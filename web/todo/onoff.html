@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>NodeJS ON/OFF switch</title>
+	<link rel="stylesheet" href="css/jquery-ui.css" />
+	<!--<link rel="stylesheet" href="css/styles.css" />-->
+	<link rel="stylesheet" href="css/nav.css" />
+	<link rel="stylesheet" href="css/modal.css" />
+	<link rel="stylesheet" href="css/fontawsme.css" />
+	<link rel='stylesheet' href='css/fontawall.css' />
+	<link rel="stylesheet" href="css/progress.css" />
+	<link rel="stylesheet" href="css/toggle.css" />
+	<link rel="shortcut icon" href="images/fvw.png" type="image/x-icon" />
+
+	<script src="js/jquery.js"></script>
+	<script src="js/jquery-ui.js"></script>
+	<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
+	<script src="js/utils.js"></script>
+	<script src="js/onoff.js"></script>
+	<script>
+		$( document ).ready(function() {
+			// const urlParams = new URLSearchParams(window.location.search);
+			// const entries = urlParams.entries();
+			// // build params object
+			// const params = {};
+			// for (entry of entries) {
+			// 	params[entry[0]] = entry[1];
+			// }
+			// console.log(params);
+    		startOnOff()
+		}); //end doc ready function
+	</script>
+</head>
+
+<body style="background-color: rgb(155, 154, 154)">
+	<!--<strong>Vote!</strong>-->
+	
+	<h2>Toggle Switch</h2>
+
+	<label class="switch">
+	  <input type="checkbox" onclick="toggleBox()" id="checkit">
+	  <span class="slider"></span>
+	</label>
+
+</body>
+</html>

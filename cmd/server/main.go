@@ -10,6 +10,7 @@ import (
 	"cmd184psu/unified-webapp/internal/grocery"
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/platform/middleware"
+	"cmd184psu/unified-webapp/internal/todo"
 )
 
 // Dispatcher routes incoming requests to the correct module handler based on
@@ -88,6 +89,8 @@ func buildModule(module string, cfg *config.Config) (http.Handler, error) {
 	switch module {
 	case "grocery":
 		return grocery.Build(cfg.Grocery)
+	case "todo":
+		return todo.Build(cfg.Todo)
 	default:
 		return nil, fmt.Errorf("unknown module %q", module)
 	}

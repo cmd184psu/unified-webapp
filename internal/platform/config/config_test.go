@@ -90,6 +90,22 @@ func TestLoadFile_OverridesDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadMissingFile_TodoDefaults(t *testing.T) {
+	cfg, err := config.Load(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Todo.Ext != "json" {
+		t.Errorf("todo ext: got %q, want %q", cfg.Todo.Ext, "json")
+	}
+	if cfg.Todo.DefaultSubject != "home" {
+		t.Errorf("todo defaultSubject: got %q, want %q", cfg.Todo.DefaultSubject, "home")
+	}
+	if cfg.Todo.SyncIntervalSeconds != 1 {
+		t.Errorf("todo sync interval: got %d, want 1", cfg.Todo.SyncIntervalSeconds)
+	}
+}
+
 func TestWriteDefault_CreatesFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "out.json")
 	if err := config.WriteDefault(path); err != nil {

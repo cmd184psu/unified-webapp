@@ -16,6 +16,16 @@ type Config struct {
 	TLSKey  string            `json:"tls_key"`
 	Routing map[string]string `json:"host_routing"` // hostname → module name
 	Grocery GroceryConfig     `json:"grocery"`
+	Todo    TodoConfig        `json:"todo"`
+}
+
+// TodoConfig holds configuration specific to the todo module.
+type TodoConfig struct {
+	StaticDir           string `json:"static_dir"`
+	DataDir             string `json:"data_dir"`
+	Ext                 string `json:"ext"`
+	DefaultSubject      string `json:"default_subject"`
+	SyncIntervalSeconds int    `json:"sync_interval_seconds"`
 }
 
 // GroceryConfig holds configuration specific to the grocery module.
@@ -46,6 +56,13 @@ func DefaultConfig() *Config {
 				"frozen",
 				"deli area near front",
 			},
+		},
+		Todo: TodoConfig{
+			StaticDir:           "./web/todo",
+			DataDir:             "./data/todo",
+			Ext:                 "json",
+			DefaultSubject:      "home",
+			SyncIntervalSeconds: 1,
 		},
 	}
 }
@@ -85,6 +102,9 @@ func Load(path string) (*Config, error) {
 	if err := expandGroceryPaths(&cfg.Grocery); err != nil {
 		return nil, err
 	}
+	if err := expandTodoPaths(&cfg.Todo); err != nil {
+		return nil, err
+	}
 	if cfg.TLSCert != "" {
 		if cfg.TLSCert, err = ExpandPath(cfg.TLSCert); err != nil {
 			return nil, err
@@ -96,6 +116,17 @@ func Load(path string) (*Config, error) {
 		}
 	}
 	return cfg, nil
+}
+
+func expandTodoPaths(t *TodoConfig) error {
+	var err error
+	if t.StaticDir, err = ExpandPath(t.StaticDir); err != nil {
+		return err
+	}
+	if t.DataDir, err = ExpandPath(t.DataDir); err != nil {
+		return err
+	}
+	return nil
 }
 
 func expandGroceryPaths(g *GroceryConfig) error {

@@ -135,12 +135,16 @@ func TestServeHTTPDeliversRefreshOnNotify(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/events", nil).WithContext(ctx)
 	rec := httptest.NewRecorder()
 
-	go b.ServeHTTP(rec, req)
+	done := make(chan struct{})
+	go func() {
+		b.ServeHTTP(rec, req)
+		close(done)
+	}()
 	time.Sleep(20 * time.Millisecond)
 	b.Notify()
 	time.Sleep(20 * time.Millisecond)
 	cancel()
-	time.Sleep(20 * time.Millisecond)
+	<-done // wait for ServeHTTP to exit before reading shared recorder
 
 	body := rec.Body.String()
 	if !strings.Contains(body, "data: refresh") {
