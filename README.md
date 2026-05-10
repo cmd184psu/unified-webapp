@@ -246,14 +246,11 @@ frontend http_front
     redirect scheme https code 301
 
 #
-# HTTPS frontend — HAProxy picks the certificate by SNI
+# HTTPS frontend — HAProxy picks the certificate by SNI.
+# Point crt at the directory; HAProxy loads every .pem it finds there.
 #
 frontend https_front
-    bind *:443 ssl \
-        crt /etc/haproxy/certs/grocery.cmdhome.net.pem \
-        crt /etc/haproxy/certs/todo.cmdhome.net.pem \
-        crt /etc/haproxy/certs/slideshow.cmdhome.net.pem \
-        crt /etc/haproxy/certs/menu.cmdhome.net.pem
+    bind *:443 ssl crt /etc/haproxy/certs/
 
     option forwardfor          # adds X-Forwarded-For with real client IP
     default_backend unified_webapp
@@ -264,6 +261,14 @@ frontend https_front
 #
 backend unified_webapp
     server app 127.0.0.1:8080 check
+```
+
+HAProxy does not support backslash line continuation, so multiple `crt` entries must either go on one long line or — more maintainably — point at a directory. The directory form above loads every `.pem` file in `/etc/haproxy/certs/` automatically; adding a new cert later just means dropping a new file there and reloading.
+
+If you prefer to list certs explicitly, it must be a single unbroken line:
+
+```haproxy
+    bind *:443 ssl crt /etc/haproxy/certs/grocery.cmdhome.net.pem crt /etc/haproxy/certs/todo.cmdhome.net.pem crt /etc/haproxy/certs/slideshow.cmdhome.net.pem crt /etc/haproxy/certs/menu.cmdhome.net.pem
 ```
 
 ### How SNI selection works
