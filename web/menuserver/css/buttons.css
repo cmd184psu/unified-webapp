@@ -1,0 +1,19 @@
+.bucket-button-container {
+    max-width: 200px;
+    margin: 0 auto;
+  }
+  
+  .bucket-action-button {
+    width: 100%;
+    padding: 10px;
+    margin: 8px 0;
+    cursor: pointer;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background-color: white;
+    transition: background-color 0.2s;
+  }
+  
+  .bucket-action-button:hover {
+    background-color: #f0f0f0;
+  }

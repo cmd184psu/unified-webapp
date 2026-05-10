@@ -1,0 +1,47 @@
+{
+  "port": 8080,
+  "tls_cert": "",
+  "tls_key": "",
+  "host_routing": {
+      "localhost":                  "todo",
+  "todo-test.cmdhome.net":      "todo",
+  "todolist.cmdhome.net":       "todo",
+  "grocery-test.cmdhome.net":       "grocery",
+  "slideshow-test.cmdhome.net":       "slideshow",
+  "menuserver-test.cmdhome.net":       "menuserver"
+
+  },
+  "grocery": {
+    "static_dir": "./web/grocery",
+    "data_file": "./data/grocery.json",
+    "groups": [
+      "Produce",
+      "Meats",
+      "mid store",
+      "back wall",
+      "frozen",
+      "deli area near front"
+    ],
+    "progress": false,
+    "sync_interval_seconds": 1,
+    "title": "Grocery List"
+  },
+  "todo": {
+    "static_dir": "./web/todo",
+    "data_dir": "./data/todo",
+    "ext": "json",
+    "default_subject": "home",
+    "sync_interval_seconds": 1
+  },
+  "slideshow": {
+    "static_dir": "./web/slideshow",
+    "image_dir": "./data/slideshow",
+    "prefix": "slides",
+    "default_subject": ""
+  },
+  "menuserver": {
+    "static_dir": "./web/menuserver",
+    "data_dir": "./data/menuserver",
+    "show_all_pages": false
+  }
+}

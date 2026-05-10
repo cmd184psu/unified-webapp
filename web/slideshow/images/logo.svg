@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200">
+  <!-- Removed background rect element -->
+  
+  <!-- Dot pattern -->
+  <g fill="#FFFFFF">
+    <!-- Center dots -->
+    <circle cx="150" cy="70" r="10"/>
+    <circle cx="130" cy="70" r="10"/>
+    <circle cx="170" cy="70" r="10"/>
+    <circle cx="150" cy="90" r="10"/>
+    <circle cx="130" cy="90" r="10"/>
+    <circle cx="170" cy="90" r="10"/>
+    
+    <!-- Outer dots -->
+    <circle cx="110" cy="70" r="6"/>
+    <circle cx="190" cy="70" r="6"/>
+    <circle cx="110" cy="90" r="6"/>
+    <circle cx="190" cy="90" r="6"/>
+    
+    <circle cx="130" cy="50" r="6"/>
+    <circle cx="150" cy="50" r="6"/>
+    <circle cx="170" cy="50" r="6"/>
+    
+    <circle cx="130" cy="110" r="6"/>
+    <circle cx="150" cy="110" r="6"/>
+    <circle cx="170" cy="110" r="6"/>
+    
+    <!-- Corner dots -->
+    <circle cx="110" cy="50" r="3"/>
+    <circle cx="190" cy="50" r="3"/>
+    <circle cx="110" cy="110" r="3"/>
+    <circle cx="190" cy="110" r="3"/>
+  </g>
+  
+  <!-- Text -->
+  <text x="150" y="160" font-family="Arial, sans-serif" font-size="48" font-weight="bold" fill="#FFFFFF" text-anchor="middle">JWT</text>
+  <text x="150" y="180" font-family="Arial, sans-serif" font-size="14" fill="#FFFFFF" text-anchor="middle">SAMPLE APP</text>
+</svg>

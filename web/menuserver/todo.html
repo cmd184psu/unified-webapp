@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>NodeJS Todolist</title>
+	<link rel="stylesheet" href="css/jquery-ui.css" />
+	<!--<link rel="stylesheet" href="css/styles.css" />-->
+	<link rel="stylesheet" href="css/nav.css" />
+	<link rel="stylesheet" href="css/modal.css" />
+	<link rel="stylesheet" href="css/fontawsme.css" />
+	<link rel='stylesheet' href='css/fontawall.css' />
+	<link rel="stylesheet" href="css/progress.css" />
+	<link rel="shortcut icon" href="images/fvw.png" type="image/x-icon" />
+
+	<script src="js/jquery.js"></script>
+	<script src="js/jquery-ui.js"></script>
+	<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
+	<script src="js/utils.js"></script>
+	<script src="js/todo-utils.js"></script>
+	<script src="js/todo.js"></script>
+	<script>
+		$( document ).ready(function() {
+			console.log("Document Ready");
+			const urlParams = new URLSearchParams(window.location.search);
+			const entries = urlParams.entries();
+			// build params object
+			const params = {};
+			for (entry of entries) {
+				params[entry[0]] = entry[1];
+			}
+			console.log("about to list params")
+			console.log(params);
+			console.log("start todo")
+    		startTodo(params)
+		}); //end doc ready function
+	</script>
+</head>
+
+<body style="background-color: rgb(155, 154, 154)">
+	<!--<strong>Vote!</strong>-->
+	<div id="titleDiv" style="display:none;  text-align: center; font-weight: bold;
+	font-size: 2em;"></div>
+	<div id="loadedSubject">Subject: <select id="subject-list-selector" onchange="changeSubject()"></select></div>
+	<div id="loadedList">List: <select id="item-list-selector" onchange="changeItem()"></select></div>
+	<div id="newSubject">New Subject: <select id="new-subject-list-selector"></select></div>
+	<div><button id="newSubjectBtn" onclick="moveListToNewSubject()">Move List to New Subject</button></div>	
+	<BR />
+	<table><tr><td>
+		<div><button id="backBTN" onclick="revertList()">Go Back</button></div>
+	</td><td>
+		<div><button id="copyLink" onclick="copyLink()">Copy Link To Clipboard <i class="far fa-copy"></i></button></div>
+	</td><td>
+		<button class="btn btn-success" onclick="window.open(calcNewHREF(),'_blank')">Open in New Tab <i class="fas fa-external-link-alt"></i></button>
+	</td></tr>
+
+	<tr><td><input type="checkbox" id="roEnable" name="roEnable" onclick="roToggled()">
+ <label for="roEnable">Read-only Mode Enabled</label></td></tr>
+	<tr><td><input type="checkbox" id="dndEnable" name="dndEnable"
+		checked onclick="dndToggled()">
+ <label for="dndEnable">Drag and Drop Enabled</label></td></tr>
+		<tr><td>Stale Count:</td><td><div id="staleCount">300</div> seconds</td></tr>
+<tr><td><input type="checkbox" id="cntEnable" name="cntEnable"
+	 onclick="reduceCountDown()">
+
+ <label for="countEnable">Stale Count Enabled</label></td></tr>
+
+	</table>
+	<!-- Total Vote Count: <input type=text id="voteCount" value="100" /><BR>-->
+	<table id="thetable" border=1>
+	<BR />
+	</table>
+	<button onclick="vote()">Vote</button>
+	<button onclick="render()">Refresh Page</button>
+	<button id="saveButton" onclick="saveit(1)">Save</button>
+	<button id="addButton" onClick="showAdd()"><i class="fas fa-plus"></i></button>
+	<button id="hideshowButton" onClick="hideShowCompleted()">Hide / Show Completed</button>
+	<button id="hideshowBlockedButton" onClick="hideShowBlocked()">Hide / Show Blocked</button>
+	<BR />
+	<BR />
+	<div>
+		Progress:
+		<div class="progress">
+			<div id="pb_complete" class="progress-bar progress-bar-completed" role="progressbar" style="width:0%">
+			Completed 0%
+			</div>
+			<div id="pb_inprogress" class="progress-bar progress-bar-inprogress" role="progressbar" style="width:0%">
+			In Progress 0%
+			</div>
+			<div id="pb_blocked" class="progress-bar progress-bar-blocked" role="progressbar" style="width:0%">
+			Blocked 0%
+			</div>
+			<div id="pb_todo" class="progress-bar progress-bar-todo" role="progressbar" style="width:0%">
+			Todo 0%
+			</div>
+		</div>
+	</div>
+
+
+	</table>
+	<HR>
+	<BR />
+	<div id="addDiv" style="display:none">
+	<table border=1>
+		<tr>
+			<td>Item: </td><td><input id="itemName" type="text" size="30" /></td>
+		</tr>
+		<tr>
+			<td>JSON: (optional) </td><td><input id="itemJSON" type="text" size="30" /></td>
+			
+		</tr>
+		<tr>
+			<td>Period in Days (optional)</td><td><input id="itemPeriod" type="text" size="30" /></td>
+		</tr>
+		<tr>
+			<td></td><td><button onclick="addIt()">Add Item to List</button></td>
+			
+			
+		</tr>
+	</table>
+	</div>
+	<div style="display:none" id="hiddentext"><input type="text" id="copytext" value="null"></div>
+</body>
+</html>

@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Reactive App (replace on load)</title>
+    <link rel="stylesheet" href="css/style-base.css" />
+    <link rel="stylesheet" href="css/style-base-tr.css" />
+    <link rel="stylesheet" href="css/progressbar-base.css" />
+    <link rel="stylesheet" href="css/arrow.css" />
+    <link rel="stylesheet" href="css/panels.css" />
+    <link rel="icon" type="image/x-icon" href="images/favicon.svg" />
+    <script src="js/axios.min.js"></script>
+</head>
+<body>
+    <div class="base-app-style">
+        <!-- Toggle buttons -->
+        <div id="leftToggle" class="toggle-btn">
+            <div class="arrow-icon">
+                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M8.59,16.59L13.17,12L8.59,7.41L10,6l6,6l-6,6L8.59,16.59z" fill="#333"/>
+                </svg>
+            </div>
+        </div>
+        
+        <div id="rightToggle" class="toggle-btn">
+            <div class="hamburger-icon">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+        
+        <!-- Left panel -->
+        <div id="leftPanel" class="side-panel">
+            <div class="panel-content">
+                <h3>Left Panel</h3>
+                <p>This area will contain dynamically added buttons.</p>
+                <!-- Dynamic buttons will be added here -->
+                <div id="dynamicButtons"></div>
+            </div>
+        </div>
+        
+        <!-- Right panel -->
+        <div id="rightPanel" class="side-panel">
+            <div class="panel-content">
+                <h3>Right Panel</h3>
+                <p>Menu options will appear here.</p>
+                <!-- Menu options will go here -->
+                <ul id="menuOptions">
+                    <li><a href="#">Option 1</a></li>
+                    <li><a href="#">Option 2</a></li>
+                    <li><a href="#">Option 3</a></li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Login panel (unchanged) -->
+        <div id="loginContainer" class="loginContainer">
+            <div style="position: absolute; top: 65px; left: 65px">
+                <img src="/images/logo.svg" alt="Logo" width="100%" />
+            </div>
+
+            <form id="loginForm">
+                <div class="loginRow">
+                    <div class="password-wrapper">
+                        <label class="loginLabel">Passcode</label>
+                        <input type="password" class="margeTextInput" id="passcode" value="11111"/>
+                        <span id="toggle-password" onclick="togglePasswordVisibility()" class="toggle-password">
+                            <i class="eye-icon">👁️</i>
+                        </span>
+                    </div>
+                </div>
+                <div id="loginButtonRow">
+                    <input id="loginBtn" type="submit" value="Log In" class="button" />
+                </div>
+            </form>
+
+            <div id="productName">
+                <div>AppName</div>
+            </div>
+        </div>
+        
+        <!-- Content panel -->
+        <div id="dataContainer" style="display: none" class="data-container">
+            <div id="bigHeadTitle">
+                <h1>Big Header Title and version, change me on load</h1>
+            </div>
+
+            <div class="tab" style="display:none">
+                <button class="tablinks" onclick="openTab(event, 'addTask')">
+                    Add Local Task
+                </button>
+                <button class="tablinks" onclick="openTab(event, 'addExistingTask')">
+                    Track Existing Process
+                </button>
+                <button class="tablinks" onclick="openTab(event, 'addSingleSSHTask')">
+                    Add Single SSH Task
+                </button>
+                <button class="tablinks" onclick="openTab(event, 'addSequentialSSHTask')">
+                    Add Sequential SSH Task
+                </button>
+                <button class="tablinks" onclick="openTab(event, 'addConcurrentSSHTask')">
+                    Add Concurrent SSH Task
+                </button>
+            </div>
+
+            <!-- Tab content -->
+            <div id="addTask" class="tabcontent">
+                <h2>Full CLI to execute Locally:</h2>
+                <input type="text" id="Command" placeholder="command to run" />
+                <button onclick="addTask()">Add Task</button>
+            </div>
+
+            <div id="addExistingTask" class="tabcontent">
+                <h3>Track Process ID:</h3>
+                <input type="number" id="Pid" placeholder="process ID" />
+                <button onclick="addExistingProcess()">Track Existing Process</button>
+            </div>
+
+            <div id="addSingleSSHTask" class="tabcontent">
+                <h3>SSH Task</h3>
+                <input type="text" id="SSHRemoteHost" placeholder="host to run on" />
+                <input type="text" id="SSHCommand" placeholder="command to run" />
+                <button onclick="addSSHTask()">Add SSH Task</button>
+            </div>
+            
+            <div id="addSequentialSSHTask" class="tabcontent">
+                <h3>SSH Task</h3>
+                <input type="text" id="seqSSHCommand" placeholder="command to run" />
+                <button onclick="addSeqSSHTask()">Add Seq SSH Task</button>
+            </div>
+            
+            <div id="addConcurrentSSHTask" class="tabcontent">
+                <h3>SSH Task</h3>
+                <input type="text" id="concurSSHCommand" placeholder="command to run" />
+                <button onclick="addConcurSSHTask()">Add Concurrent SSH Task</button>
+            </div>
+
+            <div>
+                <div id="tablesPrime">
+                    <div>
+                        <h2 onclick="toggleTable('taggedCSV')">Tagged CSV</h2>
+                        <table id="taggedCSV">
+                            <thead>
+                                <tr>
+                                    <th>Source</th>
+                                    <th>Target</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="taggedCSVBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <div id="tables" style="display:none">
+                    <div>
+                        <h2 onclick="toggleTable('queuedTable')">Queued Tasks</h2>
+                        <table id="queuedTable" class="hidden">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Command</th>
+                                </tr>
+                            </thead>
+                            <tbody id="queuedTasks"></tbody>
+                        </table>
+                    </div>
+                    <div>
+                        <h2 onclick="toggleTable('runningTable')">Running Tasks</h2>
+                        <table id="runningTable" class="hidden">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Command</th>
+                                    <th>Duration</th>
+                                </tr>
+                            </thead>
+                            <tbody id="runningTasks"></tbody>
+                        </table>
+                    </div>
+                    <div>
+                        <h2 onclick="toggleTable('completedTable')">Completed Tasks</h2>
+                        <table id="completedTable" class="hidden">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Command</th>
+                                    <th>Duration</th>
+                                    <th>Output</th>
+                                </tr>
+                            </thead>
+                            <tbody id="completedTasks"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div id="lightbox" class="lightbox">
+                <div class="lightbox-content">
+                    <span class="close" onclick="closeLightBox()">&times;</span>
+                    <div id="lightboxContent"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Footer with three sections -->
+        <div id="footer" class="footer">
+            <div class="footer-left">
+                <a href="http://www.google.com/" target="_blank">Open documentation</a>
+            </div>
+            <div id="footerMessage" class="footer-center">
+                <!-- Message will appear here -->
+            </div>
+            <div class="footer-right">
+                <button id="logoutBtn" class="button">Log Out</button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="js/base-util.js"></script>
+    <script src="js/panels.js"></script>
+</body>
+</html>

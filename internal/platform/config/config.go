@@ -11,12 +11,29 @@ const DefaultConfigPath = "~/.unified-webapp.json"
 
 // Config is the top-level unified server configuration.
 type Config struct {
-	Port    int               `json:"port"`
-	TLSCert string            `json:"tls_cert"`
-	TLSKey  string            `json:"tls_key"`
-	Routing map[string]string `json:"host_routing"` // hostname → module name
-	Grocery GroceryConfig     `json:"grocery"`
-	Todo    TodoConfig        `json:"todo"`
+	Port       int               `json:"port"`
+	TLSCert    string            `json:"tls_cert"`
+	TLSKey     string            `json:"tls_key"`
+	Routing    map[string]string `json:"host_routing"` // hostname → module name
+	Grocery    GroceryConfig     `json:"grocery"`
+	Todo       TodoConfig        `json:"todo"`
+	Slideshow  SlideshowConfig   `json:"slideshow"`
+	Menuserver MenuserverConfig  `json:"menuserver"`
+}
+
+// MenuserverConfig holds configuration specific to the menuserver module.
+type MenuserverConfig struct {
+	StaticDir    string `json:"static_dir"`
+	DataDir      string `json:"data_dir"`
+	ShowAllPages bool   `json:"show_all_pages"`
+}
+
+// SlideshowConfig holds configuration specific to the slideshow module.
+type SlideshowConfig struct {
+	StaticDir      string `json:"static_dir"`
+	ImageDir       string `json:"image_dir"`
+	Prefix         string `json:"prefix"`
+	DefaultSubject string `json:"default_subject"`
 }
 
 // TodoConfig holds configuration specific to the todo module.
@@ -64,6 +81,15 @@ func DefaultConfig() *Config {
 			DefaultSubject:      "home",
 			SyncIntervalSeconds: 1,
 		},
+		Slideshow: SlideshowConfig{
+			StaticDir: "./web/slideshow",
+			ImageDir:  "./data/slideshow",
+			Prefix:    "slides",
+		},
+		Menuserver: MenuserverConfig{
+			StaticDir: "./web/menuserver",
+			DataDir:   "./data/menuserver",
+		},
 	}
 }
 
@@ -105,6 +131,12 @@ func Load(path string) (*Config, error) {
 	if err := expandTodoPaths(&cfg.Todo); err != nil {
 		return nil, err
 	}
+	if err := expandSlideshowPaths(&cfg.Slideshow); err != nil {
+		return nil, err
+	}
+	if err := expandMenuserverPaths(&cfg.Menuserver); err != nil {
+		return nil, err
+	}
 	if cfg.TLSCert != "" {
 		if cfg.TLSCert, err = ExpandPath(cfg.TLSCert); err != nil {
 			return nil, err
@@ -116,6 +148,28 @@ func Load(path string) (*Config, error) {
 		}
 	}
 	return cfg, nil
+}
+
+func expandMenuserverPaths(m *MenuserverConfig) error {
+	var err error
+	if m.StaticDir, err = ExpandPath(m.StaticDir); err != nil {
+		return err
+	}
+	if m.DataDir, err = ExpandPath(m.DataDir); err != nil {
+		return err
+	}
+	return nil
+}
+
+func expandSlideshowPaths(s *SlideshowConfig) error {
+	var err error
+	if s.StaticDir, err = ExpandPath(s.StaticDir); err != nil {
+		return err
+	}
+	if s.ImageDir, err = ExpandPath(s.ImageDir); err != nil {
+		return err
+	}
+	return nil
 }
 
 func expandTodoPaths(t *TodoConfig) error {

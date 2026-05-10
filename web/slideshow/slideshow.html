@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, height=device-height, initial-scale=1">
+	<title>NodeJS Powered Slideshow</title>
+	<link rel="stylesheet" href="css/jquery-ui.css" />
+	<link rel="stylesheet" href="css/nav.css" />
+	<link rel="stylesheet" href="css/modal.css" />
+	<link rel="stylesheet" href="css/fontawsme.css" />
+	<link rel='stylesheet' href='css/fontawall.css' />
+	<link rel='stylesheet' href='css/kbc.css' />
+	<link rel="shortcut icon" href="images/fvw.png" type="image/x-icon" />
+
+	<script src="js/jquery.js"></script>
+	<script src="js/jquery-ui.js"></script>
+
+	<script src="js/utils.js"></script>
+	<script src="js/slideshow.js"></script>
+	<!--<script src="js/kenburns.js"></script>-->
+	<script src="js/kbc.js"></script>
+	<script>
+		function kbcSwitchOver() {
+			console.log ( "it burns!" )
+            $("#regular_ss").hide();
+			$("#kburns_ss").show();
+			$("#kbc").attr("animation-direction", "once")
+
+			prevSubject();
+			nextSubject();
+
+			console.log ( "want to set delay to " + $("#delay").val() + " seconds." )
+			console.log ( "slide-duration: " + $("#kbc").attr("slide-duration") )
+			console.log ( "fade-duration: " + $("#kbc").attr("fade-duration") )
+
+			var sd=Number( $("#delay").val() ) * 1000;
+			var fd=sd/5*1;
+			console.log( " want to set slide-duration to "+sd)
+			console.log( " want to set fade-duration to "+fd)
+
+			$("#kbc").attr( "slide-duration", sd)  //5000
+			$("#kbc").attr( "fade-duration", fd)   //2000
+			$("#kbc").attr("call-back", "nextSubject" );
+		}
+		function escape() {
+                console.log("key pressed!")
+                $("#kburns_ss").hide();
+                $("#regular_ss").show();
+				$("#kbc").attr("animation-direction", "pause")
+
+        }
+		$( document ).ready(function() {
+			document.onkeydown = function(evt) {
+				evt = evt || window.event;
+				var isEscape = false;
+				if ("key" in evt) {
+					isEscape = (evt.key === "Escape" || evt.key === "Esc");
+				} else {
+					isEscape = (evt.keyCode === 27);
+				}
+				if (isEscape) {
+					escape();
+				}
+			};
+    		startSlideShow()
+		}); //end doc ready function
+	</script>
+</head>
+<body>
+		
+<div id="regular_ss">
+
+<table>
+	<tr>
+		<td><button onclick="saveSubject()"><i class="fas fa-bookmark"></i></button></td>
+		<td>Subject: <select id="subject-selector" onchange="changeSubject()"></select></td>
+  		<td>Delay in seconds: </td>
+  		<td><div class="slidecontainer"><input type="range" min="2" max="10" value="7" id="delay"></div></td>
+  		<td>Max Width: <div id="mw">2000</div></td>
+  		<td><div class="slidecontainer"><input type="range" min="0" max="5" value="5" id="maxWidth" onchange="fixRes()"></div>px</td>
+  		<td>Max Height: <div id="mh">800</div></td>
+  		<td><div class="slidecontainer"><input type="range" min="0" max="5" value="5" id="maxHeight" onchange="fixRes()"></div>px</td>
+		</tr>
+		<tr>
+			<td colspan=8>
+				<table>	  
+					<tr>
+					<td>
+					<button id="backBtn" onClick="prevSubject()"><i class="fas fa-fast-backward"></i></button>
+					</td>
+					<td>
+					<button id="backBtn" onClick="goBackwards(true)"><i class="fas fa-backward"></i></button>
+					</td>
+					<td>
+					<button id="pauseBtn" onClick="pauseShow()" style="display:none"><i class="fas fa-pause"></i></button>
+					</td>
+					<td>
+					<button id="playBtn" onClick="playShowAlt()"><i class="fas fa-play"></i></button>
+					</td>
+					<td>
+					<button id="forwardBtn" onClick="goForwards(true)"><i class="fas fa-forward"></i></button>
+					</td>
+					<td>
+					<button id="nextSubjectBtn" onClick="nextSubject()"><i class="fas fa-fast-forward"></i></button>
+					</td>
+					<td>&nbsp;</td>
+					<td><button id="deleteSubjectBtn" onClick="deleteSubject()"><i class="fas fa-trash-alt"></i></button>
+					</td>
+					<td>&nbsp;</td>
+					<td><button id="kbcSubjectBtn" onClick="kbcSwitchOver()"><i class="fas fa-fire"></i>
+
+					</button>
+					</td>
+					</tr>
+				</table>
+			</td>
+		</tr>
+</table>
+	  
+		<div id="msgbar" style="display:none"></div>
+		<div id="slideshow-container">
+		
+		</div>
+		<br>
+		
+		<div style="text-align:center">
+		  <span class="dot"></span> 
+		  <span class="dot"></span> 
+		  <span class="dot"></span> 
+		  <span class="dot"></span> 
+		  <span class="dot"></span> 
+		</div>
+	</div>		
+<div id="kburns_ss" style="display:none" tabindex="0" onclick="nextSubject()" onkeypress="escape()" ondblclick="escape()">
+		<!--            <ken-burns-carousel id="demo3" fade-duration="2000" slide-duration="5000" animation-direction="normal" call-back="setNewImages" -->
+					<ken-burns-carousel id="kbc" fade-duration="2000" slide-duration="5000" animation-direction="pause" call-back="nextSubject"
+					images=""></ken-burns-carousel>
+		  
+</div>		
+</body>
+</html>

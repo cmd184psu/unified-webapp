@@ -8,8 +8,10 @@ import (
 	"strings"
 
 	"cmd184psu/unified-webapp/internal/grocery"
+	"cmd184psu/unified-webapp/internal/menuserver"
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/platform/middleware"
+	"cmd184psu/unified-webapp/internal/slideshow"
 	"cmd184psu/unified-webapp/internal/todo"
 )
 
@@ -69,7 +71,7 @@ func main() {
 			log.Fatalf("build module %q for host %q: %v", module, host, err)
 		}
 		dispatch.register(host, h)
-		log.Printf("registered %s → %s", host, module)
+		log.Printf("registered ( http://%s:%d ) → %s", host, cfg.Port, module)
 	}
 
 	addr    := fmt.Sprintf("0.0.0.0:%d", cfg.Port)
@@ -91,6 +93,10 @@ func buildModule(module string, cfg *config.Config) (http.Handler, error) {
 		return grocery.Build(cfg.Grocery)
 	case "todo":
 		return todo.Build(cfg.Todo)
+	case "slideshow":
+		return slideshow.Build(cfg.Slideshow)
+	case "menuserver":
+		return menuserver.Build(cfg.Menuserver)
 	default:
 		return nil, fmt.Errorf("unknown module %q", module)
 	}

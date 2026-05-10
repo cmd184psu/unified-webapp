@@ -90,6 +90,32 @@ func TestLoadFile_OverridesDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadMissingFile_MenuserverDefaults(t *testing.T) {
+	cfg, err := config.Load(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Menuserver.StaticDir == "" {
+		t.Error("menuserver static_dir should not be empty")
+	}
+	if cfg.Menuserver.DataDir == "" {
+		t.Error("menuserver data_dir should not be empty")
+	}
+}
+
+func TestLoadMissingFile_SlideshowDefaults(t *testing.T) {
+	cfg, err := config.Load(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Slideshow.Prefix != "slides" {
+		t.Errorf("slideshow prefix: got %q, want %q", cfg.Slideshow.Prefix, "slides")
+	}
+	if cfg.Slideshow.StaticDir == "" {
+		t.Error("slideshow static_dir should not be empty")
+	}
+}
+
 func TestLoadMissingFile_TodoDefaults(t *testing.T) {
 	cfg, err := config.Load(filepath.Join(t.TempDir(), "nonexistent.json"))
 	if err != nil {
