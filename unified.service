@@ -1,0 +1,15 @@
+[Unit]
+Description=Unified Webapp Service
+After=network.target
+
+[Service]
+#Environment=
+ExecStart=/opt/unified-webapp/unified-server -config /opt/unified-webapp/unified-webapp.json
+WorkingDirectory=/opt/unified-webapp
+StandardOutput=inherit
+StandardError=inherit
+Restart=always
+User=cdelezenski
+
+[Install]
+WantedBy=multi-user.target
