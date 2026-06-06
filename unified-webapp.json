@@ -3,11 +3,10 @@
   "tls_cert": "",
   "tls_key": "",
   "host_routing": {
-  "todo.cmdhome.net":      "todo",
-  "grocery.cmdhome.net":       "grocery",
-  "ntphub.cmdhome.net":       "slideshow",
-  "menuserver.cmdhome.net":       "menuserver"
-
+    "todo.cmdhome.net":       "todo",
+    "grocery.cmdhome.net":    "grocery",
+    "ntphub.cmdhome.net":     "slideshow",
+    "menuserver.cmdhome.net": "menuserver"
   },
   "grocery": {
     "static_dir": "./web/grocery",

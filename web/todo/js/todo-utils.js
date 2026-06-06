@@ -1,6 +1,6 @@
 
 
-const COOLDOWN_TIME=600000
+var COOLDOWN_TIME=600000
 const AUTO_SAVE_ENABLED=false
 const AUTO_SAVE_PERIOD=60000
 const VOTES_TO_CAST=100
@@ -232,193 +232,204 @@ function isInCoolDown(item) {
 
 //Move to todo.js
 function renderRow(i) {
-    //add delete column
-    //var row="<td name=\"delcol\"><button onclick=\"deleteit("+i+")\">Delete</button></td>";
-    var row="";
-    var trophy="";
+    trbit = '';
+    var d = new Date();
 
-    var d=new Date();
-    if(arrayOfContent[i].winner) {
-        trophy="<td><i class=\"fas fa-trophy\"></i></td>";
-        arrayOfContent[i].expires=d.getTime()+COOLDOWN_TIME;
-        
+    // Drag grip — stored separately so it is never overwritten below
+    var grip = '<td class="drag-grip" title="Drag to reorder">' +
+        '<svg viewBox="0 0 14 14" fill="currentColor" width="14" height="14" style="pointer-events:none">' +
+        '<circle cx="4" cy="3" r="1.2"/><circle cx="10" cy="3" r="1.2"/>' +
+        '<circle cx="4" cy="7" r="1.2"/><circle cx="10" cy="7" r="1.2"/>' +
+        '<circle cx="4" cy="11" r="1.2"/><circle cx="10" cy="11" r="1.2"/>' +
+        '</svg></td>';
+
+    var trophy = '';
+    if (arrayOfContent[i].winner) {
+        trophy = '<span class="ctrl-icon"><i class="fas fa-trophy"></i></span>';
+        arrayOfContent[i].expires = d.getTime() + COOLDOWN_TIME;
     }
 
-    
-
-    var updown="<table>";
-    
-    //if(arrayOfContent[i].onHold) updown+="<tr bgcolor=pink>";
-    //else 
-
-    updown+='<tr>';
-    //if(arrayOfContent[i].onHold) trbit="<tr bgcolor=pink>";
-    //else  if(arrayOfContent[i].inProgress) trbit="<tr bgcolor=lightgreen>";
-    //else trbit="<tr>";
-    trbit=""
-// up / down deprecated ;  gripit not needed
-    //    updown+="<td><span onclick=\"gripIt("+i+")\"><i class=\"fas fas fa-grip-lines\"></i></span></td>";
-//    updown+="<td><span onclick=\"moveUp("+i+")\"><i class=\"fas fa-angle-double-up\"></i></span></td>";
-    if (! $("#roEnable").is(":checked")) {
-      updown+="<td><span onclick=\"deleteit("+i+")\"><i class=\"fa fa-trash\"></i></td>";
+    // Control panel — flex div, no nested table
+    var ctrl = '<div class="ctrl-panel">';
+    if (!$("#roEnable").is(":checked")) {
+        ctrl += '<span class="ctrl-icon ctrl-delete" onclick="deleteit('+i+')"><i class="fa fa-trash"></i></span>';
+    }
+    if (arrayOfContent[i].skip || $("#roEnable").is(":checked")) {
+        ctrl += trophy;
     } else {
-      updown+="<td></td>"
-    } 
-    if(arrayOfContent[i].skip) {
-        updown+="<td colspan=5></td>";
-    } else if ($("#roEnable").is(":checked")) {
-      updown+="<td colspan=5>"+trophy+"</td>";
-    } else {    
-        updown+="<td>&nbsp;&nbsp;&nbsp;</td>";
-        updown+="<td><span onclick=\"onHoldFlip("+i+")\"><i class=\"fas fa-hand-paper\"></i></td>";
-        updown+="<td><span onclick=\"inProgressFlip("+i+")\"<i class=\"fas fa-play\"></i></td>";
-        updown+="<td><span onclick=\"editFlip("+i+")\"<i class=\"fas fa-edit\"></i></td>";
-        updown+="<td>"+trophy+"</td>";
+        ctrl += '<span class="ctrl-icon" onclick="onHoldFlip('+i+')"><i class="fas fa-hand-paper"></i></span>';
+        ctrl += '<span class="ctrl-icon" onclick="inProgressFlip('+i+')"><i class="fas fa-play"></i></span>';
+        ctrl += '<span class="ctrl-icon" onclick="editFlip('+i+')"><i class="fas fa-edit"></i></span>';
+        ctrl += trophy;
     }
+    ctrl += '</div>';
 
-    updown+="</tr></table>";
-
-
-   
-    //add checkbox
-    if(arrayOfContent[i].skip || (!arrayOfContent[i].winner && isInCoolDown(arrayOfContent[i]))) {
-        row="<td><input type=\"checkbox\" checked onclick=\"dontskipit("+i+")\"/></td>";
-        row+="<td>"+updown+"</td>";
-        row+="<td>"+(i+1)+"</td>";
-        row+="<td><strike>"+arrayOfContent[i].name+"</strike></td>";
+    var row;
+    if (arrayOfContent[i].skip || (!arrayOfContent[i].winner && isInCoolDown(arrayOfContent[i]))) {
+        row  = grip;
+        row += '<td><input type="checkbox" checked onclick="dontskipit('+i+')"/></td>';
+        row += '<td>'+ctrl+'</td>';
+        row += '<td>'+(i+1)+'</td>';
+        row += '<td><s>'+arrayOfContent[i].name+'</s></td>';
     } else {
-        row="<td><input type=\"checkbox\" onclick=\"skipit("+i+")\"/></td>";
-        row+="<td>"+updown+"</td>";
-        row+="<td>"+(i+1)+"</td>";
-
-
-        
-        row+="<td><div id=nonediting"+i+">";
-        row+=renderItem(i)
-
-        var n=arrayOfContent[i].name
-        var j=arrayOfContent[i].json
-
-        if (j==undefined || j=="undefined") {
-            j=""
-        }
-        
-        row+="</div><div id=editing"+i+" style=display:none><input size=50 text value=\""+n+"\" onkeydown=\"saveeditName(this,"+i+")\" /><input size=50 text value=\""+j+"\" onkeydown=\"saveeditJSON(this,"+i+")\" />"
-
-
-
-        row+="</div></td>"
+        row  = grip;
+        row += '<td><input type="checkbox" onclick="skipit('+i+')"/></td>';
+        row += '<td>'+ctrl+'</td>';
+        row += '<td>'+(i+1)+'</td>';
+        var n = arrayOfContent[i].name;
+        var j = (arrayOfContent[i].json == undefined || arrayOfContent[i].json == "undefined") ? "" : arrayOfContent[i].json;
+        row += '<td>';
+        row += '<div id="nonediting'+i+'">'+renderItem(i)+'</div>';
+        row += '<div id="editing'+i+'" style="display:none">';
+        row += '<input size="50" type="text" value="'+n+'" onkeydown="saveeditName(this,'+i+')" />';
+        row += '<input size="50" type="text" value="'+j+'" onkeydown="saveeditJSON(this,'+i+')" />';
+        row += '</div></td>';
     }
-    
 
-    //add vote count
-    if(arrayOfContent[i].votes==undefined)
-        row+="<td>&nbsp;</td>";
-    else
-        row+="<td>"+arrayOfContent[i].votes+"</td>";
+    // Vote count
+    row += '<td>' + (arrayOfContent[i].votes !== undefined ? arrayOfContent[i].votes : '') + '</td>';
 
-
-	//new variables:
-	//periodic - boolean; if true, this item is a recurring item
-	//nextDue  - milliseconds since the EPOC / UTC, usually in the future; this is the next due date for this recurring item
-	//period   - duration between due dates in days		
-
-    // var content="<tr><th>Complete</th><th>Control</td><th>Priority</th><th>The Item</th><th>votes</th><th>Ready?</th><th>Period (in days)</th><th>Next Due Date</th></tr>";
-    if(arrayOfContent[i].skip) {
-        row+="<td></td><td>"+EpocMStoISODate(arrayOfContent[i].completedOn*1000)+"</td>";
-    } else if(arrayOfContent[i].periodic==undefined || !arrayOfContent[i].periodic) {
-        row+="<td></td><td></td>";
+    // Period / next due date
+    if (arrayOfContent[i].skip) {
+        row += '<td></td><td>'+EpocMStoISODate(arrayOfContent[i].completedOn*1000)+'</td>';
+    } else if (arrayOfContent[i].periodic == undefined || !arrayOfContent[i].periodic) {
+        row += '<td></td><td></td>';
     } else {
-        var dueDate=new Date(arrayOfContent[i].nextDue);
-
-        row+="<td>"+arrayOfContent[i].period+"</td>";
-        row+="<td><table><tr><td width=90px>"+formatedDate(dueDate)+"&nbsp;</td><td><span onclick=\"resetDueDate("+i+")\"><i class=\"fas fa-sync\"></i></span></td></tr></table></td>";
+        var dueDate = new Date(arrayOfContent[i].nextDue);
+        row += '<td>'+arrayOfContent[i].period+'</td>';
+        row += '<td><div class="date-cell">'+formatedDate(dueDate)+
+               '<span class="ctrl-icon" onclick="resetDueDate('+i+')"><i class="fas fa-sync-alt"></i></span></div></td>';
     }
 
-    
-    //cool down
-    var timeRemaining=0;
-    var coolDown="Cool down";
-    if(arrayOfContent[i].expires==undefined || (arrayOfContent[i].expires-d.getTime()<=0)) { 
-        coolDown="Ready";
-    } 
-    row+="<td><table><tr><td width=60px>"+coolDown+"&nbsp;</td><td><span onclick=\"resetCoolDown("+i+")\"><i class=\"fas fa-sync\"></i></span></td></tr></table></td>";
+    // Cooldown
+    var coolDown = (arrayOfContent[i].expires == undefined || (arrayOfContent[i].expires - d.getTime() <= 0)) ? 'Ready' : 'Cool down';
+    row += '<td><div class="date-cell">'+coolDown+
+           '<span class="ctrl-icon" onclick="resetCoolDown('+i+')"><i class="fas fa-sync-alt"></i></span></div></td>';
 
-    
-    //return "<tr>"+row+"</tr>";
-//    return trbit+row+"</tr>";
-    return trbit+row;
+    return trbit + row;
 }
 
 
-function compare(e) {
-    if(!$("#dndEnable").is(':checked')) return; 
-    var p=arrayOfContent[dragging]
-    arrayOfContent.splice(dragging, 1)
-    //insert globalData[dragging] in draggedOver's spot
-    arrayOfContent.splice(draggedOver, 0, p)
-    console.log(JSON.stringify(arrayOfContent,null,3))
-    //reIndex()
-    
-    //console.log(JSON.stringify(arrayOfContent,null,3))
+// ── Pointer-based drag-and-drop (grocery-list style) ─────────────────────────
+// Rows stay locked in place; a line indicator shows the drop position.
+// Only the grip handle initiates a drag.
 
-    saveit()
+var ntDrag = { active: false, srcIdx: null, srcRow: null };
 
-    render()
-  }
-      
-  function setDraggedOver(e) {
-    if(!$("#dndEnable").is(':checked')) return; 
-    e.preventDefault();
-    draggedOver = parseInt(e.target.parentNode.id.substr(4))
-  }
-  
-  function setDragging(e) {
-      if(!$("#dndEnable").is(':checked')) return; 
-    //list2 becomes 2, meaning that the 3rd row (index=2) is dragging right now
-    dragging = e.target.id.substr(4)
-  }
+function _ntClearIndicators() {
+    document.querySelectorAll('#thetable tr.nt-drag-above, #thetable tr.nt-drag-below')
+        .forEach(function(el) {
+            el.classList.remove('nt-drag-above', 'nt-drag-below');
+        });
+}
+
+function attachRowDrag(row, handle, idx) {
+    function pointerStart() {
+        if ($("#roEnable").is(':checked') || indexMode) return false;
+        ntDrag.active = true;
+        ntDrag.srcIdx = idx;
+        ntDrag.srcRow = row;
+        row.classList.add('nt-dragging');
+        return true;
+    }
+
+    function pointerMove(clientX, clientY) {
+        if (!ntDrag.active) return;
+        _ntClearIndicators();
+        var el = document.elementFromPoint(clientX, clientY);
+        if (!el) return;
+        var targetRow = el.closest('#thetable tr');
+        if (targetRow && targetRow !== ntDrag.srcRow) {
+            var rect = targetRow.getBoundingClientRect();
+            targetRow.classList.add(
+                clientY < rect.top + rect.height / 2 ? 'nt-drag-above' : 'nt-drag-below'
+            );
+        }
+    }
+
+    function pointerEnd(clientX, clientY) {
+        if (!ntDrag.active) return;
+        ntDrag.active = false;
+        _ntClearIndicators();
+        if (ntDrag.srcRow) ntDrag.srcRow.classList.remove('nt-dragging');
+
+        var el = document.elementFromPoint(clientX, clientY);
+        var targetRow = el && el.closest('#thetable tr');
+        if (targetRow && targetRow !== ntDrag.srcRow) {
+            var rect   = targetRow.getBoundingClientRect();
+            var toIdx  = parseInt(targetRow.id.substr(4));
+            if (clientY >= rect.top + rect.height / 2) toIdx++;
+            var fromIdx = ntDrag.srcIdx;
+            var p = arrayOfContent[fromIdx];
+            arrayOfContent.splice(fromIdx, 1);
+            arrayOfContent.splice(Math.max(0, fromIdx < toIdx ? toIdx - 1 : toIdx), 0, p);
+            saveit();
+            render();
+        }
+        ntDrag.srcIdx = null;
+        ntDrag.srcRow = null;
+    }
+
+    // Mouse
+    handle.addEventListener('mousedown', function(e) {
+        if (!pointerStart()) return;
+        e.preventDefault();
+        var onMove = function(e) { pointerMove(e.clientX, e.clientY); };
+        var onUp   = function(e) {
+            pointerEnd(e.clientX, e.clientY);
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup',   onUp);
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup',   onUp);
+    });
+
+    // Touch
+    handle.addEventListener('touchstart', function(e) {
+        if (!pointerStart()) return;
+        var onMove = function(e) {
+            var t = e.touches[0];
+            pointerMove(t.clientX, t.clientY);
+            e.preventDefault();
+        };
+        var onEnd = function(e) {
+            var t = e.changedTouches[0];
+            pointerEnd(t.clientX, t.clientY);
+            handle.removeEventListener('touchmove', onMove);
+            handle.removeEventListener('touchend',  onEnd);
+        };
+        handle.addEventListener('touchmove', onMove, { passive: false });
+        handle.addEventListener('touchend',  onEnd);
+    }, { passive: true });
+}
 
 
 
 
 
 function genRow(i) {
-    var node= document.createElement("tr");    
-    var item= arrayOfContent[i];
+    var node = document.createElement("tr");
+    var item = arrayOfContent[i];
 
-    node.draggable = $("#dndEnable").is(':checked');
-    if(arrayOfContent[i].skip) {
-        node.className="draggableRow completeClass"
-    } else if(arrayOfContent[i].onHold) {
-        node.className="draggableRow blockedClass"
+    if (arrayOfContent[i].skip) {
+        node.className = "draggableRow completeClass";
+    } else if (arrayOfContent[i].onHold) {
+        node.className = "draggableRow blockedClass";
+    } else if (arrayOfContent[i].inProgress) {
+        node.className = "draggableRow inProgressClass";
     } else {
-        node.className="draggableRow"
+        node.className = "draggableRow";
     }
-      
-      node.id="list"+item.idx
-      
-      if(arrayOfContent[i].onHold) node.style.backgroundColor = "pink"
-      else  if(arrayOfContent[i].inProgress) node.style.backgroundColor = "lightgreen"
-      
-      //TODO: this comes next!!!
-      node.addEventListener('drag', setDragging) 
-      node.addEventListener('dragover', setDraggedOver)
-      node.addEventListener('drop', compare) 
+    if (arrayOfContent[i].winner) node.classList.add('winnerClass');
 
-    node.innerHTML=renderRow(i)
+    node.id = "list" + item.idx;
+    node.innerHTML = renderRow(i);
 
-      //hold it
-    //   var subnode=document.createElement("td")
-    //   subnode.innerText=item.col1
-    //   node.appendChild(subnode)
-    //   if(item.col2!=undefined) {
-    //     subnode=document.createElement("td")
-    //     subnode.innerText=item.col2
-    //     node.appendChild(subnode)
-    //   }
+    // Attach pointer-based drag to the grip handle only
+    var grip = node.querySelector('.drag-grip');
+    if (grip) attachRowDrag(node, grip, i);
+
     return node;
-
 }
 function eligibleToVote(item) {
     var d=new Date();
@@ -426,6 +437,34 @@ function eligibleToVote(item) {
     if(item.expires!=undefined && item.expires-d.getTime()>0) return false;
     return true;
 }
+
+var _voteEnableTimer = null;
+
+function updateVoteButton() {
+    var hasEligible = arrayOfContent.some(function(item) { return eligibleToVote(item); });
+    $('#voteBtn').prop('disabled', !hasEligible);
+
+    // Clear any pending timer — we'll reschedule if still needed.
+    if (_voteEnableTimer !== null) { clearTimeout(_voteEnableTimer); _voteEnableTimer = null; }
+
+    if (!hasEligible) {
+        // Find the earliest cooldown expiry among non-permanently-blocked items.
+        var now = Date.now();
+        var nextExpiry = Infinity;
+        arrayOfContent.forEach(function(item) {
+            if (!item.skip && !item.onHold && item.expires && item.expires > now) {
+                nextExpiry = Math.min(nextExpiry, item.expires);
+            }
+        });
+        if (nextExpiry !== Infinity) {
+            _voteEnableTimer = setTimeout(function() {
+                _voteEnableTimer = null;
+                updateVoteButton();
+            }, nextExpiry - now + 50);
+        }
+    }
+}
+
 function vote() {
     //clear the vote
     for (var i = 0; i < arrayOfContent.length; i++) {
@@ -516,7 +555,7 @@ function vote() {
     }
    
     maxVotes=0;
-    render();
+    setTimeout(render, 0);
 }
 
 //moved to utils.js
@@ -581,25 +620,20 @@ function setBar(id,text,count,arraylength,fillin) {
 }
 
 function render() {
-    $("#dndEnable").prop("disabled",false);
-    if($("#dndEnable").is(':checked') && $("#roEnable").is(':checked')) {
-      $("#dndEnable").prop('checked',false)
-      dndToggled()
-    }
-    //if(!$("#saveButton").is(':disabled')) {
-    $("#saveButton").prop("disabled",$("#roEnable").is(':checked'));
-    //}
-//    if(!$("#addButton").is(':disabled')) {
-    $("#addButton").prop("disabled",$("#roEnable").is(':checked'));
-//    }
-//    if(!$("#dndEnable").is(':disabled')) {
-    $("#dndEnable").prop("disabled",$("#roEnable").is(':checked'));
+    var readOnly = $("#roEnable").is(':checked');
+    var isEmpty  = arrayOfContent.length === 0;
 
-//    }
+    $("#saveButton").prop("disabled", readOnly);
+    $("#addButton").prop("disabled", readOnly || indexMode);
+    $("#newListBtn").toggle(indexMode && !readOnly);
+
+    // Empty-state visibility
+    $("#hideshowButton").prop("disabled", isEmpty);
+    $("#hideshowBlockedButton").prop("disabled", isEmpty);
+    $(".progress-wrap").toggle(!isEmpty && !indexMode);
+    $("#empty-msg").toggle(isEmpty && !indexMode);
 
     resetCounter()
-    var completeClassHidden=$(".completeClass").is(":hidden")
-    var blockedClassHidden=$(".blockedClass").is(":hidden")
     var blockedCount=0
     var completedCount=0
     var inprogressCount=0
@@ -607,22 +641,28 @@ function render() {
     reIndex();
     var QUIET_LOCAL=true
 
-    //console.log("---> render()::QUIET_LOCAL="+QUIET_LOCAL)
-    //console.log("---> render()::DEBUG_UTILS="+DEBUG_UTILS)
-
     var t=document.getElementById(globalEL)
+    t.classList.toggle('index-view', indexMode);
+    t.classList.toggle('ro-mode', readOnly);
     t.innerHTML=''
-    t.appendChild(genTableHeader(
-        [
-            "Complete",
-            "Control",
-            "Priority",
-            "The Item",
-            "votes",
-            "Period (in days)",
-            "Next Due Date",
-            "Cooldown"
-        ]));
+
+    if (!isEmpty) {
+        var subjectLabel = indexMode && currentFilename
+            ? currentFilename.split('/')[0].replace(/^\w/, function(c){ return c.toUpperCase(); })
+            : "The Item";
+        t.appendChild(genTableHeader(
+            [
+                "",
+                "Complete",
+                "Control",
+                "Priority",
+                subjectLabel,
+                "votes",
+                "Period (in days)",
+                "Next Due Date",
+                "Cooldown"
+            ]));
+    }
         
    
 
@@ -663,7 +703,6 @@ function render() {
     
     vtotal=inprogressCount+todoCount
 
-    t.appendChild(genTableFooter([ null, null,{ "text" : vtotal }, { "text" : "Totals" }, { "text" : TotalVotes(arrayOfContent) }, { "text" : "=====", "colSpan" : 3 }]))
 
 
 
@@ -690,8 +729,10 @@ function render() {
 
 
 
-    if(completeClassHidden) $(".completeClass").hide()
-    if(blockedClassHidden) $(".blockedClass").hide()
+    if(completedHidden) $(".completeClass").hide()
+    if(blockedHidden)   $(".blockedClass").hide()
+
+    updateVoteButton();
 }
 
 function OLDrender() {
@@ -841,13 +882,7 @@ function rebuildListSelector(s,l,desired) {
 // }
 
 
-function dndToggled() {
-    var rows = document.querySelectorAll(".draggableRow");
-    for(i=0; i<rows.length;i++) {
-        //console.log("disable draggable on row "+i+" "+rows[i].innerHTML)
-        rows[i].draggable=$("#dndEnable").is(':checked');
-    }
-}
+function dndToggled() { /* DnD is always on; disabled only in read-only mode */ }
 
 function roToggled() {
     // console.log("roEnabled is checked? "+$("#roEnable").is(':checked'))

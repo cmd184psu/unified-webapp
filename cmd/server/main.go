@@ -9,10 +9,10 @@ import (
 
 	"cmd184psu/unified-webapp/internal/grocery"
 	"cmd184psu/unified-webapp/internal/menuserver"
+	"cmd184psu/unified-webapp/internal/todo"
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/platform/middleware"
 	"cmd184psu/unified-webapp/internal/slideshow"
-	"cmd184psu/unified-webapp/internal/todo"
 )
 
 // Dispatcher routes incoming requests to the correct module handler based on
@@ -74,7 +74,7 @@ func main() {
 		log.Printf("registered ( http://%s:%d ) → %s", host, cfg.Port, module)
 	}
 
-	addr    := fmt.Sprintf("0.0.0.0:%d", cfg.Port)
+	addr    := fmt.Sprintf("localhost:%d", cfg.Port)
 	handler := middleware.Wrap(dispatch)
 	useTLS  := cfg.TLSCert != "" && cfg.TLSKey != ""
 

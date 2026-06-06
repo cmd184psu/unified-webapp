@@ -1,128 +1,378 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
-	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>NodeJS Todolist</title>
-	<link rel="stylesheet" href="css/jquery-ui.css" />
-	<!--<link rel="stylesheet" href="css/styles.css" />-->
-	<link rel="stylesheet" href="css/nav.css" />
-	<link rel="stylesheet" href="css/modal.css" />
-	<link rel="stylesheet" href="css/fontawsme.css" />
-	<link rel='stylesheet' href='css/fontawall.css' />
-	<link rel="stylesheet" href="css/progress.css" />
-	<link rel="shortcut icon" href="images/fvw.png" type="image/x-icon" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tasks</title>
+  <link rel="shortcut icon" href="images/fvw.png" type="image/x-icon">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/fontawsme.css">
+  <link rel="stylesheet" href="css/fontawall.css">
+  <link rel="stylesheet" href="css/todo.css?v=19">
 
-	<script src="js/jquery.js"></script>
-	<script src="js/jquery-ui.js"></script>
-	<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
-	<script src="js/utils.js"></script>
-	<script src="js/todo-utils.js"></script>
-	<script src="js/todo.js"></script>
-	<script>
-		$( document ).ready(function() {
-			console.log("Document Ready");
-			const urlParams = new URLSearchParams(window.location.search);
-			const entries = urlParams.entries();
-			// build params object
-			const params = {};
-			for (entry of entries) {
-				params[entry[0]] = entry[1];
-			}
-			console.log("about to list params")
-			console.log(params);
-			console.log("start todo")
-    		startTodo(params).then(function() {
-				if (currentFilename) {
-					connectSSE(currentFilename.split('/')[0]);
-				}
-			});
-		}); //end doc ready function
-	</script>
+  <script src="js/jquery.js"></script>
+  <script src="js/jquery-ui.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/todo-utils.js?v=17"></script>
+  <script src="js/todo.js?v=4"></script>
+  <script src="js/theme.js"></script>
+  <script>
+    // ── Settings (cooldown etc.) ───────────────────────────────────────────
+    function loadSettings() {
+      fetch('/config/settings')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          COOLDOWN_TIME = (data.cooldown_minutes || 10) * 60000;
+          var el = document.getElementById('cooldown-input');
+          if (el) el.value = data.cooldown_minutes || 10;
+        });
+    }
+    function saveCooldown(minutes) {
+      var m = Math.max(1, parseInt(minutes, 10) || 10);
+      COOLDOWN_TIME = m * 60000;
+      fetch('/config/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cooldown_minutes: m })
+      });
+    }
+
+    // ── Column visibility ──────────────────────────────────────────────────
+    var colConfig = { votes: true, period: true, next_due: true, cooldown: true };
+
+    var colClasses = {
+      votes:    'hide-votes',
+      period:   'hide-period',
+      next_due: 'hide-nextdue',
+      cooldown: 'hide-cooldown'
+    };
+
+    function applyColConfig() {
+      var t = document.getElementById('thetable');
+      if (!t) return;
+      Object.keys(colClasses).forEach(function(key) {
+        t.classList.toggle(colClasses[key], !colConfig[key]);
+        var cb = document.getElementById('col-' + key);
+        if (cb) cb.checked = colConfig[key];
+      });
+    }
+
+    function setColVisible(col, visible) {
+      colConfig[col] = visible;
+      applyColConfig();
+      fetch('/config/columns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(colConfig)
+      });
+    }
+
+    function loadColConfig() {
+      fetch('/config/columns')
+        .then(function(r) { return r.json(); })
+        .then(function(data) { colConfig = data; applyColConfig(); });
+    }
+
+    function toggleSidebar() {
+      document.getElementById('sidebar').classList.toggle('sidebar-open');
+      document.getElementById('sidebar-backdrop').classList.toggle('sidebar-open');
+    }
+    function closeSidebar() {
+      document.getElementById('sidebar').classList.remove('sidebar-open');
+      document.getElementById('sidebar-backdrop').classList.remove('sidebar-open');
+    }
+
+    // ── Title editor ───────────────────────────────────────────────────────
+    // ── New list (index mode) ──────────────────────────────────────────────
+    function openNewListDialog() {
+      if (!indexMode) return;
+      $('#new-list-name').val('');
+      $('#new-list-error').text('');
+      $('#newListModal').css('display', 'flex');
+      setTimeout(function () { $('#new-list-name').focus(); }, 50);
+    }
+    function closeNewListModal() { $('#newListModal').hide(); }
+    function createNewList() {
+      var name = $('#new-list-name').val().trim();
+      if (!name || !/^[a-zA-Z0-9_-]+$/.test(name)) {
+        $('#new-list-error').text('Letters, numbers, hyphens and underscores only.');
+        return;
+      }
+      var subject = currentFilename.split('/')[0];
+      fetch('items/' + subject, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name })
+      }).then(function (r) { return r.json(); }).then(function (data) {
+        if (data.error) { $('#new-list-error').text(data.error); return; }
+        closeNewListModal();
+        // Reload the index so the new file appears immediately
+        loadList('items/' + currentFilename).then(function (content) {
+          arrayOfContent = content;
+          render();
+        });
+      });
+    }
+
+    function openTitleEditor() {
+      if (typeof indexMode !== 'undefined' && indexMode) return;
+      $('#title-input').val($('#titleDiv').text().trim());
+      $('#titleModal').css('display', 'flex');
+      setTimeout(function () { $('#title-input').focus().select(); }, 50);
+    }
+    function closeTitleModal() { $('#titleModal').hide(); }
+    function saveTitleEdit() {
+      var t = $('#title-input').val().trim();
+      $('#titleDiv').html(t);
+      closeTitleModal();
+      saveit();
+    }
+    function clearTitleEdit() { $('#title-input').val(''); saveTitleEdit(); }
+
+    // Override showAdd so the Add button opens the modal instead of toggling a card.
+    function showAdd() {
+      $('#addDiv').css('display', 'flex');
+      setTimeout(function () { $('#itemName').focus(); }, 50);
+    }
+
+    $(document).ready(function () {
+      // Close any open modal on ESC
+      $(document).on('keydown', function (e) {
+        if (e.key === 'Escape') { $('#addDiv').hide(); closeTitleModal(); closeNewListModal(); }
+      });
+
+      const urlParams = new URLSearchParams(window.location.search);
+      const params = {};
+      for (const [k, v] of urlParams.entries()) { params[k] = v; }
+      startTodo(params).then(function () {
+        if (currentFilename) {
+          connectSSE(currentFilename.split('/')[0]);
+        }
+        loadColConfig();
+        loadSettings();
+      });
+    });
+  </script>
 </head>
 
-<body style="background-color: rgb(155, 154, 154)">
-	<!--<strong>Vote!</strong>-->
-	<div id="titleDiv" style="display:none;  text-align: center; font-weight: bold;
-	font-size: 2em;"></div>
-	<div id="loadedSubject">Subject: <select id="subject-list-selector" onchange="changeSubject()"></select></div>
-	<div id="loadedList">List: <select id="item-list-selector" onchange="changeItem()"></select></div>
-	<div id="newSubject">New Subject: <select id="new-subject-list-selector"></select></div>
-	<div><button id="newSubjectBtn" onclick="moveListToNewSubject()">Move List to New Subject</button></div>	
-	<BR />
-	<table><tr><td>
-		<div><button id="backBTN" onclick="revertList()">Go Back</button></div>
-	</td><td>
-		<div><button id="copyLink" onclick="copyLink()">Copy Link To Clipboard <i class="far fa-copy"></i></button></div>
-	</td><td>
-		<button class="btn btn-success" onclick="window.open(calcNewHREF(),'_blank')">Open in New Tab <i class="fas fa-external-link-alt"></i></button>
-	</td></tr>
+<body>
 
-	<tr><td><input type="checkbox" id="roEnable" name="roEnable" onclick="roToggled()">
- <label for="roEnable">Read-only Mode Enabled</label></td></tr>
-	<tr><td><input type="checkbox" id="dndEnable" name="dndEnable"
-		checked onclick="dndToggled()">
- <label for="dndEnable">Drag and Drop Enabled</label></td></tr>
-		<tr><td>Stale Count:</td><td><div id="staleCount">300</div> seconds</td></tr>
-<tr><td><input type="checkbox" id="cntEnable" name="cntEnable"
-	 onclick="reduceCountDown()">
+  <!-- ── Top Navigation Bar ─────────────────────────────────────────────── -->
+  <nav class="topbar">
+    <div class="topbar-left">
+      <button class="icon-btn" id="menu-toggle" title="Menu" onclick="toggleSidebar()">
+        <i class="fas fa-bars"></i>
+      </button>
+      <span class="topbar-brand" onclick="openTitleEditor()" title="Edit list title">Tasks</span>
+      <div id="titleDiv" class="topbar-title" onclick="openTitleEditor()" title="Edit list title"></div>
+    </div>
+    <div class="topbar-right">
+      <button class="icon-btn" id="theme-toggle" title="Toggle dark / light mode" onclick="toggleTheme()">
+        <i class="fas fa-moon" id="theme-icon"></i>
+      </button>
+      <button class="icon-btn" id="copyLink" title="Copy link to clipboard" onclick="copyLink()">
+        <i class="far fa-copy"></i>
+      </button>
+      <button class="icon-btn" title="Open in new tab" onclick="window.open(calcNewHREF(),'_blank')">
+        <i class="fas fa-external-link-alt"></i>
+      </button>
+    </div>
+  </nav>
 
- <label for="countEnable">Stale Count Enabled</label></td></tr>
+  <!-- Sidebar backdrop (click to close) -->
+  <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="closeSidebar()"></div>
 
-	</table>
-	<!-- Total Vote Count: <input type=text id="voteCount" value="100" /><BR>-->
-	<table id="thetable" border=1>
-	<BR />
-	</table>
-	<button onclick="vote()">Vote</button>
-	<button onclick="render()">Refresh Page</button>
-	<button id="saveButton" onclick="saveit(1)">Save</button>
-	<button id="addButton" onClick="showAdd()"><i class="fas fa-plus"></i></button>
-	<button id="hideshowButton" onClick="hideShowCompleted()">Hide / Show Completed</button>
-	<button id="hideshowBlockedButton" onClick="hideShowBlocked()">Hide / Show Blocked</button>
-	<BR />
-	<BR />
-	<div>
-		Progress:
-		<div class="progress">
-			<div id="pb_complete" class="progress-bar progress-bar-completed" role="progressbar" style="width:0%">
-			Completed 0%
-			</div>
-			<div id="pb_inprogress" class="progress-bar progress-bar-inprogress" role="progressbar" style="width:0%">
-			In Progress 0%
-			</div>
-			<div id="pb_blocked" class="progress-bar progress-bar-blocked" role="progressbar" style="width:0%">
-			Blocked 0%
-			</div>
-			<div id="pb_todo" class="progress-bar progress-bar-todo" role="progressbar" style="width:0%">
-			Todo 0%
-			</div>
-		</div>
-	</div>
+  <!-- ── Main Layout ────────────────────────────────────────────────────── -->
+  <div class="app-layout">
 
+    <!-- Sidebar: slide-in panel -->
+    <aside class="sidebar" id="sidebar">
 
-	</table>
-	<HR>
-	<BR />
-	<div id="addDiv" style="display:none">
-	<table border=1>
-		<tr>
-			<td>Item: </td><td><input id="itemName" type="text" size="30" /></td>
-		</tr>
-		<tr>
-			<td>JSON: (optional) </td><td><input id="itemJSON" type="text" size="30" /></td>
-			
-		</tr>
-		<tr>
-			<td>Period in Days (optional)</td><td><input id="itemPeriod" type="text" size="30" /></td>
-		</tr>
-		<tr>
-			<td></td><td><button onclick="addIt()">Add Item to List</button></td>
-			
-			
-		</tr>
-	</table>
-	</div>
-	<div style="display:none" id="hiddentext"><input type="text" id="copytext" value="null"></div>
+      <div class="sidebar-section">
+        <label class="field-label" for="subject-list-selector">Subject</label>
+        <select id="subject-list-selector" class="select-input" onchange="changeSubject()"></select>
+      </div>
+
+      <div class="sidebar-section">
+        <label class="field-label" for="item-list-selector">List</label>
+        <select id="item-list-selector" class="select-input" onchange="changeItem()"></select>
+      </div>
+
+      <div class="sidebar-section">
+        <label class="field-label" for="new-subject-list-selector">Move to subject</label>
+        <select id="new-subject-list-selector" class="select-input"></select>
+        <button class="btn btn-outline mt-1" onclick="moveListToNewSubject()">Move List</button>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <div class="sidebar-section option-group">
+        <label class="field-label">Columns</label>
+        <label class="toggle-label">
+          <input type="checkbox" id="col-votes" onchange="setColVisible('votes', this.checked)">
+          <span class="toggle-text">Votes</span>
+        </label>
+        <label class="toggle-label">
+          <input type="checkbox" id="col-period" onchange="setColVisible('period', this.checked)">
+          <span class="toggle-text">Period</span>
+        </label>
+        <label class="toggle-label">
+          <input type="checkbox" id="col-next_due" onchange="setColVisible('next_due', this.checked)">
+          <span class="toggle-text">Next Due Date</span>
+        </label>
+        <label class="toggle-label">
+          <input type="checkbox" id="col-cooldown" onchange="setColVisible('cooldown', this.checked)">
+          <span class="toggle-text">Cooldown</span>
+        </label>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <div class="sidebar-section">
+        <label class="field-label" for="cooldown-input">Vote Cooldown</label>
+        <div class="cooldown-row">
+          <input type="number" id="cooldown-input" class="text-input" min="1" max="120" value="10"
+                 onchange="saveCooldown(this.value)">
+          <span class="cooldown-unit">min</span>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- Main content: table + actions -->
+    <main class="content-area">
+
+      <!-- Progress bar -->
+      <div class="progress-wrap">
+        <div class="progress">
+          <div id="pb_complete"    class="progress-bar progress-bar-completed"  role="progressbar" style="width:0%">Completed 0%</div>
+          <div id="pb_inprogress" class="progress-bar progress-bar-inprogress" role="progressbar" style="width:0%">In Progress 0%</div>
+          <div id="pb_blocked"    class="progress-bar progress-bar-blocked"     role="progressbar" style="width:0%">Blocked 0%</div>
+          <div id="pb_todo"       class="progress-bar progress-bar-todo"        role="progressbar" style="width:0%">Todo 0%</div>
+        </div>
+      </div>
+
+      <!-- Action toolbar -->
+      <div class="toolbar">
+        <button class="icon-btn" id="backBTN" onclick="revertList()" title="Go Back">
+          <i class="fas fa-chevron-left"></i>
+        </button>
+        <button class="btn btn-outline" id="newListBtn" style="display:none"
+                onclick="openNewListDialog()" title="Create new list">
+          <i class="fas fa-plus-circle"></i> New List
+        </button>
+        <button class="btn btn-primary" id="addButton" onclick="showAdd()">
+          <i class="fas fa-plus"></i> Add
+        </button>
+        <button class="btn btn-ghost" id="hideshowButton" onclick="hideShowCompleted()">
+          <i class="fas fa-eye-slash"></i> Completed
+        </button>
+        <button class="btn btn-ghost" id="hideshowBlockedButton" onclick="hideShowBlocked()">
+          <i class="fas fa-ban"></i> Blocked
+        </button>
+        <label class="toolbar-toggle">
+          <input type="checkbox" id="roEnable" name="roEnable" onclick="roToggled()">
+          <span>Read-only</span>
+        </label>
+        <button class="btn btn-ghost" id="voteBtn" onclick="vote()">
+          <i class="fas fa-vote-yea"></i> Vote
+        </button>
+      </div>
+
+      <!-- Item table -->
+      <div class="table-wrap">
+        <table id="thetable" class="item-table" border="0">
+        </table>
+      </div>
+
+      <!-- Empty state -->
+      <div id="empty-msg" class="empty-state" style="display:none">No items to display</div>
+
+    </main>
+  </div>
+
+  <!-- Add item modal ─────────────────────────────────────────────────────── -->
+  <div id="addDiv" class="modal-overlay" style="display:none"
+       onclick="if(event.target===this)$(this).hide()">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title">Add Item</h3>
+        <button class="modal-close" onclick="$('#addDiv').hide()" title="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="add-field">
+          <label class="field-label" for="itemName">Name</label>
+          <input id="itemName" class="text-input" type="text" placeholder="Item name"
+                 onkeydown="if(event.key==='Enter')addIt()">
+        </div>
+        <div class="add-field">
+          <label class="field-label" for="itemJSON">JSON link <span class="optional">(optional)</span></label>
+          <input id="itemJSON" class="text-input" type="text" placeholder="sub/list.json">
+        </div>
+        <div class="add-field">
+          <label class="field-label" for="itemPeriod">Period in days <span class="optional">(optional)</span></label>
+          <input id="itemPeriod" class="text-input" type="text" placeholder="e.g. 7">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="$('#addDiv').hide()">Cancel</button>
+        <button class="btn btn-primary" onclick="addIt()">Add to List</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- New list modal ──────────────────────────────────────────────────────── -->
+  <div id="newListModal" class="modal-overlay" style="display:none"
+       onclick="if(event.target===this)closeNewListModal()">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title">Create New List</h3>
+        <button class="modal-close" onclick="closeNewListModal()" title="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="add-field">
+          <label class="field-label" for="new-list-name">List name</label>
+          <input id="new-list-name" class="text-input" type="text"
+                 placeholder="e.g. shopping"
+                 onkeydown="if(event.key==='Enter') createNewList()">
+          <span class="field-hint">Letters, numbers, hyphens and underscores only. <code>.json</code> is added automatically.</span>
+          <span id="new-list-error" class="field-error"></span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeNewListModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="createNewList()">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Title editor modal ─────────────────────────────────────────────────── -->
+  <div id="titleModal" class="modal-overlay" style="display:none"
+       onclick="if(event.target===this)closeTitleModal()">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title">List Title</h3>
+        <button class="modal-close" onclick="closeTitleModal()" title="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="add-field">
+          <label class="field-label" for="title-input">Title</label>
+          <input id="title-input" class="text-input" type="text" placeholder="Enter a title for this list"
+                 onkeydown="if(event.key==='Enter') saveTitleEdit()">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="clearTitleEdit()">Remove title</button>
+        <button class="btn btn-ghost" onclick="closeTitleModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveTitleEdit()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Clipboard helper (hidden) -->
+  <div style="display:none" id="hiddentext"><input type="text" id="copytext" value="null"></div>
+
 </body>
 </html>

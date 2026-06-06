@@ -3,6 +3,9 @@ var arrayOfContent = [];
 var lists = []
 var savebutton = false;
 var countTimeoutDefault = 300
+var indexMode = false;      // true when the current file is a directory index
+var completedHidden = false; // current hide/show state for completed rows
+var blockedHidden   = false; // current hide/show state for blocked rows
 
 const item_list_selector = 'item-list-selector'
 const subject_list_selector = 'subject-list-selector'
@@ -89,17 +92,14 @@ async function loadList(fn) {
     console.log("loadList(" + fn + ")")
     var allContent = await ajaxGetJSON(fn)
     if (Array.isArray(allContent)) {
-        console.log("loadList(" + fn + ") returning just array with length = " + allContent.length)
+        indexMode = false;
         return allContent;
     }
+    indexMode = (allContent.type === 'index');
     if (allContent.title != undefined) {
         $("#titleDiv").show();
         $("#titleDiv").html(allContent.title)
-
-        console.log("setting title to " + allContent.title)
     }
-    //}
-    console.log("loadList(" + fn + ") setting title and returning array with length = " + allContent.list.length)
     return allContent.list
 }
 
@@ -323,6 +323,8 @@ async function startTodo(params) {
             $("#saveButton").prop("disabled", false);
             $("#addButton").prop("disabled", false);
         }
+        if (params.hideCompleted) completedHidden = true;
+        if (params.hideBlocked)   blockedHidden   = true;
     }
     //render selectors
     DEBUG && console.log("config.defaultSubject=" + config.defaultSubject)
@@ -341,9 +343,8 @@ async function startTodo(params) {
     //arrayOfContent=await ajaxGetJSON('items/'+currentFilename)
 
     arrayOfContent = await loadList('items/' + currentFilename)
-    //render it
+    if (!params || !params.hideCompleted) completedHidden = true;
     render();
-    $(".completeClass").hide()
 }
 
 async function reduceCountDown() {
@@ -404,11 +405,14 @@ function showAdd() {
 }
 
 function calcNewHREF() {
-
-    if ($("#roEnable").is(":checked")) extra = "&readonly=true";
-    else extra = "";
-
-    return window.location.origin + "/?subject=" + lists[$('#' + subject_list_selector).val()].subject + "&item=" + lists[$('#' + subject_list_selector).val()].entries[$('#' + item_list_selector).val()] + extra;
+    var params = [
+        'subject=' + lists[$('#' + subject_list_selector).val()].subject,
+        'item='    + lists[$('#' + subject_list_selector).val()].entries[$('#' + item_list_selector).val()]
+    ];
+    if ($("#roEnable").is(":checked")) params.push('readonly=true');
+    if (completedHidden)               params.push('hideCompleted=true');
+    if (blockedHidden)                 params.push('hideBlocked=true');
+    return window.location.origin + '/?' + params.join('&');
 }
 
 function copyLink() {
@@ -479,14 +483,12 @@ function moveListToNewSubject() {
 }
 
 function hideShowCompleted() {
-    console.log("hide/show [completed]")
-
-    $(".completeClass").toggle()
+    completedHidden = !completedHidden;
+    $(".completeClass").toggle();
 }
 function hideShowBlocked() {
-    console.log("hide/show [blocked]")
-
-    $(".blockedClass").toggle()
+    blockedHidden = !blockedHidden;
+    $(".blockedClass").toggle();
 }
 
 // ── SSE: real-time sync ───────────────────────────────────────────────────────
