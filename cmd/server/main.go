@@ -74,7 +74,7 @@ func main() {
 		log.Printf("registered ( http://%s:%d ) → %s", host, cfg.Port, module)
 	}
 
-	addr    := fmt.Sprintf("localhost:%d", cfg.Port)
+	addr    := fmt.Sprintf("0.0.0.0:%d", cfg.Port)
 	handler := middleware.Wrap(dispatch)
 	useTLS  := cfg.TLSCert != "" && cfg.TLSKey != ""
 
