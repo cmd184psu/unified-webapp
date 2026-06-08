@@ -16,9 +16,18 @@ type Config struct {
 	TLSKey     string            `json:"tls_key"`
 	Routing    map[string]string `json:"host_routing"` // hostname → module name
 	Grocery    GroceryConfig     `json:"grocery"`
-	Todo       TodoConfig        `json:"todo"`
+	Todo    TodoConfig     `json:"todo"`
 	Slideshow  SlideshowConfig   `json:"slideshow"`
 	Menuserver MenuserverConfig  `json:"menuserver"`
+}
+
+// TodoConfig holds configuration specific to the todo module.
+type TodoConfig struct {
+	StaticDir           string `json:"static_dir"`
+	DataDir             string `json:"data_dir"`
+	Ext                 string `json:"ext"`
+	DefaultSubject      string `json:"default_subject"`
+	SyncIntervalSeconds int    `json:"sync_interval_seconds"`
 }
 
 // MenuserverConfig holds configuration specific to the menuserver module.
@@ -34,15 +43,6 @@ type SlideshowConfig struct {
 	ImageDir       string `json:"image_dir"`
 	Prefix         string `json:"prefix"`
 	DefaultSubject string `json:"default_subject"`
-}
-
-// TodoConfig holds configuration specific to the todo module.
-type TodoConfig struct {
-	StaticDir           string `json:"static_dir"`
-	DataDir             string `json:"data_dir"`
-	Ext                 string `json:"ext"`
-	DefaultSubject      string `json:"default_subject"`
-	SyncIntervalSeconds int    `json:"sync_interval_seconds"`
 }
 
 // GroceryConfig holds configuration specific to the grocery module.

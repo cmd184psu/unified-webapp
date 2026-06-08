@@ -9,10 +9,10 @@ import (
 
 	"cmd184psu/unified-webapp/internal/grocery"
 	"cmd184psu/unified-webapp/internal/menuserver"
+	"cmd184psu/unified-webapp/internal/todo"
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/platform/middleware"
 	"cmd184psu/unified-webapp/internal/slideshow"
-	"cmd184psu/unified-webapp/internal/todo"
 )
 
 // Dispatcher routes incoming requests to the correct module handler based on

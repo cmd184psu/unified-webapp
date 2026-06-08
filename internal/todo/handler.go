@@ -1,6 +1,7 @@
 package todo
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -26,7 +27,12 @@ func NewHandler(store *Store, mbr *broker.MultiRoomBroker, cfg config.TodoConfig
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /config", h.handleConfig)
 	mux.HandleFunc("GET /config/", h.handleConfig)
+	mux.HandleFunc("GET /config/columns", h.handleGetColumns)
+	mux.HandleFunc("POST /config/columns", h.handleSetColumns)
+	mux.HandleFunc("GET /config/settings", h.handleGetSettings)
+	mux.HandleFunc("POST /config/settings", h.handleSetSettings)
 	mux.HandleFunc("GET /items", h.handleSubjects)
+	mux.HandleFunc("POST /items/{subject}", h.handleCreateList)
 	mux.HandleFunc("GET /items/{subject}/{item}", h.handleReadFile)
 	mux.HandleFunc("POST /items/{subject}/{item}", h.handleWriteFile)
 	mux.HandleFunc("POST /items/{subject}/{item}/{newSubject}", h.handleMoveFile)
@@ -136,6 +142,91 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.broker.Room(subject).ServeHTTP(w, r)
+}
+
+func (h *Handler) handleGetSettings(w http.ResponseWriter, r *http.Request) {
+	st, err := h.store.ReadSettings()
+	if err != nil {
+		response.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, st)
+}
+
+func (h *Handler) handleSetSettings(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil || len(body) == 0 {
+		response.WriteError(w, http.StatusBadRequest, "cannot read body")
+		return
+	}
+	var st Settings
+	if err := json.Unmarshal(body, &st); err != nil {
+		response.WriteError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if st.CooldownMinutes < 1 {
+		st.CooldownMinutes = 1
+	}
+	if err := h.store.WriteSettings(st); err != nil {
+		response.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, map[string]string{"msg": "saved"})
+}
+
+func (h *Handler) handleCreateList(w http.ResponseWriter, r *http.Request) {
+	subject := r.PathValue("subject")
+	if !validName(subject) {
+		response.WriteError(w, http.StatusBadRequest, "invalid subject")
+		return
+	}
+	var body struct {
+		Name string `json:"name"`
+	}
+	data, err := io.ReadAll(r.Body)
+	if err != nil || len(data) == 0 {
+		response.WriteError(w, http.StatusBadRequest, "cannot read body")
+		return
+	}
+	if err := json.Unmarshal(data, &body); err != nil || !validName(body.Name) {
+		response.WriteError(w, http.StatusBadRequest, "invalid name")
+		return
+	}
+	item := body.Name + ".json"
+	empty := []byte(`{"title":"","list":[]}`)
+	if err := h.store.WriteFile(subject, item, empty); err != nil {
+		response.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.broker.Notify(subject)
+	response.WriteJSON(w, http.StatusOK, map[string]string{"msg": "created", "item": subject + "/" + item})
+}
+
+func (h *Handler) handleGetColumns(w http.ResponseWriter, r *http.Request) {
+	cv, err := h.store.ReadColumns()
+	if err != nil {
+		response.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, cv)
+}
+
+func (h *Handler) handleSetColumns(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil || len(body) == 0 {
+		response.WriteError(w, http.StatusBadRequest, "cannot read body")
+		return
+	}
+	var cv ColumnVisibility
+	if err := json.Unmarshal(body, &cv); err != nil {
+		response.WriteError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if err := h.store.WriteColumns(cv); err != nil {
+		response.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, map[string]string{"msg": "saved"})
 }
 
 // validName returns true if name is a safe single-path-component identifier.

@@ -47,6 +47,9 @@ func (s *Store) Subjects() ([]Subject, error) {
 			continue
 		}
 		name := d.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
 		lk := s.subjectLock(name)
 		lk.RLock()
 		files, err := os.ReadDir(filepath.Join(s.dataDir, name))
@@ -77,6 +80,7 @@ func (s *Store) GenerateIndex(subject string) ([]byte, error) {
 		return nil, err
 	}
 	idx := IndexFile{
+		Type:  "index",
 		Title: "Index of " + subject,
 		List:  []IndexItem{},
 	}
@@ -91,6 +95,61 @@ func (s *Store) GenerateIndex(subject string) ([]byte, error) {
 		})
 	}
 	return json.Marshal(idx)
+}
+
+// ReadColumns loads column visibility from {dataDir}/columns.json.
+// Returns defaults if the file does not exist yet.
+func (s *Store) ReadColumns() (ColumnVisibility, error) {
+	path := filepath.Join(s.dataDir, "columns.json")
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return defaultColumns(), nil
+	}
+	if err != nil {
+		return defaultColumns(), err
+	}
+	var cv ColumnVisibility
+	if err := json.Unmarshal(data, &cv); err != nil {
+		return defaultColumns(), err
+	}
+	return cv, nil
+}
+
+// ReadSettings loads general settings from {dataDir}/settings.json.
+func (s *Store) ReadSettings() (Settings, error) {
+	path := filepath.Join(s.dataDir, "settings.json")
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return defaultSettings(), nil
+	}
+	if err != nil {
+		return defaultSettings(), err
+	}
+	var st Settings
+	if err := json.Unmarshal(data, &st); err != nil {
+		return defaultSettings(), err
+	}
+	return st, nil
+}
+
+// WriteSettings saves general settings to {dataDir}/settings.json.
+func (s *Store) WriteSettings(st Settings) error {
+	path := filepath.Join(s.dataDir, "settings.json")
+	data, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
+// WriteColumns saves column visibility to {dataDir}/columns.json.
+func (s *Store) WriteColumns(cv ColumnVisibility) error {
+	path := filepath.Join(s.dataDir, "columns.json")
+	data, err := json.MarshalIndent(cv, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }
 
 // emptyList is the initial content written to newly created list files.
