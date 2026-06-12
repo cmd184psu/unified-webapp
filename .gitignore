@@ -32,3 +32,6 @@ go.work.sum
 # .vscode/
 data
 .DS_Store
+node_modules/
+.unified-webapp.json
+.zenflow/

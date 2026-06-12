@@ -11,14 +11,32 @@ const DefaultConfigPath = "~/.unified-webapp.json"
 
 // Config is the top-level unified server configuration.
 type Config struct {
-	Port       int               `json:"port"`
-	TLSCert    string            `json:"tls_cert"`
-	TLSKey     string            `json:"tls_key"`
-	Routing    map[string]string `json:"host_routing"` // hostname → module name
-	Grocery    GroceryConfig     `json:"grocery"`
-	Todo    TodoConfig     `json:"todo"`
-	Slideshow  SlideshowConfig   `json:"slideshow"`
-	Menuserver MenuserverConfig  `json:"menuserver"`
+	Port        int               `json:"port"`
+	TLSCert     string            `json:"tls_cert"`
+	TLSKey      string            `json:"tls_key"`
+	Routing     map[string]string `json:"host_routing"` // hostname → module name
+	Grocery     GroceryConfig     `json:"grocery"`
+	Todo        TodoConfig        `json:"todo"`
+	Slideshow   SlideshowConfig   `json:"slideshow"`
+	Menuserver  MenuserverConfig  `json:"menuserver"`
+	Obsidianoid ObsidianoidConfig `json:"obsidianoid"`
+}
+
+// ObsidianoidVault holds the per-vault configuration for the obsidianoid module.
+type ObsidianoidVault struct {
+	Path  string `json:"path"`
+	Name  string `json:"name"`
+	Theme string `json:"theme"`
+}
+
+// ObsidianoidConfig holds configuration specific to the obsidianoid module.
+type ObsidianoidConfig struct {
+	StaticDir        string             `json:"static_dir"`
+	DataDir          string             `json:"data_dir"`
+	Vaults           []ObsidianoidVault `json:"vaults"`
+	ThreadsFolder    string             `json:"threads_folder"`
+	ThreadCount      int                `json:"thread_count"`
+	AutoSaveDisabled bool               `json:"autosave_disabled"`
 }
 
 // TodoConfig holds configuration specific to the todo module.
@@ -90,6 +108,12 @@ func DefaultConfig() *Config {
 			StaticDir: "./web/menuserver",
 			DataDir:   "./data/menuserver",
 		},
+		Obsidianoid: ObsidianoidConfig{
+			StaticDir:     "./web/obsidianoid",
+			DataDir:       "./data/obsidianoid",
+			ThreadsFolder: "Threads",
+			ThreadCount:   4,
+		},
 	}
 }
 
@@ -135,6 +159,9 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	if err := expandMenuserverPaths(&cfg.Menuserver); err != nil {
+		return nil, err
+	}
+	if err := expandObsidianoidPaths(&cfg.Obsidianoid); err != nil {
 		return nil, err
 	}
 	if cfg.TLSCert != "" {
@@ -190,6 +217,22 @@ func expandGroceryPaths(g *GroceryConfig) error {
 	}
 	if g.DataFile, err = ExpandPath(g.DataFile); err != nil {
 		return err
+	}
+	return nil
+}
+
+func expandObsidianoidPaths(o *ObsidianoidConfig) error {
+	var err error
+	if o.StaticDir, err = ExpandPath(o.StaticDir); err != nil {
+		return err
+	}
+	if o.DataDir, err = ExpandPath(o.DataDir); err != nil {
+		return err
+	}
+	for i := range o.Vaults {
+		if o.Vaults[i].Path, err = ExpandPath(o.Vaults[i].Path); err != nil {
+			return err
+		}
 	}
 	return nil
 }

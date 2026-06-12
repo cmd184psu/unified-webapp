@@ -1,6 +1,6 @@
 # unified-webapp
 
-Unified Go server for todo-list, slideshow, menuserver, and grocery-list. A single binary replaces four separate services. HAProxy (or `/etc/hosts`) routes hostnames to the correct module; the Go server dispatches on the `Host` header.
+Unified Go server for todo-list, slideshow, menuserver, grocery-list, and obsidianoid (Obsidian-vault viewer/editor). A single binary replaces separate services. HAProxy (or `/etc/hosts`) routes hostnames to the correct module; the Go server dispatches on the `Host` header.
 
 ---
 
@@ -41,8 +41,10 @@ Minimal example with all four modules. Multiple hostnames can map to the same mo
     "todo-test.cmdhome.net":      "todo",
     "slideshow.cmdhome.net":      "slideshow",
     "slideshow-test.cmdhome.net": "slideshow",
-    "menu.cmdhome.net":           "menuserver",
-    "menu-test.cmdhome.net":      "menuserver"
+    "menu.cmdhome.net":               "menuserver",
+    "menu-test.cmdhome.net":          "menuserver",
+    "obsidianoid.cmdhome.net":        "obsidianoid",
+    "obsidianoid-test.cmdhome.net":   "obsidianoid"
   },
   "grocery": {
     "static_dir": "/opt/unified-webapp/web/grocery",
@@ -68,6 +70,16 @@ Minimal example with all four modules. Multiple hostnames can map to the same mo
     "static_dir": "/opt/unified-webapp/web/menuserver",
     "data_dir":   "/data/menuserver",
     "show_all_pages": false
+  },
+  "obsidianoid": {
+    "static_dir": "/opt/unified-webapp/web/obsidianoid",
+    "data_dir":   "/data/obsidianoid",
+    "vaults": [
+      { "path": "/path/to/vault", "name": "My Vault", "theme": "dark" }
+    ],
+    "threads_folder": "Threads",
+    "thread_count": 4,
+    "autosave_disabled": false
   }
 }
 ```
@@ -170,6 +182,35 @@ One subdirectory per subject, images inside:
 ```
 
 Supported formats: `.jpg`, `.jpeg`, `.png`, `.gif`
+
+### Obsidianoid
+
+Reads an existing Obsidian vault directory (plain Markdown files). The vault directory must already exist; the module will not create it.
+
+```
+/opt/Vaults/MyVault/
+  Projects/
+    Note A.md
+    Note B.md
+  Journal.md
+  Threads/          ← created automatically on first thread save
+    Thread01.md
+    Thread02.md
+    Thread03.md
+    Thread04.md
+```
+
+Thread disabled-state is persisted separately in the module's data directory (not inside the vault):
+
+```
+/data/obsidianoid/state.json
+```
+
+To migrate existing thread states from the standalone app, copy the `thread_states` array from `~/.obsidianoid.json` into `state.json` under the key `thread_states`.
+
+**Git sync** (`POST /api/git/sync`): shells out to `git add -A && git commit && git push` inside the vault directory. The service user must have git installed and push credentials configured for the vault's remote.
+
+**TypeScript sources**: the frontend is compiled TypeScript. After editing `web/obsidianoid/js/*.ts`, run `make web` then commit the regenerated `.js` files. `make typecheck` runs `tsc --noEmit` for type safety. `make build` / `make build-rpi` do not require npm — compiled JS is committed.
 
 ### Menuserver
 

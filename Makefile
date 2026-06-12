@@ -2,7 +2,7 @@ BINARY    := unified-webapp
 CMD       := ./cmd/server
 CONFIG    := ~/.unified-webapp.json
 
-.PHONY: run build build-rpi test clean init-config
+.PHONY: run build build-rpi test clean init-config web typecheck
 
 run:
 	go run $(CMD) -config $(CONFIG)
@@ -21,3 +21,10 @@ init-config:
 
 clean:
 	rm -f $(BINARY) $(BINARY)-arm64-linux
+
+web:
+	@if [ ! -d node_modules ]; then npm install; fi
+	npm run build
+
+typecheck:
+	npm run typecheck

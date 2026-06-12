@@ -1,0 +1,13 @@
+{
+  "name": "unified-webapp",
+  "private": true,
+  "scripts": {
+    "build": "esbuild web/obsidianoid/js/threads.ts web/obsidianoid/js/app.ts --target=es2020 --outdir=web/obsidianoid/js/",
+    "build:dev": "esbuild web/obsidianoid/js/threads.ts web/obsidianoid/js/app.ts --target=es2020 --outdir=web/obsidianoid/js/ --sourcemap",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0",
+    "typescript": "^5.4.0"
+  }
+}

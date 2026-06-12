@@ -1,0 +1,189 @@
+/* ─── Design Tokens: dark (default) ─── */
+:root, [data-theme="dark"] {
+  --color-bg:              #13131a;
+  --color-surface:         #1a1a24;
+  --color-surface-2:       #1f1f2e;
+  --color-surface-offset:  #252535;
+  --color-surface-dynamic: #2e2e42;
+  --color-divider:         #2a2a3a;
+  --color-border:          #333348;
+  --color-text:            #d4d4e8;
+  --color-text-muted:      #7878a0;
+  --color-text-faint:      #4a4a68;
+  --color-primary:         #7c6af7;
+  --color-primary-hover:   #9580ff;
+  --color-primary-active:  #5a4bcc;
+  --color-primary-highlight: #2a2548;
+  --color-success:         #4dbb6e;
+  --color-error:           #e05c7a;
+  --color-warning:         #f0a04a;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 3px oklch(0 0 0 / 0.3);
+  --shadow-md: 0 4px 16px oklch(0 0 0 / 0.4);
+  --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem;
+  --space-4: 1rem;    --space-6: 1.5rem; --space-8: 2rem;
+  --text-xs:   clamp(0.75rem,  0.7rem + 0.25vw, 0.875rem);
+  --text-sm:   clamp(0.875rem, 0.8rem + 0.35vw, 1rem);
+  --text-base: clamp(1rem,     0.95rem + 0.25vw, 1.125rem);
+  --text-lg:   clamp(1.125rem, 1rem + 0.75vw, 1.5rem);
+  --font-body: 'Inter', 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --sidebar-width: 280px;
+  --topbar-height: 48px;
+  --transition: 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ─── Design Tokens: forest (dark green) ─── */
+[data-theme="forest"] {
+  --color-bg:              #0d1a0f;
+  --color-surface:         #112214;
+  --color-surface-2:       #142918;
+  --color-surface-offset:  #1a3320;
+  --color-surface-dynamic: #1f3d26;
+  --color-divider:         #1d3020;
+  --color-border:          #244028;
+  --color-text:            #c8e6ca;
+  --color-text-muted:      #6a9870;
+  --color-text-faint:      #3d6644;
+  --color-primary:         #4dbb6e;
+  --color-primary-hover:   #6dcc88;
+  --color-primary-active:  #37924f;
+  --color-primary-highlight: #163d20;
+  --color-success:         #4dbb6e;
+  --color-error:           #e05c7a;
+  --color-warning:         #f0a04a;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 3px oklch(0 0 0 / 0.35);
+  --shadow-md: 0 4px 16px oklch(0 0 0 / 0.45);
+  --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem;
+  --space-4: 1rem;    --space-6: 1.5rem; --space-8: 2rem;
+  --text-xs:   clamp(0.75rem,  0.7rem + 0.25vw, 0.875rem);
+  --text-sm:   clamp(0.875rem, 0.8rem + 0.35vw, 1rem);
+  --text-base: clamp(1rem,     0.95rem + 0.25vw, 1.125rem);
+  --text-lg:   clamp(1.125rem, 1rem + 0.75vw, 1.5rem);
+  --font-body: 'Inter', 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --sidebar-width: 280px;
+  --topbar-height: 48px;
+  --transition: 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ─── Design Tokens: ocean (dark blue) ─── */
+[data-theme="ocean"] {
+  --color-bg:              #0d1420;
+  --color-surface:         #101c2c;
+  --color-surface-2:       #132236;
+  --color-surface-offset:  #182a40;
+  --color-surface-dynamic: #1e3450;
+  --color-divider:         #1a2d42;
+  --color-border:          #213858;
+  --color-text:            #cad8f8;
+  --color-text-muted:      #6888c0;
+  --color-text-faint:      #3a5080;
+  --color-primary:         #5b9cf6;
+  --color-primary-hover:   #7ab0ff;
+  --color-primary-active:  #3d7dcc;
+  --color-primary-highlight: #142040;
+  --color-success:         #4dbb6e;
+  --color-error:           #e05c7a;
+  --color-warning:         #f0a04a;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 3px oklch(0 0 0 / 0.35);
+  --shadow-md: 0 4px 16px oklch(0 0 0 / 0.45);
+  --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem;
+  --space-4: 1rem;    --space-6: 1.5rem; --space-8: 2rem;
+  --text-xs:   clamp(0.75rem,  0.7rem + 0.25vw, 0.875rem);
+  --text-sm:   clamp(0.875rem, 0.8rem + 0.35vw, 1rem);
+  --text-base: clamp(1rem,     0.95rem + 0.25vw, 1.125rem);
+  --text-lg:   clamp(1.125rem, 1rem + 0.75vw, 1.5rem);
+  --font-body: 'Inter', 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --sidebar-width: 280px;
+  --topbar-height: 48px;
+  --transition: 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ─── Design Tokens: ember (dark amber) ─── */
+[data-theme="ember"] {
+  --color-bg:              #1a1108;
+  --color-surface:         #231809;
+  --color-surface-2:       #2b1e0c;
+  --color-surface-offset:  #352510;
+  --color-surface-dynamic: #402c14;
+  --color-divider:         #2e2010;
+  --color-border:          #3d2a14;
+  --color-text:            #f5deb3;
+  --color-text-muted:      #b08060;
+  --color-text-faint:      #6e5030;
+  --color-primary:         #f0a04a;
+  --color-primary-hover:   #ffb86a;
+  --color-primary-active:  #c07830;
+  --color-primary-highlight: #3d2510;
+  --color-success:         #4dbb6e;
+  --color-error:           #e05c7a;
+  --color-warning:         #f0a04a;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 3px oklch(0 0 0 / 0.35);
+  --shadow-md: 0 4px 16px oklch(0 0 0 / 0.45);
+  --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem;
+  --space-4: 1rem;    --space-6: 1.5rem; --space-8: 2rem;
+  --text-xs:   clamp(0.75rem,  0.7rem + 0.25vw, 0.875rem);
+  --text-sm:   clamp(0.875rem, 0.8rem + 0.35vw, 1rem);
+  --text-base: clamp(1rem,     0.95rem + 0.25vw, 1.125rem);
+  --text-lg:   clamp(1.125rem, 1rem + 0.75vw, 1.5rem);
+  --font-body: 'Inter', 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --sidebar-width: 280px;
+  --topbar-height: 48px;
+  --transition: 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ─── Design Tokens: rose (dark pink) ─── */
+[data-theme="rose"] {
+  --color-bg:              #1a0d12;
+  --color-surface:         #22101a;
+  --color-surface-2:       #2a1420;
+  --color-surface-offset:  #331828;
+  --color-surface-dynamic: #3d1e30;
+  --color-divider:         #2e1422;
+  --color-border:          #3d1a2c;
+  --color-text:            #f0c8d0;
+  --color-text-muted:      #a06878;
+  --color-text-faint:      #6e3848;
+  --color-primary:         #e05c7a;
+  --color-primary-hover:   #f07090;
+  --color-primary-active:  #b83d5a;
+  --color-primary-highlight: #3d1428;
+  --color-success:         #4dbb6e;
+  --color-error:           #e05c7a;
+  --color-warning:         #f0a04a;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 3px oklch(0 0 0 / 0.35);
+  --shadow-md: 0 4px 16px oklch(0 0 0 / 0.45);
+  --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem;
+  --space-4: 1rem;    --space-6: 1.5rem; --space-8: 2rem;
+  --text-xs:   clamp(0.75rem,  0.7rem + 0.25vw, 0.875rem);
+  --text-sm:   clamp(0.875rem, 0.8rem + 0.35vw, 1rem);
+  --text-base: clamp(1rem,     0.95rem + 0.25vw, 1.125rem);
+  --text-lg:   clamp(1.125rem, 1rem + 0.75vw, 1.5rem);
+  --font-body: 'Inter', 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --sidebar-width: 280px;
+  --topbar-height: 48px;
+  --transition: 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}

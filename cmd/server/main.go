@@ -9,6 +9,7 @@ import (
 
 	"cmd184psu/unified-webapp/internal/grocery"
 	"cmd184psu/unified-webapp/internal/menuserver"
+	"cmd184psu/unified-webapp/internal/obsidianoid"
 	"cmd184psu/unified-webapp/internal/todo"
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/platform/middleware"
@@ -97,6 +98,8 @@ func buildModule(module string, cfg *config.Config) (http.Handler, error) {
 		return slideshow.Build(cfg.Slideshow)
 	case "menuserver":
 		return menuserver.Build(cfg.Menuserver)
+	case "obsidianoid":
+		return obsidianoid.Build(cfg.Obsidianoid)
 	default:
 		return nil, fmt.Errorf("unknown module %q", module)
 	}

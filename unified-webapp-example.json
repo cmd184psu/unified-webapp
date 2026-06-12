@@ -8,7 +8,9 @@
   "todolist.cmdhome.net":       "todo",
   "grocery-test.cmdhome.net":       "grocery",
   "slideshow-test.cmdhome.net":       "slideshow",
-  "menuserver-test.cmdhome.net":       "menuserver"
+  "menuserver-test.cmdhome.net":       "menuserver",
+  "obsidianoid-test.cmdhome.net":      "obsidianoid",
+  "obsidianoid.cmdhome.net":           "obsidianoid"
 
   },
   "grocery": {
@@ -43,5 +45,15 @@
     "static_dir": "./web/menuserver",
     "data_dir": "./data/menuserver",
     "show_all_pages": false
+  },
+  "obsidianoid": {
+    "static_dir": "./web/obsidianoid",
+    "data_dir": "./data/obsidianoid",
+    "vaults": [
+      { "path": "/path/to/your/vault", "name": "My Vault", "theme": "dark" }
+    ],
+    "threads_folder": "Threads",
+    "thread_count": 4,
+    "autosave_disabled": false
   }
 }
