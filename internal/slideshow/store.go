@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // imageExts is the set of file extensions treated as images.
@@ -24,30 +25,57 @@ type Subject struct {
 
 // Store scans imageDir for subject subdirectories containing image files.
 type Store struct {
-	imageDir string
+	imageDir      string
+	ageCutoffDays int
 }
 
 // NewStore creates a Store backed by imageDir, creating it if necessary.
-func NewStore(imageDir string) (*Store, error) {
+// ageCutoffDays filters out subjects whose directory mtime is older than that
+// many days; 0 disables the filter.
+func NewStore(imageDir string, ageCutoffDays int) (*Store, error) {
 	if err := os.MkdirAll(imageDir, 0755); err != nil {
 		return nil, err
 	}
-	return &Store{imageDir: imageDir}, nil
+	return &Store{imageDir: imageDir, ageCutoffDays: ageCutoffDays}, nil
 }
 
-// Subjects lists all subject directories and their image file entries.
-// Entries are formatted as "{subject}/{filename}" to match the JS URL pattern.
+// Subjects lists all subject directories and their image file entries, applying
+// blacklist (_-prefix) and age cutoff filters.
+// Entries are formatted as "{subject}/{filename}" to match the image URL pattern.
 func (s *Store) Subjects() ([]Subject, error) {
 	dirs, err := os.ReadDir(s.imageDir)
 	if err != nil {
 		return nil, err
 	}
+
+	var cutoff time.Time
+	if s.ageCutoffDays > 0 {
+		cutoff = time.Now().AddDate(0, 0, -s.ageCutoffDays)
+	}
+
 	var subjects []Subject
 	for _, d := range dirs {
 		if !d.IsDir() {
 			continue
 		}
 		name := d.Name()
+
+		// Blacklist: skip _-prefixed subjects.
+		if strings.HasPrefix(name, "_") {
+			continue
+		}
+
+		// Age filter: skip directories older than cutoff.
+		if !cutoff.IsZero() {
+			info, err := d.Info()
+			if err != nil {
+				continue
+			}
+			if info.ModTime().Before(cutoff) {
+				continue
+			}
+		}
+
 		files, err := os.ReadDir(filepath.Join(s.imageDir, name))
 		if err != nil {
 			continue

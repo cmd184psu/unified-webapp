@@ -10,20 +10,25 @@ import (
 
 // Build returns a ready-to-use http.Handler for the slideshow module.
 func Build(cfg config.SlideshowConfig) (http.Handler, error) {
-	store, err := NewStore(cfg.ImageDir)
+	store, err := NewStore(cfg.ImageDir, cfg.AgeCutoffDays)
 	if err != nil {
 		return nil, err
 	}
-	h := NewHandler(store, cfg)
+	music := NewMusicStore(cfg.Music.AudioDir)
+	broker := NewSSEBroker()
+	conductor := NewConductor(store, music, broker, cfg)
+	h := NewHandler(store, conductor, broker, music, cfg)
 
 	mux := http.NewServeMux()
 	h.Register(mux)
 	mux.Handle("/", &staticHandler{dir: cfg.StaticDir})
 
+	go conductor.Run()
+
 	return mux, nil
 }
 
-// staticHandler serves files from dir with a slideshow.html fallback.
+// staticHandler serves files from dir with an index.html fallback.
 type staticHandler struct {
 	dir string
 }

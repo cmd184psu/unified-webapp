@@ -7,5 +7,5 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["web/obsidianoid/js/*.ts"]
+  "include": ["web/obsidianoid/js/*.ts", "web/slideshow/js/*.ts"]
 }

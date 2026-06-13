@@ -1,0 +1,385 @@
+/* ── Reset / base ─────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:          #111;
+  --fg:          #eee;
+  --overlay-bg:  rgba(0, 0, 0, 0.45);
+  --btn-bg:      rgba(255, 255, 255, 0.14);
+  --btn-border:  rgba(255, 255, 255, 0.28);
+  --btn-hover:   rgba(255, 255, 255, 0.28);
+  --panel-bg:    rgba(18, 18, 18, 0.88);
+  --panel-border: rgba(255,255,255,0.1);
+  --label-fg:    rgba(255,255,255,0.55);
+}
+
+[data-theme="light"] {
+  --bg:          #f5f5f5;
+  --fg:          #111;
+  --overlay-bg:  rgba(255, 255, 255, 0.45);
+  --btn-bg:      rgba(0, 0, 0, 0.12);
+  --btn-border:  rgba(0, 0, 0, 0.20);
+  --btn-hover:   rgba(0, 0, 0, 0.22);
+  --panel-bg:    rgba(240, 240, 240, 0.92);
+  --panel-border: rgba(0,0,0,0.12);
+  --label-fg:    rgba(0,0,0,0.50);
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, sans-serif;
+  overflow: hidden;
+}
+
+/* dvh = dynamic viewport height: tracks the actual usable area on iOS Safari
+   as the browser chrome appears/disappears. Falls back to vh on older browsers. */
+
+/* ── Display + image ──────────────────────────────────────────────────────── */
+#display {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh; /* dvh tracks actual usable height; vh is the max (chrome hidden) */
+  overflow: hidden;
+}
+
+#slide-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain; /* always show the full image — no cropping */
+  background: var(--bg);
+}
+
+/* ── Slideshow mode animations ────────────────────────────────────────────── */
+#slide-img.mode-static {
+  object-fit: contain;
+}
+
+/* Pan & Scan: object-fit and object-position are driven by PanScan (app.ts).
+   The CSS class is only a hook for any future styling; all motion is JS-owned. */
+#slide-img.mode-panscan {
+  object-fit: cover;
+}
+
+@keyframes kenburns-a {
+  0%   { transform: scale(1.00) translate( 0%,  0%); }
+  100% { transform: scale(1.08) translate(-2%, -1%); }
+}
+@keyframes kenburns-b {
+  0%   { transform: scale(1.08) translate(-2%, -1%); }
+  100% { transform: scale(1.00) translate( 1%,  2%); }
+}
+#slide-img.mode-kenburns-a {
+  /* object-fit stays contain — gentle zoom stays within the visible image */
+  animation: kenburns-a var(--interval, 8s) ease-in-out forwards;
+}
+#slide-img.mode-kenburns-b {
+  animation: kenburns-b var(--interval, 8s) ease-in-out forwards;
+}
+
+
+/* Pause all animations when the slideshow is paused */
+#display.paused #slide-img {
+  animation-play-state: paused;
+}
+
+/* ── Overlay ──────────────────────────────────────────────────────────────── */
+/* Two children only: #top-bar and #controls-bar → space-between is correct. */
+#overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+/* ── Top bar ──────────────────────────────────────────────────────────────── */
+#top-bar {
+  pointer-events: all;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.9rem 1.5rem;
+  background: linear-gradient(var(--overlay-bg), transparent);
+}
+
+#top-left {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;    /* allow text-overflow to work */
+  max-width: 55vw;
+}
+
+#subject-label {
+  font-size: 0.9rem;
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#debug-display {
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+  opacity: 0.75;
+  white-space: nowrap;
+  background: rgba(0,0,0,0.35);
+  border-radius: 4px;
+  padding: 0.15rem 0.5rem;
+  letter-spacing: 0.03em;
+}
+
+/* ── Controls bar ─────────────────────────────────────────────────────────── */
+/* Flex column: ctrl-row on top, image-counter below.                         */
+#controls-bar {
+  pointer-events: all;
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem 0.9rem 0.5rem;
+  background: linear-gradient(transparent, var(--overlay-bg));
+}
+
+.ctrl-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ctrl-group {
+  display: flex;
+  gap: 0.35rem;
+}
+.ctrl-group.center {
+  flex: 1;
+  justify-content: center;
+}
+
+#image-counter {
+  font-size: 0.75rem;
+  opacity: 0.55;
+  white-space: nowrap;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+button {
+  background: var(--btn-bg);
+  border: 1px solid var(--btn-border);
+  color: var(--fg);
+  border-radius: 6px;
+  padding: 0.4rem 0.7rem;
+  font-size: 1rem;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: background 0.15s;
+  user-select: none;
+}
+button:hover { background: var(--btn-hover); }
+button:active { opacity: 0.7; }
+
+#btn-hamburger {
+  font-size: 1.2rem;
+  padding: 0.3rem 0.6rem;
+}
+
+#music-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: auto;
+}
+.music-icon {
+  font-size: 1rem;
+  opacity: 0.7;
+  margin-right: 0.1rem;
+  pointer-events: none;
+}
+#music-label {
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+
+/* ── Controls position: top ───────────────────────────────────────────────── */
+#display[data-controls-pos="top"] #controls-bar {
+  order: -1;
+  background: linear-gradient(var(--overlay-bg), transparent);
+  padding: 0.5rem 0.9rem 1.5rem;
+  flex-direction: column-reverse; /* counter above buttons when flipped */
+}
+#display[data-controls-pos="top"] #top-bar {
+  order: 1;
+  background: linear-gradient(transparent, var(--overlay-bg));
+  padding: 1.5rem 0.9rem 0.5rem;
+}
+
+/* ── Scrim + settings panel ───────────────────────────────────────────────── */
+#settings-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  /* no background — transparent dismiss target; panel sits on top */
+}
+
+#settings-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 300px;
+  background: var(--panel-bg);
+  backdrop-filter: blur(10px);
+  border-left: 1px solid var(--panel-border);
+  padding: 1.5rem 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  color: var(--fg);
+  z-index: 30;   /* above scrim */
+  overflow-y: auto;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.panel-header h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  opacity: 0.9;
+}
+.panel-header button {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  font-size: 1.1rem;
+  padding: 0.2rem 0.4rem;
+  opacity: 0.55;
+  backdrop-filter: none;
+}
+.panel-header button:hover { background: transparent; opacity: 1; }
+
+#settings-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--label-fg);
+}
+
+#settings-panel label.checkbox-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--fg);
+}
+
+#settings-panel select,
+#settings-panel input[type="number"] {
+  background: var(--btn-bg);
+  border: 1px solid var(--btn-border);
+  color: var(--fg);
+  border-radius: 5px;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.9rem;
+}
+
+.panel-divider {
+  border: none;
+  border-top: 1px solid var(--panel-border);
+  margin: 0.2rem 0;
+}
+
+.server-stamp {
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  opacity: 0.45;
+  text-align: center;
+}
+
+.shortcuts-help h4 {
+  font-size: 0.8rem;
+  font-weight: 600;
+  opacity: 0.6;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+
+.shortcuts-help dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.3rem 0.8rem;
+  font-size: 0.8rem;
+}
+
+.shortcuts-help dt {
+  display: flex;
+  gap: 0.2rem;
+  align-items: baseline;
+  white-space: nowrap;
+}
+
+.shortcuts-help dd {
+  opacity: 0.65;
+}
+
+kbd {
+  display: inline-block;
+  background: var(--btn-bg);
+  border: 1px solid var(--btn-border);
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+  font-family: system-ui, sans-serif;
+  font-size: 0.75rem;
+}
+
+/* ── Touch / iPad adjustments ─────────────────────────────────────────────── */
+@media (pointer: coarse) {
+  /* Minimum 44 × 44 pt tap targets */
+  button {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 0.5rem 0.9rem;
+    font-size: 1.1rem;
+  }
+  #btn-hamburger { font-size: 1.4rem; }
+
+  .ctrl-group { gap: 0.6rem; }
+
+  /* Respect safe-area insets (notched iPads) */
+  #top-bar {
+    padding-top:   max(0.6rem, env(safe-area-inset-top));
+    padding-left:  max(0.9rem, env(safe-area-inset-left));
+    padding-right: max(0.9rem, env(safe-area-inset-right));
+  }
+  #controls-bar {
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+  }
+  #display[data-controls-pos="top"] #controls-bar {
+    padding-top: max(0.5rem, env(safe-area-inset-top));
+  }
+  #display[data-controls-pos="top"] #top-bar {
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+  }
+
+  .panel-header button { min-width: 44px; min-height: 44px; }
+
+  /* Wider settings panel on tablet */
+  #settings-panel { width: 320px; }
+
+  #settings-panel select,
+  #settings-panel input[type="number"] {
+    padding: 0.5rem 0.6rem;
+    font-size: 1rem;
+  }
+}
+
+/* ── Utility ──────────────────────────────────────────────────────────────── */
+[hidden] { display: none !important; }

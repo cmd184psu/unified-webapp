@@ -55,12 +55,24 @@ type MenuserverConfig struct {
 	ShowAllPages bool   `json:"show_all_pages"`
 }
 
+// MusicConfig holds music configuration. Collections are discovered automatically
+// by scanning subdirectories of AudioDir; no explicit list is needed.
+type MusicConfig struct {
+	AudioDir string `json:"audio_dir"`
+}
+
 // SlideshowConfig holds configuration specific to the slideshow module.
 type SlideshowConfig struct {
-	StaticDir      string `json:"static_dir"`
-	ImageDir       string `json:"image_dir"`
-	Prefix         string `json:"prefix"`
-	DefaultSubject string `json:"default_subject"`
+	StaticDir       string      `json:"static_dir"`
+	ImageDir        string      `json:"image_dir"`
+	Prefix          string      `json:"prefix"`
+	DefaultSubject  string      `json:"default_subject"`
+	IntervalSeconds int         `json:"interval_seconds"`
+	AgeCutoffDays   int         `json:"age_cutoff_days"`
+	DefaultMode     string      `json:"default_mode"`
+	DefaultShuffle  bool        `json:"default_shuffle"`
+	DefaultTheme    string      `json:"default_theme"`
+	Music           MusicConfig `json:"music"`
 }
 
 // GroceryConfig holds configuration specific to the grocery module.
@@ -100,9 +112,12 @@ func DefaultConfig() *Config {
 			SyncIntervalSeconds: 1,
 		},
 		Slideshow: SlideshowConfig{
-			StaticDir: "./web/slideshow",
-			ImageDir:  "./data/slideshow",
-			Prefix:    "slides",
+			StaticDir:       "./web/slideshow",
+			ImageDir:        "./data/slideshow",
+			Prefix:          "slides",
+			IntervalSeconds: 8,
+			DefaultMode:     "kenburns",
+			DefaultTheme:    "dark",
 		},
 		Menuserver: MenuserverConfig{
 			StaticDir: "./web/menuserver",
@@ -195,6 +210,11 @@ func expandSlideshowPaths(s *SlideshowConfig) error {
 	}
 	if s.ImageDir, err = ExpandPath(s.ImageDir); err != nil {
 		return err
+	}
+	if s.Music.AudioDir != "" {
+		if s.Music.AudioDir, err = ExpandPath(s.Music.AudioDir); err != nil {
+			return err
+		}
 	}
 	return nil
 }

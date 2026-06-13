@@ -2,8 +2,8 @@
   "name": "unified-webapp",
   "private": true,
   "scripts": {
-    "build": "esbuild web/obsidianoid/js/threads.ts web/obsidianoid/js/app.ts --target=es2020 --outdir=web/obsidianoid/js/",
-    "build:dev": "esbuild web/obsidianoid/js/threads.ts web/obsidianoid/js/app.ts --target=es2020 --outdir=web/obsidianoid/js/ --sourcemap",
+    "build": "esbuild web/obsidianoid/js/threads.ts web/obsidianoid/js/app.ts --target=es2020 --outdir=web/obsidianoid/js/ && esbuild web/slideshow/js/app.ts --target=es2020 --outdir=web/slideshow/js/",
+    "build:dev": "esbuild web/obsidianoid/js/threads.ts web/obsidianoid/js/app.ts --target=es2020 --outdir=web/obsidianoid/js/ --sourcemap && esbuild web/slideshow/js/app.ts --target=es2020 --outdir=web/slideshow/js/ --sourcemap",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
