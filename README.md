@@ -111,6 +111,8 @@ Minimal example with all four modules. Multiple hostnames can map to the same mo
 | `strict_host_key` | `true` verifies SSH host keys against `known_hosts_path` and fails closed if that file is missing. |
 | `known_hosts_path` | Empty resolves to `<ssh_dir>/known_hosts`. |
 
+Running and using the module — host cards, terminals, broadcasts, the proxy requirements, and the audit log — is documented separately in **[docs/multissh.md](docs/multissh.md)**. Read the [proxy section](docs/multissh.md#3-putting-it-behind-a-proxy) before putting it behind nginx: a front end that rewrites the `Host` header breaks every terminal while leaving the page looking fine. Note also that this module has **no login** — reaching its hostname is the whole access boundary.
+
 **Empty strings are meaningful, not omissions.** `ssh_dir`, `upload_dir`, `browse_root` and `known_hosts_path` are resolved at startup from the environment, so `make init-config` writes them as present-but-empty strings. An empty value reads as "resolve this for me"; leaving the key out entirely would be indistinguishable from a typo'd key name. Keep them present.
 
 ### 3. Run

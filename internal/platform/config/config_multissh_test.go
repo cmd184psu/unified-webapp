@@ -181,3 +181,50 @@ func TestMultisshMaxSessionsValidation(t *testing.T) {
 		})
 	}
 }
+
+// What `make init-config` writes must load back unchanged. The two halves --
+// WriteDefault and Load -- can drift independently: Load applies tilde
+// expansion and max_sessions validation, so a default that needed either would
+// mean the generated file is not the file the server actually runs on.
+func TestWrittenDefaultConfigLoadsUnchanged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "unified-webapp.json")
+	if err := config.WriteDefault(path); err != nil {
+		t.Fatalf("WriteDefault: %v", err)
+	}
+
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Compare against the file's own bytes rather than DefaultConfig(), so a
+	// field that WriteDefault omits is caught rather than silently defaulted.
+	var onDisk config.Config
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if err := json.Unmarshal(data, &onDisk); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if loaded.Multissh != onDisk.Multissh {
+		t.Errorf("init-config output did not survive Load:\n on disk %+v\n loaded  %+v", onDisk.Multissh, loaded.Multissh)
+	}
+
+	// Every multissh key must be present in the generated file. An absent key
+	// is indistinguishable from a typo'd one when an operator edits it.
+	var raw struct {
+		Multissh map[string]json.RawMessage `json:"multissh"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal raw: %v", err)
+	}
+	for _, key := range []string{
+		"static_dir", "ssh_dir", "upload_dir", "hosts_path", "browse_root",
+		"max_sessions", "max_upload_bytes", "strict_host_key", "known_hosts_path",
+	} {
+		if _, ok := raw.Multissh[key]; !ok {
+			t.Errorf("init-config output is missing the %q key", key)
+		}
+	}
+}
