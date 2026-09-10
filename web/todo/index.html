@@ -131,6 +131,13 @@
     }
     function clearTitleEdit() { $('#title-input').val(''); saveTitleEdit(); }
 
+    function openCompare() {
+      var subject = lists[$('#' + subject_list_selector).val()].subject;
+      var item = lists[$('#' + subject_list_selector).val()].entries[$('#' + item_list_selector).val()];
+      window.location.href = 'compare.html?leftSubject=' + encodeURIComponent(subject) +
+        '&leftItem=' + encodeURIComponent(item);
+    }
+
     // Override showAdd so the Add button opens the modal instead of toggling a card.
     function showAdd() {
       $('#addDiv').css('display', 'flex');
@@ -177,6 +184,9 @@
       </button>
       <button class="icon-btn" title="Open in new tab" onclick="window.open(calcNewHREF(),'_blank')">
         <i class="fas fa-external-link-alt"></i>
+      </button>
+      <button class="icon-btn" id="compareBtn" title="Compare two lists side by side" onclick="openCompare()">
+        <i class="fas fa-columns"></i>
       </button>
     </div>
   </nav>

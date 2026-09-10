@@ -75,7 +75,7 @@ func (h *Handler) handleReadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if item == "index.json" {
+	if item == "index.json" && !h.store.IndexJSONExists(subject) {
 		data, err := h.store.GenerateIndex(subject)
 		if err != nil {
 			response.WriteError(w, http.StatusInternalServerError, err.Error())
@@ -99,6 +99,10 @@ func (h *Handler) handleWriteFile(w http.ResponseWriter, r *http.Request) {
 	item := r.PathValue("item")
 	if !validName(subject) || !validName(item) {
 		response.WriteError(w, http.StatusBadRequest, "invalid path")
+		return
+	}
+	if item == "index.json" && !h.store.IndexJSONExists(subject) {
+		response.WriteError(w, http.StatusConflict, "index.json is generated automatically for this subject; create a real file first to write to it")
 		return
 	}
 	body, err := io.ReadAll(r.Body)

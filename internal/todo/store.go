@@ -35,7 +35,8 @@ func (s *Store) subjectLock(subject string) *sync.RWMutex {
 }
 
 // Subjects lists all subject directories and their .json entries.
-// index.json is always prepended to each subject's entry list.
+// Only real files on disk are listed; index.json appears only if a real
+// file exists at that path (see IndexJSONExists).
 func (s *Store) Subjects() ([]Subject, error) {
 	dirs, err := os.ReadDir(s.dataDir)
 	if err != nil {
@@ -57,9 +58,9 @@ func (s *Store) Subjects() ([]Subject, error) {
 		if err != nil {
 			continue
 		}
-		entries := []string{name + "/index.json"}
+		var entries []string
 		for _, f := range files {
-			if f.IsDir() || !strings.HasSuffix(f.Name(), ".json") || f.Name() == "index.json" {
+			if f.IsDir() || !strings.HasSuffix(f.Name(), ".json") {
 				continue
 			}
 			entries = append(entries, name+"/"+f.Name())
@@ -67,6 +68,17 @@ func (s *Store) Subjects() ([]Subject, error) {
 		subjects = append(subjects, Subject{Age: 0, Timestamp: 0, Subject: name, Entries: entries})
 	}
 	return subjects, nil
+}
+
+// IndexJSONExists reports whether a real index.json file exists on disk for
+// subject. When false, index.json is treated as a synthetic, generated
+// directory listing (see GenerateIndex) rather than a real list.
+func (s *Store) IndexJSONExists(subject string) bool {
+	lk := s.subjectLock(subject)
+	lk.RLock()
+	defer lk.RUnlock()
+	info, err := os.Stat(filepath.Join(s.dataDir, subject, "index.json"))
+	return err == nil && !info.IsDir()
 }
 
 // GenerateIndex returns a dynamically generated index for subject, listing all

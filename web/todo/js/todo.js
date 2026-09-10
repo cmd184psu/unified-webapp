@@ -18,6 +18,23 @@ const DEBUG = true
 const skipsave = false
 const restrictedsave = false
 const showsavealert = false
+
+// Server no longer reports a synthetic index.json entry per subject (it only
+// lists real files now — see Store.Subjects). The main list picker still
+// wants an "Index" option per subject pointing at the generated/real
+// directory view, so append one locally after every /items fetch (unless a
+// real index.json file already made it into entries, in which case it's
+// already there and appending again would duplicate it).
+function appendIndexEntries(subjectList) {
+    (subjectList || []).forEach(function (s) {
+        var indexEntry = s.subject + '/index.json';
+        s.entries = s.entries || [];
+        if (s.entries.indexOf(indexEntry) === -1) {
+            s.entries = s.entries.concat(indexEntry);
+        }
+    });
+    return subjectList;
+}
 //const BASE='lists/'
 
 function resetCounter() {
@@ -295,7 +312,7 @@ async function startTodo(params) {
 
     console.log("about to call /items")
     //load items into memory
-    lists = await ajaxGetJSON("items");
+    lists = appendIndexEntries(await ajaxGetJSON("items"));
 
     console.log("lists looks like:")
     console.log(JSON.stringify(lists, null, 3))
@@ -426,7 +443,7 @@ function copyLink() {
 
 async function reloadUI(newsub, newfile) {
     //before we select a new subject and item
-    lists = await ajaxGetJSON("items");
+    lists = appendIndexEntries(await ajaxGetJSON("items"));
     rebuildListSelector(subject_list_selector, lists, newsub)
     rebuildListSelector(new_subject_list_selector, lists, newsub)
     rebuildListSelector(item_list_selector, lists[$('#' + subject_list_selector).val()].entries, newfile)

@@ -55,7 +55,7 @@ func TestSubjects_ListsDirectories(t *testing.T) {
 	}
 }
 
-func TestSubjects_IndexAlwaysFirst(t *testing.T) {
+func TestSubjects_NoSyntheticIndexEntry(t *testing.T) {
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, "home"), 0755)
 	os.WriteFile(filepath.Join(dir, "home", "shopping.json"), []byte(`[]`), 0644)
@@ -65,8 +65,33 @@ func TestSubjects_IndexAlwaysFirst(t *testing.T) {
 	if len(subs) != 1 {
 		t.Fatalf("want 1 subject, got %d", len(subs))
 	}
-	if subs[0].Entries[0] != "home/index.json" {
-		t.Errorf("first entry should be index.json, got %q", subs[0].Entries[0])
+	for _, e := range subs[0].Entries {
+		if e == "home/index.json" {
+			t.Errorf("entries should not contain synthetic index.json, got %v", subs[0].Entries)
+		}
+	}
+	if len(subs[0].Entries) != 1 {
+		t.Errorf("want 1 entry, got %d: %v", len(subs[0].Entries), subs[0].Entries)
+	}
+}
+
+func TestSubjects_RealIndexJsonIncludedAsNormalEntry(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "home"), 0755)
+	os.WriteFile(filepath.Join(dir, "home", "index.json"), []byte(`{"title":"x","list":[]}`), 0644)
+	os.WriteFile(filepath.Join(dir, "home", "shopping.json"), []byte(`[]`), 0644)
+
+	s, _ := todo.NewStore(dir)
+	subs, _ := s.Subjects()
+	if len(subs) != 1 {
+		t.Fatalf("want 1 subject, got %d", len(subs))
+	}
+	found := map[string]bool{}
+	for _, e := range subs[0].Entries {
+		found[e] = true
+	}
+	if !found["home/index.json"] || !found["home/shopping.json"] {
+		t.Errorf("missing entries: %v", subs[0].Entries)
 	}
 	if len(subs[0].Entries) != 2 {
 		t.Errorf("want 2 entries, got %d: %v", len(subs[0].Entries), subs[0].Entries)
@@ -111,6 +136,36 @@ func TestGenerateIndex_MissingDirectory(t *testing.T) {
 	json.Unmarshal(data, &idx)
 	if len(idx.List) != 0 {
 		t.Errorf("want empty list, got %d items", len(idx.List))
+	}
+}
+
+// ── IndexJSONExists ──────────────────────────────────────────────────────────
+
+func TestIndexJSONExists_False_WhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "home"), 0755)
+
+	s, _ := todo.NewStore(dir)
+	if s.IndexJSONExists("home") {
+		t.Error("want false when no index.json present")
+	}
+}
+
+func TestIndexJSONExists_True_WhenPresent(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "home"), 0755)
+	os.WriteFile(filepath.Join(dir, "home", "index.json"), []byte(`{}`), 0644)
+
+	s, _ := todo.NewStore(dir)
+	if !s.IndexJSONExists("home") {
+		t.Error("want true when index.json present")
+	}
+}
+
+func TestIndexJSONExists_False_MissingSubjectDir(t *testing.T) {
+	s := newTempStore(t)
+	if s.IndexJSONExists("nosuchsubject") {
+		t.Error("want false for missing subject directory")
 	}
 }
 
