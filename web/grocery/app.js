@@ -17,6 +17,18 @@
 
   let recipes          = [];
   let activeTab        = 'grocery';
+  // Deferred closures for mutations made while offline (syncEnabled === false).
+  // Each closure reads its target object's CURRENT fields at replay time, not
+  // at queue time, so a later edit to something still queued is what actually
+  // reaches the server — "newest wins" falls out of that for free, with no
+  // separate merge step. Drained in order on reconnect, before refreshAll().
+  let pendingOps = [];
+  // Temp ids need a sequence, not just a clock: two creates in the same
+  // millisecond (routine when adding several things while offline) would
+  // otherwise mint the SAME id, and every find-by-id after that hits whichever
+  // twin comes first.
+  let localSeq = 0;
+  function newLocalId() { return 'local-' + (++localSeq) + '-' + Date.now(); }
   // Card collapse state, deliberately NOT persisted — collapsedGroups is not
   // persisted either, and persisting one but not the other is new behaviour
   // behind no acceptance criterion.
@@ -47,7 +59,6 @@
   const tabRecipes   = document.getElementById('tab-recipes');
   const rc           = document.getElementById('recipes-container');
   const rEmptyEl     = document.getElementById('recipes-empty-state');
-  const rHintEl      = document.getElementById('recipes-offline-hint');
 
   // ── Reset modal
   const resetModal   = document.getElementById('reset-modal');
@@ -346,9 +357,28 @@
     renderProgressBar();
   }
 
+  // A local-only entity (id still 'local-'-prefixed, never reached the
+  // server) must survive a GET refresh. refreshAll() runs on every SSE tick —
+  // any client's mutation, not just this one's — so an unlucky tick landing
+  // between an optimistic create and its resolution used to wipe the
+  // optimistic row outright. That is the same mechanism that, over a longer
+  // gap, made a reconnect after offline edits look like the server "blowing
+  // away" the recipe: refreshAll() replaced local state wholesale. Anything
+  // already server-known is still fully replaced, since the server is
+  // authoritative for it; only not-yet-synced local creates are preserved.
+  function mergeServerItems(serverItems) {
+    const pendingLocal = items.filter(i => i.id.startsWith('local-') && !i._deleted);
+    items = [...serverItems, ...pendingLocal];
+  }
+
+  function mergeServerRecipes(serverRecipes) {
+    const pendingLocal = recipes.filter(r => r.id.startsWith('local-') && !r._deleted);
+    recipes = [...serverRecipes, ...pendingLocal];
+  }
+
   async function fetchItemsData() {
     const data = await api('GET', '/api/items').catch(() => []);
-    items = data || [];
+    mergeServerItems(data || []);
   }
 
   async function fetchItems() {
@@ -360,7 +390,7 @@
   // this data-only form or refreshAll, so a wrapper would have no callers.
   async function fetchRecipesData() {
     const data = await api('GET', '/api/recipes').catch(() => []);
-    recipes = data || [];
+    mergeServerRecipes(data || []);
   }
 
   /**
@@ -374,6 +404,31 @@
     await Promise.all([fetchItemsData(), fetchRecipesData(), loadConfigData()]);
     rebuildGroupSelect();
     render();
+  }
+
+  // Drains pendingOps in the order edits were made while offline — a while
+  // loop, not a for, so an op that defensively re-queues itself is still
+  // caught in this same reconnect pass. Every op is written to never throw
+  // (failures are swallowed the same way every other sync call in this file
+  // already does), so the .catch here is a backstop, not the primary guard.
+  // True only while the queue drains. Confirm-adoption is suppressed under it:
+  // a mid-drain server reply reflects only the ops replayed SO FAR, so adopting
+  // it would clobber a newer local edit a later op is about to read (a rename's
+  // reply carries enabled:false and would erase a still-queued toggle). The
+  // refreshAll() the reconnect handler runs after the drain is the one
+  // reconciliation point, once every op has reached the server.
+  let replayingOps = false;
+
+  async function replayPendingOps() {
+    replayingOps = true;
+    try {
+      while (pendingOps.length) {
+        const op = pendingOps.shift();
+        await op().catch(() => null);
+      }
+    } finally {
+      replayingOps = false;
+    }
   }
 
   async function syncToServer() {
@@ -402,21 +457,31 @@
   // Mutations
   // ────────────────────────────────────────────────────────────────
   async function addItem(name, group) {
-    const tempId = 'local-' + Date.now();
-    items.push({
+    const tempId = newLocalId();
+    const it = {
       id: tempId, name, group,
       state: 'needed', completed: false,
       order: items.filter(i => i.group === group).length,
       created_at: new Date().toISOString()
-    });
+    };
+    items.push(it);
     render();
-    if (syncEnabled) {
-      const saved = await api('POST', '/api/items', { name, group }).catch(() => null);
-      if (saved) {
-        const idx = items.findIndex(i => i.id === tempId);
-        if (idx !== -1) items[idx] = saved;
-        render();
-      }
+    const sync = () => syncAddItem(it);
+    if (syncEnabled) await sync();
+    else pendingOps.push(sync);
+  }
+
+  async function syncAddItem(it) {
+    if (it._deleted) return; // deleted offline before it ever reached the server
+    const saved = await api('POST', '/api/items', { name: it.name, group: it.group }).catch(() => null);
+    // In-place, not array-replacement: keeps object identity so any later
+    // queued closure that still references `it` sees the resolved real id.
+    // Mid-drain, only the identity fields are adopted — the server row's
+    // state/completed reflect none of the still-queued patches, and a full
+    // assign here would feed a later patch the stale values.
+    if (saved) {
+      Object.assign(it, replayingOps ? { id: saved.id, created_at: saved.created_at } : saved);
+      render();
     }
   }
 
@@ -425,7 +490,9 @@
     if (!item) return;
     item.completed = !item.completed;
     render();
-    if (syncEnabled) api('PATCH', `/api/items/${id}`, { completed: item.completed });
+    const sync = () => syncPatchItem(item, { completed: item.completed });
+    if (syncEnabled) await sync();
+    else pendingOps.push(sync);
   }
 
   async function cycleState(id) {
@@ -433,13 +500,31 @@
     if (!item) return;
     item.state = nextState(item.state);
     render();
-    if (syncEnabled) api('PATCH', `/api/items/${id}`, { state: item.state });
+    const sync = () => syncPatchItem(item, { state: item.state });
+    if (syncEnabled) await sync();
+    else pendingOps.push(sync);
+  }
+
+  // fields is read at CALL time (it's the deferred arrow's own expression),
+  // so a queued toggleComplete followed by a queued cycleState replays with
+  // whatever the item's current completed/state actually are, not whatever
+  // they were when each was queued — the second call's PATCH is a redundant
+  // but harmless resend of the same already-current values.
+  async function syncPatchItem(item, fields) {
+    if (item.id.startsWith('local-')) return; // its own create-replay sends current fields already
+    await api('PATCH', `/api/items/${item.id}`, fields).catch(() => null);
   }
 
   async function deleteItem(id) {
+    const item = items.find(i => i.id === id);
+    if (!item) return;
     items = items.filter(i => i.id !== id);
     render();
-    if (syncEnabled) api('DELETE', `/api/items/${id}`);
+    item._deleted = true; // cancels a still-pending create for this same item
+    if (item.id.startsWith('local-')) return; // never reached the server
+    const sync = () => api('DELETE', `/api/items/${item.id}`).catch(() => null);
+    if (syncEnabled) await sync();
+    else pendingOps.push(sync);
   }
 
   async function moveItem(id, toGroup, orderIds) {
@@ -451,7 +536,15 @@
       if (it) it.order = idx;
     });
     render();
-    if (syncEnabled) api('POST', '/api/move', { id, group: toGroup, order_ids: orderIds });
+    // Ids re-derived at replay time: the queued snapshot could hold 'local-'
+    // ids that a queued create resolves earlier in the same drain, and the
+    // current sort already reflects every later reorder anyway.
+    const sync = () => api('POST', '/api/move', {
+      id: item.id, group: item.group,
+      order_ids: itemsForGroup(item.group).map(i => i.id).filter(x => !x.startsWith('local-'))
+    }).catch(() => null);
+    if (syncEnabled) await sync();
+    else pendingOps.push(sync);
   }
 
   async function reorderWithinGroup(group, orderIds) {
@@ -460,7 +553,11 @@
       if (it) it.order = idx;
     });
     render();
-    if (syncEnabled) api('POST', '/api/reorder', { group, ids: orderIds });
+    const sync = () => api('POST', '/api/reorder', {
+      group, ids: itemsForGroup(group).map(i => i.id).filter(x => !x.startsWith('local-'))
+    }).catch(() => null);
+    if (syncEnabled) await sync();
+    else pendingOps.push(sync);
   }
 
   // ────────────────────────────────────────────────────────────────
@@ -475,11 +572,13 @@
   // ────────────────────────────────────────────────────────────────
 
   // PATCH /api/recipes/:id answers {recipe, items} for a rename as well as a
-  // toggle, so both callers adopt through here.
+  // toggle, so both callers adopt through here. Object.assign, not slot
+  // replacement: pending offline closures hold references to the existing
+  // recipe object, and replacing the slot would strand them on a stale copy.
   function adoptRecipePatch(patched) {
-    const idx = recipes.findIndex(r => r.id === patched.recipe.id);
-    if (idx !== -1) recipes[idx] = patched.recipe;
-    if (Array.isArray(patched.items)) items = patched.items;
+    const r = recipes.find(x => x.id === patched.recipe.id);
+    if (r) Object.assign(r, patched.recipe);
+    if (Array.isArray(patched.items)) mergeServerItems(patched.items);
   }
 
   // Returns false when the name is one the server would refuse, so the caller
@@ -487,22 +586,41 @@
   async function createRecipe(name) {
     name = String(name).trim();
     if (!name || recipeNameTaken(recipes, name)) return false;
-    const tempId = 'local-' + Date.now();
-    recipes.push({
-      id: tempId, name, enabled: false,
+    const r = {
+      id: newLocalId(), name, enabled: false,
       order: nextRecipeOrder(recipes),
       created_at: new Date().toISOString()
-    });
+    };
+    recipes.push(r);
     render();
-    if (syncEnabled) {
-      const saved = await api('POST', '/api/recipes', { name }).catch(() => null);
-      if (saved && saved.id) {
-        const idx = recipes.findIndex(r => r.id === tempId);
-        if (idx !== -1) recipes[idx] = saved;
-        render();
-      }
-    }
+    const sync = () => syncCreateRecipe(r);
+    if (syncEnabled) await sync();
+    else pendingOps.push(sync);
     return true;
+  }
+
+  async function syncCreateRecipe(r) {
+    if (r._deleted) return; // created and deleted within the same offline stretch
+    // Attempt 1 is the name as typed. A null reply is a network failure and
+    // ends the attempts (matching every other swallowed sync error here); a
+    // parsed body WITHOUT an id is the server's error envelope — for a create
+    // that means the name clashed with a recipe some other client added while
+    // this one was offline. Newest-wins says the offline recipe still lands,
+    // so it lands under a disambiguated name rather than being dropped.
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      const name = attempt === 1 ? r.name : `${r.name} (${attempt})`;
+      const saved = await api('POST', '/api/recipes', { name }).catch(() => null);
+      if (saved === null) return;
+      if (!saved.id) continue;
+      const tempId = r.id;
+      // In place, so queued closures still holding this object see the real id.
+      Object.assign(r, saved, { enabled: r.enabled });
+      // recipe_id is a plain string on each item, not an object reference, so
+      // the temp→real hop has to be patched by hand for offline ingredients.
+      items.forEach(i => { if (i.recipe_id === tempId) i.recipe_id = r.id; });
+      render();
+      return;
+    }
   }
 
   async function renameRecipe(id, name) {
@@ -514,11 +632,19 @@
     if (recipeNameTaken(recipes, name, id)) return;
     r.name = name;
     render();
-    if (syncEnabled) {
-      const patched = await api('PATCH', '/api/recipes/' + encodeURIComponent(id),
-                                { name }).catch(() => null);
-      if (patched && patched.recipe) { adoptRecipePatch(patched); render(); }
-    }
+    const sync = () => syncPatchRecipe(r, () => ({ name: r.name }));
+    if (syncEnabled) await sync();
+    else pendingOps.push(sync);
+  }
+
+  // fields is a thunk so the payload is built from the recipe's CURRENT state
+  // at replay time — the newest offline edit is what the server receives, even
+  // when several queued patches target the same recipe.
+  async function syncPatchRecipe(r, fields) {
+    if (r._deleted || r.id.startsWith('local-')) return; // create-replay already carries current state
+    const patched = await api('PATCH', '/api/recipes/' + encodeURIComponent(r.id),
+                              fields()).catch(() => null);
+    if (patched && patched.recipe && !replayingOps) { adoptRecipePatch(patched); render(); }
   }
 
   async function toggleRecipe(id, enabled) {
@@ -528,43 +654,50 @@
     // AC-9.5: the grocery side flips in the same paint, with no manual reload.
     items = applyRecipeToggle(items, id, enabled);
     render();
-    if (syncEnabled) {
-      const patched = await api('PATCH', '/api/recipes/' + encodeURIComponent(id),
-                                { enabled }).catch(() => null);
-      if (patched && patched.recipe) { adoptRecipePatch(patched); render(); }
-    }
+    const sync = () => syncPatchRecipe(r, () => ({ enabled: r.enabled }));
+    if (syncEnabled) await sync();
+    else pendingOps.push(sync);
   }
 
   async function deleteRecipe(id) {
-    if (!recipeById(recipes, id)) return;
-    recipes = recipes.filter(r => r.id !== id);
-    items   = items.filter(i => i.recipe_id !== id);
+    const r = recipeById(recipes, id);
+    if (!r) return;
+    recipes = recipes.filter(x => x.id !== id);
+    // Flag before filtering: queued offline creates for these ingredients hold
+    // references to the objects and must see the flag, or they would replay a
+    // POST onto a recipe that no longer exists.
+    items.forEach(i => { if (i.recipe_id === id) i._deleted = true; });
+    items = items.filter(i => i.recipe_id !== id);
     // Both maps are keyed by recipe id; dropping the entries keeps them from
     // growing across a long session, as collapsedGroups never does.
     delete recipeDrafts[id];
     delete collapsedRecipes[id];
     render();
-    if (syncEnabled) {
+    r._deleted = true; // cancels a still-pending create and any queued patches
+    if (r.id.startsWith('local-')) return; // never reached the server
+    const sync = async () => {
       // D-1: the response is {items} only — there is no recipe key to adopt,
       // which is why the recipe was removed client-side above.
-      const res = await api('DELETE', '/api/recipes/' + encodeURIComponent(id))
+      const res = await api('DELETE', '/api/recipes/' + encodeURIComponent(r.id))
                     .catch(() => null);
-      if (res && Array.isArray(res.items)) { items = res.items; render(); }
-    }
+      if (res && Array.isArray(res.items)) { mergeServerItems(res.items); render(); }
+    };
+    if (syncEnabled) await sync();
+    else pendingOps.push(sync);
   }
 
   async function addIngredient(recipeId, name) {
     const r = recipeById(recipes, recipeId);
     if (!r || !name) return;
-    const tempId = 'local-' + Date.now();
-    items.push({
-      id: tempId, name, group: NO_GROUP,
+    const it = {
+      id: newLocalId(), name, group: NO_GROUP,
       state: r.enabled ? 'needed' : 'not_needed',
       completed: false,
       order: items.filter(i => i.group === NO_GROUP).length,
       created_at: new Date().toISOString(),
       recipe_id: recipeId
-    });
+    };
+    items.push(it);
     // Clear the draft and claim focus BEFORE painting, so the input the user
     // was typing in comes back empty and focused, ready for the next one.
     // Blanking the live element is not redundant with deleting the draft: on
@@ -579,33 +712,47 @@
     if (live) live.value = '';
     focusRecipeId = recipeId;
     render();
-    if (syncEnabled) {
-      const saved = await api('POST',
-        '/api/recipes/' + encodeURIComponent(recipeId) + '/ingredients',
-        { name }).catch(() => null);
-      if (saved && saved.id) {
-        const idx = items.findIndex(i => i.id === tempId);
-        if (idx !== -1) items[idx] = saved;
-        // The confirm pass wipes the container too, so the claim is re-made.
-        focusRecipeId = recipeId;
-        render();
-      }
+    const sync = () => syncAddIngredient(it);
+    if (syncEnabled) await sync();
+    else pendingOps.push(sync);
+  }
+
+  async function syncAddIngredient(it) {
+    if (it._deleted) return; // removed (or its recipe deleted) before syncing
+    // it.recipe_id is read here, at call time: an offline-created recipe's
+    // create-replay has already rewritten it from the temp id to the real one.
+    const saved = await api('POST',
+      '/api/recipes/' + encodeURIComponent(it.recipe_id) + '/ingredients',
+      { name: it.name }).catch(() => null);
+    if (saved && saved.id) {
+      // Identity-only under replay, for the same reason as syncAddItem.
+      Object.assign(it, replayingOps
+        ? { id: saved.id, created_at: saved.created_at, recipe_id: saved.recipe_id }
+        : saved);
+      // The confirm pass wipes the container too, so the claim is re-made.
+      focusRecipeId = it.recipe_id;
+      render();
     }
   }
 
   async function removeIngredient(recipeId, itemId) {
-    if (!items.some(i => i.id === itemId)) return;
+    const it = items.find(i => i.id === itemId);
+    if (!it) return;
     items = items.filter(i => i.id !== itemId);
     render();
-    if (syncEnabled) {
+    it._deleted = true; // cancels a still-pending create for this ingredient
+    if (it.id.startsWith('local-')) return; // never reached the server
+    const sync = async () => {
       // 204 carries no body, so there is nothing to adopt; the only meaningful
       // confirm is repairing an optimistic removal the server refused.
       const ok = await api('DELETE',
-        '/api/recipes/' + encodeURIComponent(recipeId) +
-        '/ingredients/' + encodeURIComponent(itemId))
+        '/api/recipes/' + encodeURIComponent(it.recipe_id) +
+        '/ingredients/' + encodeURIComponent(it.id))
         .then(() => true).catch(() => false);
       if (!ok) { await fetchItemsData(); render(); }
-    }
+    };
+    if (syncEnabled) await sync();
+    else pendingOps.push(sync);
   }
 
   async function moveRecipe(id, delta) {
@@ -618,11 +765,16 @@
     ordered.forEach((r, i) => { r.order = i; });
     recipes = ordered;
     render();
-    if (syncEnabled) {
-      const saved = await api('POST', '/api/recipes/reorder',
-                              { ids: ordered.map(r => r.id) }).catch(() => null);
-      if (Array.isArray(saved)) { recipes = saved; render(); }
-    }
+    const sync = async () => {
+      // Ids re-derived at replay time, filtered of any still-local recipe the
+      // server has never heard of; the current sort reflects every later move.
+      const ids = recipesForRender(recipes)
+        .map(r => r.id).filter(x => !x.startsWith('local-'));
+      const saved = await api('POST', '/api/recipes/reorder', { ids }).catch(() => null);
+      if (Array.isArray(saved)) { mergeServerRecipes(saved); render(); }
+    };
+    if (syncEnabled) await sync();
+    else pendingOps.push(sync);
   }
 
   // ────────────────────────────────────────────────────────────────
@@ -761,10 +913,12 @@
     // A-2: reset returns every item to Check, so no recipe is still "on".
     recipes.forEach(r => { r.enabled = false; });
     render();
-    if (syncEnabled) {
+    const sync = async () => {
       const data = await api('POST', '/api/reset').catch(() => null);
-      if (data) { items = data; render(); }
-    }
+      if (data) { mergeServerItems(data); render(); }
+    };
+    if (syncEnabled) await sync();
+    else pendingOps.push(sync);
   }
 
   resetBtn.addEventListener('click',     openResetModal);
@@ -1209,32 +1363,24 @@
     updateRecipeControlsDisabled();
   }
 
+  // AC-10.1's lockout is gone by request: offline recipe edits now queue in
+  // pendingOps and replay on reconnect, exactly as grocery-item edits always
+  // could. What remains is the edge-state repair for the move buttons and
+  // making sure nothing left over from the lockout era stays disabled.
   function updateRecipeControlsDisabled() {
-    const lock = !syncEnabled;
-
     rc.querySelectorAll('.recipe-switch-input, .recipe-ingredient-input, ' +
                         '.recipe-ingredient-delete')
-      .forEach(el => { el.disabled = lock; });
+      .forEach(el => { el.disabled = false; });
 
     // Move buttons carry their own boundary state in data-edge: the first
-    // card's up arrow and the last card's down arrow are disabled whatever sync
-    // is doing, so a blanket re-enable here would resurrect them. The add
-    // button shares this class and carries no data-edge, so it tracks lock.
+    // card's up arrow and the last card's down arrow stay disabled whatever
+    // sync is doing. The add button shares this class and carries no data-edge.
     rc.querySelectorAll('.recipe-move-btn').forEach(el => {
-      el.disabled = lock || el.dataset.edge === '1';
+      el.disabled = el.dataset.edge === '1';
     });
 
-    // D-9: the footer form is shared between tabs, so the Recipes tab's gating
-    // has to reach into it. On Grocery it stays enabled — offline item edits are
-    // existing, supported behaviour.
     const submit = addForm.querySelector('button[type="submit"]');
-    if (submit) submit.disabled = lock && activeTab === 'recipes';
-
-    // R4-14: the hint is tab-scoped, not sync-scoped. This function also runs
-    // from the sync toggle, which fires whichever tab is showing, and the hint
-    // sits inside <main> — gated on sync alone it would announce a restriction
-    // on a view the user is not looking at, above the grocery list.
-    setHidden(rHintEl, syncEnabled || activeTab !== 'recipes');
+    if (submit) submit.disabled = false;
   }
 
   function renderGroceryTab() {
@@ -1349,12 +1495,21 @@
           ${STATE_LABELS[item.state]}
         </span>
       </span>
-      ${owned ? '' : `<button class="delete-btn" data-id="${item.id}" aria-label="Delete ${esc(item.name)}">
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor"
-             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M3 6h14M8 6V4h4v2M5 6l1 11h8l1-11"/>
-        </svg>
-      </button>`}`;
+      <span class="item-actions">
+        <button class="move-btn" data-id="${item.id}" title="Move to a different group"
+                aria-label="Move ${esc(item.name)} to a different group">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 10h11M9 5l5 5-5 5"/>
+          </svg>
+        </button>
+        ${owned ? '' : `<button class="delete-btn" data-id="${item.id}" aria-label="Delete ${esc(item.name)}">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 6h14M8 6V4h4v2M5 6l1 11h8l1-11"/>
+          </svg>
+        </button>`}
+      </span>`;
 
     attachDragToHandle(li, li.querySelector('.drag-handle'));
     return li;
@@ -1481,6 +1636,64 @@
   }
 
   // ────────────────────────────────────────────────────────────────
+  // Move-to-group modal — a tap-driven alternative to the drag handle.
+  // Dragging an item across a long list (e.g. up out of the bottom-most
+  // Unallocated group) is fiddly on a touch screen, so every row also gets
+  // a button that opens a plain list of the other groups; tapping one calls
+  // moveItem exactly as a cross-group drop would, appending to that group's
+  // end (same destIds derivation as pointerEnd's cross-group branch above).
+  // ────────────────────────────────────────────────────────────────
+  const moveModal = document.createElement('div');
+  moveModal.className = 'modal-overlay hidden';
+  moveModal.setAttribute('role', 'dialog');
+  moveModal.setAttribute('aria-modal', 'true');
+  document.body.appendChild(moveModal);
+
+  let moveModalItemId = null;
+
+  function closeMoveModal() {
+    moveModal.classList.add('hidden');
+    moveModal.innerHTML = '';
+    moveModalItemId = null;
+  }
+
+  function openMoveModal(itemId) {
+    const item = items.find(i => i.id === itemId);
+    if (!item) return;
+    moveModalItemId = itemId;
+    const dest = [...groups, NO_GROUP].filter(g => g !== item.group);
+    const rows = dest.map(g => `
+      <li><button type="button" class="move-modal-item" data-group="${esc(g)}">
+        ${esc(groupLabel(g))}
+      </button></li>`).join('');
+    moveModal.innerHTML = `
+      <div class="modal">
+        <h2 class="modal-title">Move &ldquo;${esc(item.name)}&rdquo;</h2>
+        <ul class="move-modal-list">${rows ||
+          '<li class="move-modal-empty">No other groups yet</li>'}</ul>
+        <div class="modal-actions modal-actions--right">
+          <button type="button" class="btn btn-ghost" id="move-modal-cancel">Cancel</button>
+        </div>
+      </div>`;
+    moveModal.classList.remove('hidden');
+  }
+
+  moveModal.addEventListener('click', e => {
+    if (e.target === moveModal || e.target.closest('#move-modal-cancel')) {
+      closeMoveModal();
+      return;
+    }
+    const btn = e.target.closest('.move-modal-item');
+    if (!btn) return;
+    const id         = moveModalItemId;
+    const targetGroup = btn.dataset.group;
+    closeMoveModal();
+    const destIds = itemsForGroup(targetGroup).map(i => i.id);
+    destIds.push(id);
+    moveItem(id, targetGroup, destIds);
+  });
+
+  // ────────────────────────────────────────────────────────────────
   // Event delegation  (list)
   // ────────────────────────────────────────────────────────────────
   gc.addEventListener('click', e => {
@@ -1489,6 +1702,7 @@
     const chip  = e.target.closest('.recipe-chip');
     const name  = e.target.closest('.item-name');
     const badge = e.target.closest('.state-badge');
+    const move  = e.target.closest('.move-btn');
     const del   = e.target.closest('.delete-btn');
     if (cb)    { toggleComplete(cb.dataset.id);  return; }
     // Mandatory ordering: the chip is a DESCENDANT of .item-name, so the arm
@@ -1497,6 +1711,7 @@
     if (chip)  { revealRecipe(chip.dataset.recipeId); return; }
     if (name)  { cycleState(name.dataset.id);    return; }
     if (badge) { cycleState(badge.dataset.id);   return; }
+    if (move)  { openMoveModal(move.dataset.id); return; }
     if (del)   { deleteItem(del.dataset.id);     return; }
   });
 
@@ -1709,14 +1924,19 @@
     syncEnabled = syncTog.checked;
     if (syncEnabled) {
       banner.classList.add('hidden');
+      // Replay FIRST, refresh SECOND. Offline edits happened later in the
+      // timeline than anything the server holds, so they are pushed up before
+      // the authoritative re-read \u2014 refreshing first would adopt the stale
+      // server state over them, which is the data-loss this ordering fixes.
+      await replayPendingOps();
       await refreshAll();
       connectSSE();
     } else {
       disconnectSSE();
-      banner.textContent = '\u26a0 Offline mode \u2014 changes are local only';
+      banner.textContent =
+        '\u26a0 Offline mode \u2014 changes will sync when you reconnect';
       banner.classList.remove('hidden');
     }
-    // AC-10.2: the gating is immediate, without waiting for the next pass.
     updateRecipeControlsDisabled();
   });
 
