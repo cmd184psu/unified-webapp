@@ -44,7 +44,9 @@ Minimal example with all four modules. Multiple hostnames can map to the same mo
     "menu.cmdhome.net":               "menuserver",
     "menu-test.cmdhome.net":          "menuserver",
     "obsidianoid.cmdhome.net":        "obsidianoid",
-    "obsidianoid-test.cmdhome.net":   "obsidianoid"
+    "obsidianoid-test.cmdhome.net":   "obsidianoid",
+    "multissh.cmdhome.net":           "multissh",
+    "multissh-test.cmdhome.net":      "multissh"
   },
   "grocery": {
     "static_dir": "/opt/unified-webapp/web/grocery",
@@ -80,9 +82,38 @@ Minimal example with all four modules. Multiple hostnames can map to the same mo
     "threads_folder": "Threads",
     "thread_count": 4,
     "autosave_disabled": false
+  },
+  "multissh": {
+    "static_dir": "/opt/unified-webapp/web/multissh",
+    "ssh_dir": "",
+    "upload_dir": "",
+    "hosts_path": "/data/multissh/multissh-hosts.json",
+    "browse_root": "",
+    "max_sessions": 3,
+    "max_upload_bytes": 8589934592,
+    "strict_host_key": false,
+    "known_hosts_path": ""
   }
 }
 ```
+
+#### The `multissh` section
+
+| Field | Meaning |
+|---|---|
+| `static_dir` | Built frontend for the module. Must exist and be readable, or multissh fails to build. |
+| `ssh_dir` | Directory backing the SSH key picker. Empty resolves to the server user's `~/.ssh` at startup. |
+| `upload_dir` | Staging area for broadcast uploads. Empty resolves to `$TMPDIR/multissh-uploads`. |
+| `hosts_path` | JSON file of saved host presets. Passwords are never written here. |
+| `browse_root` | Sandbox root for the server-side file browser. Empty resolves to `upload_dir`. |
+| `max_sessions` | Number of concurrent terminal panels, 1–16. `0` means "unset" and takes the default of 3; values above 16 are clamped with a warning. |
+| `max_upload_bytes` | Hard cap per upload. Default 8 GiB. |
+| `strict_host_key` | `true` verifies SSH host keys against `known_hosts_path` and fails closed if that file is missing. |
+| `known_hosts_path` | Empty resolves to `<ssh_dir>/known_hosts`. |
+
+Running and using the module — host cards, terminals, broadcasts, the proxy requirements, and the audit log — is documented separately in **[docs/multissh.md](docs/multissh.md)**. Read the [proxy section](docs/multissh.md#3-putting-it-behind-a-proxy) before putting it behind nginx: a front end that rewrites the `Host` header breaks every terminal while leaving the page looking fine. Note also that this module has **no login** — reaching its hostname is the whole access boundary.
+
+**Empty strings are meaningful, not omissions.** `ssh_dir`, `upload_dir`, `browse_root` and `known_hosts_path` are resolved at startup from the environment, so `make init-config` writes them as present-but-empty strings. An empty value reads as "resolve this for me"; leaving the key out entirely would be indistinguishable from a typo'd key name. Keep them present.
 
 ### 3. Run
 

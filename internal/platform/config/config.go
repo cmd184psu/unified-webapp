@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 )
@@ -20,6 +21,7 @@ type Config struct {
 	Slideshow   SlideshowConfig   `json:"slideshow"`
 	Menuserver  MenuserverConfig  `json:"menuserver"`
 	Obsidianoid ObsidianoidConfig `json:"obsidianoid"`
+	Multissh    MultisshConfig    `json:"multissh"`
 }
 
 // ObsidianoidVault holds the per-vault configuration for the obsidianoid module.
@@ -85,6 +87,36 @@ type GroceryConfig struct {
 	Title               string   `json:"title"`
 }
 
+// MultisshConfig holds configuration specific to the multissh module.
+//
+// StrictHostKey controls SSH host-key verification. When false (the default,
+// suited to trusted lab networks with frequently rebuilt VMs) SSH connections
+// skip host-key verification. When true, host keys are verified against
+// KnownHostsPath for both the terminal bridge and SFTP broadcasts, failing
+// closed if that file is missing or a key is unknown/mismatched.
+//
+// SSHDir, UploadDir, BrowseRoot and KnownHostsPath are resolved at Build time
+// when left empty, so the written default config keeps them as present-but-empty
+// strings rather than baking machine-specific paths into the file.
+type MultisshConfig struct {
+	StaticDir      string `json:"static_dir"`
+	SSHDir         string `json:"ssh_dir"`
+	UploadDir      string `json:"upload_dir"`
+	HostsPath      string `json:"hosts_path"`
+	BrowseRoot     string `json:"browse_root"`
+	MaxSessions    int    `json:"max_sessions"`
+	MaxUploadBytes int64  `json:"max_upload_bytes"`
+	StrictHostKey  bool   `json:"strict_host_key"`
+	KnownHostsPath string `json:"known_hosts_path"`
+}
+
+// Multissh session-count bounds. MaxSessions is validated in exactly one place
+// (Load); Build trusts the resolved value and performs no re-validation.
+const (
+	DefaultMaxSessions = 3
+	MaxMaxSessions     = 16
+)
+
 // DefaultConfig returns a Config populated with safe defaults.
 func DefaultConfig() *Config {
 	return &Config{
@@ -128,6 +160,13 @@ func DefaultConfig() *Config {
 			DataDir:       "./data/obsidianoid",
 			ThreadsFolder: "Threads",
 			ThreadCount:   4,
+		},
+		Multissh: MultisshConfig{
+			StaticDir:      "./web/multissh",
+			HostsPath:      "./data/multissh/multissh-hosts.json",
+			MaxSessions:    DefaultMaxSessions,
+			MaxUploadBytes: 8 << 30, // 8 GiB
+			StrictHostKey:  false,
 		},
 	}
 }
@@ -177,6 +216,12 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	if err := expandObsidianoidPaths(&cfg.Obsidianoid); err != nil {
+		return nil, err
+	}
+	if err := expandMultisshPaths(&cfg.Multissh); err != nil {
+		return nil, err
+	}
+	if err := normalizeMultissh(&cfg.Multissh); err != nil {
 		return nil, err
 	}
 	if cfg.TLSCert != "" {
@@ -253,6 +298,46 @@ func expandObsidianoidPaths(o *ObsidianoidConfig) error {
 		if o.Vaults[i].Path, err = ExpandPath(o.Vaults[i].Path); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func expandMultisshPaths(m *MultisshConfig) error {
+	var err error
+	if m.StaticDir, err = ExpandPath(m.StaticDir); err != nil {
+		return err
+	}
+	if m.SSHDir, err = ExpandPath(m.SSHDir); err != nil {
+		return err
+	}
+	if m.UploadDir, err = ExpandPath(m.UploadDir); err != nil {
+		return err
+	}
+	if m.HostsPath, err = ExpandPath(m.HostsPath); err != nil {
+		return err
+	}
+	if m.BrowseRoot, err = ExpandPath(m.BrowseRoot); err != nil {
+		return err
+	}
+	if m.KnownHostsPath, err = ExpandPath(m.KnownHostsPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+// normalizeMultissh is the single validation point for max_sessions (FR-N1).
+// Zero means "unset" and takes the default; negative is an operator error and
+// is rejected; an absurdly large value is a typo and is clamped with a warning
+// rather than refused. multissh.Build trusts the result and does not re-check.
+func normalizeMultissh(m *MultisshConfig) error {
+	switch {
+	case m.MaxSessions < 0:
+		return fmt.Errorf("multissh: max_sessions must be at least 1, got %d", m.MaxSessions)
+	case m.MaxSessions == 0:
+		m.MaxSessions = DefaultMaxSessions
+	case m.MaxSessions > MaxMaxSessions:
+		log.Printf("multissh: max_sessions %d exceeds the maximum of %d; clamping to %d", m.MaxSessions, MaxMaxSessions, MaxMaxSessions)
+		m.MaxSessions = MaxMaxSessions
 	}
 	return nil
 }

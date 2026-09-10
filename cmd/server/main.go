@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -9,6 +10,7 @@ import (
 
 	"cmd184psu/unified-webapp/internal/grocery"
 	"cmd184psu/unified-webapp/internal/menuserver"
+	"cmd184psu/unified-webapp/internal/multissh"
 	"cmd184psu/unified-webapp/internal/obsidianoid"
 	"cmd184psu/unified-webapp/internal/todo"
 	"cmd184psu/unified-webapp/internal/platform/config"
@@ -64,16 +66,7 @@ func main() {
 	if *flagCert != "" { cfg.TLSCert = *flagCert }
 	if *flagKey  != "" { cfg.TLSKey  = *flagKey  }
 
-	dispatch := newDispatcher()
-
-	for host, module := range cfg.Routing {
-		h, err := buildModule(module, cfg)
-		if err != nil {
-			log.Fatalf("build module %q for host %q: %v", module, host, err)
-		}
-		dispatch.register(host, h)
-		log.Printf("registered ( http://%s:%d ) → %s", host, cfg.Port, module)
-	}
+	dispatch := buildDispatcher(cfg)
 
 	addr    := fmt.Sprintf("0.0.0.0:%d", cfg.Port)
 	handler := middleware.Wrap(dispatch)
@@ -88,6 +81,38 @@ func main() {
 	}
 }
 
+// buildDispatcher builds every routed module and returns the Host-header
+// dispatcher for them.
+//
+// Each module is built once, however many hostnames route to it. Two entries
+// pointing at the same module must share one handler: a second instance would
+// carry its own copy of that module's state -- uploads staged through one
+// hostname would be invisible through the other, and concurrent writes to the
+// same data file would clobber each other.
+//
+// The same table records failures. A module that cannot build gets a handler
+// that 503s with the reason, so one bad path takes down that module's
+// hostnames and leaves the rest of the binary serving.
+func buildDispatcher(cfg *config.Config) *Dispatcher {
+	dispatch := newDispatcher()
+	built := make(map[string]http.Handler, len(cfg.Routing))
+	for host, module := range cfg.Routing {
+		h, ok := built[module]
+		if !ok {
+			var err error
+			h, err = buildModule(module, cfg)
+			if err != nil {
+				log.Printf("ERROR: module %q failed to build and will return 503 on every request: %v", module, err)
+				h = unavailableHandler(module, err)
+			}
+			built[module] = h
+		}
+		dispatch.register(host, h)
+		log.Printf("registered ( http://%s:%d ) → %s", host, cfg.Port, module)
+	}
+	return dispatch
+}
+
 func buildModule(module string, cfg *config.Config) (http.Handler, error) {
 	switch module {
 	case "grocery":
@@ -100,7 +125,25 @@ func buildModule(module string, cfg *config.Config) (http.Handler, error) {
 		return menuserver.Build(cfg.Menuserver)
 	case "obsidianoid":
 		return obsidianoid.Build(cfg.Obsidianoid)
+	case "multissh":
+		return multissh.Build(cfg.Multissh)
 	default:
 		return nil, fmt.Errorf("unknown module %q", module)
 	}
+}
+
+// unavailableHandler answers every request to a module that failed to build.
+// The boot log is easy to miss once the binary comes up healthy, so the reason
+// travels in the response body too -- whoever loads the page sees the cause.
+func unavailableHandler(module string, cause error) http.Handler {
+	msg := cause.Error()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error":  "module unavailable",
+			"module": module,
+			"reason": msg,
+		})
+	})
 }
