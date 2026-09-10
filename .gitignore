@@ -35,3 +35,8 @@ data
 node_modules/
 .unified-webapp.json
 .zenflow/
+
+# Build outputs (make build / make build-rpi). Anchored so they cannot match
+# unified-webapp-example.json or anything nested.
+/unified-webapp
+/unified-webapp-arm64-linux
