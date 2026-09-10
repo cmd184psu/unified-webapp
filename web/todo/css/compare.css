@@ -1,0 +1,141 @@
+/* compare.css — side-by-side list compare/merge view.
+   Reuses design tokens (--bg, --surface, --accent, etc.) defined in todo.css. */
+
+.compare-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.compare-toolbar .shortcut-hint {
+  font-size: .7rem;
+  opacity: .7;
+  margin-left: .15rem;
+}
+
+.compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 800px) {
+  .compare-grid { grid-template-columns: 1fr; }
+}
+
+.compare-pane {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.compare-pane-header {
+  padding: .75rem .9rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+
+.compare-pane-title {
+  font-weight: 600;
+  font-size: .95rem;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compare-pane-pickers {
+  display: flex;
+  gap: .4rem;
+}
+
+.compare-pane-pickers .select-input {
+  font-size: .8rem;
+  padding: .3rem .4rem;
+}
+
+.compare-table-wrap {
+  overflow-x: auto;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .85rem;
+}
+
+.compare-table tr.compare-row {
+  border-bottom: 1px solid var(--border);
+  cursor: grab;
+  transition: background 100ms ease;
+}
+.compare-table tr.compare-row:hover { background: var(--surface-raised); }
+.compare-table tr.compare-row:active { cursor: grabbing; }
+.compare-table tr.completeClass { opacity: .5; }
+
+.compare-table td { padding: .45rem .5rem; vertical-align: middle; }
+
+.cmp-check, .cmp-badge, .cmp-send, .cmp-delete {
+  width: 1%;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.cmp-name {
+  width: auto;
+  word-break: break-word;
+}
+
+.cmp-check input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; }
+
+.cmp-send-btn, .cmp-delete-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  font-size: .75rem;
+}
+.cmp-delete-btn:hover { color: var(--danger); border-color: var(--danger); }
+
+.compare-empty {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: .85rem;
+  opacity: .55;
+  padding: 1.5rem 1rem;
+}
+
+/* ── Duplicate flagging ─────────────────────────────────────────────────── */
+
+.cmp-badge i { color: var(--warning); cursor: pointer; }
+
+.compare-table tr.cmp-dup {
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+}
+.compare-table tr.cmp-dup:hover {
+  background: color-mix(in srgb, var(--warning) 26%, transparent);
+}
+
+.compare-table tr.cmp-flash {
+  animation: cmp-flash-anim 900ms ease;
+}
+@keyframes cmp-flash-anim {
+  0%   { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+  100% { background: transparent; }
+}
+
+/* ── Drag-over target hint ──────────────────────────────────────────────── */
+
+.compare-table-wrap.cmp-drag-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}

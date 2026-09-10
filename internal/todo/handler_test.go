@@ -117,6 +117,30 @@ func TestHandleReadFile_IndexJson(t *testing.T) {
 	}
 }
 
+func TestHandleReadFile_IndexJson_RealFileTakesPrecedence(t *testing.T) {
+	h, store := newTestHandler(t)
+	store.WriteFile("home", "index.json", []byte(`{"title":"real index","list":[{"name":"x"}]}`))
+
+	w := serve(t, h, "GET", "/items/home/index.json", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200", w.Code)
+	}
+	var data map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &data); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if data["title"] != "real index" {
+		t.Errorf("title: got %v, want real file content, not generated index", data["title"])
+	}
+	if data["type"] == "index" {
+		t.Errorf("expected real file content, got generated index shape: %v", data)
+	}
+	list, _ := data["list"].([]interface{})
+	if len(list) != 1 {
+		t.Errorf("list: got %v", data["list"])
+	}
+}
+
 func TestHandleReadFile_RegularFile(t *testing.T) {
 	h, store := newTestHandler(t)
 	store.WriteFile("home", "tasks.json", []byte(`{"title":"tasks","list":[]}`))
@@ -183,6 +207,33 @@ func TestHandleWriteFile_EmptyBody_Rejected(t *testing.T) {
 	w := serve(t, h, "POST", "/items/home/list.json", "")
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("want 400 for empty body, got %d", w.Code)
+	}
+}
+
+func TestHandleWriteFile_IndexJson_RejectedWhenSynthetic(t *testing.T) {
+	h, _ := newTestHandler(t)
+	w := serve(t, h, "POST", "/items/home/index.json", `{"title":"x","list":[]}`)
+	if w.Code != http.StatusConflict {
+		t.Errorf("want 409 when no real index.json exists, got %d", w.Code)
+	}
+}
+
+func TestHandleWriteFile_IndexJson_AllowedWhenRealFileExists(t *testing.T) {
+	h, store := newTestHandler(t)
+	store.WriteFile("home", "index.json", []byte(`{"title":"orig","list":[]}`))
+
+	w := serve(t, h, "POST", "/items/home/index.json", `{"title":"updated","list":[]}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200\nbody: %s", w.Code, w.Body.String())
+	}
+	got, err := store.ReadFile("home", "index.json")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var data map[string]interface{}
+	json.Unmarshal(got, &data)
+	if data["title"] != "updated" {
+		t.Errorf("write did not persist: got %v", data)
 	}
 }
 

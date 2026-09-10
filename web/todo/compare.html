@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Compare Lists</title>
+  <link rel="shortcut icon" href="images/fvw.png" type="image/x-icon">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/fontawsme.css">
+  <link rel="stylesheet" href="css/fontawall.css">
+  <link rel="stylesheet" href="css/todo.css?v=19">
+  <link rel="stylesheet" href="css/compare.css?v=1">
+
+  <script src="js/jquery.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/theme.js"></script>
+  <script src="js/compare.js?v=1"></script>
+  <script>
+    $(document).ready(function () {
+      const urlParams = new URLSearchParams(window.location.search);
+      const params = {};
+      for (const [k, v] of urlParams.entries()) { params[k] = v; }
+      startCompare(params);
+    });
+  </script>
+</head>
+
+<body>
+
+  <!-- ── Top Navigation Bar ─────────────────────────────────────────────── -->
+  <nav class="topbar">
+    <div class="topbar-left">
+      <a class="icon-btn" href="index.html" title="Back to list">
+        <i class="fas fa-chevron-left"></i>
+      </a>
+      <span class="topbar-brand">Compare Lists</span>
+    </div>
+    <div class="topbar-right">
+      <button class="icon-btn" id="theme-toggle" title="Toggle dark / light mode" onclick="toggleTheme()">
+        <i class="fas fa-moon" id="theme-icon"></i>
+      </button>
+    </div>
+  </nav>
+
+  <div class="app-layout">
+    <main class="content-area">
+
+      <!-- Action toolbar -->
+      <div class="compare-toolbar toolbar">
+        <button class="btn btn-outline" onclick="swapSides()" title="Swap left and right lists (Alt+S)">
+          <i class="fas fa-exchange-alt"></i> Swap <span class="shortcut-hint">Alt+S</span>
+        </button>
+        <button class="btn btn-outline" onclick="moveAllRightToLeft()" title="Move all items from right to left (Alt+M)">
+          <i class="fas fa-arrow-left"></i> Move All &rarr; Left <span class="shortcut-hint">Alt+M</span>
+        </button>
+        <button class="btn btn-outline" onclick="flagDuplicates()" title="Flag likely duplicate items (Alt+D)">
+          <i class="fas fa-exclamation-triangle"></i> Flag Duplicates <span class="shortcut-hint">Alt+D</span>
+        </button>
+      </div>
+
+      <!-- Two-pane grid -->
+      <div class="compare-grid">
+
+        <!-- Left pane -->
+        <section class="compare-pane">
+          <div class="compare-pane-header">
+            <div class="compare-pane-title" id="left-title">No list selected</div>
+            <div class="compare-pane-pickers">
+              <select id="left-subject-select" class="select-input"></select>
+              <select id="left-item-select" class="select-input"></select>
+            </div>
+          </div>
+          <div class="compare-table-wrap" id="left-table-wrap">
+            <table class="compare-table">
+              <tbody id="left-table"></tbody>
+            </table>
+            <div class="compare-empty" id="left-empty" style="display:none">No items</div>
+          </div>
+        </section>
+
+        <!-- Right pane -->
+        <section class="compare-pane">
+          <div class="compare-pane-header">
+            <div class="compare-pane-title" id="right-title">No list selected</div>
+            <div class="compare-pane-pickers">
+              <select id="right-subject-select" class="select-input"></select>
+              <select id="right-item-select" class="select-input"></select>
+            </div>
+          </div>
+          <div class="compare-table-wrap" id="right-table-wrap">
+            <table class="compare-table">
+              <tbody id="right-table"></tbody>
+            </table>
+            <div class="compare-empty" id="right-empty" style="display:none">No items</div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+</body>
+</html>
