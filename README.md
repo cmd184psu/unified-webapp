@@ -174,6 +174,49 @@ Only one module can be the `localhost` fallback at a time. Change it to switch w
 
 ---
 
+## Grocery: the Recipes tab
+
+The Grocery module has two tabs over one shared list. **Grocery** organises food by where it
+sits in the store; **Recipes** organises the same food by the meal it belongs to. There is one
+set of items underneath — a recipe ingredient *is* a grocery item, not a copy of one.
+
+### Enabling a recipe
+
+Each recipe has a switch. Enabling it flips all of its ingredients to **needed** on the Grocery
+tab; disabling it flips them back to **not needed**. That is a starting point, not a lock — you
+can still cycle an individual item to "not needed" by clicking it if you already have some, and
+that override survives reloads. Re-enabling the recipe resets it.
+
+Recipes do not share ingredients. If chili and tacos both need beef, you get two rows, `beef
+(Chili)` and `beef (Tacos)`. There is no notion of quantity, so two near-duplicate rows is how
+"twice the beef" gets expressed.
+
+### New ingredients land in Unallocated
+
+Adding an ingredient to a recipe does not make you choose a store section first. It appears at
+the bottom of the Grocery tab under **Unallocated**, and you can drag it into Meats or Produce
+whenever you like. The move sticks.
+
+### Why recipe ingredients have no trash icon
+
+On the Grocery tab, the delete (trash) control appears only on **free items** — ones that
+belong to no recipe. An ingredient owned by a recipe deliberately has no delete button, so that
+you cannot quietly break a recipe from the shopping view. Hovering such a row shows which
+recipe owns it, e.g. *"Belongs to recipe Chili"*.
+
+To remove an ingredient, go to the Recipes tab and delete it there, behind a confirmation. Since
+both tabs read the same list, it disappears from both. Deleting a whole recipe deletes all of
+its ingredients, and the confirmation names the recipe and states how many items go with it.
+
+The rule is enforced server-side too, not just hidden in the UI: `DELETE /api/items/{id}` on a
+recipe-owned item returns **409 Conflict**.
+
+### Jumping between the two views
+
+Clicking the `(Chili)` chip on a Grocery row switches to the Recipes tab, expands that recipe's
+card and scrolls it into view. Clicking the item *name* cycles its state instead — the chip and
+the name are separate controls on the same row.
+
 ## Data Directory Layout
 
 ### Grocery

@@ -2,6 +2,7 @@ package grocery
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -34,6 +35,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 
 	mux.HandleFunc("/api/items",  h.handleItems)
 	mux.HandleFunc("/api/items/", h.handleItem)
+
+	mux.HandleFunc("/api/recipes",  h.handleRecipes)
+	mux.HandleFunc("/api/recipes/", h.handleRecipePath)
 
 	mux.HandleFunc("/api/move",     h.handleMove)
 	mux.HandleFunc("/api/reorder",  h.handleReorder)
@@ -220,6 +224,11 @@ func (h *Handler) handleItem(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodDelete:
 		if err := h.store.Delete(id); err != nil {
+			if errors.Is(err, ErrRecipeOwned) {
+				response.WriteError(w, http.StatusConflict,
+					"item belongs to a recipe; delete it from the recipe instead")
+				return
+			}
 			response.WriteError(w, http.StatusNotFound, err.Error())
 			return
 		}
@@ -318,6 +327,169 @@ func (h *Handler) handleRevision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.WriteJSON(w, http.StatusOK, map[string]int64{"revision": h.store.Revision()})
+}
+
+// writeRecipeError maps the store's sentinel errors onto status codes. The item
+// routes collapse every store error to 404; the recipe routes have to
+// distinguish 400, 404 and 409, which is what the sentinels exist for.
+func writeRecipeError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrRecipeNotFound):
+		response.WriteError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, ErrDuplicateRecipe):
+		// 409, not 400: the request is well-formed, it collides with existing
+		// state. This is what separates ErrDuplicateRecipe from ErrInvalidName
+		// — mapping both to 400 made the two sentinels indistinguishable to a
+		// client and left this function unable to do the job its comment claims.
+		response.WriteError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, ErrInvalidName):
+		response.WriteError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, ErrRecipeOwned):
+		response.WriteError(w, http.StatusConflict, err.Error())
+	default:
+		response.WriteError(w, http.StatusInternalServerError, err.Error())
+	}
+}
+
+// GET  /api/recipes → list
+// POST /api/recipes → create
+func (h *Handler) handleRecipes(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		response.WriteJSON(w, http.StatusOK, h.store.Recipes())
+
+	case http.MethodPost:
+		name, ok := decodeName(w, r)
+		if !ok {
+			return
+		}
+		recipe, err := h.store.AddRecipe(name)
+		if err != nil {
+			writeRecipeError(w, err)
+			return
+		}
+		response.WriteJSON(w, http.StatusCreated, recipe)
+		h.broker.Notify()
+
+	default:
+		response.WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+// POST   /api/recipes/reorder
+// PATCH  /api/recipes/:id                        → rename and/or enable
+// DELETE /api/recipes/:id                        → remove recipe + its items
+// POST   /api/recipes/:id/ingredients            → add ingredient
+// DELETE /api/recipes/:id/ingredients/:item_id   → remove ingredient
+//
+// DELETE /api/recipes/ trims to an empty id and answers 404 rather than
+// handleItem's 400 "id required". Both are defensible; 404 is the store's own
+// answer, so it is used rather than adding a check that disagrees with it.
+func (h *Handler) handleRecipePath(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/api/recipes/")
+	seg := strings.Split(rest, "/")
+
+	// The literal has to be matched before the :id case, or "reorder" is read
+	// as a recipe id.
+	if len(seg) == 1 && seg[0] == "reorder" {
+		if r.Method != http.MethodPost {
+			response.WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		var body struct {
+			IDs []string `json:"ids"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			response.WriteError(w, http.StatusBadRequest, "invalid body")
+			return
+		}
+		recipes, err := h.store.ReorderRecipes(body.IDs)
+		if err != nil {
+			writeRecipeError(w, err)
+			return
+		}
+		response.WriteJSON(w, http.StatusOK, recipes)
+		h.broker.Notify()
+		return
+	}
+
+	id := seg[0]
+
+	switch {
+	case len(seg) == 1:
+		switch r.Method {
+		case http.MethodPatch:
+			var body struct {
+				Name    *string `json:"name"`
+				Enabled *bool   `json:"enabled"`
+			}
+			// Both fields are pointers, so a failed decode leaves both nil —
+			// indistinguishable from a legitimate no-op patch. Without this
+			// guard, PATCH {"enabled":"yes"} would answer 200 and tell the
+			// client the write succeeded.
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				response.WriteError(w, http.StatusBadRequest, "invalid body")
+				return
+			}
+			recipe, items, err := h.store.PatchRecipe(id, body.Name, body.Enabled)
+			if err != nil {
+				writeRecipeError(w, err)
+				return
+			}
+			response.WriteJSON(w, http.StatusOK, map[string]any{"recipe": recipe, "items": items})
+			// A patch carrying neither field wrote nothing, so there is
+			// nothing to broadcast.
+			if body.Name != nil || body.Enabled != nil {
+				h.broker.Notify()
+			}
+
+		case http.MethodDelete:
+			items, err := h.store.DeleteRecipe(id)
+			if err != nil {
+				writeRecipeError(w, err)
+				return
+			}
+			response.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+			h.broker.Notify()
+
+		default:
+			response.WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+
+	case len(seg) == 2 && seg[1] == "ingredients":
+		if r.Method != http.MethodPost {
+			response.WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		// decodeName is what makes {"name":"  "} a 400 before the store is
+		// reached, unlike the PATCH branch above.
+		name, ok := decodeName(w, r)
+		if !ok {
+			return
+		}
+		item, err := h.store.AddIngredient(id, name)
+		if err != nil {
+			writeRecipeError(w, err)
+			return
+		}
+		response.WriteJSON(w, http.StatusCreated, item)
+		h.broker.Notify()
+
+	case len(seg) == 3 && seg[1] == "ingredients":
+		if r.Method != http.MethodDelete {
+			response.WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if err := h.store.DeleteIngredient(id, seg[2]); err != nil {
+			writeRecipeError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		h.broker.Notify()
+
+	default:
+		response.WriteError(w, http.StatusNotFound, "not found")
+	}
 }
 
 // decodeName reads {"name":"..."} from the request body.
