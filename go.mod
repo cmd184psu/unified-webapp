@@ -7,6 +7,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/pkg/sftp v1.13.10
 	github.com/russross/blackfriday/v2 v2.1.0
+	go.uber.org/goleak v1.3.0
 	golang.org/x/crypto v0.53.0
 )
 

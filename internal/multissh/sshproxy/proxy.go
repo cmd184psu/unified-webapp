@@ -73,7 +73,11 @@ type session struct {
 	// cred is the password this session authenticated with, held only while the
 	// connection is live. closeConn zeroes it, so a session that has ended holds
 	// nothing (FR-N4).
-	cred    Secret
+	cred Secret
+	// host and user identify the live connection in the disconnect audit line;
+	// both are already client-supplied, non-secret connection metadata.
+	host    string
+	user    string
 	writeMu sync.Mutex // serializes all writes to ws (gorilla allows one writer)
 }
 
@@ -133,6 +137,7 @@ func (h *Handler) connect(s *session, msg clientMsg) {
 	hasKey := strings.TrimSpace(msg.Key) != ""
 	hasPassword := !msg.Password.IsZero()
 	if hasKey == hasPassword {
+		Auditf("connect host=%q user=%q outcome=rejected reason=credential", msg.Host, msg.User)
 		s.sendError("provide exactly one of an SSH key or a password")
 		return
 	}
@@ -142,12 +147,13 @@ func (h *Handler) connect(s *session, msg clientMsg) {
 		var err error
 		keyPath, err = ResolveKeyPath(h.sshDir, msg.Key)
 		if err != nil {
+			Auditf("connect host=%q user=%q auth=key outcome=rejected reason=key", msg.Host, msg.User)
 			s.sendError("invalid SSH key selection")
 			return
 		}
 	}
 
-	conn, err := h.dialer.Dial(ConnectParams{
+	params := ConnectParams{
 		Host:     msg.Host,
 		Port:     msg.Port,
 		User:     msg.User,
@@ -155,8 +161,12 @@ func (h *Handler) connect(s *session, msg clientMsg) {
 		Password: msg.Password,
 		Cols:     msg.Cols,
 		Rows:     msg.Rows,
-	})
+	}
+	auth := authLabel(params)
+
+	conn, err := h.dialer.Dial(params)
 	if err != nil {
+		Auditf("connect host=%q port=%d user=%q auth=%s outcome=failed", msg.Host, msg.Port, msg.User, auth)
 		s.sendError(dialErrorMessage(err))
 		return
 	}
@@ -164,8 +174,11 @@ func (h *Handler) connect(s *session, msg clientMsg) {
 	s.mu.Lock()
 	s.conn = conn
 	s.cred = msg.Password
+	s.host = msg.Host
+	s.user = msg.User
 	s.mu.Unlock()
 
+	Auditf("connect host=%q port=%d user=%q auth=%s outcome=ok", msg.Host, msg.Port, msg.User, auth)
 	s.sendStatus("connected")
 	go s.pumpOutput(conn)
 	go s.waitClose(conn)
@@ -195,6 +208,7 @@ func (s *session) waitClose(conn Conn) {
 	_ = conn.Wait()
 	s.mu.Lock()
 	current := s.conn == conn
+	host, user := s.host, s.user
 	if current {
 		s.conn = nil
 		// The session is over; the password it authenticated with does not
@@ -203,6 +217,7 @@ func (s *session) waitClose(conn Conn) {
 	}
 	s.mu.Unlock()
 	if current {
+		Auditf("disconnect host=%q user=%q reason=remote", host, user)
 		s.sendStatus("disconnected")
 	}
 }
@@ -229,10 +244,15 @@ func (s *session) resize(cols, rows int) {
 func (s *session) closeConn() {
 	s.mu.Lock()
 	conn := s.conn
+	host, user := s.host, s.user
 	s.conn = nil
 	s.cred.Zero()
 	s.mu.Unlock()
 	if conn != nil {
+		// Only the operator-initiated path gets here with a live connection;
+		// a remote-initiated end is logged by waitClose instead, so the two
+		// paths cannot double-log one disconnect.
+		Auditf("disconnect host=%q user=%q reason=client", host, user)
 		_ = conn.Close()
 	}
 }
@@ -287,7 +307,13 @@ func sameOrigin(r *http.Request) bool {
 	}
 	host := r.Host
 	// Compare the Origin's host:port against the request Host.
-	return originHost(origin) == host
+	if originHost(origin) == host {
+		return true
+	}
+	// R1: a proxy that rewrites Host fails every upgrade here, and the pair is
+	// the whole diagnosis -- log it rather than making the operator guess.
+	Auditf("ws upgrade rejected origin=%q host=%q", origin, host)
+	return false
 }
 
 // originHost extracts the host[:port] from an Origin header value, returning

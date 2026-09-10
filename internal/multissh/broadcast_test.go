@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"cmd184psu/unified-webapp/internal/multissh/sshproxy"
+	"github.com/gorilla/websocket"
 )
 
 type transferCall struct {

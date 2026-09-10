@@ -307,14 +307,17 @@ func (s *Server) runBroadcastTransfer(job *broadcastJob, index int, host string,
 	defer cancel()
 
 	job.update(broadcastProgressFrame{Type: "progress", Index: index, Host: host, Bytes: 0, Total: total, State: "transferring", Message: ""})
+	sshproxy.Auditf("broadcast host=%q user=%q remote=%q bytes=%d outcome=start", host, params.User, remotePath, total)
 
 	err := s.broadcasts.transferrer.Transfer(ctx, params, localPath, remotePath, func(n int64) {
 		job.update(broadcastProgressFrame{Type: "progress", Index: index, Host: host, Bytes: n, Total: total, State: "transferring", Message: ""})
 	})
 	if err != nil {
+		sshproxy.Auditf("broadcast host=%q user=%q remote=%q outcome=failed", host, params.User, remotePath)
 		job.update(broadcastProgressFrame{Type: "progress", Index: index, Host: host, Bytes: 0, Total: total, State: "error", Message: broadcastTransferErrorMessage(err)})
 		return
 	}
+	sshproxy.Auditf("broadcast host=%q user=%q remote=%q bytes=%d outcome=ok", host, params.User, remotePath, total)
 	job.update(broadcastProgressFrame{Type: "progress", Index: index, Host: host, Bytes: total, Total: total, State: "done", Message: ""})
 }
 
@@ -388,7 +391,13 @@ func sameOrigin(r *http.Request) bool {
 		return true
 	}
 	host := r.Host
-	return originHost(origin) == host
+	if originHost(origin) == host {
+		return true
+	}
+	// R1: same diagnosis as the terminal bridge -- a Host-rewriting proxy shows
+	// up here as a rejected upgrade and nothing else.
+	sshproxy.Auditf("broadcast ws upgrade rejected origin=%q host=%q", origin, host)
+	return false
 }
 
 func originHost(origin string) string {
