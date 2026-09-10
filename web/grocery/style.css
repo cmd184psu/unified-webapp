@@ -1074,3 +1074,289 @@ main {
   color: var(--color-danger);
   margin-top: calc(-1 * var(--space-1));
 }
+
+/* ════════════════════════════════════════════════════════════════
+   RECIPES TAB
+   Everything below is appended and additive. No rule here re-declares
+   a selector that exists above; where a value is shared with an
+   existing rule it is duplicated rather than grouped into it, so the
+   Grocery cascade cannot be disturbed from down here.
+   ════════════════════════════════════════════════════════════════ */
+
+/* ── Tab bar ─────────────────────────────────────────────────── */
+.tab-bar {
+  display: flex; align-items: center; gap: var(--space-1);
+  margin-left: var(--space-2);
+  flex-shrink: 0;
+  /* Pins the tabs beside the title instead of letting them drift to the middle.
+     .app-header is justify-content: space-between, so its free space is shared
+     BETWEEN children unless something absorbs it. On the Grocery tab with
+     progress:true, #progress-bar { flex: 1 } absorbs it and the tabs sit left.
+     On the Recipes tab that bar and three icon buttons are display:none, so
+     nothing absorbs it and the tabs slide toward centre. The same drift happens
+     on BOTH tabs under the default progress:false, so this is not a
+     Recipes-only fix.
+
+     margin-right rather than a layout rewrite: auto margins absorb free space
+     only AFTER flexible lengths resolve, so whenever the progress bar is
+     visible it still takes the space and this margin computes to zero. The
+     grocery+progress layout is unchanged. */
+  margin-right: auto;
+}
+.tab-btn {
+  display: flex; align-items: center; justify-content: center;
+  height: 34px; padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm); font-weight: 600;
+  color: var(--color-text-muted);
+  background: none; border: 0; cursor: pointer;
+  transition: background var(--t), color var(--t);
+  -webkit-tap-highlight-color: transparent;
+  white-space: nowrap;
+}
+.tab-btn:hover  { background: var(--color-surface-off); color: var(--color-text); }
+.tab-btn:active { background: var(--color-border); }
+.tab-btn.active {
+  background: var(--color-primary-lite);
+  color: var(--color-primary);
+}
+
+/* ── Recipe card ─────────────────────────────────────────────────
+   Mirrors .group-section / .group-header / .group-body by duplicating
+   their declarations. Recipe cards deliberately do NOT carry
+   class="group-section": app.js:760 and app.js:796 use
+   el.closest('.group-section'), which walks ancestors from wherever
+   the pointer is and is not container-scoped. Drag only happens to
+   miss the Recipes tab because #recipes-container is hidden while the
+   Grocery tab is active — incidental, not structural, and not
+   something to lean on.                                            */
+.recipe-card { margin-bottom: var(--space-3); }
+
+.recipe-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-off);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  cursor: pointer; user-select: none;
+  transition: background var(--t), border-color var(--t);
+  -webkit-tap-highlight-color: transparent;
+  min-height: 44px;
+}
+.recipe-header:active { background: var(--color-border); }
+.recipe-header.open {
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  border-bottom-color: transparent;
+}
+.recipe-title {
+  font-size: var(--text-sm); font-weight: 600;
+  color: var(--color-text);
+  flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.recipe-meta { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }
+.recipe-count {
+  font-size: var(--text-xs); color: var(--color-text-faint);
+  background: var(--color-border); border-radius: var(--radius-full);
+  padding: 1px 7px; font-weight: 500;
+}
+.recipe-chevron {
+  width: 16px; height: 16px; color: var(--color-text-faint); flex-shrink: 0;
+  transition: transform var(--t);
+  pointer-events: none;
+}
+.recipe-header.open .recipe-chevron { transform: rotate(180deg); }
+
+/* Enabled recipes are accented, following the .group-header--nogroup
+   precedent of tinting the header rather than the whole section. */
+.recipe-card--enabled > .recipe-header {
+  background: var(--color-primary-lite);
+  border-color: var(--color-primary);
+}
+.recipe-card--enabled > .recipe-header .recipe-title { color: var(--color-primary); }
+.recipe-card--enabled > .recipe-body { border-color: var(--color-primary); }
+
+.recipe-body {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-top: none;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  overflow: hidden;
+}
+.recipe-body.collapsed { display: none; }
+
+/* ── Enable/disable switch ───────────────────────────────────────
+   The .sync-toggle track/thumb pattern, duplicated under recipe-owned
+   class names so the two switches can diverge without either editing
+   the other.                                                        */
+.recipe-switch {
+  display: flex; align-items: center;
+  cursor: pointer; user-select: none;
+  flex-shrink: 0;
+}
+.recipe-switch-input { position: absolute; opacity: 0; width: 0; height: 0; }
+.recipe-switch-track {
+  position: relative; width: 38px; height: 22px;
+  background: var(--color-surface-off);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  transition: background var(--t), border-color var(--t);
+}
+.recipe-switch-input:checked + .recipe-switch-track {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+.recipe-switch-thumb {
+  position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px;
+  background: #fff; border-radius: var(--radius-full);
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--t);
+}
+.recipe-switch-input:checked + .recipe-switch-track .recipe-switch-thumb {
+  transform: translateX(16px);
+}
+.recipe-switch-input:disabled + .recipe-switch-track { opacity: 0.45; cursor: not-allowed; }
+
+/* ── Recipe suffix on grocery rows ───────────────────────────────
+   .recipe-chip and .item-recipe-suffix land on the SAME <button>, so
+   these two rules are read together on one node. Order is load-bearing:
+   the chip resets the UA button defaults to `inherit`, and the suffix
+   must then win the colour. Equal specificity, so source order decides
+   — chip first, suffix second.                                       */
+.recipe-chip {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  -webkit-appearance: none;
+  -webkit-tap-highlight-color: transparent;
+  /* A <button> is an atomic inline box, and text decorations are not
+     propagated into atomic inlines. Without this, a completed owned row
+     strikes through `beef` and leaves `(Chili)` unstruck. Inheriting is
+     the fix that does not require touching the .item-name rule above. */
+  text-decoration: inherit;
+}
+.recipe-chip:hover { color: var(--color-primary); }
+
+.item-recipe-suffix { color: var(--color-text-faint); }
+
+/* ── Offline hint ────────────────────────────────────────────── */
+.offline-hint {
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  background: var(--color-warning-lite);
+  border: 1px solid var(--color-warning-bdr);
+  border-radius: var(--radius-md);
+  text-align: center;
+  margin-bottom: var(--space-3);
+}
+
+/* ── Ingredient rows inside a recipe body ────────────────────────
+   Follows .groups-modal-item / .groups-modal-delete.               */
+.recipe-ingredient-row {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-divider);
+  min-height: 44px;
+  background: var(--color-surface);
+}
+.recipe-ingredient-row:last-child { border-bottom: none; }
+.recipe-ingredient-name {
+  font-size: var(--text-sm); color: var(--color-text);
+  flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.recipe-ingredient-delete {
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: var(--radius-md); flex-shrink: 0;
+  color: var(--color-text-faint);
+  background: none; border: 0; cursor: pointer;
+  font-size: var(--text-base); line-height: 1;
+  transition: color var(--t), background var(--t);
+  -webkit-tap-highlight-color: transparent;
+}
+.recipe-ingredient-delete:hover, .recipe-ingredient-delete:active {
+  color: var(--color-danger);
+  background: var(--color-danger-lite);
+}
+.recipe-ingredient-empty {
+  padding: var(--space-4);
+  font-size: var(--text-sm); color: var(--color-text-faint);
+  text-align: center; font-style: italic;
+}
+
+/* ── Add-ingredient row ──────────────────────────────────────── */
+.recipe-ingredient-add {
+  display: flex; gap: var(--space-2); align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--color-divider);
+  background: var(--color-surface-off);
+}
+.recipe-ingredient-input {
+  flex: 1; padding: 0 var(--space-3);
+  height: 36px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-family: var(--font-body);
+  background: var(--color-surface);
+  color: var(--color-text);
+  min-width: 0;
+}
+.recipe-ingredient-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+.recipe-ingredient-input:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* ── Reorder buttons (R-14) ──────────────────────────────────── */
+.recipe-move-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: var(--radius-md); flex-shrink: 0;
+  color: var(--color-text-faint);
+  background: none; border: 0; cursor: pointer;
+  font-size: var(--text-xs); line-height: 1;
+  transition: color var(--t), background var(--t);
+  -webkit-tap-highlight-color: transparent;
+}
+.recipe-move-btn:hover  { color: var(--color-text); background: var(--color-surface-off); }
+.recipe-move-btn:disabled { opacity: 0.3; cursor: default; }
+
+/* ── Add-recipe row ──────────────────────────────────────────── */
+.recipe-add {
+  display: flex; gap: var(--space-2); align-items: center;
+  margin-bottom: var(--space-4);
+}
+.recipe-add-input {
+  flex: 1; padding: 0 var(--space-3);
+  height: 40px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-base);
+  font-family: var(--font-body);
+  background: var(--color-surface);
+  color: var(--color-text);
+  min-width: 0;
+}
+.recipe-add-input:focus { outline: none; border-color: var(--color-primary); }
+.recipe-add-input:disabled { opacity: 0.55; cursor: not-allowed; }
+.recipe-add-btn {
+  display: flex; align-items: center; justify-content: center;
+  height: 40px; padding: 0 var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-primary); color: #fff;
+  border: 0; cursor: pointer; flex-shrink: 0;
+  font-size: var(--text-sm); font-weight: 600;
+  font-family: var(--font-body);
+  transition: background var(--t);
+  -webkit-tap-highlight-color: transparent;
+}
+.recipe-add-btn:hover { background: var(--color-primary-hov); }
+.recipe-add-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* Recipe-owned SVGs are sized by a class rather than by a descendant
+   `svg` rule, which would take a bare element selector as its subject. */
+.recipe-icon { width: 14px; height: 14px; pointer-events: none; }

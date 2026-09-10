@@ -574,3 +574,428 @@ func TestSSE_DataEventDelivered(t *testing.T) {
 		t.Errorf("SSE stream missing 'refresh' event after mutation; got: %q", rw.Body.String())
 	}
 }
+
+// ── /api/recipes ──────────────────────────────────────────────────────────────
+
+// notifyCountC subscribes with a deep buffer, fires f, and asserts the exact
+// number of Notify signals. Notify() is a non-blocking send per subscriber and
+// the handlers call it synchronously before returning, so once f() has returned
+// len(ch) is settled and does not need a timeout to observe.
+//
+// The existing notifyC answers "at least one"; the recipe routes need "exactly
+// one" (a patch must not double-broadcast) and "exactly zero" (a patch that
+// wrote nothing must not broadcast at all).
+func notifyCountC(t *testing.T, b *broker.Broker, label string, want int, f func()) {
+	t.Helper()
+	ch := make(chan struct{}, 8)
+	b.Subscribe(ch)
+	defer b.Unsubscribe(ch)
+	f()
+	if got := len(ch); got != want {
+		t.Errorf("%s: got %d Notify signals, want %d", label, got, want)
+	}
+}
+
+// patchResp is the PATCH /api/recipes/:id envelope: the recipe plus the whole
+// item list, because enabling a recipe rewrites its ingredients' states.
+type patchResp struct {
+	Recipe grocery.Recipe `json:"recipe"`
+	Items  []grocery.Item `json:"items"`
+}
+
+func mkRecipe(t *testing.T, hh *harness, name string) grocery.Recipe {
+	t.Helper()
+	w := hh.do(t, http.MethodPost, "/api/recipes", map[string]string{"name": name})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create recipe %q: want 201, got %d (%s)", name, w.Code, w.Body.String())
+	}
+	return decodeJSON[grocery.Recipe](t, w)
+}
+
+func mkIngredient(t *testing.T, hh *harness, recipeID, name string) grocery.Item {
+	t.Helper()
+	w := hh.do(t, http.MethodPost, "/api/recipes/"+recipeID+"/ingredients",
+		map[string]string{"name": name})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("add ingredient %q: want 201, got %d (%s)", name, w.Code, w.Body.String())
+	}
+	return decodeJSON[grocery.Item](t, w)
+}
+
+func TestHandlerRecipes_GetEmptyIsArrayNotNull(t *testing.T) {
+	hh := newHarness(t, nil)
+	w := hh.do(t, http.MethodGet, "/api/recipes", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", w.Code)
+	}
+	// A nil slice marshals to "null", which the client's .map() would choke on.
+	if got := strings.TrimSpace(w.Body.String()); got != "[]" {
+		t.Errorf("empty recipe list serialized as %q, want %q", got, "[]")
+	}
+}
+
+func TestHandlerRecipes_PostCreatesDisabledRecipe(t *testing.T) {
+	hh := newHarness(t, nil)
+	r := mkRecipe(t, hh, "  Chili  ")
+	if r.Name != "Chili" {
+		t.Errorf("name %q, want %q (handler must trim)", r.Name, "Chili")
+	}
+	if r.Enabled {
+		t.Error("new recipe is enabled; recipes must start disabled")
+	}
+	if r.ID == "" {
+		t.Error("new recipe has no id")
+	}
+
+	list := decodeJSON[[]grocery.Recipe](t, hh.do(t, http.MethodGet, "/api/recipes", nil))
+	if len(list) != 1 || list[0].ID != r.ID {
+		t.Errorf("GET /api/recipes did not return the created recipe: %+v", list)
+	}
+}
+
+// A malformed name is 400; a well-formed name that collides is 409. The two
+// sentinels exist to be told apart, so the test asserts them apart.
+func TestHandlerRecipes_PostRejectsBlankAndDuplicateNames(t *testing.T) {
+	hh := newHarness(t, nil)
+	mkRecipe(t, hh, "Chili")
+
+	cases := []struct {
+		label string
+		body  any
+		want  int
+	}{
+		{"empty name", map[string]string{"name": ""}, http.StatusBadRequest},
+		{"whitespace name", map[string]string{"name": "   "}, http.StatusBadRequest},
+		{"duplicate name", map[string]string{"name": "Chili"}, http.StatusConflict},
+		{"case-insensitive duplicate", map[string]string{"name": "cHiLi"}, http.StatusConflict},
+	}
+	for _, c := range cases {
+		w := hh.do(t, http.MethodPost, "/api/recipes", c.body)
+		if w.Code != c.want {
+			t.Errorf("%s: want %d, got %d (%s)", c.label, c.want, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestHandlerRecipes_WrongMethodIs405(t *testing.T) {
+	hh := newHarness(t, nil)
+	r := mkRecipe(t, hh, "Chili")
+	item := mkIngredient(t, hh, r.ID, "Beef")
+
+	cases := []struct{ method, path string }{
+		{http.MethodPut, "/api/recipes"},
+		{http.MethodDelete, "/api/recipes"},
+		{http.MethodGet, "/api/recipes/reorder"},
+		{http.MethodGet, "/api/recipes/" + r.ID},
+		{http.MethodPost, "/api/recipes/" + r.ID},
+		{http.MethodGet, "/api/recipes/" + r.ID + "/ingredients"},
+		{http.MethodGet, "/api/recipes/" + r.ID + "/ingredients/" + item.ID},
+	}
+	for _, c := range cases {
+		w := hh.do(t, c.method, c.path, nil)
+		if w.Code != http.StatusMethodNotAllowed {
+			t.Errorf("%s %s: want 405, got %d", c.method, c.path, w.Code)
+		}
+	}
+}
+
+func TestHandlerRecipes_UnknownShapeIs404(t *testing.T) {
+	hh := newHarness(t, nil)
+	r := mkRecipe(t, hh, "Chili")
+
+	cases := []struct{ method, path string }{
+		// A bare trailing slash trims to an empty id; the store answers "recipe
+		// not found", and the handler is deliberately not second-guessing it
+		// with a 400.
+		{http.MethodDelete, "/api/recipes/"},
+		{http.MethodPatch, "/api/recipes/"},
+		{http.MethodPost, "/api/recipes/" + r.ID + "/steps"},
+		{http.MethodDelete, "/api/recipes/" + r.ID + "/ingredients/x/y"},
+	}
+	for _, c := range cases {
+		w := hh.do(t, c.method, c.path, map[string]string{"name": "x"})
+		if w.Code != http.StatusNotFound {
+			t.Errorf("%s %s: want 404, got %d", c.method, c.path, w.Code)
+		}
+	}
+}
+
+func TestHandlerRecipes_PatchRenameReturnsRecipeAndItems(t *testing.T) {
+	hh := newHarness(t, nil)
+	r := mkRecipe(t, hh, "Chili")
+	mkIngredient(t, hh, r.ID, "Beef")
+
+	w := hh.do(t, http.MethodPatch, "/api/recipes/"+r.ID, map[string]any{"name": "Chili Verde"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d (%s)", w.Code, w.Body.String())
+	}
+	resp := decodeJSON[patchResp](t, w)
+	if resp.Recipe.Name != "Chili Verde" {
+		t.Errorf("recipe name %q, want %q", resp.Recipe.Name, "Chili Verde")
+	}
+	// A rename does not touch item state, but the items array still ships so
+	// the client has one response shape to handle for every patch.
+	if len(resp.Items) != 1 {
+		t.Fatalf("rename response carried %d items, want 1", len(resp.Items))
+	}
+	if resp.Items[0].State != grocery.StateNotNeeded {
+		t.Errorf("rename changed item state to %q; renames must not touch state", resp.Items[0].State)
+	}
+}
+
+func TestHandlerRecipes_PatchEnabledFlipsIngredientStates(t *testing.T) {
+	hh := newHarness(t, nil)
+	r := mkRecipe(t, hh, "Chili")
+	beef := mkIngredient(t, hh, r.ID, "Beef")
+	if beef.State != grocery.StateNotNeeded {
+		t.Fatalf("ingredient of a disabled recipe starts as %q, want %q", beef.State, grocery.StateNotNeeded)
+	}
+
+	on := decodeJSON[patchResp](t, hh.do(t, http.MethodPatch, "/api/recipes/"+r.ID,
+		map[string]any{"enabled": true}))
+	if !on.Recipe.Enabled {
+		t.Error("recipe not enabled after PATCH enabled:true")
+	}
+	if on.Items[0].State != grocery.StateNeeded {
+		t.Errorf("after enable, item state %q, want %q", on.Items[0].State, grocery.StateNeeded)
+	}
+
+	off := decodeJSON[patchResp](t, hh.do(t, http.MethodPatch, "/api/recipes/"+r.ID,
+		map[string]any{"enabled": false}))
+	if off.Items[0].State != grocery.StateNotNeeded {
+		t.Errorf("after disable, item state %q, want %q", off.Items[0].State, grocery.StateNotNeeded)
+	}
+}
+
+func TestHandlerRecipes_PatchBadBodyIs400(t *testing.T) {
+	hh := newHarness(t, nil)
+	r := mkRecipe(t, hh, "Chili")
+
+	// Both fields are pointers, so a decode failure is indistinguishable from a
+	// no-op patch unless the handler checks the error. Without that check this
+	// would answer 200 and tell the client a write it never made succeeded.
+	w := hh.do(t, http.MethodPatch, "/api/recipes/"+r.ID, map[string]any{"enabled": "yes"})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("PATCH with a non-boolean enabled: want 400, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	after := decodeJSON[[]grocery.Recipe](t, hh.do(t, http.MethodGet, "/api/recipes", nil))
+	if after[0].Enabled {
+		t.Error("rejected patch still enabled the recipe")
+	}
+}
+
+func TestHandlerRecipes_PatchUnknownIs404AndDuplicateIs409(t *testing.T) {
+	hh := newHarness(t, nil)
+	r := mkRecipe(t, hh, "Chili")
+	mkRecipe(t, hh, "Tacos")
+
+	w := hh.do(t, http.MethodPatch, "/api/recipes/nope", map[string]any{"name": "X"})
+	if w.Code != http.StatusNotFound {
+		t.Errorf("patch unknown recipe: want 404, got %d", w.Code)
+	}
+
+	// Renaming INTO an existing name is the true conflict case: the request is
+	// valid, the target name is taken.
+	w = hh.do(t, http.MethodPatch, "/api/recipes/"+r.ID, map[string]any{"name": "Tacos"})
+	if w.Code != http.StatusConflict {
+		t.Errorf("patch to a duplicate name: want 409, got %d", w.Code)
+	}
+
+	// Renaming a recipe to its own current name is not a duplicate.
+	w = hh.do(t, http.MethodPatch, "/api/recipes/"+r.ID, map[string]any{"name": "Chili"})
+	if w.Code != http.StatusOK {
+		t.Errorf("self-rename: want 200, got %d (%s)", w.Code, w.Body.String())
+	}
+}
+
+func TestHandlerRecipes_PatchWithNeitherFieldIs200AndSilent(t *testing.T) {
+	hh := newHarness(t, nil)
+	r := mkRecipe(t, hh, "Chili")
+	mkIngredient(t, hh, r.ID, "Beef")
+
+	var w *httptest.ResponseRecorder
+	notifyCountC(t, hh.broker, "PATCH /api/recipes/:id with neither field", 0, func() {
+		w = hh.do(t, http.MethodPatch, "/api/recipes/"+r.ID, map[string]any{})
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d (%s)", w.Code, w.Body.String())
+	}
+	// The response shape must not degrade just because nothing changed.
+	body := decodeJSON[map[string]json.RawMessage](t, w)
+	if _, ok := body["recipe"]; !ok {
+		t.Error(`no-op patch response is missing the "recipe" key`)
+	}
+	if _, ok := body["items"]; !ok {
+		t.Error(`no-op patch response is missing the "items" key`)
+	}
+}
+
+func TestHandlerRecipes_DeleteReturnsItemsWithoutRecipeKey(t *testing.T) {
+	hh := newHarness(t, []string{"Produce"})
+	hh.do(t, http.MethodPost, "/api/items", map[string]string{"name": "Milk", "group": "Produce"})
+	r := mkRecipe(t, hh, "Chili")
+	mkIngredient(t, hh, r.ID, "Beef")
+	mkIngredient(t, hh, r.ID, "Beans")
+
+	w := hh.do(t, http.MethodDelete, "/api/recipes/"+r.ID, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d (%s)", w.Code, w.Body.String())
+	}
+	body := decodeJSON[map[string]json.RawMessage](t, w)
+	// The recipe is gone, so there is nothing to put under a "recipe" key;
+	// shipping one would invite the client to render a tombstone.
+	if _, ok := body["recipe"]; ok {
+		t.Error(`delete response carries a "recipe" key; it should carry only "items"`)
+	}
+	var items []grocery.Item
+	if err := json.Unmarshal(body["items"], &items); err != nil {
+		t.Fatalf("items: %v", err)
+	}
+	if len(items) != 1 || items[0].Name != "Milk" {
+		t.Errorf("after deleting the recipe the list should hold only the free item; got %+v", items)
+	}
+
+	if w := hh.do(t, http.MethodDelete, "/api/recipes/"+r.ID, nil); w.Code != http.StatusNotFound {
+		t.Errorf("deleting an already-deleted recipe: want 404, got %d", w.Code)
+	}
+}
+
+func TestHandlerRecipes_PostIngredientLandsUnallocatedAndOwned(t *testing.T) {
+	hh := newHarness(t, []string{"Produce"})
+	r := mkRecipe(t, hh, "Chili")
+
+	item := mkIngredient(t, hh, r.ID, "  Beef  ")
+	if item.Name != "Beef" {
+		t.Errorf("ingredient name %q, want %q", item.Name, "Beef")
+	}
+	if item.Group != grocery.NoGroup {
+		t.Errorf("ingredient group %q, want %q", item.Group, grocery.NoGroup)
+	}
+	if item.RecipeID != r.ID {
+		t.Errorf("ingredient recipe_id %q, want %q", item.RecipeID, r.ID)
+	}
+
+	for _, c := range []struct {
+		label string
+		path  string
+		body  any
+		want  int
+	}{
+		{"blank name", "/api/recipes/" + r.ID + "/ingredients", map[string]string{"name": "  "}, http.StatusBadRequest},
+		{"unknown recipe", "/api/recipes/nope/ingredients", map[string]string{"name": "Beef"}, http.StatusNotFound},
+	} {
+		if w := hh.do(t, http.MethodPost, c.path, c.body); w.Code != c.want {
+			t.Errorf("%s: want %d, got %d (%s)", c.label, c.want, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestHandlerRecipes_DeleteIngredientIs204WithNoBody(t *testing.T) {
+	hh := newHarness(t, nil)
+	r := mkRecipe(t, hh, "Chili")
+	other := mkRecipe(t, hh, "Tacos")
+	beef := mkIngredient(t, hh, r.ID, "Beef")
+
+	// An ingredient may only be deleted through the recipe that owns it.
+	w := hh.do(t, http.MethodDelete, "/api/recipes/"+other.ID+"/ingredients/"+beef.ID, nil)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("delete via the wrong recipe: want 404, got %d", w.Code)
+	}
+
+	w = hh.do(t, http.MethodDelete, "/api/recipes/"+r.ID+"/ingredients/"+beef.ID, nil)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("want 204, got %d (%s)", w.Code, w.Body.String())
+	}
+	if w.Body.Len() != 0 {
+		t.Errorf("204 carried a body: %q", w.Body.String())
+	}
+
+	items := decodeJSON[[]grocery.Item](t, hh.do(t, http.MethodGet, "/api/items", nil))
+	if len(items) != 0 {
+		t.Errorf("ingredient survived deletion: %+v", items)
+	}
+}
+
+func TestHandlerRecipes_ReorderRewritesOrder(t *testing.T) {
+	hh := newHarness(t, nil)
+	a := mkRecipe(t, hh, "Chili")
+	b := mkRecipe(t, hh, "Tacos")
+	c := mkRecipe(t, hh, "Soup")
+
+	w := hh.do(t, http.MethodPost, "/api/recipes/reorder",
+		map[string]any{"ids": []string{c.ID, a.ID, b.ID}})
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d (%s)", w.Code, w.Body.String())
+	}
+	got := decodeJSON[[]grocery.Recipe](t, w)
+	want := []string{"Soup", "Chili", "Tacos"}
+	for i, name := range want {
+		if i >= len(got) || got[i].Name != name {
+			t.Fatalf("order after reorder: got %+v, want %v", got, want)
+		}
+	}
+
+	if w := hh.do(t, http.MethodPost, "/api/recipes/reorder", map[string]any{"ids": "nope"}); w.Code != http.StatusBadRequest {
+		t.Errorf("reorder with a malformed body: want 400, got %d", w.Code)
+	}
+}
+
+func TestHandlerItems_DeleteRecipeOwnedItemIs409(t *testing.T) {
+	hh := newHarness(t, nil)
+	r := mkRecipe(t, hh, "Chili")
+	beef := mkIngredient(t, hh, r.ID, "Beef")
+
+	w := hh.do(t, http.MethodDelete, "/api/items/"+beef.ID, nil)
+	// 409, not 404: the item is right there, the request is refused because
+	// deleting it from the grocery side would silently break the recipe.
+	if w.Code != http.StatusConflict {
+		t.Fatalf("want 409, got %d (%s)", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "recipe") {
+		t.Errorf("409 message does not mention the recipe: %s", w.Body.String())
+	}
+
+	items := decodeJSON[[]grocery.Item](t, hh.do(t, http.MethodGet, "/api/items", nil))
+	if len(items) != 1 {
+		t.Errorf("refused delete still removed the item: %+v", items)
+	}
+}
+
+func TestBroker_RecipeRoutesNotifyExactlyOnce(t *testing.T) {
+	hh := newHarness(t, nil)
+	r := mkRecipe(t, hh, "Chili")
+	other := mkRecipe(t, hh, "Tacos")
+	beef := mkIngredient(t, hh, r.ID, "Beef")
+
+	notifyCountC(t, hh.broker, "POST /api/recipes", 1, func() {
+		hh.do(t, http.MethodPost, "/api/recipes", map[string]string{"name": "Soup"})
+	})
+	notifyCountC(t, hh.broker, "PATCH /api/recipes/:id (both fields)", 1, func() {
+		hh.do(t, http.MethodPatch, "/api/recipes/"+r.ID,
+			map[string]any{"name": "Chili Verde", "enabled": true})
+	})
+	notifyCountC(t, hh.broker, "POST /api/recipes/:id/ingredients", 1, func() {
+		hh.do(t, http.MethodPost, "/api/recipes/"+r.ID+"/ingredients",
+			map[string]string{"name": "Beans"})
+	})
+	notifyCountC(t, hh.broker, "DELETE /api/recipes/:id/ingredients/:item_id", 1, func() {
+		hh.do(t, http.MethodDelete, "/api/recipes/"+r.ID+"/ingredients/"+beef.ID, nil)
+	})
+	notifyCountC(t, hh.broker, "POST /api/recipes/reorder", 1, func() {
+		hh.do(t, http.MethodPost, "/api/recipes/reorder",
+			map[string]any{"ids": []string{other.ID, r.ID}})
+	})
+	notifyCountC(t, hh.broker, "DELETE /api/recipes/:id", 1, func() {
+		hh.do(t, http.MethodDelete, "/api/recipes/"+r.ID, nil)
+	})
+
+	// Rejected requests must be silent: no write happened, so no client should
+	// be told to refetch.
+	notifyCountC(t, hh.broker, "POST /api/recipes (duplicate name)", 0, func() {
+		hh.do(t, http.MethodPost, "/api/recipes", map[string]string{"name": "Tacos"})
+	})
+	notifyCountC(t, hh.broker, "DELETE /api/recipes/:id (unknown)", 0, func() {
+		hh.do(t, http.MethodDelete, "/api/recipes/nope", nil)
+	})
+}
