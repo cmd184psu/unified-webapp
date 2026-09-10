@@ -10,7 +10,8 @@
   "slideshow-test.cmdhome.net":       "slideshow",
   "menuserver-test.cmdhome.net":       "menuserver",
   "obsidianoid-test.cmdhome.net":      "obsidianoid",
-  "obsidianoid.cmdhome.net":           "obsidianoid"
+  "obsidianoid.cmdhome.net":           "obsidianoid",
+  "multissh-test.cmdhome.net":         "multissh"
 
   },
   "grocery": {
@@ -55,5 +56,16 @@
     "threads_folder": "Threads",
     "thread_count": 4,
     "autosave_disabled": false
+  },
+  "multissh": {
+    "static_dir": "./web/multissh",
+    "ssh_dir": "",
+    "upload_dir": "",
+    "hosts_path": "./data/multissh/multissh-hosts.json",
+    "browse_root": "",
+    "max_sessions": 3,
+    "max_upload_bytes": 8589934592,
+    "strict_host_key": false,
+    "known_hosts_path": ""
   }
 }
