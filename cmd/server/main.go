@@ -98,7 +98,8 @@ func main() {
 	adminRouted := adminIsRouted(cfg.Routing)
 	svc, err := auth.FromConfig(cfg.Auth, knownModules, adminRouted)
 	if err != nil {
-		log.Fatalf("auth: %v", err)
+		// Errors from the auth package are already "auth:"-prefixed.
+		log.Fatalf("%v", err)
 	}
 
 	dispatch := buildDispatcher(cfg, svc)
