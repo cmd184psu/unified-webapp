@@ -2,9 +2,9 @@ package menuserver
 
 import (
 	"net/http"
-	"strings"
 
 	"cmd184psu/unified-webapp/internal/platform/config"
+	"cmd184psu/unified-webapp/internal/platform/fspath"
 	"cmd184psu/unified-webapp/internal/platform/response"
 )
 
@@ -52,7 +52,7 @@ func (h *Handler) handleSubjects(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleMenu(w http.ResponseWriter, r *http.Request) {
 	subject := r.PathValue("subject")
 	item := r.PathValue("item")
-	if !validName(subject) || !validName(item) {
+	if !fspath.ValidName(subject) || !fspath.ValidName(item) {
 		http.NotFound(w, r)
 		return
 	}
@@ -64,12 +64,4 @@ func (h *Handler) handleMenu(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(data) //nolint:errcheck
-}
-
-// validName returns true if name is a safe single-path-component identifier.
-func validName(name string) bool {
-	return name != "" &&
-		!strings.HasPrefix(name, ".") &&
-		!strings.Contains(name, "/") &&
-		!strings.Contains(name, "\\")
 }

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"cmd184psu/unified-webapp/internal/platform/broker"
 	"cmd184psu/unified-webapp/internal/platform/config"
 )
 
@@ -34,7 +35,7 @@ type ConductorState struct {
 }
 
 // Conductor is the server-side playlist manager. It owns the tick clock, the
-// current ConductorState, and broadcasts state changes via its SSEBroker.
+// current ConductorState, and broadcasts state changes via its broker.
 // Call Run() once (from Build) to start the background goroutine.
 type Conductor struct {
 	mu         sync.Mutex
@@ -43,13 +44,13 @@ type Conductor struct {
 	playlist   []int         // subject indices in current play order
 	playPos    int           // index into playlist (current subject)
 	resetCh    chan time.Duration // send new duration to reset the ticker
-	broker     *SSEBroker
+	broker     *broker.Broker
 	musicStore *MusicStore
 }
 
 // NewConductor creates a Conductor initialised from cfg and the subjects in store.
 // It does not start the background goroutine; call Run() for that.
-func NewConductor(store *Store, music *MusicStore, broker *SSEBroker, cfg config.SlideshowConfig) *Conductor {
+func NewConductor(store *Store, music *MusicStore, b *broker.Broker, cfg config.SlideshowConfig) *Conductor {
 	subjects, _ := store.Subjects()
 
 	interval := cfg.IntervalSeconds
@@ -70,7 +71,7 @@ func NewConductor(store *Store, music *MusicStore, broker *SSEBroker, cfg config
 	c := &Conductor{
 		subjects:   subjects,
 		resetCh:    make(chan time.Duration, 1),
-		broker:     broker,
+		broker:     b,
 		musicStore: music,
 		state: ConductorState{
 			Mode:             mode,

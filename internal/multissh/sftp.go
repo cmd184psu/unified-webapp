@@ -7,11 +7,12 @@ import (
 	"strings"
 
 	"cmd184psu/unified-webapp/internal/multissh/sshproxy"
+	"cmd184psu/unified-webapp/internal/platform/response"
 )
 
 func (s *Server) handleSFTPListDir(w http.ResponseWriter, r *http.Request) {
 	if s.opts.RemoteLister == nil {
-		writeError(w, http.StatusInternalServerError, "remote lister unavailable")
+		response.WriteError(w, http.StatusInternalServerError, "remote lister unavailable")
 		return
 	}
 	var req struct {
@@ -22,16 +23,16 @@ func (s *Server) handleSFTPListDir(w http.ResponseWriter, r *http.Request) {
 		Path string `json:"path"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		response.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if strings.TrimSpace(req.Host) == "" || strings.TrimSpace(req.User) == "" {
-		writeError(w, http.StatusBadRequest, "invalid target")
+		response.WriteError(w, http.StatusBadRequest, "invalid target")
 		return
 	}
 	keyPath, err := sshproxy.ResolveKeyPath(s.opts.SSHKeyDir, req.Key)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid target key")
+		response.WriteError(w, http.StatusBadRequest, "invalid target key")
 		return
 	}
 	pathListed, entries, err := s.opts.RemoteLister.ListDir(r.Context(), sshproxy.ConnectParams{
@@ -42,7 +43,7 @@ func (s *Server) handleSFTPListDir(w http.ResponseWriter, r *http.Request) {
 	}, req.Path)
 	if err != nil {
 		log.Printf("server: sftp listdir failed: %v", err)
-		writeError(w, http.StatusBadGateway, "unable to list remote directory")
+		response.WriteError(w, http.StatusBadGateway, "unable to list remote directory")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

@@ -2,13 +2,14 @@ package obsidianoid
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strconv"
 
+	"cmd184psu/unified-webapp/internal/platform/broker"
 	"cmd184psu/unified-webapp/internal/platform/config"
+	"cmd184psu/unified-webapp/internal/platform/response"
 	"github.com/russross/blackfriday/v2"
 )
 
@@ -16,11 +17,11 @@ import (
 type Handler struct {
 	cfg     config.ObsidianoidConfig
 	state   *StateStore
-	brokers []*eventBroker
+	brokers []*broker.Broker
 }
 
 // NewHandler constructs a Handler. brokers must be indexed in the same order as cfg.Vaults.
-func NewHandler(cfg config.ObsidianoidConfig, state *StateStore, brokers []*eventBroker) *Handler {
+func NewHandler(cfg config.ObsidianoidConfig, state *StateStore, brokers []*broker.Broker) *Handler {
 	return &Handler{cfg: cfg, state: state, brokers: brokers}
 }
 
@@ -61,14 +62,13 @@ func (h *Handler) handleVaults(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"autosave":%v}`, !h.cfg.AutoSaveDisabled)
+	response.WriteJSON(w, http.StatusOK, map[string]bool{"autosave": !h.cfg.AutoSaveDisabled})
 }
 
 func (h *Handler) handleTree(w http.ResponseWriter, r *http.Request) {
 	tree, err := vaultTree(h.vaultPath(r))
 	if err != nil {
-		http.Error(w, "failed to list vault", http.StatusInternalServerError)
+		response.WriteError(w, http.StatusInternalServerError, "failed to list vault")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -78,15 +78,15 @@ func (h *Handler) handleTree(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleNoteGet(w http.ResponseWriter, r *http.Request) {
 	rel := r.URL.Query().Get("path")
 	if rel == "" {
-		http.Error(w, "path required", http.StatusBadRequest)
+		response.WriteError(w, http.StatusBadRequest, "path required")
 		return
 	}
 	content, err := readNote(h.vaultPath(r), rel)
 	if err != nil {
 		if os.IsNotExist(err) || os.IsPermission(err) {
-			http.Error(w, "note not found", http.StatusNotFound)
+			response.WriteError(w, http.StatusNotFound, "note not found")
 		} else {
-			http.Error(w, "read error", http.StatusInternalServerError)
+			response.WriteError(w, http.StatusInternalServerError, "read error")
 		}
 		return
 	}
@@ -97,19 +97,19 @@ func (h *Handler) handleNoteGet(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleNotePut(w http.ResponseWriter, r *http.Request) {
 	rel := r.URL.Query().Get("path")
 	if rel == "" {
-		http.Error(w, "path required", http.StatusBadRequest)
+		response.WriteError(w, http.StatusBadRequest, "path required")
 		return
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "read body failed", http.StatusBadRequest)
+		response.WriteError(w, http.StatusBadRequest, "read body failed")
 		return
 	}
 	if err := writeNote(h.vaultPath(r), rel, body); err != nil {
 		if os.IsPermission(err) {
-			http.Error(w, "forbidden", http.StatusForbidden)
+			response.WriteError(w, http.StatusForbidden, "forbidden")
 		} else {
-			http.Error(w, "write error", http.StatusInternalServerError)
+			response.WriteError(w, http.StatusInternalServerError, "write error")
 		}
 		return
 	}
@@ -119,7 +119,7 @@ func (h *Handler) handleNotePut(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleRender(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "read error", http.StatusBadRequest)
+		response.WriteError(w, http.StatusBadRequest, "read error")
 		return
 	}
 	flags := blackfriday.CommonExtensions |
@@ -138,7 +138,7 @@ func (h *Handler) handleRender(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleThreadsGet(w http.ResponseWriter, r *http.Request) {
 	ts, err := readThreads(h.vaultPath(r), h.cfg.ThreadsFolder, h.cfg.ThreadCount, h.state.States())
 	if err != nil {
-		http.Error(w, "failed to read threads", http.StatusInternalServerError)
+		response.WriteError(w, http.StatusInternalServerError, "failed to read threads")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -148,15 +148,15 @@ func (h *Handler) handleThreadsGet(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleThreadsPut(w http.ResponseWriter, r *http.Request) {
 	var incoming []Thread
 	if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		response.WriteError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 	if len(incoming) != h.cfg.ThreadCount {
-		http.Error(w, "wrong thread count", http.StatusBadRequest)
+		response.WriteError(w, http.StatusBadRequest, "wrong thread count")
 		return
 	}
 	if err := writeThreads(h.vaultPath(r), h.cfg.ThreadsFolder, incoming); err != nil {
-		http.Error(w, "write error", http.StatusInternalServerError)
+		response.WriteError(w, http.StatusInternalServerError, "write error")
 		return
 	}
 	disabled := make([]bool, len(incoming))
@@ -164,28 +164,27 @@ func (h *Handler) handleThreadsPut(w http.ResponseWriter, r *http.Request) {
 		disabled[i] = t.Disabled
 	}
 	if err := h.state.SetDisabled(disabled); err != nil {
-		http.Error(w, "state save error", http.StatusInternalServerError)
+		response.WriteError(w, http.StatusInternalServerError, "state save error")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) handleGitStatus(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"available":%v}`, gitIsAvailable(h.vaultPath(r)))
+	response.WriteJSON(w, http.StatusOK, map[string]bool{"available": gitIsAvailable(h.vaultPath(r))})
 }
 
 func (h *Handler) handleGitSync(w http.ResponseWriter, r *http.Request) {
 	root := h.vaultPath(r)
 	if !gitIsAvailable(root) {
-		http.Error(w, "git not available", http.StatusNotFound)
+		response.WriteError(w, http.StatusNotFound, "git not available")
 		return
 	}
 	var body struct {
 		Message string `json:"message"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		response.WriteError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 	if body.Message == "" {
@@ -202,5 +201,5 @@ func (h *Handler) handleGitSync(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
-	h.brokers[h.vaultIdx(r)].serveSSE(w, r)
+	h.brokers[h.vaultIdx(r)].ServeSSE("note-changed", nil)(w, r)
 }

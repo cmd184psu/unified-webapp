@@ -5,9 +5,10 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 
+	"cmd184psu/unified-webapp/internal/platform/broker"
 	"cmd184psu/unified-webapp/internal/platform/config"
+	"cmd184psu/unified-webapp/internal/platform/static"
 )
 
 // Build returns a ready-to-use http.Handler for the obsidianoid module.
@@ -34,9 +35,10 @@ func Build(cfg config.ObsidianoidConfig) (http.Handler, error) {
 		return nil, fmt.Errorf("obsidianoid: state store: %w", err)
 	}
 
-	brokers := make([]*eventBroker, len(cfg.Vaults))
+	brokers := make([]*broker.Broker, len(cfg.Vaults))
 	for i, v := range cfg.Vaults {
-		b := newEventBroker()
+		b := broker.NewBroker(0)
+		b.SetMaxSubscribers(cfg.SSEMaxSubscribers)
 		brokers[i] = b
 
 		if _, err := os.Stat(v.Path); err != nil {
@@ -54,21 +56,7 @@ func Build(cfg config.ObsidianoidConfig) (http.Handler, error) {
 	h := NewHandler(cfg, state, brokers)
 	mux := http.NewServeMux()
 	h.Register(mux)
-	mux.Handle("/", &staticHandler{dir: cfg.StaticDir})
+	mux.Handle("/", static.NewHandler(cfg.StaticDir))
 
 	return mux, nil
-}
-
-// staticHandler serves files from dir with an index.html fallback.
-type staticHandler struct {
-	dir string
-}
-
-func (sh *staticHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := filepath.Join(sh.dir, filepath.Clean("/"+r.URL.Path))
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		http.ServeFile(w, r, filepath.Join(sh.dir, "index.html"))
-		return
-	}
-	http.ServeFile(w, r, path)
 }

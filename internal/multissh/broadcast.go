@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"cmd184psu/unified-webapp/internal/multissh/sshproxy"
+	"cmd184psu/unified-webapp/internal/platform/response"
 	"github.com/gorilla/websocket"
 )
 
@@ -220,21 +221,21 @@ func (s *Server) resolveBroadcastSource(req broadcastRequest) (string, string, i
 
 func (s *Server) handleBroadcastPost(w http.ResponseWriter, r *http.Request) {
 	if s.broadcasts == nil || s.uploads == nil {
-		writeError(w, http.StatusInternalServerError, "broadcast unavailable")
+		response.WriteError(w, http.StatusInternalServerError, "broadcast unavailable")
 		return
 	}
 	var req broadcastRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		response.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	localPath, baseName, totalSize, err := s.resolveBroadcastSource(req)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		response.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if len(req.Targets) < 1 || len(req.Targets) > s.maxSessions {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("targets must contain 1 to %d entries", s.maxSessions))
+		response.WriteError(w, http.StatusBadRequest, fmt.Sprintf("targets must contain 1 to %d entries", s.maxSessions))
 		return
 	}
 
@@ -249,7 +250,7 @@ func (s *Server) handleBroadcastPost(w http.ResponseWriter, r *http.Request) {
 	creds := make([]sshproxy.Secret, 0, len(req.Targets))
 	for i, t := range req.Targets {
 		if strings.TrimSpace(t.Host) == "" || strings.TrimSpace(t.User) == "" {
-			writeError(w, http.StatusBadRequest, "invalid target")
+			response.WriteError(w, http.StatusBadRequest, "invalid target")
 			return
 		}
 		// A target authenticates with a key or with a password, never both and
@@ -257,14 +258,14 @@ func (s *Server) handleBroadcastPost(w http.ResponseWriter, r *http.Request) {
 		hasKey := strings.TrimSpace(t.Key) != ""
 		hasPassword := !t.Password.IsZero()
 		if hasKey == hasPassword {
-			writeError(w, http.StatusBadRequest, "each target needs exactly one of a key or a password")
+			response.WriteError(w, http.StatusBadRequest, "each target needs exactly one of a key or a password")
 			return
 		}
 		var keyPath string
 		if hasKey {
 			keyPath, err = sshproxy.ResolveKeyPath(s.opts.SSHKeyDir, t.Key)
 			if err != nil {
-				writeError(w, http.StatusBadRequest, "invalid target key")
+				response.WriteError(w, http.StatusBadRequest, "invalid target key")
 				return
 			}
 		}
@@ -290,7 +291,7 @@ func (s *Server) handleBroadcastPost(w http.ResponseWriter, r *http.Request) {
 
 	jobID, job, err := s.broadcasts.createJob(initial, creds)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "unable to start broadcast")
+		response.WriteError(w, http.StatusInternalServerError, "unable to start broadcast")
 		return
 	}
 
@@ -323,17 +324,17 @@ func (s *Server) runBroadcastTransfer(job *broadcastJob, index int, host string,
 
 func (s *Server) handleBroadcastWS(w http.ResponseWriter, r *http.Request) {
 	if s.broadcasts == nil {
-		writeError(w, http.StatusInternalServerError, "broadcast unavailable")
+		response.WriteError(w, http.StatusInternalServerError, "broadcast unavailable")
 		return
 	}
 	jobID := strings.TrimSpace(r.URL.Query().Get("job"))
 	if jobID == "" {
-		writeError(w, http.StatusBadRequest, "missing job id")
+		response.WriteError(w, http.StatusBadRequest, "missing job id")
 		return
 	}
 	job, ok := s.broadcasts.getJob(jobID)
 	if !ok {
-		writeError(w, http.StatusNotFound, "job not found")
+		response.WriteError(w, http.StatusNotFound, "job not found")
 		return
 	}
 

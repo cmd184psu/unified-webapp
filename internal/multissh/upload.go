@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"cmd184psu/unified-webapp/internal/platform/response"
 )
 
 type uploadMeta struct {
@@ -88,40 +90,40 @@ func (u *uploadRegistry) remove(id string) (uploadMeta, bool) {
 
 func (s *Server) handleUploadPost(w http.ResponseWriter, r *http.Request) {
 	if s.uploads == nil {
-		writeError(w, http.StatusInternalServerError, "upload storage unavailable")
+		response.WriteError(w, http.StatusInternalServerError, "upload storage unavailable")
 		return
 	}
 	mr, err := r.MultipartReader()
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid multipart request")
+		response.WriteError(w, http.StatusBadRequest, "invalid multipart request")
 		return
 	}
 
 	part, err := nextUploadPart(mr)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		response.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if part == nil {
-		writeError(w, http.StatusBadRequest, "missing file part")
+		response.WriteError(w, http.StatusBadRequest, "missing file part")
 		return
 	}
 	defer part.Close()
 
 	name, err := sanitizeUploadName(part.FileName())
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid file name")
+		response.WriteError(w, http.StatusBadRequest, "invalid file name")
 		return
 	}
 	id, err := randomHexID(16)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "unable to stage upload")
+		response.WriteError(w, http.StatusInternalServerError, "unable to stage upload")
 		return
 	}
 	stagedPath := filepath.Join(s.uploads.uploadDir, id+"-"+name)
 	f, err := os.OpenFile(stagedPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "unable to stage upload")
+		response.WriteError(w, http.StatusInternalServerError, "unable to stage upload")
 		return
 	}
 
@@ -131,10 +133,10 @@ func (s *Server) handleUploadPost(w http.ResponseWriter, r *http.Request) {
 	if copyErr != nil || closeErr != nil {
 		_ = os.Remove(stagedPath)
 		if errors.Is(copyErr, errUploadTooLarge) {
-			writeError(w, http.StatusRequestEntityTooLarge, "upload exceeds maximum allowed size")
+			response.WriteError(w, http.StatusRequestEntityTooLarge, "upload exceeds maximum allowed size")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "unable to stage upload")
+		response.WriteError(w, http.StatusInternalServerError, "unable to stage upload")
 		return
 	}
 
@@ -147,7 +149,7 @@ func (s *Server) handleUploadPost(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUploadsGet(w http.ResponseWriter, r *http.Request) {
 	if s.uploads == nil {
-		writeError(w, http.StatusInternalServerError, "upload storage unavailable")
+		response.WriteError(w, http.StatusInternalServerError, "upload storage unavailable")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -156,17 +158,17 @@ func (s *Server) handleUploadsGet(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUploadsDelete(w http.ResponseWriter, r *http.Request) {
 	if s.uploads == nil {
-		writeError(w, http.StatusInternalServerError, "upload storage unavailable")
+		response.WriteError(w, http.StatusInternalServerError, "upload storage unavailable")
 		return
 	}
 	id := r.PathValue("id")
 	meta, ok := s.uploads.remove(id)
 	if !ok {
-		writeError(w, http.StatusNotFound, "upload not found")
+		response.WriteError(w, http.StatusNotFound, "upload not found")
 		return
 	}
 	if err := os.Remove(meta.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		writeError(w, http.StatusInternalServerError, "unable to remove upload")
+		response.WriteError(w, http.StatusInternalServerError, "unable to remove upload")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

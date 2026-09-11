@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"cmd184psu/unified-webapp/internal/multissh/sshproxy"
+	"cmd184psu/unified-webapp/internal/platform/response"
 )
 
 // hostConfig is the persisted host preset -- the only shape that reaches
@@ -201,7 +202,7 @@ func normalizeHostFields(ip string, port int, user, key, remoteDir string) (host
 
 func (s *Server) handleHostsGet(w http.ResponseWriter, r *http.Request) {
 	if s.hosts == nil {
-		writeError(w, http.StatusInternalServerError, "host storage unavailable")
+		response.WriteError(w, http.StatusInternalServerError, "host storage unavailable")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -210,18 +211,18 @@ func (s *Server) handleHostsGet(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleHostsPut(w http.ResponseWriter, r *http.Request) {
 	if s.hosts == nil {
-		writeError(w, http.StatusInternalServerError, "host storage unavailable")
+		response.WriteError(w, http.StatusInternalServerError, "host storage unavailable")
 		return
 	}
 	var req struct {
 		Hosts []hostRequest `json:"hosts"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		response.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if err := s.hosts.set(req.Hosts); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		response.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

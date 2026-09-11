@@ -16,6 +16,7 @@ type Config struct {
 	TLSCert     string            `json:"tls_cert"`
 	TLSKey      string            `json:"tls_key"`
 	Routing     map[string]string `json:"host_routing"` // hostname → module name
+	Server      ServerConfig      `json:"server"`
 	Grocery     GroceryConfig     `json:"grocery"`
 	Todo        TodoConfig        `json:"todo"`
 	Slideshow   SlideshowConfig   `json:"slideshow"`
@@ -23,6 +24,21 @@ type Config struct {
 	Obsidianoid ObsidianoidConfig `json:"obsidianoid"`
 	Multissh    MultisshConfig    `json:"multissh"`
 }
+
+// ServerConfig holds configuration for the shared HTTP server infrastructure,
+// as opposed to any single module.
+type ServerConfig struct {
+	// OriginCheck controls request-origin validation. Semantics are wired up
+	// separately; this field only carries the configured value for now.
+	OriginCheck string `json:"origin_check"`
+	// SSEMaxSubscribers caps concurrent SSE subscribers per broker across all
+	// modules. 0 (unset) takes DefaultSSEMaxSubscribers.
+	SSEMaxSubscribers int `json:"sse_max_subscribers"`
+}
+
+// DefaultSSEMaxSubscribers is the SSE subscriber cap applied when
+// server.sse_max_subscribers is unset (0) in the config file.
+const DefaultSSEMaxSubscribers = 64
 
 // ObsidianoidVault holds the per-vault configuration for the obsidianoid module.
 type ObsidianoidVault struct {
@@ -39,6 +55,9 @@ type ObsidianoidConfig struct {
 	ThreadsFolder    string             `json:"threads_folder"`
 	ThreadCount      int                `json:"thread_count"`
 	AutoSaveDisabled bool               `json:"autosave_disabled"`
+	// SSEMaxSubscribers is the effective SSE subscriber cap, copied from
+	// Config.Server.SSEMaxSubscribers by Load. Not read from the config file.
+	SSEMaxSubscribers int `json:"-"`
 }
 
 // TodoConfig holds configuration specific to the todo module.
@@ -48,6 +67,9 @@ type TodoConfig struct {
 	Ext                 string `json:"ext"`
 	DefaultSubject      string `json:"default_subject"`
 	SyncIntervalSeconds int    `json:"sync_interval_seconds"`
+	// SSEMaxSubscribers is the effective SSE subscriber cap, copied from
+	// Config.Server.SSEMaxSubscribers by Load. Not read from the config file.
+	SSEMaxSubscribers int `json:"-"`
 }
 
 // MenuserverConfig holds configuration specific to the menuserver module.
@@ -75,6 +97,9 @@ type SlideshowConfig struct {
 	DefaultShuffle  bool        `json:"default_shuffle"`
 	DefaultTheme    string      `json:"default_theme"`
 	Music           MusicConfig `json:"music"`
+	// SSEMaxSubscribers is the effective SSE subscriber cap, copied from
+	// Config.Server.SSEMaxSubscribers by Load. Not read from the config file.
+	SSEMaxSubscribers int `json:"-"`
 }
 
 // GroceryConfig holds configuration specific to the grocery module.
@@ -85,6 +110,9 @@ type GroceryConfig struct {
 	Progress            bool     `json:"progress"`
 	SyncIntervalSeconds int      `json:"sync_interval_seconds"`
 	Title               string   `json:"title"`
+	// SSEMaxSubscribers is the effective SSE subscriber cap, copied from
+	// Config.Server.SSEMaxSubscribers by Load. Not read from the config file.
+	SSEMaxSubscribers int `json:"-"`
 }
 
 // MultisshConfig holds configuration specific to the multissh module.
@@ -194,6 +222,7 @@ func Load(path string) (*Config, error) {
 
 	data, err := os.ReadFile(expanded)
 	if os.IsNotExist(err) {
+		applyServerDefaults(cfg)
 		return cfg, nil
 	}
 	if err != nil {
@@ -234,7 +263,22 @@ func Load(path string) (*Config, error) {
 			return nil, err
 		}
 	}
+	applyServerDefaults(cfg)
 	return cfg, nil
+}
+
+// applyServerDefaults normalizes cfg.Server and copies the effective SSE
+// subscriber cap into each SSE-serving module's config, mirroring the
+// path-expansion pattern used elsewhere in Load.
+func applyServerDefaults(cfg *Config) {
+	max := cfg.Server.SSEMaxSubscribers
+	if max <= 0 {
+		max = DefaultSSEMaxSubscribers
+	}
+	cfg.Grocery.SSEMaxSubscribers = max
+	cfg.Todo.SSEMaxSubscribers = max
+	cfg.Slideshow.SSEMaxSubscribers = max
+	cfg.Obsidianoid.SSEMaxSubscribers = max
 }
 
 func expandMenuserverPaths(m *MenuserverConfig) error {

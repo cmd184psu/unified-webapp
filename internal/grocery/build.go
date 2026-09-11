@@ -7,6 +7,7 @@ import (
 
 	"cmd184psu/unified-webapp/internal/platform/broker"
 	"cmd184psu/unified-webapp/internal/platform/config"
+	"cmd184psu/unified-webapp/internal/platform/static"
 )
 
 // Build returns a ready-to-use http.Handler for the grocery module.
@@ -29,25 +30,12 @@ func Build(cfg config.GroceryConfig) (http.Handler, error) {
 	}
 
 	b := broker.NewBroker(cfg.SyncIntervalSeconds * 1000)
+	b.SetMaxSubscribers(cfg.SSEMaxSubscribers)
 	h := NewHandler(s, groups, cfg.Progress, cfg.SyncIntervalSeconds, cfg.Title, b)
 
 	mux := http.NewServeMux()
 	h.Register(mux)
-	mux.Handle("/", &staticHandler{dir: cfg.StaticDir})
+	mux.Handle("/", static.NewHandler(cfg.StaticDir))
 
 	return mux, nil
-}
-
-// staticHandler serves files from dir with an index.html fallback for SPA routing.
-type staticHandler struct {
-	dir string
-}
-
-func (sh *staticHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := filepath.Join(sh.dir, filepath.Clean("/"+r.URL.Path))
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		http.ServeFile(w, r, filepath.Join(sh.dir, "index.html"))
-		return
-	}
-	http.ServeFile(w, r, path)
 }
