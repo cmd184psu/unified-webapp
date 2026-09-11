@@ -40,3 +40,8 @@ node_modules/
 # unified-webapp-example.json or anything nested.
 /unified-webapp
 /unified-webapp-arm64-linux
+
+# Local-testing profile runtime state (created by local-test/setup.sh).
+# The profile itself (config.json, setup.sh, glauth.cfg) stays tracked.
+/local-test/data/
+/local-test/admin.pin

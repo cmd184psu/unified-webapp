@@ -1,0 +1,113 @@
+{
+  "port": 8080,
+  "tls_cert": "",
+  "tls_key": "",
+  "host_routing": {
+    "localhost":         "grocery",
+    "grocery.local":     "grocery",
+    "todo.local":        "todo",
+    "slideshow.local":   "slideshow",
+    "menu.local":        "menuserver",
+    "menuserver.local":  "menuserver",
+    "obsidianoid.local": "obsidianoid",
+    "multissh.local":    "multissh",
+    "admin.local":       "admin"
+  },
+  "server": {
+    "origin_check": "enforce",
+    "sse_max_subscribers": 64
+  },
+  "grocery": {
+    "static_dir": "./web/grocery",
+    "data_file": "./local-test/data/grocery.json",
+    "groups": [
+      "Produce",
+      "Meats",
+      "mid store",
+      "back wall",
+      "frozen",
+      "deli area near front"
+    ],
+    "progress": false,
+    "sync_interval_seconds": 1,
+    "title": "Grocery List (local test)"
+  },
+  "todo": {
+    "static_dir": "./web/todo",
+    "data_dir": "./local-test/data/todo",
+    "ext": "json",
+    "default_subject": "home",
+    "sync_interval_seconds": 1
+  },
+  "slideshow": {
+    "static_dir": "./web/slideshow",
+    "image_dir": "./local-test/data/slideshow",
+    "prefix": "slides",
+    "default_subject": ""
+  },
+  "menuserver": {
+    "static_dir": "./web/menuserver",
+    "data_dir": "./local-test/data/menuserver",
+    "show_all_pages": true
+  },
+  "obsidianoid": {
+    "static_dir": "./web/obsidianoid",
+    "data_dir": "./local-test/data/obsidianoid",
+    "vaults": [
+      { "path": "./local-test/data/vault", "name": "Test Vault", "theme": "dark" }
+    ],
+    "threads_folder": "Threads",
+    "thread_count": 4,
+    "autosave_disabled": false
+  },
+  "multissh": {
+    "static_dir": "./web/multissh",
+    "ssh_dir": "./local-test/data/multissh/ssh",
+    "upload_dir": "./local-test/data/multissh/uploads",
+    "hosts_path": "./local-test/data/multissh/hosts.json",
+    "browse_root": "",
+    "max_sessions": 3,
+    "max_upload_bytes": 8589934592,
+    "strict_host_key": false,
+    "known_hosts_path": ""
+  },
+  "admin": {
+    "static_dir": "./web/admin",
+    "max_body_bytes": 1048576
+  },
+  "auth": {
+    "modules": {
+      "todo": ["pin"],
+      "slideshow": ["pin"],
+      "menuserver": ["key"],
+      "obsidianoid": ["ldap"],
+      "multissh": ["ldap", "key"],
+      "admin": []
+    },
+    "admin_pin_file": "./admin.pin",
+    "data_dir": "./data/auth",
+    "cookie_secure": false,
+    "cookie_domain": "",
+    "session": {
+      "ttl_hours": 720,
+      "refresh_after_fraction": 0.5
+    },
+    "ldap": {
+      "url": "ldap://127.0.0.1:3893",
+      "start_tls": false,
+      "insecure_tls": false,
+      "bind_dn": "cn=serviceuser,dc=glauth,dc=com",
+      "bind_password": "svc-secret-1",
+      "base_dn": "dc=glauth,dc=com",
+      "user_filter": "(cn=%s)",
+      "required_groups": ["household"],
+      "timeout_seconds": 5
+    },
+    "pins": [
+      { "name": "tester", "hash": "$2a$10$t705LW5e1Oo9upyp2.xjb.ChrAWIAcXfBtrkjSWgrJZHQwko20lQq" }
+    ],
+    "api_keys": [
+      { "name": "local-test", "hash": "sha256:c7fa7e4500e52a9c89f647736a72b39aaed9bcf4c3b2327c2b228adb9c7c10c3" }
+    ]
+  }
+}
