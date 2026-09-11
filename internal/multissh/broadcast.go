@@ -52,11 +52,6 @@ type broadcastCompleteFrame struct {
 	Type string `json:"type"`
 }
 
-type broadcastEvent struct {
-	frame    *broadcastProgressFrame
-	complete bool
-}
-
 type broadcastJob struct {
 	id string
 
@@ -67,7 +62,12 @@ type broadcastJob struct {
 	// reaches a terminal state (FR-N4).
 	creds []sshproxy.Secret
 	done  bool
-	subs  map[chan broadcastEvent]struct{}
+	// doneCh is closed under mu the moment done flips to true. Completion
+	// travels on it rather than as a fan-out event so a subscriber can
+	// never miss it: a buffered progress channel can drop frames when
+	// full, but a closed channel is observable forever.
+	doneCh chan struct{}
+	subs   map[chan broadcastProgressFrame]struct{}
 }
 
 type broadcastRegistry struct {
@@ -99,7 +99,7 @@ func (b *broadcastRegistry) createJob(targets []broadcastProgressFrame, creds []
 	if err != nil {
 		return "", nil, err
 	}
-	job := &broadcastJob{id: id, targets: targets, creds: creds, subs: make(map[chan broadcastEvent]struct{})}
+	job := &broadcastJob{id: id, targets: targets, creds: creds, doneCh: make(chan struct{}), subs: make(map[chan broadcastProgressFrame]struct{})}
 	b.mu.Lock()
 	b.jobs[id] = job
 	b.mu.Unlock()
@@ -121,21 +121,22 @@ func (j *broadcastJob) snapshot() ([]broadcastProgressFrame, bool) {
 	return out, j.done
 }
 
-func (j *broadcastJob) subscribe() chan broadcastEvent {
+func (j *broadcastJob) subscribe() chan broadcastProgressFrame {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	ch := make(chan broadcastEvent, 32)
+	ch := make(chan broadcastProgressFrame, 32)
 	j.subs[ch] = struct{}{}
 	return ch
 }
 
-func (j *broadcastJob) unsubscribe(ch chan broadcastEvent) {
+// unsubscribe removes ch from the fan-out set. It deliberately does not
+// close ch: update sends to its copied subscriber list outside the job
+// lock, so closing here would race those sends into a panic. The channel
+// is simply dropped and garbage-collected.
+func (j *broadcastJob) unsubscribe(ch chan broadcastProgressFrame) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	if _, ok := j.subs[ch]; ok {
-		delete(j.subs, ch)
-		close(ch)
-	}
+	delete(j.subs, ch)
 }
 
 func (j *broadcastJob) update(frame broadcastProgressFrame) {
@@ -146,12 +147,11 @@ func (j *broadcastJob) update(frame broadcastProgressFrame) {
 	if frame.Index >= 0 && frame.Index < len(j.creds) && isBroadcastTerminal(frame.State) {
 		j.creds[frame.Index].Zero()
 	}
-	done := j.done
-	if !done && allBroadcastTargetsTerminal(j.targets) {
+	if !j.done && allBroadcastTargetsTerminal(j.targets) {
 		j.done = true
-		done = true
+		close(j.doneCh)
 	}
-	subs := make([]chan broadcastEvent, 0, len(j.subs))
+	subs := make([]chan broadcastProgressFrame, 0, len(j.subs))
 	for sub := range j.subs {
 		subs = append(subs, sub)
 	}
@@ -159,14 +159,8 @@ func (j *broadcastJob) update(frame broadcastProgressFrame) {
 
 	for _, sub := range subs {
 		select {
-		case sub <- broadcastEvent{frame: &frame}:
+		case sub <- frame:
 		default:
-		}
-		if done {
-			select {
-			case sub <- broadcastEvent{complete: true}:
-			default:
-			}
 		}
 	}
 }
@@ -344,6 +338,13 @@ func (s *Server) handleBroadcastWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer ws.Close()
 
+	// Subscribe before snapshotting. With the reverse order there is a gap
+	// in which the job can reach its final state: the snapshot says "not
+	// done", the completing update fans out to nobody, and the subscriber
+	// registered a moment later waits forever for a signal already fired.
+	sub := job.subscribe()
+	defer job.unsubscribe(sub)
+
 	snapshot, done := job.snapshot()
 	for _, frame := range snapshot {
 		_ = ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
@@ -357,20 +358,24 @@ func (s *Server) handleBroadcastWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sub := job.subscribe()
-	defer job.unsubscribe(sub)
 	for {
-		ev, ok := <-sub
-		if !ok {
-			return
-		}
-		if ev.frame != nil {
+		select {
+		case frame := <-sub:
 			_ = ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := ws.WriteJSON(ev.frame); err != nil {
+			if err := ws.WriteJSON(frame); err != nil {
 				return
 			}
-		}
-		if ev.complete {
+		case <-job.doneCh:
+			// Frames still buffered in sub (or dropped when its buffer
+			// filled) may postdate the snapshot; a fresh snapshot carries
+			// every target's final state, so send that and finish.
+			final, _ := job.snapshot()
+			for _, frame := range final {
+				_ = ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				if err := ws.WriteJSON(frame); err != nil {
+					return
+				}
+			}
 			_ = ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			_ = ws.WriteJSON(broadcastCompleteFrame{Type: "complete"})
 			return
