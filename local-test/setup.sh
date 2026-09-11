@@ -21,7 +21,7 @@ mkdir -p "$LT/data/todo/home" \
          "$LT/data/menuserver/home" \
          "$LT/data/obsidianoid" \
          "$LT/data/vault/Threads" \
-         "$LT/data/multissh/ssh" "$LT/data/multissh/uploads" \
+         "$LT/data/multissh/uploads" \
          "$LT/data/auth"
 
 echo "== admin PIN file (plaintext PIN, must be chmod 0400) =="

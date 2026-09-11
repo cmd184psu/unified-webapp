@@ -62,7 +62,7 @@
   },
   "multissh": {
     "static_dir": "./web/multissh",
-    "ssh_dir": "./local-test/data/multissh/ssh",
+    "ssh_dir": "~/.ssh",
     "upload_dir": "./local-test/data/multissh/uploads",
     "hosts_path": "./local-test/data/multissh/hosts.json",
     "browse_root": "",
