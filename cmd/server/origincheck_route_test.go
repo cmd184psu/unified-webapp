@@ -75,8 +75,8 @@ func routeMatrixConfig(t *testing.T, mode string) *config.Config {
 
 // newOriginCheckedServer wires a dispatcher the same way cmd/server/main.go
 // does: OriginCheck inside Wrap, outside the dispatcher.
-func newOriginCheckedServer(cfg *config.Config) *httptest.Server {
-	dispatch := buildDispatcher(cfg)
+func newOriginCheckedServer(t *testing.T, cfg *config.Config) *httptest.Server {
+	dispatch := buildDispatcher(cfg, noAuthService(t))
 	handler := middleware.Wrap(middleware.OriginCheck(cfg.Server.OriginCheck, dispatch))
 	return httptest.NewServer(handler)
 }
@@ -102,7 +102,7 @@ func foreignOriginPOST(t *testing.T, srv *httptest.Server, host, path string) *h
 // the module's on-disk/in-memory state is left untouched.
 func TestOriginCheckRouteMatrix_Enforce(t *testing.T) {
 	cfg := routeMatrixConfig(t, "enforce")
-	srv := newOriginCheckedServer(cfg)
+	srv := newOriginCheckedServer(t, cfg)
 	defer srv.Close()
 
 	cases := []struct {
@@ -162,7 +162,7 @@ func TestOriginCheckRouteMatrix_Enforce(t *testing.T) {
 func TestOriginCheckRouteMatrix_Menuserver(t *testing.T) {
 	t.Run("enforce rejects", func(t *testing.T) {
 		cfg := routeMatrixConfig(t, "enforce")
-		srv := newOriginCheckedServer(cfg)
+		srv := newOriginCheckedServer(t, cfg)
 		defer srv.Close()
 
 		res := foreignOriginPOST(t, srv, "menu.example", "/items")
@@ -175,7 +175,7 @@ func TestOriginCheckRouteMatrix_Menuserver(t *testing.T) {
 
 	t.Run("off passes through to the module's own behavior", func(t *testing.T) {
 		cfg := routeMatrixConfig(t, "off")
-		srv := newOriginCheckedServer(cfg)
+		srv := newOriginCheckedServer(t, cfg)
 		defer srv.Close()
 
 		res := foreignOriginPOST(t, srv, "menu.example", "/items")

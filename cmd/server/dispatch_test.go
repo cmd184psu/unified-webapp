@@ -10,9 +10,23 @@ import (
 	"strings"
 	"testing"
 
+	"cmd184psu/unified-webapp/internal/platform/auth"
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/platform/middleware"
 )
+
+// noAuthService builds a Service from an empty AuthConfig -- no modules
+// protected, no admin routed -- so buildDispatcher's gate is a pass-through
+// and these dispatcher-focused tests observe the same behavior they did
+// before the gate was mounted.
+func noAuthService(t *testing.T) *auth.Service {
+	t.Helper()
+	svc, err := auth.FromConfig(config.AuthConfig{}, knownModules, false)
+	if err != nil {
+		t.Fatalf("noAuthService: %v", err)
+	}
+	return svc
+}
 
 // multisshTestConfig returns a config whose multissh module can actually build:
 // a real static dir, a real ssh dir, and paths under t.TempDir().
@@ -73,7 +87,7 @@ func TestTwoHostnamesShareOneModuleInstance(t *testing.T) {
 		"ssh-a.example": "multissh",
 		"ssh-b.example": "multissh",
 	})
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg)))
+	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg, noAuthService(t))))
 	defer srv.Close()
 
 	res := doHost(t, srv, http.MethodPut, "ssh-a.example", "/api/hosts",
@@ -111,7 +125,7 @@ func TestModuleBuildFailureIsScopedToThatModule(t *testing.T) {
 	cfg.Grocery.StaticDir = groceryDir
 	cfg.Grocery.DataFile = filepath.Join(groceryDir, "grocery.json")
 
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg)))
+	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg, noAuthService(t))))
 	defer srv.Close()
 
 	res := doHost(t, srv, http.MethodGet, "ssh.example", "/api/config", "")
@@ -141,7 +155,7 @@ func TestModuleBuildFailureIsScopedToThatModule(t *testing.T) {
 // failure: its hostnames 503 and the binary still serves everything else.
 func TestUnknownModuleBecomesA503(t *testing.T) {
 	cfg := multisshTestConfig(t, map[string]string{"weird.example": "not-a-module"})
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg)))
+	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg, noAuthService(t))))
 	defer srv.Close()
 
 	res := doHost(t, srv, http.MethodGet, "weird.example", "/", "")
@@ -162,7 +176,7 @@ func TestUnknownModuleBecomesA503(t *testing.T) {
 func TestWebSocketOriginCheckThroughDispatcher(t *testing.T) {
 	const hostname = "ssh.example"
 	cfg := multisshTestConfig(t, map[string]string{hostname: "multissh"})
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg)))
+	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg, noAuthService(t))))
 	defer srv.Close()
 
 	cases := []struct {

@@ -23,6 +23,7 @@ import (
 	"cmd184psu/unified-webapp/internal/multissh"
 	"cmd184psu/unified-webapp/internal/obsidianoid"
 	"cmd184psu/unified-webapp/internal/todo"
+	"cmd184psu/unified-webapp/internal/platform/auth"
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/platform/middleware"
 	"cmd184psu/unified-webapp/internal/slideshow"
@@ -93,7 +94,19 @@ func main() {
 	if *flagCert != "" { cfg.TLSCert = *flagCert }
 	if *flagKey  != "" { cfg.TLSKey  = *flagKey  }
 
-	dispatch := buildDispatcher(cfg)
+	adminRouted := false
+	for _, module := range cfg.Routing {
+		if module == "admin" {
+			adminRouted = true
+			break
+		}
+	}
+	svc, err := auth.FromConfig(cfg.Auth, knownModules, adminRouted)
+	if err != nil {
+		log.Fatalf("auth: %v", err)
+	}
+
+	dispatch := buildDispatcher(cfg, svc)
 
 	addr    := fmt.Sprintf("0.0.0.0:%d", cfg.Port)
 	handler := middleware.Wrap(middleware.OriginCheck(cfg.Server.OriginCheck, dispatch))
@@ -197,19 +210,19 @@ func newServer(addr string, handler http.Handler) *http.Server {
 // The same table records failures. A module that cannot build gets a handler
 // that 503s with the reason, so one bad path takes down that module's
 // hostnames and leaves the rest of the binary serving.
-func buildDispatcher(cfg *config.Config) *Dispatcher {
+func buildDispatcher(cfg *config.Config, svc *auth.Service) *Dispatcher {
 	dispatch := newDispatcher()
 	built := make(map[string]http.Handler, len(cfg.Routing))
 	for host, module := range cfg.Routing {
 		h, ok := built[module]
 		if !ok {
-			var err error
-			h, err = buildModule(module, cfg)
+			hh, err := buildModule(module, cfg)
 			if err != nil {
 				log.Printf("ERROR: module %q failed to build and will return 503 on every request: %v", module, err)
 				h = unavailableHandler(module, err)
+			} else {
+				h = middleware.BodyLimit(limitFor(module, cfg), svc.Gate(module, hh))
 			}
-			h = middleware.BodyLimit(limitFor(module, cfg), h)
 			built[module] = h
 		}
 		dispatch.register(host, h)
@@ -233,6 +246,11 @@ func limitFor(module string, cfg *config.Config) int64 {
 	}
 	return defaultBodyLimit
 }
+
+// knownModules is the buildModule universe -- exactly the module names the
+// switch below handles. auth.FromConfig uses it to validate that every
+// module named in auth.modules is one buildDispatcher can actually build.
+var knownModules = []string{"grocery", "todo", "slideshow", "menuserver", "obsidianoid", "multissh"}
 
 func buildModule(module string, cfg *config.Config) (http.Handler, error) {
 	switch module {
