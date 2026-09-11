@@ -309,17 +309,17 @@ func buildModule(module string, cfg *config.Config, svc *auth.Service) (http.Han
 }
 
 // unavailableHandler answers every request to a module that failed to build.
-// The boot log is easy to miss once the binary comes up healthy, so the reason
-// travels in the response body too -- whoever loads the page sees the cause.
+// This surface sits outside the auth gate (there is no working module to
+// gate), so the build error -- which can name filesystem paths -- must not
+// travel in the response. The cause lives in the boot log only (see
+// buildDispatcher); the response says which module is down and nothing else.
 func unavailableHandler(module string, cause error) http.Handler {
-	msg := cause.Error()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"error":  "module unavailable",
 			"module": module,
-			"reason": msg,
 		})
 	})
 }

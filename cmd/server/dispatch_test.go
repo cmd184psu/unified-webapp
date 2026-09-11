@@ -136,8 +136,11 @@ func TestModuleBuildFailureIsScopedToThatModule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read body: %v", err)
 	}
-	if !strings.Contains(string(body), missing) {
-		t.Errorf("503 body does not name the offending path %q: %s", missing, body)
+	// The 503 surface sits outside the auth gate, so the build error -- which
+	// names filesystem paths -- must never reach the response body. The cause
+	// is boot-log-only; the body names the module and nothing else.
+	if strings.Contains(string(body), missing) {
+		t.Errorf("503 body leaks the offending path %q to unauthenticated callers: %s", missing, body)
 	}
 	if !strings.Contains(string(body), "multissh") {
 		t.Errorf("503 body does not name the module: %s", body)
