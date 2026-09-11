@@ -49,6 +49,15 @@ func refreshFraction(cfg config.SessionConfig) float64 {
 // issueToken creates and signs an HS256 session JWT for sub, recording
 // methods, with iat=now and exp=now+ttl.
 func issueToken(key []byte, sub string, methods []string, ttl time.Duration, now time.Time) (string, error) {
+	if len(key) == 0 {
+		// HMAC-SHA256 signs "successfully" with an empty key, producing
+		// trivially forgeable tokens. A Service whose policy protects
+		// anything always has a key (FromConfig's creation condition is
+		// implied by every protected state, including admin routed, which
+		// ValidatePolicy ties to an operator PIN) -- so an empty key here
+		// is a wiring bug, and refusing beats signing.
+		return "", fmt.Errorf("auth: refusing to sign a session token with an empty key")
+	}
 	claims := sessionClaims{
 		Methods: methods,
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -71,6 +80,11 @@ func issueToken(key []byte, sub string, methods []string, ttl time.Duration, now
 // against the injected now with no leeway, so tests can control time
 // deterministically.
 func parseToken(key []byte, tokenString string, now time.Time) (*sessionClaims, error) {
+	if len(key) == 0 {
+		// Mirror of issueToken's guard: never accept a token verified
+		// against an empty key.
+		return nil, fmt.Errorf("auth: refusing to verify a session token with an empty key")
+	}
 	claims := &sessionClaims{}
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (interface{}, error) {
 		return key, nil

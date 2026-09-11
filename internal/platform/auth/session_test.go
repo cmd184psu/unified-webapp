@@ -276,3 +276,31 @@ func TestClearSessionCookie(t *testing.T) {
 		t.Error("Secure = false, want true")
 	}
 }
+
+// TestTokenFunctionsRefuseEmptyKey locks in the empty-key guard: HMAC-SHA256
+// happily "signs" with an empty key, which would make every session token
+// trivially forgeable if a Service ever reached issueToken/parseToken without
+// its key loaded (it cannot today -- FromConfig creates the key for every
+// protected state, and ValidatePolicy ties admin routing to an operator PIN
+// -- but the guard makes the failure loud instead of silently exploitable).
+func TestTokenFunctionsRefuseEmptyKey(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := issueToken(nil, "admin", []string{"admin_pin"}, time.Hour, now); err == nil {
+		t.Fatal("issueToken with an empty key succeeded, want refusal")
+	}
+	if _, err := issueToken([]byte{}, "admin", []string{"admin_pin"}, time.Hour, now); err == nil {
+		t.Fatal("issueToken with a zero-length key succeeded, want refusal")
+	}
+	// A token hand-signed with an empty key must not verify either.
+	forged := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub": "admin", "methods": []string{"admin_pin"},
+		"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
+	})
+	forgedStr, err := forged.SignedString([]byte{})
+	if err != nil {
+		t.Fatalf("signing forged token: %v", err)
+	}
+	if _, err := parseToken(nil, forgedStr, now); err == nil {
+		t.Fatal("parseToken with an empty key accepted a forged token, want refusal")
+	}
+}

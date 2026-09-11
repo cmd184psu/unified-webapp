@@ -39,6 +39,7 @@ const (
 	reasonBadCredential    = "bad_credential"
 	reasonDisallowedMethod = "disallowed_method"
 	reasonThrottled        = "throttled"
+	reasonAdminPINConfig   = "admin_pin_config"
 )
 
 // logLoginAttempt writes the one auth event log line (FR-A12b) for a login
@@ -115,7 +116,19 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request, module str
 	switch req.Method {
 	case "pin":
 		if module == "admin" {
-			if ok, err := s.checkAdminPIN(req.PIN); err == nil && ok {
+			ok, err := s.checkAdminPIN(req.PIN)
+			if err != nil {
+				// FR-M2: a misconfigured operator-PIN file (unreadable, or
+				// mode too open) fails loudly with the fix in the response
+				// -- the operator PIN is the break-glass path, and a
+				// generic "invalid credentials" here would strand the
+				// operator with no diagnostic. Not a credential failure,
+				// so it does not feed the throttle.
+				logLoginAttempt(false, module, req.Method, "", reasonAdminPINConfig)
+				response.WriteError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if ok {
 				identity, method = adminIdentity, adminPINMethod
 			} else if containsMethod(p.Modules["admin"], "pin") {
 				if name, ok2 := s.checkPIN(req.PIN); ok2 {

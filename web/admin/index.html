@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Admin</h1>
+    <button id="logout-btn" class="btn-link" type="button">Sign out</button>
+  </header>
+  <main id="app">
+    <p id="status">Loading&hellip;</p>
+
+    <section class="panel hidden" id="panel-matrix">
+      <h2>Module Access</h2>
+      <p class="hint">Sign-in methods each module accepts. Unchecking every method for a module leaves it unreachable.</p>
+      <div id="matrix-table"></div>
+      <div class="panel-actions">
+        <button id="matrix-save" type="button">Save matrix</button>
+        <span id="matrix-status" class="status"></span>
+      </div>
+      <p id="matrix-error" class="error"></p>
+    </section>
+
+    <section class="panel hidden" id="panel-pins">
+      <h2>PINs</h2>
+      <ul id="pins-list" class="named-list"></ul>
+      <form id="pin-form" class="inline-form">
+        <input id="pin-name" placeholder="name" autocomplete="off" required>
+        <input id="pin-value" type="password" inputmode="numeric" placeholder="PIN" autocomplete="off" required>
+        <button type="submit">Add PIN</button>
+      </form>
+      <p id="pin-error" class="error"></p>
+    </section>
+
+    <section class="panel hidden" id="panel-keys">
+      <h2>API Keys</h2>
+      <ul id="keys-list" class="named-list"></ul>
+      <form id="key-form" class="inline-form">
+        <input id="key-name" placeholder="name" autocomplete="off" required>
+        <button type="submit">Generate key</button>
+      </form>
+      <p id="key-error" class="error"></p>
+    </section>
+
+    <section class="panel hidden" id="panel-ldap">
+      <h2>LDAP</h2>
+      <dl id="ldap-settings" class="settings-list"></dl>
+      <p class="hint">Edit in config file.</p>
+      <h3>Test bind</h3>
+      <form id="ldap-test-form" class="inline-form">
+        <input id="ldap-test-username" placeholder="username" autocomplete="off" required>
+        <input id="ldap-test-password" type="password" placeholder="password" autocomplete="off" required>
+        <button type="submit">Test</button>
+      </form>
+      <p id="ldap-test-result" class="status"></p>
+    </section>
+
+    <section class="panel hidden" id="panel-session">
+      <h2>Session</h2>
+      <form id="session-form" class="settings-form">
+        <label>TTL (hours)
+          <input id="session-ttl" type="number" min="0" step="1">
+        </label>
+        <label>Cookie domain
+          <input id="session-cookie-domain" type="text" autocomplete="off">
+        </label>
+        <label class="checkbox-label">
+          <input id="session-cookie-secure" type="checkbox">
+          Cookie secure
+        </label>
+        <button type="submit">Save</button>
+      </form>
+      <p id="session-status" class="status"></p>
+    </section>
+
+    <section class="panel hidden" id="panel-passkeys">
+      <h2>Passkeys</h2>
+      <ul id="passkeys-list" class="named-list"></ul>
+      <form id="passkey-form" class="inline-form">
+        <input id="passkey-name" placeholder="name (optional)" autocomplete="off">
+        <button type="submit">Register new passkey</button>
+      </form>
+      <p id="passkey-error" class="error"></p>
+    </section>
+
+    <section class="panel hidden" id="panel-operator-pin">
+      <h2>Operator PIN</h2>
+      <p id="operator-pin-status" class="hint"></p>
+    </section>
+  </main>
+
+  <div id="key-modal" class="modal hidden">
+    <div class="modal-content">
+      <h2>API key generated</h2>
+      <p class="warn">This key will not be shown again. Copy it now.</p>
+      <div class="key-display">
+        <code id="key-modal-value"></code>
+        <button id="key-modal-copy" type="button">Copy</button>
+      </div>
+      <p id="key-modal-copied" class="status"></p>
+      <button id="key-modal-close" type="button">Close</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

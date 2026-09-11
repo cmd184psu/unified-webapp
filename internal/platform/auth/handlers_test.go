@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -541,6 +544,233 @@ func TestAuthEventLog(t *testing.T) {
 		if strings.Contains(out, secret) {
 			t.Fatalf("log output leaked a secret %q; got:\n%s", secret, out)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------
+// T5.2 -- break-glass enforcement (FR-M2), login-handler level.
+//
+// Item 1, 3, 4, and 8 of the T5.2 checklist are proven at the Gate/Policy
+// level in gate_test.go (adminEmptyMatrixEncodings is defined there and
+// shared with this file). This section covers item 2 (operator PIN file
+// login, both empty-matrix encodings) and items 5-7 (the 0644 PIN file,
+// editing the file taking effect without a swap, and the throttle
+// applying to operator-PIN attempts) -- all of which go through
+// handleLogin.
+// ---------------------------------------------------------------------
+
+// TestHandleLoginAdminPINFileBothEmptyMatrixEncodings proves T5.2 item 2:
+// the operator PIN from a 0400 admin_pin_file logs in as identity "admin"
+// via method "admin_pin", regardless of which empty-matrix encoding admin
+// is configured with, confirmed both in the login response and in a
+// follow-up GET /api/auth/session using the issued cookie.
+func TestHandleLoginAdminPINFileBothEmptyMatrixEncodings(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for name, modules := range adminEmptyMatrixEncodings() {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "admin.pin")
+			if err := os.WriteFile(path, []byte("9999"), 0400); err != nil {
+				t.Fatalf("write pin file: %v", err)
+			}
+			p := &Policy{
+				Modules:         modules,
+				AdminPINFile:    path,
+				SessionTTL:      time.Hour,
+				RefreshFraction: 0.5,
+			}
+			svc := newGateService(t, now, p)
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody(t, "pin", "9999", "", ""))
+			svc.Gate("admin", echoHandler()).ServeHTTP(rec, req)
+			mustNotReached(t, rec)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+			}
+			body := decodeJSON(t, rec)
+			if body["identity"] != "admin" {
+				t.Fatalf("identity = %v, want admin", body["identity"])
+			}
+			mustEqualStrings(t, methodsOf(t, body), []string{adminPINMethod})
+
+			tok, ok := setCookieValue(rec)
+			if !ok {
+				t.Fatal("expected Set-Cookie after a successful admin PIN login")
+			}
+
+			recSession := httptest.NewRecorder()
+			reqSession := httptest.NewRequest(http.MethodGet, "/api/auth/session", nil)
+			reqSession.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
+			svc.Gate("admin", echoHandler()).ServeHTTP(recSession, reqSession)
+			mustNotReached(t, recSession)
+			if recSession.Code != http.StatusOK {
+				t.Fatalf("session status = %d, want 200", recSession.Code)
+			}
+			sessionBody := decodeJSON(t, recSession)
+			if sessionBody["identity"] != "admin" {
+				t.Fatalf("session identity = %v, want admin", sessionBody["identity"])
+			}
+			mustEqualStrings(t, methodsOf(t, sessionBody), []string{adminPINMethod})
+		})
+	}
+}
+
+// TestHandleLoginAdminPINFileTooOpenPermissions proves T5.2 item 5
+// (FR-M2): a too-open admin_pin_file fails the login loudly with an error
+// naming chmod and the file's mode -- never the generic "invalid
+// credentials" 401, which would strand the operator on the break-glass
+// path with no diagnostic. The misconfiguration is surfaced as a 500 (it
+// is a server-side config error, not a credential failure) and must not
+// feed the throttle.
+func TestHandleLoginAdminPINFileTooOpenPermissions(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "admin.pin")
+	if err := os.WriteFile(path, []byte("9999"), 0644); err != nil {
+		t.Fatalf("write pin file: %v", err)
+	}
+	p := &Policy{
+		Modules:      map[string][]string{},
+		AdminPINFile: path,
+	}
+	svc := newGateService(t, now, p)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody(t, "pin", "9999", "", ""))
+	svc.Gate("admin", echoHandler()).ServeHTTP(rec, req)
+	mustNotReached(t, rec)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (admin_pin_file misconfiguration is a server-side error)", rec.Code)
+	}
+	body := decodeJSON(t, rec)
+	errMsg := fmt.Sprint(body["error"])
+	if !strings.Contains(errMsg, "chmod") {
+		t.Fatalf("body[error] = %q, want it to name chmod (FR-M2: the fix must be in the response)", errMsg)
+	}
+	if strings.Contains(errMsg, "9999") {
+		t.Fatalf("body[error] = %q leaks the attempted pin", errMsg)
+	}
+
+	// The config error must not have fed the throttle: fixing the file's
+	// mode makes the very next attempt succeed with no backoff.
+	if err := os.Chmod(path, 0400); err != nil {
+		t.Fatalf("chmod pin file: %v", err)
+	}
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody(t, "pin", "9999", "", ""))
+	svc.Gate("admin", echoHandler()).ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("after chmod 0400: status = %d, want 200 (config errors must not throttle)", rec2.Code)
+	}
+}
+
+// TestHandleLoginAdminPINFileEditTakesEffectWithoutSwap proves T5.2 item 6:
+// rewriting the admin_pin_file's contents takes effect on the very next
+// login attempt with no SwapPolicy/BuildPolicy call at all -- checkAdminPIN
+// re-reads the file per attempt (pin.go).
+func TestHandleLoginAdminPINFileEditTakesEffectWithoutSwap(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "admin.pin")
+	if err := os.WriteFile(path, []byte("1111"), 0400); err != nil {
+		t.Fatalf("write pin file: %v", err)
+	}
+	p := &Policy{
+		Modules:         map[string][]string{},
+		AdminPINFile:    path,
+		SessionTTL:      time.Hour,
+		RefreshFraction: 0.5,
+	}
+	svc := newGateService(t, now, p)
+
+	rec1 := httptest.NewRecorder()
+	req1 := httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody(t, "pin", "1111", "", ""))
+	svc.Gate("admin", echoHandler()).ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("original pin: status = %d, want 200, body=%s", rec1.Code, rec1.Body.String())
+	}
+
+	// Edit the file's contents in place -- no SwapPolicy call at all.
+	if err := os.Chmod(path, 0600); err != nil {
+		t.Fatalf("chmod for rewrite: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("2222"), 0400); err != nil {
+		t.Fatalf("rewrite pin file: %v", err)
+	}
+
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody(t, "pin", "1111", "", ""))
+	svc.Gate("admin", echoHandler()).ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusUnauthorized {
+		t.Fatalf("original pin after rewrite: status = %d, want 401", rec2.Code)
+	}
+
+	rec3 := httptest.NewRecorder()
+	req3 := httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody(t, "pin", "2222", "", ""))
+	svc.Gate("admin", echoHandler()).ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusOK {
+		t.Fatalf("new pin, next attempt: status = %d, want 200, body=%s", rec3.Code, rec3.Body.String())
+	}
+	body3 := decodeJSON(t, rec3)
+	if body3["identity"] != "admin" {
+		t.Fatalf("identity = %v, want admin", body3["identity"])
+	}
+}
+
+// TestHandleLoginThrottleAppliesToAdminPIN proves T5.2 item 7: the global
+// login throttle (throttle.go) applies to operator-PIN attempts exactly as
+// it does to any other login method -- five consecutive failures arm a
+// delay that throttles the sixth attempt even with the correct PIN, and
+// advancing the injected clock past the armed delay lets a subsequent
+// correct attempt through (and resets the throttle).
+func TestHandleLoginThrottleAppliesToAdminPIN(t *testing.T) {
+	clk := newFakeClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	p := &Policy{
+		Modules:         map[string][]string{},
+		AdminPIN:        hashFor(t, "9999"),
+		SessionTTL:      time.Hour,
+		RefreshFraction: 0.5,
+	}
+	svc := &Service{
+		key:      gateTestKey(),
+		now:      clk.now,
+		throttle: newThrottle(clk.now),
+	}
+	svc.SwapPolicy(p)
+
+	for i := 0; i < 5; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody(t, "pin", "0000", "", ""))
+		svc.Gate("admin", echoHandler()).ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: status = %d, want 401", i+1, rec.Code)
+		}
+	}
+
+	// The 6th attempt, even with the correct operator PIN, is throttled.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody(t, "pin", "9999", "", ""))
+	svc.Gate("admin", echoHandler()).ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", rec.Code)
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Fatal("expected a Retry-After header on a throttled response")
+	}
+
+	// Advance the injected clock past the armed 2s delay: the correct PIN
+	// now succeeds.
+	clk.advance(3 * time.Second)
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody(t, "pin", "9999", "", ""))
+	svc.Gate("admin", echoHandler()).ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("status after clock advance = %d, want 200, body=%s", rec2.Code, rec2.Body.String())
+	}
+	body := decodeJSON(t, rec2)
+	if body["identity"] != "admin" {
+		t.Fatalf("identity = %v, want admin", body["identity"])
 	}
 }
 

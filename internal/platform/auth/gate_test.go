@@ -2,6 +2,7 @@ package auth
 
 import (
 	"bufio"
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -593,5 +594,203 @@ func TestGateAdminAlwaysProtected(t *testing.T) {
 				t.Fatalf("status = %d, want 401", rec.Code)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------
+// T5.2 -- break-glass enforcement (FR-M2), auth-package level.
+//
+// This section covers the items of security-plan.md's T5.2 that need the
+// unexported Policy/Service seams (a hand-built Policy, SwapPolicy, an
+// injected clock) rather than a real dispatcher: items 1, 3, 4, and 8 from
+// the task's checklist. Item 2 (operator PIN file login, both encodings)
+// and items 5-7 (the 0644 PIN file, editing the file without a swap, and
+// the throttle) live in handlers_test.go since they go through
+// handleLogin. One end-to-end dispatcher-level round trip per encoding
+// lives in cmd/server/dispatcher_auth_test.go.
+// ---------------------------------------------------------------------
+
+// adminEmptyMatrixEncodings names the two ways the converged reviewer
+// ruling (security-plan.md T5.2) requires "empty assignment matrix" to be
+// exercised: an explicit "admin": [] entry, and no "admin" key in the
+// matrix at all. Every admin break-glass test in this file and
+// handlers_test.go that claims to cover "both encodings" runs both of
+// these.
+func adminEmptyMatrixEncodings() map[string]map[string][]string {
+	return map[string]map[string][]string{
+		"explicit admin: []": {"admin": {}},
+		"no admin key":       {},
+	}
+}
+
+// TestGateAdminEmptyMatrixUnauthenticatedAndLoginRoutes proves T5.2 item 1
+// for both empty-matrix encodings: an unauthenticated admin data route
+// 401s, and the gate-owned login route is still served (reaching
+// handleLogin, not the module) even though admin has no accepted methods
+// of its own in the matrix.
+func TestGateAdminEmptyMatrixUnauthenticatedAndLoginRoutes(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for name, modules := range adminEmptyMatrixEncodings() {
+		t.Run(name, func(t *testing.T) {
+			p := &Policy{Modules: modules}
+			svc := newGateService(t, now, p)
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/config/auth", nil)
+			svc.Gate("admin", echoHandler()).ServeHTTP(rec, req)
+			mustNotReached(t, rec)
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("unauthenticated admin data route: status = %d, want 401", rec.Code)
+			}
+
+			// A gate-owned login route reaches handleLogin -- not the
+			// module -- regardless of admin's (empty) matrix entry: an
+			// empty body reaches its JSON-decode step (400), never next.
+			recLogin := httptest.NewRecorder()
+			reqLogin := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+			svc.Gate("admin", echoHandler()).ServeHTTP(recLogin, reqLogin)
+			mustNotReached(t, recLogin)
+			if recLogin.Code != http.StatusBadRequest {
+				t.Fatalf("POST /api/auth/login: status = %d, want 400 (reached handleLogin's decode step, not the module)", recLogin.Code)
+			}
+		})
+	}
+}
+
+// TestGateAdminEmptyMatrixModeListsAdminPIN proves T5.2 item 3 for both
+// empty-matrix encodings: GET /api/auth/mode on admin always contains
+// "admin_pin", unauthenticated, regardless of which encoding produced the
+// empty matrix.
+func TestGateAdminEmptyMatrixModeListsAdminPIN(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for name, modules := range adminEmptyMatrixEncodings() {
+		t.Run(name, func(t *testing.T) {
+			p := &Policy{Modules: modules}
+			svc := newGateService(t, now, p)
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/auth/mode", nil)
+			svc.Gate("admin", echoHandler()).ServeHTTP(rec, req)
+			mustNotReached(t, rec)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rec.Code)
+			}
+			if !contains(rec.Body.String(), `"admin_pin"`) {
+				t.Fatalf("body = %q, want it to contain \"admin_pin\"", rec.Body.String())
+			}
+		})
+	}
+}
+
+// TestGateAdminSwapDeletingMatrixEntryStaysProtected proves T5.2 item 4: a
+// live matrix save that deletes admin's entry entirely (legal per FR-M5,
+// modeling what T5.3's applyAuth does -- BuildPolicy from a fresh
+// config.AuthConfig, then SwapPolicy) leaves admin protected on the very
+// next request, exactly as if it had never had an entry.
+func TestGateAdminSwapDeletingMatrixEntryStaysProtected(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	initial, err := BuildPolicy(config.AuthConfig{
+		Modules:  map[string][]string{"admin": {"ldap"}},
+		AdminPIN: hashFor(t, "9999"),
+		LDAP:     config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
+	})
+	if err != nil {
+		t.Fatalf("BuildPolicy(initial): %v", err)
+	}
+	svc := newGateService(t, now, initial)
+
+	// Sanity: admin currently has a matrix entry and is (still) protected.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/config/auth", nil)
+	svc.Gate("admin", echoHandler()).ServeHTTP(rec, req)
+	mustNotReached(t, rec)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("before swap: status = %d, want 401", rec.Code)
+	}
+
+	// A live save deletes admin's matrix entry entirely.
+	deleted, err := BuildPolicy(config.AuthConfig{
+		Modules:  map[string][]string{},
+		AdminPIN: hashFor(t, "9999"),
+	})
+	if err != nil {
+		t.Fatalf("BuildPolicy(deleted): %v", err)
+	}
+	svc.SwapPolicy(deleted)
+
+	// Admin is still protected on the very next request.
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodGet, "/api/config/auth", nil)
+	svc.Gate("admin", echoHandler()).ServeHTTP(rec2, req2)
+	mustNotReached(t, rec2)
+	if rec2.Code != http.StatusUnauthorized {
+		t.Fatalf("after swap deleting admin's matrix entry: status = %d, want 401", rec2.Code)
+	}
+}
+
+// adminModeMethods issues GET /api/auth/mode against svc for the admin
+// module and returns the decoded methods list.
+func adminModeMethods(t *testing.T, svc *Service) []string {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/mode", nil)
+	svc.Gate("admin", echoHandler()).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/auth/mode: status = %d, want 200", rec.Code)
+	}
+	var body struct {
+		Methods []string `json:"methods"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode mode body: %v", err)
+	}
+	return body.Methods
+}
+
+// TestGateAdminMatrixCanAddMethodsButNeverLosesAdminPIN proves T5.2 item 8:
+// a matrix save can add methods to admin (mode then lists both the added
+// method and admin_pin), but since admin_pin is never itself a matrix
+// entry, no matrix save -- including one that removes every method admin
+// had -- can ever cause mode to stop listing it.
+func TestGateAdminMatrixCanAddMethodsButNeverLosesAdminPIN(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	start, err := BuildPolicy(config.AuthConfig{Modules: map[string][]string{}})
+	if err != nil {
+		t.Fatalf("BuildPolicy(start): %v", err)
+	}
+	svc := newGateService(t, now, start)
+
+	methods := adminModeMethods(t, svc)
+	if len(methods) != 1 || methods[0] != adminPINMethod {
+		t.Fatalf("initial methods = %v, want [admin_pin] only", methods)
+	}
+
+	// A matrix save ADDS ldap to admin.
+	added, err := BuildPolicy(config.AuthConfig{
+		Modules: map[string][]string{"admin": {"ldap"}},
+		LDAP:    config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
+	})
+	if err != nil {
+		t.Fatalf("BuildPolicy(added): %v", err)
+	}
+	svc.SwapPolicy(added)
+	methods = adminModeMethods(t, svc)
+	if !containsMethod(methods, "ldap") || !containsMethod(methods, adminPINMethod) {
+		t.Fatalf("methods after adding ldap = %v, want both ldap and admin_pin", methods)
+	}
+
+	// A further save removes ldap again -- admin_pin was never IN the
+	// matrix, so it survives this (or any) matrix save regardless.
+	removed, err := BuildPolicy(config.AuthConfig{Modules: map[string][]string{}})
+	if err != nil {
+		t.Fatalf("BuildPolicy(removed): %v", err)
+	}
+	svc.SwapPolicy(removed)
+	methods = adminModeMethods(t, svc)
+	if !containsMethod(methods, adminPINMethod) {
+		t.Fatalf("methods after removing ldap = %v, want admin_pin still present", methods)
+	}
+	if containsMethod(methods, "ldap") {
+		t.Fatalf("methods after removing ldap = %v, want ldap gone", methods)
 	}
 }

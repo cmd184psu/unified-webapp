@@ -18,6 +18,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"
 
+	"cmd184psu/unified-webapp/internal/admin"
 	"cmd184psu/unified-webapp/internal/grocery"
 	"cmd184psu/unified-webapp/internal/menuserver"
 	"cmd184psu/unified-webapp/internal/multissh"
@@ -94,13 +95,7 @@ func main() {
 	if *flagCert != "" { cfg.TLSCert = *flagCert }
 	if *flagKey  != "" { cfg.TLSKey  = *flagKey  }
 
-	adminRouted := false
-	for _, module := range cfg.Routing {
-		if module == "admin" {
-			adminRouted = true
-			break
-		}
-	}
+	adminRouted := adminIsRouted(cfg.Routing)
 	svc, err := auth.FromConfig(cfg.Auth, knownModules, adminRouted)
 	if err != nil {
 		log.Fatalf("auth: %v", err)
@@ -216,7 +211,7 @@ func buildDispatcher(cfg *config.Config, svc *auth.Service) *Dispatcher {
 	for host, module := range cfg.Routing {
 		h, ok := built[module]
 		if !ok {
-			hh, err := buildModule(module, cfg)
+			hh, err := buildModule(module, cfg, svc)
 			if err != nil {
 				log.Printf("ERROR: module %q failed to build and will return 503 on every request: %v", module, err)
 				h = unavailableHandler(module, err)
@@ -241,8 +236,13 @@ const defaultBodyLimit int64 = 1 << 20 // 1 MiB
 // surrounding multipart framing so BodyLimit never clips a legitimate upload
 // before multissh's own check gets to report it.
 func limitFor(module string, cfg *config.Config) int64 {
-	if module == "multissh" {
+	switch module {
+	case "multissh":
 		return cfg.Multissh.MaxUploadBytes + defaultBodyLimit
+	case "admin":
+		if cfg.Admin.MaxBodyBytes > 0 {
+			return cfg.Admin.MaxBodyBytes
+		}
 	}
 	return defaultBodyLimit
 }
@@ -250,9 +250,22 @@ func limitFor(module string, cfg *config.Config) int64 {
 // knownModules is the buildModule universe -- exactly the module names the
 // switch below handles. auth.FromConfig uses it to validate that every
 // module named in auth.modules is one buildDispatcher can actually build.
-var knownModules = []string{"grocery", "todo", "slideshow", "menuserver", "obsidianoid", "multissh"}
+var knownModules = []string{"grocery", "todo", "slideshow", "menuserver", "obsidianoid", "multissh", "admin"}
 
-func buildModule(module string, cfg *config.Config) (http.Handler, error) {
+// adminIsRouted reports whether "admin" appears among routing's module
+// values (config.Config.Routing / host_routing). Both main's boot-time
+// auth.FromConfig call and buildModule's "admin" case need this, and they
+// must agree, so it lives in one place.
+func adminIsRouted(routing map[string]string) bool {
+	for _, module := range routing {
+		if module == "admin" {
+			return true
+		}
+	}
+	return false
+}
+
+func buildModule(module string, cfg *config.Config, svc *auth.Service) (http.Handler, error) {
 	switch module {
 	case "grocery":
 		return grocery.Build(cfg.Grocery)
@@ -266,6 +279,13 @@ func buildModule(module string, cfg *config.Config) (http.Handler, error) {
 		return obsidianoid.Build(cfg.Obsidianoid)
 	case "multissh":
 		return multissh.Build(cfg.Multissh)
+	case "admin":
+		return admin.Build(cfg, admin.Deps{
+			Service:      svc,
+			ConfigPath:   cfg.ConfigPath(),
+			KnownModules: knownModules,
+			AdminRouted:  adminIsRouted(cfg.Routing),
+		})
 	default:
 		return nil, fmt.Errorf("unknown module %q", module)
 	}

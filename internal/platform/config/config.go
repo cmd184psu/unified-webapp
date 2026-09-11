@@ -24,6 +24,21 @@ type Config struct {
 	Obsidianoid ObsidianoidConfig `json:"obsidianoid"`
 	Multissh    MultisshConfig    `json:"multissh"`
 	Auth        AuthConfig        `json:"auth"`
+	Admin       AdminConfig       `json:"admin"`
+
+	// configPath is the absolute path Load read this Config from (empty when
+	// built via DefaultConfig()/WriteDefault without going through Load, or
+	// when the config file did not exist). It is unexported (json:"-" is
+	// redundant for an unexported field, but not serialized regardless) so
+	// admin's live-apply (T5.3) can locate the file to splice without every
+	// caller threading a path around separately.
+	configPath string
+}
+
+// ConfigPath returns the absolute path this Config was loaded from (see
+// Load), or "" if it was never loaded from a file.
+func (c *Config) ConfigPath() string {
+	return c.configPath
 }
 
 // AuthConfig holds the shared authentication/authorization configuration
@@ -121,6 +136,15 @@ type TodoConfig struct {
 	// SSEMaxSubscribers is the effective SSE subscriber cap, copied from
 	// Config.Server.SSEMaxSubscribers by Load. Not read from the config file.
 	SSEMaxSubscribers int `json:"-"`
+}
+
+// AdminConfig holds configuration specific to the admin module (FR-M). Admin
+// is always protected (T3.1's boot validation refuses it routed without
+// exactly one operator-PIN form), so it carries no other module's data
+// fields yet -- T5.1 is a static-shell scaffold only.
+type AdminConfig struct {
+	StaticDir    string `json:"static_dir"`
+	MaxBodyBytes int64  `json:"max_body_bytes"`
 }
 
 // MenuserverConfig holds configuration specific to the menuserver module.
@@ -247,8 +271,17 @@ func DefaultConfig() *Config {
 			MaxUploadBytes: 8 << 30, // 8 GiB
 			StrictHostKey:  false,
 		},
+		Admin: AdminConfig{
+			StaticDir:    "./web/admin",
+			MaxBodyBytes: defaultModuleBodyBytes,
+		},
 	}
 }
+
+// defaultModuleBodyBytes is the request-body ceiling applied to a module
+// config's MaxBodyBytes when left unset (0), mirroring
+// cmd/server/main.go's defaultBodyLimit convention.
+const defaultModuleBodyBytes int64 = 1 << 20 // 1 MiB
 
 // ExpandPath expands a leading ~ to the user home directory.
 func ExpandPath(path string) (string, error) {
@@ -270,6 +303,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg := DefaultConfig()
+	cfg.configPath = expanded
 
 	data, err := os.ReadFile(expanded)
 	if os.IsNotExist(err) {
@@ -307,6 +341,9 @@ func Load(path string) (*Config, error) {
 	if err := expandAuthPaths(cfg, filepath.Dir(expanded)); err != nil {
 		return nil, err
 	}
+	if err := expandAdminPaths(&cfg.Admin); err != nil {
+		return nil, err
+	}
 	if cfg.TLSCert != "" {
 		if cfg.TLSCert, err = ExpandPath(cfg.TLSCert); err != nil {
 			return nil, err
@@ -341,6 +378,14 @@ func expandMenuserverPaths(m *MenuserverConfig) error {
 		return err
 	}
 	if m.DataDir, err = ExpandPath(m.DataDir); err != nil {
+		return err
+	}
+	return nil
+}
+
+func expandAdminPaths(a *AdminConfig) error {
+	var err error
+	if a.StaticDir, err = ExpandPath(a.StaticDir); err != nil {
 		return err
 	}
 	return nil
