@@ -275,6 +275,24 @@ func DefaultConfig() *Config {
 			StaticDir:    "./web/admin",
 			MaxBodyBytes: defaultModuleBodyBytes,
 		},
+		Auth: AuthConfig{
+			// Present-but-empty (FR-A14): a config with no operator edits to
+			// this section loads identically to a config with no "auth" key
+			// at all -- ValidatePolicy's fast path and FromConfig's lazy key
+			// creation both key off len()/=="" checks, which empty
+			// maps/slices satisfy exactly like nil. Written out explicitly
+			// (rather than left as Go's zero value, which would marshal
+			// Modules/PINs/APIKeys as JSON null) so an operator opening the
+			// generated file sees the auth surface's shape instead of an
+			// unexplained null.
+			Modules: map[string][]string{},
+			PINs:    []NamedHash{},
+			APIKeys: []NamedHash{},
+		},
+		Server: ServerConfig{
+			OriginCheck:       "enforce",
+			SSEMaxSubscribers: DefaultSSEMaxSubscribers,
+		},
 	}
 }
 

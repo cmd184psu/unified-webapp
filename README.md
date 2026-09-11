@@ -419,6 +419,64 @@ echo | openssl s_client -connect <haproxy-ip>:443 -servername grocery.cmdhome.ne
 
 ---
 
+## Authentication (optional)
+
+Auth is off by default: a config with no `auth` section, or an empty one (what `make init-config` writes), behaves exactly like the server did before auth existed — every module wide open, no login, no cookies. Everything below only matters once you start filling in `auth` in your config. See `unified-webapp-example.json` for a fully-populated example (per-module matrix, PINs, an API key, LDAP, and passkeys).
+
+### The model: per-module method lists are literal
+
+`auth.modules` maps a module name to the list of methods that unlock it — `"pin"`, `"key"`, `"ldap"`, `"passkey"`. There is no strength ranking between them: listing `["pin", "ldap"]` on a module means *either* a matching PIN *or* a successful LDAP bind opens it, full stop. If you want a module protected only by something strong, only list that one method — don't rely on the list being read as "at least this secure."
+
+A module with no entry in `auth.modules` at all is unprotected, same as if `auth` weren't configured. The one exception is `admin`: when it's routed (appears in `host_routing`), it is *always* protected — with or without a matrix entry — using the operator PIN described below. A live matrix save can add methods to `admin`'s entry, or even delete the entry outright, but it can never remove the operator PIN, because the operator PIN isn't a member of the matrix in the first place.
+
+### `origin_check`: `enforce` is the default, `log` is the escape hatch
+
+`server.origin_check` rejects cross-origin state-changing requests (any method other than GET/HEAD whose `Origin` header doesn't match `Host`) with a 403, before the request body is even read. `"enforce"` (the default — both an unset field and the literal string mean the same thing) is what you want for anything reachable from a browser. If something legitimate is tripping the check — a reverse-proxy setup where `Origin` and `Host` genuinely differ for a reason you've verified is safe — set it to `"log"` to see the rejections in the server log without actually blocking them, diagnose, then either fix the mismatch or move on. `"off"` disables the check entirely; there's rarely a good reason for that outside of local testing with `curl -H Host: ...`, which never sends `Origin` anyway and so isn't affected by this setting either way.
+
+### The reverse proxy must preserve the `Host` header
+
+This is load-bearing, not a nicety: the Go server dispatches every request by `Host` (`host_routing`) and the origin check above compares `Origin` against that same `Host`. A proxy that rewrites `Host` — even to "fix" something — breaks module dispatch and can make legitimate same-origin requests look cross-origin. HAProxy already preserves `Host` by default (see the section above; don't add a `set-header Host` rule). If you're fronting with nginx instead, make sure your `location` block has:
+
+```nginx
+proxy_set_header Host $host;
+```
+
+nginx's default `Host` behavior varies by version/config, so set this explicitly rather than assuming it's already correct.
+
+### Session key file: rotate or delete it to force a global logout
+
+Sessions are signed JWTs (HMAC-SHA256) using a key generated on first boot and stored at `<auth.data_dir>/session.key`. Every currently-issued session is validated against that one key. If you ever need to invalidate every session at once — a suspected leak, or just "log everyone out" — stop the server, delete (or move aside) `session.key`, and restart; a fresh key is generated and every existing session cookie stops verifying. There's no per-session revocation list; this file is the only lever.
+
+### `cookie_domain` and `passkey.rp_id`: share them across modules on a common parent domain
+
+If your modules live under a shared parent domain (e.g. `grocery.cmdhome.net`, `todo.cmdhome.net`), set `auth.cookie_domain` to the parent (`.cmdhome.net`) so one login session is valid across all of them — no separate login per module. Passkeys work the same way via `auth.passkey.rp_id`: set it to the shared parent domain and a passkey registered on one module's hostname is usable to log into any other module under that same `rp_id`, as long as each module's origin is also listed in `auth.passkey.rp_origins`. Leave `cookie_domain` empty (host-only cookie) and set `rp_id` per-hostname if you'd rather keep each module's login fully separate.
+
+### First-run bootstrap for the admin operator PIN
+
+The `admin` module (when routed) always requires an operator PIN, configured as exactly one of `auth.admin_pin` (a bcrypt hash, generated with `-hash-pin`) or `auth.admin_pin_file` (a plaintext file read fresh on every login attempt — no caching, so editing it takes effect on the very next attempt). The file form is the easiest way to get started:
+
+```bash
+echo "$PIN" > admin.pin && chmod 0400 admin.pin
+```
+
+then point `auth.admin_pin_file` at that path. The file's permissions are checked on every read; anything looser than `0400` is refused with an error telling you to `chmod` it.
+
+### Bind address stays `0.0.0.0`
+
+The server still binds `0.0.0.0:<port>` regardless of auth configuration — that hasn't changed and isn't going to. The expected deployment posture is the one described above: a reverse proxy (HAProxy/nginx) on the same host or network handles TLS and is the only thing actually reachable from outside, forwarding to the Go server over plain HTTP on localhost or an internal address. Auth is defense for a proxy or an internal network you don't fully trust, not a substitute for keeping the Go server's port off the public internet.
+
+### API keys for automation
+
+Scripts and other non-browser clients can authenticate with an API key instead of logging in interactively. Generate one with:
+
+```bash
+go run ./cmd/server -gen-api-key
+```
+
+which prints the key once (put it wherever your script reads secrets from) and its `sha256:...` hash (paste that into `auth.api_keys`). Send the key as either header — `Authorization: Bearer <key>` is checked first, falling back to `X-API-Key: <key>` if `Authorization` is absent or isn't `Bearer`-shaped. A module only accepts API keys if `"key"` appears in its `auth.modules` entry.
+
+---
+
 ## Make Targets
 
 | Target | Description |
