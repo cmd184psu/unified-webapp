@@ -23,6 +23,57 @@ type Config struct {
 	Menuserver  MenuserverConfig  `json:"menuserver"`
 	Obsidianoid ObsidianoidConfig `json:"obsidianoid"`
 	Multissh    MultisshConfig    `json:"multissh"`
+	Auth        AuthConfig        `json:"auth"`
+}
+
+// AuthConfig holds the shared authentication/authorization configuration
+// surface used across modules. Modules maps a module name (or the reserved
+// "admin" pseudo-module) to the ordered list of methods accepted for it.
+type AuthConfig struct {
+	Modules      map[string][]string `json:"modules"`
+	AdminPIN     string              `json:"admin_pin"`
+	AdminPINFile string              `json:"admin_pin_file"`
+	DataDir      string              `json:"data_dir"`
+	CookieSecure bool                `json:"cookie_secure"`
+	CookieDomain string              `json:"cookie_domain"`
+	Session      SessionConfig       `json:"session"`
+	LDAP         LDAPConfig          `json:"ldap"`
+	PINs         []NamedHash         `json:"pins"`
+	APIKeys      []NamedHash         `json:"api_keys"`
+	Passkey      PasskeyConfig       `json:"passkey"`
+}
+
+// SessionConfig controls session lifetime and sliding-refresh behavior.
+type SessionConfig struct {
+	TTLHours             int     `json:"ttl_hours"`              // default 720 (30d) applied downstream, 0 = default
+	RefreshAfterFraction float64 `json:"refresh_after_fraction"` // default 0.5, 0 = default
+}
+
+// NamedHash pairs an operator-facing name with a stored credential hash.
+// Hash is bcrypt for pins, "sha256:<hex>" for api keys.
+type NamedHash struct {
+	Name string `json:"name"`
+	Hash string `json:"hash"`
+}
+
+// LDAPConfig configures LDAP authentication. Full behavior is ported in
+// T3.7; fields are defined now for validation.
+type LDAPConfig struct {
+	URL            string   `json:"url"`
+	StartTLS       bool     `json:"start_tls"`
+	InsecureTLS    bool     `json:"insecure_tls"`
+	BindDN         string   `json:"bind_dn"`
+	BindPassword   string   `json:"bind_password"`
+	BaseDN         string   `json:"base_dn"`
+	UserFilter     string   `json:"user_filter"`
+	RequiredGroups []string `json:"required_groups"`
+	TimeoutSeconds int      `json:"timeout_seconds"`
+}
+
+// PasskeyConfig configures WebAuthn/passkey authentication.
+type PasskeyConfig struct {
+	RPID      string   `json:"rp_id"`
+	RPOrigins []string `json:"rp_origins"`
 }
 
 // ServerConfig holds configuration for the shared HTTP server infrastructure,
@@ -253,6 +304,9 @@ func Load(path string) (*Config, error) {
 	if err := normalizeMultissh(&cfg.Multissh); err != nil {
 		return nil, err
 	}
+	if err := expandAuthPaths(cfg, filepath.Dir(expanded)); err != nil {
+		return nil, err
+	}
 	if cfg.TLSCert != "" {
 		if cfg.TLSCert, err = ExpandPath(cfg.TLSCert); err != nil {
 			return nil, err
@@ -344,6 +398,38 @@ func expandObsidianoidPaths(o *ObsidianoidConfig) error {
 		}
 	}
 	return nil
+}
+
+// expandAuthPaths makes Auth.DataDir and Auth.AdminPINFile absolute relative
+// to the config file's directory (baseDir), mirroring the other expand*Paths
+// functions but resolving against the config's location rather than the
+// working directory.
+func expandAuthPaths(cfg *Config, baseDir string) error {
+	var err error
+	if cfg.Auth.DataDir != "" {
+		if cfg.Auth.DataDir, err = expandRelativeTo(cfg.Auth.DataDir, baseDir); err != nil {
+			return err
+		}
+	}
+	if cfg.Auth.AdminPINFile != "" {
+		if cfg.Auth.AdminPINFile, err = expandRelativeTo(cfg.Auth.AdminPINFile, baseDir); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// expandRelativeTo expands a leading ~ via ExpandPath, then makes the result
+// absolute relative to baseDir if it is not already absolute.
+func expandRelativeTo(path, baseDir string) (string, error) {
+	expanded, err := ExpandPath(path)
+	if err != nil {
+		return "", err
+	}
+	if filepath.IsAbs(expanded) {
+		return expanded, nil
+	}
+	return filepath.Join(baseDir, expanded), nil
 }
 
 func expandMultisshPaths(m *MultisshConfig) error {

@@ -1,13 +1,22 @@
 package main
 
 import (
+	"bufio"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/term"
 
 	"cmd184psu/unified-webapp/internal/grocery"
 	"cmd184psu/unified-webapp/internal/menuserver"
@@ -49,6 +58,8 @@ func main() {
 	flagCert := flag.String("tls-cert",   "", "Override TLS cert path")
 	flagKey  := flag.String("tls-key",    "", "Override TLS key path")
 	flagInit := flag.Bool("init-config", false, "Write default config and exit")
+	flagHashPin := flag.Bool("hash-pin", false, "Read a PIN from stdin, print its bcrypt hash, and exit")
+	flagGenAPIKey := flag.Bool("gen-api-key", false, "Generate a new API key and its config hash, print both, and exit")
 	flag.Parse()
 
 	if *flagInit {
@@ -56,6 +67,16 @@ func main() {
 			log.Fatalf("write default config: %v", err)
 		}
 		fmt.Printf("Default config written to %s\n", *cfgPath)
+		return
+	}
+
+	if *flagHashPin {
+		hashPINAndExit()
+		return
+	}
+
+	if *flagGenAPIKey {
+		genAPIKeyAndExit()
 		return
 	}
 
@@ -87,6 +108,62 @@ func main() {
 		log.Printf("unified-webapp → http://%s", addr)
 		log.Fatalf("HTTP error: %v", srv.ListenAndServe())
 	}
+}
+
+// hashPINAndExit reads a PIN from stdin, prints its bcrypt hash to stdout,
+// and exits. When stdin is a terminal, the PIN is prompted for on stderr
+// with no echo (term.ReadPassword); otherwise (piped/redirected input) a
+// single line is read from stdin instead, so scripted invocations such as
+// `go run ./cmd/server -hash-pin <<< "1234"` work without a TTY.
+func hashPINAndExit() {
+	var pin string
+	fd := int(os.Stdin.Fd())
+	if term.IsTerminal(fd) {
+		fmt.Fprint(os.Stderr, "PIN: ")
+		b, err := term.ReadPassword(fd)
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			log.Fatalf("hash-pin: reading PIN: %v", err)
+		}
+		pin = string(b)
+	} else {
+		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if err != nil && line == "" {
+			log.Fatalf("hash-pin: reading PIN: %v", err)
+		}
+		pin = line
+	}
+
+	pin = strings.TrimSpace(pin)
+	if pin == "" {
+		log.Fatalf("hash-pin: PIN must not be empty")
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(pin), bcrypt.DefaultCost)
+	if err != nil {
+		log.Fatalf("hash-pin: %v", err)
+	}
+	fmt.Println(string(hash))
+}
+
+// genAPIKeyAndExit generates a new 32-byte random API key, encodes it as
+// base64url without padding (the text a client will send in the
+// Authorization/X-API-Key header), and prints it alongside its
+// "sha256:<hex>" config hash. The hash is computed over the encoded key
+// string itself -- exactly what a client sends -- so it matches what
+// auth.checkAPIKey computes from the header value.
+func genAPIKeyAndExit() {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		log.Fatalf("gen-api-key: generating key: %v", err)
+	}
+	key := base64.RawURLEncoding.EncodeToString(raw)
+
+	sum := sha256.Sum256([]byte(key))
+	hash := "sha256:" + hex.EncodeToString(sum[:])
+
+	fmt.Printf("key:  %s\n", key)
+	fmt.Printf("hash: %s\n", hash)
 }
 
 // newServer builds the http.Server used to serve the app.
