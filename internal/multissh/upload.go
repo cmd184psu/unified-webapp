@@ -47,7 +47,7 @@ func newUploadRegistry(uploadDir string, maxBytes int64) (*uploadRegistry, error
 	if maxBytes <= 0 {
 		return nil, fmt.Errorf("max bytes must be > 0")
 	}
-	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+	if err := os.MkdirAll(uploadDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create upload dir: %w", err)
 	}
 	return &uploadRegistry{uploads: make(map[string]uploadMeta), uploadDir: uploadDir, maxBytes: maxBytes}, nil

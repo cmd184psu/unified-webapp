@@ -13,7 +13,7 @@ import (
 // Build returns a ready-to-use http.Handler for the grocery module.
 // The caller is responsible for wrapping it with middleware (e.g. CORS).
 func Build(cfg config.GroceryConfig) (http.Handler, error) {
-	if err := os.MkdirAll(filepath.Dir(cfg.DataFile), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(cfg.DataFile), 0750); err != nil {
 		return nil, err
 	}
 	s, err := New(cfg.DataFile)

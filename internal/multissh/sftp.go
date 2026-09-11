@@ -23,7 +23,7 @@ func (s *Server) handleSFTPListDir(w http.ResponseWriter, r *http.Request) {
 		Path string `json:"path"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.WriteError(w, http.StatusBadRequest, "invalid request body")
+		response.WriteDecodeError(w, err)
 		return
 	}
 	if strings.TrimSpace(req.Host) == "" || strings.TrimSpace(req.User) == "" {

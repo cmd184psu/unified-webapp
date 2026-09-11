@@ -218,7 +218,7 @@ func (s *Server) handleHostsPut(w http.ResponseWriter, r *http.Request) {
 		Hosts []hostRequest `json:"hosts"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.WriteError(w, http.StatusBadRequest, "invalid request body")
+		response.WriteDecodeError(w, err)
 		return
 	}
 	if err := s.hosts.set(req.Hosts); err != nil {

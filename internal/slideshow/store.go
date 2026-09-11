@@ -35,7 +35,7 @@ type Store struct {
 // ageCutoffDays filters out subjects whose directory mtime is older than that
 // many days; 0 disables the filter.
 func NewStore(imageDir string, ageCutoffDays int) (*Store, error) {
-	if err := os.MkdirAll(imageDir, 0755); err != nil {
+	if err := os.MkdirAll(imageDir, 0750); err != nil {
 		return nil, err
 	}
 	return &Store{imageDir: imageDir, ageCutoffDays: ageCutoffDays}, nil

@@ -59,12 +59,12 @@ type controlRequest struct {
 func (h *Handler) handleControl(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		response.WriteError(w, http.StatusBadRequest, "cannot read body")
+		response.WriteDecodeError(w, err)
 		return
 	}
 	var req controlRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		response.WriteError(w, http.StatusBadRequest, "invalid JSON")
+		response.WriteDecodeError(w, err)
 		return
 	}
 	if req.Action == "" {

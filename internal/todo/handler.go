@@ -159,13 +159,17 @@ func (h *Handler) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleSetSettings(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
-	if err != nil || len(body) == 0 {
+	if err != nil {
+		response.WriteDecodeError(w, err)
+		return
+	}
+	if len(body) == 0 {
 		response.WriteError(w, http.StatusBadRequest, "cannot read body")
 		return
 	}
 	var st Settings
 	if err := json.Unmarshal(body, &st); err != nil {
-		response.WriteError(w, http.StatusBadRequest, "invalid JSON")
+		response.WriteDecodeError(w, err)
 		return
 	}
 	if st.CooldownMinutes < 1 {
@@ -188,7 +192,11 @@ func (h *Handler) handleCreateList(w http.ResponseWriter, r *http.Request) {
 		Name string `json:"name"`
 	}
 	data, err := io.ReadAll(r.Body)
-	if err != nil || len(data) == 0 {
+	if err != nil {
+		response.WriteDecodeError(w, err)
+		return
+	}
+	if len(data) == 0 {
 		response.WriteError(w, http.StatusBadRequest, "cannot read body")
 		return
 	}
@@ -217,13 +225,17 @@ func (h *Handler) handleGetColumns(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleSetColumns(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
-	if err != nil || len(body) == 0 {
+	if err != nil {
+		response.WriteDecodeError(w, err)
+		return
+	}
+	if len(body) == 0 {
 		response.WriteError(w, http.StatusBadRequest, "cannot read body")
 		return
 	}
 	var cv ColumnVisibility
 	if err := json.Unmarshal(body, &cv); err != nil {
-		response.WriteError(w, http.StatusBadRequest, "invalid JSON")
+		response.WriteDecodeError(w, err)
 		return
 	}
 	if err := h.store.WriteColumns(cv); err != nil {

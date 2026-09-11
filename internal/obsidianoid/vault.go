@@ -93,8 +93,8 @@ func writeNote(root, relPath string, content []byte) error {
 	if err != nil {
 		return os.ErrPermission
 	}
-	if err := os.MkdirAll(filepath.Dir(clean), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(clean), 0o750); err != nil {
 		return err
 	}
-	return os.WriteFile(clean, content, 0o644)
+	return os.WriteFile(clean, content, 0o600)
 }

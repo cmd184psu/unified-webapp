@@ -132,6 +132,7 @@ func (h *Handler) handleRender(w http.ResponseWriter, r *http.Request) {
 	})
 	html := blackfriday.Run(body, blackfriday.WithExtensions(flags), blackfriday.WithRenderer(renderer))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Security-Policy", "sandbox")
 	_, _ = w.Write(html)
 }
 
@@ -148,7 +149,7 @@ func (h *Handler) handleThreadsGet(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleThreadsPut(w http.ResponseWriter, r *http.Request) {
 	var incoming []Thread
 	if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
-		response.WriteError(w, http.StatusBadRequest, "invalid JSON")
+		response.WriteDecodeError(w, err)
 		return
 	}
 	if len(incoming) != h.cfg.ThreadCount {
@@ -184,7 +185,7 @@ func (h *Handler) handleGitSync(w http.ResponseWriter, r *http.Request) {
 		Message string `json:"message"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		response.WriteError(w, http.StatusBadRequest, "invalid JSON")
+		response.WriteDecodeError(w, err)
 		return
 	}
 	if body.Message == "" {

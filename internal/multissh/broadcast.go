@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"cmd184psu/unified-webapp/internal/multissh/sshproxy"
+	"cmd184psu/unified-webapp/internal/platform/middleware"
 	"cmd184psu/unified-webapp/internal/platform/response"
 	"github.com/gorilla/websocket"
 )
@@ -226,7 +226,7 @@ func (s *Server) handleBroadcastPost(w http.ResponseWriter, r *http.Request) {
 	}
 	var req broadcastRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.WriteError(w, http.StatusBadRequest, "invalid request body")
+		response.WriteDecodeError(w, err)
 		return
 	}
 	localPath, baseName, totalSize, err := s.resolveBroadcastSource(req)
@@ -386,25 +386,14 @@ func broadcastTransferErrorMessage(err error) string {
 	return "transfer failed"
 }
 
-func sameOrigin(r *http.Request) bool {
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		return true
-	}
-	host := r.Host
-	if originHost(origin) == host {
+// sameOrigin wraps middleware.SameOrigin, adding the audit line the broadcast
+// bridge relies on when an upgrade is rejected.
+var sameOrigin = func(r *http.Request) bool {
+	if middleware.SameOrigin(r) {
 		return true
 	}
 	// R1: same diagnosis as the terminal bridge -- a Host-rewriting proxy shows
 	// up here as a rejected upgrade and nothing else.
-	sshproxy.Auditf("broadcast ws upgrade rejected origin=%q host=%q", origin, host)
+	sshproxy.Auditf("broadcast ws upgrade rejected origin=%q host=%q", r.Header.Get("Origin"), r.Host)
 	return false
-}
-
-func originHost(origin string) string {
-	u, err := url.Parse(origin)
-	if err != nil || u.Host == "" {
-		return origin
-	}
-	return u.Host
 }

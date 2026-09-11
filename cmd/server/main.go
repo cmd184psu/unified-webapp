@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"cmd184psu/unified-webapp/internal/grocery"
 	"cmd184psu/unified-webapp/internal/menuserver"
@@ -62,6 +63,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
+	switch cfg.Server.OriginCheck {
+	case "", "enforce", "log", "off":
+	default:
+		log.Fatalf("config: server.origin_check %q is invalid; must be one of \"\", \"enforce\", \"log\", \"off\"", cfg.Server.OriginCheck)
+	}
 	if *flagPort != 0  { cfg.Port    = *flagPort }
 	if *flagCert != "" { cfg.TLSCert = *flagCert }
 	if *flagKey  != "" { cfg.TLSKey  = *flagKey  }
@@ -69,15 +75,36 @@ func main() {
 	dispatch := buildDispatcher(cfg)
 
 	addr    := fmt.Sprintf("0.0.0.0:%d", cfg.Port)
-	handler := middleware.Wrap(dispatch)
+	handler := middleware.Wrap(middleware.OriginCheck(cfg.Server.OriginCheck, dispatch))
 	useTLS  := cfg.TLSCert != "" && cfg.TLSKey != ""
+
+	srv := newServer(addr, handler)
 
 	if useTLS {
 		log.Printf("unified-webapp → https://%s (TLS)", addr)
-		log.Fatalf("HTTPS error: %v", http.ListenAndServeTLS(addr, cfg.TLSCert, cfg.TLSKey, handler))
+		log.Fatalf("HTTPS error: %v", srv.ListenAndServeTLS(cfg.TLSCert, cfg.TLSKey))
 	} else {
 		log.Printf("unified-webapp → http://%s", addr)
-		log.Fatalf("HTTP error: %v", http.ListenAndServe(addr, handler))
+		log.Fatalf("HTTP error: %v", srv.ListenAndServe())
+	}
+}
+
+// newServer builds the http.Server used to serve the app.
+//
+// ReadTimeout and WriteTimeout are deliberately left at zero (no timeout):
+// slideshow SSE streams and multissh WebSocket/terminal sessions are
+// long-lived connections that can sit idle or stream for hours, and a
+// nonzero WriteTimeout would kill every one of them mid-stream. IdleTimeout
+// only bounds the time a keep-alive connection may sit between requests, and
+// ReadHeaderTimeout bounds how long a client may take to send request
+// headers, guarding against slowloris-style attacks without affecting
+// long-lived request bodies/responses.
+func newServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 }
 
@@ -105,12 +132,29 @@ func buildDispatcher(cfg *config.Config) *Dispatcher {
 				log.Printf("ERROR: module %q failed to build and will return 503 on every request: %v", module, err)
 				h = unavailableHandler(module, err)
 			}
+			h = middleware.BodyLimit(limitFor(module, cfg), h)
 			built[module] = h
 		}
 		dispatch.register(host, h)
 		log.Printf("registered ( http://%s:%d ) → %s", host, cfg.Port, module)
 	}
 	return dispatch
+}
+
+// defaultBodyLimit caps the request body of every module that has no larger
+// need of its own.
+const defaultBodyLimit int64 = 1 << 20 // 1 MiB
+
+// limitFor returns the request-body ceiling for a module. multissh streams
+// file uploads through the same body and enforces its own precise ceiling at
+// cfg.Multissh.MaxUploadBytes; the extra 1 MiB headroom here covers the
+// surrounding multipart framing so BodyLimit never clips a legitimate upload
+// before multissh's own check gets to report it.
+func limitFor(module string, cfg *config.Config) int64 {
+	if module == "multissh" {
+		return cfg.Multissh.MaxUploadBytes + defaultBodyLimit
+	}
+	return defaultBodyLimit
 }
 
 func buildModule(module string, cfg *config.Config) (http.Handler, error) {

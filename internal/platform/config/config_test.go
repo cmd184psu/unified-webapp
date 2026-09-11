@@ -142,6 +142,24 @@ func TestWriteDefault_CreatesFile(t *testing.T) {
 	}
 }
 
+// TestWriteDefault_FileMode asserts the written config file carries no
+// group/other permission bits (FR-R4). Exact equality with 0600 is not
+// asserted because umask can only clear bits from the requested mode, never
+// set them, so mode&0077==0 is the safe, umask-independent check.
+func TestWriteDefault_FileMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "out.json")
+	if err := config.WriteDefault(path); err != nil {
+		t.Fatalf("WriteDefault: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if mode := info.Mode().Perm(); mode&0o077 != 0 {
+		t.Errorf("config file mode = %o, want no group/other bits (owner-only)", mode)
+	}
+}
+
 func TestWriteDefault_Idempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "out.json")
 	if err := config.WriteDefault(path); err != nil {

@@ -399,5 +399,5 @@ func WriteDefault(path string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(expanded, data, 0644)
+	return os.WriteFile(expanded, data, 0600)
 }

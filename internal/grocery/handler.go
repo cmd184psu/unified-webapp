@@ -187,7 +187,11 @@ func (h *Handler) handleConfigGroupsReorder(w http.ResponseWriter, r *http.Reque
 	var body struct {
 		Groups []string `json:"groups"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Groups) == 0 {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		response.WriteDecodeError(w, err)
+		return
+	}
+	if len(body.Groups) == 0 {
 		response.WriteError(w, http.StatusBadRequest, "groups array required")
 		return
 	}
@@ -211,8 +215,11 @@ func (h *Handler) handleItemsCreate(w http.ResponseWriter, r *http.Request) {
 		Name  string `json:"name"`
 		Group string `json:"group"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil ||
-		strings.TrimSpace(body.Name) == "" {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		response.WriteDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(body.Name) == "" {
 		response.WriteError(w, http.StatusBadRequest, "name is required")
 		return
 	}
@@ -237,7 +244,7 @@ func (h *Handler) handleItemPatch(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var p PatchPayload
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		response.WriteError(w, http.StatusBadRequest, "invalid body")
+		response.WriteDecodeError(w, err)
 		return
 	}
 	item, err := h.store.Patch(id, p)
@@ -271,7 +278,11 @@ func (h *Handler) handleMove(w http.ResponseWriter, r *http.Request) {
 		ID string `json:"id"`
 		MovePayload
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ID == "" {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		response.WriteDecodeError(w, err)
+		return
+	}
+	if body.ID == "" {
 		response.WriteError(w, http.StatusBadRequest, "id and group required")
 		return
 	}
@@ -291,7 +302,7 @@ func (h *Handler) handleReorder(w http.ResponseWriter, r *http.Request) {
 		IDs   []string `json:"ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		response.WriteError(w, http.StatusBadRequest, "invalid body")
+		response.WriteDecodeError(w, err)
 		return
 	}
 	if err := h.store.Reorder(body.Group, body.IDs); err != nil {
@@ -306,7 +317,7 @@ func (h *Handler) handleReorder(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleSync(w http.ResponseWriter, r *http.Request) {
 	var items []*Item
 	if err := json.NewDecoder(r.Body).Decode(&items); err != nil {
-		response.WriteError(w, http.StatusBadRequest, "invalid body")
+		response.WriteDecodeError(w, err)
 		return
 	}
 	merged, err := h.store.BulkSync(items)
@@ -382,7 +393,7 @@ func (h *Handler) handleRecipesReorder(w http.ResponseWriter, r *http.Request) {
 		IDs []string `json:"ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		response.WriteError(w, http.StatusBadRequest, "invalid body")
+		response.WriteDecodeError(w, err)
 		return
 	}
 	recipes, err := h.store.ReorderRecipes(body.IDs)
@@ -406,7 +417,7 @@ func (h *Handler) handleRecipePatch(w http.ResponseWriter, r *http.Request) {
 	// PATCH {"enabled":"yes"} would answer 200 and tell the client the write
 	// succeeded.
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		response.WriteError(w, http.StatusBadRequest, "invalid body")
+		response.WriteDecodeError(w, err)
 		return
 	}
 	recipe, items, err := h.store.PatchRecipe(id, body.Name, body.Enabled)
@@ -474,7 +485,7 @@ func decodeName(w http.ResponseWriter, r *http.Request) (string, bool) {
 		Name string `json:"name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		response.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+		response.WriteDecodeError(w, err)
 		return "", false
 	}
 	name := strings.TrimSpace(body.Name)
