@@ -2,6 +2,7 @@ package obsidianoid
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -11,7 +12,24 @@ import (
 	"cmd184psu/unified-webapp/internal/platform/static"
 )
 
-// Build returns a ready-to-use http.Handler for the obsidianoid module.
+// watcherHandler pairs the module's mux with the vault watchers Build
+// started so the process owner can shut them down (io.Closer is the
+// dispatcher's optional shutdown hook). Plain http.Handler use is unaffected.
+type watcherHandler struct {
+	http.Handler
+	watchers []io.Closer
+}
+
+func (h watcherHandler) Close() error {
+	for _, w := range h.watchers {
+		_ = w.Close()
+	}
+	return nil
+}
+
+// Build returns a ready-to-use http.Handler for the obsidianoid module. The
+// handler also implements io.Closer; Close stops the per-vault fsnotify
+// watcher goroutines Build starts.
 func Build(cfg config.ObsidianoidConfig) (http.Handler, error) {
 	if len(cfg.Vaults) == 0 {
 		return nil, fmt.Errorf("obsidianoid: no vaults configured")
@@ -36,6 +54,7 @@ func Build(cfg config.ObsidianoidConfig) (http.Handler, error) {
 	}
 
 	brokers := make([]*broker.Broker, len(cfg.Vaults))
+	var watchers []io.Closer
 	for i, v := range cfg.Vaults {
 		b := broker.NewBroker(0)
 		b.SetMaxSubscribers(cfg.SSEMaxSubscribers)
@@ -50,7 +69,7 @@ func Build(cfg config.ObsidianoidConfig) (http.Handler, error) {
 			log.Printf("obsidianoid: watcher for vault %q failed: %v", v.Path, err)
 			continue
 		}
-		_ = closer // process-lifetime watcher; never closed in production
+		watchers = append(watchers, closer)
 	}
 
 	h := NewHandler(cfg, state, brokers)
@@ -58,5 +77,5 @@ func Build(cfg config.ObsidianoidConfig) (http.Handler, error) {
 	h.Register(mux)
 	mux.Handle("/", static.NewHandler(cfg.StaticDir))
 
-	return mux, nil
+	return watcherHandler{Handler: mux, watchers: watchers}, nil
 }

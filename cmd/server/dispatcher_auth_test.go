@@ -47,6 +47,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"go.uber.org/goleak"
 	"golang.org/x/crypto/bcrypt"
 
 	"cmd184psu/unified-webapp/internal/platform/auth"
@@ -90,6 +91,9 @@ func buildControlDispatcher(cfg *config.Config) *Dispatcher {
 			if err != nil {
 				h = unavailableHandler(module, err)
 			} else {
+				if c, ok := hh.(io.Closer); ok {
+					dispatch.closers = append(dispatch.closers, c)
+				}
 				h = middleware.BodyLimit(limitFor(module, cfg), hh)
 			}
 			built[module] = h
@@ -97,6 +101,17 @@ func buildControlDispatcher(cfg *config.Config) *Dispatcher {
 		dispatch.register(host, h)
 	}
 	return dispatch
+}
+
+// newGateServer builds the production dispatcher for cfg/svc and serves it,
+// registering dispatcher cleanup so the module goroutines slideshow and
+// obsidianoid start are stopped when the test ends -- the goleak gate in
+// TestMain depends on it.
+func newGateServer(t *testing.T, cfg *config.Config, svc *auth.Service) *httptest.Server {
+	t.Helper()
+	dispatch := buildDispatcher(cfg, svc)
+	t.Cleanup(dispatch.Close)
+	return httptest.NewServer(middleware.Wrap(dispatch))
 }
 
 // doHostWithCookie issues method/path against host on srv, carrying cookie
@@ -167,9 +182,11 @@ func TestAC1_NoAuthConfigIsToday(t *testing.T) {
 	// cfg.Auth is left at its zero value: "config without auth".
 	svc := noAuthService(t)
 
-	real := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg, svc)))
+	real := newGateServer(t, cfg, svc)
 	defer real.Close()
-	control := httptest.NewServer(middleware.Wrap(buildControlDispatcher(cfg)))
+	controlDispatch := buildControlDispatcher(cfg)
+	t.Cleanup(controlDispatch.Close)
+	control := httptest.NewServer(middleware.Wrap(controlDispatch))
 	defer control.Close()
 
 	for host := range cfg.Routing {
@@ -291,7 +308,7 @@ func TestAC2_AllModulesProtected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("auth.FromConfig: %v", err)
 	}
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg, svc)))
+	srv := newGateServer(t, cfg, svc)
 	defer srv.Close()
 
 	hostForModule := make(map[string]string, len(cfg.Routing))
@@ -367,7 +384,7 @@ func TestAC3_AccumulationAcrossModules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("auth.FromConfig: %v", err)
 	}
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg, svc)))
+	srv := newGateServer(t, cfg, svc)
 	defer srv.Close()
 
 	// PIN login on slideshow succeeds and sets a cookie.
@@ -470,7 +487,7 @@ func TestAC4_TokenLifecycle(t *testing.T) {
 		t.Fatalf("read session key: %v", err)
 	}
 
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg, svc)))
+	srv := newGateServer(t, cfg, svc)
 	defer srv.Close()
 
 	now := time.Now()
@@ -558,7 +575,7 @@ func TestAC5_ThrottleBackoff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("auth.FromConfig: %v", err)
 	}
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg, svc)))
+	srv := newGateServer(t, cfg, svc)
 	defer srv.Close()
 
 	for i := 0; i < 5; i++ {
@@ -605,7 +622,7 @@ func TestAC5b_APIKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("auth.FromConfig: %v", err)
 	}
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg, svc)))
+	srv := newGateServer(t, cfg, svc)
 	defer srv.Close()
 
 	t.Run("valid key on grocery succeeds with zero cookies", func(t *testing.T) {
@@ -700,7 +717,7 @@ func TestT5_2_AdminBreakGlassBothEmptyMatrixEncodings(t *testing.T) {
 			if err != nil {
 				t.Fatalf("auth.FromConfig: %v", err)
 			}
-			srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg, svc)))
+			srv := newGateServer(t, cfg, svc)
 			defer srv.Close()
 
 			// Unauthenticated admin data route -> 401.
@@ -924,7 +941,7 @@ func TestT5_6_RestartEquivalence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("auth.FromConfig(initial): %v", err)
 	}
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfgInitial, svc)))
+	srv := newGateServer(t, cfgInitial, svc)
 	defer srv.Close()
 
 	// --- Step 1: operator-PIN login on the admin host -> cookie. ---
@@ -1072,7 +1089,7 @@ func TestT5_6_RestartEquivalence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("auth.FromConfig(restarted): %v", err)
 	}
-	srvRestarted := httptest.NewServer(middleware.Wrap(buildDispatcher(cfgRestarted, svcRestarted)))
+	srvRestarted := newGateServer(t, cfgRestarted, svcRestarted)
 	defer srvRestarted.Close()
 
 	t.Run("restart: identical behavior matrix", func(t *testing.T) {
@@ -1179,35 +1196,14 @@ func TestT5_6_RestartEquivalence(t *testing.T) {
 // goleak
 // ---------------------------------------------------------------------
 //
-// This package intentionally does NOT add
-//
-//	func TestMain(m *testing.M) { goleak.VerifyTestMain(m) }
-//
-// Empirically, doing so fails the entire cmd/server suite -- not just this
-// file's tests -- with goroutine leaks that predate T4.6 and have nothing to
-// do with the auth gate:
-//
-//   - internal/slideshow.Conductor.Run (started by slideshow.Build via
-//     "go conductor.Run()", conductor.go) has no shutdown/cancellation path:
-//     it loops on an unbuffered select forever. Every test in this package
-//     that builds a slideshow module (routeMatrixConfig is used throughout
-//     this file and origincheck_route_test.go) leaks one such goroutine.
-//   - internal/obsidianoid.startVaultWatcher (events.go) starts an fsnotify
-//     watcher goroutine per vault with no corresponding Close/Stop, leaking
-//     both the watcher goroutine and its underlying kqueue/inotify
-//     goroutine.
-//
-// Both are pre-existing product-code lifecycle gaps, not new leaks from the
-// auth gate, and this task (T4.6) is tests-only -- it must not patch
-// slideshow or obsidianoid to add shutdown paths. Wrapping the package in
-// goleak.VerifyTestMain today would fail on every run of `go test ./cmd/...`,
-// for anyone, regardless of whether the auth gate leaks anything, which
-// defeats the point of a leak gate. This was verified directly: adding the
-// TestMain above and running `go test -race ./cmd/...` reports exactly these
-// two goroutine families as leaked, with every other goroutine clean.
-//
-// Recommendation: add the goleak TestMain once slideshow.Conductor.Run and
-// obsidianoid.startVaultWatcher gain a stop mechanism (a separate, non-test
-// change); until then this file's tests are individually leak-clean (none of
-// them start a goroutine of their own), and the package-wide gate is left
-// off rather than filtered around the known leaks.
+// Package-wide leak gate. The two module goroutine families this package
+// starts -- slideshow's conductor tick loop and obsidianoid's per-vault
+// fsnotify watchers -- now have stop paths (their Build handlers implement
+// io.Closer), and every test that builds modules does so through
+// newGateServer, newOriginCheckedServer, or the hoisted
+// buildControlDispatcher call, all of which register Dispatcher.Close as
+// test cleanup. A module goroutine that outlives its test is therefore a
+// bug, and this gate keeps it that way.
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}

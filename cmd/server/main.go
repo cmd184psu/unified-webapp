@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -32,8 +33,11 @@ import (
 
 // Dispatcher routes incoming requests to the correct module handler based on
 // the Host header. HAProxy is expected to forward the original Host unchanged.
+// closers holds the shutdown hooks of modules whose Build started background
+// goroutines (their handlers implement io.Closer); Close runs them all.
 type Dispatcher struct {
 	handlers map[string]http.Handler
+	closers  []io.Closer
 }
 
 func newDispatcher() *Dispatcher {
@@ -42,6 +46,15 @@ func newDispatcher() *Dispatcher {
 
 func (d *Dispatcher) register(host string, h http.Handler) {
 	d.handlers[host] = h
+}
+
+// Close stops every module background goroutine the dispatcher's modules
+// started. Production never calls it (modules live for the process); tests
+// use it so the package can run under a goleak gate.
+func (d *Dispatcher) Close() {
+	for _, c := range d.closers {
+		_ = c.Close()
+	}
 }
 
 func (d *Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -217,6 +230,9 @@ func buildDispatcher(cfg *config.Config, svc *auth.Service) *Dispatcher {
 				log.Printf("ERROR: module %q failed to build and will return 503 on every request: %v", module, err)
 				h = unavailableHandler(module, err)
 			} else {
+				if c, ok := hh.(io.Closer); ok {
+					dispatch.closers = append(dispatch.closers, c)
+				}
 				h = middleware.BodyLimit(limitFor(module, cfg), svc.Gate(module, hh))
 			}
 			built[module] = h

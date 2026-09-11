@@ -77,6 +77,7 @@ func routeMatrixConfig(t *testing.T, mode string) *config.Config {
 // does: OriginCheck inside Wrap, outside the dispatcher.
 func newOriginCheckedServer(t *testing.T, cfg *config.Config) *httptest.Server {
 	dispatch := buildDispatcher(cfg, noAuthService(t))
+	t.Cleanup(dispatch.Close)
 	handler := middleware.Wrap(middleware.OriginCheck(cfg.Server.OriginCheck, dispatch))
 	return httptest.NewServer(handler)
 }

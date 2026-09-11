@@ -46,6 +46,9 @@ type Conductor struct {
 	resetCh    chan time.Duration // send new duration to reset the ticker
 	broker     *broker.Broker
 	musicStore *MusicStore
+
+	done     chan struct{} // closed by Stop; ends Run
+	stopOnce sync.Once
 }
 
 // NewConductor creates a Conductor initialised from cfg and the subjects in store.
@@ -71,6 +74,7 @@ func NewConductor(store *Store, music *MusicStore, b *broker.Broker, cfg config.
 	c := &Conductor{
 		subjects:   subjects,
 		resetCh:    make(chan time.Duration, 1),
+		done:       make(chan struct{}),
 		broker:     b,
 		musicStore: music,
 		state: ConductorState{
@@ -92,12 +96,15 @@ func NewConductor(store *Store, music *MusicStore, b *broker.Broker, cfg config.
 }
 
 // Run starts the conductor's background tick goroutine.
-// It must be called exactly once; call it from Build().
+// It must be called exactly once; call it from Build(). Run returns after
+// Stop is called.
 func (c *Conductor) Run() {
 	ticker := time.NewTicker(c.duration())
 	defer ticker.Stop()
 	for {
 		select {
+		case <-c.done:
+			return
 		case <-ticker.C:
 			c.mu.Lock()
 			if c.state.Playing && len(c.subjects) > 0 {
@@ -119,6 +126,12 @@ func (c *Conductor) Run() {
 			ticker = time.NewTicker(d)
 		}
 	}
+}
+
+// Stop ends the goroutine Run started. Idempotent; safe to call whether or
+// not Run was ever started.
+func (c *Conductor) Stop() {
+	c.stopOnce.Do(func() { close(c.done) })
 }
 
 // Snapshot returns the current state as a JSON string (thread-safe).

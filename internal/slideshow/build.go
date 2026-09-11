@@ -8,7 +8,22 @@ import (
 	"cmd184psu/unified-webapp/internal/platform/static"
 )
 
-// Build returns a ready-to-use http.Handler for the slideshow module.
+// stoppableHandler pairs the module's mux with the conductor's Stop so the
+// process owner can end the background tick goroutine (io.Closer is the
+// dispatcher's optional shutdown hook). Plain http.Handler use is unaffected.
+type stoppableHandler struct {
+	http.Handler
+	stop func()
+}
+
+func (h stoppableHandler) Close() error {
+	h.stop()
+	return nil
+}
+
+// Build returns a ready-to-use http.Handler for the slideshow module. The
+// handler also implements io.Closer; Close stops the conductor goroutine
+// Build starts.
 func Build(cfg config.SlideshowConfig) (http.Handler, error) {
 	store, err := NewStore(cfg.ImageDir, cfg.AgeCutoffDays)
 	if err != nil {
@@ -26,5 +41,5 @@ func Build(cfg config.SlideshowConfig) (http.Handler, error) {
 
 	go conductor.Run()
 
-	return mux, nil
+	return stoppableHandler{Handler: mux, stop: conductor.Stop}, nil
 }

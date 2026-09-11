@@ -3,6 +3,7 @@ package slideshow_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -54,6 +55,9 @@ func TestBuild_SSEMaxSubscribersFromConfig(t *testing.T) {
 	h, err := slideshow.Build(cfg.Slideshow)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
+	}
+	if c, ok := h.(io.Closer); ok {
+		t.Cleanup(func() { _ = c.Close() })
 	}
 	srv := httptest.NewServer(h)
 	defer srv.Close()

@@ -40,6 +40,13 @@ the reason instead of crashing the rest of the binary (`unavailableHandler` in
 `cmd/server/main.go`). `admin` is the one sanctioned exception to this signature — see
 **The admin exception**, below.
 
+If `Build` starts a background goroutine (a ticker loop, a filesystem watcher), the
+handler it returns must also implement `io.Closer`, with `Close` stopping everything
+`Build` started. The dispatcher detects the interface and calls `Close` on shutdown;
+this is what lets `cmd/server`'s tests run under a `goleak` gate. Slideshow (conductor
+tick loop) and obsidianoid (per-vault fsnotify watchers) are the two existing examples.
+A module with no background work returns its mux as-is.
+
 ## Step-by-step checklist
 
 1. **Config struct + expander.** Add a `<Module>Config` struct to
