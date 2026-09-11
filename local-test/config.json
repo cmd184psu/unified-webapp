@@ -4,14 +4,14 @@
   "tls_key": "",
   "host_routing": {
     "localhost":         "grocery",
-    "grocery.local":     "grocery",
-    "todo.local":        "todo",
-    "slideshow.local":   "slideshow",
-    "menu.local":        "menuserver",
-    "menuserver.local":  "menuserver",
-    "obsidianoid.local": "obsidianoid",
-    "multissh.local":    "multissh",
-    "admin.local":       "admin"
+    "grocery.test":     "grocery",
+    "todo.test":        "todo",
+    "slideshow.test":   "slideshow",
+    "menu.test":        "menuserver",
+    "menuserver.test":  "menuserver",
+    "obsidianoid.test": "obsidianoid",
+    "multissh.test":    "multissh",
+    "admin.test":       "admin"
   },
   "server": {
     "origin_check": "enforce",

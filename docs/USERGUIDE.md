@@ -2,8 +2,8 @@
 
 One Go binary serves seven modules. The `Host` header of each request picks
 the module: `host_routing` in the config maps a hostname (port ignored) to a
-module name, so `todo.local:8080` and `todo.local` both route to whatever
-`"todo.local"` maps to. Each module can independently require login (PIN,
+module name, so `todo.test:8080` and `todo.test` both route to whatever
+`"todo.test"` maps to. Each module can independently require login (PIN,
 LDAP, passkey, or API key) — or require nothing at all.
 
 Modules:
@@ -23,20 +23,19 @@ Modules:
 ## Local testing quick start
 
 A ready-made profile lives in `local-test/`. It routes every module to a
-`.local` hostname and demonstrates every auth style at once.
+`.test` hostname and demonstrates every auth style at once. (`.test` is
+reserved for exactly this — RFC 6761. Don't use `.local`: that domain
+belongs to Bonjour/mDNS on macOS, and every page load stalls ~5 seconds
+waiting on multicast lookups.)
 
 **1. Add the hostnames** (two lines in `/etc/hosts`, needs sudo):
 
 ```
-127.0.0.1 grocery.local todo.local slideshow.local menu.local menuserver.local obsidianoid.local multissh.local admin.local
-::1 grocery.local todo.local slideshow.local menu.local menuserver.local obsidianoid.local multissh.local admin.local
+127.0.0.1 grocery.test todo.test slideshow.test menu.test menuserver.test obsidianoid.test multissh.test admin.test
+::1 grocery.test todo.test slideshow.test menu.test menuserver.test obsidianoid.test multissh.test admin.test
 ```
 
-Both lines matter. macOS treats `.local` as the Bonjour/mDNS domain: with
-only the IPv4 line, the resolver still sends the IPv6 (AAAA) lookup over
-multicast DNS and waits ~5 seconds for a reply that never comes — every
-page load in a browser stalls by that much. The `::1` line answers the
-IPv6 query instantly.
+Add both so IPv4 and IPv6 lookups resolve straight from `/etc/hosts`.
 
 **2. Seed data dirs and the admin PIN file** (idempotent):
 
@@ -51,17 +50,17 @@ relative to the working directory):
 go run ./cmd/server -config local-test/config.json
 ```
 
-**4. Browse.** Every module is at `http://<name>.local:8080`:
+**4. Browse.** Every module is at `http://<name>.test:8080`:
 
 | URL | Module | Auth | Credential |
 |---|---|---|---|
-| http://grocery.local:8080 | grocery | none | — |
-| http://todo.local:8080 | todo | PIN | `1234` |
-| http://slideshow.local:8080 | slideshow | PIN | `1234` |
-| http://menuserver.local:8080 (or menu.local) | menuserver | API key | see below |
-| http://obsidianoid.local:8080 | obsidianoid | LDAP | `chris` / `ldap-test-1` |
-| http://multissh.local:8080 | multissh | LDAP **or** API key | same as above |
-| http://admin.local:8080 | admin | admin PIN | `424242` |
+| http://grocery.test:8080 | grocery | none | — |
+| http://todo.test:8080 | todo | PIN | `1234` |
+| http://slideshow.test:8080 | slideshow | PIN | `1234` |
+| http://menuserver.test:8080 (or menu.test) | menuserver | API key | see below |
+| http://obsidianoid.test:8080 | obsidianoid | LDAP | `chris` / `ldap-test-1` |
+| http://multissh.test:8080 | multissh | LDAP **or** API key | same as above |
+| http://admin.test:8080 | admin | admin PIN | `424242` |
 
 These are throwaway test credentials, published in this repo on purpose.
 Never reuse them outside local testing.
@@ -76,7 +75,7 @@ API keys are for scripted access, not browsers — send them as a header:
 
 ```
 curl -H "Authorization: Bearer varOO_vuQyged_rklN3ujsy2tgQAcEs-9Ln13hDIyh0" \
-     http://menuserver.local:8080/items
+     http://menuserver.test:8080/items
 ```
 
 ### Local LDAP with glauth
@@ -117,12 +116,12 @@ groups by searching `base_dn` for entries whose `member`/`memberUid`/
   config keeps it `true` — don't copy this profile's auth block to a real
   deployment.
 - **Sessions don't carry across hostnames.** `cookie_domain` is empty, so
-  each `<module>.local` gets its own host-only session cookie; logging into
-  todo.local doesn't log you into slideshow.local. (In production, siblings
+  each `<module>.test` gets its own host-only session cookie; logging into
+  todo.test doesn't log you into slideshow.test. (In production, siblings
   under one parent domain plus `cookie_domain: ".example.net"` give you the
   accumulating multi-module session.)
 - **Passkeys are deliberately absent.** WebAuthn requires a secure context,
-  and `http://anything.local` is not one (only `localhost` gets that
+  and `http://anything.test` is not one (only `localhost` gets that
   exemption). Testing passkeys needs TLS or a `localhost` route.
 - **Admin PIN lives in `local-test/admin.pin`** — a plaintext PIN in a file
   that must be `chmod 0400` (the server refuses more-open modes on every

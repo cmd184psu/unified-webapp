@@ -5,7 +5,7 @@
 #
 # Test credentials this profile uses (LOCAL TESTING ONLY):
 #   PIN login (todo, slideshow):  1234
-#   Admin PIN (admin.local):      424242
+#   Admin PIN (admin.test):      424242
 #   API key (menuserver, multissh):
 #     varOO_vuQyged_rklN3ujsy2tgQAcEs-9Ln13hDIyh0
 #   LDAP (obsidianoid, multissh) via glauth (see glauth.cfg):
@@ -89,12 +89,11 @@ fi
 
 echo
 echo "== /etc/hosts check =="
-# Both lines are required. macOS treats .local as the Bonjour/mDNS domain:
-# with only the 127.0.0.1 entry, the resolver still sends the IPv6 (AAAA)
-# query over multicast DNS and waits ~5 seconds for a reply that never
-# comes -- every page load stalls. The ::1 twin answers that query
-# instantly.
-HOSTNAMES="grocery.local todo.local slideshow.local menu.local menuserver.local obsidianoid.local multissh.local admin.local"
+# The profile uses .test (reserved for exactly this, RFC 6761) rather than
+# .local, which belongs to Bonjour/mDNS on macOS and stalls every page load
+# ~5s waiting on multicast AAAA lookups. Add both lines so IPv4 and IPv6
+# lookups resolve from /etc/hosts without touching a DNS server.
+HOSTNAMES="grocery.test todo.test slideshow.test menu.test menuserver.test obsidianoid.test multissh.test admin.test"
 MISSING4=""
 MISSING6=""
 for h in $HOSTNAMES; do
@@ -102,14 +101,13 @@ for h in $HOSTNAMES; do
   grep -qE "^::1[[:space:]].*[[:space:]]$h([[:space:]]|\$)" /etc/hosts || MISSING6="$MISSING6 $h"
 done
 if [ -n "$MISSING4" ] || [ -n "$MISSING6" ]; then
-  echo "   Add BOTH lines to /etc/hosts (sudo required) -- the ::1 line"
-  echo "   prevents a ~5s mDNS timeout on every .local page load:"
+  echo "   Add BOTH lines to /etc/hosts (sudo required):"
   echo
   [ -n "$MISSING4" ] && echo "   127.0.0.1 $HOSTNAMES"
   [ -n "$MISSING6" ] && echo "   ::1 $HOSTNAMES"
   echo
 else
-  echo "   all .local hostnames present (IPv4 and IPv6)"
+  echo "   all .test hostnames present (IPv4 and IPv6)"
 fi
 
 echo "== done =="
