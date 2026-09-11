@@ -577,7 +577,7 @@ main {
 .item-list { list-style: none; }
 .item-row {
   display: grid;
-  grid-template-columns: 28px 28px 1fr 38px;
+  grid-template-columns: 28px 28px 1fr auto;
   align-items: center;
   padding: var(--space-2) var(--space-1) var(--space-2) 0;
   border-bottom: 1px solid var(--color-divider);
@@ -664,6 +664,50 @@ main {
   background: var(--color-danger-lite);
 }
 .delete-btn svg { width: 16px; height: 16px; pointer-events: none; }
+
+.item-actions { display: flex; align-items: center; justify-content: flex-end; }
+
+.move-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border-radius: var(--radius-md);
+  color: var(--color-text-faint); margin: auto;
+  transition: color var(--t), background var(--t);
+  -webkit-tap-highlight-color: transparent;
+}
+.move-btn:hover, .move-btn:active {
+  color: var(--color-primary);
+  background: var(--color-surface-off);
+}
+.move-btn svg { width: 16px; height: 16px; pointer-events: none; }
+
+/* ── Move-item modal ────────────────────────────────────────────── */
+.move-modal-list {
+  list-style: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin-bottom: var(--space-3);
+  max-height: 320px;
+  overflow-y: auto;
+}
+.move-modal-item {
+  display: block; width: 100%; text-align: left;
+  padding: var(--space-3); border: none;
+  border-bottom: 1px solid var(--color-divider);
+  min-height: 44px;
+  background: var(--color-surface);
+  font-size: var(--text-sm); color: var(--color-text); font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+.move-modal-item:last-child { border-bottom: none; }
+.move-modal-item:hover, .move-modal-item:active {
+  background: var(--color-surface-off);
+}
+.move-modal-empty {
+  padding: var(--space-4);
+  font-size: var(--text-sm); color: var(--color-text-faint);
+  text-align: center; font-style: italic;
+}
 
 .group-empty {
   padding: var(--space-3) var(--space-4);

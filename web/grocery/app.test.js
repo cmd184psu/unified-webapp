@@ -940,12 +940,17 @@ describe('AC-9.7 static half — escaping in the shipped source', () => {
     //                   li.title PROPERTY. A property assignment is not a markup
     //                   boundary; the DOM stores the string literally, so esc()
     //                   here would render the entities visibly in the tooltip.
+    //   syncCreateRecipe — builds "Chili (2)" as the replay retry name. It goes
+    //                   through JSON.stringify into a request BODY, never near
+    //                   innerHTML; esc() here would send visible entities to
+    //                   the server as the recipe's actual name.
     //
-    // Adding a third raw interpolation must fail this until someone states
-    // which of those two arguments it relies on.
+    // Adding a fourth raw interpolation must fail this until someone states
+    // which of those arguments it relies on.
     const patterns = [
       /return r \? ` \(\$\{r\.name\}\)` : '';/,
       /return r \? `Belongs to recipe \$\{r\.name\}` : '';/,
+      /attempt === 1 \? r\.name : `\$\{r\.name\} \(\$\{attempt\}\)`;/,
     ];
     assert.equal(rawNameLines.length, patterns.length,
       `expected exactly ${patterns.length} raw ${'${r.name}'} lines; found ` +
@@ -1147,5 +1152,126 @@ describe('header layout — the tabs do not move when the tab changes', () => {
     // than from the gap, and the title or the Sync toggle would compress.
     assert.match(block('.header-left'),  /flex-shrink:\s*0/);
     assert.match(block('.header-right'), /flex-shrink:\s*0/);
+  });
+});
+
+describe('offline queue — edits made with sync off replay on reconnect', () => {
+  // The reported failure: reconnecting after offline edits ran refreshAll()
+  // alone, which adopted the server's stale state wholesale and destroyed
+  // every local edit. Newest-wins means the queued edits are pushed UP first
+  // and only then is the authoritative state re-read.
+  it('the sync toggle replays the queue BEFORE refreshing', () => {
+    const start = APP_SRC.indexOf("syncTog.addEventListener('change'");
+    assert.notEqual(start, -1, 'sync toggle handler not found — this gate has lost its target');
+    const body   = APP_SRC.slice(start, APP_SRC.indexOf('});', start));
+    const replay = body.indexOf('await replayPendingOps()');
+    const fresh  = body.indexOf('await refreshAll()');
+    assert.notEqual(replay, -1, 'the reconnect path no longer replays pendingOps');
+    assert.notEqual(fresh,  -1, 'refreshAll() call not found — this gate has lost its target');
+    assert.ok(replay < fresh,
+      'refreshAll() runs before the replay — stale server state overwrites offline edits');
+  });
+
+  it('replayPendingOps drains with a while loop, not a one-pass for', () => {
+    assert.match(APP_N, /while \(pendingOps\.length\) \{/);
+  });
+
+  it('every offline mutation queues instead of silently dropping its sync step', () => {
+    // One arm per mutation family; the shape `if (syncEnabled) await sync();
+    // else pendingOps.push(sync);` is the wiring this pins. Counting the else
+    // branches catches a mutation reverted to the old fire-and-forget-or-drop.
+    const queued = (APP_N.match(/else pendingOps\.push\(sync\);/g) || []).length;
+    assert.ok(queued >= 12,
+      `only ${queued} mutations queue when offline — one has lost its else branch`);
+  });
+
+  it('a GET refresh preserves local-only (not yet synced) entities', () => {
+    // refreshAll runs on every SSE tick from ANY client; a wholesale
+    // `items = data` here is exactly the wipe the offline work removed.
+    assert.match(APP_N, /mergeServerItems\(data \|\| \[\]\);/);
+    assert.match(APP_N, /mergeServerRecipes\(data \|\| \[\]\);/);
+    assert.doesNotMatch(APP_N, /items = data \|\| \[\];/);
+    assert.doesNotMatch(APP_N, /recipes = data \|\| \[\];/);
+  });
+
+  it('adoptRecipePatch merges items rather than replacing the array', () => {
+    assert.doesNotMatch(APP_N, /if \(Array\.isArray\(patched\.items\)\) items = patched\.items;/,
+      'adoptRecipePatch replaces items wholesale — pending local creates are destroyed');
+    assert.match(APP_N, /if \(Array\.isArray\(patched\.items\)\) mergeServerItems\(patched\.items\);/);
+  });
+
+  it('create-then-delete offline cancels out instead of replaying a dead POST', () => {
+    assert.match(APP_N, /if \(r\._deleted\) return;/);
+    assert.match(APP_N, /if \(it\._deleted\) return;/);
+  });
+
+  it('the recipes tab is no longer locked while offline (AC-10.1 retired)', () => {
+    // The user asked for offline recipe editing; the old lockout disabled
+    // every recipe control and the shared footer submit when sync was off.
+    const start = APP_SRC.indexOf('function updateRecipeControlsDisabled() {');
+    assert.notEqual(start, -1, 'updateRecipeControlsDisabled not found — this gate has lost its target');
+    const after = APP_SRC.slice(start + 1);
+    const rel   = after.search(/\n  (?:async function |function |const |let )/);
+    const body  = after.slice(0, rel === -1 ? undefined : rel);
+    assert.doesNotMatch(body, /!syncEnabled/,
+      'recipe controls are gated on sync again — offline recipe edits are locked out');
+    assert.match(body, /el\.dataset\.edge === '1'/,
+      'the move-button edge state must survive the lockout removal');
+  });
+});
+
+describe('move-to-group button — a tap alternative to dragging across groups', () => {
+  // Reported pain point: dragging an item out of the bottom-most Unallocated
+  // group to a named group is fiddly on a small touch screen. Every row gets
+  // a .move-btn that opens a plain list of the OTHER groups; picking one
+  // calls moveItem with the same destIds shape a cross-group drop already
+  // used (append to the destination group's id list), verified live in
+  // smoke-move.mjs against a real server. This block pins the static wiring.
+  it('buildRow emits a .move-btn on every row, independent of ownership', () => {
+    assert.match(APP_N,
+      /<button class="move-btn" data-id="\$\{item\.id\}" title="Move to a different group"/);
+    assert.equal((APP_SRC.match(/class="move-btn"/g) || []).length, 1,
+      'the move button markup should appear once, in buildRow, not duplicated elsewhere');
+  });
+
+  it('the move button sits alongside delete, not inside its conditional', () => {
+    // Must NOT be nested in the `owned ? '' : ...` branch — an owned
+    // (recipe-linked) item still needs to be movable between groups.
+    const start = APP_SRC.indexOf('class="move-btn"');
+    const ownedTernary = APP_SRC.indexOf('${owned ? \'\' : `<button class="delete-btn"');
+    assert.ok(start !== -1 && ownedTernary !== -1 && start < ownedTernary,
+      'move-btn must render before, and outside of, the ownership-gated delete button');
+  });
+
+  it('openMoveModal excludes the item\'s current group from the destination list', () => {
+    assert.match(APP_N, /const dest = \[\.\.\.groups, NO_GROUP\]\.filter\(g => g !== item\.group\);/);
+  });
+
+  it('picking a destination appends the item to that group\'s end, then calls moveItem', () => {
+    // Same shape as pointerEnd's cross-group drop branch: read the destination
+    // group's current ids, push the moved id on the end, hand both to moveItem.
+    assert.match(APP_N, /const destIds = itemsForGroup\(targetGroup\)\.map\(i => i\.id\);\s*destIds\.push\(id\);\s*moveItem\(id, targetGroup, destIds\);/);
+  });
+
+  it('the delegated list click handler wires .move-btn to openMoveModal', () => {
+    assert.match(APP_N, /if \(move\)\s*\{ openMoveModal\(move\.dataset\.id\); return; \}/);
+  });
+
+  it('the modal closes on backdrop click and on Cancel, without moving anything', () => {
+    assert.match(APP_N,
+      /if \(e\.target === moveModal \|\| e\.target\.closest\('#move-modal-cancel'\)\) \{\s*closeMoveModal\(\);\s*return;\s*\}/);
+  });
+
+  it('.item-row grid still has exactly 4 tracks — move+delete share the last one', () => {
+    // Regression guard for the grid-column landmine: adding a 5th DOM child
+    // (move-btn) without also widening grid-template-columns would misalign
+    // the actions column on rows where delete-btn is absent (owned items),
+    // since grid assigns tracks by DOM order, not by column identity.
+    const m = CSS_SRC.match(/\.item-row\s*\{[^}]*grid-template-columns:\s*([^;]+);/);
+    assert.ok(m, 'grid-template-columns not found on .item-row');
+    assert.equal(m[1].trim().split(/\s+/).length, 4,
+      `expected 4 grid tracks, found: ${m[1].trim()}`);
+    assert.match(APP_N, /<span class="item-actions">/,
+      'move-btn and delete-btn must be wrapped in one flex container occupying the 4th track');
   });
 });
