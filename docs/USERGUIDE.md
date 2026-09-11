@@ -25,11 +25,18 @@ Modules:
 A ready-made profile lives in `local-test/`. It routes every module to a
 `.local` hostname and demonstrates every auth style at once.
 
-**1. Add the hostnames** (one line in `/etc/hosts`, needs sudo):
+**1. Add the hostnames** (two lines in `/etc/hosts`, needs sudo):
 
 ```
 127.0.0.1 grocery.local todo.local slideshow.local menu.local menuserver.local obsidianoid.local multissh.local admin.local
+::1 grocery.local todo.local slideshow.local menu.local menuserver.local obsidianoid.local multissh.local admin.local
 ```
+
+Both lines matter. macOS treats `.local` as the Bonjour/mDNS domain: with
+only the IPv4 line, the resolver still sends the IPv6 (AAAA) lookup over
+multicast DNS and waits ~5 seconds for a reply that never comes — every
+page load in a browser stalls by that much. The `::1` line answers the
+IPv6 query instantly.
 
 **2. Seed data dirs and the admin PIN file** (idempotent):
 

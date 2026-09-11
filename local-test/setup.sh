@@ -89,17 +89,27 @@ fi
 
 echo
 echo "== /etc/hosts check =="
-MISSING=""
-for h in grocery.local todo.local slideshow.local menu.local menuserver.local obsidianoid.local multissh.local admin.local; do
-  grep -qE "^[^#]*[[:space:]]$h([[:space:]]|\$)" /etc/hosts || MISSING="$MISSING $h"
+# Both lines are required. macOS treats .local as the Bonjour/mDNS domain:
+# with only the 127.0.0.1 entry, the resolver still sends the IPv6 (AAAA)
+# query over multicast DNS and waits ~5 seconds for a reply that never
+# comes -- every page load stalls. The ::1 twin answers that query
+# instantly.
+HOSTNAMES="grocery.local todo.local slideshow.local menu.local menuserver.local obsidianoid.local multissh.local admin.local"
+MISSING4=""
+MISSING6=""
+for h in $HOSTNAMES; do
+  grep -qE "^127\.0\.0\.1[[:space:]].*[[:space:]]$h([[:space:]]|\$)" /etc/hosts || MISSING4="$MISSING4 $h"
+  grep -qE "^::1[[:space:]].*[[:space:]]$h([[:space:]]|\$)" /etc/hosts || MISSING6="$MISSING6 $h"
 done
-if [ -n "$MISSING" ]; then
-  echo "   Add this line to /etc/hosts (sudo required):"
+if [ -n "$MISSING4" ] || [ -n "$MISSING6" ]; then
+  echo "   Add BOTH lines to /etc/hosts (sudo required) -- the ::1 line"
+  echo "   prevents a ~5s mDNS timeout on every .local page load:"
   echo
-  echo "   127.0.0.1 grocery.local todo.local slideshow.local menu.local menuserver.local obsidianoid.local multissh.local admin.local"
+  [ -n "$MISSING4" ] && echo "   127.0.0.1 $HOSTNAMES"
+  [ -n "$MISSING6" ] && echo "   ::1 $HOSTNAMES"
   echo
 else
-  echo "   all .local hostnames already present"
+  echo "   all .local hostnames present (IPv4 and IPv6)"
 fi
 
 echo "== done =="
