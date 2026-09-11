@@ -24,6 +24,7 @@ package auth
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"math"
 	"net/http"
@@ -140,8 +141,14 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request, module str
 		}
 	case "ldap":
 		client := s.ldapClient(p.LDAP)
-		if name, err := client.Authenticate(r.Context(), req.Username, req.Password); err == nil {
+		name, err := client.Authenticate(r.Context(), req.Username, req.Password)
+		if err == nil {
 			identity, method = name, "ldap"
+		} else if !errors.Is(err, ErrLDAPAuth) && !errors.Is(err, ErrLDAPForbidden) {
+			// Connection-level failure (directory down, unreachable, TLS),
+			// not a credential problem. The client still gets the uniform
+			// 401 below, but the operator can tell the two apart here.
+			log.Printf("event=auth_ldap_error module=%q err=%q", module, err.Error())
 		}
 	}
 

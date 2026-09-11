@@ -92,6 +92,12 @@ ldapsearch -H ldap://127.0.0.1:3893 -x \
   -b dc=glauth,dc=com "(cn=chris)"
 ```
 
+**If glauth isn't running, LDAP logins fail with the same generic "login
+failed" a wrong password gets** (deliberately — the login page never reveals
+infrastructure detail). The server log tells them apart: a directory that
+can't be reached logs `event=auth_ldap_error ... connection refused`, while
+a wrong password logs `reason="bad_credential"`.
+
 To use a real LDAP server instead, edit the `auth.ldap` block in
 `local-test/config.json`. Note `required_groups` entries are matched against
 group **cn values** (e.g. `"household"`), not full DNs — the server resolves

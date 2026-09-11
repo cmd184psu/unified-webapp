@@ -11,6 +11,9 @@
   form.visible { display: flex; }
   input, button { font-size: 1rem; padding: 0.4rem; }
   button { cursor: pointer; }
+  .secret-row { display: flex; gap: 0.25rem; }
+  .secret-row input { flex: 1; min-width: 0; }
+  .secret-row .reveal { flex: none; }
   #passkey-btn { display: none; }
   #error { color: #b00020; min-height: 1.2em; }
 </style>
@@ -21,7 +24,10 @@
 
 <form id="pin-form">
   <label for="pin-input">PIN</label>
-  <input id="pin-input" type="password" inputmode="numeric" autocomplete="off" required>
+  <div class="secret-row">
+    <input id="pin-input" type="password" inputmode="numeric" autocomplete="off" required>
+    <button type="button" class="reveal" data-target="pin-input" aria-label="Show PIN">Show</button>
+  </div>
   <button type="submit">Sign in with PIN</button>
 </form>
 
@@ -29,7 +35,10 @@
   <label for="ldap-username">Username</label>
   <input id="ldap-username" type="text" autocomplete="username" required>
   <label for="ldap-password">Password</label>
-  <input id="ldap-password" type="password" autocomplete="current-password" required>
+  <div class="secret-row">
+    <input id="ldap-password" type="password" autocomplete="current-password" required>
+    <button type="button" class="reveal" data-target="ldap-password" aria-label="Show password">Show</button>
+  </div>
   <button type="submit">Sign in</button>
 </form>
 
@@ -110,6 +119,18 @@
       clientExtensionResults: credential.getClientExtensionResults()
     };
   }
+
+  // --- show/hide toggles for secret fields ---
+
+  Array.prototype.forEach.call(document.querySelectorAll(".reveal"), function (btn) {
+    btn.addEventListener("click", function () {
+      var input = document.getElementById(btn.getAttribute("data-target"));
+      var show = input.type === "password";
+      input.type = show ? "text" : "password";
+      btn.textContent = show ? "Hide" : "Show";
+      btn.setAttribute("aria-label", (show ? "Hide" : "Show") + " " + (input.id === "pin-input" ? "PIN" : "password"));
+    });
+  });
 
   // --- form wiring ---
 
