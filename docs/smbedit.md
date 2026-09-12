@@ -34,7 +34,7 @@ running and operating it.
 the hostname is the entire access-control story in this release. Application
 authentication is a separate, later piece of work; until it lands, the network
 is the boundary. Do not expose the smbedit hostname beyond the network segment
-you would trust with root-adjacent control of the file server. And note the
+you would trust with root on this host. And note the
 boundary is really the **browser** of anyone who can resolve the hostname, not
 just the network segment itself: the shared platform middleware answers with
 `Access-Control-Allow-Origin: *` and there is no CSRF token, so any web page
@@ -98,7 +98,7 @@ conf path, and the log path to your host; edit with `visudo -f`):
 # backs up the existing file through the same "sudo install" path before
 # writing, and fails before writing anything if the backup is denied.
 cdelezenski ALL=(root) NOPASSWD: /usr/bin/install -m 0644 * /etc/samba/smb.conf
-cdelezenski ALL=(root) NOPASSWD: /usr/bin/install -m 0644 * /etc/samba/smb.conf.*
+cdelezenski ALL=(root) NOPASSWD: /usr/bin/install -m 0644 * /etc/samba/smb.conf.[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].bak
 cdelezenski ALL=(root) NOPASSWD: /usr/bin/systemctl restart smbd
 cdelezenski ALL=(root) NOPASSWD: /usr/bin/systemctl restart smb
 cdelezenski ALL=(root) NOPASSWD: /usr/sbin/service smbd restart
