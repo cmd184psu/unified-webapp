@@ -11,7 +11,8 @@
   "menuserver-test.cmdhome.net":       "menuserver",
   "obsidianoid-test.cmdhome.net":      "obsidianoid",
   "obsidianoid.cmdhome.net":           "obsidianoid",
-  "multissh-test.cmdhome.net":         "multissh"
+  "multissh-test.cmdhome.net":         "multissh",
+  "certmachine-test.cmdhome.net":      "certmachine"
 
   },
   "grocery": {
@@ -67,5 +68,12 @@
     "max_upload_bytes": 8589934592,
     "strict_host_key": false,
     "known_hosts_path": ""
+  },
+  "certmachine": {
+    "static_dir": "./web/certmachine",
+    "db_path": "./data/certmachine/certmachine.db",
+    "legacy_import_dir": "",
+    "default_validity_days": 365,
+    "expiry_warn_days": 30
   }
 }

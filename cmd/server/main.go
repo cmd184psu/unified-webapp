@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"cmd184psu/unified-webapp/internal/certmachine"
 	"cmd184psu/unified-webapp/internal/grocery"
 	"cmd184psu/unified-webapp/internal/menuserver"
 	"cmd184psu/unified-webapp/internal/multissh"
@@ -127,6 +128,8 @@ func buildModule(module string, cfg *config.Config) (http.Handler, error) {
 		return obsidianoid.Build(cfg.Obsidianoid)
 	case "multissh":
 		return multissh.Build(cfg.Multissh)
+	case "certmachine":
+		return certmachine.Build(cfg.Certmachine)
 	default:
 		return nil, fmt.Errorf("unknown module %q", module)
 	}

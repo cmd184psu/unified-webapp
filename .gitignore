@@ -40,3 +40,6 @@ node_modules/
 # unified-webapp-example.json or anything nested.
 /unified-webapp
 /unified-webapp-arm64-linux
+# `go build ./cmd/server` with no -o lands here, named after the package
+# directory; a 19MB binary got left untracked in the repo root this way.
+/server

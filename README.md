@@ -27,7 +27,7 @@ Open `~/.unified-webapp.json` and fill in:
 - `host_routing` — map hostname → module name
 - Module `static_dir` and `data_dir` / `data_file` paths (use absolute paths in production)
 
-Minimal example with all four modules. Multiple hostnames can map to the same module — useful for adding `-test` aliases that won't collide with live services on your network:
+Minimal example with all seven modules. Multiple hostnames can map to the same module — useful for adding `-test` aliases that won't collide with live services on your network:
 
 ```json
 {
@@ -46,7 +46,9 @@ Minimal example with all four modules. Multiple hostnames can map to the same mo
     "obsidianoid.cmdhome.net":        "obsidianoid",
     "obsidianoid-test.cmdhome.net":   "obsidianoid",
     "multissh.cmdhome.net":           "multissh",
-    "multissh-test.cmdhome.net":      "multissh"
+    "multissh-test.cmdhome.net":      "multissh",
+    "certmachine.cmdhome.net":        "certmachine",
+    "certmachine-test.cmdhome.net":   "certmachine"
   },
   "grocery": {
     "static_dir": "/opt/unified-webapp/web/grocery",
@@ -93,6 +95,13 @@ Minimal example with all four modules. Multiple hostnames can map to the same mo
     "max_upload_bytes": 8589934592,
     "strict_host_key": false,
     "known_hosts_path": ""
+  },
+  "certmachine": {
+    "static_dir": "/opt/unified-webapp/web/certmachine",
+    "db_path": "/data/certmachine/certmachine.db",
+    "legacy_import_dir": "",
+    "default_validity_days": 365,
+    "expiry_warn_days": 30
   }
 }
 ```
@@ -114,6 +123,18 @@ Minimal example with all four modules. Multiple hostnames can map to the same mo
 Running and using the module — host cards, terminals, broadcasts, the proxy requirements, and the audit log — is documented separately in **[docs/multissh.md](docs/multissh.md)**. Read the [proxy section](docs/multissh.md#3-putting-it-behind-a-proxy) before putting it behind nginx: a front end that rewrites the `Host` header breaks every terminal while leaving the page looking fine. Note also that this module has **no login** — reaching its hostname is the whole access boundary.
 
 **Empty strings are meaningful, not omissions.** `ssh_dir`, `upload_dir`, `browse_root` and `known_hosts_path` are resolved at startup from the environment, so `make init-config` writes them as present-but-empty strings. An empty value reads as "resolve this for me"; leaving the key out entirely would be indistinguishable from a typo'd key name. Keep them present.
+
+#### The `certmachine` section
+
+| Field | Meaning |
+|---|---|
+| `static_dir` | Built frontend for the module. Must exist and be readable, or certmachine fails to build. |
+| `db_path` | Path to the module's SQLite database. Created (along with its parent directory, `0700`) on first run if missing. |
+| `legacy_import_dir` | Directory holding a standalone `certmachine` installation's PKI (`rootCA.crt`, `rootCA.key`, `certs/`). Empty means no import is offered. If set but unreadable, the module still builds and serves — the UI shows the reason instead of the import wizard. |
+| `default_validity_days` | Validity period for newly generated and renewed leaf certificates, in days. `0` means "unset" and takes the default of **365**. |
+| `expiry_warn_days` | How many days before a certificate's (or the CA's own) expiry the UI shows an "expiring soon" badge, and the threshold below which `POST /api/certs` and renew refuse with 409 rather than mint something a client would soon distrust along with its issuer. `0` means "unset" and takes the default of **30** — **`expiry_warn_days` cannot express "never warn."** Following `max_sessions`'s convention above, `0` normalizes to the default rather than disabling the check, so the smallest effective warning horizon is `1` day, not `0`. Set it to `1` if you want the closest thing to "only warn when it's actually about to expire," never `0` expecting silence — you'll get the 30-day default instead, and since this same value also gates the CA's own expiring-CA 409, the surprise would not be confined to badge colors. |
+
+Running and using the module — the download-to-HAProxy workflow, the import wizard, trusting the root CA, the status badge vocabulary, backup, and the manual procedure for replacing the root CA — is documented separately in **[docs/certmachine.md](docs/certmachine.md)**. Note also that this module has **no login** — reaching its hostname is the whole access boundary, same as multissh above.
 
 ### 3. Run
 
@@ -310,6 +331,16 @@ Each menu file follows this shape:
 }
 ```
 
+### Certmachine
+
+A single SQLite database, created (with its parent directory at `0700`) on first run if missing:
+
+```
+/data/certmachine/certmachine.db
+```
+
+There is no `meta.json` and no other on-disk state — the certificate authority row, every leaf certificate row, and everything the UI displays about them (CN, SANs, serial, fingerprint, validity window) live in this one file and are derived from the stored PEM data, not a sidecar. See [docs/certmachine.md](docs/certmachine.md#9-backup) for the backup story: stop the binary and copy this file.
+
 ---
 
 ## Production: HAProxy Configuration
@@ -333,6 +364,8 @@ chmod 600 /etc/haproxy/certs/*.pem
 ```
 
 If your CA provides a single combined file (cert + chain + key), you can use it directly.
+
+**If certs come from the certmachine module**, skip the `cat`/`chmod` steps above entirely: download `haproxy.pem` straight from a cert's row (or extract it from the `.tgz` bundle) and drop it into `/etc/haproxy/certs/` as-is. It is already the correct combined-PEM shape, and the file already carries mode `0600` — the tar archive preserves that bit, so nothing needs re-chmodding after extraction. See [docs/certmachine.md § Downloads and the HAProxy workflow](docs/certmachine.md#7-downloads-and-the-haproxy-workflow).
 
 ### /etc/haproxy/haproxy.cfg
 

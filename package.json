@@ -2,10 +2,10 @@
   "name": "unified-webapp",
   "private": true,
   "scripts": {
-    "build": "esbuild web/obsidianoid/js/threads.ts web/obsidianoid/js/app.ts --target=es2020 --outdir=web/obsidianoid/js/ && esbuild web/slideshow/js/app.ts --target=es2020 --outdir=web/slideshow/js/ && esbuild web/multissh/js/main.ts --bundle --target=es2020 --outfile=web/multissh/js/bundle.js",
-    "build:dev": "esbuild web/obsidianoid/js/threads.ts web/obsidianoid/js/app.ts --target=es2020 --outdir=web/obsidianoid/js/ --sourcemap && esbuild web/slideshow/js/app.ts --target=es2020 --outdir=web/slideshow/js/ --sourcemap && esbuild web/multissh/js/main.ts --bundle --target=es2020 --outfile=web/multissh/js/bundle.js --sourcemap",
+    "build": "esbuild web/obsidianoid/js/threads.ts web/obsidianoid/js/app.ts --target=es2020 --outdir=web/obsidianoid/js/ && esbuild web/slideshow/js/app.ts --target=es2020 --outdir=web/slideshow/js/ && esbuild web/multissh/js/main.ts --bundle --target=es2020 --outfile=web/multissh/js/bundle.js && esbuild web/certmachine/js/main.ts --bundle --target=es2020 --outfile=web/certmachine/js/bundle.js",
+    "build:dev": "esbuild web/obsidianoid/js/threads.ts web/obsidianoid/js/app.ts --target=es2020 --outdir=web/obsidianoid/js/ --sourcemap && esbuild web/slideshow/js/app.ts --target=es2020 --outdir=web/slideshow/js/ --sourcemap && esbuild web/multissh/js/main.ts --bundle --target=es2020 --outfile=web/multissh/js/bundle.js --sourcemap && esbuild web/certmachine/js/main.ts --bundle --target=es2020 --outfile=web/certmachine/js/bundle.js --sourcemap",
     "typecheck": "tsc --noEmit",
-    "test:web": "esbuild web/multissh/js/sshcommand.test.ts --bundle --platform=node --format=cjs --target=node18 --log-level=warning | node -"
+    "test:web": "esbuild web/multissh/js/sshcommand.test.ts --bundle --platform=node --format=cjs --target=node18 --log-level=warning | node - && esbuild web/certmachine/js/status.test.ts --bundle --platform=node --format=cjs --target=node18 --log-level=warning | node - && esbuild web/certmachine/js/listmodel.test.ts --bundle --platform=node --format=cjs --target=node18 --log-level=warning | node - && esbuild web/certmachine/js/generate.test.ts --bundle --platform=node --format=cjs --target=node18 --log-level=warning | node -"
   },
   "devDependencies": {
     "esbuild": "^0.28.0",

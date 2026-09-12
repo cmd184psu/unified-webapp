@@ -137,6 +137,110 @@ func TestModuleBuildFailureIsScopedToThatModule(t *testing.T) {
 	}
 }
 
+// certmachine is the seventh module: the same build-failure isolation
+// TestModuleBuildFailureIsScopedToThatModule proves for multissh must also
+// hold for it, since it is wired into buildModule exactly like every other
+// module (cmd/server/main.go).
+func TestCertmachineBuildFailureIsScopedToThatModule(t *testing.T) {
+	cfg := multisshTestConfig(t, map[string]string{
+		"certmachine.example": "certmachine",
+		"grocery.example":     "grocery",
+	})
+	missing := filepath.Join(t.TempDir(), "no-such-frontend")
+	cfg.Certmachine.StaticDir = missing
+	cfg.Certmachine.DBPath = filepath.Join(t.TempDir(), "certmachine.db")
+	groceryDir := t.TempDir()
+	cfg.Grocery.StaticDir = groceryDir
+	cfg.Grocery.DataFile = filepath.Join(groceryDir, "grocery.json")
+
+	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg)))
+	defer srv.Close()
+
+	res := doHost(t, srv, http.MethodGet, "certmachine.example", "/api/config", "")
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("failed module status = %d, want 503", res.StatusCode)
+	}
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if !strings.Contains(string(body), missing) {
+		t.Errorf("503 body does not name the offending path %q: %s", missing, body)
+	}
+	if !strings.Contains(string(body), "certmachine") {
+		t.Errorf("503 body does not name the module: %s", body)
+	}
+
+	healthy := doHost(t, srv, http.MethodGet, "grocery.example", "/config", "")
+	defer healthy.Body.Close()
+	if healthy.StatusCode == http.StatusServiceUnavailable {
+		t.Fatalf("a certmachine misconfiguration took grocery offline (status %d)", healthy.StatusCode)
+	}
+}
+
+// middleware.Wrap sets Access-Control-Allow-Origin: * on every module's
+// response, which for certmachine means any page on the internet could read a
+// leaf's private key out of a logged-in operator's browser. certmachine strips
+// those headers back off inside its own handler (stripCORS, build.go), and this
+// test is the reason that approach is verifiable: it goes through the very same
+// middleware.Wrap(buildDispatcher(cfg)) stack main.go builds, so if Wrap ever
+// moves its header Set to after next.ServeHTTP -- where an inner Del can no
+// longer win -- this fails instead of silently regressing.
+//
+// The grocery assertion at the end is the other half of the contract: the fix
+// is certmachine-scoped, and the platform middleware other modules may rely on
+// is untouched.
+func TestCertmachineResponsesCarryNoCORSHeaders(t *testing.T) {
+	cfg := multisshTestConfig(t, map[string]string{
+		"certmachine.example": "certmachine",
+		"grocery.example":     "grocery",
+	})
+	certDir := t.TempDir()
+	staticDir := filepath.Join(certDir, "web")
+	if err := os.MkdirAll(staticDir, 0o755); err != nil {
+		t.Fatalf("mkdir certmachine static: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(staticDir, "index.html"), []byte("INDEX"), 0o644); err != nil {
+		t.Fatalf("write certmachine index: %v", err)
+	}
+	cfg.Certmachine.StaticDir = staticDir
+	cfg.Certmachine.DBPath = filepath.Join(certDir, "data", "certmachine.db")
+	groceryDir := t.TempDir()
+	cfg.Grocery.StaticDir = groceryDir
+	cfg.Grocery.DataFile = filepath.Join(groceryDir, "grocery.json")
+
+	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg)))
+	defer srv.Close()
+
+	corsHeaders := []string{
+		"Access-Control-Allow-Origin",
+		"Access-Control-Allow-Methods",
+		"Access-Control-Allow-Headers",
+	}
+	// One route per response shape: JSON API, the SPA shell, and a 404 from
+	// the API's catch-all -- the headers must be gone from all of them, not
+	// just the happy path.
+	for _, path := range []string{"/api/config", "/api/certs", "/", "/api/nope"} {
+		res := doHost(t, srv, http.MethodGet, "certmachine.example", path, "")
+		res.Body.Close()
+		if res.StatusCode == http.StatusServiceUnavailable {
+			t.Fatalf("certmachine failed to build; GET %s = 503", path)
+		}
+		for _, h := range corsHeaders {
+			if got := res.Header.Get(h); got != "" {
+				t.Errorf("GET %s carries %s: %q", path, h, got)
+			}
+		}
+	}
+
+	grocery := doHost(t, srv, http.MethodGet, "grocery.example", "/config", "")
+	grocery.Body.Close()
+	if got := grocery.Header.Get("Access-Control-Allow-Origin"); got == "" {
+		t.Error("stripping CORS for certmachine also stripped it from grocery; the fix must stay module-scoped")
+	}
+}
+
 // An unrecognized module name in the config gets the same treatment as a build
 // failure: its hostnames 503 and the binary still serves everything else.
 func TestUnknownModuleBecomesA503(t *testing.T) {

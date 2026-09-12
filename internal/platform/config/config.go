@@ -22,6 +22,7 @@ type Config struct {
 	Menuserver  MenuserverConfig  `json:"menuserver"`
 	Obsidianoid ObsidianoidConfig `json:"obsidianoid"`
 	Multissh    MultisshConfig    `json:"multissh"`
+	Certmachine CertmachineConfig `json:"certmachine"`
 }
 
 // ObsidianoidVault holds the per-vault configuration for the obsidianoid module.
@@ -110,6 +111,26 @@ type MultisshConfig struct {
 	KnownHostsPath string `json:"known_hosts_path"`
 }
 
+// CertmachineConfig holds configuration specific to the certmachine module.
+//
+// StaticDir, DBPath and LegacyImportDir all accept a leading ~ (expanded at
+// Load time). LegacyImportDir left empty means no legacy PKI import is
+// attempted; DefaultValidityDays and ExpiryWarnDays of 0 take their FR-1
+// defaults, validated once by normalizeCertmachine.
+type CertmachineConfig struct {
+	StaticDir           string `json:"static_dir"`
+	DBPath              string `json:"db_path"`
+	LegacyImportDir     string `json:"legacy_import_dir"`
+	DefaultValidityDays int    `json:"default_validity_days"`
+	ExpiryWarnDays      int    `json:"expiry_warn_days"`
+}
+
+// Certmachine defaults (FR-1).
+const (
+	DefaultCertValidityDays = 365
+	DefaultExpiryWarnDays   = 30
+)
+
 // Multissh session-count bounds. MaxSessions is validated in exactly one place
 // (Load); Build trusts the resolved value and performs no re-validation.
 const (
@@ -168,6 +189,13 @@ func DefaultConfig() *Config {
 			MaxUploadBytes: 8 << 30, // 8 GiB
 			StrictHostKey:  false,
 		},
+		Certmachine: CertmachineConfig{
+			StaticDir:           "./web/certmachine",
+			DBPath:              "./data/certmachine/certmachine.db",
+			LegacyImportDir:     "",
+			DefaultValidityDays: DefaultCertValidityDays,
+			ExpiryWarnDays:      DefaultExpiryWarnDays,
+		},
 	}
 }
 
@@ -222,6 +250,12 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	if err := normalizeMultissh(&cfg.Multissh); err != nil {
+		return nil, err
+	}
+	if err := expandCertmachinePaths(&cfg.Certmachine); err != nil {
+		return nil, err
+	}
+	if err := normalizeCertmachine(&cfg.Certmachine); err != nil {
 		return nil, err
 	}
 	if cfg.TLSCert != "" {
@@ -321,6 +355,40 @@ func expandMultisshPaths(m *MultisshConfig) error {
 	}
 	if m.KnownHostsPath, err = ExpandPath(m.KnownHostsPath); err != nil {
 		return err
+	}
+	return nil
+}
+
+func expandCertmachinePaths(cm *CertmachineConfig) error {
+	var err error
+	if cm.StaticDir, err = ExpandPath(cm.StaticDir); err != nil {
+		return err
+	}
+	if cm.DBPath, err = ExpandPath(cm.DBPath); err != nil {
+		return err
+	}
+	if cm.LegacyImportDir, err = ExpandPath(cm.LegacyImportDir); err != nil {
+		return err
+	}
+	return nil
+}
+
+// normalizeCertmachine is the single validation point for
+// default_validity_days and expiry_warn_days (FR-1). Zero means "unset" and
+// takes the default; negative is an operator error and is rejected, naming
+// the field. certmachine.Build trusts the result and does not re-check.
+func normalizeCertmachine(cm *CertmachineConfig) error {
+	switch {
+	case cm.DefaultValidityDays < 0:
+		return fmt.Errorf("certmachine: default_validity_days must be at least 0, got %d", cm.DefaultValidityDays)
+	case cm.DefaultValidityDays == 0:
+		cm.DefaultValidityDays = DefaultCertValidityDays
+	}
+	switch {
+	case cm.ExpiryWarnDays < 0:
+		return fmt.Errorf("certmachine: expiry_warn_days must be at least 0, got %d", cm.ExpiryWarnDays)
+	case cm.ExpiryWarnDays == 0:
+		cm.ExpiryWarnDays = DefaultExpiryWarnDays
 	}
 	return nil
 }
