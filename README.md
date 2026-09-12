@@ -27,7 +27,7 @@ Open `~/.unified-webapp.json` and fill in:
 - `host_routing` — map hostname → module name
 - Module `static_dir` and `data_dir` / `data_file` paths (use absolute paths in production)
 
-Minimal example with all four modules. Multiple hostnames can map to the same module — useful for adding `-test` aliases that won't collide with live services on your network:
+Minimal example with all seven modules. Multiple hostnames can map to the same module — useful for adding `-test` aliases that won't collide with live services on your network:
 
 ```json
 {
@@ -46,7 +46,9 @@ Minimal example with all four modules. Multiple hostnames can map to the same mo
     "obsidianoid.cmdhome.net":        "obsidianoid",
     "obsidianoid-test.cmdhome.net":   "obsidianoid",
     "multissh.cmdhome.net":           "multissh",
-    "multissh-test.cmdhome.net":      "multissh"
+    "multissh-test.cmdhome.net":      "multissh",
+    "utuber.cmdhome.net":             "utuber",
+    "utuber-test.cmdhome.net":        "utuber"
   },
   "grocery": {
     "static_dir": "/opt/unified-webapp/web/grocery",
@@ -93,6 +95,12 @@ Minimal example with all four modules. Multiple hostnames can map to the same mo
     "max_upload_bytes": 8589934592,
     "strict_host_key": false,
     "known_hosts_path": ""
+  },
+  "utuber": {
+    "static_dir": "/opt/unified-webapp/web/utuber",
+    "download_dir": "/data/utuber/downloads",
+    "workers": 1,
+    "python_bin": "python3.12"
   }
 }
 ```
@@ -114,6 +122,17 @@ Minimal example with all four modules. Multiple hostnames can map to the same mo
 Running and using the module — host cards, terminals, broadcasts, the proxy requirements, and the audit log — is documented separately in **[docs/multissh.md](docs/multissh.md)**. Read the [proxy section](docs/multissh.md#3-putting-it-behind-a-proxy) before putting it behind nginx: a front end that rewrites the `Host` header breaks every terminal while leaving the page looking fine. Note also that this module has **no login** — reaching its hostname is the whole access boundary.
 
 **Empty strings are meaningful, not omissions.** `ssh_dir`, `upload_dir`, `browse_root` and `known_hosts_path` are resolved at startup from the environment, so `make init-config` writes them as present-but-empty strings. An empty value reads as "resolve this for me"; leaving the key out entirely would be indistinguishable from a typo'd key name. Keep them present.
+
+#### The `utuber` section
+
+| Field | Meaning |
+|---|---|
+| `static_dir` | Frontend for the module (a single `index.html`). |
+| `download_dir` | Where finished downloads land, alongside `history.json` and `settings.json`. Created at startup if absent. |
+| `workers` | Concurrent download workers. `0` means "unset" and takes the default of 1; values above 8 are clamped with a warning; negative values are a config error. |
+| `python_bin` | Python interpreter used by the "Update yt-dlp" button. Default `python3.12`. Can be overridden from the UI's ☰ settings menu, which persists the override in `settings.json`. |
+
+Running and using the module — endpoints, runtime dependencies (`yt-dlp`, `ffmpeg`), the settings menu, and shutdown behavior — is documented separately in **[docs/utuber.md](docs/utuber.md)**. Like multissh, this module has **no login** — reaching its hostname is the whole access boundary.
 
 ### 3. Run
 
@@ -308,6 +327,17 @@ Each menu file follows this shape:
   ],
   "notes": ""
 }
+```
+
+### Utuber
+
+`download_dir` holds the finished output files plus two housekeeping files: `history.json` (the download dedup log) and `settings.json` (UI settings, e.g. the Python interpreter override). All of it — housekeeping files included — is reachable over HTTP via the module's `/downloads/` file server.
+
+```
+/data/utuber/downloads/
+  history.json
+  settings.json
+  Cool Artist - S01E01 - Cool Track.m4v
 ```
 
 ---
