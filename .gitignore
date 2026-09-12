@@ -40,3 +40,7 @@ node_modules/
 # unified-webapp-example.json or anything nested.
 /unified-webapp
 /unified-webapp-arm64-linux
+
+# Frozen upstream snapshot used as the utuber port's fidelity baseline; the
+# Step 1 commit body carries a git hash-object manifest of the ported files.
+/reference/
