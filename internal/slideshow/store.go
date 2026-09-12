@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"cmd184psu/unified-webapp/internal/platform/fspath"
 )
 
 // imageExts is the set of file extensions treated as images.
@@ -33,7 +35,7 @@ type Store struct {
 // ageCutoffDays filters out subjects whose directory mtime is older than that
 // many days; 0 disables the filter.
 func NewStore(imageDir string, ageCutoffDays int) (*Store, error) {
-	if err := os.MkdirAll(imageDir, 0755); err != nil {
+	if err := os.MkdirAll(imageDir, 0750); err != nil {
 		return nil, err
 	}
 	return &Store{imageDir: imageDir, ageCutoffDays: ageCutoffDays}, nil
@@ -110,10 +112,8 @@ func (s *Store) ImagePath(subject, item string) (string, error) {
 	if !imageExts[ext] {
 		return "", os.ErrInvalid
 	}
-	// filepath.Join cleans the path; verify it stays inside imageDir.
-	abs := filepath.Join(s.imageDir, subject, item)
-	rel, err := filepath.Rel(s.imageDir, abs)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	abs, err := fspath.ConfineTo(s.imageDir, filepath.Join(subject, item))
+	if err != nil {
 		return "", os.ErrInvalid
 	}
 	return abs, nil

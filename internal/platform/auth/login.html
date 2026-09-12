@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 320px; margin: 4rem auto; padding: 0 1rem; color: #222; }
+  h1 { font-size: 1.25rem; }
+  form { display: none; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem; }
+  form.visible { display: flex; }
+  input, button { font-size: 1rem; padding: 0.4rem; }
+  button { cursor: pointer; }
+  .secret-row { position: relative; display: flex; }
+  .secret-row input { flex: 1; min-width: 0; padding-right: 2.4rem; }
+  .reveal {
+    position: absolute; right: 0; top: 0; bottom: 0; width: 2.4rem;
+    display: flex; align-items: center; justify-content: center;
+    background: none; border: none; padding: 0; color: #777;
+  }
+  .reveal:hover, .reveal:focus-visible { color: #222; }
+  .reveal svg { width: 1.15rem; height: 1.15rem; }
+  .reveal .eye-closed { display: none; }
+  .reveal.showing .eye-open { display: none; }
+  .reveal.showing .eye-closed { display: block; }
+  #passkey-btn { display: none; }
+  #error { color: #b00020; min-height: 1.2em; }
+</style>
+</head>
+<body>
+<h1>Sign in</h1>
+<div id="error"></div>
+
+<form id="pin-form">
+  <label for="pin-input">PIN</label>
+  <div class="secret-row">
+    <input id="pin-input" type="password" inputmode="numeric" autocomplete="off" required>
+    <button type="button" class="reveal" data-target="pin-input" aria-label="Show PIN">
+      <svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+      <svg class="eye-closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 7 11 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+    </button>
+  </div>
+  <button type="submit">Sign in with PIN</button>
+</form>
+
+<form id="ldap-form">
+  <label for="ldap-username">Username</label>
+  <input id="ldap-username" type="text" autocomplete="username" required>
+  <label for="ldap-password">Password</label>
+  <div class="secret-row">
+    <input id="ldap-password" type="password" autocomplete="current-password" required>
+    <button type="button" class="reveal" data-target="ldap-password" aria-label="Show password">
+      <svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+      <svg class="eye-closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 7 11 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+    </button>
+  </div>
+  <button type="submit">Sign in</button>
+</form>
+
+<button id="passkey-btn" type="button">Sign in with passkey</button>
+
+<script>
+(function () {
+  "use strict";
+
+  var errorEl = document.getElementById("error");
+  var pinForm = document.getElementById("pin-form");
+  var ldapForm = document.getElementById("ldap-form");
+  var passkeyBtn = document.getElementById("passkey-btn");
+
+  function showError(msg) {
+    errorEl.textContent = msg;
+  }
+
+  function handleLoginResponse(res) {
+    if (res.status === 200) {
+      location.reload();
+      return;
+    }
+    if (res.status === 401) {
+      showError("login failed");
+      return;
+    }
+    if (res.status === 429) {
+      showError("too many attempts, wait a moment");
+      return;
+    }
+    showError("login failed");
+  }
+
+  // --- base64url helpers (WebAuthn ceremony encode/decode) ---
+
+  function b64urlToBuffer(value) {
+    var normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+    var padded = normalized + "===".slice((normalized.length + 3) % 4);
+    var binary = atob(padded);
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
+  }
+
+  function bufferToB64url(value) {
+    if (!value) return null;
+    var bytes = new Uint8Array(value);
+    var binary = "";
+    for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  }
+
+  function assertionOptions(options) {
+    var publicKey = Object.assign({}, options.publicKey);
+    publicKey.challenge = b64urlToBuffer(publicKey.challenge);
+    if (Array.isArray(publicKey.allowCredentials)) {
+      publicKey.allowCredentials = publicKey.allowCredentials.map(function (c) {
+        return Object.assign({}, c, { id: b64urlToBuffer(c.id) });
+      });
+    }
+    return publicKey;
+  }
+
+  function credentialToJSON(credential) {
+    var response = credential.response;
+    return {
+      id: credential.id,
+      rawId: bufferToB64url(credential.rawId),
+      type: credential.type,
+      authenticatorAttachment: credential.authenticatorAttachment,
+      response: {
+        authenticatorData: bufferToB64url(response.authenticatorData),
+        clientDataJSON: bufferToB64url(response.clientDataJSON),
+        signature: bufferToB64url(response.signature),
+        userHandle: bufferToB64url(response.userHandle)
+      },
+      clientExtensionResults: credential.getClientExtensionResults()
+    };
+  }
+
+  // --- show/hide toggles for secret fields ---
+
+  Array.prototype.forEach.call(document.querySelectorAll(".reveal"), function (btn) {
+    btn.addEventListener("click", function () {
+      var input = document.getElementById(btn.getAttribute("data-target"));
+      var show = input.type === "password";
+      input.type = show ? "text" : "password";
+      btn.classList.toggle("showing", show);
+      btn.setAttribute("aria-label", (show ? "Hide" : "Show") + " " + (input.id === "pin-input" ? "PIN" : "password"));
+    });
+  });
+
+  // --- form wiring ---
+
+  pinForm.addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    showError("");
+    fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ method: "pin", pin: document.getElementById("pin-input").value })
+    }).then(handleLoginResponse).catch(function () { showError("login failed"); });
+  });
+
+  ldapForm.addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    showError("");
+    fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        method: "ldap",
+        username: document.getElementById("ldap-username").value,
+        password: document.getElementById("ldap-password").value
+      })
+    }).then(handleLoginResponse).catch(function () { showError("login failed"); });
+  });
+
+  passkeyBtn.addEventListener("click", function () {
+    showError("");
+    fetch("/api/auth/passkey/login/begin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({})
+    }).then(function (res) {
+      if (!res.ok) { showError("login failed"); return null; }
+      return res.json();
+    }).then(function (ceremony) {
+      if (!ceremony) return;
+      return navigator.credentials.get({ publicKey: assertionOptions(ceremony.options) })
+        .then(function (credential) {
+          if (!credential) throw new Error("cancelled");
+          return fetch("/api/auth/passkey/login/finish", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              challengeId: ceremony.challengeId,
+              credential: credentialToJSON(credential)
+            })
+          });
+        })
+        .then(handleLoginResponse);
+    }).catch(function () { showError("login failed"); });
+  });
+
+  // --- mode-driven form selection ---
+
+  fetch("/api/auth/mode").then(function (res) { return res.json(); }).then(function (body) {
+    var methods = body.methods || [];
+    var hasPin = methods.indexOf("pin") !== -1 || methods.indexOf("admin_pin") !== -1;
+    var hasLdap = methods.indexOf("ldap") !== -1;
+    var hasPasskey = methods.indexOf("passkey") !== -1;
+
+    if (hasPin) pinForm.classList.add("visible");
+    if (hasLdap) ldapForm.classList.add("visible");
+    if (hasPasskey && window.PublicKeyCredential && navigator.credentials) {
+      passkeyBtn.style.display = "block";
+    }
+  }).catch(function () { showError("unable to load sign-in options"); });
+})();
+</script>
+</body>
+</html>

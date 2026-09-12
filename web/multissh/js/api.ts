@@ -12,6 +12,20 @@ import type {
 /** The panel count used when the server cannot be asked. */
 const DEFAULT_MAX_SESSIONS = 3;
 
+/** Guards against triggering more than one reload when several calls 401 at once. */
+let sessionExpiredHandled = false;
+
+/** If `status` is 401, notify the user and reload to the auth gate's login page. */
+function checkAuth(status: number): void {
+  if (status !== 401) return;
+  if (!sessionExpiredHandled) {
+    sessionExpiredHandled = true;
+    console.warn("multissh: session expired, reloading to sign in");
+    window.location.reload();
+  }
+  throw new Error("session expired — reloading to sign in");
+}
+
 /**
  * Fetch the server's runtime configuration.
  *
@@ -22,6 +36,7 @@ const DEFAULT_MAX_SESSIONS = 3;
 export async function fetchConfig(): Promise<AppConfig> {
   try {
     const res = await fetch("/api/config");
+    checkAuth(res.status);
     if (!res.ok) throw new Error(`config fetch failed: ${res.status}`);
     const body = (await res.json()) as { maxSessions?: unknown };
     const n = body.maxSessions;
@@ -41,6 +56,7 @@ export async function fetchConfig(): Promise<AppConfig> {
 /** Fetch the regular files in the server user's ~/.ssh for the key picker. */
 export async function fetchKeys(): Promise<KeyFile[]> {
   const res = await fetch("/api/ssh/keys");
+  checkAuth(res.status);
   if (!res.ok) {
     throw new Error(`key listing failed: ${res.status}`);
   }
@@ -68,6 +84,12 @@ export function uploadFile(
       if (e.lengthComputable) onProgress(e.loaded, e.total);
     };
     xhr.onload = () => {
+      try {
+        checkAuth(xhr.status);
+      } catch (err) {
+        reject(err);
+        return;
+      }
       if (xhr.status === 413) {
         reject(new Error("File too large"));
         return;
@@ -93,6 +115,7 @@ export async function deleteUpload(id: string): Promise<void> {
   const res = await fetch(`/api/uploads/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
+  checkAuth(res.status);
   if (!res.ok && res.status !== 204) {
     throw new Error(`delete failed: ${res.status}`);
   }
@@ -107,6 +130,7 @@ export async function startBroadcast(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
   });
+  checkAuth(res.status);
   if (!res.ok) {
     const body = (await res.json()) as { error?: string };
     throw new Error(body.error ?? `broadcast failed: ${res.status}`);
@@ -123,6 +147,7 @@ export function broadcastWsURL(jobId: string): string {
 /** Fetch the persisted host configurations. */
 export async function fetchHosts(): Promise<PersistedHost[]> {
   const res = await fetch("/api/hosts");
+  checkAuth(res.status);
   if (!res.ok) throw new Error(`fetch hosts failed: ${res.status}`);
   const body = (await res.json()) as { hosts?: PersistedHost[] };
   return body.hosts ?? [];
@@ -153,6 +178,7 @@ export async function saveHosts(hosts: HostConfig[]): Promise<PersistedHost[]> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ hosts: payload }),
   });
+  checkAuth(res.status);
   if (!res.ok) throw new Error(`save hosts failed: ${res.status}`);
   const body = (await res.json()) as { hosts?: PersistedHost[] };
   return body.hosts ?? payload;
@@ -168,6 +194,7 @@ export async function listRemoteDir(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...target, path }),
   });
+  checkAuth(res.status);
   if (!res.ok) throw new Error(`listdir failed: ${res.status}`);
   return (await res.json()) as { path: string; entries: RemoteDirEntry[] };
 }
@@ -177,6 +204,7 @@ export async function listServerFiles(
   path: string,
 ): Promise<{ path: string; entries: ServerFileEntry[] }> {
   const res = await fetch(`/api/files?path=${encodeURIComponent(path)}`);
+  checkAuth(res.status);
   if (!res.ok) throw new Error(`list files failed: ${res.status}`);
   return (await res.json()) as { path: string; entries: ServerFileEntry[] };
 }

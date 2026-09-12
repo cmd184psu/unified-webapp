@@ -21,7 +21,7 @@ type Store struct {
 
 // NewStore creates a Store backed by dataDir, creating it if necessary.
 func NewStore(dataDir string) (*Store, error) {
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+	if err := os.MkdirAll(dataDir, 0750); err != nil {
 		return nil, err
 	}
 	return &Store{dataDir: dataDir}, nil

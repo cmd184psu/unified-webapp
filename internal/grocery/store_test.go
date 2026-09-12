@@ -1195,3 +1195,45 @@ func TestRevision_IncrementsOnMutation(t *testing.T) {
 		t.Errorf("revision should increase after Delete: %d → %d", r2, r3)
 	}
 }
+
+// TestSave_FileAndDirModes covers the temp-file+rename write path (FR-R4):
+// the data directory created by save() must be 0750 and the final data file
+// (after the tmp-file rename) must be 0600. Exact equality is not asserted
+// because umask can only clear bits from the requested mode, never set them,
+// so checking for absent other-permission bits (and absent group-write on the
+// dir) is safe regardless of the test runner's umask.
+func TestSave_FileAndDirModes(t *testing.T) {
+	dir := t.TempDir()
+	nested := filepath.Join(dir, "sub")
+	path := filepath.Join(nested, "items.json")
+
+	s, err := grocery.New(path)
+	if err != nil {
+		t.Fatalf("grocery.New: %v", err)
+	}
+	if _, err := s.Add("Milk", "Dairy"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	dirInfo, err := os.Stat(nested)
+	if err != nil {
+		t.Fatalf("stat dir: %v", err)
+	}
+	if dirMode := dirInfo.Mode().Perm(); dirMode&0o007 != 0 || dirMode&0o020 != 0 {
+		t.Errorf("data dir mode = %o, want no other bits and no group-write", dirMode)
+	}
+
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat file: %v", err)
+	}
+	if fileMode := fileInfo.Mode().Perm(); fileMode&0o077 != 0 {
+		t.Errorf("data file mode = %o, want no group/other bits (owner-only)", fileMode)
+	}
+
+	// The tmp file must not survive the rename, but if it did, it too must
+	// never be written with wider-than-owner permissions.
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("tmp file should not exist after rename, stat err=%v", err)
+	}
+}

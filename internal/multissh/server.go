@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"cmd184psu/unified-webapp/internal/multissh/sshproxy"
+	"cmd184psu/unified-webapp/internal/platform/response"
 )
 
 // Options configures a Server. SSHHandler is the WebSocket bridge and SSHKeyDir
@@ -129,22 +130,16 @@ func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSSHKeys(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		response.WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	keys, err := sshproxy.ListKeys(s.opts.SSHKeyDir)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "unable to read ssh directory")
+		response.WriteError(w, http.StatusInternalServerError, "unable to read ssh directory")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"keys": keys})
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
 // onlyGet restricts a handler to GET and HEAD.
@@ -152,7 +147,7 @@ func onlyGet(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
-			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			response.WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -184,7 +179,7 @@ func staticHandler(dir string) http.Handler {
 	index := filepath.Join(dir, "index.html")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
-			writeError(w, http.StatusNotFound, "not found")
+			response.WriteError(w, http.StatusNotFound, "not found")
 			return
 		}
 		if staticFileExists(dir, r.URL.Path) {
@@ -193,7 +188,7 @@ func staticHandler(dir string) http.Handler {
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
-			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			response.WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 		http.ServeFile(w, r, index)

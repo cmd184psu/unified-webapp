@@ -54,11 +54,11 @@ func Build(cfg config.MultisshConfig) (http.Handler, error) {
 		return nil, fmt.Errorf("multissh: known_hosts %s: %w", knownHosts, err)
 	}
 
-	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+	if err := os.MkdirAll(uploadDir, 0o750); err != nil {
 		return nil, fmt.Errorf("multissh: create upload dir %s: %w", uploadDir, err)
 	}
 	if hostsPath := strings.TrimSpace(cfg.HostsPath); hostsPath != "" {
-		if err := os.MkdirAll(filepath.Dir(hostsPath), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(hostsPath), 0o750); err != nil {
 			return nil, fmt.Errorf("multissh: create hosts dir for %s: %w", hostsPath, err)
 		}
 	}

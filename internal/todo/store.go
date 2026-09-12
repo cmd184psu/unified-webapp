@@ -18,7 +18,7 @@ type Store struct {
 
 // NewStore creates a Store backed by dataDir, creating it if necessary.
 func NewStore(dataDir string) (*Store, error) {
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+	if err := os.MkdirAll(dataDir, 0750); err != nil {
 		return nil, err
 	}
 	return &Store{dataDir: dataDir, locks: make(map[string]*sync.RWMutex)}, nil
@@ -151,7 +151,7 @@ func (s *Store) WriteSettings(st Settings) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0600)
 }
 
 // WriteColumns saves column visibility to {dataDir}/columns.json.
@@ -161,7 +161,7 @@ func (s *Store) WriteColumns(cv ColumnVisibility) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0600)
 }
 
 // emptyList is the initial content written to newly created list files.
@@ -190,10 +190,10 @@ func (s *Store) ReadFile(subject, item string) ([]byte, error) {
 	if err == nil {
 		return data, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(path, emptyList, 0644); err != nil {
+	if err := os.WriteFile(path, emptyList, 0600); err != nil {
 		return nil, err
 	}
 	return emptyList, nil
@@ -205,11 +205,11 @@ func (s *Store) WriteFile(subject, item string, data []byte) error {
 	lk := s.subjectLock(subject)
 	lk.Lock()
 	defer lk.Unlock()
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)
@@ -235,7 +235,7 @@ func (s *Store) MoveFile(subject, item, newSubject string) error {
 
 	src := filepath.Join(s.dataDir, subject, item)
 	dst := filepath.Join(s.dataDir, newSubject, item)
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), 0750); err != nil {
 		return err
 	}
 	return os.Rename(src, dst)

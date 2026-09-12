@@ -2,9 +2,20 @@
 (() => {
   // web/multissh/js/api.ts
   var DEFAULT_MAX_SESSIONS = 3;
+  var sessionExpiredHandled = false;
+  function checkAuth(status) {
+    if (status !== 401) return;
+    if (!sessionExpiredHandled) {
+      sessionExpiredHandled = true;
+      console.warn("multissh: session expired, reloading to sign in");
+      window.location.reload();
+    }
+    throw new Error("session expired \u2014 reloading to sign in");
+  }
   async function fetchConfig() {
     try {
       const res = await fetch("/api/config");
+      checkAuth(res.status);
       if (!res.ok) throw new Error(`config fetch failed: ${res.status}`);
       const body = await res.json();
       const n = body.maxSessions;
@@ -22,6 +33,7 @@
   }
   async function fetchKeys() {
     const res = await fetch("/api/ssh/keys");
+    checkAuth(res.status);
     if (!res.ok) {
       throw new Error(`key listing failed: ${res.status}`);
     }
@@ -42,6 +54,12 @@
         if (e.lengthComputable) onProgress(e.loaded, e.total);
       };
       xhr.onload = () => {
+        try {
+          checkAuth(xhr.status);
+        } catch (err) {
+          reject(err);
+          return;
+        }
         if (xhr.status === 413) {
           reject(new Error("File too large"));
           return;
@@ -66,6 +84,7 @@
     const res = await fetch(`/api/uploads/${encodeURIComponent(id)}`, {
       method: "DELETE"
     });
+    checkAuth(res.status);
     if (!res.ok && res.status !== 204) {
       throw new Error(`delete failed: ${res.status}`);
     }
@@ -76,6 +95,7 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(req)
     });
+    checkAuth(res.status);
     if (!res.ok) {
       const body = await res.json();
       throw new Error(body.error ?? `broadcast failed: ${res.status}`);
@@ -88,6 +108,7 @@
   }
   async function fetchHosts() {
     const res = await fetch("/api/hosts");
+    checkAuth(res.status);
     if (!res.ok) throw new Error(`fetch hosts failed: ${res.status}`);
     const body = await res.json();
     return body.hosts ?? [];
@@ -108,6 +129,7 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ hosts: payload })
     });
+    checkAuth(res.status);
     if (!res.ok) throw new Error(`save hosts failed: ${res.status}`);
     const body = await res.json();
     return body.hosts ?? payload;
@@ -118,11 +140,13 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...target, path })
     });
+    checkAuth(res.status);
     if (!res.ok) throw new Error(`listdir failed: ${res.status}`);
     return await res.json();
   }
   async function listServerFiles(path) {
     const res = await fetch(`/api/files?path=${encodeURIComponent(path)}`);
+    checkAuth(res.status);
     if (!res.ok) throw new Error(`list files failed: ${res.status}`);
     return await res.json();
   }

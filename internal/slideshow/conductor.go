@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"cmd184psu/unified-webapp/internal/platform/broker"
 	"cmd184psu/unified-webapp/internal/platform/config"
 )
 
@@ -34,7 +35,7 @@ type ConductorState struct {
 }
 
 // Conductor is the server-side playlist manager. It owns the tick clock, the
-// current ConductorState, and broadcasts state changes via its SSEBroker.
+// current ConductorState, and broadcasts state changes via its broker.
 // Call Run() once (from Build) to start the background goroutine.
 type Conductor struct {
 	mu         sync.Mutex
@@ -43,13 +44,16 @@ type Conductor struct {
 	playlist   []int         // subject indices in current play order
 	playPos    int           // index into playlist (current subject)
 	resetCh    chan time.Duration // send new duration to reset the ticker
-	broker     *SSEBroker
+	broker     *broker.Broker
 	musicStore *MusicStore
+
+	done     chan struct{} // closed by Stop; ends Run
+	stopOnce sync.Once
 }
 
 // NewConductor creates a Conductor initialised from cfg and the subjects in store.
 // It does not start the background goroutine; call Run() for that.
-func NewConductor(store *Store, music *MusicStore, broker *SSEBroker, cfg config.SlideshowConfig) *Conductor {
+func NewConductor(store *Store, music *MusicStore, b *broker.Broker, cfg config.SlideshowConfig) *Conductor {
 	subjects, _ := store.Subjects()
 
 	interval := cfg.IntervalSeconds
@@ -70,7 +74,8 @@ func NewConductor(store *Store, music *MusicStore, broker *SSEBroker, cfg config
 	c := &Conductor{
 		subjects:   subjects,
 		resetCh:    make(chan time.Duration, 1),
-		broker:     broker,
+		done:       make(chan struct{}),
+		broker:     b,
 		musicStore: music,
 		state: ConductorState{
 			Mode:             mode,
@@ -91,12 +96,15 @@ func NewConductor(store *Store, music *MusicStore, broker *SSEBroker, cfg config
 }
 
 // Run starts the conductor's background tick goroutine.
-// It must be called exactly once; call it from Build().
+// It must be called exactly once; call it from Build(). Run returns after
+// Stop is called.
 func (c *Conductor) Run() {
 	ticker := time.NewTicker(c.duration())
 	defer ticker.Stop()
 	for {
 		select {
+		case <-c.done:
+			return
 		case <-ticker.C:
 			c.mu.Lock()
 			if c.state.Playing && len(c.subjects) > 0 {
@@ -118,6 +126,12 @@ func (c *Conductor) Run() {
 			ticker = time.NewTicker(d)
 		}
 	}
+}
+
+// Stop ends the goroutine Run started. Idempotent; safe to call whether or
+// not Run was ever started.
+func (c *Conductor) Stop() {
+	c.stopOnce.Do(func() { close(c.done) })
 }
 
 // Snapshot returns the current state as a JSON string (thread-safe).

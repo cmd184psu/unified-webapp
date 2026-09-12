@@ -588,7 +588,7 @@ func (s *Store) load() error {
 }
 
 func (s *Store) save() error {
-	if err := os.MkdirAll(filepath.Dir(s.filePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(s.filePath), 0750); err != nil {
 		return err
 	}
 	sd := storeData{
@@ -602,7 +602,7 @@ func (s *Store) save() error {
 		return err
 	}
 	tmp := s.filePath + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return err
 	}
 	if err := os.Rename(tmp, s.filePath); err != nil {

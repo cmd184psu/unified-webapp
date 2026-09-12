@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"strings"
 
 	"cmd184psu/unified-webapp/internal/platform/broker"
 	"cmd184psu/unified-webapp/internal/platform/config"
+	"cmd184psu/unified-webapp/internal/platform/fspath"
 	"cmd184psu/unified-webapp/internal/platform/response"
 )
 
@@ -70,7 +70,7 @@ func (h *Handler) handleSubjects(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleReadFile(w http.ResponseWriter, r *http.Request) {
 	subject := r.PathValue("subject")
 	item := r.PathValue("item")
-	if !validName(subject) || !validName(item) {
+	if !fspath.ValidName(subject) || !fspath.ValidName(item) {
 		response.WriteError(w, http.StatusBadRequest, "invalid path")
 		return
 	}
@@ -97,7 +97,7 @@ func (h *Handler) handleReadFile(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleWriteFile(w http.ResponseWriter, r *http.Request) {
 	subject := r.PathValue("subject")
 	item := r.PathValue("item")
-	if !validName(subject) || !validName(item) {
+	if !fspath.ValidName(subject) || !fspath.ValidName(item) {
 		response.WriteError(w, http.StatusBadRequest, "invalid path")
 		return
 	}
@@ -126,7 +126,7 @@ func (h *Handler) handleMoveFile(w http.ResponseWriter, r *http.Request) {
 	subject := r.PathValue("subject")
 	item := r.PathValue("item")
 	newSubject := r.PathValue("newSubject")
-	if !validName(subject) || !validName(item) || !validName(newSubject) {
+	if !fspath.ValidName(subject) || !fspath.ValidName(item) || !fspath.ValidName(newSubject) {
 		response.WriteError(w, http.StatusBadRequest, "invalid path")
 		return
 	}
@@ -159,13 +159,17 @@ func (h *Handler) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleSetSettings(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
-	if err != nil || len(body) == 0 {
+	if err != nil {
+		response.WriteDecodeError(w, err)
+		return
+	}
+	if len(body) == 0 {
 		response.WriteError(w, http.StatusBadRequest, "cannot read body")
 		return
 	}
 	var st Settings
 	if err := json.Unmarshal(body, &st); err != nil {
-		response.WriteError(w, http.StatusBadRequest, "invalid JSON")
+		response.WriteDecodeError(w, err)
 		return
 	}
 	if st.CooldownMinutes < 1 {
@@ -180,7 +184,7 @@ func (h *Handler) handleSetSettings(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleCreateList(w http.ResponseWriter, r *http.Request) {
 	subject := r.PathValue("subject")
-	if !validName(subject) {
+	if !fspath.ValidName(subject) {
 		response.WriteError(w, http.StatusBadRequest, "invalid subject")
 		return
 	}
@@ -188,11 +192,15 @@ func (h *Handler) handleCreateList(w http.ResponseWriter, r *http.Request) {
 		Name string `json:"name"`
 	}
 	data, err := io.ReadAll(r.Body)
-	if err != nil || len(data) == 0 {
+	if err != nil {
+		response.WriteDecodeError(w, err)
+		return
+	}
+	if len(data) == 0 {
 		response.WriteError(w, http.StatusBadRequest, "cannot read body")
 		return
 	}
-	if err := json.Unmarshal(data, &body); err != nil || !validName(body.Name) {
+	if err := json.Unmarshal(data, &body); err != nil || !fspath.ValidName(body.Name) {
 		response.WriteError(w, http.StatusBadRequest, "invalid name")
 		return
 	}
@@ -217,13 +225,17 @@ func (h *Handler) handleGetColumns(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleSetColumns(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
-	if err != nil || len(body) == 0 {
+	if err != nil {
+		response.WriteDecodeError(w, err)
+		return
+	}
+	if len(body) == 0 {
 		response.WriteError(w, http.StatusBadRequest, "cannot read body")
 		return
 	}
 	var cv ColumnVisibility
 	if err := json.Unmarshal(body, &cv); err != nil {
-		response.WriteError(w, http.StatusBadRequest, "invalid JSON")
+		response.WriteDecodeError(w, err)
 		return
 	}
 	if err := h.store.WriteColumns(cv); err != nil {
@@ -231,13 +243,4 @@ func (h *Handler) handleSetColumns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.WriteJSON(w, http.StatusOK, map[string]string{"msg": "saved"})
-}
-
-// validName returns true if name is a safe single-path-component identifier.
-// Rejects empty strings, dot-prefixed names, and any embedded separators.
-func validName(name string) bool {
-	return name != "" &&
-		!strings.HasPrefix(name, ".") &&
-		!strings.Contains(name, "/") &&
-		!strings.Contains(name, "\\")
 }

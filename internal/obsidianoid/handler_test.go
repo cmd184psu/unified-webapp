@@ -227,6 +227,18 @@ func TestHandlerRender(t *testing.T) {
 	if !strings.Contains(ct, "text/html") {
 		t.Errorf("expected text/html, got %q", ct)
 	}
+	if csp := resp.Header.Get("Content-Security-Policy"); csp != "sandbox" {
+		t.Errorf("expected Content-Security-Policy: sandbox, got %q", csp)
+	}
+}
+
+func TestHandlerRender_CSPOnlyOnRenderRoute(t *testing.T) {
+	hh := newHarness(t)
+	resp := hh.do(t, "GET", "/api/config", nil)
+	resp.Body.Close()
+	if csp := resp.Header.Get("Content-Security-Policy"); csp != "" {
+		t.Errorf("expected no Content-Security-Policy on /api/config, got %q", csp)
+	}
 }
 
 func TestHandlerThreadsGetPut(t *testing.T) {

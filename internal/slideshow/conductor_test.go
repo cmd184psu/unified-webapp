@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"cmd184psu/unified-webapp/internal/platform/broker"
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/slideshow"
 )
@@ -36,7 +37,7 @@ func newConductorFromDir(t *testing.T, imageDir string) *slideshow.Conductor {
 	return slideshow.NewConductor(
 		store,
 		slideshow.NewMusicStore(""),
-		slideshow.NewSSEBroker(),
+		broker.NewBroker(0),
 		config.SlideshowConfig{
 			Prefix:          "slides",
 			IntervalSeconds: 8,
@@ -545,9 +546,9 @@ func TestConductor_MusicNext_WrapsAround(t *testing.T) {
 
 	store, _ := slideshow.NewStore(imageDir, 0)
 	music := slideshow.NewMusicStore(audioDir)
-	broker := slideshow.NewSSEBroker()
+	b := broker.NewBroker(0)
 	cfg := config.SlideshowConfig{Prefix: "slides", IntervalSeconds: 8, DefaultMode: "kenburns", DefaultTheme: "dark"}
-	c := slideshow.NewConductor(store, music, broker, cfg)
+	c := slideshow.NewConductor(store, music, b, cfg)
 
 	for i, want := range []int{1, 2, 0} { // 3 nexts wrap back to 0
 		if err := control(t, c, "music-next"); err != nil {

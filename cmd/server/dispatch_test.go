@@ -10,9 +10,22 @@ import (
 	"strings"
 	"testing"
 
+	"cmd184psu/unified-webapp/internal/platform/auth"
 	"cmd184psu/unified-webapp/internal/platform/config"
-	"cmd184psu/unified-webapp/internal/platform/middleware"
 )
+
+// noAuthService builds a Service from an empty AuthConfig -- no modules
+// protected, no admin routed -- so buildDispatcher's gate is a pass-through
+// and these dispatcher-focused tests observe the same behavior they did
+// before the gate was mounted.
+func noAuthService(t *testing.T) *auth.Service {
+	t.Helper()
+	svc, err := auth.FromConfig(config.AuthConfig{}, knownModules, false)
+	if err != nil {
+		t.Fatalf("noAuthService: %v", err)
+	}
+	return svc
+}
 
 // multisshTestConfig returns a config whose multissh module can actually build:
 // a real static dir, a real ssh dir, and paths under t.TempDir().
@@ -73,7 +86,7 @@ func TestTwoHostnamesShareOneModuleInstance(t *testing.T) {
 		"ssh-a.example": "multissh",
 		"ssh-b.example": "multissh",
 	})
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg)))
+	srv := newGateServer(t, cfg, noAuthService(t))
 	defer srv.Close()
 
 	res := doHost(t, srv, http.MethodPut, "ssh-a.example", "/api/hosts",
@@ -111,7 +124,7 @@ func TestModuleBuildFailureIsScopedToThatModule(t *testing.T) {
 	cfg.Grocery.StaticDir = groceryDir
 	cfg.Grocery.DataFile = filepath.Join(groceryDir, "grocery.json")
 
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg)))
+	srv := newGateServer(t, cfg, noAuthService(t))
 	defer srv.Close()
 
 	res := doHost(t, srv, http.MethodGet, "ssh.example", "/api/config", "")
@@ -123,8 +136,11 @@ func TestModuleBuildFailureIsScopedToThatModule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read body: %v", err)
 	}
-	if !strings.Contains(string(body), missing) {
-		t.Errorf("503 body does not name the offending path %q: %s", missing, body)
+	// The 503 surface sits outside the auth gate, so the build error -- which
+	// names filesystem paths -- must never reach the response body. The cause
+	// is boot-log-only; the body names the module and nothing else.
+	if strings.Contains(string(body), missing) {
+		t.Errorf("503 body leaks the offending path %q to unauthenticated callers: %s", missing, body)
 	}
 	if !strings.Contains(string(body), "multissh") {
 		t.Errorf("503 body does not name the module: %s", body)
@@ -141,7 +157,7 @@ func TestModuleBuildFailureIsScopedToThatModule(t *testing.T) {
 // failure: its hostnames 503 and the binary still serves everything else.
 func TestUnknownModuleBecomesA503(t *testing.T) {
 	cfg := multisshTestConfig(t, map[string]string{"weird.example": "not-a-module"})
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg)))
+	srv := newGateServer(t, cfg, noAuthService(t))
 	defer srv.Close()
 
 	res := doHost(t, srv, http.MethodGet, "weird.example", "/", "")
@@ -190,7 +206,7 @@ func utuberTestConfig(t *testing.T, routing map[string]string) *config.Config {
 // /jobs.json answers with the (empty) queue.
 func TestUtuberRoutesAndServesIndex(t *testing.T) {
 	cfg := utuberTestConfig(t, map[string]string{"utuber.example": "utuber"})
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg)))
+	srv := newGateServer(t, cfg, noAuthService(t))
 	defer srv.Close()
 
 	res := doHost(t, srv, http.MethodGet, "utuber.example", "/", "")
@@ -231,7 +247,7 @@ func TestUtuberTwoHostnamesShareOneInstance(t *testing.T) {
 		"utuber-a.example": "utuber",
 		"utuber-b.example": "utuber",
 	})
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg)))
+	srv := newGateServer(t, cfg, noAuthService(t))
 	defer srv.Close()
 
 	res := doHost(t, srv, http.MethodPost, "utuber-a.example",
@@ -264,7 +280,7 @@ func TestUtuberTwoHostnamesShareOneInstance(t *testing.T) {
 //
 // DownloadDir is the regular file ITSELF, not a path under it: MkdirAll's
 // first Stat then succeeds with !IsDir() and the returned *PathError names
-// DownloadDir verbatim, which the body assertion depends on.
+// DownloadDir verbatim, which the leak assertion depends on.
 func TestUtuberBuildFailureIsScopedToThatModule(t *testing.T) {
 	cfg := utuberTestConfig(t, map[string]string{
 		"utuber.example":  "utuber",
@@ -279,7 +295,7 @@ func TestUtuberBuildFailureIsScopedToThatModule(t *testing.T) {
 	cfg.Grocery.StaticDir = groceryDir
 	cfg.Grocery.DataFile = filepath.Join(groceryDir, "grocery.json")
 
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg)))
+	srv := newGateServer(t, cfg, noAuthService(t))
 	defer srv.Close()
 
 	res := doHost(t, srv, http.MethodGet, "utuber.example", "/jobs.json", "")
@@ -291,8 +307,10 @@ func TestUtuberBuildFailureIsScopedToThatModule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read body: %v", err)
 	}
-	if !strings.Contains(string(body), blocker) {
-		t.Errorf("503 body does not name the offending path %q: %s", blocker, body)
+	// The 503 surface sits outside the auth gate, so the build error -- which
+	// names filesystem paths -- must never reach the response body.
+	if strings.Contains(string(body), blocker) {
+		t.Errorf("503 body leaks the offending path %q to unauthenticated callers: %s", blocker, body)
 	}
 	if !strings.Contains(string(body), "utuber") {
 		t.Errorf("503 body does not name the module: %s", body)
@@ -312,7 +330,7 @@ func TestUtuberBuildFailureIsScopedToThatModule(t *testing.T) {
 func TestWebSocketOriginCheckThroughDispatcher(t *testing.T) {
 	const hostname = "ssh.example"
 	cfg := multisshTestConfig(t, map[string]string{hostname: "multissh"})
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg)))
+	srv := newGateServer(t, cfg, noAuthService(t))
 	defer srv.Close()
 
 	cases := []struct {
