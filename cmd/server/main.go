@@ -13,6 +13,7 @@ import (
 	"cmd184psu/unified-webapp/internal/multissh"
 	"cmd184psu/unified-webapp/internal/obsidianoid"
 	"cmd184psu/unified-webapp/internal/todo"
+	"cmd184psu/unified-webapp/internal/utuber"
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/platform/middleware"
 	"cmd184psu/unified-webapp/internal/slideshow"
@@ -127,6 +128,8 @@ func buildModule(module string, cfg *config.Config) (http.Handler, error) {
 		return obsidianoid.Build(cfg.Obsidianoid)
 	case "multissh":
 		return multissh.Build(cfg.Multissh)
+	case "utuber":
+		return utuber.Build(cfg.Utuber)
 	default:
 		return nil, fmt.Errorf("unknown module %q", module)
 	}
