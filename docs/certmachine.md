@@ -35,12 +35,13 @@ This document covers running and using it.
 
 ## 1. Before you start
 
-**There is no login.** Anyone who can reach the certmachine hostname can
-initialize or import the certificate authority, issue certificates, and
+**Gate this module.** certmachine has no login of its own; it relies on the
+platform auth gate. List it in `auth.modules` (the example config ships
+`"certmachine": ["pin"]`) or anyone who can reach the certmachine hostname
+can initialize or import the certificate authority, issue certificates, and
 download every private key the module holds, including the root CA's own key.
-Reaching the hostname is the entire access-control story in this release —
-see [Security posture](#12-security-posture) for the full list and why this
-is deliberate for now, not an oversight.
+An unlisted module is served ungated — reaching the hostname becomes the
+entire access-control story. See [Security posture](#12-security-posture).
 
 Two other things worth knowing up front:
 
@@ -51,8 +52,10 @@ Two other things worth knowing up front:
 - **A healthy process is not proof certmachine came up.** An unwritable
   `db_path` directory makes the module fail to build; the process stays up,
   every other module keeps serving, and every certmachine hostname returns
-  **503** with the offending path in the body. Check the 503 body or the boot
-  log before assuming the module is broken in some other way.
+  **503** naming the module. The build error itself — which includes the
+  offending path — appears only in the boot log, never in the response body
+  (the 503 surface sits outside the auth gate). Check the boot log before
+  assuming the module is broken in some other way.
 
 ---
 
@@ -368,19 +371,20 @@ need optimizing before it does.
 ## 12. Security posture
 
 Per the plan for this module, no new authentication, authorization, or
-encryption-at-rest work is in scope here — that work is already underway,
-platform-wide, on a separate branch, and certmachine is expected to sit
-behind it once it lands rather than grow its own parallel mechanism. What
-follows is **not a punch list of things this module got wrong**; it is a
-record of what an operator should know before exposing this hostname, so
-the gap is documented rather than discovered:
+encryption-at-rest work was built inside certmachine — the platform-wide
+auth work (PIN/LDAP/passkey/API-key gate, same-origin CORS, origin check,
+body limits) has since landed and certmachine sits behind it like every
+other module rather than growing a parallel mechanism. What follows is
+**not a punch list of things this module got wrong**; it is a record of
+what an operator should know before exposing this hostname:
 
-- **No authentication on any endpoint**, including certificate-authority
-  initialization, private-key downloads (`cert.pem`, `key.pem`,
-  `haproxy.pem`, `.tgz` bundles, and the CA's own key implicitly via any
-  operation that needs it), and every mutating route. Network reachability
-  of the hostname is the entire access boundary. This matches the inherited
-  legacy tool's posture; it is not a regression introduced by this module.
+- **Authentication is opt-in per module.** The platform gate protects
+  certmachine only when it is listed in `auth.modules` (the example config
+  ships `"certmachine": ["pin"]`). An unlisted module is served ungated:
+  certificate-authority initialization, private-key downloads (`cert.pem`,
+  `key.pem`, `haproxy.pem`, `.tgz` bundles), and every mutating route become
+  reachable by anyone who can reach the hostname — the inherited legacy
+  tool's posture. Do not deploy this hostname ungated.
 - **Key material is stored unencrypted in the SQLite database**
   (`certmachine.db`), exactly as it was stored unencrypted on disk by the
   legacy tool. Anyone with filesystem read access to `db_path` has every
@@ -397,9 +401,13 @@ the gap is documented rather than discovered:
   error rather than discarding it), and GET requests that mutate state
   (every mutation in this module is POST or DELETE).
 
-When the platform-wide auth/API-key/LDAP effort lands, the intent is for
-this module's routes to sit behind it without route-shape changes — nothing
-here was designed to make that harder.
+The platform-wide auth/API-key/LDAP effort has landed, and this module's
+routes sit behind its gate without route-shape changes, exactly as
+intended. Two module-scoped hardening details on top of it: certmachine
+strips the platform's CORS response headers off its own responses
+(`stripCORS`, `internal/certmachine/build.go`) — a key-serving module has
+no cross-origin caller at all — and its build-failure 503 never echoes
+filesystem paths.
 
 ---
 

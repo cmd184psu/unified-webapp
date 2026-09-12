@@ -87,14 +87,14 @@
   },
   "auth": {
     "modules": {
-      "grocery": ["pin"],
-      "todo": ["pin"],
-      "slideshow": ["pin"],
-      "menuserver": ["pin"],
-      "obsidianoid": ["ldap", "passkey"],
-      "multissh": ["key"],
-      "certmachine": ["pin"],
-      "admin": []
+      "grocery": { "pin_file": "/etc/unified-webapp/grocery.pin" },
+      "todo": { "pin_file": "/etc/unified-webapp/todo.pin" },
+      "slideshow": { "pin_file": "/etc/unified-webapp/slideshow.pin" },
+      "menuserver": { "pin_file": "/etc/unified-webapp/menuserver.pin" },
+      "obsidianoid": {},
+      "multissh": {},
+      "certmachine": { "pin_file": "/etc/unified-webapp/certmachine.pin" },
+      "admin": {}
     },
     "admin_pin_file": "/etc/unified-webapp/admin.pin",
     "data_dir": "/data/auth",
@@ -115,9 +115,6 @@
       "required_groups": ["cn=household,ou=groups,dc=cmdhome,dc=net"],
       "timeout_seconds": 5
     },
-    "pins": [
-      { "name": "chris", "hash": "$2a$10$f81lJT7WsTVxIMS0bPy9xO2FZ1PjGbqcTKYnFck6RNFp9ARxcgnMe" }
-    ],
     "api_keys": [
       { "name": "automation", "hash": "sha256:b408256cc1181a47c036389a767e271f39da77e401ad27a28c35805a696b7d22" }
     ],
