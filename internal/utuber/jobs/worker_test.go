@@ -13,7 +13,7 @@ type fakeProcessor struct {
 	err error
 }
 
-func (f *fakeProcessor) Process(ctx context.Context, j *Job) error {
+func (f *fakeProcessor) Process(ctx context.Context, j Job, q *Queue) error {
 	defer f.wg.Done()
 	return f.err
 }
@@ -29,14 +29,11 @@ func TestWorkerProcessesJob(t *testing.T) {
 
 	StartWorkers(ctx, q, &fakeProcessor{wg: &wg}, 1)
 
-	job := &Job{ID: "1", Status: Queued}
-	q.Enqueue(job)
+	q.Enqueue(&Job{ID: "1", Status: Queued})
 
 	waitOrFatal(t, &wg, "worker did not process job in time")
 
-	if job.Status != Completed {
-		t.Fatalf("expected %s, got %s", Completed, job.Status)
-	}
+	waitForStatus(t, q, "1", Completed)
 }
 
 func TestWorkerSetsFailedOnError(t *testing.T) {
@@ -51,16 +48,13 @@ func TestWorkerSetsFailedOnError(t *testing.T) {
 	boom := errors.New("something broke")
 	StartWorkers(ctx, q, &fakeProcessor{wg: &wg, err: boom}, 1)
 
-	job := &Job{ID: "2", Status: Queued}
-	q.Enqueue(job)
+	q.Enqueue(&Job{ID: "2", Status: Queued})
 
 	waitOrFatal(t, &wg, "worker did not process job in time")
 
-	if job.Status != Failed {
-		t.Fatalf("expected %s, got %s", Failed, job.Status)
-	}
-	if job.Error != boom.Error() {
-		t.Errorf("Error field: got %q, want %q", job.Error, boom.Error())
+	got := waitForStatus(t, q, "2", Failed)
+	if got.Error != boom.Error() {
+		t.Errorf("Error field: got %q, want %q", got.Error, boom.Error())
 	}
 }
 
@@ -72,8 +66,7 @@ func TestWorkerContextCancel(t *testing.T) {
 	wg.Add(1)
 	StartWorkers(ctx, q, &fakeProcessor{wg: &wg}, 1)
 
-	job := &Job{ID: "3", Status: Queued}
-	q.Enqueue(job)
+	q.Enqueue(&Job{ID: "3", Status: Queued})
 	waitOrFatal(t, &wg, "first job not processed")
 
 	// cancel and ensure no panic / hang on a second job that never runs
@@ -92,18 +85,16 @@ func TestMultipleWorkers(t *testing.T) {
 
 	StartWorkers(ctx, q, &fakeProcessor{wg: &wg}, n)
 
-	jobs := make([]*Job, n)
-	for i := range jobs {
-		jobs[i] = &Job{ID: string(rune('a' + i)), Status: Queued}
-		q.Enqueue(jobs[i])
+	ids := make([]string, n)
+	for i := range ids {
+		ids[i] = string(rune('a' + i))
+		q.Enqueue(&Job{ID: ids[i], Status: Queued})
 	}
 
 	waitOrFatal(t, &wg, "not all jobs processed")
 
-	for _, j := range jobs {
-		if j.Status != Completed {
-			t.Errorf("job %s: expected %s, got %s", j.ID, Completed, j.Status)
-		}
+	for _, id := range ids {
+		waitForStatus(t, q, id, Completed)
 	}
 }
 
@@ -116,4 +107,25 @@ func waitOrFatal(t *testing.T, wg *sync.WaitGroup, msg string) {
 	case <-time.After(2 * time.Second):
 		t.Fatal(msg)
 	}
+}
+
+// waitForStatus polls q.Get until the job reaches the wanted status and
+// returns the observed job value. The worker's final status Update can land
+// after the processor's wg.Done fires, so a plain read after waitOrFatal
+// could still see Running; polling closes that gap.
+func waitForStatus(t *testing.T, q *Queue, id string, want Status) Job {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	last := Status("<never seen>")
+	for time.Now().Before(deadline) {
+		if j, ok := q.Get(id); ok {
+			last = j.Status
+			if j.Status == want {
+				return j
+			}
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("job %s: never reached status %s (last seen %s)", id, want, last)
+	return Job{}
 }

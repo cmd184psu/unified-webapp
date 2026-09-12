@@ -29,7 +29,7 @@ func TestAllReturnsCopy(t *testing.T) {
 	a := q.All()
 	b := q.All()
 	// mutating the slice from All() must not affect the queue's internal order
-	a[0] = &Job{ID: "mutated"}
+	a[0] = Job{ID: "mutated"}
 	if q.All()[0].ID != "x" {
 		t.Error("All() returned a reference to internal slice")
 	}
