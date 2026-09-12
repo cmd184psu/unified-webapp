@@ -34,7 +34,12 @@ running and operating it.
 the hostname is the entire access-control story in this release. Application
 authentication is a separate, later piece of work; until it lands, the network
 is the boundary. Do not expose the smbedit hostname beyond the network segment
-you would trust with root-adjacent control of the file server.
+you would trust with root-adjacent control of the file server. And note the
+boundary is really the **browser** of anyone who can resolve the hostname, not
+just the network segment itself: the shared platform middleware answers with
+`Access-Control-Allow-Origin: *` and there is no CSRF token, so any web page
+open in such a browser can POST to smbedit's API cross-origin (including
+`save-and-restart` and `import`) without the user doing anything.
 
 Two other things worth knowing up front:
 
@@ -75,7 +80,8 @@ Samba refuses cleanly instead of exporting a dangling share.
 ## 3. Privileges: the sudoers grants
 
 The service user (see `unified.service`) needs passwordless sudo for exactly
-three commands, and nothing else:
+three operations — writing the conf, restarting Samba, tailing the log — and
+nothing else:
 
 ```
 sudo install -m 0644 <tmp> <smb_conf_path>     # write smb.conf when not directly writable
@@ -87,8 +93,12 @@ A copy-pasteable snippet for `/etc/sudoers.d/smbedit` (adjust the user, the
 conf path, and the log path to your host; edit with `visudo -f`):
 
 ```
-# smbedit: write smb.conf, restart Samba, tail the Samba log — nothing else.
+# smbedit: write smb.conf (and its timestamped .bak backup), restart Samba,
+# tail the Samba log — nothing else. The .bak rule is required: Save & Restart
+# backs up the existing file through the same "sudo install" path before
+# writing, and fails before writing anything if the backup is denied.
 cdelezenski ALL=(root) NOPASSWD: /usr/bin/install -m 0644 * /etc/samba/smb.conf
+cdelezenski ALL=(root) NOPASSWD: /usr/bin/install -m 0644 * /etc/samba/smb.conf.*
 cdelezenski ALL=(root) NOPASSWD: /usr/bin/systemctl restart smbd
 cdelezenski ALL=(root) NOPASSWD: /usr/bin/systemctl restart smb
 cdelezenski ALL=(root) NOPASSWD: /usr/sbin/service smbd restart
