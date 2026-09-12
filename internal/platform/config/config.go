@@ -16,13 +16,198 @@ type Config struct {
 	TLSCert     string            `json:"tls_cert"`
 	TLSKey      string            `json:"tls_key"`
 	Routing     map[string]string `json:"host_routing"` // hostname → module name
+	Server      ServerConfig      `json:"server"`
 	Grocery     GroceryConfig     `json:"grocery"`
 	Todo        TodoConfig        `json:"todo"`
 	Slideshow   SlideshowConfig   `json:"slideshow"`
 	Menuserver  MenuserverConfig  `json:"menuserver"`
 	Obsidianoid ObsidianoidConfig `json:"obsidianoid"`
 	Multissh    MultisshConfig    `json:"multissh"`
+	Auth        AuthConfig        `json:"auth"`
+	Admin       AdminConfig       `json:"admin"`
+
+	// configPath is the absolute path Load read this Config from (empty when
+	// built via DefaultConfig()/WriteDefault without going through Load, or
+	// when the config file did not exist). It is unexported (json:"-" is
+	// redundant for an unexported field, but not serialized regardless) so
+	// admin's live-apply (T5.3) can locate the file to splice without every
+	// caller threading a path around separately.
+	configPath string
 }
+
+// ConfigPath returns the absolute path this Config was loaded from (see
+// Load), or "" if it was never loaded from a file.
+func (c *Config) ConfigPath() string {
+	return c.configPath
+}
+
+// AuthConfig holds the shared authentication/authorization configuration
+// surface used across modules. Modules maps a module name (or the reserved
+// "admin" pseudo-module) to its two-state auth config: present (even as `{}`)
+// means protected, absent means open. See ModuleAuthConfig.
+type AuthConfig struct {
+	Modules      map[string]ModuleAuthConfig `json:"modules"`
+	AdminPIN     string                      `json:"admin_pin"`
+	AdminPINFile string                      `json:"admin_pin_file"`
+	DataDir      string                      `json:"data_dir"`
+	CookieSecure bool                        `json:"cookie_secure"`
+	CookieDomain string                      `json:"cookie_domain"`
+	Session      SessionConfig               `json:"session"`
+	LDAP         LDAPConfig                  `json:"ldap"`
+	// PINs is a tombstone for the removed auth.pins (identity PIN table).
+	// It is never populated by config we write ourselves -- it exists only
+	// to detect the legacy key at decode time (see Load) and to remain
+	// marshal-invisible (json:"...,omitempty" on a nil RawMessage) so the
+	// admin live-apply path never re-writes a "pins": null that would brick
+	// the next boot on this very check.
+	PINs    json.RawMessage `json:"pins,omitempty"`
+	APIKeys []NamedHash     `json:"api_keys"`
+	Passkey PasskeyConfig   `json:"passkey"`
+}
+
+// ModuleAuthConfig is the per-module auth configuration. A module present in
+// AuthConfig.Modules (even as an empty `{}`) is protected; PinFile, when
+// non-empty, offers a per-module door-code PIN alongside LDAP/passkey.
+type ModuleAuthConfig struct {
+	PinFile string `json:"pin_file"`
+}
+
+// legacyModuleAuthError is returned when a module's auth.modules entry is a
+// legacy JSON array (the old accepted-methods list) rather than an object.
+const legacyModuleAuthErrFmt = "per-module method lists were removed; use {} (protected) or {\"pin_file\": \"./todo.pin\"} — see docs/FRD-admin-identity.md"
+
+// UnmarshalJSON detects the legacy per-module accepted-methods array
+// (`["ldap", "pin"]`) and fails with a targeted migration error instead of
+// silently misinterpreting it. moduleAuthConfigsUnmarshal (used by
+// AuthConfig's decode path) additionally prefixes this error with the
+// module's key so the operator knows exactly which entry to fix.
+func (m *ModuleAuthConfig) UnmarshalJSON(data []byte) error {
+	trimmed := bytesTrimLeftSpace(data)
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		return fmt.Errorf("%s", legacyModuleAuthErrFmt)
+	}
+	type alias ModuleAuthConfig
+	var a alias
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	*m = ModuleAuthConfig(a)
+	return nil
+}
+
+// bytesTrimLeftSpace trims leading JSON whitespace without importing
+// encoding/json's internal helpers or bytes just for this one use.
+func bytesTrimLeftSpace(b []byte) []byte {
+	i := 0
+	for i < len(b) {
+		switch b[i] {
+		case ' ', '\t', '\r', '\n':
+			i++
+			continue
+		}
+		break
+	}
+	return b[i:]
+}
+
+// authConfigRemovedPINsErr is the fatal boot error for the legacy top-level
+// auth.pins key (the removed identity-PIN table). A literal `"pins": null`
+// also decodes to a non-empty json.RawMessage (the 4 bytes "null") and
+// therefore fires this error too -- deliberate (see PLAN-auth-two-state.md
+// S1): null only appears when something wrote the legacy key, and failing
+// loud names the fix.
+const authConfigRemovedPINsErr = "auth.pins was removed; identity comes from LDAP, door codes are per-module pin_file"
+
+// UnmarshalJSON decodes AuthConfig with two hard-break checks beyond plain
+// field decoding:
+//
+//  1. auth.modules is decoded key-by-key so a legacy accepted-methods-array
+//     value produces an error naming the offending module
+//     ("auth.modules.<key>: ...").
+//  2. the legacy auth.pins key (detected via the PINs json.RawMessage
+//     tombstone) fails the whole load with authConfigRemovedPINsErr.
+func (a *AuthConfig) UnmarshalJSON(data []byte) error {
+	type alias AuthConfig
+	shadow := struct {
+		Modules json.RawMessage `json:"modules"`
+		*alias
+	}{
+		alias: (*alias)(a),
+	}
+	if err := json.Unmarshal(data, &shadow); err != nil {
+		return err
+	}
+
+	if len(shadow.Modules) > 0 {
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(shadow.Modules, &raw); err != nil {
+			return fmt.Errorf("auth.modules: %w", err)
+		}
+		modules := make(map[string]ModuleAuthConfig, len(raw))
+		for key, v := range raw {
+			var m ModuleAuthConfig
+			if err := json.Unmarshal(v, &m); err != nil {
+				return fmt.Errorf("auth.modules.%s: %w", key, err)
+			}
+			modules[key] = m
+		}
+		a.Modules = modules
+	}
+
+	if len(a.PINs) > 0 {
+		return fmt.Errorf("%s", authConfigRemovedPINsErr)
+	}
+
+	return nil
+}
+
+// SessionConfig controls session lifetime and sliding-refresh behavior.
+type SessionConfig struct {
+	TTLHours             int     `json:"ttl_hours"`              // default 720 (30d) applied downstream, 0 = default
+	RefreshAfterFraction float64 `json:"refresh_after_fraction"` // default 0.5, 0 = default
+}
+
+// NamedHash pairs an operator-facing name with a stored credential hash.
+// Hash is bcrypt for pins, "sha256:<hex>" for api keys.
+type NamedHash struct {
+	Name string `json:"name"`
+	Hash string `json:"hash"`
+}
+
+// LDAPConfig configures LDAP authentication. Full behavior is ported in
+// T3.7; fields are defined now for validation.
+type LDAPConfig struct {
+	URL            string   `json:"url"`
+	StartTLS       bool     `json:"start_tls"`
+	InsecureTLS    bool     `json:"insecure_tls"`
+	BindDN         string   `json:"bind_dn"`
+	BindPassword   string   `json:"bind_password"`
+	BaseDN         string   `json:"base_dn"`
+	UserFilter     string   `json:"user_filter"`
+	RequiredGroups []string `json:"required_groups"`
+	TimeoutSeconds int      `json:"timeout_seconds"`
+}
+
+// PasskeyConfig configures WebAuthn/passkey authentication.
+type PasskeyConfig struct {
+	RPID      string   `json:"rp_id"`
+	RPOrigins []string `json:"rp_origins"`
+}
+
+// ServerConfig holds configuration for the shared HTTP server infrastructure,
+// as opposed to any single module.
+type ServerConfig struct {
+	// OriginCheck controls request-origin validation. Semantics are wired up
+	// separately; this field only carries the configured value for now.
+	OriginCheck string `json:"origin_check"`
+	// SSEMaxSubscribers caps concurrent SSE subscribers per broker across all
+	// modules. 0 (unset) takes DefaultSSEMaxSubscribers.
+	SSEMaxSubscribers int `json:"sse_max_subscribers"`
+}
+
+// DefaultSSEMaxSubscribers is the SSE subscriber cap applied when
+// server.sse_max_subscribers is unset (0) in the config file.
+const DefaultSSEMaxSubscribers = 64
 
 // ObsidianoidVault holds the per-vault configuration for the obsidianoid module.
 type ObsidianoidVault struct {
@@ -39,6 +224,9 @@ type ObsidianoidConfig struct {
 	ThreadsFolder    string             `json:"threads_folder"`
 	ThreadCount      int                `json:"thread_count"`
 	AutoSaveDisabled bool               `json:"autosave_disabled"`
+	// SSEMaxSubscribers is the effective SSE subscriber cap, copied from
+	// Config.Server.SSEMaxSubscribers by Load. Not read from the config file.
+	SSEMaxSubscribers int `json:"-"`
 }
 
 // TodoConfig holds configuration specific to the todo module.
@@ -48,6 +236,18 @@ type TodoConfig struct {
 	Ext                 string `json:"ext"`
 	DefaultSubject      string `json:"default_subject"`
 	SyncIntervalSeconds int    `json:"sync_interval_seconds"`
+	// SSEMaxSubscribers is the effective SSE subscriber cap, copied from
+	// Config.Server.SSEMaxSubscribers by Load. Not read from the config file.
+	SSEMaxSubscribers int `json:"-"`
+}
+
+// AdminConfig holds configuration specific to the admin module (FR-M). Admin
+// is always protected (T3.1's boot validation refuses it routed without
+// exactly one operator-PIN form), so it carries no other module's data
+// fields yet -- T5.1 is a static-shell scaffold only.
+type AdminConfig struct {
+	StaticDir    string `json:"static_dir"`
+	MaxBodyBytes int64  `json:"max_body_bytes"`
 }
 
 // MenuserverConfig holds configuration specific to the menuserver module.
@@ -75,6 +275,9 @@ type SlideshowConfig struct {
 	DefaultShuffle  bool        `json:"default_shuffle"`
 	DefaultTheme    string      `json:"default_theme"`
 	Music           MusicConfig `json:"music"`
+	// SSEMaxSubscribers is the effective SSE subscriber cap, copied from
+	// Config.Server.SSEMaxSubscribers by Load. Not read from the config file.
+	SSEMaxSubscribers int `json:"-"`
 }
 
 // GroceryConfig holds configuration specific to the grocery module.
@@ -85,6 +288,9 @@ type GroceryConfig struct {
 	Progress            bool     `json:"progress"`
 	SyncIntervalSeconds int      `json:"sync_interval_seconds"`
 	Title               string   `json:"title"`
+	// SSEMaxSubscribers is the effective SSE subscriber cap, copied from
+	// Config.Server.SSEMaxSubscribers by Load. Not read from the config file.
+	SSEMaxSubscribers int `json:"-"`
 }
 
 // MultisshConfig holds configuration specific to the multissh module.
@@ -168,8 +374,37 @@ func DefaultConfig() *Config {
 			MaxUploadBytes: 8 << 30, // 8 GiB
 			StrictHostKey:  false,
 		},
+		Admin: AdminConfig{
+			StaticDir:    "./web/admin",
+			MaxBodyBytes: defaultModuleBodyBytes,
+		},
+		Auth: AuthConfig{
+			// Present-but-empty (FR-A14): a config with no operator edits to
+			// this section loads identically to a config with no "auth" key
+			// at all -- ValidatePolicy's fast path and FromConfig's lazy key
+			// creation both key off len()/=="" checks, which empty
+			// maps/slices satisfy exactly like nil. Written out explicitly
+			// (rather than left as Go's zero value, which would marshal
+			// Modules/APIKeys as JSON null) so an operator opening the
+			// generated file sees the auth surface's shape instead of an
+			// unexplained null. PINs is deliberately left at its zero value
+			// (nil json.RawMessage) -- it is a marshal-invisible tombstone
+			// for the removed auth.pins key (json:"pins,omitempty"), and
+			// must never be written back out.
+			Modules: map[string]ModuleAuthConfig{},
+			APIKeys: []NamedHash{},
+		},
+		Server: ServerConfig{
+			OriginCheck:       "enforce",
+			SSEMaxSubscribers: DefaultSSEMaxSubscribers,
+		},
 	}
 }
+
+// defaultModuleBodyBytes is the request-body ceiling applied to a module
+// config's MaxBodyBytes when left unset (0), mirroring
+// cmd/server/main.go's defaultBodyLimit convention.
+const defaultModuleBodyBytes int64 = 1 << 20 // 1 MiB
 
 // ExpandPath expands a leading ~ to the user home directory.
 func ExpandPath(path string) (string, error) {
@@ -191,9 +426,11 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg := DefaultConfig()
+	cfg.configPath = expanded
 
 	data, err := os.ReadFile(expanded)
 	if os.IsNotExist(err) {
+		applyServerDefaults(cfg)
 		return cfg, nil
 	}
 	if err != nil {
@@ -224,6 +461,12 @@ func Load(path string) (*Config, error) {
 	if err := normalizeMultissh(&cfg.Multissh); err != nil {
 		return nil, err
 	}
+	if err := expandAuthPaths(cfg, filepath.Dir(expanded)); err != nil {
+		return nil, err
+	}
+	if err := expandAdminPaths(&cfg.Admin); err != nil {
+		return nil, err
+	}
 	if cfg.TLSCert != "" {
 		if cfg.TLSCert, err = ExpandPath(cfg.TLSCert); err != nil {
 			return nil, err
@@ -234,7 +477,22 @@ func Load(path string) (*Config, error) {
 			return nil, err
 		}
 	}
+	applyServerDefaults(cfg)
 	return cfg, nil
+}
+
+// applyServerDefaults normalizes cfg.Server and copies the effective SSE
+// subscriber cap into each SSE-serving module's config, mirroring the
+// path-expansion pattern used elsewhere in Load.
+func applyServerDefaults(cfg *Config) {
+	max := cfg.Server.SSEMaxSubscribers
+	if max <= 0 {
+		max = DefaultSSEMaxSubscribers
+	}
+	cfg.Grocery.SSEMaxSubscribers = max
+	cfg.Todo.SSEMaxSubscribers = max
+	cfg.Slideshow.SSEMaxSubscribers = max
+	cfg.Obsidianoid.SSEMaxSubscribers = max
 }
 
 func expandMenuserverPaths(m *MenuserverConfig) error {
@@ -243,6 +501,14 @@ func expandMenuserverPaths(m *MenuserverConfig) error {
 		return err
 	}
 	if m.DataDir, err = ExpandPath(m.DataDir); err != nil {
+		return err
+	}
+	return nil
+}
+
+func expandAdminPaths(a *AdminConfig) error {
+	var err error
+	if a.StaticDir, err = ExpandPath(a.StaticDir); err != nil {
 		return err
 	}
 	return nil
@@ -302,6 +568,55 @@ func expandObsidianoidPaths(o *ObsidianoidConfig) error {
 	return nil
 }
 
+// expandAuthPaths makes Auth.DataDir, Auth.AdminPINFile, and every
+// non-empty per-module PinFile (including modules.admin.pin_file, an
+// accepted alternate spelling of the admin PIN source) absolute relative to
+// the config file's directory (baseDir), mirroring the other expand*Paths
+// functions but resolving against the config's location rather than the
+// working directory.
+func expandAuthPaths(cfg *Config, baseDir string) error {
+	var err error
+	if cfg.Auth.DataDir != "" {
+		if cfg.Auth.DataDir, err = ExpandRelativeTo(cfg.Auth.DataDir, baseDir); err != nil {
+			return err
+		}
+	}
+	if cfg.Auth.AdminPINFile != "" {
+		if cfg.Auth.AdminPINFile, err = ExpandRelativeTo(cfg.Auth.AdminPINFile, baseDir); err != nil {
+			return err
+		}
+	}
+	for key, m := range cfg.Auth.Modules {
+		if m.PinFile == "" {
+			continue
+		}
+		if m.PinFile, err = ExpandRelativeTo(m.PinFile, baseDir); err != nil {
+			return err
+		}
+		cfg.Auth.Modules[key] = m
+	}
+	return nil
+}
+
+// ExpandRelativeTo expands a leading ~ via ExpandPath, then makes the result
+// absolute: joined against baseDir if relative, and always run through
+// filepath.Abs so the returned path is absolute even when baseDir itself is
+// relative (e.g. the server was started with -config local-test/config.json).
+// Absoluteness makes expansion idempotent, which internal/admin's live-apply
+// pipeline depends on: it re-expands the handler's cached (already-expanded)
+// config on every mutation, and a merely-joined relative result would be
+// joined against baseDir a second time ("local-test/local-test/admin.pin").
+func ExpandRelativeTo(path, baseDir string) (string, error) {
+	expanded, err := ExpandPath(path)
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(expanded) {
+		expanded = filepath.Join(baseDir, expanded)
+	}
+	return filepath.Abs(expanded)
+}
+
 func expandMultisshPaths(m *MultisshConfig) error {
 	var err error
 	if m.StaticDir, err = ExpandPath(m.StaticDir); err != nil {
@@ -355,5 +670,5 @@ func WriteDefault(path string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(expanded, data, 0644)
+	return os.WriteFile(expanded, data, 0600)
 }

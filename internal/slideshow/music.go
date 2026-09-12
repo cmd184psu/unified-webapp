@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"cmd184psu/unified-webapp/internal/platform/fspath"
 )
 
 // audioExts is the set of file extensions treated as audio.
@@ -89,9 +91,8 @@ func (ms *MusicStore) AudioPath(collection, track string) (string, error) {
 	if !audioExts[ext] {
 		return "", os.ErrInvalid
 	}
-	abs := filepath.Join(ms.audioDir, collection, track)
-	rel, err := filepath.Rel(ms.audioDir, abs)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	abs, err := fspath.ConfineTo(ms.audioDir, filepath.Join(collection, track))
+	if err != nil {
 		return "", os.ErrInvalid
 	}
 	return abs, nil

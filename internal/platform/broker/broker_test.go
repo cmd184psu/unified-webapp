@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"bufio"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -149,6 +150,90 @@ func TestServeHTTPDeliversRefreshOnNotify(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, "data: refresh") {
 		t.Errorf("expected refresh event in body, got: %q", body)
+	}
+}
+
+// TestServeSSECapRejects65thSubscriber connects 64 clients (the default cap),
+// verifies all 64 receive a published event, then verifies a 65th connect is
+// rejected with 503 before any SSE headers are written.
+func TestServeSSECapRejects65thSubscriber(t *testing.T) {
+	b := NewBroker(0)
+	b.SetMaxSubscribers(64)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/events", b.ServeSSE("state", nil))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	type conn struct {
+		resp *http.Response
+	}
+	conns := make([]conn, 0, 64)
+	for i := 0; i < 64; i++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/api/events", nil)
+		if err != nil {
+			t.Fatalf("subscriber %d: build request: %v", i, err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("subscriber %d: connect: %v", i, err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("subscriber %d: status = %d, want 200", i, resp.StatusCode)
+		}
+		conns = append(conns, conn{resp: resp})
+	}
+	defer func() {
+		for _, c := range conns {
+			c.resp.Body.Close()
+		}
+	}()
+
+	// Give ServeSSE time to register every subscriber before checking the cap.
+	time.Sleep(50 * time.Millisecond)
+
+	// 65th connect must be rejected with 503 before any SSE headers are set.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/api/events", nil)
+	if err != nil {
+		t.Fatalf("65th subscriber: build request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("65th subscriber: connect: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("65th subscriber: status = %d, want 503", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); strings.Contains(ct, "text/event-stream") {
+		t.Errorf("65th subscriber: got SSE Content-Type %q, want no SSE headers on 503", ct)
+	}
+
+	// The first 64 subscribers must still receive a published event.
+	b.Publish("hello")
+	readers := make([]*bufio.Reader, len(conns))
+	for i, c := range conns {
+		readers[i] = bufio.NewReader(c.resp.Body)
+	}
+	for i, r := range readers {
+		found := false
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			line, err := r.ReadString('\n')
+			if err != nil {
+				break
+			}
+			if strings.Contains(line, "hello") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("subscriber %d did not receive published event", i)
+		}
 	}
 }
 

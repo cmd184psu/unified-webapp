@@ -31,7 +31,7 @@ func TestVaultWatcherNotifiesOnWrite(t *testing.T) {
 	t.Cleanup(func() { closer.Close() })
 
 	// Serve SSE via a real httptest server.
-	srv := httptest.NewServer(http.HandlerFunc(b.ServeSSE))
+	srv := httptest.NewServer(b.ServeSSE("note-changed", nil))
 	t.Cleanup(srv.Close)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

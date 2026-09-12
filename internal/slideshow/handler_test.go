@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"cmd184psu/unified-webapp/internal/platform/broker"
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/slideshow"
 )
@@ -30,15 +31,15 @@ func newTestHarnessWithMusic(t *testing.T, audioDir string) (*slideshow.Handler,
 		t.Fatalf("NewStore: %v", err)
 	}
 	music := slideshow.NewMusicStore(audioDir)
-	broker := slideshow.NewSSEBroker()
+	b := broker.NewBroker(0)
 	cfg := config.SlideshowConfig{
 		Prefix:          "slides",
 		IntervalSeconds: 8,
 		DefaultMode:     "kenburns",
 		DefaultTheme:    "dark",
 	}
-	conductor := slideshow.NewConductor(store, music, broker, cfg)
-	return slideshow.NewHandler(store, conductor, broker, music, cfg), dir
+	conductor := slideshow.NewConductor(store, music, b, cfg)
+	return slideshow.NewHandler(store, conductor, b, music, cfg), dir
 }
 
 func serve(t *testing.T, h *slideshow.Handler, method, path, body string) *httptest.ResponseRecorder {
@@ -96,10 +97,10 @@ func TestGetAPIState_WithImages(t *testing.T) {
 
 	store, _ := slideshow.NewStore(dir, 0)
 	music := slideshow.NewMusicStore("")
-	broker := slideshow.NewSSEBroker()
+	b := broker.NewBroker(0)
 	cfg := config.SlideshowConfig{Prefix: "slides", IntervalSeconds: 8, DefaultMode: "kenburns", DefaultTheme: "dark"}
-	conductor := slideshow.NewConductor(store, music, broker, cfg)
-	h := slideshow.NewHandler(store, conductor, broker, music, cfg)
+	conductor := slideshow.NewConductor(store, music, b, cfg)
+	h := slideshow.NewHandler(store, conductor, b, music, cfg)
 
 	w := serve(t, h, "GET", "/api/state", "")
 	var state map[string]interface{}
