@@ -70,6 +70,32 @@
       color: var(--text);
     }
     .topbar-title span { color: var(--primary); }
+    .topbar-spacer { flex: 1; }
+    .icon-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 1.1rem;
+      line-height: 1;
+      padding: 0.4rem 0.55rem;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: background var(--t), color var(--t);
+    }
+    .icon-btn:hover { background: var(--surface-2); color: var(--text); }
+
+    /* ── Settings panel (FR-8) ── */
+    .settings-panel {
+      width: 100%;
+      max-width: 680px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 1.25rem;
+      margin-bottom: 1.5rem;
+    }
+    .settings-panel[hidden] { display: none; }
 
     /* ── Card ── */
     .card {
@@ -416,6 +442,23 @@
       </svg>
     </div>
     <div class="topbar-title">u<span>Tuber</span></div>
+    <div class="topbar-spacer"></div>
+    <button class="icon-btn" id="settings-btn" aria-label="Settings"
+            aria-expanded="false" aria-controls="settings-panel"
+            onclick="toggleSettings()">☰</button>
+  </div>
+
+  <div class="settings-panel" id="settings-panel" hidden>
+    <div class="field">
+      <label for="python-bin">Python interpreter</label>
+      <input id="python-bin" placeholder="python3.12"
+             autocomplete="off" spellcheck="false">
+      <span class="optional-hint">Used by “Update yt-dlp”. Blank resets to the server default.</span>
+    </div>
+    <div class="submit-row">
+      <button class="btn btn-ghost btn-sm" onclick="saveSettings()" id="settings-save">Save</button>
+      <span id="settings-status" style="font-size:0.75rem;color:var(--text-faint)"></span>
+    </div>
   </div>
 
   <!-- ── Submit card ── -->
@@ -717,8 +760,57 @@ function runYtdlpUpdate() {
   }
 }
 
+/* ── Settings panel (FR-8) ── */
+function toggleSettings() {
+  const panel = document.getElementById('settings-panel')
+  const btn = document.getElementById('settings-btn')
+  const open = panel.hidden
+  panel.hidden = !open
+  btn.setAttribute('aria-expanded', String(open))
+  if (open) loadSettings()
+}
+
+async function loadSettings() {
+  const status = document.getElementById('settings-status')
+  try {
+    const res = await fetch('/settings.json')
+    const data = await res.json()
+    document.getElementById('python-bin').value = data.python_bin || ''
+    status.textContent = ''
+  } catch {
+    status.style.color = 'var(--danger)'
+    status.textContent = 'Connection error.'
+  }
+}
+
+async function saveSettings() {
+  const status = document.getElementById('settings-status')
+  const input = document.getElementById('python-bin')
+  try {
+    const res = await fetch('/settings.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ python_bin: input.value }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      input.value = data.python_bin || ''
+      status.style.color = 'var(--success)'
+      status.textContent = 'Saved.'
+    } else {
+      // Leave the field as typed so the user can correct it.
+      status.style.color = 'var(--danger)'
+      status.textContent = await res.text()
+    }
+  } catch {
+    status.style.color = 'var(--danger)'
+    status.textContent = 'Connection error.'
+  }
+}
+
 setInterval(refreshJobs, 2000)
 refreshJobs()
+loadSettings()
 </script>
 </body>
 </html>
