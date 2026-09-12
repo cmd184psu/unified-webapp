@@ -83,16 +83,28 @@ func mustEqualStrings(t *testing.T, got, want []string) {
 	}
 }
 
+// writePinFile creates a 0400 pin file under t.TempDir() containing pin,
+// returning its path -- the fixture every module-scoped door-code test
+// below uses in place of the old named-PIN table.
+func writePinFile(t *testing.T, pin string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "module.pin")
+	if err := os.WriteFile(path, []byte(pin), 0400); err != nil {
+		t.Fatalf("write pin file: %v", err)
+	}
+	return path
+}
+
 // --- Method enforcement (FR-A10b) ---
 
 func TestHandleLoginDisallowedMethodNeverInvokesAuthenticator(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	// A pin that WOULD match, on a module whose matrix only accepts ldap --
-	// the PIN table is never consulted because method enforcement runs
-	// first.
+	// A pin that WOULD match a real pin file, on a module that has no
+	// pin_file at all (ldap only) -- the door code is never consulted
+	// because method enforcement runs first.
 	p := &Policy{
-		Modules: map[string][]string{"multissh": {"ldap"}},
-		PINs:    []config.NamedHash{{Name: "carol", Hash: hashFor(t, "4242")}},
+		Modules: map[string]ModulePolicy{"multissh": {}},
 		LDAP:    config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
 	}
 	svc := newGateService(t, now, p)
@@ -110,11 +122,42 @@ func TestHandleLoginDisallowedMethodNeverInvokesAuthenticator(t *testing.T) {
 	}
 }
 
-func TestHandlePasskeyLoginBeginDisallowedMethodNoChallenge(t *testing.T) {
+// TestHandleLoginLDAPDisallowedOnAdmin proves admin byte-for-byte: LDAP is
+// never an acceptable method on the admin pseudo-module -- OfferedMethods
+// is exactly ["admin_pin"], so a posted "ldap" method is rejected before
+// any bind is attempted.
+func TestHandleLoginLDAPDisallowedOnAdmin(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	p := &Policy{
+		Modules:  map[string]ModulePolicy{},
+		AdminPIN: hashFor(t, "9999"),
+		LDAP:     config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
+	}
+	svc := newGateService(t, now, p)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody(t, "ldap", "", "admin", "whatever"))
+	svc.Gate("admin", echoHandler()).ServeHTTP(rec, req)
+
+	mustNotReached(t, rec)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (ldap must never be accepted on admin)", rec.Code)
+	}
+	if _, ok := setCookieValue(rec); ok {
+		t.Fatal("Set-Cookie present for a disallowed ldap-on-admin login, want none")
+	}
+}
+
+// TestHandlePasskeyLoginBeginDisallowedOnAdmin proves passkey ceremony
+// routes are rejected on admin: OfferedMethods("admin") never includes
+// "passkey", regardless of whether a passkey service happens to be
+// configured for other modules.
+func TestHandlePasskeyLoginBeginDisallowedOnAdmin(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	ps := newTestPasskeyService(t, testPasskeyConfig(), func() time.Time { return now })
 	p := &Policy{
-		Modules:  map[string][]string{"grocery": {"pin"}},
+		Modules:  map[string]ModulePolicy{},
+		AdminPIN: hashFor(t, "9999"),
 		passkeys: ps,
 	}
 	svc := newGateService(t, now, p)
@@ -122,7 +165,7 @@ func TestHandlePasskeyLoginBeginDisallowedMethodNoChallenge(t *testing.T) {
 	rec := httptest.NewRecorder()
 	body, _ := json.Marshal(map[string]string{"username": "alice"})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/passkey/login/begin", bytes.NewReader(body))
-	svc.Gate("grocery", echoHandler()).ServeHTTP(rec, req)
+	svc.Gate("admin", echoHandler()).ServeHTTP(rec, req)
 
 	mustNotReached(t, rec)
 	if rec.Code != http.StatusBadRequest {
@@ -133,11 +176,12 @@ func TestHandlePasskeyLoginBeginDisallowedMethodNoChallenge(t *testing.T) {
 	}
 }
 
-func TestHandlePasskeyLoginFinishDisallowedMethod(t *testing.T) {
+func TestHandlePasskeyLoginFinishDisallowedOnAdmin(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	ps := newTestPasskeyService(t, testPasskeyConfig(), func() time.Time { return now })
 	p := &Policy{
-		Modules:  map[string][]string{"grocery": {"pin"}},
+		Modules:  map[string]ModulePolicy{},
+		AdminPIN: hashFor(t, "9999"),
 		passkeys: ps,
 	}
 	svc := newGateService(t, now, p)
@@ -145,7 +189,7 @@ func TestHandlePasskeyLoginFinishDisallowedMethod(t *testing.T) {
 	rec := httptest.NewRecorder()
 	body, _ := json.Marshal(map[string]string{"challengeId": "whatever"})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/passkey/login/finish", bytes.NewReader(body))
-	svc.Gate("grocery", echoHandler()).ServeHTTP(rec, req)
+	svc.Gate("admin", echoHandler()).ServeHTTP(rec, req)
 
 	mustNotReached(t, rec)
 	if rec.Code != http.StatusBadRequest {
@@ -158,9 +202,9 @@ func TestHandlePasskeyLoginFinishDisallowedMethod(t *testing.T) {
 func TestHandleLoginPinSuccessThenLDAPAccumulates(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	conn := scriptedUserConn("uid=carol,ou=people,dc=example,dc=com", []string{"users"}, nil)
+	pinPath := writePinFile(t, "4242")
 	p := &Policy{
-		Modules:         map[string][]string{"multissh": {"pin", "ldap"}},
-		PINs:            []config.NamedHash{{Name: "carol", Hash: hashFor(t, "4242")}},
+		Modules:         map[string]ModulePolicy{"multissh": {PinFile: pinPath}},
 		LDAP:            config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
 		SessionTTL:      time.Hour,
 		RefreshFraction: 0.5,
@@ -168,7 +212,7 @@ func TestHandleLoginPinSuccessThenLDAPAccumulates(t *testing.T) {
 	svc := newGateService(t, now, p)
 	svc.ldapDialer = func(ctx context.Context, opts ldapDialOptions) (ldapConn, error) { return conn, nil }
 
-	// First login: pin.
+	// First login: pin -- a door-code grant, anonymous (identity "").
 	rec1 := httptest.NewRecorder()
 	req1 := httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody(t, "pin", "4242", "", ""))
 	svc.Gate("multissh", echoHandler()).ServeHTTP(rec1, req1)
@@ -181,13 +225,13 @@ func TestHandleLoginPinSuccessThenLDAPAccumulates(t *testing.T) {
 		t.Fatal("expected Set-Cookie after a successful pin login")
 	}
 	body1 := decodeJSON(t, rec1)
-	if body1["identity"] != "carol" {
-		t.Fatalf("identity = %v, want carol", body1["identity"])
+	if body1["identity"] != "" {
+		t.Fatalf("identity = %v, want \"\" (a door-code login is anonymous)", body1["identity"])
 	}
-	mustEqualStrings(t, methodsOf(t, body1), []string{"pin"})
+	mustEqualStrings(t, methodsOf(t, body1), []string{pinGrant("multissh")})
 
-	// Second login, carrying the first session's cookie: ldap, same
-	// identity -> methods accumulate (union), not replace.
+	// Second login, carrying the first session's cookie: ldap adopts the
+	// anonymous session's subject and unions grants, not replaces them.
 	rec2 := httptest.NewRecorder()
 	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody(t, "ldap", "", "carol", "correct-horse"))
 	req2.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
@@ -200,14 +244,14 @@ func TestHandleLoginPinSuccessThenLDAPAccumulates(t *testing.T) {
 	if body2["identity"] != "carol" {
 		t.Fatalf("identity = %v, want carol", body2["identity"])
 	}
-	mustEqualStrings(t, methodsOf(t, body2), []string{"pin", "ldap"})
+	mustEqualStrings(t, methodsOf(t, body2), []string{pinGrant("multissh"), "ldap"})
 }
 
 func TestHandleLoginLDAPFakeDialer(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	conn := scriptedUserConn("uid=dana,ou=people,dc=example,dc=com", []string{"users"}, nil)
 	p := &Policy{
-		Modules:         map[string][]string{"multissh": {"ldap"}},
+		Modules:         map[string]ModulePolicy{"multissh": {}},
 		LDAP:            config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
 		SessionTTL:      time.Hour,
 		RefreshFraction: 0.5,
@@ -242,18 +286,13 @@ func TestHandleLoginLDAPFakeDialer(t *testing.T) {
 // this file) is unexported: package main has no way to inject a fake dialer
 // into a Service built via auth.FromConfig, so the LDAP half of AC-3 is
 // proven here, against two Gate calls on one Service (one per module) in
-// place of two real dispatcher hostnames. The PIN half of AC-3 (PIN login
-// opens its own module, the same cookie 401s on the LDAP-only module, and a
-// PIN login attempt on the LDAP-only module 400s before any credential
-// check) is proven at the dispatcher level in
-// cmd/server/dispatcher_auth_test.go's TestAC3_AccumulationAcrossModules,
-// which cross-references this test for the LDAP half.
+// place of two real dispatcher hostnames.
 func TestCrossModuleAccumulationPINThenLDAP(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	conn := scriptedUserConn("uid=carol,ou=people,dc=example,dc=com", []string{"users"}, nil)
+	pinPath := writePinFile(t, "4242")
 	p := &Policy{
-		Modules:         map[string][]string{"slideshow": {"pin"}, "multissh": {"ldap"}},
-		PINs:            []config.NamedHash{{Name: "carol", Hash: hashFor(t, "4242")}},
+		Modules:         map[string]ModulePolicy{"slideshow": {PinFile: pinPath}, "multissh": {}},
 		LDAP:            config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
 		SessionTTL:      time.Hour,
 		RefreshFraction: 0.5,
@@ -281,8 +320,8 @@ func TestCrossModuleAccumulationPINThenLDAP(t *testing.T) {
 	svc.Gate("slideshow", echoHandler()).ServeHTTP(recOpen, reqOpen)
 	mustReached(t, recOpen)
 
-	// The same cookie 401s on multissh -- its methods ("pin") don't
-	// intersect multissh's accepted set ("ldap").
+	// The same cookie 401s on multissh -- a module-scoped door-code grant
+	// (pin:slideshow) reaches only its own module.
 	recBlocked := httptest.NewRecorder()
 	reqBlocked := httptest.NewRequest(http.MethodGet, "/", nil)
 	reqBlocked.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
@@ -292,8 +331,9 @@ func TestCrossModuleAccumulationPINThenLDAP(t *testing.T) {
 		t.Fatalf("multissh with a pin-only cookie: status = %d, want 401", recBlocked.Code)
 	}
 
-	// LDAP login on multissh, carrying the slideshow cookie: same identity
-	// -> methods accumulate (union), not replace.
+	// LDAP login on multissh, carrying the slideshow cookie: an anonymous
+	// (pin-only) session adopts the ldap login's subject and keeps the
+	// existing pin grant -- accumulate (union), not replace.
 	rec2 := httptest.NewRecorder()
 	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody(t, "ldap", "", "carol", "correct-horse"))
 	req2.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
@@ -306,13 +346,14 @@ func TestCrossModuleAccumulationPINThenLDAP(t *testing.T) {
 	if body2["identity"] != "carol" {
 		t.Fatalf("identity = %v, want carol", body2["identity"])
 	}
-	mustEqualStrings(t, methodsOf(t, body2), []string{"pin", "ldap"})
+	mustEqualStrings(t, methodsOf(t, body2), []string{pinGrant("slideshow"), "ldap"})
 	tok2, ok := setCookieValue(rec2)
 	if !ok || tok2 == "" {
 		t.Fatal("expected Set-Cookie after the accumulating ldap login")
 	}
 
-	// The accumulated token now opens both modules.
+	// The accumulated token now opens both modules: the ldap identity grant
+	// reaches multissh directly, and still carries the slideshow pin grant.
 	for _, module := range []string{"slideshow", "multissh"} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -327,7 +368,7 @@ func TestCrossModuleAccumulationPINThenLDAP(t *testing.T) {
 func TestHandleLoginAdminOperatorPIN(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	p := &Policy{
-		Modules:         map[string][]string{},
+		Modules:         map[string]ModulePolicy{},
 		AdminPIN:        hashFor(t, "9999"),
 		SessionTTL:      time.Hour,
 		RefreshFraction: 0.5,
@@ -348,13 +389,113 @@ func TestHandleLoginAdminOperatorPIN(t *testing.T) {
 	mustEqualStrings(t, methodsOf(t, body), []string{"admin_pin"})
 }
 
+// --- Module PinFile door code ---
+
+// TestHandleLoginModulePinFileSuccessAndFailure proves a plain protected
+// module's own pin_file works as a login credential: the correct PIN grants
+// pinGrant(module) anonymously, the wrong PIN is a normal bad_credential
+// 401 (and feeds the throttle like any other credential failure).
+func TestHandleLoginModulePinFileSuccessAndFailure(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	pinPath := writePinFile(t, "7777")
+	p := &Policy{
+		Modules:         map[string]ModulePolicy{"todo": {PinFile: pinPath}},
+		SessionTTL:      time.Hour,
+		RefreshFraction: 0.5,
+	}
+	svc := newGateService(t, now, p)
+
+	t.Run("wrong pin -> 401 bad_credential", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody(t, "pin", "0000", "", ""))
+		svc.Gate("todo", echoHandler()).ServeHTTP(rec, req)
+		mustNotReached(t, rec)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", rec.Code)
+		}
+	})
+
+	t.Run("correct pin -> grant pin:todo, anonymous", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody(t, "pin", "7777", "", ""))
+		svc.Gate("todo", echoHandler()).ServeHTTP(rec, req)
+		mustNotReached(t, rec)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+		}
+		body := decodeJSON(t, rec)
+		if body["identity"] != "" {
+			t.Fatalf("identity = %v, want \"\"", body["identity"])
+		}
+		mustEqualStrings(t, methodsOf(t, body), []string{pinGrant("todo")})
+	})
+}
+
+// TestHandleLoginPinFileConfigErrorIsLoud500NotThrottled proves the
+// generalized FR-M2 break-glass pattern for a plain module's own pin_file
+// (not admin's): a config error -- here, the file going missing after
+// boot -- is a loud 500 naming the fix, logged under the distinct
+// pin_file_config reason (never admin_pin_config, which is reserved for
+// admin's own PIN-file error), and must not feed the throttle.
+func TestHandleLoginPinFileConfigErrorIsLoud500NotThrottled(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "todo.pin")
+	if err := os.WriteFile(path, []byte("7777"), 0400); err != nil {
+		t.Fatalf("write pin file: %v", err)
+	}
+	p := &Policy{
+		Modules:         map[string]ModulePolicy{"todo": {PinFile: path}},
+		SessionTTL:      time.Hour,
+		RefreshFraction: 0.5,
+	}
+	svc := newGateService(t, now, p)
+
+	// The file goes missing after boot -- no ValidatePolicy re-check, no
+	// SwapPolicy; checkPINFile discovers this on the next login attempt.
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove pin file: %v", err)
+	}
+
+	var buf bytes.Buffer
+	prevOut := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(prevOut) })
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody(t, "pin", "7777", "", ""))
+	svc.Gate("todo", echoHandler()).ServeHTTP(rec, req)
+	mustNotReached(t, rec)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (missing pin_file is a server-side config error)", rec.Code)
+	}
+	if !strings.Contains(buf.String(), `reason="pin_file_config"`) {
+		t.Fatalf("log output missing reason=\"pin_file_config\"; got:\n%s", buf.String())
+	}
+	if strings.Contains(buf.String(), `reason="admin_pin_config"`) {
+		t.Fatalf("log output must not use admin_pin_config for a module's own pin_file error; got:\n%s", buf.String())
+	}
+
+	// The config error must not have fed the throttle: restoring the file
+	// makes the very next attempt succeed with no backoff.
+	if err := os.WriteFile(path, []byte("7777"), 0400); err != nil {
+		t.Fatalf("restore pin file: %v", err)
+	}
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody(t, "pin", "7777", "", ""))
+	svc.Gate("todo", echoHandler()).ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("after restoring the file: status = %d, want 200 (config errors must not throttle)", rec2.Code)
+	}
+}
+
 // --- Throttle (FR-A7) ---
 
 func TestHandleLoginThrottle(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	pinPath := writePinFile(t, "1234")
 	p := &Policy{
-		Modules:         map[string][]string{"grocery": {"pin"}},
-		PINs:            []config.NamedHash{{Name: "dave", Hash: hashFor(t, "1234")}},
+		Modules:         map[string]ModulePolicy{"grocery": {PinFile: pinPath}},
 		SessionTTL:      time.Hour,
 		RefreshFraction: 0.5,
 	}
@@ -389,10 +530,10 @@ func TestHandleLoginThrottle(t *testing.T) {
 
 func TestHandleLogoutClearsCookie(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	p := &Policy{Modules: map[string][]string{"grocery": {"pin"}}}
+	p := &Policy{Modules: map[string]ModulePolicy{"grocery": {PinFile: "/tmp/does-not-matter"}}}
 	svc := newGateService(t, now, p)
 
-	tok, err := issueToken(gateTestKey(), "alice", []string{"pin"}, time.Hour, now)
+	tok, err := issueToken(gateTestKey(), "alice", []string{pinGrant("grocery")}, time.Hour, now)
 	if err != nil {
 		t.Fatalf("issueToken: %v", err)
 	}
@@ -428,7 +569,7 @@ func TestHandleLogoutClearsCookie(t *testing.T) {
 
 func TestHandleSessionWithAndWithoutCookie(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	p := &Policy{Modules: map[string][]string{"grocery": {"pin"}}}
+	p := &Policy{Modules: map[string]ModulePolicy{"grocery": {PinFile: "/tmp/does-not-matter"}}}
 	svc := newGateService(t, now, p)
 
 	t.Run("without cookie -> 401", func(t *testing.T) {
@@ -442,7 +583,7 @@ func TestHandleSessionWithAndWithoutCookie(t *testing.T) {
 	})
 
 	t.Run("with valid cookie -> 200 identity/methods", func(t *testing.T) {
-		tok, err := issueToken(gateTestKey(), "alice", []string{"pin"}, time.Hour, now)
+		tok, err := issueToken(gateTestKey(), "alice", []string{pinGrant("grocery")}, time.Hour, now)
 		if err != nil {
 			t.Fatalf("issueToken: %v", err)
 		}
@@ -458,7 +599,7 @@ func TestHandleSessionWithAndWithoutCookie(t *testing.T) {
 		if body["identity"] != "alice" {
 			t.Fatalf("identity = %v, want alice", body["identity"])
 		}
-		mustEqualStrings(t, methodsOf(t, body), []string{"pin"})
+		mustEqualStrings(t, methodsOf(t, body), []string{pinGrant("grocery")})
 	})
 }
 
@@ -466,9 +607,9 @@ func TestHandleSessionWithAndWithoutCookie(t *testing.T) {
 
 func TestAuthEventLog(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	pinPath := writePinFile(t, "1234")
 	p := &Policy{
-		Modules:         map[string][]string{"grocery": {"pin"}, "multissh": {"ldap"}},
-		PINs:            []config.NamedHash{{Name: "dave", Hash: hashFor(t, "1234")}},
+		Modules:         map[string]ModulePolicy{"grocery": {PinFile: pinPath}, "multissh": {}},
 		LDAP:            config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
 		SessionTTL:      time.Hour,
 		RefreshFraction: 0.5,
@@ -497,7 +638,7 @@ func TestAuthEventLog(t *testing.T) {
 		t.Fatalf("success login status = %d, want 200", rec.Code)
 	}
 
-	// disallowed_method: pin on an ldap-only module.
+	// disallowed_method: pin on an ldap-only module (no pin_file).
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody(t, "pin", wrongPIN, "", ""))
 	svc.Gate("multissh", echoHandler()).ServeHTTP(rec, req)
@@ -506,7 +647,7 @@ func TestAuthEventLog(t *testing.T) {
 	}
 
 	// bad_credential: wrong pin on grocery (still below the throttle
-	// threshold -- this is attempt #2 against grocery's PIN table).
+	// threshold -- this is attempt #2 against grocery's pin_file).
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody(t, "pin", wrongPIN, "", ""))
 	svc.Gate("grocery", echoHandler()).ServeHTTP(rec, req)
@@ -631,10 +772,15 @@ func TestHandleLoginAdminPINFileTooOpenPermissions(t *testing.T) {
 		t.Fatalf("write pin file: %v", err)
 	}
 	p := &Policy{
-		Modules:      map[string][]string{},
+		Modules:      map[string]ModulePolicy{},
 		AdminPINFile: path,
 	}
 	svc := newGateService(t, now, p)
+
+	var buf bytes.Buffer
+	prevOut := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(prevOut) })
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody(t, "pin", "9999", "", ""))
@@ -650,6 +796,9 @@ func TestHandleLoginAdminPINFileTooOpenPermissions(t *testing.T) {
 	}
 	if strings.Contains(errMsg, "9999") {
 		t.Fatalf("body[error] = %q leaks the attempted pin", errMsg)
+	}
+	if !strings.Contains(buf.String(), `reason="admin_pin_config"`) {
+		t.Fatalf("log output missing reason=\"admin_pin_config\"; got:\n%s", buf.String())
 	}
 
 	// The config error must not have fed the throttle: fixing the file's
@@ -677,7 +826,7 @@ func TestHandleLoginAdminPINFileEditTakesEffectWithoutSwap(t *testing.T) {
 		t.Fatalf("write pin file: %v", err)
 	}
 	p := &Policy{
-		Modules:         map[string][]string{},
+		Modules:         map[string]ModulePolicy{},
 		AdminPINFile:    path,
 		SessionTTL:      time.Hour,
 		RefreshFraction: 0.5,
@@ -727,7 +876,7 @@ func TestHandleLoginAdminPINFileEditTakesEffectWithoutSwap(t *testing.T) {
 func TestHandleLoginThrottleAppliesToAdminPIN(t *testing.T) {
 	clk := newFakeClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	p := &Policy{
-		Modules:         map[string][]string{},
+		Modules:         map[string]ModulePolicy{},
 		AdminPIN:        hashFor(t, "9999"),
 		SessionTTL:      time.Hour,
 		RefreshFraction: 0.5,
@@ -778,7 +927,8 @@ func TestAuthEventLogPasskeyDisallowed(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	ps := newTestPasskeyService(t, testPasskeyConfig(), func() time.Time { return now })
 	p := &Policy{
-		Modules:  map[string][]string{"grocery": {"pin"}},
+		Modules:  map[string]ModulePolicy{},
+		AdminPIN: hashFor(t, "9999"),
 		passkeys: ps,
 	}
 	svc := newGateService(t, now, p)
@@ -791,12 +941,50 @@ func TestAuthEventLogPasskeyDisallowed(t *testing.T) {
 	rec := httptest.NewRecorder()
 	body, _ := json.Marshal(map[string]string{"username": "alice"})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/passkey/login/begin", bytes.NewReader(body))
-	svc.Gate("grocery", echoHandler()).ServeHTTP(rec, req)
+	svc.Gate("admin", echoHandler()).ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}
 
 	if !strings.Contains(buf.String(), `reason="disallowed_method"`) {
 		t.Fatalf("expected a disallowed_method log line; got:\n%s", buf.String())
+	}
+}
+
+// TestAuthEventLogPasskeyManagementDeniedWithoutLDAP proves the exact log
+// line the gate emits when a valid but door-code-only session tries to
+// reach a passkey management route: event=auth_passkey_denied with the
+// module and the requires_ldap reason, and a 403 whose body explains why.
+func TestAuthEventLogPasskeyManagementDeniedWithoutLDAP(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	pinPath := writePinFile(t, "1234")
+	p := &Policy{
+		Modules:         map[string]ModulePolicy{"grocery": {PinFile: pinPath}},
+		SessionTTL:      time.Hour,
+		RefreshFraction: 0.5,
+	}
+	svc := newGateService(t, now, p)
+
+	var buf bytes.Buffer
+	prevOut := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(prevOut) })
+
+	tok, err := issueToken(gateTestKey(), "", []string{pinGrant("grocery")}, time.Hour, now)
+	if err != nil {
+		t.Fatalf("issueToken: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/passkeys", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
+	svc.Gate("grocery", echoHandler()).ServeHTTP(rec, req)
+	mustNotReached(t, rec)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, `event=auth_passkey_denied`) || !strings.Contains(out, `module="grocery"`) || !strings.Contains(out, `reason="requires_ldap"`) {
+		t.Fatalf("expected an auth_passkey_denied log line for module grocery, reason requires_ldap; got:\n%s", out)
 	}
 }

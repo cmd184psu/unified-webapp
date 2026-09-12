@@ -12,7 +12,7 @@
 // password is checked, an LDAP bind attempted, or a WebAuthn challenge
 // issued. The one exception is the "admin" pseudo-module, for which the
 // operator PIN path is always acceptable regardless of its matrix entry
-// (L6; see policy.go's EffectiveMethods and pin.go's adminPINMethod).
+// (L6; see policy.go's OfferedMethods and pin.go's adminPINMethod).
 //
 // The auth event log (FR-A12b) records one line per login attempt --
 // success or failure, across every method including passkey -- via the
@@ -41,7 +41,21 @@ const (
 	reasonDisallowedMethod = "disallowed_method"
 	reasonThrottled        = "throttled"
 	reasonAdminPINConfig   = "admin_pin_config"
+	reasonPinFileConfig    = "pin_file_config"
 )
+
+// containsMethod reports whether method appears in list -- used against
+// OfferedMethods' output, both here (login-method enforcement) and by the
+// passkey ceremony guards below. It has no notion of authorization; that is
+// grantsAllow's job (session.go), consulted only by gate.go.
+func containsMethod(list []string, method string) bool {
+	for _, m := range list {
+		if m == method {
+			return true
+		}
+	}
+	return false
+}
 
 // logLoginAttempt writes the one auth event log line (FR-A12b) for a login
 // attempt against module using method, whether it succeeded, its resolved
@@ -80,20 +94,23 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request, module str
 	}
 
 	p := s.policy()
-	accepted := p.EffectiveMethods(module)
+	offered := p.OfferedMethods(module)
 
-	// Method enforcement (FR-A10b): before any credential is examined. The
-	// operator PIN path is always acceptable on "admin" regardless of its
-	// matrix entry.
+	// Method enforcement (FR-A10b): before any credential is examined.
+	// login.html posts method "pin" on every module including admin, while
+	// OfferedMethods("admin") is ["admin_pin"] -- so posted "pin" is
+	// acceptable iff the module offers "pin" (a module PinFile) or
+	// "admin_pin" (the admin pseudo-module), and on admin it selects the
+	// admin-PIN path below exactly like today's special case.
 	switch req.Method {
 	case "pin":
-		if module != "admin" && !containsMethod(accepted, "pin") {
+		if !containsMethod(offered, pinMethod) && !containsMethod(offered, adminPINMethod) {
 			logLoginAttempt(false, module, req.Method, "", reasonDisallowedMethod)
 			response.WriteError(w, http.StatusBadRequest, "method not accepted for this module")
 			return
 		}
 	case "ldap":
-		if !containsMethod(accepted, "ldap") {
+		if !containsMethod(offered, "ldap") {
 			logLoginAttempt(false, module, req.Method, "", reasonDisallowedMethod)
 			response.WriteError(w, http.StatusBadRequest, "method not accepted for this module")
 			return
@@ -113,11 +130,12 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request, module str
 		return
 	}
 
-	var identity, method string
+	var identity, grant string
+	var ok bool
 	switch req.Method {
 	case "pin":
 		if module == "admin" {
-			ok, err := s.checkAdminPIN(req.PIN)
+			pinOK, err := s.checkAdminPIN(req.PIN)
 			if err != nil {
 				// FR-M2: a misconfigured operator-PIN file (unreadable, or
 				// mode too open) fails loudly with the fix in the response
@@ -129,21 +147,30 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request, module str
 				response.WriteError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
-			if ok {
-				identity, method = adminIdentity, adminPINMethod
-			} else if containsMethod(p.Modules["admin"], "pin") {
-				if name, ok2 := s.checkPIN(req.PIN); ok2 {
-					identity, method = name, pinMethod
-				}
+			if pinOK {
+				identity, grant, ok = adminIdentity, adminPINMethod, true
 			}
-		} else if name, ok := s.checkPIN(req.PIN); ok {
-			identity, method = name, pinMethod
+		} else {
+			mp := p.Modules[module]
+			pinOK, err := checkPINFile(mp.PinFile, req.PIN)
+			if err != nil {
+				// FR-M2's break-glass pattern, generalized to any module's
+				// own door-code file: a config error (missing file, bad
+				// perms, unreadable) is a loud 500 naming the fix, logged
+				// under its own reason, and never feeds the throttle.
+				logLoginAttempt(false, module, req.Method, "", reasonPinFileConfig)
+				response.WriteError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if pinOK {
+				grant, ok = pinGrant(module), true
+			}
 		}
 	case "ldap":
 		client := s.ldapClient(p.LDAP)
 		name, err := client.Authenticate(r.Context(), req.Username, req.Password)
 		if err == nil {
-			identity, method = name, "ldap"
+			identity, grant, ok = name, "ldap", true
 		} else if !errors.Is(err, ErrLDAPAuth) && !errors.Is(err, ErrLDAPForbidden) {
 			// Connection-level failure (directory down, unreachable, TLS),
 			// not a credential problem. The client still gets the uniform
@@ -152,24 +179,24 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request, module str
 		}
 	}
 
-	if identity == "" {
+	if !ok {
 		s.throttle.fail()
-		logLoginAttempt(false, module, req.Method, "", reasonBadCredential)
+		logLoginAttempt(false, module, req.Method, identity, reasonBadCredential)
 		response.WriteError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 
 	existing, _ := s.sessionClaimsFromRequest(r, s.now())
-	sub, methods := accumulate(existing, identity, method)
-	tok, err := issueToken(s.key, sub, methods, p.SessionTTL, s.now())
+	sub, grants := accumulate(existing, identity, grant)
+	tok, err := issueToken(s.key, sub, grants, p.SessionTTL, s.now())
 	if err != nil {
 		response.WriteError(w, http.StatusInternalServerError, "unable to issue session")
 		return
 	}
 	setSessionCookie(w, tok, p.SessionTTL, p.CookieSecure, p.CookieDomain)
 	s.throttle.success()
-	logLoginAttempt(true, module, method, sub, "")
-	response.WriteJSON(w, http.StatusOK, map[string]any{"identity": sub, "methods": methods})
+	logLoginAttempt(true, module, grant, sub, "")
+	response.WriteJSON(w, http.StatusOK, map[string]any{"identity": sub, "methods": grants})
 }
 
 // handleLogout backs POST /api/auth/logout: clears the session cookie and
@@ -198,7 +225,7 @@ func (s *Service) handleSession(w http.ResponseWriter, r *http.Request, module s
 		response.WriteError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	response.WriteJSON(w, http.StatusOK, map[string]any{"identity": claims.Subject, "methods": claims.Methods})
+	response.WriteJSON(w, http.StatusOK, map[string]any{"identity": claims.Subject, "methods": claims.Grants})
 }
 
 // passkeyLoginBeginRequest is the POST /api/auth/passkey/login/begin body.
@@ -212,7 +239,7 @@ type passkeyLoginBeginRequest struct {
 // has no configured passkey service at all.
 func (s *Service) handlePasskeyLoginBegin(w http.ResponseWriter, r *http.Request, module string) {
 	p := s.policy()
-	if !containsMethod(p.EffectiveMethods(module), "passkey") || p.passkeys == nil {
+	if !containsMethod(p.OfferedMethods(module), "passkey") || p.passkeys == nil {
 		logLoginAttempt(false, module, "passkey", "", reasonDisallowedMethod)
 		response.WriteError(w, http.StatusBadRequest, "method not accepted for this module")
 		return
@@ -245,7 +272,7 @@ type passkeyLoginFinishRequest struct {
 // a successful handleLogin.
 func (s *Service) handlePasskeyLoginFinish(w http.ResponseWriter, r *http.Request, module string) {
 	p := s.policy()
-	if !containsMethod(p.EffectiveMethods(module), "passkey") || p.passkeys == nil {
+	if !containsMethod(p.OfferedMethods(module), "passkey") || p.passkeys == nil {
 		logLoginAttempt(false, module, "passkey", "", reasonDisallowedMethod)
 		response.WriteError(w, http.StatusBadRequest, "method not accepted for this module")
 		return

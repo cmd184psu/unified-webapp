@@ -16,7 +16,8 @@ import (
 )
 
 // bcryptHash bcrypt-hashes pin at the minimum cost (tests don't need real
-// hardening, just a hash checkPIN's bcrypt.CompareHashAndPassword accepts).
+// hardening, just a hash checkAdminPIN's bcrypt.CompareHashAndPassword
+// accepts).
 func bcryptHash(t *testing.T, pin string) string {
 	t.Helper()
 	h, err := bcrypt.GenerateFromPassword([]byte(pin), bcrypt.MinCost)
@@ -24,6 +25,18 @@ func bcryptHash(t *testing.T, pin string) string {
 		t.Fatalf("bcrypt.GenerateFromPassword: %v", err)
 	}
 	return string(h)
+}
+
+// pinFileFixture writes pin to a fresh 0400 file and returns its path, for
+// module.pin_file-protected AuthConfig fixtures.
+func pinFileFixture(t *testing.T, pin string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "door.pin")
+	if err := os.WriteFile(path, []byte(pin), 0o400); err != nil {
+		t.Fatalf("writing pin file: %v", err)
+	}
+	return path
 }
 
 // writeApplyFixture writes content to a fresh temp dir and returns its path.
@@ -70,9 +83,7 @@ const fixtureWithAuth = `{
   },
   "auth": {
     "modules": {
-      "old": [
-        "pin"
-      ]
+      "old": {}
     }
   },
   "trailing": {
@@ -105,8 +116,8 @@ func TestApplyAuthReplacesExistingAuthMemberByteRangeOnly(t *testing.T) {
 	}
 
 	newAuth := config.AuthConfig{
-		Modules: map[string][]string{"todo": {"pin"}},
-		PINs:    []config.NamedHash{{Name: "alice", Hash: bcryptHash(t, "1234")}},
+		Modules: map[string]config.ModuleAuthConfig{"todo": {PinFile: pinFileFixture(t, "1234")}},
+		LDAP:    config.LDAPConfig{URL: "ldaps://ldap.example.com"},
 	}
 	expectedMarshaled, err := json.MarshalIndent(newAuth, loc.indent, "  ")
 	if err != nil {
@@ -116,7 +127,7 @@ func TestApplyAuthReplacesExistingAuthMemberByteRangeOnly(t *testing.T) {
 	path := writeApplyFixture(t, fixtureWithAuth)
 	h := applyTestHandler(t, config.AuthConfig{}, []string{"todo"}, false, path)
 
-	if err := h.applyAuth(newAuth); err != nil {
+	if _, err := h.applyAuth(newAuth); err != nil {
 		t.Fatalf("applyAuth: %v", err)
 	}
 
@@ -156,8 +167,8 @@ func TestApplyAuthInsertsAuthMemberWhenAbsentByteRangeOnly(t *testing.T) {
 	}
 
 	newAuth := config.AuthConfig{
-		Modules: map[string][]string{"todo": {"pin"}},
-		PINs:    []config.NamedHash{{Name: "alice", Hash: bcryptHash(t, "1234")}},
+		Modules: map[string]config.ModuleAuthConfig{"todo": {PinFile: pinFileFixture(t, "1234")}},
+		LDAP:    config.LDAPConfig{URL: "ldaps://ldap.example.com"},
 	}
 	expectedMarshaled, err := json.MarshalIndent(newAuth, loc.indent, "  ")
 	if err != nil {
@@ -172,7 +183,7 @@ func TestApplyAuthInsertsAuthMemberWhenAbsentByteRangeOnly(t *testing.T) {
 	path := writeApplyFixture(t, fixtureWithoutAuth)
 	h := applyTestHandler(t, config.AuthConfig{}, []string{"todo"}, false, path)
 
-	if err := h.applyAuth(newAuth); err != nil {
+	if _, err := h.applyAuth(newAuth); err != nil {
 		t.Fatalf("applyAuth: %v", err)
 	}
 
@@ -227,14 +238,14 @@ func TestApplyAuthNextRequestEnforcesNewPolicy(t *testing.T) {
 	}
 
 	newAuth := config.AuthConfig{
-		Modules: map[string][]string{"todo": {"pin"}},
-		PINs:    []config.NamedHash{{Name: "alice", Hash: bcryptHash(t, "1234")}},
+		Modules: map[string]config.ModuleAuthConfig{"todo": {PinFile: pinFileFixture(t, "1234")}},
+		LDAP:    config.LDAPConfig{URL: "ldaps://ldap.example.com"},
 	}
-	if err := h.applyAuth(newAuth); err != nil {
+	if _, err := h.applyAuth(newAuth); err != nil {
 		t.Fatalf("applyAuth: %v", err)
 	}
 
-	// After: "todo" now requires "pin"; the same unauthenticated request is
+	// After: "todo" is now protected; the same unauthenticated request is
 	// rejected on the very next request, no restart.
 	after := httptest.NewRecorder()
 	h.deps.Service.Gate("todo", echo).ServeHTTP(after, httptest.NewRequest(http.MethodGet, "/", nil))
@@ -274,8 +285,8 @@ func TestApplyAuthInvalidSaveChangesNothing(t *testing.T) {
 	// "nope" is not in KnownModules ({"todo"}), so ValidatePolicy rejects
 	// this outright -- a real rejection per auth/validate.go, not a
 	// contrived one.
-	invalid := config.AuthConfig{Modules: map[string][]string{"nope": {"pin"}}}
-	err := h.applyAuth(invalid)
+	invalid := config.AuthConfig{Modules: map[string]config.ModuleAuthConfig{"nope": {}}}
+	_, err := h.applyAuth(invalid)
 	if err == nil {
 		t.Fatalf("applyAuth(invalid) = nil error, want a validation error")
 	}
@@ -303,10 +314,10 @@ func TestApplyAuthLeavesNoStrayTmpFiles(t *testing.T) {
 	h := applyTestHandler(t, config.AuthConfig{}, []string{"todo"}, false, path)
 
 	newAuth := config.AuthConfig{
-		Modules: map[string][]string{"todo": {"pin"}},
-		PINs:    []config.NamedHash{{Name: "alice", Hash: bcryptHash(t, "1234")}},
+		Modules: map[string]config.ModuleAuthConfig{"todo": {PinFile: pinFileFixture(t, "1234")}},
+		LDAP:    config.LDAPConfig{URL: "ldaps://ldap.example.com"},
 	}
-	if err := h.applyAuth(newAuth); err != nil {
+	if _, err := h.applyAuth(newAuth); err != nil {
 		t.Fatalf("applyAuth: %v", err)
 	}
 
@@ -338,13 +349,13 @@ func TestApplyAuthRoundTripsThroughConfigLoad(t *testing.T) {
 	h := applyTestHandler(t, config.AuthConfig{}, []string{"todo"}, false, path)
 
 	newAuth := config.AuthConfig{
-		Modules:      map[string][]string{"todo": {"pin", "key"}},
-		PINs:         []config.NamedHash{{Name: "alice", Hash: bcryptHash(t, "1234")}},
+		Modules:      map[string]config.ModuleAuthConfig{"todo": {PinFile: pinFileFixture(t, "1234")}},
+		LDAP:         config.LDAPConfig{URL: "ldaps://ldap.example.com"},
 		APIKeys:      []config.NamedHash{{Name: "svc1", Hash: "sha256:deadbeef"}},
 		CookieSecure: true,
 		CookieDomain: "example.com",
 	}
-	if err := h.applyAuth(newAuth); err != nil {
+	if _, err := h.applyAuth(newAuth); err != nil {
 		t.Fatalf("applyAuth: %v", err)
 	}
 

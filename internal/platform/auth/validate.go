@@ -1,31 +1,28 @@
 // Package auth defines the shared authentication/authorization policy
 // surface used across modules. It has no knowledge of and no dependency on
 // any specific module package (grocery, todo, etc.) — it only understands
-// the generic shape of module names and auth methods.
+// the generic shape of module names and the two-state auth model.
 package auth
 
 import (
 	"fmt"
-	"os"
 	"sort"
 
 	"cmd184psu/unified-webapp/internal/platform/config"
 )
 
-// validMethods is the set of auth methods a module may list.
-var validMethods = map[string]bool{
-	"ldap":    true,
-	"pin":     true,
-	"passkey": true,
-	"key":     true,
-}
-
-// ValidatePolicy checks a for internal consistency: every module referenced
-// in a.Modules must be known (or the reserved "admin" pseudo-module), every
-// listed method must be recognized and have its corresponding authenticator
-// configured, and the admin operator PIN must be configured exactly once if
-// the admin module is routed through auth. It performs no authentication and
-// has no side effects beyond stat-ing AdminPINFile when set.
+// ValidatePolicy checks a for internal consistency under the two-state auth
+// model: every module referenced in a.Modules must be known (or the reserved
+// "admin" pseudo-module); any protected non-admin module requires LDAP to be
+// configured (LDAP is the identity backbone every protected module relies
+// on); every configured pin_file -- a module door code, or, via
+// modules.admin.pin_file, one of the admin PIN sources -- must exist and be
+// readable by the process only; and the admin operator PIN must be
+// configured through exactly one of its three sources if the admin module is
+// routed through auth. api_keys may be empty and the passkey config is
+// entirely optional -- neither has a required-when-used rule any more. It
+// performs no authentication and has no side effects beyond stat-ing pin
+// files.
 func ValidatePolicy(a config.AuthConfig, knownModules []string, adminRouted bool) error {
 	// Fast path: nothing configured and admin isn't routed through auth, so
 	// there is nothing to validate. This also covers a zero-value AuthConfig
@@ -46,48 +43,56 @@ func ValidatePolicy(a config.AuthConfig, knownModules []string, adminRouted bool
 	}
 	sort.Strings(modNames)
 
-	usedMethods := make(map[string]bool)
 	for _, mod := range modNames {
 		if mod != "admin" && !known[mod] {
 			return fmt.Errorf("auth.modules: unknown module %q", mod)
 		}
-		for _, method := range a.Modules[mod] {
-			if method == "admin_pin" {
-				return fmt.Errorf("auth.modules: module %q lists %q, which is a reserved token and can never be configured as a method", mod, method)
-			}
-			if !validMethods[method] {
-				return fmt.Errorf("auth.modules: module %q lists unknown auth method %q", mod, method)
-			}
-			usedMethods[method] = true
+	}
+
+	for _, mod := range modNames {
+		if mod == "admin" {
+			continue
+		}
+		if a.LDAP.URL == "" {
+			return fmt.Errorf("auth.modules: module %q is protected but auth.ldap.url is not set", mod)
 		}
 	}
 
-	if usedMethods["ldap"] && a.LDAP.URL == "" {
-		return fmt.Errorf("auth: method %q is configured for a module but auth.ldap.url is not set", "ldap")
-	}
-	if usedMethods["pin"] && len(a.PINs) == 0 {
-		return fmt.Errorf("auth: method %q is configured for a module but auth.pins is empty", "pin")
-	}
-	if usedMethods["key"] && len(a.APIKeys) == 0 {
-		return fmt.Errorf("auth: method %q is configured for a module but auth.api_keys is empty", "key")
-	}
-	if usedMethods["passkey"] && a.Passkey.RPID == "" {
-		return fmt.Errorf("auth: method %q is configured for a module but auth.passkey.rp_id is not set", "passkey")
+	for _, mod := range modNames {
+		pinFile := a.Modules[mod].PinFile
+		if pinFile == "" {
+			continue
+		}
+		if err := statPINFile(pinFile); err != nil {
+			return fmt.Errorf("auth.modules.%s.pin_file: %w", mod, err)
+		}
 	}
 
-	if adminRouted && a.AdminPIN == "" && a.AdminPINFile == "" {
-		return fmt.Errorf("auth: the admin module requires an operator PIN (set auth.admin_pin or auth.admin_pin_file)")
+	adminModPinFile := ""
+	if m, ok := a.Modules["admin"]; ok {
+		adminModPinFile = m.PinFile
 	}
-	if a.AdminPIN != "" && a.AdminPINFile != "" {
-		return fmt.Errorf("auth: exactly one of auth.admin_pin or auth.admin_pin_file may be set, not both")
+
+	adminSources := 0
+	if a.AdminPIN != "" {
+		adminSources++
 	}
 	if a.AdminPINFile != "" {
-		info, err := os.Stat(a.AdminPINFile)
-		if err != nil {
+		adminSources++
+	}
+	if adminModPinFile != "" {
+		adminSources++
+	}
+	if adminSources > 1 {
+		return fmt.Errorf("auth: exactly one of auth.admin_pin, auth.admin_pin_file, or auth.modules.admin.pin_file may be set")
+	}
+	if adminRouted && adminSources == 0 {
+		return fmt.Errorf("auth: the admin module requires an operator PIN (set auth.admin_pin, auth.admin_pin_file, or auth.modules.admin.pin_file)")
+	}
+
+	if a.AdminPINFile != "" {
+		if err := statPINFile(a.AdminPINFile); err != nil {
 			return fmt.Errorf("auth.admin_pin_file: %w", err)
-		}
-		if info.Mode().Perm()&0077 != 0 {
-			return fmt.Errorf("auth.admin_pin_file: permissions %#o are too open; chmod 0400 %s", info.Mode().Perm(), a.AdminPINFile)
 		}
 	}
 

@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+
 	"cmd184psu/unified-webapp/internal/platform/config"
 )
 
@@ -60,13 +62,35 @@ func mustNotReached(t *testing.T, rec *httptest.ResponseRecorder) {
 	}
 }
 
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (func() bool {
+		for i := 0; i+len(substr) <= len(s); i++ {
+			if s[i:i+len(substr)] == substr {
+				return true
+			}
+		}
+		return false
+	})()
+}
+
+// sessionCookieToken issues and returns a session JWT carrying sub/grants,
+// signed with gateTestKey, for direct use as a cookie value in gate tests.
+func sessionCookieToken(t *testing.T, sub string, grants []string, ttl time.Duration, now time.Time) string {
+	t.Helper()
+	tok, err := issueToken(gateTestKey(), sub, grants, ttl, now)
+	if err != nil {
+		t.Fatalf("issueToken: %v", err)
+	}
+	return tok
+}
+
 // --- Step 1: healthz ---
 
 func TestGateHealthzAlwaysOK(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	unprotected := newGateService(t, now, &Policy{})
-	protected := newGateService(t, now, &Policy{Modules: map[string][]string{"grocery": {"pin"}}})
+	protected := newGateService(t, now, &Policy{Modules: map[string]ModulePolicy{"grocery": {}}})
 
 	for name, svc := range map[string]*Service{"unprotected": unprotected, "protected": protected} {
 		t.Run(name, func(t *testing.T) {
@@ -84,9 +108,9 @@ func TestGateHealthzAlwaysOK(t *testing.T) {
 	}
 }
 
-// --- Step 2: mode ---
+// --- Step 2: mode, per state ---
 
-func TestGateModeReportsAcceptedMethods(t *testing.T) {
+func TestGateModeReportsOfferedMethods(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	tests := []struct {
@@ -97,20 +121,32 @@ func TestGateModeReportsAcceptedMethods(t *testing.T) {
 		wantSub string // substring check when want == ""
 	}{
 		{
-			name:   "unprotected module",
-			policy: &Policy{Modules: map[string][]string{}},
+			name:   "open module",
+			policy: &Policy{Modules: map[string]ModulePolicy{}},
 			module: "grocery",
 			want:   `{"methods":[]}` + "\n",
 		},
 		{
-			name:   "pin-protected module",
-			policy: &Policy{Modules: map[string][]string{"grocery": {"pin"}}},
+			name: "protected module, ldap only",
+			policy: &Policy{
+				Modules: map[string]ModulePolicy{"grocery": {}},
+				LDAP:    config.LDAPConfig{URL: "ldap://fake"},
+			},
 			module: "grocery",
-			want:   `{"methods":["pin"]}` + "\n",
+			want:   `{"methods":["ldap"]}` + "\n",
+		},
+		{
+			name: "protected module with pin_file",
+			policy: &Policy{
+				Modules: map[string]ModulePolicy{"grocery": {PinFile: "/tmp/does-not-matter"}},
+				LDAP:    config.LDAPConfig{URL: "ldap://fake"},
+			},
+			module: "grocery",
+			want:   `{"methods":["ldap","pin"]}` + "\n",
 		},
 		{
 			name:    "admin with empty matrix",
-			policy:  &Policy{Modules: map[string][]string{}},
+			policy:  &Policy{Modules: map[string]ModulePolicy{}},
 			module:  "admin",
 			wantSub: `"admin_pin"`,
 		},
@@ -137,22 +173,36 @@ func TestGateModeReportsAcceptedMethods(t *testing.T) {
 	}
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (func() bool {
-		for i := 0; i+len(substr) <= len(s); i++ {
-			if s[i:i+len(substr)] == substr {
-				return true
+// TestGateModeAdminIsByteForByte proves admin's mode output is exactly
+// ["admin_pin"], never more, regardless of whether admin has its own
+// (irrelevant) Modules entry.
+func TestGateModeAdminIsByteForByte(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for name, modules := range map[string]map[string]ModulePolicy{
+		"no admin entry":    {},
+		"empty admin entry": {"admin": {}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc := newGateService(t, now, &Policy{Modules: modules})
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/auth/mode", nil)
+			svc.Gate("admin", echoHandler()).ServeHTTP(rec, req)
+			mustNotReached(t, rec)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rec.Code)
 			}
-		}
-		return false
-	})()
+			if got := rec.Body.String(); got != `{"methods":["admin_pin"]}`+"\n" {
+				t.Fatalf("body = %q, want exactly admin_pin", got)
+			}
+		})
+	}
 }
 
 // --- Step 3: unprotected pass-through, including login routes ---
 
 func TestGateUnprotectedModulePassesEverythingThrough(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	svc := newGateService(t, now, &Policy{Modules: map[string][]string{}})
+	svc := newGateService(t, now, &Policy{Modules: map[string]ModulePolicy{}})
 
 	paths := []struct {
 		method string
@@ -185,7 +235,7 @@ func TestGateUnprotectedModulePassesEverythingThrough(t *testing.T) {
 // design.
 func TestGateUnprotectedPassthroughByteIdentical(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	svc := newGateService(t, now, &Policy{Modules: map[string][]string{}})
+	svc := newGateService(t, now, &Policy{Modules: map[string]ModulePolicy{}})
 
 	next := func() http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -227,11 +277,38 @@ func TestGateUnprotectedPassthroughByteIdentical(t *testing.T) {
 	}
 }
 
+// TestGateBearerOnOpenModulePassesThroughIdentically proves a bearer token
+// presented against an open module is inert: the request passes through
+// exactly as it would with no header at all (no key check ever runs on an
+// unprotected module).
+func TestGateBearerOnOpenModulePassesThroughIdentically(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	svc := newGateService(t, now, &Policy{Modules: map[string]ModulePolicy{}})
+
+	withKey := httptest.NewRecorder()
+	reqWithKey := httptest.NewRequest(http.MethodGet, "/api/items", nil)
+	reqWithKey.Header.Set("Authorization", "Bearer whatever-not-configured")
+	svc.Gate("grocery", echoHandler()).ServeHTTP(withKey, reqWithKey)
+
+	withoutKey := httptest.NewRecorder()
+	reqWithoutKey := httptest.NewRequest(http.MethodGet, "/api/items", nil)
+	svc.Gate("grocery", echoHandler()).ServeHTTP(withoutKey, reqWithoutKey)
+
+	mustReached(t, withKey)
+	mustReached(t, withoutKey)
+	if withKey.Code != withoutKey.Code || withKey.Body.String() != withoutKey.Body.String() {
+		t.Fatalf("bearer on open module diverged: withKey=%d/%q withoutKey=%d/%q", withKey.Code, withKey.Body.String(), withoutKey.Code, withoutKey.Body.String())
+	}
+}
+
 // --- Step 4/6: protected module, no credentials ---
 
 func TestGateProtectedNoCredentials(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	svc := newGateService(t, now, &Policy{Modules: map[string][]string{"grocery": {"pin"}}})
+	svc := newGateService(t, now, &Policy{
+		Modules: map[string]ModulePolicy{"grocery": {PinFile: "/tmp/does-not-matter"}},
+		LDAP:    config.LDAPConfig{URL: "ldap://fake"},
+	})
 
 	t.Run("API path, no accept header -> JSON 401", func(t *testing.T) {
 		rec := httptest.NewRecorder()
@@ -284,62 +361,157 @@ func TestGateProtectedNoCredentials(t *testing.T) {
 	})
 }
 
-// --- Step 5: cookie verification ---
+// --- Step 5: grant-based authorization ---
 
-func TestGateValidCookieIntersectingMethod(t *testing.T) {
+// TestGatePinGrantScopedToItsModule proves a door-code session (grant
+// "pin:todo") authorizes exactly the module it was issued for -- denied on
+// a different protected module, accepted on its own.
+func TestGatePinGrantScopedToItsModule(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	p := &Policy{
-		Modules:         map[string][]string{"grocery": {"pin", "ldap"}},
+		Modules: map[string]ModulePolicy{
+			"todo":        {PinFile: "/tmp/todo-pin"},
+			"obsidianoid": {PinFile: "/tmp/obsidianoid-pin"},
+		},
+		LDAP:            config.LDAPConfig{URL: "ldap://fake"},
+		SessionTTL:      time.Hour,
+		RefreshFraction: 0.5,
+	}
+	svc := newGateService(t, now, p)
+	tok := sessionCookieToken(t, "", []string{pinGrant("todo")}, time.Hour, now)
+
+	t.Run("denied on obsidianoid", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/items", nil)
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
+		svc.Gate("obsidianoid", echoHandler()).ServeHTTP(rec, req)
+		mustNotReached(t, rec)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", rec.Code)
+		}
+	})
+
+	t.Run("accepted on todo", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/items", nil)
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
+		svc.Gate("todo", echoHandler()).ServeHTTP(rec, req)
+		mustReached(t, rec)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+	})
+}
+
+// TestGateLDAPGrantReachesEveryProtectedNonAdminModule proves an "ldap"
+// identity grant authorizes every protected non-admin module.
+func TestGateLDAPGrantReachesEveryProtectedNonAdminModule(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	p := &Policy{
+		Modules: map[string]ModulePolicy{
+			"menuserver":  {},
+			"obsidianoid": {},
+			"multissh":    {},
+		},
+		LDAP:            config.LDAPConfig{URL: "ldap://fake"},
+		SessionTTL:      time.Hour,
+		RefreshFraction: 0.5,
+	}
+	svc := newGateService(t, now, p)
+	tok := sessionCookieToken(t, "alice", []string{"ldap"}, time.Hour, now)
+
+	for _, module := range []string{"menuserver", "obsidianoid", "multissh"} {
+		t.Run(module, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/items", nil)
+			req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
+			svc.Gate(module, echoHandler()).ServeHTTP(rec, req)
+			mustReached(t, rec)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rec.Code)
+			}
+		})
+	}
+}
+
+// TestGateLegacyClaimsTokenIsDenied proves a session token signed under the
+// old "methods" claim key (pre-cutover) decodes to an empty Grants slice
+// under the new sessionClaims shape and is denied on a protected module --
+// no panic, no accidental authorization.
+func TestGateLegacyClaimsTokenIsDenied(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	p := &Policy{
+		Modules:         map[string]ModulePolicy{"grocery": {}},
+		LDAP:            config.LDAPConfig{URL: "ldap://fake"},
 		SessionTTL:      time.Hour,
 		RefreshFraction: 0.5,
 	}
 	svc := newGateService(t, now, p)
 
-	tok, err := issueToken(gateTestKey(), "alice", []string{"pin"}, time.Hour, now)
-	if err != nil {
-		t.Fatalf("issueToken: %v", err)
-	}
+	for name, oldMethods := range map[string][]string{
+		"pin":  {"pin"},
+		"ldap": {"ldap"},
+		"key":  {"key"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tok := legacyMethodsToken(t, "alice", oldMethods, time.Hour, now)
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/items", nil)
+			req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
 
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/items", nil)
-	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
-	svc.Gate("grocery", echoHandler()).ServeHTTP(rec, req)
-	mustReached(t, rec)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-}
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						t.Fatalf("panic handling legacy-claims token: %v", r)
+					}
+				}()
+				svc.Gate("grocery", echoHandler()).ServeHTTP(rec, req)
+			}()
 
-func TestGateValidCookieNonIntersectingMethod(t *testing.T) {
-	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	p := &Policy{
-		Modules:         map[string][]string{"grocery": {"ldap"}},
-		SessionTTL:      time.Hour,
-		RefreshFraction: 0.5,
-	}
-	svc := newGateService(t, now, p)
-
-	tok, err := issueToken(gateTestKey(), "alice", []string{"pin"}, time.Hour, now)
-	if err != nil {
-		t.Fatalf("issueToken: %v", err)
-	}
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/items", nil)
-	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
-	svc.Gate("grocery", echoHandler()).ServeHTTP(rec, req)
-	mustNotReached(t, rec)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
+			mustNotReached(t, rec)
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401", rec.Code)
+			}
+		})
 	}
 }
 
-// --- Step 5: API key ---
+// legacyClaims mirrors the pre-cutover (Decision B1) session claim shape --
+// "methods" instead of "grants" -- so tests can simulate a token signed
+// before the rename.
+type legacyClaims struct {
+	Methods []string `json:"methods"`
+	jwt.RegisteredClaims
+}
 
+// legacyMethodsToken hand-signs a JWT carrying the pre-cutover "methods"
+// claim key instead of "grants", simulating a session issued before the
+// grants rename (Decision B1).
+func legacyMethodsToken(t *testing.T, sub string, methods []string, ttl time.Duration, now time.Time) string {
+	t.Helper()
+	claims := legacyClaims{
+		Methods: methods,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   sub,
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+		},
+	}
+	tok, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(gateTestKey())
+	if err != nil {
+		t.Fatalf("sign legacy claims: %v", err)
+	}
+	return tok
+}
+
+// --- Step 5: bearer API key ---
+
+// TestGateAPIKeyModule proves a bearer key satisfies any protected
+// non-admin module unconditionally, with no per-module opt-in.
 func TestGateAPIKeyModule(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	p := &Policy{
-		Modules: map[string][]string{"grocery": {"key"}},
+		Modules: map[string]ModulePolicy{"menuserver": {}},
 		APIKeys: []config.NamedHash{{Name: "svc", Hash: hashKey("secret-key")}},
 	}
 	svc := newGateService(t, now, p)
@@ -348,7 +520,7 @@ func TestGateAPIKeyModule(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/api/items", nil)
 		req.Header.Set("X-API-Key", "secret-key")
-		svc.Gate("grocery", echoHandler()).ServeHTTP(rec, req)
+		svc.Gate("menuserver", echoHandler()).ServeHTTP(rec, req)
 		mustReached(t, rec)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200", rec.Code)
@@ -362,12 +534,34 @@ func TestGateAPIKeyModule(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/api/items", nil)
 		req.Header.Set("X-API-Key", "wrong-key")
-		svc.Gate("grocery", echoHandler()).ServeHTTP(rec, req)
+		svc.Gate("menuserver", echoHandler()).ServeHTTP(rec, req)
 		mustNotReached(t, rec)
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("status = %d, want 401", rec.Code)
 		}
 	})
+}
+
+// TestGateAPIKeyNeverAuthorizesAdmin proves a valid bearer key never
+// satisfies admin -- admin stays on its 401/login path even with a
+// perfectly valid API key presented.
+func TestGateAPIKeyNeverAuthorizesAdmin(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	p := &Policy{
+		Modules:  map[string]ModulePolicy{},
+		AdminPIN: hashFor(t, "9999"),
+		APIKeys:  []config.NamedHash{{Name: "svc", Hash: hashKey("secret-key")}},
+	}
+	svc := newGateService(t, now, p)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/config/auth", nil)
+	req.Header.Set("X-API-Key", "secret-key")
+	svc.Gate("admin", echoHandler()).ServeHTTP(rec, req)
+	mustNotReached(t, rec)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 (bearer key must never authorize admin)", rec.Code)
+	}
 }
 
 // --- Sliding refresh ---
@@ -376,15 +570,13 @@ func TestGateSlidingRefresh(t *testing.T) {
 	issuedAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	ttl := time.Hour
 	p := &Policy{
-		Modules:         map[string][]string{"grocery": {"pin"}},
+		Modules:         map[string]ModulePolicy{"grocery": {PinFile: "/tmp/does-not-matter"}},
+		LDAP:            config.LDAPConfig{URL: "ldap://fake"},
 		SessionTTL:      ttl,
 		RefreshFraction: 0.5,
 	}
 
-	tok, err := issueToken(gateTestKey(), "alice", []string{"pin"}, ttl, issuedAt)
-	if err != nil {
-		t.Fatalf("issueToken: %v", err)
-	}
+	tok := sessionCookieToken(t, "alice", []string{"ldap"}, ttl, issuedAt)
 
 	t.Run("stale token gets a refreshed Set-Cookie", func(t *testing.T) {
 		now := issuedAt.Add(45 * time.Minute) // > 50% of ttl
@@ -430,16 +622,14 @@ func (h *hijackableRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 func TestGateHijackerSurvivesUpgradeRequest(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	p := &Policy{
-		Modules:         map[string][]string{"multissh": {"pin"}},
+		Modules:         map[string]ModulePolicy{"multissh": {}},
+		LDAP:            config.LDAPConfig{URL: "ldap://fake"},
 		SessionTTL:      time.Hour,
 		RefreshFraction: 0.5,
 	}
 	svc := newGateService(t, now, p)
 
-	tok, err := issueToken(gateTestKey(), "alice", []string{"pin"}, time.Hour, now)
-	if err != nil {
-		t.Fatalf("issueToken: %v", err)
-	}
+	tok := sessionCookieToken(t, "alice", []string{"ldap"}, time.Hour, now)
 
 	var sawHijacker bool
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -468,7 +658,8 @@ func TestGateHijackerSurvivesUpgradeRequest(t *testing.T) {
 func TestGateSessionRequiredPasskeyRoutes(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	p := &Policy{
-		Modules:         map[string][]string{"grocery": {"pin", "passkey"}},
+		Modules:         map[string]ModulePolicy{"grocery": {PinFile: "/tmp/does-not-matter"}},
+		LDAP:            config.LDAPConfig{URL: "ldap://fake"},
 		SessionTTL:      time.Hour,
 		RefreshFraction: 0.5,
 	}
@@ -484,21 +675,31 @@ func TestGateSessionRequiredPasskeyRoutes(t *testing.T) {
 		}
 	})
 
-	t.Run("with valid session -> handler reached (no passkey service configured in this policy)", func(t *testing.T) {
-		tok, err := issueToken(gateTestKey(), "alice", []string{"pin"}, time.Hour, now)
-		if err != nil {
-			t.Fatalf("issueToken: %v", err)
-		}
+	t.Run("door-code-only session -> 403 requires_ldap", func(t *testing.T) {
+		tok := sessionCookieToken(t, "", []string{pinGrant("grocery")}, time.Hour, now)
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/api/auth/passkeys", nil)
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
 		svc.Gate("grocery", echoHandler()).ServeHTTP(rec, req)
 		mustNotReached(t, rec)
-		// This test's Policy lists "passkey" in grocery's matrix but never
-		// configures a passkey service (p.passkeys is nil) -- an
-		// inconsistent state BuildPolicy would never produce, but one the
-		// handler must still fail closed on defensively, proving the
-		// session precondition ran before the handler.
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403 (door-code session must not manage passkeys)", rec.Code)
+		}
+		if !contains(rec.Body.String(), "requires a full (LDAP) login") {
+			t.Fatalf("body = %q, want it to explain the LDAP requirement", rec.Body.String())
+		}
+	})
+
+	t.Run("ldap session -> handler reached (no passkey service configured in this policy)", func(t *testing.T) {
+		tok := sessionCookieToken(t, "alice", []string{"ldap"}, time.Hour, now)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/auth/passkeys", nil)
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
+		svc.Gate("grocery", echoHandler()).ServeHTTP(rec, req)
+		mustNotReached(t, rec)
+		// This policy has no configured passkey service (p.passkeys is nil)
+		// -- the handler itself fails closed on that, proving the ldap-grant
+		// precondition ran and let the request through to the stub.
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want 400 (handler reached, no passkey service configured)", rec.Code)
 		}
@@ -513,6 +714,18 @@ func TestGateSessionRequiredPasskeyRoutes(t *testing.T) {
 			t.Fatalf("status = %d, want 401", rec.Code)
 		}
 	})
+
+	t.Run("DELETE /api/auth/passkeys/{id} door-code session -> 403", func(t *testing.T) {
+		tok := sessionCookieToken(t, "", []string{pinGrant("grocery")}, time.Hour, now)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/auth/passkeys/abc123", nil)
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
+		svc.Gate("grocery", echoHandler()).ServeHTTP(rec, req)
+		mustNotReached(t, rec)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403", rec.Code)
+		}
+	})
 }
 
 // --- Unauthenticated allowlist routes reach their real handlers directly ---
@@ -524,7 +737,7 @@ func TestGateSessionRequiredPasskeyRoutes(t *testing.T) {
 // minimal/empty request, not next.ServeHTTP.
 func TestGateUnauthenticatedAuthRoutesReachHandler(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	p := &Policy{Modules: map[string][]string{"grocery": {"pin"}}}
+	p := &Policy{Modules: map[string]ModulePolicy{"grocery": {PinFile: "/tmp/does-not-matter"}}}
 	svc := newGateService(t, now, p)
 
 	routes := []struct {
@@ -539,8 +752,8 @@ func TestGateUnauthenticatedAuthRoutesReachHandler(t *testing.T) {
 		{http.MethodPost, "/api/auth/logout", "", http.StatusOK},
 		// No cookie -> unauthorized.
 		{http.MethodGet, "/api/auth/session", "", http.StatusUnauthorized},
-		// grocery's matrix here is ["pin"] only -- "passkey" disallowed,
-		// rejected before the (empty) body would even matter.
+		// grocery's policy has no passkey service configured -- "passkey"
+		// disallowed, rejected before the (empty) body would even matter.
 		{http.MethodPost, "/api/auth/passkey/login/begin", "", http.StatusBadRequest},
 		{http.MethodPost, "/api/auth/passkey/login/finish", "", http.StatusBadRequest},
 	}
@@ -562,7 +775,7 @@ func TestGateUnauthenticatedAuthRoutesReachHandler(t *testing.T) {
 
 func TestGateAuthRouteMethodMismatch(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	p := &Policy{Modules: map[string][]string{"grocery": {"pin"}}}
+	p := &Policy{Modules: map[string]ModulePolicy{"grocery": {}}}
 	svc := newGateService(t, now, p)
 
 	rec := httptest.NewRecorder()
@@ -579,10 +792,7 @@ func TestGateAuthRouteMethodMismatch(t *testing.T) {
 func TestGateAdminAlwaysProtected(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	for name, modules := range map[string]map[string][]string{
-		"no admin entry":    {},
-		"empty admin entry": {"admin": {}},
-	} {
+	for name, modules := range adminEmptyMatrixEncodings() {
 		t.Run(name, func(t *testing.T) {
 			p := &Policy{Modules: modules}
 			svc := newGateService(t, now, p)
@@ -612,13 +822,13 @@ func TestGateAdminAlwaysProtected(t *testing.T) {
 
 // adminEmptyMatrixEncodings names the two ways the converged reviewer
 // ruling (security-plan.md T5.2) requires "empty assignment matrix" to be
-// exercised: an explicit "admin": [] entry, and no "admin" key in the
+// exercised: an explicit "admin": {} entry, and no "admin" key in the
 // matrix at all. Every admin break-glass test in this file and
 // handlers_test.go that claims to cover "both encodings" runs both of
 // these.
-func adminEmptyMatrixEncodings() map[string]map[string][]string {
-	return map[string]map[string][]string{
-		"explicit admin: []": {"admin": {}},
+func adminEmptyMatrixEncodings() map[string]map[string]ModulePolicy {
+	return map[string]map[string]ModulePolicy{
+		"explicit admin: {}": {"admin": {}},
 		"no admin key":       {},
 	}
 }
@@ -626,8 +836,7 @@ func adminEmptyMatrixEncodings() map[string]map[string][]string {
 // TestGateAdminEmptyMatrixUnauthenticatedAndLoginRoutes proves T5.2 item 1
 // for both empty-matrix encodings: an unauthenticated admin data route
 // 401s, and the gate-owned login route is still served (reaching
-// handleLogin, not the module) even though admin has no accepted methods
-// of its own in the matrix.
+// handleLogin, not the module) even though admin has no matrix entry.
 func TestGateAdminEmptyMatrixUnauthenticatedAndLoginRoutes(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	for name, modules := range adminEmptyMatrixEncodings() {
@@ -690,9 +899,8 @@ func TestGateAdminEmptyMatrixModeListsAdminPIN(t *testing.T) {
 func TestGateAdminSwapDeletingMatrixEntryStaysProtected(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	initial, err := BuildPolicy(config.AuthConfig{
-		Modules:  map[string][]string{"admin": {"ldap"}},
+		Modules:  map[string]config.ModuleAuthConfig{"admin": {}},
 		AdminPIN: hashFor(t, "9999"),
-		LDAP:     config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
 	})
 	if err != nil {
 		t.Fatalf("BuildPolicy(initial): %v", err)
@@ -710,7 +918,7 @@ func TestGateAdminSwapDeletingMatrixEntryStaysProtected(t *testing.T) {
 
 	// A live save deletes admin's matrix entry entirely.
 	deleted, err := BuildPolicy(config.AuthConfig{
-		Modules:  map[string][]string{},
+		Modules:  map[string]config.ModuleAuthConfig{},
 		AdminPIN: hashFor(t, "9999"),
 	})
 	if err != nil {
@@ -747,50 +955,45 @@ func adminModeMethods(t *testing.T, svc *Service) []string {
 	return body.Methods
 }
 
-// TestGateAdminMatrixCanAddMethodsButNeverLosesAdminPIN proves T5.2 item 8:
-// a matrix save can add methods to admin (mode then lists both the added
-// method and admin_pin), but since admin_pin is never itself a matrix
-// entry, no matrix save -- including one that removes every method admin
-// had -- can ever cause mode to stop listing it.
-func TestGateAdminMatrixCanAddMethodsButNeverLosesAdminPIN(t *testing.T) {
+// TestGateAdminModeNeverGainsMethodsFromMatrix proves T5.2 item 8's new-model
+// equivalent: since OfferedMethods("admin") is exactly ["admin_pin"] by
+// construction (never read off Modules["admin"]), no matrix save -- adding
+// an admin entry, deleting it, anything -- ever changes what admin's mode
+// endpoint reports.
+func TestGateAdminModeNeverGainsMethodsFromMatrix(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	start, err := BuildPolicy(config.AuthConfig{Modules: map[string][]string{}})
+	start, err := BuildPolicy(config.AuthConfig{Modules: map[string]config.ModuleAuthConfig{}})
 	if err != nil {
 		t.Fatalf("BuildPolicy(start): %v", err)
 	}
 	svc := newGateService(t, now, start)
 
-	methods := adminModeMethods(t, svc)
-	if len(methods) != 1 || methods[0] != adminPINMethod {
-		t.Fatalf("initial methods = %v, want [admin_pin] only", methods)
+	assertAdminPINOnly := func(t *testing.T) {
+		t.Helper()
+		methods := adminModeMethods(t, svc)
+		if len(methods) != 1 || methods[0] != adminPINMethod {
+			t.Fatalf("methods = %v, want [admin_pin] only", methods)
+		}
 	}
+	assertAdminPINOnly(t)
 
-	// A matrix save ADDS ldap to admin.
-	added, err := BuildPolicy(config.AuthConfig{
-		Modules: map[string][]string{"admin": {"ldap"}},
-		LDAP:    config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
+	// A matrix save adds an admin entry with a pin_file -- admin's mode is
+	// still exactly admin_pin; a module-scoped door code never applies to
+	// admin.
+	withEntry, err := BuildPolicy(config.AuthConfig{
+		Modules: map[string]config.ModuleAuthConfig{"admin": {PinFile: "/tmp/whatever"}},
 	})
 	if err != nil {
-		t.Fatalf("BuildPolicy(added): %v", err)
+		t.Fatalf("BuildPolicy(withEntry): %v", err)
 	}
-	svc.SwapPolicy(added)
-	methods = adminModeMethods(t, svc)
-	if !containsMethod(methods, "ldap") || !containsMethod(methods, adminPINMethod) {
-		t.Fatalf("methods after adding ldap = %v, want both ldap and admin_pin", methods)
-	}
+	svc.SwapPolicy(withEntry)
+	assertAdminPINOnly(t)
 
-	// A further save removes ldap again -- admin_pin was never IN the
-	// matrix, so it survives this (or any) matrix save regardless.
-	removed, err := BuildPolicy(config.AuthConfig{Modules: map[string][]string{}})
+	// Deleting it again changes nothing either.
+	removed, err := BuildPolicy(config.AuthConfig{Modules: map[string]config.ModuleAuthConfig{}})
 	if err != nil {
 		t.Fatalf("BuildPolicy(removed): %v", err)
 	}
 	svc.SwapPolicy(removed)
-	methods = adminModeMethods(t, svc)
-	if !containsMethod(methods, adminPINMethod) {
-		t.Fatalf("methods after removing ldap = %v, want admin_pin still present", methods)
-	}
-	if containsMethod(methods, "ldap") {
-		t.Fatalf("methods after removing ldap = %v, want ldap gone", methods)
-	}
+	assertAdminPINOnly(t)
 }

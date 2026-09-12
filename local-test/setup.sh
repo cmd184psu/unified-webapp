@@ -4,12 +4,18 @@
 # Then start the server:   go run ./cmd/server -config local-test/config.json
 #
 # Test credentials this profile uses (LOCAL TESTING ONLY):
-#   PIN login (todo, slideshow):  1234
-#   Admin PIN (admin.test):      424242
-#   API key (menuserver, multissh):
-#     varOO_vuQyged_rklN3ujsy2tgQAcEs-9Ln13hDIyh0
-#   LDAP (obsidianoid, multissh) via glauth (see glauth.cfg):
+#   grocery.test:                 open, no login
+#   todo.test:                    PIN 111111, or LDAP
+#   slideshow.test:                PIN 222222, or LDAP
+#   menuserver.test / menu.test:  LDAP only
+#   obsidianoid.test:             LDAP only
+#   multissh.test:                LDAP only
+#   admin.test:                   admin PIN 424242 (PIN-only, no LDAP)
+#   LDAP (all protected non-admin modules) via glauth (see glauth.cfg):
 #     user "chris" / password "ldap-test-1"
+#   API key (works on any protected non-admin module, never admin, ignored
+#   on open modules like grocery):
+#     varOO_vuQyged_rklN3ujsy2tgQAcEs-9Ln13hDIyh0
 set -euo pipefail
 
 cd "$(dirname "$0")/.."   # repo root
@@ -32,6 +38,26 @@ if [ ! -f "$LT/admin.pin" ]; then
   echo "   wrote $LT/admin.pin (PIN: 424242)"
 else
   echo "   $LT/admin.pin already exists, leaving it alone"
+fi
+
+echo "== todo PIN file (plaintext PIN, must be chmod 0400) =="
+if [ ! -f "$LT/todo.pin" ]; then
+  umask 077
+  printf '111111\n' > "$LT/todo.pin"
+  chmod 0400 "$LT/todo.pin"
+  echo "   wrote $LT/todo.pin (PIN: 111111)"
+else
+  echo "   $LT/todo.pin already exists, leaving it alone"
+fi
+
+echo "== slideshow PIN file (plaintext PIN, must be chmod 0400) =="
+if [ ! -f "$LT/slideshow.pin" ]; then
+  umask 077
+  printf '222222\n' > "$LT/slideshow.pin"
+  chmod 0400 "$LT/slideshow.pin"
+  echo "   wrote $LT/slideshow.pin (PIN: 222222)"
+else
+  echo "   $LT/slideshow.pin already exists, leaving it alone"
 fi
 
 echo "== seeding sample slideshow images =="
@@ -112,5 +138,5 @@ fi
 
 echo "== done =="
 echo "Start the server:   go run ./cmd/server -config local-test/config.json"
-echo "Optional LDAP:      glauth -c local-test/glauth.cfg   (needed for obsidianoid/multissh login)"
+echo "Optional LDAP:      glauth -c local-test/glauth.cfg   (needed for menuserver/obsidianoid/multissh login, or as an alternative to the PIN on todo/slideshow)"
 echo "Full instructions:  docs/USERGUIDE.md"

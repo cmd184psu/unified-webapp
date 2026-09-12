@@ -43,8 +43,7 @@ func TestValidatePolicy(t *testing.T) {
 			name: "unknown module rejected",
 			auth: func(t *testing.T) config.AuthConfig {
 				return config.AuthConfig{
-					Modules: map[string][]string{"nosuchmodule": {"pin"}},
-					PINs:    []config.NamedHash{{Name: "a", Hash: "h"}},
+					Modules: map[string]config.ModuleAuthConfig{"nosuchmodule": {}},
 				}
 			},
 			wantErr: `auth.modules: unknown module "nosuchmodule"`,
@@ -53,66 +52,76 @@ func TestValidatePolicy(t *testing.T) {
 			name: "admin module key is always allowed",
 			auth: func(t *testing.T) config.AuthConfig {
 				return config.AuthConfig{
-					Modules:  map[string][]string{"admin": {"pin"}},
-					PINs:     []config.NamedHash{{Name: "a", Hash: "h"}},
+					Modules:  map[string]config.ModuleAuthConfig{"admin": {}},
 					AdminPIN: "1234",
+				}
+			},
+			adminRouted: true,
+			wantErr:     "",
+		},
+		{
+			name: "protected non-admin module without ldap configured rejected",
+			auth: func(t *testing.T) config.AuthConfig {
+				return config.AuthConfig{
+					Modules: map[string]config.ModuleAuthConfig{"grocery": {}},
+				}
+			},
+			wantErr: `module "grocery" is protected but auth.ldap.url is not set`,
+		},
+		{
+			name: "protected non-admin module with ldap configured accepted",
+			auth: func(t *testing.T) config.AuthConfig {
+				return config.AuthConfig{
+					Modules: map[string]config.ModuleAuthConfig{"grocery": {}},
+					LDAP:    config.LDAPConfig{URL: "ldaps://ldap.example.com"},
 				}
 			},
 			wantErr: "",
 		},
 		{
-			name: "unrecognized method rejected",
+			name: "pin_file protected module still requires ldap",
 			auth: func(t *testing.T) config.AuthConfig {
 				return config.AuthConfig{
-					Modules: map[string][]string{"grocery": {"carrier_pigeon"}},
+					Modules: map[string]config.ModuleAuthConfig{"todo": {PinFile: pinFile(t, 0400)}},
 				}
 			},
-			wantErr: `unknown auth method "carrier_pigeon"`,
+			wantErr: `module "todo" is protected but auth.ldap.url is not set`,
 		},
 		{
-			name: "ldap method without ldap config rejected",
+			name: "missing module pin_file rejected",
 			auth: func(t *testing.T) config.AuthConfig {
 				return config.AuthConfig{
-					Modules: map[string][]string{"grocery": {"ldap"}},
+					Modules: map[string]config.ModuleAuthConfig{
+						"todo": {PinFile: filepath.Join(t.TempDir(), "does-not-exist.pin")},
+					},
+					LDAP: config.LDAPConfig{URL: "ldaps://ldap.example.com"},
 				}
 			},
-			wantErr: "auth.ldap.url is not set",
+			wantErr: "auth.modules.todo.pin_file",
 		},
 		{
-			name: "pin method without pins configured rejected",
+			name: "world-readable module pin_file rejected",
 			auth: func(t *testing.T) config.AuthConfig {
 				return config.AuthConfig{
-					Modules: map[string][]string{"grocery": {"pin"}},
+					Modules: map[string]config.ModuleAuthConfig{
+						"todo": {PinFile: pinFile(t, 0644)},
+					},
+					LDAP: config.LDAPConfig{URL: "ldaps://ldap.example.com"},
 				}
 			},
-			wantErr: "auth.pins is empty",
+			wantErr: "chmod 0400",
 		},
 		{
-			name: "key method without api keys configured rejected",
+			name: "0400 module pin_file accepted",
 			auth: func(t *testing.T) config.AuthConfig {
 				return config.AuthConfig{
-					Modules: map[string][]string{"grocery": {"key"}},
+					Modules: map[string]config.ModuleAuthConfig{
+						"todo": {PinFile: pinFile(t, 0400)},
+					},
+					LDAP: config.LDAPConfig{URL: "ldaps://ldap.example.com"},
 				}
 			},
-			wantErr: "auth.api_keys is empty",
-		},
-		{
-			name: "passkey method without rp_id configured rejected",
-			auth: func(t *testing.T) config.AuthConfig {
-				return config.AuthConfig{
-					Modules: map[string][]string{"grocery": {"passkey"}},
-				}
-			},
-			wantErr: "auth.passkey.rp_id is not set",
-		},
-		{
-			name: "admin_pin literal in modules list rejected",
-			auth: func(t *testing.T) config.AuthConfig {
-				return config.AuthConfig{
-					Modules: map[string][]string{"grocery": {"admin_pin"}},
-				}
-			},
-			wantErr: `reserved token`,
+			wantErr: "",
 		},
 		{
 			name: "admin routed without any pin form rejected",
@@ -123,7 +132,7 @@ func TestValidatePolicy(t *testing.T) {
 			wantErr:     "admin module requires an operator PIN",
 		},
 		{
-			name: "both admin_pin and admin_pin_file set rejected",
+			name: "admin_pin and admin_pin_file both set rejected",
 			auth: func(t *testing.T) config.AuthConfig {
 				return config.AuthConfig{
 					AdminPIN:     "1234",
@@ -131,7 +140,39 @@ func TestValidatePolicy(t *testing.T) {
 				}
 			},
 			adminRouted: true,
-			wantErr:     "exactly one of auth.admin_pin or auth.admin_pin_file",
+			wantErr:     "exactly one of auth.admin_pin, auth.admin_pin_file, or auth.modules.admin.pin_file",
+		},
+		{
+			name: "admin_pin and modules.admin.pin_file both set rejected",
+			auth: func(t *testing.T) config.AuthConfig {
+				return config.AuthConfig{
+					AdminPIN: "1234",
+					Modules:  map[string]config.ModuleAuthConfig{"admin": {PinFile: pinFile(t, 0400)}},
+				}
+			},
+			adminRouted: true,
+			wantErr:     "exactly one of auth.admin_pin, auth.admin_pin_file, or auth.modules.admin.pin_file",
+		},
+		{
+			name: "admin_pin_file and modules.admin.pin_file both set rejected",
+			auth: func(t *testing.T) config.AuthConfig {
+				return config.AuthConfig{
+					AdminPINFile: pinFile(t, 0400),
+					Modules:      map[string]config.ModuleAuthConfig{"admin": {PinFile: pinFile(t, 0400)}},
+				}
+			},
+			adminRouted: true,
+			wantErr:     "exactly one of auth.admin_pin, auth.admin_pin_file, or auth.modules.admin.pin_file",
+		},
+		{
+			name: "admin routed via modules.admin.pin_file alone accepted",
+			auth: func(t *testing.T) config.AuthConfig {
+				return config.AuthConfig{
+					Modules: map[string]config.ModuleAuthConfig{"admin": {PinFile: pinFile(t, 0400)}},
+				}
+			},
+			adminRouted: true,
+			wantErr:     "",
 		},
 		{
 			name: "admin_pin_file missing rejected",
@@ -174,16 +215,36 @@ func TestValidatePolicy(t *testing.T) {
 			wantErr:     "",
 		},
 		{
+			name: "empty api_keys is fine",
+			auth: func(t *testing.T) config.AuthConfig {
+				return config.AuthConfig{
+					Modules: map[string]config.ModuleAuthConfig{"grocery": {}},
+					LDAP:    config.LDAPConfig{URL: "ldaps://ldap.example.com"},
+					APIKeys: nil,
+				}
+			},
+			wantErr: "",
+		},
+		{
+			name: "passkey config is optional",
+			auth: func(t *testing.T) config.AuthConfig {
+				return config.AuthConfig{
+					Modules: map[string]config.ModuleAuthConfig{"grocery": {}},
+					LDAP:    config.LDAPConfig{URL: "ldaps://ldap.example.com"},
+				}
+			},
+			wantErr: "",
+		},
+		{
 			name: "fully populated valid config",
 			auth: func(t *testing.T) config.AuthConfig {
 				return config.AuthConfig{
-					Modules: map[string][]string{
-						"grocery": {"pin", "key"},
-						"todo":    {"ldap", "passkey"},
-						"admin":   {"pin"},
+					Modules: map[string]config.ModuleAuthConfig{
+						"grocery": {},
+						"todo":    {PinFile: pinFile(t, 0400)},
+						"admin":   {},
 					},
 					AdminPIN: "9999",
-					PINs:     []config.NamedHash{{Name: "chris", Hash: "bcryptedhash"}},
 					APIKeys:  []config.NamedHash{{Name: "svc", Hash: "sha256:deadbeef"}},
 					LDAP: config.LDAPConfig{
 						URL:            "ldaps://ldap.example.com",

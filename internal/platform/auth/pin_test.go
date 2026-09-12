@@ -7,8 +7,6 @@ import (
 	"testing"
 
 	"golang.org/x/crypto/bcrypt"
-
-	"cmd184psu/unified-webapp/internal/platform/config"
 )
 
 // hashFor returns a bcrypt hash of pin at bcrypt.MinCost, for fast tests.
@@ -21,23 +19,83 @@ func hashFor(t *testing.T, pin string) string {
 	return string(hash)
 }
 
-func TestCheckPIN(t *testing.T) {
-	pins := []config.NamedHash{
-		{Name: "alice", Hash: hashFor(t, "1111")},
-		{Name: "bob", Hash: hashFor(t, "2222")},
+func TestCheckPINFileMatch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "todo.pin")
+	if err := os.WriteFile(path, []byte("4242"), 0400); err != nil {
+		t.Fatalf("WriteFile: %v", err)
 	}
 
-	if name, ok := checkPIN(pins, "1111"); !ok || name != "alice" {
-		t.Fatalf("checkPIN(1111) = (%q, %v), want (alice, true)", name, ok)
+	ok, err := checkPINFile(path, "4242")
+	if err != nil || !ok {
+		t.Fatalf("checkPINFile(match) = (%v, %v), want (true, nil)", ok, err)
 	}
-	if name, ok := checkPIN(pins, "2222"); !ok || name != "bob" {
-		t.Fatalf("checkPIN(2222) = (%q, %v), want (bob, true)", name, ok)
+}
+
+func TestCheckPINFileMismatch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "todo.pin")
+	if err := os.WriteFile(path, []byte("4242"), 0400); err != nil {
+		t.Fatalf("WriteFile: %v", err)
 	}
-	if name, ok := checkPIN(pins, "9999"); ok {
-		t.Fatalf("checkPIN(9999) = (%q, %v), want ok=false", name, ok)
+
+	ok, err := checkPINFile(path, "0000")
+	if err != nil || ok {
+		t.Fatalf("checkPINFile(mismatch) = (%v, %v), want (false, nil)", ok, err)
 	}
-	if name, ok := checkPIN(nil, "1111"); ok {
-		t.Fatalf("checkPIN(nil, 1111) = (%q, %v), want ok=false", name, ok)
+	if err != nil && strings.Contains(err.Error(), "0000") {
+		t.Fatalf("error leaked attempted pin: %v", err)
+	}
+}
+
+func TestCheckPINFileMissing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "does-not-exist.pin")
+
+	ok, err := checkPINFile(path, "4242")
+	if ok {
+		t.Fatalf("checkPINFile(missing file) = ok=true, want false")
+	}
+	if err == nil {
+		t.Fatalf("checkPINFile(missing file) = nil error, want an error")
+	}
+	if strings.Contains(err.Error(), "4242") {
+		t.Fatalf("error leaked attempted pin: %v", err)
+	}
+}
+
+func TestCheckPINFileWorldReadableRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "todo.pin")
+	if err := os.WriteFile(path, []byte("4242"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	ok, err := checkPINFile(path, "4242")
+	if ok {
+		t.Fatalf("checkPINFile with mode 0644 = ok=true, want false")
+	}
+	if err == nil {
+		t.Fatalf("checkPINFile with mode 0644 = nil error, want an error naming the fix")
+	}
+	if !strings.Contains(err.Error(), "chmod") {
+		t.Fatalf("checkPINFile with mode 0644 error = %q, want it to contain %q", err.Error(), "chmod")
+	}
+	if strings.Contains(err.Error(), "4242") {
+		t.Fatalf("error leaked file pin plaintext: %v", err)
+	}
+}
+
+func TestCheckPINFileTrailingNewlineTolerated(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "todo.pin")
+	if err := os.WriteFile(path, []byte("4242\n"), 0400); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	ok, err := checkPINFile(path, "4242")
+	if err != nil || !ok {
+		t.Fatalf("checkPINFile(trailing newline) = (%v, %v), want (true, nil)", ok, err)
 	}
 }
 
@@ -100,6 +158,9 @@ func TestCheckAdminPINFile(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "chmod") {
 		t.Fatalf("checkAdminPIN with mode 0644 error = %q, want it to contain %q", err.Error(), "chmod")
+	}
+	if !strings.Contains(err.Error(), "auth.admin_pin_file") {
+		t.Fatalf("checkAdminPIN with mode 0644 error = %q, want it to contain %q", err.Error(), "auth.admin_pin_file")
 	}
 	if strings.Contains(err.Error(), "5678") {
 		t.Fatalf("error leaked file pin plaintext: %v", err)

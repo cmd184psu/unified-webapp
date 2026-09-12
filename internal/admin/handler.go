@@ -14,7 +14,6 @@ import (
 	"sync"
 
 	"github.com/go-ldap/ldap/v3"
-	"golang.org/x/crypto/bcrypt"
 
 	"cmd184psu/unified-webapp/internal/platform/auth"
 	"cmd184psu/unified-webapp/internal/platform/config"
@@ -22,7 +21,7 @@ import (
 )
 
 // Handler serves all admin module HTTP routes. T5.1 was a scaffold with no
-// routes; T5.4 adds the FR-M1/FR-M5 data API below -- matrix, PIN, API-key,
+// routes; T5.4 adds the FR-M1/FR-M5 data API below -- module matrix, API-key,
 // LDAP-test, and session settings -- every mutating route funneling through
 // applyAuth (T5.3: validate -> splice the config file -> swap the live
 // Policy). No route here does any authentication or authorization of the
@@ -37,16 +36,16 @@ import (
 // authConfig/mu: applyAuth's inputs (a config.AuthConfig) and its swap
 // target (the live auth.Service) are stateless from this Handler's point of
 // view -- applyAuth always needs the *current* full auth config to build a
-// candidate from (e.g. adding one PIN must not silently drop every other
-// PIN, key, and LDAP/session setting already configured), so the Handler
-// tracks its own copy, seeded at construction from the config file's "auth"
-// section (NewHandler's authConfig parameter) and updated only after a
-// mutation's applyAuth call actually succeeds. mu serializes the entire
-// read-current -> build-candidate -> applyAuth -> update-stored-copy
+// candidate from (e.g. adding one API key must not silently drop every
+// other key, module entry, and LDAP/session setting already configured), so
+// the Handler tracks its own copy, seeded at construction from the config
+// file's "auth" section (NewHandler's authConfig parameter) and updated only
+// after a mutation's applyAuth call actually succeeds. mu serializes the
+// entire read-current -> build-candidate -> applyAuth -> update-stored-copy
 // sequence for every mutating route (mutateAuth, below), so two concurrent
-// admin requests (e.g. two POST /api/pins for different names) can never
+// admin requests (e.g. two POST /api/keys for different names) can never
 // race a lost update against each other -- without it, both could read the
-// same starting PINs slice, and whichever applyAuth/store finished last
+// same starting APIKeys slice, and whichever applyAuth/store finished last
 // would silently discard the other's addition.
 type Handler struct {
 	cfg  config.AdminConfig
@@ -70,19 +69,20 @@ func NewHandler(cfg config.AdminConfig, authConfig config.AuthConfig, deps Deps)
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/config/auth", h.handleGetConfigAuth)
 	mux.HandleFunc("PUT /api/config/modules", h.handlePutConfigModules)
-	mux.HandleFunc("POST /api/pins", h.handlePostPin)
-	mux.HandleFunc("DELETE /api/pins/{name}", h.handleDeletePin)
 	mux.HandleFunc("POST /api/keys", h.handlePostKey)
 	mux.HandleFunc("DELETE /api/keys/{name}", h.handleDeleteKey)
 	mux.HandleFunc("POST /api/ldap/test", h.handlePostLDAPTest)
 	mux.HandleFunc("PUT /api/config/session", h.handlePutConfigSession)
+	mux.HandleFunc("GET /api/config/pin-files", h.handleGetPinFiles)
+	mux.HandleFunc("POST /api/config/pin-files", h.handlePostPinFile)
+	mux.HandleFunc("PUT /api/config/ldap", h.handlePutConfigLdap)
 }
 
 // mutateAuth is the single path every mutating route below uses. It holds
 // h.mu for the entire sequence: mutate is called with the current
 // h.authConfig and returns the candidate config to apply plus whether a
 // change should happen at all (false lets a handler answer "not found" --
-// e.g. deleting a PIN/key that isn't there -- without splicing an
+// e.g. deleting a key that isn't there -- without splicing an
 // unchanged config back into the file). When ok is true, the candidate is
 // passed to applyAuth (T5.3: ValidatePolicy -> splice -> SwapPolicy); a
 // rejection there is returned unchanged and h.authConfig is left untouched
@@ -98,10 +98,15 @@ func (h *Handler) mutateAuth(mutate func(config.AuthConfig) (config.AuthConfig, 
 	if !ok {
 		return false, nil
 	}
-	if err := h.applyAuth(candidate); err != nil {
+	expandedAuth, err := h.applyAuth(candidate)
+	if err != nil {
 		return false, err
 	}
-	h.authConfig = candidate
+	// Store applyAuth's return value, not candidate: it carries every
+	// pin_file expanded relative to the config file's directory, matching
+	// what was actually validated, persisted, and swapped in -- so the very
+	// next GET /api/config/auth reports the same absolute paths boot would.
+	h.authConfig = expandedAuth
 	return true, nil
 }
 
@@ -118,21 +123,20 @@ func (h *Handler) mutateAuth(mutate func(config.AuthConfig) (config.AuthConfig, 
 // verbatim, so a future field added to config.AuthConfig does not
 // accidentally leak through this endpoint by default.
 type authConfigView struct {
-	Modules      map[string][]string  `json:"modules"`
-	KnownModules []string             `json:"known_modules"`
-	PINs         []namedHashView      `json:"pins"`
-	APIKeys      []namedHashView      `json:"api_keys"`
-	AdminPIN     adminPINView         `json:"admin_pin"`
-	LDAP         ldapConfigView       `json:"ldap"`
-	Passkey      config.PasskeyConfig `json:"passkey"`
-	Session      sessionConfigView    `json:"session"`
-	CookieSecure bool                 `json:"cookie_secure"`
-	CookieDomain string               `json:"cookie_domain"`
+	Modules      map[string]config.ModuleAuthConfig `json:"modules"`
+	KnownModules []string                           `json:"known_modules"`
+	APIKeys      []namedHashView                    `json:"api_keys"`
+	AdminPIN     adminPINView                       `json:"admin_pin"`
+	LDAP         ldapConfigView                     `json:"ldap"`
+	Passkey      config.PasskeyConfig               `json:"passkey"`
+	Session      sessionConfigView                  `json:"session"`
+	CookieSecure bool                               `json:"cookie_secure"`
+	CookieDomain string                             `json:"cookie_domain"`
 }
 
 // namedHashView mirrors config.NamedHash with Hash always redacted to
 // "(set)" -- every entry in the underlying table has a hash by construction
-// (upsertNamedHash/handlePostPin/handlePostKey never store an empty one), so
+// (upsertNamedHash/handlePostKey never store an empty one), so
 // there is no "unset" case to distinguish here.
 type namedHashView struct {
 	Name string `json:"name"`
@@ -171,10 +175,6 @@ type sessionConfigView struct {
 // redactAuthConfig builds the GET /api/config/auth response from a, eliding
 // every credential per authConfigView's doc comment.
 func redactAuthConfig(a config.AuthConfig) authConfigView {
-	pins := make([]namedHashView, len(a.PINs))
-	for i, p := range a.PINs {
-		pins[i] = namedHashView{Name: p.Name, Hash: "(set)"}
-	}
 	keys := make([]namedHashView, len(a.APIKeys))
 	for i, k := range a.APIKeys {
 		keys[i] = namedHashView{Name: k.Name, Hash: "(set)"}
@@ -196,12 +196,11 @@ func redactAuthConfig(a config.AuthConfig) authConfigView {
 
 	modules := a.Modules
 	if modules == nil {
-		modules = map[string][]string{}
+		modules = map[string]config.ModuleAuthConfig{}
 	}
 
 	return authConfigView{
 		Modules:  modules,
-		PINs:     pins,
 		APIKeys:  keys,
 		AdminPIN: adminPIN,
 		LDAP: ldapConfigView{
@@ -235,15 +234,15 @@ func (h *Handler) handleGetConfigAuth(w http.ResponseWriter, r *http.Request) {
 
 // --- PUT /api/config/modules ---
 
-// handlePutConfigModules replaces the module x method matrix wholesale: the
-// request body is exactly the map[string][]string auth.ValidatePolicy
-// consumes (module name, or the reserved "admin" pseudo-module, -> its
-// accepted-method list). An unknown module or method (e.g. a typo) is
-// rejected by applyAuth's ValidatePolicy step and reported as 400 with its
-// exact error message; nothing is written to the config file and the live
-// policy is untouched.
+// handlePutConfigModules replaces the module auth table wholesale: the
+// request body is exactly the map[string]config.ModuleAuthConfig
+// auth.ValidatePolicy consumes (module name, or the reserved "admin"
+// pseudo-module, -> its two-state auth config). An unknown module (e.g. a
+// typo) is rejected by applyAuth's ValidatePolicy step and reported as 400
+// with its exact error message; nothing is written to the config file and
+// the live policy is untouched.
 func (h *Handler) handlePutConfigModules(w http.ResponseWriter, r *http.Request) {
-	var matrix map[string][]string
+	var matrix map[string]config.ModuleAuthConfig
 	if err := json.NewDecoder(r.Body).Decode(&matrix); err != nil {
 		response.WriteDecodeError(w, err)
 		return
@@ -257,71 +256,15 @@ func (h *Handler) handlePutConfigModules(w http.ResponseWriter, r *http.Request)
 		response.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	response.WriteJSON(w, http.StatusOK, map[string]any{"modules": matrix})
-}
-
-// --- POST /api/pins, DELETE /api/pins/{name} ---
-
-// postPinRequest is the POST /api/pins body.
-type postPinRequest struct {
-	Name string `json:"name"`
-	PIN  string `json:"pin"`
-}
-
-// handlePostPin bcrypts the posted plaintext PIN (bcrypt.DefaultCost,
-// matching cmd/server/main.go's -hash-pin flag) and adds it to the named-PIN
-// table, replacing any existing entry with the same name. The plaintext PIN
-// is used only for hashing here and never appears in the response or is
-// logged.
-func (h *Handler) handlePostPin(w http.ResponseWriter, r *http.Request) {
-	var req postPinRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.WriteDecodeError(w, err)
-		return
-	}
-	if req.Name == "" || req.PIN == "" {
-		response.WriteError(w, http.StatusBadRequest, "name and pin are required")
-		return
-	}
-
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.PIN), bcrypt.DefaultCost)
-	if err != nil {
-		response.WriteError(w, http.StatusInternalServerError, "hashing pin")
-		return
-	}
-
-	_, err = h.mutateAuth(func(cur config.AuthConfig) (config.AuthConfig, bool) {
-		cur.PINs = upsertNamedHash(cur.PINs, req.Name, string(hash))
-		return cur, true
-	})
-	if err != nil {
-		response.WriteError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	response.WriteJSON(w, http.StatusOK, map[string]string{"name": req.Name})
-}
-
-// handleDeletePin removes the named PIN entry, if present, via applyAuth.
-func (h *Handler) handleDeletePin(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-
-	applied, err := h.mutateAuth(func(cur config.AuthConfig) (config.AuthConfig, bool) {
-		pins, ok := removeNamedHash(cur.PINs, name)
-		if !ok {
-			return cur, false
-		}
-		cur.PINs = pins
-		return cur, true
-	})
-	if err != nil {
-		response.WriteError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if !applied {
-		response.WriteError(w, http.StatusNotFound, "pin not found")
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	// Report what was actually persisted (h.authConfig.Modules), not the
+	// submitted matrix verbatim: applyAuth expands each pin_file relative to
+	// the config file's directory before validating and splicing it in, so a
+	// relative path the operator typed is echoed back here as the same
+	// absolute path GET /api/config/auth would report.
+	h.mu.Lock()
+	persisted := h.authConfig.Modules
+	h.mu.Unlock()
+	response.WriteJSON(w, http.StatusOK, map[string]any{"modules": persisted})
 }
 
 // --- POST /api/keys, DELETE /api/keys/{name} ---
@@ -537,6 +480,79 @@ func isLDAPTLSError(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "tls:") || strings.Contains(msg, "certificate") || strings.Contains(msg, "x509")
+}
+
+// --- PUT /api/config/ldap ---
+
+// putLDAPRequest mirrors config.LDAPConfig's JSON shape exactly except
+// BindPassword, which is a *string here so the three "leave it alone"
+// spellings (omitted, blank after strings.TrimSpace, and the redacted
+// placeholder "(set)" GET /api/config/auth echoes back for an
+// already-configured password) can be told apart from an actual new value
+// -- see handlePutConfigLdap.
+type putLDAPRequest struct {
+	URL            string   `json:"url"`
+	StartTLS       bool     `json:"start_tls"`
+	InsecureTLS    bool     `json:"insecure_tls"`
+	BindDN         string   `json:"bind_dn"`
+	BindPassword   *string  `json:"bind_password"`
+	BaseDN         string   `json:"base_dn"`
+	UserFilter     string   `json:"user_filter"`
+	RequiredGroups []string `json:"required_groups"`
+	TimeoutSeconds int      `json:"timeout_seconds"`
+}
+
+// handlePutConfigLdap replaces auth.ldap wholesale via applyAuth, making the
+// admin console's LDAP panel an editor rather than a read-only display.
+// Every field replaces the currently configured value except BindPassword:
+// nil, blank after strings.TrimSpace, or the literal "(set)" all mean "keep
+// the currently configured bind password" -- anything else replaces it.
+// This is what lets the admin UI round-trip a GET's redacted view straight
+// back through a PUT without the displayed placeholder ever overwriting the
+// real password.
+//
+// ValidatePolicy (via applyAuth) rejects clearing auth.ldap.url while a
+// protected non-admin module still exists; that rejection surfaces here as
+// a 400 with its exact message, same as every other mutateAuth caller. On
+// success the response is the same redacted LDAP view redactAuthConfig
+// produces for GET /api/config/auth's "ldap" field.
+func (h *Handler) handlePutConfigLdap(w http.ResponseWriter, r *http.Request) {
+	var req putLDAPRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.WriteDecodeError(w, err)
+		return
+	}
+
+	_, err := h.mutateAuth(func(cur config.AuthConfig) (config.AuthConfig, bool) {
+		bindPassword := cur.LDAP.BindPassword
+		if req.BindPassword != nil {
+			trimmed := strings.TrimSpace(*req.BindPassword)
+			if trimmed != "" && trimmed != "(set)" {
+				bindPassword = *req.BindPassword
+			}
+		}
+		cur.LDAP = config.LDAPConfig{
+			URL:            req.URL,
+			StartTLS:       req.StartTLS,
+			InsecureTLS:    req.InsecureTLS,
+			BindDN:         req.BindDN,
+			BindPassword:   bindPassword,
+			BaseDN:         req.BaseDN,
+			UserFilter:     req.UserFilter,
+			RequiredGroups: req.RequiredGroups,
+			TimeoutSeconds: req.TimeoutSeconds,
+		}
+		return cur, true
+	})
+	if err != nil {
+		response.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	h.mu.Lock()
+	view := redactAuthConfig(h.authConfig)
+	h.mu.Unlock()
+	response.WriteJSON(w, http.StatusOK, view.LDAP)
 }
 
 // --- PUT /api/config/session ---

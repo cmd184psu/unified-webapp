@@ -103,8 +103,7 @@ func deadTCPAddr(t *testing.T) string {
 func TestGetConfigAuthRedactsHashesAndBindPassword(t *testing.T) {
 	initial := config.AuthConfig{
 		DataDir:  t.TempDir(),
-		Modules:  map[string][]string{"todo": {"pin"}},
-		PINs:     []config.NamedHash{{Name: "alice", Hash: bcryptHash(t, "1234")}},
+		Modules:  map[string]config.ModuleAuthConfig{"todo": {PinFile: pinFileFixture(t, "1234")}},
 		APIKeys:  []config.NamedHash{{Name: "svc1", Hash: "sha256:deadbeefdeadbeef"}},
 		AdminPIN: bcryptHash(t, "opPIN"),
 		LDAP:     config.LDAPConfig{URL: "ldaps://dc.example.com", BindDN: "cn=svc", BindPassword: "topsecret"},
@@ -135,9 +134,6 @@ func TestGetConfigAuthRedactsHashesAndBindPassword(t *testing.T) {
 	var got authConfigView
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decoding response: %v\nbody: %s", err, body)
-	}
-	if len(got.PINs) != 1 || got.PINs[0].Name != "alice" || got.PINs[0].Hash != "(set)" {
-		t.Errorf("PINs = %+v, want [{alice (set)}]", got.PINs)
 	}
 	if len(got.APIKeys) != 1 || got.APIKeys[0].Name != "svc1" || got.APIKeys[0].Hash != "(set)" {
 		t.Errorf("APIKeys = %+v, want [{svc1 (set)}]", got.APIKeys)
@@ -193,10 +189,11 @@ func TestGetConfigAuthAdminPINDefinedByVariants(t *testing.T) {
 // --- PUT /api/config/modules: typo'd module rejected, nothing changes ---
 
 func TestPutConfigModulesTypoRejected400NothingChanges(t *testing.T) {
+	pinPath := pinFileFixture(t, "1234")
 	initial := config.AuthConfig{
 		DataDir: t.TempDir(),
-		Modules: map[string][]string{"todo": {"pin"}},
-		PINs:    []config.NamedHash{{Name: "alice", Hash: bcryptHash(t, "1234")}},
+		Modules: map[string]config.ModuleAuthConfig{"todo": {PinFile: pinPath}},
+		LDAP:    config.LDAPConfig{URL: "ldaps://ldap.example.com"},
 	}
 	h, mux, path := newAdminTestHandler(t, initial, []string{"todo"}, false)
 
@@ -212,7 +209,7 @@ func TestPutConfigModulesTypoRejected400NothingChanges(t *testing.T) {
 		t.Fatalf("before PUT: todo gate = %d, want 401 (protected)", before.Code)
 	}
 
-	rec := doAdmin(t, mux, http.MethodPut, "/api/config/modules", map[string][]string{"totally-bogus-module": {"pin"}})
+	rec := doAdmin(t, mux, http.MethodPut, "/api/config/modules", map[string]config.ModuleAuthConfig{"totally-bogus-module": {}})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("PUT /api/config/modules (typo) = %d, want 400; body: %s", rec.Code, rec.Body.String())
 	}
@@ -236,7 +233,7 @@ func TestPutConfigModulesTypoRejected400NothingChanges(t *testing.T) {
 	if err := json.Unmarshal(getRec.Body.Bytes(), &view); err != nil {
 		t.Fatalf("decoding GET response: %v", err)
 	}
-	if methods, ok := view.Modules["todo"]; !ok || len(methods) != 1 || methods[0] != "pin" {
+	if m, ok := view.Modules["todo"]; !ok || m.PinFile != pinPath {
 		t.Errorf("Handler's stored auth config changed after a rejected PUT: modules[todo] = %v", view.Modules["todo"])
 	}
 	if _, ok := view.Modules["totally-bogus-module"]; ok {
@@ -244,86 +241,11 @@ func TestPutConfigModulesTypoRejected400NothingChanges(t *testing.T) {
 	}
 }
 
-// --- pin add -> live login on a protected module; pin delete -> login stops working ---
-
-func TestPinAddEnablesLiveLoginThenDeleteRevokesIt(t *testing.T) {
-	// "seed" is already protected at boot so the Service's HMAC session key
-	// is loaded (auth.FromConfig only loads it when something is already
-	// protected at boot -- see policy.go's FromConfig doc comment); this
-	// isolates the test from that boot-time behavior and exercises the
-	// live-apply path T5.4 is actually meant to prove.
-	initial := config.AuthConfig{
-		DataDir: t.TempDir(),
-		Modules: map[string][]string{"seed": {"pin"}},
-		PINs:    []config.NamedHash{{Name: "seeduser", Hash: bcryptHash(t, "seedpin")}},
-	}
-	h, mux, _ := newAdminTestHandler(t, initial, []string{"seed", "todo"}, false)
-
-	pinRec := doAdmin(t, mux, http.MethodPost, "/api/pins", map[string]string{"name": "alice", "pin": "alice-secret-pin"})
-	if pinRec.Code != http.StatusOK {
-		t.Fatalf("POST /api/pins = %d, want 200; body: %s", pinRec.Code, pinRec.Body.String())
-	}
-
-	matRec := doAdmin(t, mux, http.MethodPut, "/api/config/modules", map[string][]string{
-		"seed": {"pin"},
-		"todo": {"pin"},
-	})
-	if matRec.Code != http.StatusOK {
-		t.Fatalf("PUT /api/config/modules = %d, want 200; body: %s", matRec.Code, matRec.Body.String())
-	}
-
-	echo := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
-	gated := h.deps.Service.Gate("todo", echo)
-
-	unauth := httptest.NewRecorder()
-	gated.ServeHTTP(unauth, httptest.NewRequest(http.MethodGet, "/", nil))
-	if unauth.Code != http.StatusUnauthorized {
-		t.Fatalf("todo unauthenticated = %d, want 401", unauth.Code)
-	}
-
-	loginBody, _ := json.Marshal(map[string]string{"method": "pin", "pin": "alice-secret-pin"})
-	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(loginBody))
-	loginRec := httptest.NewRecorder()
-	gated.ServeHTTP(loginRec, loginReq)
-	if loginRec.Code != http.StatusOK {
-		t.Fatalf("login with newly-added pin = %d, want 200; body: %s", loginRec.Code, loginRec.Body.String())
-	}
-	var cookie *http.Cookie
-	for _, c := range loginRec.Result().Cookies() {
-		if c.Name == "uw_session" {
-			cookie = c
-		}
-	}
-	if cookie == nil {
-		t.Fatalf("login response set no uw_session cookie")
-	}
-
-	authed := httptest.NewRecorder()
-	authedReq := httptest.NewRequest(http.MethodGet, "/", nil)
-	authedReq.AddCookie(cookie)
-	gated.ServeHTTP(authed, authedReq)
-	if authed.Code != http.StatusOK {
-		t.Fatalf("todo with session from newly-added pin = %d, want 200", authed.Code)
-	}
-
-	// Now delete the pin and confirm login with it no longer works.
-	delRec := doAdmin(t, mux, http.MethodDelete, "/api/pins/alice", nil)
-	if delRec.Code != http.StatusNoContent {
-		t.Fatalf("DELETE /api/pins/alice = %d, want 204; body: %s", delRec.Code, delRec.Body.String())
-	}
-
-	loginAgainReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(loginBody))
-	loginAgainRec := httptest.NewRecorder()
-	gated.ServeHTTP(loginAgainRec, loginAgainReq)
-	if loginAgainRec.Code == http.StatusOK {
-		t.Fatalf("login with deleted pin still succeeded")
-	}
-}
-
 // --- generated key round-trips through a Gate; delete revokes it ---
 
 func TestKeyGenerateRoundTripsThenDeleteRevokesIt(t *testing.T) {
-	h, mux, _ := newAdminTestHandler(t, config.AuthConfig{}, []string{"keymod"}, false)
+	initial := config.AuthConfig{LDAP: config.LDAPConfig{URL: "ldaps://ldap.example.com"}}
+	h, mux, _ := newAdminTestHandler(t, initial, []string{"keymod"}, false)
 
 	generate := func(name string) string {
 		t.Helper()
@@ -345,14 +267,11 @@ func TestKeyGenerateRoundTripsThenDeleteRevokesIt(t *testing.T) {
 
 	// A second, undeleted "keeper" key stays configured throughout, so
 	// deleting "svc1" below revokes only that one key rather than emptying
-	// auth.api_keys entirely while "keymod" still requires the "key"
-	// method (which ValidatePolicy correctly rejects as an orphaned
-	// method -- deleting the *last* key for a module still requiring "key"
-	// auth is a separate, expected 400 case, exercised at the end).
+	// auth.api_keys entirely.
 	svc1Key := generate("svc1")
 	keeperKey := generate("keeper")
 
-	matRec := doAdmin(t, mux, http.MethodPut, "/api/config/modules", map[string][]string{"keymod": {"key"}})
+	matRec := doAdmin(t, mux, http.MethodPut, "/api/config/modules", map[string]config.ModuleAuthConfig{"keymod": {}})
 	if matRec.Code != http.StatusOK {
 		t.Fatalf("PUT /api/config/modules = %d, want 200; body: %s", matRec.Code, matRec.Body.String())
 	}
@@ -396,15 +315,15 @@ func TestKeyGenerateRoundTripsThenDeleteRevokesIt(t *testing.T) {
 		t.Fatalf("DELETE /api/keys/svc1 (again) = %d, want 404", delAgainRec.Code)
 	}
 
-	// Deleting the last remaining key while "keymod" still requires "key"
-	// auth would orphan that method -- ValidatePolicy rejects it, and the
-	// key (and the module's protection) must remain intact.
+	// api_keys may be empty (the two-state auth model does not tie a
+	// module's protection to how many keys exist), so deleting the last
+	// remaining key succeeds and revokes it like any other.
 	delLastRec := doAdmin(t, mux, http.MethodDelete, "/api/keys/keeper", nil)
-	if delLastRec.Code != http.StatusBadRequest {
-		t.Fatalf("DELETE /api/keys/keeper (last remaining, still required) = %d, want 400; body: %s", delLastRec.Code, delLastRec.Body.String())
+	if delLastRec.Code != http.StatusNoContent {
+		t.Fatalf("DELETE /api/keys/keeper (last remaining) = %d, want 204; body: %s", delLastRec.Code, delLastRec.Body.String())
 	}
-	if rec := withKey(keeperKey); rec.Code != http.StatusOK {
-		t.Fatalf("keeper key stopped working after a rejected delete: %d", rec.Code)
+	if rec := withKey(keeperKey); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("keeper key still worked after being deleted: %d", rec.Code)
 	}
 }
 
@@ -479,18 +398,16 @@ func TestPutConfigSessionAppliesAndPersists(t *testing.T) {
 
 func TestAC15NoResponseBodyEverLeaksASecret(t *testing.T) {
 	const (
-		alicePIN   = "alice-super-secret-pin-42"
 		ldapPass   = "ldap-super-secret-password-99"
 		generateNm = "svc1"
 	)
 
 	initial := config.AuthConfig{
 		DataDir: t.TempDir(),
-		Modules: map[string][]string{"seed": {"pin"}},
-		PINs:    []config.NamedHash{{Name: "seeduser", Hash: bcryptHash(t, "seedpin")}},
+		Modules: map[string]config.ModuleAuthConfig{"seed": {}},
 		LDAP:    config.LDAPConfig{URL: "ldap://" + deadTCPAddr(t)},
 	}
-	h, mux, _ := newAdminTestHandler(t, initial, []string{"seed", "todo", "keymod"}, false)
+	h, mux, _ := newAdminTestHandler(t, initial, []string{"seed", "keymod"}, false)
 
 	var bodies []string
 	capture := func(rec *httptest.ResponseRecorder) *httptest.ResponseRecorder {
@@ -501,21 +418,12 @@ func TestAC15NoResponseBodyEverLeaksASecret(t *testing.T) {
 	// 1. Initial redacted view.
 	capture(doAdmin(t, mux, http.MethodGet, "/api/config/auth", nil))
 
-	// 2. Add a PIN.
-	pinRec := capture(doAdmin(t, mux, http.MethodPost, "/api/pins", map[string]string{"name": "alice", "pin": alicePIN}))
-	if pinRec.Code != http.StatusOK {
-		t.Fatalf("POST /api/pins = %d, want 200; body: %s", pinRec.Code, pinRec.Body.String())
-	}
-
-	// 3. Redacted view again.
+	// 2. Redacted view again.
 	capture(doAdmin(t, mux, http.MethodGet, "/api/config/auth", nil))
 
-	// 4. Generate two API keys -- svc1's plaintext is the one this test
+	// 3. Generate two API keys -- svc1's plaintext is the one this test
 	// tracks for the exactly-once assertion below; "keeper" stays configured
-	// throughout so deleting svc1 later doesn't orphan keymod's "key"
-	// method requirement (ValidatePolicy rejects emptying auth.api_keys
-	// while a module still requires it -- a separate, correct 400 case
-	// covered by TestKeyGenerateRoundTripsThenDeleteRevokesIt).
+	// throughout so deleting svc1 later doesn't touch it.
 	genRec := capture(doAdmin(t, mux, http.MethodPost, "/api/keys", map[string]string{"name": generateNm}))
 	if genRec.Code != http.StatusOK {
 		t.Fatalf("POST /api/keys = %d, want 200; body: %s", genRec.Code, genRec.Body.String())
@@ -541,34 +449,22 @@ func TestAC15NoResponseBodyEverLeaksASecret(t *testing.T) {
 		t.Fatalf("decoding keeper key-generate response: %v", err)
 	}
 
-	// 5. Protect todo/keymod live.
-	matRec := capture(doAdmin(t, mux, http.MethodPut, "/api/config/modules", map[string][]string{
-		"seed":   {"pin"},
-		"todo":   {"pin"},
-		"keymod": {"key"},
+	// 4. Protect keymod live.
+	matRec := capture(doAdmin(t, mux, http.MethodPut, "/api/config/modules", map[string]config.ModuleAuthConfig{
+		"seed":   {},
+		"keymod": {},
 	}))
 	if matRec.Code != http.StatusOK {
 		t.Fatalf("PUT /api/config/modules = %d, want 200; body: %s", matRec.Code, matRec.Body.String())
 	}
 
-	// 6. Login on todo with the newly-added pin, through the real gate (not
-	// the admin mux, but still a response body captured for the grep).
-	echo := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
-	gatedTodo := h.deps.Service.Gate("todo", echo)
-	loginBody, _ := json.Marshal(map[string]string{"method": "pin", "pin": alicePIN})
-	loginRec := httptest.NewRecorder()
-	gatedTodo.ServeHTTP(loginRec, httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(loginBody)))
-	bodies = append(bodies, loginRec.Body.String())
-	if loginRec.Code != http.StatusOK {
-		t.Fatalf("login = %d, want 200; body: %s", loginRec.Code, loginRec.Body.String())
-	}
-
-	// 7. Redacted view again.
+	// 5. Redacted view again.
 	capture(doAdmin(t, mux, http.MethodGet, "/api/config/auth", nil))
 
-	// 8. The generated key authenticates a "key"-module request through a
-	// Gate (round-trip proof) -- the echoed response body is harmless but
+	// 6. The generated key authenticates a keymod request through a Gate
+	// (round-trip proof) -- the echoed response body is harmless but
 	// captured anyway.
+	echo := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
 	gatedKey := h.deps.Service.Gate("keymod", echo)
 	keyReq := httptest.NewRequest(http.MethodGet, "/", nil)
 	keyReq.Header.Set("Authorization", "Bearer "+genResp.Key)
@@ -579,7 +475,7 @@ func TestAC15NoResponseBodyEverLeaksASecret(t *testing.T) {
 		t.Fatalf("generated key did not authenticate through the gate: %d", keyRec.Code)
 	}
 
-	// 9. Revoke the key.
+	// 7. Revoke the key.
 	delKeyRec := capture(doAdmin(t, mux, http.MethodDelete, "/api/keys/"+generateNm, nil))
 	if delKeyRec.Code != http.StatusNoContent {
 		t.Fatalf("DELETE /api/keys/%s = %d, want 204; body: %s", generateNm, delKeyRec.Code, delKeyRec.Body.String())
@@ -602,26 +498,14 @@ func TestAC15NoResponseBodyEverLeaksASecret(t *testing.T) {
 		t.Fatalf("keeper key stopped working after svc1 was deleted: %d", keeperStillWorksRec.Code)
 	}
 
-	// 10. LDAP test against a dead port with a posted password.
+	// 8. LDAP test against a dead port with a posted password.
 	ldapRec := capture(doAdmin(t, mux, http.MethodPost, "/api/ldap/test", map[string]string{"username": "bob", "password": ldapPass}))
 	if ldapRec.Code != http.StatusOK {
 		t.Fatalf("POST /api/ldap/test = %d, want 200; body: %s", ldapRec.Code, ldapRec.Body.String())
 	}
 
-	// 11. A typo'd matrix save -> 400, its error body captured too.
-	capture(doAdmin(t, mux, http.MethodPut, "/api/config/modules", map[string][]string{"nonexistent-oops": {"pin"}}))
-
-	// 12. Delete the pin; login with it should now fail.
-	delPinRec := capture(doAdmin(t, mux, http.MethodDelete, "/api/pins/alice", nil))
-	if delPinRec.Code != http.StatusNoContent {
-		t.Fatalf("DELETE /api/pins/alice = %d, want 204; body: %s", delPinRec.Code, delPinRec.Body.String())
-	}
-	relRec := httptest.NewRecorder()
-	gatedTodo.ServeHTTP(relRec, httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(loginBody)))
-	bodies = append(bodies, relRec.Body.String())
-	if relRec.Code == http.StatusOK {
-		t.Fatalf("login with deleted pin still succeeded")
-	}
+	// 9. A typo'd matrix save -> 400, its error body captured too.
+	capture(doAdmin(t, mux, http.MethodPut, "/api/config/modules", map[string]config.ModuleAuthConfig{"nonexistent-oops": {}}))
 
 	// --- The AC-15 assertions, over every captured body ---
 
@@ -636,13 +520,138 @@ func TestAC15NoResponseBodyEverLeaksASecret(t *testing.T) {
 	if strings.Contains(all, "$2a$") || strings.Contains(all, "$2b$") {
 		t.Errorf("a bcrypt hash prefix leaked into a response body:\n%s", all)
 	}
-	if strings.Contains(all, alicePIN) {
-		t.Errorf("the posted plaintext PIN leaked into a response body:\n%s", all)
-	}
 	if strings.Contains(all, ldapPass) {
 		t.Errorf("the posted plaintext LDAP password leaked into a response body:\n%s", all)
 	}
-	if strings.Contains(all, "seedpin") {
-		t.Errorf("the seed PIN's plaintext leaked into a response body:\n%s", all)
+}
+
+// --- PUT /api/config/ldap ---
+
+func TestPutConfigLdapReplacesUrlAndBaseDN(t *testing.T) {
+	initial := config.AuthConfig{LDAP: config.LDAPConfig{URL: "ldaps://old.example.com", BaseDN: "dc=old"}}
+	_, mux, path := newAdminTestHandler(t, initial, nil, false)
+
+	rec := doAdmin(t, mux, http.MethodPut, "/api/config/ldap", map[string]any{
+		"url":     "ldaps://new.example.com",
+		"base_dn": "dc=new",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT /api/config/ldap = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("config.Load(spliced file): %v", err)
+	}
+	if loaded.Auth.LDAP.URL != "ldaps://new.example.com" {
+		t.Errorf("loaded LDAP.URL = %q, want %q", loaded.Auth.LDAP.URL, "ldaps://new.example.com")
+	}
+	if loaded.Auth.LDAP.BaseDN != "dc=new" {
+		t.Errorf("loaded LDAP.BaseDN = %q, want %q", loaded.Auth.LDAP.BaseDN, "dc=new")
 	}
 }
+
+func TestPutConfigLdapBlankAndSetPlaceholderKeepExistingBindPassword(t *testing.T) {
+	const existingPassword = "the-real-secret"
+
+	for _, tc := range []struct {
+		name         string
+		bindPassword *string
+	}{
+		{"omitted (nil)", nil},
+		{"blank string", strPtr("")},
+		{"whitespace-only", strPtr("   ")},
+		{"(set) placeholder", strPtr("(set)")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			initial := config.AuthConfig{LDAP: config.LDAPConfig{URL: "ldaps://ldap.example.com", BindDN: "cn=svc", BindPassword: existingPassword}}
+			_, mux, path := newAdminTestHandler(t, initial, nil, false)
+
+			body := map[string]any{"url": "ldaps://ldap.example.com", "bind_dn": "cn=svc"}
+			if tc.bindPassword != nil {
+				body["bind_password"] = *tc.bindPassword
+			}
+			rec := doAdmin(t, mux, http.MethodPut, "/api/config/ldap", body)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("PUT /api/config/ldap = %d, want 200; body: %s", rec.Code, rec.Body.String())
+			}
+
+			if strings.Contains(rec.Body.String(), existingPassword) {
+				t.Fatalf("response leaked the bind password: %s", rec.Body.String())
+			}
+			var view ldapConfigView
+			if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+				t.Fatalf("decoding response: %v\nbody: %s", err, rec.Body.String())
+			}
+			if view.BindPassword != "(set)" {
+				t.Errorf("response BindPassword = %q, want %q", view.BindPassword, "(set)")
+			}
+
+			loaded, err := config.Load(path)
+			if err != nil {
+				t.Fatalf("config.Load(spliced file): %v", err)
+			}
+			if loaded.Auth.LDAP.BindPassword != existingPassword {
+				t.Errorf("on-disk BindPassword = %q, want unchanged %q", loaded.Auth.LDAP.BindPassword, existingPassword)
+			}
+		})
+	}
+}
+
+func TestPutConfigLdapNonBlankBindPasswordReplaces(t *testing.T) {
+	initial := config.AuthConfig{LDAP: config.LDAPConfig{URL: "ldaps://ldap.example.com", BindPassword: "old-secret"}}
+	_, mux, path := newAdminTestHandler(t, initial, nil, false)
+
+	rec := doAdmin(t, mux, http.MethodPut, "/api/config/ldap", map[string]any{
+		"url":           "ldaps://ldap.example.com",
+		"bind_password": "brand-new-secret",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT /api/config/ldap = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "brand-new-secret") || strings.Contains(rec.Body.String(), "old-secret") {
+		t.Fatalf("response leaked a bind password: %s", rec.Body.String())
+	}
+
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("config.Load(spliced file): %v", err)
+	}
+	if loaded.Auth.LDAP.BindPassword != "brand-new-secret" {
+		t.Errorf("on-disk BindPassword = %q, want %q", loaded.Auth.LDAP.BindPassword, "brand-new-secret")
+	}
+}
+
+func TestPutConfigLdapClearingUrlWithProtectedModuleRejected400NamingModule(t *testing.T) {
+	initial := config.AuthConfig{
+		DataDir: t.TempDir(),
+		LDAP:    config.LDAPConfig{URL: "ldaps://ldap.example.com"},
+		Modules: map[string]config.ModuleAuthConfig{"todo": {}},
+	}
+	_, mux, path := newAdminTestHandler(t, initial, []string{"todo"}, false)
+
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading fixture config: %v", err)
+	}
+
+	rec := doAdmin(t, mux, http.MethodPut, "/api/config/ldap", map[string]any{"url": ""})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("PUT /api/config/ldap (clearing url) = %d, want 400; body: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "todo") {
+		t.Errorf("400 body doesn't name the offending module: %s", rec.Body.String())
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading config after rejected PUT: %v", err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Errorf("config file changed after a rejected PUT:\n got: %s\nwant (unchanged): %s", got, original)
+	}
+}
+
+// strPtr returns a pointer to s, for populating putLDAPRequest-shaped test
+// bodies where nil must be distinguishable from an empty string.
+func strPtr(s string) *string { return &s }

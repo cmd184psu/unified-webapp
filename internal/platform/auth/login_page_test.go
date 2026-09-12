@@ -17,7 +17,7 @@ import (
 
 func TestLoginPageServedOnUnauthenticatedHTMLGet(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	svc := newGateService(t, now, &Policy{Modules: map[string][]string{"grocery": {"pin"}}})
+	svc := newGateService(t, now, &Policy{Modules: map[string]ModulePolicy{"grocery": {PinFile: "/tmp/does-not-matter"}}})
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/some/page.html", nil)
@@ -42,7 +42,7 @@ func TestLoginPageServedOnUnauthenticatedHTMLGet(t *testing.T) {
 
 func TestLoginPageJSONOnUnauthenticatedJSONAccept(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	svc := newGateService(t, now, &Policy{Modules: map[string][]string{"grocery": {"pin"}}})
+	svc := newGateService(t, now, &Policy{Modules: map[string]ModulePolicy{"grocery": {PinFile: "/tmp/does-not-matter"}}})
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/some/page.html", nil)
@@ -65,7 +65,7 @@ func TestLoginPageJSONOnUnauthenticatedJSONAccept(t *testing.T) {
 
 func TestLoginPageJSONOnPostEvenWithHTMLAccept(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	svc := newGateService(t, now, &Policy{Modules: map[string][]string{"grocery": {"pin"}}})
+	svc := newGateService(t, now, &Policy{Modules: map[string]ModulePolicy{"grocery": {PinFile: "/tmp/does-not-matter"}}})
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/some/page.html", nil)
@@ -88,7 +88,7 @@ func TestLoginPageJSONOnPostEvenWithHTMLAccept(t *testing.T) {
 
 func TestLoginPageNeverServedOnAPIPath(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	svc := newGateService(t, now, &Policy{Modules: map[string][]string{"admin": {}}})
+	svc := newGateService(t, now, &Policy{Modules: map[string]ModulePolicy{"admin": {}}})
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
@@ -166,10 +166,10 @@ func TestLoginPageAdminEmptyMatrixShowsPINForm(t *testing.T) {
 
 	// And end-to-end via the gate: admin's mode response for an empty
 	// matrix includes "admin_pin" (already covered in gate_test.go's
-	// TestGateModeReportsAcceptedMethods; re-asserted here as the
+	// TestGateModeReportsOfferedMethods; re-asserted here as the
 	// companion half of the JS check above).
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	svc := newGateService(t, now, &Policy{Modules: map[string][]string{}})
+	svc := newGateService(t, now, &Policy{Modules: map[string]ModulePolicy{}})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/mode", nil)
 	svc.Gate("admin", echoHandler()).ServeHTTP(rec, req)

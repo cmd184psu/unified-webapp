@@ -48,22 +48,25 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/goleak"
-	"golang.org/x/crypto/bcrypt"
 
 	"cmd184psu/unified-webapp/internal/platform/auth"
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/platform/middleware"
 )
 
-// bcryptHash returns pin's bcrypt hash at the minimum cost -- these tests
-// need a valid hash, not a slow one.
-func bcryptHash(t *testing.T, pin string) string {
+// modulePinFile writes pin to a fresh 0400 file under a new t.TempDir() and
+// returns its path -- the fixture every PinFile test below (module door
+// codes and AdminPINFile alike) uses in place of the removed auth.pins
+// identity-PIN table (a door-code login is now anonymous, not a named
+// identity -- see internal/platform/auth/handlers_test.go).
+func modulePinFile(t *testing.T, pin string) string {
 	t.Helper()
-	h, err := bcrypt.GenerateFromPassword([]byte(pin), bcrypt.MinCost)
-	if err != nil {
-		t.Fatalf("bcrypt hash: %v", err)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "module.pin")
+	if err := os.WriteFile(path, []byte(pin), 0400); err != nil {
+		t.Fatalf("write module pin file: %v", err)
 	}
-	return string(h)
+	return path
 }
 
 // apiKeyHash returns the "sha256:<hex>" config hash for the literal key
@@ -150,6 +153,21 @@ func doHostWithKey(t *testing.T, srv *httptest.Server, host, path, key string) *
 		t.Fatalf("do request: %v", err)
 	}
 	return res
+}
+
+// mustEqualMethods fails t unless got equals want exactly, in order --
+// GET /api/auth/mode's methods list is order-stable (OfferedMethods always
+// builds it ["ldap", ["passkey"], ["pin"]]).
+func mustEqualMethods(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("methods = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("methods = %v, want %v", got, want)
+		}
+	}
 }
 
 // firstSetCookie returns the value of the first Set-Cookie header on res, if
@@ -292,16 +310,17 @@ var ac2RouteMatrix = map[string][]ac2RouteMatrixRow{
 // silently skipped rather than passed.
 func TestAC2_AllModulesProtected(t *testing.T) {
 	cfg := routeMatrixConfig(t, "off")
+	sharedPinFile := modulePinFile(t, "4242")
 	cfg.Auth = config.AuthConfig{
-		Modules: map[string][]string{
-			"grocery":     {"pin"},
-			"todo":        {"pin"},
-			"slideshow":   {"pin"},
-			"menuserver":  {"pin"},
-			"obsidianoid": {"pin"},
-			"multissh":    {"pin"},
+		Modules: map[string]config.ModuleAuthConfig{
+			"grocery":     {PinFile: sharedPinFile},
+			"todo":        {PinFile: sharedPinFile},
+			"slideshow":   {PinFile: sharedPinFile},
+			"menuserver":  {PinFile: sharedPinFile},
+			"obsidianoid": {PinFile: sharedPinFile},
+			"multissh":    {PinFile: sharedPinFile},
 		},
-		PINs:    []config.NamedHash{{Name: "carol", Hash: bcryptHash(t, "4242")}},
+		LDAP:    config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
 		DataDir: t.TempDir(),
 	}
 	svc, err := auth.FromConfig(cfg.Auth, knownModules, false)
@@ -348,9 +367,7 @@ func TestAC2_AllModulesProtected(t *testing.T) {
 			if err := json.NewDecoder(modeRes.Body).Decode(&mode); err != nil {
 				t.Fatalf("decode /api/auth/mode body: %v", err)
 			}
-			if len(mode.Methods) != 1 || mode.Methods[0] != "pin" {
-				t.Fatalf("methods = %v, want [pin]", mode.Methods)
-			}
+			mustEqualMethods(t, mode.Methods, []string{"ldap", "pin"})
 		})
 	}
 }
@@ -371,12 +388,12 @@ func TestAC2_AllModulesProtected(t *testing.T) {
 // comment for why it lives there.
 func TestAC3_AccumulationAcrossModules(t *testing.T) {
 	cfg := routeMatrixConfig(t, "off")
+	slideshowPinFile := modulePinFile(t, "4242")
 	cfg.Auth = config.AuthConfig{
-		Modules: map[string][]string{
-			"slideshow": {"pin"},
-			"multissh":  {"ldap"},
+		Modules: map[string]config.ModuleAuthConfig{
+			"slideshow": {PinFile: slideshowPinFile},
+			"multissh":  {},
 		},
-		PINs:    []config.NamedHash{{Name: "carol", Hash: bcryptHash(t, "4242")}},
 		LDAP:    config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
 		DataDir: t.TempDir(),
 	}
@@ -436,16 +453,16 @@ func TestAC3_AccumulationAcrossModules(t *testing.T) {
 // iat/exp, and the near-expiry/rotated-key/expired cases all need exactly
 // that control.
 type testSessionClaims struct {
-	Methods []string `json:"methods"`
+	Grants []string `json:"grants"`
 	jwt.RegisteredClaims
 }
 
-// signSessionToken mints an HS256 session token with the given key, methods,
+// signSessionToken mints an HS256 session token with the given key, grants,
 // and issued-at/expiry, matching auth's session.go token shape.
-func signSessionToken(t *testing.T, key []byte, subject string, methods []string, iat, exp time.Time) string {
+func signSessionToken(t *testing.T, key []byte, subject string, grants []string, iat, exp time.Time) string {
 	t.Helper()
 	claims := testSessionClaims{
-		Methods: methods,
+		Grants: grants,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   subject,
 			IssuedAt:  jwt.NewNumericDate(iat),
@@ -470,8 +487,8 @@ func TestAC4_TokenLifecycle(t *testing.T) {
 	authDataDir := t.TempDir()
 	cfg := routeMatrixConfig(t, "off")
 	cfg.Auth = config.AuthConfig{
-		Modules: map[string][]string{"slideshow": {"pin"}},
-		PINs:    []config.NamedHash{{Name: "carol", Hash: bcryptHash(t, "4242")}},
+		Modules: map[string]config.ModuleAuthConfig{"slideshow": {PinFile: modulePinFile(t, "4242")}},
+		LDAP:    config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
 		DataDir: authDataDir,
 		Session: config.SessionConfig{TTLHours: 1}, // 1h TTL, default 0.5 refresh fraction.
 	}
@@ -493,7 +510,7 @@ func TestAC4_TokenLifecycle(t *testing.T) {
 	now := time.Now()
 
 	t.Run("expired token", func(t *testing.T) {
-		tok := signSessionToken(t, realKey, "carol", []string{"pin"}, now.Add(-2*time.Hour), now.Add(-time.Hour))
+		tok := signSessionToken(t, realKey, "carol", []string{"pin:slideshow"}, now.Add(-2*time.Hour), now.Add(-time.Hour))
 		res := doHostWithCookie(t, srv, http.MethodGet, "slideshow.example", "/", &http.Cookie{Name: "uw_session", Value: tok})
 		defer res.Body.Close()
 		if res.StatusCode != http.StatusUnauthorized {
@@ -514,7 +531,7 @@ func TestAC4_TokenLifecycle(t *testing.T) {
 		if _, err := rand.Read(otherKey); err != nil {
 			t.Fatalf("generate other key: %v", err)
 		}
-		tok := signSessionToken(t, otherKey, "carol", []string{"pin"}, now.Add(-time.Minute), now.Add(time.Hour))
+		tok := signSessionToken(t, otherKey, "carol", []string{"pin:slideshow"}, now.Add(-time.Minute), now.Add(time.Hour))
 		res := doHostWithCookie(t, srv, http.MethodGet, "slideshow.example", "/", &http.Cookie{Name: "uw_session", Value: tok})
 		defer res.Body.Close()
 		if res.StatusCode != http.StatusUnauthorized {
@@ -525,7 +542,7 @@ func TestAC4_TokenLifecycle(t *testing.T) {
 	t.Run("near-expiry refreshes the cookie", func(t *testing.T) {
 		iat := now.Add(-40 * time.Minute) // > 50% of the 1h TTL has elapsed.
 		exp := iat.Add(time.Hour)         // still valid: 20 minutes remain.
-		tok := signSessionToken(t, realKey, "carol", []string{"pin"}, iat, exp)
+		tok := signSessionToken(t, realKey, "carol", []string{"pin:slideshow"}, iat, exp)
 		res := doHostWithCookie(t, srv, http.MethodGet, "slideshow.example", "/", &http.Cookie{Name: "uw_session", Value: tok})
 		defer res.Body.Close()
 		if res.StatusCode != http.StatusOK {
@@ -567,8 +584,8 @@ func TestAC4_TokenLifecycle(t *testing.T) {
 func TestAC5_ThrottleBackoff(t *testing.T) {
 	cfg := routeMatrixConfig(t, "off")
 	cfg.Auth = config.AuthConfig{
-		Modules: map[string][]string{"slideshow": {"pin"}},
-		PINs:    []config.NamedHash{{Name: "carol", Hash: bcryptHash(t, "4242")}},
+		Modules: map[string]config.ModuleAuthConfig{"slideshow": {PinFile: modulePinFile(t, "4242")}},
+		LDAP:    config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
 		DataDir: t.TempDir(),
 	}
 	svc, err := auth.FromConfig(cfg.Auth, knownModules, false)
@@ -602,23 +619,28 @@ func TestAC5_ThrottleBackoff(t *testing.T) {
 // AC-5b: API keys.
 // ---------------------------------------------------------------------
 
-// TestAC5b_APIKeys proves security-plan.md's AC-5b: a valid API key passes a
-// "key" module with zero cookies, the same key is rejected on a non-"key"
-// module, an invalid key is a normal 401, and healthz is unaffected on both
-// hosts.
+// TestAC5b_APIKeys proves security-plan.md's AC-5b under the two-state model
+// (L6): a valid API key is a bearer credential that passes ANY protected
+// non-admin module unconditionally -- no per-module "key" opt-in exists any
+// more -- with zero cookies; an invalid key is a normal 401; the key never
+// authorizes admin (PIN-only, exclusively); and healthz is unaffected
+// everywhere.
 func TestAC5b_APIKeys(t *testing.T) {
 	const validKey = "test-automation-key-0123456789ab"
 	cfg := routeMatrixConfig(t, "off")
+	cfg.Routing["admin.example"] = "admin"
+	cfg.Admin.StaticDir = mkStaticDir(t)
 	cfg.Auth = config.AuthConfig{
-		Modules: map[string][]string{
-			"grocery": {"key"},
-			"todo":    {"pin"},
+		Modules: map[string]config.ModuleAuthConfig{
+			"grocery": {},
+			"todo":    {},
 		},
-		APIKeys: []config.NamedHash{{Name: "automation", Hash: apiKeyHash(validKey)}},
-		PINs:    []config.NamedHash{{Name: "carol", Hash: bcryptHash(t, "4242")}},
-		DataDir: t.TempDir(),
+		LDAP:         config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
+		APIKeys:      []config.NamedHash{{Name: "automation", Hash: apiKeyHash(validKey)}},
+		AdminPINFile: modulePinFile(t, "9999"),
+		DataDir:      t.TempDir(),
 	}
-	svc, err := auth.FromConfig(cfg.Auth, knownModules, false)
+	svc, err := auth.FromConfig(cfg.Auth, knownModules, true)
 	if err != nil {
 		t.Fatalf("auth.FromConfig: %v", err)
 	}
@@ -637,11 +659,20 @@ func TestAC5b_APIKeys(t *testing.T) {
 		}
 	})
 
-	t.Run("same key on todo (a non-key module) is 401", func(t *testing.T) {
+	t.Run("same key on todo (no per-module opt-in needed) also succeeds", func(t *testing.T) {
 		res := doHostWithKey(t, srv, "todo.example", "/items", validKey)
 		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(res.Body)
+			t.Fatalf("status = %d, want 200 (body %q)", res.StatusCode, body)
+		}
+	})
+
+	t.Run("the key never authorizes admin", func(t *testing.T) {
+		res := doHostWithKey(t, srv, "admin.example", "/api/config/auth", validKey)
+		defer res.Body.Close()
 		if res.StatusCode != http.StatusUnauthorized {
-			t.Fatalf("status = %d, want 401", res.StatusCode)
+			t.Fatalf("status = %d, want 401 (admin is PIN-only, exclusively)", res.StatusCode)
 		}
 	})
 
@@ -653,8 +684,8 @@ func TestAC5b_APIKeys(t *testing.T) {
 		}
 	})
 
-	t.Run("healthz 200 on both hosts", func(t *testing.T) {
-		for _, host := range []string{"grocery.example", "todo.example"} {
+	t.Run("healthz 200 everywhere", func(t *testing.T) {
+		for _, host := range []string{"grocery.example", "todo.example", "admin.example"} {
 			res := doHost(t, srv, http.MethodGet, host, "/healthz", "")
 			defer res.Body.Close()
 			if res.StatusCode != http.StatusOK {
@@ -679,18 +710,6 @@ func TestAC5b_APIKeys(t *testing.T) {
 // the one T5.2 item (a 0644 PIN file's login error) whose actual behavior
 // diverges from the plan's spec text.
 
-// adminPinFile writes pin to a fresh 0400 file under a new t.TempDir() and
-// returns its path.
-func adminPinFile(t *testing.T, pin string) string {
-	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "admin.pin")
-	if err := os.WriteFile(path, []byte(pin), 0400); err != nil {
-		t.Fatalf("write admin pin file: %v", err)
-	}
-	return path
-}
-
 // TestT5_2_AdminBreakGlassBothEmptyMatrixEncodings proves, for both
 // encodings of an empty admin assignment matrix (an explicit "admin": []
 // entry, and no "admin" key in auth.modules at all), that: an
@@ -698,7 +717,7 @@ func adminPinFile(t *testing.T, pin string) string {
 // from a 0400 admin_pin_file logs in as identity "admin" via method
 // "admin_pin"; and the resulting session cookie opens the admin shell.
 func TestT5_2_AdminBreakGlassBothEmptyMatrixEncodings(t *testing.T) {
-	encodings := map[string]map[string][]string{
+	encodings := map[string]map[string]config.ModuleAuthConfig{
 		"explicit admin: []": {"admin": {}},
 		"no admin key":       {},
 	}
@@ -710,7 +729,7 @@ func TestT5_2_AdminBreakGlassBothEmptyMatrixEncodings(t *testing.T) {
 			cfg.Admin.StaticDir = mkStaticDir(t)
 			cfg.Auth = config.AuthConfig{
 				Modules:      modules,
-				AdminPINFile: adminPinFile(t, "9999"),
+				AdminPINFile: modulePinFile(t, "9999"),
 				DataDir:      t.TempDir(),
 			}
 			svc, err := auth.FromConfig(cfg.Auth, knownModules, true)
@@ -844,7 +863,11 @@ const t56ConfigTemplate = `{
   },
   "auth": {
     "admin_pin_file": %[6]q,
-    "data_dir": %[7]q
+    "data_dir": %[7]q,
+    "ldap": {
+      "url": "ldap://fake",
+      "base_dn": "dc=example,dc=com"
+    }
   },
   "trailing_section": {
     "z": "keep-me-too",
@@ -905,7 +928,8 @@ func TestT5_6_RestartEquivalence(t *testing.T) {
 	const alicePIN = "1111"
 	const apiKeyName = "ci"
 
-	adminPINPath := adminPinFile(t, adminPIN)
+	adminPINPath := modulePinFile(t, adminPIN)
+	slideshowPinPath := modulePinFile(t, alicePIN)
 	authDataDir := t.TempDir()
 	adminStaticDir := mkStaticDir(t)
 	slideshowStaticDir := mkStaticDir(t)
@@ -957,14 +981,12 @@ func TestT5_6_RestartEquivalence(t *testing.T) {
 		t.Fatal("admin operator PIN login: expected a Set-Cookie")
 	}
 
-	// --- Step 2: via the admin API, add a PIN and generate a key. ---
-
-	pinRes := doHostWithCookieAndBody(t, srv, http.MethodPost, "admin.example", "/api/pins", `{"name":"alice","pin":"`+alicePIN+`"}`, adminCookie)
-	pinBody, _ := io.ReadAll(pinRes.Body)
-	pinRes.Body.Close()
-	if pinRes.StatusCode != http.StatusOK {
-		t.Fatalf("POST /api/pins: status = %d, want 200 (body %q)", pinRes.StatusCode, pinBody)
-	}
+	// --- Step 2: via the admin API, generate a key. The slideshow door code
+	// is a pin_file (slideshowPinPath, written directly to disk above) named
+	// in the module matrix below, not a value added through the admin API --
+	// auth.pins (a named-identity PIN table with its own POST route) was
+	// removed under the two-state model; a module's door code is now purely
+	// a config-file (or, here, live-apply) pin_file reference.
 
 	keyRes := doHostWithCookieAndBody(t, srv, http.MethodPost, "admin.example", "/api/keys", `{"name":"`+apiKeyName+`"}`, adminCookie)
 	keyBody, _ := io.ReadAll(keyRes.Body)
@@ -996,9 +1018,21 @@ func TestT5_6_RestartEquivalence(t *testing.T) {
 		}
 	})
 
-	// --- Step 2 (cont'd): PUT the module x method matrix. ---
+	// --- Step 2 (cont'd): PUT the module protection matrix. slideshow gets
+	// its own pin_file (a door code); grocery gets no pin_file at all --
+	// under the two-state model an empty ModuleAuthConfig{} is still fully
+	// protected, and the captured API key (a bearer credential, orthogonal
+	// to any per-module opt-in) authorizes it unconditionally. ---
 
-	matrixRes := doHostWithCookieAndBody(t, srv, http.MethodPut, "admin.example", "/api/config/modules", `{"slideshow":["pin"],"grocery":["key"]}`, adminCookie)
+	protectMatrixJSON, err := json.Marshal(map[string]config.ModuleAuthConfig{
+		"slideshow": {PinFile: slideshowPinPath},
+		"grocery":   {},
+	})
+	if err != nil {
+		t.Fatalf("marshal protect matrix: %v", err)
+	}
+
+	matrixRes := doHostWithCookieAndBody(t, srv, http.MethodPut, "admin.example", "/api/config/modules", string(protectMatrixJSON), adminCookie)
 	matrixBody, _ := io.ReadAll(matrixRes.Body)
 	matrixRes.Body.Close()
 	if matrixRes.StatusCode != http.StatusOK {
@@ -1065,7 +1099,7 @@ func TestT5_6_RestartEquivalence(t *testing.T) {
 
 	// --- Re-add protection for the restart phase. ---
 
-	restoreRes := doHostWithCookieAndBody(t, srv, http.MethodPut, "admin.example", "/api/config/modules", `{"slideshow":["pin"],"grocery":["key"]}`, adminCookie)
+	restoreRes := doHostWithCookieAndBody(t, srv, http.MethodPut, "admin.example", "/api/config/modules", string(protectMatrixJSON), adminCookie)
 	restoreBody, _ := io.ReadAll(restoreRes.Body)
 	restoreRes.Body.Close()
 	if restoreRes.StatusCode != http.StatusOK {

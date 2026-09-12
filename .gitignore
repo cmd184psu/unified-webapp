@@ -45,3 +45,5 @@ node_modules/
 # The profile itself (config.json, setup.sh, glauth.cfg) stays tracked.
 /local-test/data/
 /local-test/admin.pin
+/local-test/todo.pin
+/local-test/slideshow.pin

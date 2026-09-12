@@ -7,24 +7,26 @@
 (() => {
   'use strict';
 
-  const METHODS = ['pin', 'ldap', 'passkey', 'key'];
-
   const statusEl = document.getElementById('status');
   const panels = [
-    'panel-matrix', 'panel-pins', 'panel-keys',
+    'panel-matrix', 'panel-keys',
     'panel-ldap', 'panel-session', 'panel-passkeys', 'panel-operator-pin'
   ].map(id => document.getElementById(id));
 
   let authConfig = null; // last-fetched GET /api/config/auth response (redacted view)
-  let matrix = {};       // editable copy of authConfig.modules, keyed by module name
+  // Editable copy of authConfig.modules, keyed by module name -- excludes
+  // "admin" (shown read-only, never edited from this table; see
+  // renderMatrix/adminSourceDisplay). { [module]: { protected: bool, pinFile: string } }.
+  let matrix = {};
   let passkeys = [];     // last-fetched GET /api/auth/passkeys "passkeys" array
+  let pinFiles = [];     // last-fetched GET /api/config/pin-files "files" array
 
   // ────────────────────────────────────────────────────────────────
   // API helper
   // ────────────────────────────────────────────────────────────────
 
   // api() never throws on an HTTP error -- callers read `ok`/`data.error`
-  // and render it inline, per the matrix/pin/key/session panels' spec. The
+  // and render it inline, per the matrix/key/session panels' spec. The
   // one exception is 401: the gate has decided this session is no longer
   // valid, and the only correct move anywhere in this app is to reload so
   // the gate can serve its own login page.
@@ -57,13 +59,77 @@
   }
 
   // ────────────────────────────────────────────────────────────────
+  // Pin files (GET /api/config/pin-files) -- shared between the matrix's
+  // per-row pin_file picker and the Operator PIN panel's file picker.
+  // ────────────────────────────────────────────────────────────────
+
+  async function loadPinFiles() {
+    const res = await api('GET', '/api/config/pin-files');
+    if (res.ok && res.data) {
+      pinFiles = res.data.files || [];
+    }
+  }
+
+  // Builds <option> markup for a pin-file <select>: an empty "(no pin
+  // file)" option, one option per known pin file (label name, value path),
+  // and -- if currentValue isn't among them -- one extra option preserving
+  // it verbatim, so a pin_file value that predates this listing (or was
+  // just set moments ago, before the listing refreshed) is never silently
+  // dropped from the dropdown.
+  function pinFileOptions(currentValue) {
+    const opts = [`<option value=""${currentValue ? '' : ' selected'}>(no pin file)</option>`];
+    let found = !currentValue;
+    pinFiles.forEach(f => {
+      if (f.path === currentValue) found = true;
+      opts.push(`<option value="${esc(f.path)}"${f.path === currentValue ? ' selected' : ''}>${esc(f.name)}</option>`);
+    });
+    if (currentValue && !found) {
+      opts.push(`<option value="${esc(currentValue)}" selected>${esc(currentValue)}</option>`);
+    }
+    return opts.join('');
+  }
+
+  // Shared payload builder for PUT /api/config/modules: turns the matrix
+  // state into the module map the endpoint expects. adminOverride, when
+  // given, replaces modules.admin (used by the Operator PIN panel's file
+  // picker and Set PIN form); otherwise admin is re-injected verbatim from
+  // the last-fetched authConfig, since the PUT replaces the whole map and
+  // the matrix table never edits admin itself.
+  function buildModulesPayload(adminOverride) {
+    const toSave = {};
+    Object.keys(matrix).forEach(m => {
+      if (!matrix[m].protected) return;
+      const pinFile = matrix[m].pinFile.trim();
+      toSave[m] = pinFile ? { pin_file: pinFile } : {};
+    });
+    if (adminOverride !== undefined) {
+      toSave.admin = adminOverride;
+    } else if (authConfig.modules && authConfig.modules.admin) {
+      toSave.admin = authConfig.modules.admin;
+    }
+    return toSave;
+  }
+
+  // currentAdminPinFilePath mirrors adminSourceDisplay's precedence (see
+  // below) but returns the bare path, for seeding the Operator PIN panel's
+  // file picker and Set PIN form.
+  function currentAdminPinFilePath() {
+    const adminModule = (authConfig.modules || {}).admin;
+    if (adminModule && adminModule.pin_file) return adminModule.pin_file;
+    const adminPin = authConfig.admin_pin || {};
+    if (adminPin.defined_by === 'file') return adminPin.path || '';
+    return '';
+  }
+
+  // ────────────────────────────────────────────────────────────────
   // Load + render
   // ────────────────────────────────────────────────────────────────
 
   async function loadAll() {
     const [authRes, passkeysRes] = await Promise.all([
       api('GET', '/api/config/auth'),
-      api('GET', '/api/auth/passkeys')
+      api('GET', '/api/auth/passkeys'),
+      loadPinFiles()
     ]);
     if (!authRes.ok) {
       statusEl.textContent = 'Unable to load admin config.';
@@ -72,10 +138,24 @@
     authConfig = authRes.data;
     // One row per routable module (known_modules), not just the already-
     // protected ones -- otherwise protection could never be turned ON here.
+    // "admin" is excluded: it is shown read-only (renderMatrix) and never
+    // edited through this table (see the matrix-save handler).
+    //
+    // Seeding is deliberately asymmetric: known_modules seeds every row as
+    // *unprotected*, and only actual entries in authConfig.modules flip a
+    // row to protected. Seeding every known module as protected here would
+    // silently protect everything on the very next save (present === protected
+    // under the two-state model) -- the opposite of what an unprotected
+    // module's absence from authConfig.modules means.
     matrix = {};
-    (authConfig.known_modules || []).forEach(m => { matrix[m] = []; });
+    (authConfig.known_modules || []).forEach(m => {
+      if (m === 'admin') return;
+      matrix[m] = { protected: false, pinFile: '' };
+    });
     Object.keys(authConfig.modules || {}).forEach(m => {
-      matrix[m] = (authConfig.modules[m] || []).slice();
+      if (m === 'admin') return;
+      const entry = authConfig.modules[m] || {};
+      matrix[m] = { protected: true, pinFile: entry.pin_file || '' };
     });
     passkeys = (passkeysRes.ok && passkeysRes.data && passkeysRes.data.passkeys) || [];
 
@@ -83,7 +163,6 @@
     panels.forEach(p => p.classList.remove('hidden'));
 
     renderMatrix();
-    renderPins();
     renderKeys();
     renderLdap();
     renderSession();
@@ -93,49 +172,139 @@
 
   // ── Matrix ──────────────────────────────────────────────────────
 
+  // adminSourceDisplay describes where the admin PIN comes from, for the
+  // matrix table's read-only admin row: modules.admin.pin_file (the new
+  // spelling) takes priority when set, otherwise the legacy top-level
+  // admin_pin/admin_pin_file source authConfig.admin_pin already reports.
+  function adminSourceDisplay() {
+    const adminModule = (authConfig.modules || {}).admin;
+    if (adminModule && adminModule.pin_file) {
+      return adminModule.pin_file + ' (modules.admin.pin_file)';
+    }
+    const adminPin = authConfig.admin_pin || {};
+    if (adminPin.defined_by === 'file') return adminPin.path + ' (admin_pin_file)';
+    if (adminPin.defined_by === 'config') return '(inline config hash)';
+    return '(not configured)';
+  }
+
   function renderMatrix() {
     const container = document.getElementById('matrix-table');
     const modules = Object.keys(matrix).sort();
-    if (modules.length === 0) {
-      container.innerHTML = '<p class="hint">No modules in the matrix.</p>';
-      return;
-    }
 
     const table = document.createElement('table');
     table.className = 'matrix';
 
     const thead = document.createElement('thead');
-    thead.innerHTML = '<tr><th>Module</th>' +
-      METHODS.map(m => `<th>${esc(m)}</th>`).join('') + '</tr>';
+    thead.innerHTML = '<tr><th>Module</th><th>Protected</th><th>Pin file</th></tr>';
     table.appendChild(thead);
 
     const tbody = document.createElement('tbody');
     modules.forEach(mod => {
+      const entry = matrix[mod];
       const tr = document.createElement('tr');
-      let row = `<td>${esc(mod)}</td>`;
-      METHODS.forEach(method => {
-        const checked = matrix[mod].indexOf(method) !== -1;
-        row += `<td><input type="checkbox" data-module="${esc(mod)}" data-method="${esc(method)}"${checked ? ' checked' : ''}></td>`;
-      });
-      tr.innerHTML = row;
+      tr.innerHTML =
+        `<td>${esc(mod)}</td>` +
+        `<td><input type="checkbox" class="matrix-protected" data-module="${esc(mod)}"${entry.protected ? ' checked' : ''}></td>` +
+        `<td>` +
+        `<select class="matrix-pinfile" data-module="${esc(mod)}"${entry.protected ? '' : ' disabled'}>${pinFileOptions(entry.pinFile)}</select> ` +
+        `<button type="button" class="matrix-setpin-btn" data-module="${esc(mod)}"${entry.protected ? '' : ' disabled'}>Set PIN&hellip;</button>` +
+        `<div class="matrix-setpin-form inline-form hidden" data-module="${esc(mod)}">` +
+        `<input type="password" class="matrix-pin-input" placeholder="new PIN" autocomplete="off">` +
+        `<button type="button" class="matrix-pin-save" data-module="${esc(mod)}">Save</button>` +
+        `<button type="button" class="matrix-pin-cancel" data-module="${esc(mod)}">Cancel</button>` +
+        `</div>` +
+        `<span class="matrix-pin-status status" data-module="${esc(mod)}"></span>` +
+        `<p class="matrix-pin-error error" data-module="${esc(mod)}"></p>` +
+        `</td>`;
       tbody.appendChild(tr);
     });
+
+    // Admin is always shown for visibility, but read-only here: its source
+    // is one of three config keys (auth.admin_pin, auth.admin_pin_file,
+    // auth.modules.admin.pin_file) with its own exactly-one-of-three rule,
+    // not a toggle-and-door-code pair like every other module -- see the
+    // Operator PIN panel below for the authoritative, unredacted view.
+    const adminTr = document.createElement('tr');
+    adminTr.innerHTML =
+      `<td>admin</td>` +
+      `<td class="hint">n/a</td>` +
+      `<td class="hint">${esc(adminSourceDisplay())}</td>`;
+    tbody.appendChild(adminTr);
+
     table.appendChild(tbody);
 
     container.innerHTML = '';
     container.appendChild(table);
 
-    container.querySelectorAll('input[type="checkbox"]').forEach(box => {
+    container.querySelectorAll('input.matrix-protected').forEach(box => {
       box.addEventListener('change', () => {
         const mod = box.dataset.module;
-        const method = box.dataset.method;
-        const list = matrix[mod] || [];
-        const idx = list.indexOf(method);
-        if (box.checked && idx === -1) list.push(method);
-        if (!box.checked && idx !== -1) list.splice(idx, 1);
-        matrix[mod] = list;
+        matrix[mod].protected = box.checked;
+        const select = container.querySelector(`select.matrix-pinfile[data-module="${CSS.escape(mod)}"]`);
+        if (select) select.disabled = !box.checked;
+        const setBtn = container.querySelector(`.matrix-setpin-btn[data-module="${CSS.escape(mod)}"]`);
+        if (setBtn) setBtn.disabled = !box.checked;
       });
     });
+    container.querySelectorAll('select.matrix-pinfile').forEach(select => {
+      select.addEventListener('change', () => {
+        matrix[select.dataset.module].pinFile = select.value;
+      });
+    });
+    container.querySelectorAll('.matrix-setpin-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const mod = btn.dataset.module;
+        const form = container.querySelector(`.matrix-setpin-form[data-module="${CSS.escape(mod)}"]`);
+        form.classList.toggle('hidden');
+        const input = form.querySelector('.matrix-pin-input');
+        input.value = '';
+        if (!form.classList.contains('hidden')) input.focus();
+      });
+    });
+    container.querySelectorAll('.matrix-pin-cancel').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const mod = btn.dataset.module;
+        const form = container.querySelector(`.matrix-setpin-form[data-module="${CSS.escape(mod)}"]`);
+        form.classList.add('hidden');
+        form.querySelector('.matrix-pin-input').value = '';
+      });
+    });
+    container.querySelectorAll('.matrix-pin-save').forEach(btn => {
+      btn.addEventListener('click', () => matrixSetPinSubmit(btn.dataset.module));
+    });
+  }
+
+  // matrixSetPinSubmit pushes a new PIN to a module's pin file via POST
+  // /api/config/pin-files, from the matrix row's inline "Set PIN..." form.
+  // Targets the file currently selected in that row's dropdown, or lets
+  // the server pick a default path by module name when none is selected
+  // yet. The typed PIN is cleared from the input immediately after
+  // submission, success or failure, and is never logged or redisplayed.
+  async function matrixSetPinSubmit(mod) {
+    const container = document.getElementById('matrix-table');
+    const form = container.querySelector(`.matrix-setpin-form[data-module="${CSS.escape(mod)}"]`);
+    const select = container.querySelector(`select.matrix-pinfile[data-module="${CSS.escape(mod)}"]`);
+    const errorEl = container.querySelector(`.matrix-pin-error[data-module="${CSS.escape(mod)}"]`);
+    const input = form.querySelector('.matrix-pin-input');
+    const pin = input.value;
+    errorEl.textContent = '';
+    const selectedPath = select.value;
+    const payload = selectedPath ? { path: selectedPath, pin } : { name: mod + '.pin', pin };
+    const res = await api('POST', '/api/config/pin-files', payload);
+    input.value = '';
+    if (!res.ok) {
+      errorEl.textContent = errorText(res, 'Unable to set PIN.');
+      return;
+    }
+    matrix[mod].pinFile = (res.data && res.data.path) || '';
+    await loadPinFiles();
+    renderMatrix();
+    const statusEl2 = document.getElementById('matrix-table')
+      .querySelector(`.matrix-pin-status[data-module="${CSS.escape(mod)}"]`);
+    if (statusEl2) {
+      statusEl2.textContent = 'Saved.';
+      setTimeout(() => { statusEl2.textContent = ''; }, 3000);
+    }
   }
 
   document.getElementById('matrix-save').addEventListener('click', async () => {
@@ -143,77 +312,28 @@
     const statusEl2 = document.getElementById('matrix-status');
     errorEl.textContent = '';
     statusEl2.textContent = '';
-    // A matrix entry with zero methods would protect the module with no
-    // way to log in, so unchecked rows are omitted, not sent empty.
-    const toSave = {};
-    Object.keys(matrix).forEach(m => {
-      if (matrix[m].length > 0) toSave[m] = matrix[m];
-    });
+    // Only rows the operator checked "Protected" are sent, as {} (LDAP/
+    // passkey only) or {pin_file: ...} (also accepts a per-module door
+    // code) -- an unchecked row is simply omitted, leaving it open. This is
+    // the two-state model's contract: present (even {}) means protected,
+    // absent means open. admin is never edited from this table -- see
+    // buildModulesPayload, which resends its existing entry (if any)
+    // unchanged so a save doesn't silently drop modules.admin.pin_file
+    // (the PUT replaces the whole map).
+    const toSave = buildModulesPayload();
     const res = await api('PUT', '/api/config/modules', toSave);
     if (!res.ok) {
       errorEl.textContent = errorText(res, 'Unable to save matrix.');
       return;
     }
+    authConfig.modules = (res.data && res.data.modules) || toSave;
+    Object.keys(matrix).forEach(m => {
+      matrix[m].pinFile = (authConfig.modules[m] && authConfig.modules[m].pin_file) || '';
+    });
+    renderMatrix();
     statusEl2.textContent = 'Saved.';
     setTimeout(() => { statusEl2.textContent = ''; }, 3000);
   });
-
-  // ── PINs ────────────────────────────────────────────────────────
-
-  function renderPins() {
-    const list = document.getElementById('pins-list');
-    list.innerHTML = '';
-    const pins = (authConfig.pins || []);
-    if (pins.length === 0) {
-      list.innerHTML = '<li class="named-list-empty">No PINs configured.</li>';
-      return;
-    }
-    pins.forEach(p => {
-      const li = document.createElement('li');
-      li.innerHTML = `<span class="named-list-name">${esc(p.name)}</span>` +
-        `<span class="named-list-value">(set)</span>` +
-        `<button type="button" class="btn-remove" data-name="${esc(p.name)}">Remove</button>`;
-      list.appendChild(li);
-    });
-    list.querySelectorAll('.btn-remove').forEach(btn => {
-      btn.addEventListener('click', () => removePin(btn.dataset.name));
-    });
-  }
-
-  document.getElementById('pin-form').addEventListener('submit', async e => {
-    e.preventDefault();
-    const errorEl = document.getElementById('pin-error');
-    errorEl.textContent = '';
-    const nameInput = document.getElementById('pin-name');
-    const pinInput = document.getElementById('pin-value');
-    const name = nameInput.value.trim();
-    const pin = pinInput.value;
-    if (!name || !pin) return;
-    const res = await api('POST', '/api/pins', { name, pin });
-    if (!res.ok) {
-      errorEl.textContent = errorText(res, 'Unable to add PIN.');
-      return;
-    }
-    authConfig.pins = authConfig.pins || [];
-    const idx = authConfig.pins.findIndex(p => p.name === name);
-    const entry = { name, hash: '(set)' };
-    if (idx !== -1) authConfig.pins[idx] = entry; else authConfig.pins.push(entry);
-    nameInput.value = '';
-    pinInput.value = '';
-    renderPins();
-  });
-
-  async function removePin(name) {
-    const errorEl = document.getElementById('pin-error');
-    errorEl.textContent = '';
-    const res = await api('DELETE', '/api/pins/' + encodeURIComponent(name));
-    if (!res.ok && res.status !== 404) {
-      errorEl.textContent = errorText(res, 'Unable to remove PIN.');
-      return;
-    }
-    authConfig.pins = (authConfig.pins || []).filter(p => p.name !== name);
-    renderPins();
-  }
 
   // ── API keys ────────────────────────────────────────────────────
 
@@ -303,21 +423,52 @@
   // ── LDAP ────────────────────────────────────────────────────────
 
   function renderLdap() {
-    const dl = document.getElementById('ldap-settings');
     const l = authConfig.ldap || {};
-    const rows = [
-      ['URL', l.url || '(not set)'],
-      ['Start TLS', l.start_tls ? 'yes' : 'no'],
-      ['Insecure TLS', l.insecure_tls ? 'yes' : 'no'],
-      ['Bind DN', l.bind_dn || '(not set)'],
-      ['Bind password', l.bind_password || '(not set)'],
-      ['Base DN', l.base_dn || '(not set)'],
-      ['User filter', l.user_filter || '(not set)'],
-      ['Required groups', (l.required_groups || []).join(', ') || '(none)'],
-      ['Timeout (s)', String(l.timeout_seconds || 0)]
-    ];
-    dl.innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+    document.getElementById('ldap-url').value = l.url || '';
+    document.getElementById('ldap-base-dn').value = l.base_dn || '';
+    document.getElementById('ldap-bind-dn').value = l.bind_dn || '';
+    const pwInput = document.getElementById('ldap-bind-password');
+    pwInput.value = '';
+    pwInput.placeholder = l.bind_password === '(set)' ? '(unchanged)' : '(none)';
+    document.getElementById('ldap-user-filter').value = l.user_filter || '';
+    document.getElementById('ldap-required-groups').value = (l.required_groups || []).join(', ');
+    document.getElementById('ldap-timeout').value = l.timeout_seconds || 0;
+    document.getElementById('ldap-start-tls').checked = !!l.start_tls;
+    document.getElementById('ldap-insecure-tls').checked = !!l.insecure_tls;
   }
+
+  document.getElementById('ldap-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const errorEl = document.getElementById('ldap-error');
+    const statusEl2 = document.getElementById('ldap-status');
+    errorEl.textContent = '';
+    statusEl2.textContent = '';
+    statusEl2.className = 'status';
+    const url = document.getElementById('ldap-url').value.trim();
+    const start_tls = document.getElementById('ldap-start-tls').checked;
+    const insecure_tls = document.getElementById('ldap-insecure-tls').checked;
+    const bind_dn = document.getElementById('ldap-bind-dn').value.trim();
+    const bind_password = document.getElementById('ldap-bind-password').value;
+    const base_dn = document.getElementById('ldap-base-dn').value.trim();
+    const user_filter = document.getElementById('ldap-user-filter').value.trim();
+    const required_groups = document.getElementById('ldap-required-groups').value
+      .split(',').map(s => s.trim()).filter(Boolean);
+    const timeout_seconds = parseInt(document.getElementById('ldap-timeout').value, 10) || 0;
+    const res = await api('PUT', '/api/config/ldap', {
+      url, start_tls, insecure_tls, bind_dn, bind_password,
+      base_dn, user_filter, required_groups, timeout_seconds
+    });
+    document.getElementById('ldap-bind-password').value = '';
+    if (!res.ok) {
+      errorEl.textContent = errorText(res, 'Unable to save LDAP settings.');
+      return;
+    }
+    authConfig.ldap = res.data;
+    renderLdap();
+    statusEl2.textContent = 'Saved.';
+    statusEl2.className = 'status status-good';
+    setTimeout(() => { statusEl2.textContent = ''; statusEl2.className = 'status'; }, 3000);
+  });
 
   document.getElementById('ldap-test-form').addEventListener('submit', async e => {
     e.preventDefault();
@@ -466,14 +617,27 @@
     };
   }
 
+  // Passkeys need a secure context: browsers expose WebAuthn only over
+  // HTTPS or on localhost, so on a plain-http host the register button is
+  // disabled up front with a tooltip explaining why, rather than erroring
+  // on click.
+  const passkeySupported = window.isSecureContext &&
+    !!window.PublicKeyCredential && !!navigator.credentials;
+  if (!passkeySupported) {
+    const form = document.getElementById('passkey-form');
+    const btn = form.querySelector('button');
+    btn.disabled = true;
+    const why = 'Disabled: this page is served over plain HTTP. Browsers only ' +
+      'allow passkeys (WebAuthn) over HTTPS or on localhost.';
+    btn.title = why;
+    form.title = why;
+  }
+
   document.getElementById('passkey-form').addEventListener('submit', async e => {
     e.preventDefault();
+    if (!passkeySupported) return;
     const errorEl = document.getElementById('passkey-error');
     errorEl.textContent = '';
-    if (!window.PublicKeyCredential || !navigator.credentials) {
-      errorEl.textContent = 'Passkeys are not supported in this browser.';
-      return;
-    }
     const nameInput = document.getElementById('passkey-name');
     const friendlyName = nameInput.value.trim();
 
@@ -510,7 +674,11 @@
     renderPasskeys();
   });
 
-  // ── Operator PIN (read-only) ────────────────────────────────────
+  // ── Operator PIN ────────────────────────────────────────────────
+  // The door-code that unlocks this admin panel. Read-only status text
+  // (source: config / file / none) plus a pin-file picker and a Set PIN
+  // form that push changes via the same modules-map save path the matrix
+  // uses (see buildModulesPayload) and the shared pin-files endpoint.
 
   function renderOperatorPin() {
     const el = document.getElementById('operator-pin-status');
@@ -522,7 +690,80 @@
     } else {
       el.textContent = 'Not configured.';
     }
+    document.getElementById('operator-pin-file-select').innerHTML =
+      pinFileOptions(currentAdminPinFilePath());
   }
+
+  document.getElementById('operator-pin-change-file').addEventListener('click', async () => {
+    const statusEl2 = document.getElementById('operator-pin-file-status');
+    const errorEl = document.getElementById('operator-pin-error');
+    statusEl2.textContent = '';
+    errorEl.textContent = '';
+    const selectedPath = document.getElementById('operator-pin-file-select').value;
+    const toSave = buildModulesPayload({ pin_file: selectedPath });
+    const res = await api('PUT', '/api/config/modules', toSave);
+    if (!res.ok) {
+      errorEl.textContent = errorText(res, 'Unable to change PIN file.');
+      return;
+    }
+    authConfig.modules = (res.data && res.data.modules) || toSave;
+    Object.keys(matrix).forEach(m => {
+      matrix[m].pinFile = (authConfig.modules[m] && authConfig.modules[m].pin_file) || '';
+    });
+    renderMatrix();
+    renderOperatorPin();
+    statusEl2.textContent = 'Saved.';
+    setTimeout(() => { statusEl2.textContent = ''; }, 3000);
+  });
+
+  document.getElementById('operator-pin-set-btn').addEventListener('click', () => {
+    const form = document.getElementById('operator-pin-form');
+    const input = document.getElementById('operator-pin-value');
+    form.classList.toggle('hidden');
+    input.value = '';
+    if (!form.classList.contains('hidden')) input.focus();
+  });
+
+  document.getElementById('operator-pin-cancel').addEventListener('click', () => {
+    document.getElementById('operator-pin-form').classList.add('hidden');
+    document.getElementById('operator-pin-value').value = '';
+  });
+
+  document.getElementById('operator-pin-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const errorEl = document.getElementById('operator-pin-error');
+    const statusEl2 = document.getElementById('operator-pin-file-status');
+    errorEl.textContent = '';
+    statusEl2.textContent = '';
+    const input = document.getElementById('operator-pin-value');
+    const pin = input.value;
+    const currentPath = currentAdminPinFilePath();
+    const payload = currentPath ? { path: currentPath, pin } : { name: 'admin.pin', pin };
+    const res = await api('POST', '/api/config/pin-files', payload);
+    input.value = '';
+    if (!res.ok) {
+      errorEl.textContent = errorText(res, 'Unable to set PIN.');
+      return;
+    }
+    // Also point modules.admin.pin_file at the returned path, via the same
+    // shared modules-map save path the matrix and "Change file" use.
+    const toSave = buildModulesPayload({ pin_file: res.data.path });
+    const modRes = await api('PUT', '/api/config/modules', toSave);
+    if (!modRes.ok) {
+      errorEl.textContent = errorText(modRes, 'PIN set, but unable to update the admin pin file reference.');
+      return;
+    }
+    authConfig.modules = (modRes.data && modRes.data.modules) || toSave;
+    Object.keys(matrix).forEach(m => {
+      matrix[m].pinFile = (authConfig.modules[m] && authConfig.modules[m].pin_file) || '';
+    });
+    await loadPinFiles();
+    renderMatrix();
+    renderOperatorPin();
+    document.getElementById('operator-pin-form').classList.add('hidden');
+    statusEl2.textContent = 'Saved.';
+    setTimeout(() => { statusEl2.textContent = ''; }, 3000);
+  });
 
   // ── Sign out ────────────────────────────────────────────────────
 

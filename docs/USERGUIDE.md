@@ -3,8 +3,10 @@
 One Go binary serves seven modules. The `Host` header of each request picks
 the module: `host_routing` in the config maps a hostname (port ignored) to a
 module name, so `todo.test:8080` and `todo.test` both route to whatever
-`"todo.test"` maps to. Each module can independently require login (PIN,
-LDAP, passkey, or API key) — or require nothing at all.
+`"todo.test"` maps to. Each module is independently either open (no login)
+or protected (LDAP, an optional PIN door code, passkey, and API keys all
+work against a protected module) — see
+[Logging in: the auth model](#logging-in-the-auth-model).
 
 Modules:
 
@@ -52,20 +54,22 @@ go run ./cmd/server -config local-test/config.json
 
 **4. Browse.** Every module is at `http://<name>.test:8080`:
 
-| URL | Module | Auth | Credential |
+| URL | Module | Protected? | Credential |
 |---|---|---|---|
-| http://grocery.test:8080 | grocery | none | — |
-| http://todo.test:8080 | todo | PIN | `1234` |
-| http://slideshow.test:8080 | slideshow | PIN | `1234` |
-| http://menuserver.test:8080 (or menu.test) | menuserver | API key | see below |
-| http://obsidianoid.test:8080 | obsidianoid | LDAP | `chris` / `ldap-test-1` |
-| http://multissh.test:8080 | multissh | LDAP **or** API key | same as above |
-| http://admin.test:8080 | admin | admin PIN | `424242` |
+| http://grocery.test:8080 | grocery | open | — |
+| http://todo.test:8080 | todo | yes | PIN `111111`, or LDAP |
+| http://slideshow.test:8080 | slideshow | yes | PIN `222222`, or LDAP |
+| http://menuserver.test:8080 (or menu.test) | menuserver | yes | LDAP (or API key) |
+| http://obsidianoid.test:8080 | obsidianoid | yes | LDAP (or API key) |
+| http://multissh.test:8080 | multissh | yes | LDAP (or API key) |
+| http://admin.test:8080 | admin | yes | admin PIN `424242` only |
 
 These are throwaway test credentials, published in this repo on purpose.
-Never reuse them outside local testing.
+Never reuse them outside local testing. LDAP credentials for all protected
+modules other than admin: `chris` / `ldap-test-1` (see below).
 
-The test API key (menuserver, multissh):
+The test API key (works on any protected non-admin module — todo,
+slideshow, menuserver, obsidianoid, multissh):
 
 ```
 varOO_vuQyged_rklN3ujsy2tgQAcEs-9Ln13hDIyh0
@@ -89,8 +93,12 @@ glauth -c local-test/glauth.cfg
 ```
 
 That serves user `chris` (password `ldap-test-1`, member of `household`,
-which the profile requires) and a read-only bind account. Verify it answers
-before blaming the webapp:
+which the profile requires) and a read-only bind account. LDAP is offered on
+every protected module in this profile — including menuserver, which used
+to be API-key-only — so glauth needs to be running to log into todo,
+slideshow, menuserver, obsidianoid, or multissh via the browser (todo and
+slideshow also accept their PIN instead). Verify it answers before blaming
+the webapp:
 
 ```
 ldapsearch -H ldap://127.0.0.1:3893 -x \
@@ -123,11 +131,12 @@ groups by searching `base_dn` for entries whose `member`/`memberUid`/
 - **Passkeys are deliberately absent.** WebAuthn requires a secure context,
   and `http://anything.test` is not one (only `localhost` gets that
   exemption). Testing passkeys needs TLS or a `localhost` route.
-- **Admin PIN lives in `local-test/admin.pin`** — a plaintext PIN in a file
-  that must be `chmod 0400` (the server refuses more-open modes on every
-  read). Edit the file to change the PIN; it takes effect on the next login
-  attempt, no restart.
-- Runtime state (data dirs, the PIN file, the auth session key) is
+- **PINs live in plaintext files** — `local-test/admin.pin` (admin),
+  `local-test/todo.pin` (todo), `local-test/slideshow.pin` (slideshow) —
+  each of which must be `chmod 0400` (the server refuses more-open modes on
+  every read). Edit a file to change its PIN; it takes effect on the next
+  login attempt, no restart.
+- Runtime state (data dirs, the PIN files, the auth session key) is
   gitignored; the profile itself (`config.json`, `setup.sh`, `glauth.cfg`)
   is tracked.
 
@@ -136,25 +145,38 @@ groups by searching `base_dn` for entries whose `member`/`memberUid`/
 ## Logging in: the auth model
 
 Auth is configured centrally (`auth` section) and enforced server-side per
-module by a gate in front of the module's routes. `auth.modules` maps each
-module to the list of methods it accepts:
+module by a gate in front of the module's routes. It's a **two-state**
+model: `auth.modules` maps a module name to its protection — a module *not*
+listed there is **open** (no login at all); a module listed there — even as
+a bare `{}` — is **protected**, and every protected module accepts the same
+set of methods, gated only by what's configured:
 
-- **`pin`** — a shared numeric PIN checked against bcrypt hashes in
-  `auth.pins` (several named PINs allowed; the matching name becomes your
-  identity). Generate a hash with `go run ./cmd/server -hash-pin`.
-- **`ldap`** — username + password verified by bind against your directory,
+- **LDAP** — always offered on a protected non-admin module (it's the
+  identity backbone every protected module relies on, which is why
+  `auth.ldap.url` is required as soon as any non-admin module is
+  protected). Username + password verified by bind against your directory,
   with optional required-group membership.
-- **`passkey`** — WebAuthn. Requires a configured `rp_id`/`rp_origins` and a
-  secure context (HTTPS, or localhost). Register keys from a module page
-  once logged in by another method.
-- **`key`** — API keys for scripts: `Authorization: Bearer <key>` (no
-  cookies involved). Keys are stored as SHA-256 hashes in `auth.api_keys`;
-  generate a pair with `go run ./cmd/server -gen-api-key`.
+- **A PIN door code** — offered only when the module's entry sets
+  `pin_file`, e.g. `"todo": { "pin_file": "./todo.pin" }`. This is a single
+  shared numeric PIN read from a plaintext file that must be `chmod 0400`;
+  it doesn't carry an identity the way LDAP does — it's just a door code
+  for that one module. Edit the file to change the PIN; no restart needed.
+- **Passkey** — WebAuthn, offered when `auth.passkey` (`rp_id`/
+  `rp_origins`) is configured. Requires a secure context (HTTPS, or
+  `localhost`). Register keys from a module page once logged in by another
+  method.
+- **API key** — orthogonal to the modules matrix: a valid key from
+  `auth.api_keys` works on **any protected non-admin module**, regardless
+  of that module's own `pin_file` setting, and is ignored on open modules
+  (nothing to authenticate into) and never accepted for admin. Sent as
+  `Authorization: Bearer <key>` (no cookies involved); keys are stored as
+  SHA-256 hashes, generate a pair with `go run ./cmd/server -gen-api-key`.
 
-A module with an empty/absent method list is open — no login. The **admin**
-module is special: routed admin always requires the operator PIN
-(`auth.admin_pin` bcrypt hash in config, or `auth.admin_pin_file` — exactly
-one of the two), independent of the matrix.
+The **admin** module is the one exception to all of this: it is **PIN-only**
+— never LDAP, passkey, or API key — using the operator PIN configured
+through exactly one of `auth.admin_pin` (bcrypt hash in config),
+`auth.admin_pin_file`, or `auth.modules.admin.pin_file` (the last is just
+the module matrix's normal `pin_file` field, reused for admin's own entry).
 
 Sessions are cookies (`uw_session`), TTL and sliding refresh configurable
 under `auth.session`. Every module answers `GET /api/auth/mode` with its
@@ -256,10 +278,11 @@ it as a self-hosted start page for your home infrastructure.
 - There is no editing UI — edit the JSON files on disk. The server never
   writes.
 
-Because pages can hold passwords, the local profile gates this module with
-an API key; in production put it behind whatever auth you trust. **Don't
-rely on the hidden-password toggle for security** — the password is in the
-page's HTML; the auth gate is the protection.
+Because pages can hold passwords, the local profile protects this module
+(LDAP, or the API key for scripted access); in production put it behind
+whatever auth you trust. **Don't rely on the hidden-password toggle for
+security** — the password is in the page's HTML; the auth gate is the
+protection.
 
 ## Obsidianoid
 
@@ -309,32 +332,34 @@ it to many hosts. See `docs/multissh.md` for the full operator guide.
   disconnections, broadcasts, and rejected WebSocket upgrades are audit-
   logged server-side (never with credential values).
 
-In the local profile multissh accepts LDAP (browser login) **or** an API
-key (scripted access) — an example of stacking methods on one module.
+In the local profile multissh is protected like any other module: LDAP for
+browser login, or the API key for scripted access.
 
 ## Admin
 
-A web UI for operating the auth system without touching the server: edit
-which methods each module requires, manage PINs and API keys, and apply the
-result **live** — enforcement changes on the very next request, no restart.
+A web UI for operating the auth system without touching the server: toggle
+which modules are protected, set or clear each module's `pin_file` door
+code, manage API keys, and apply the result **live** — enforcement changes
+on the very next request, no restart.
 
 **Using it:**
 
-- Log in with the operator PIN. This is separate from the auth matrix: a
+- Log in with the operator PIN. This is separate from the modules matrix: a
   routed admin module always requires the admin PIN, configured as exactly
-  one of `auth.admin_pin` (bcrypt hash in the config) or
-  `auth.admin_pin_file` (plaintext PIN in a root-owned `0400` file, re-read
-  every login so edits apply immediately). The server refuses to boot with
-  admin routed and neither — or both — configured.
-- Edit the per-module method matrix, add/remove named PINs, add/remove API
+  one of `auth.admin_pin` (bcrypt hash in the config), `auth.admin_pin_file`,
+  or `auth.modules.admin.pin_file` (plaintext PIN in a `0400` file, re-read
+  every login so edits apply immediately) — exactly one of the three. The
+  server refuses to boot with admin routed and none configured.
+- Toggle each module protected/open and set its `pin_file`, add/remove API
   keys. New API keys are shown **once** at creation; only their hashes are
   stored. Sensitive values are redacted in every view.
 - Apply validates the new policy first (same rules as boot) and rejects
-  anything inconsistent — e.g. a module listing `pin` with no PINs defined.
-  On success the config file is rewritten surgically (only the auth
-  section; your comments-free JSON formatting elsewhere is preserved) via
-  an atomic temp-file + rename, and the running policy is swapped in
-  memory. The result is exactly what a restart would load.
+  anything inconsistent — e.g. an unknown module name, or a protected
+  non-admin module when `auth.ldap.url` isn't set. On success the config
+  file is rewritten surgically (only the auth section; your comments-free
+  JSON formatting elsewhere is preserved) via an atomic temp-file + rename,
+  and the running policy is swapped in memory. The result is exactly what a
+  restart would load.
 - Wrong-PIN attempts get 401s and are throttled.
 
 **Don't rely on front-end behavior for security** — all enforcement

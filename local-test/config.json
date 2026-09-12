@@ -77,15 +77,28 @@
   },
   "auth": {
     "modules": {
-      "todo": ["pin"],
-      "slideshow": ["pin"],
-      "menuserver": ["key"],
-      "obsidianoid": ["ldap"],
-      "multissh": ["ldap", "key"],
-      "admin": []
+      "admin": {
+        "pin_file": "/opt/unified-webapp/local-test/admin.pin"
+      },
+      "menuserver": {
+        "pin_file": ""
+      },
+      "multissh": {
+        "pin_file": ""
+      },
+      "obsidianoid": {
+        "pin_file": ""
+      },
+      "slideshow": {
+        "pin_file": "/opt/unified-webapp/local-test/slideshow.pin"
+      },
+      "todo": {
+        "pin_file": "/opt/unified-webapp/local-test/todo.pin"
+      }
     },
-    "admin_pin_file": "./admin.pin",
-    "data_dir": "./data/auth",
+    "admin_pin": "",
+    "admin_pin_file": "",
+    "data_dir": "/opt/unified-webapp/local-test/data/auth",
     "cookie_secure": false,
     "cookie_domain": "",
     "session": {
@@ -100,14 +113,20 @@
       "bind_password": "svc-secret-1",
       "base_dn": "dc=glauth,dc=com",
       "user_filter": "(cn=%s)",
-      "required_groups": ["household"],
+      "required_groups": [
+        "household"
+      ],
       "timeout_seconds": 5
     },
-    "pins": [
-      { "name": "tester", "hash": "$2a$10$t705LW5e1Oo9upyp2.xjb.ChrAWIAcXfBtrkjSWgrJZHQwko20lQq" }
-    ],
     "api_keys": [
-      { "name": "local-test", "hash": "sha256:c7fa7e4500e52a9c89f647736a72b39aaed9bcf4c3b2327c2b228adb9c7c10c3" }
-    ]
+      {
+        "name": "local-test",
+        "hash": "sha256:c7fa7e4500e52a9c89f647736a72b39aaed9bcf4c3b2327c2b228adb9c7c10c3"
+      }
+    ],
+    "passkey": {
+      "rp_id": "",
+      "rp_origins": null
+    }
   }
 }

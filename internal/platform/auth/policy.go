@@ -5,9 +5,9 @@
 //
 // The design (FR-A11 / AC-13) is deliberate: BuildPolicy is the *only*
 // constructor of a Policy, and it captures everything a live admin edit can
-// change -- the module method matrix, the PIN/API-key tables, the admin-PIN
+// change -- the two-state module table, the API-key table, the admin-PIN
 // source, LDAP settings, passkey RP config, and session/cookie settings --
-// not just the matrix. A later task (admin live-apply) validates a new
+// not just the module table. A later task (admin live-apply) validates a new
 // config.AuthConfig, builds a fresh Policy, and swaps it into the Service
 // with a single atomic pointer store. Because every per-request read goes
 // through Service.policy(), that swap takes effect on the very next request
@@ -29,22 +29,25 @@ import (
 // concurrent readers always observe an internally-consistent set of values.
 type Policy struct {
 	// Modules is a copy of config.AuthConfig.Modules: module name (or the
-	// reserved "admin" pseudo-module) -> its configured accepted-method
-	// list. This is the raw matrix as configured -- it does not include the
-	// admin_pin token that admin's *effective* accepted set always carries;
-	// EffectiveMethods below folds that in, and the gate/mode reporting
-	// (T4.2) is expected to call it for admin rather than reading Modules
-	// directly.
-	Modules map[string][]string
+	// reserved "admin" pseudo-module) -> its two-state auth config. Present
+	// (even a zero ModulePolicy) means the module is protected; absent means
+	// open (auth bypassed entirely). This replaces the old accepted-method
+	// matrix: what a protected module offers on its login page is computed
+	// by OfferedMethods below, never read off this map directly.
+	Modules map[string]ModulePolicy
 
-	// PINs and APIKeys are copies of the configured named-hash tables.
-	PINs    []config.NamedHash
+	// APIKeys is a copy of the configured named-hash API-key table. Keys are
+	// orthogonal service authentication: valid on any protected non-admin
+	// module, never on admin, never surfaced on a login page.
 	APIKeys []config.NamedHash
 
 	// AdminPIN and AdminPINFile mirror config.AuthConfig's admin operator
-	// PIN source -- exactly one is non-empty, or both are empty when no
-	// operator PIN is configured (ValidatePolicy enforces this before a
-	// Policy is ever built from the config).
+	// PIN source. ValidatePolicy guarantees at most one of the three
+	// configured spellings (auth.admin_pin, auth.admin_pin_file,
+	// auth.modules.admin.pin_file) is ever set; BuildPolicy folds the third
+	// spelling into AdminPINFile, so by the time a Policy exists there are
+	// only ever these two fields to consult, exactly one non-empty or both
+	// empty when no operator PIN is configured.
 	AdminPIN     string
 	AdminPINFile string
 
@@ -58,9 +61,9 @@ type Policy struct {
 	Passkey config.PasskeyConfig
 
 	// passkeys is the constructed passkey ceremony service for this
-	// snapshot, or nil when passkeys are not configured/used by any module.
-	// It is built once per Policy (newPasskeyService touches the
-	// filesystem), never rebuilt per request.
+	// snapshot, or nil when no protected non-admin module is configured (or
+	// Passkey.RPID is unset). It is built once per Policy (newPasskeyService
+	// touches the filesystem), never rebuilt per request.
 	passkeys *passkeyService
 
 	// SessionTTL and RefreshFraction are the resolved (default-applied)
@@ -75,25 +78,44 @@ type Policy struct {
 	CookieDomain string
 }
 
-// EffectiveMethods returns module's accepted-method list, folding in the
-// reserved "admin_pin" token when module is the "admin" pseudo-module (the
-// operator PIN is always acceptable for admin, regardless of whether "pin"
-// appears in its matrix entry, and regardless of whether admin has a matrix
-// entry at all). For every other module it is exactly the configured list
-// (nil/empty when the module is unprotected).
-func (p *Policy) EffectiveMethods(module string) []string {
-	methods := p.Modules[module]
-	if module != "admin" {
-		return methods
+// ModulePolicy is the resolved per-module auth state carried in a Policy
+// snapshot.
+type ModulePolicy struct {
+	// PinFile is the absolute path to the module's door-code file (S1's
+	// config loading, and the admin live-apply pipeline, both expand it
+	// relative to the config file's directory before it ever reaches here),
+	// or "" when the module has no door code (LDAP/passkey only).
+	PinFile string
+}
+
+// OfferedMethods returns the auth methods module should present on
+// /api/auth/mode and accept from a login attempt (S3 wires both) -- it
+// drives login *surface* only, never request authorization (that is
+// grantsAllow's job, session.go):
+//
+//   - module == "admin": exactly ["admin_pin"], regardless of whether admin
+//     has its own Modules entry. The operator PIN is the only way in.
+//   - a protected non-admin module: ["ldap"], plus "passkey" when this
+//     policy's passkey service is configured, plus "pin" when the module's
+//     ModulePolicy has a PinFile. API keys ("key") never appear here -- they
+//     are orthogonal service auth with no login-page surface.
+//   - an open (unconfigured) module: nil.
+func (p *Policy) OfferedMethods(module string) []string {
+	if module == "admin" {
+		return []string{adminPINMethod}
 	}
-	out := make([]string, 0, len(methods)+1)
-	out = append(out, methods...)
-	for _, m := range out {
-		if m == adminPINMethod {
-			return out
-		}
+	m, ok := p.Modules[module]
+	if !ok {
+		return nil
 	}
-	return append(out, adminPINMethod)
+	methods := []string{"ldap"}
+	if p.passkeys != nil {
+		methods = append(methods, "passkey")
+	}
+	if m.PinFile != "" {
+		methods = append(methods, pinMethod)
+	}
+	return methods
 }
 
 // BuildPolicy constructs an immutable Policy snapshot from a. It is the one
@@ -103,22 +125,29 @@ func (p *Policy) EffectiveMethods(module string) []string {
 // have already called it); it only copies/resolves fields and, when needed,
 // constructs the passkey ceremony service.
 //
-// The passkeyService is only constructed when passkeys are actually
-// configured and used: a.Passkey.RPID must be set AND "passkey" must appear
-// in at least one module's method list (including admin's, since admin's
-// matrix entry is a plain module entry like any other). newPasskeyService
-// touches the filesystem (it creates dataDir and opens/creates the
-// passkeys.json store), so building it unconditionally would mean every
-// config -- even one with no passkey module at all -- pays that cost and, on
-// an unwritable data dir, fails to boot. Any error from newPasskeyService is
-// propagated to the caller.
+// The passkeyService is only constructed when passkeys are actually usable:
+// a.Passkey.RPID must be set AND at least one protected non-admin module is
+// configured -- passkey is offered on every protected non-admin module once
+// globally configured (OfferedMethods above), never gated per-module the way
+// the old method-list matrix did, so admin-only configs never need it.
+// newPasskeyService touches the filesystem (it creates dataDir and
+// opens/creates the passkeys.json store), so building it unconditionally
+// would mean every config -- even one with no protected non-admin module at
+// all -- pays that cost and, on an unwritable data dir, fails to boot. Any
+// error from newPasskeyService is propagated to the caller.
 func BuildPolicy(a config.AuthConfig) (*Policy, error) {
+	adminPINFile := a.AdminPINFile
+	if adminPINFile == "" {
+		if m, ok := a.Modules["admin"]; ok {
+			adminPINFile = m.PinFile
+		}
+	}
+
 	p := &Policy{
 		Modules:         copyModules(a.Modules),
-		PINs:            append([]config.NamedHash(nil), a.PINs...),
 		APIKeys:         append([]config.NamedHash(nil), a.APIKeys...),
 		AdminPIN:        a.AdminPIN,
-		AdminPINFile:    a.AdminPINFile,
+		AdminPINFile:    adminPINFile,
 		LDAP:            a.LDAP,
 		Passkey:         a.Passkey,
 		SessionTTL:      sessionTTL(a.Session),
@@ -127,7 +156,7 @@ func BuildPolicy(a config.AuthConfig) (*Policy, error) {
 		CookieDomain:    a.CookieDomain,
 	}
 
-	if a.Passkey.RPID != "" && modulesUseMethod(a.Modules, "passkey") {
+	if a.Passkey.RPID != "" && hasProtectedNonAdminModule(a.Modules) {
 		svc, err := newPasskeyService(a.Passkey, a.DataDir, nil)
 		if err != nil {
 			return nil, err
@@ -138,28 +167,28 @@ func BuildPolicy(a config.AuthConfig) (*Policy, error) {
 	return p, nil
 }
 
-// copyModules returns a deep-enough copy of m: a fresh top-level map with
-// each value slice also copied, so a caller mutating a's Modules (or a
-// Policy's) after BuildPolicy returns can never affect the snapshot.
-func copyModules(m map[string][]string) map[string][]string {
+// copyModules returns a fresh top-level copy of m, so a caller mutating a's
+// Modules (or a Policy's) after BuildPolicy returns can never affect the
+// snapshot.
+func copyModules(m map[string]config.ModuleAuthConfig) map[string]ModulePolicy {
 	if m == nil {
 		return nil
 	}
-	out := make(map[string][]string, len(m))
+	out := make(map[string]ModulePolicy, len(m))
 	for k, v := range m {
-		out[k] = append([]string(nil), v...)
+		out[k] = ModulePolicy{PinFile: v.PinFile}
 	}
 	return out
 }
 
-// modulesUseMethod reports whether method appears in any module's list in
-// modules.
-func modulesUseMethod(modules map[string][]string, method string) bool {
-	for _, methods := range modules {
-		for _, m := range methods {
-			if m == method {
-				return true
-			}
+// hasProtectedNonAdminModule reports whether modules has at least one entry
+// other than "admin". BuildPolicy's passkey-construction condition and
+// validate.go's per-module LDAP requirement both key off this notion of "a
+// real protected module exists".
+func hasProtectedNonAdminModule(modules map[string]config.ModuleAuthConfig) bool {
+	for k := range modules {
+		if k != "admin" {
+			return true
 		}
 	}
 	return false
@@ -261,12 +290,6 @@ func FromConfig(a config.AuthConfig, knownModules []string, adminRouted bool) (*
 
 	s.policyPtr.Store(p)
 	return s, nil
-}
-
-// checkPIN validates pin against the current policy's named PIN table,
-// delegating to pin.go's package-level checkPIN.
-func (s *Service) checkPIN(pin string) (name string, ok bool) {
-	return checkPIN(s.policy().PINs, pin)
 }
 
 // checkAdminPIN validates pin against the current policy's operator PIN

@@ -17,6 +17,7 @@ package auth
 
 import (
 	_ "embed"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -32,36 +33,39 @@ var loginPageHTML []byte
 // after it -- used for DELETE /api/auth/passkeys/{id}), the one HTTP method
 // it accepts (any other method on the same path is a 405), whether it
 // requires an already-valid session before the handler runs, and the
-// handler itself.
+// handler itself. requiredGrant, when non-empty, is an additional
+// precondition beyond a merely-valid session: the session's claims must
+// carry that grant (see grantsAllow's grant vocabulary) or the gate answers
+// 403 before the handler runs -- used to require a full (LDAP) login for
+// passkey management, as opposed to a door-code-only session.
 type authGateRoute struct {
-	path    string
-	prefix  bool
-	method  string
-	session bool
-	handle  func(*Service, http.ResponseWriter, *http.Request, string)
+	path          string
+	prefix        bool
+	method        string
+	session       bool
+	requiredGrant string
+	handle        func(*Service, http.ResponseWriter, *http.Request, string)
 }
 
 // authGateRoutes is the fixed set of routes the gate itself owns on every
 // protected module. The five unauthenticated-allowlist routes let a caller
 // establish or inspect a session; the four session-required routes manage
-// passkeys and may only run once a valid session cookie is present -- the
-// gate enforces that precondition itself (see Gate below) so every
-// handler here can assume it holds.
-//
-// The handlers are stubs for this task (T4.2): each returns 501, via its
-// own named method on Service, so T4.3 (login/logout/session) and T4.4
-// (the login page) can replace individual method bodies without touching
-// this routing table.
+// passkeys and may only run once a valid session cookie carrying the
+// "ldap" grant is present -- the gate enforces both preconditions itself
+// (see Gate below) so every handler here can assume they hold. Passkey
+// *management* (list/register/delete) requires a full LDAP login; passkey
+// *login* (begin/finish, above) is unauthenticated on purpose -- it is how
+// a session is established in the first place.
 var authGateRoutes = []authGateRoute{
 	{path: "/api/auth/login", method: http.MethodPost, handle: (*Service).handleLogin},
 	{path: "/api/auth/logout", method: http.MethodPost, handle: (*Service).handleLogout},
 	{path: "/api/auth/session", method: http.MethodGet, handle: (*Service).handleSession},
 	{path: "/api/auth/passkey/login/begin", method: http.MethodPost, handle: (*Service).handlePasskeyLoginBegin},
 	{path: "/api/auth/passkey/login/finish", method: http.MethodPost, handle: (*Service).handlePasskeyLoginFinish},
-	{path: "/api/auth/passkeys", method: http.MethodGet, session: true, handle: (*Service).handlePasskeysList},
-	{path: "/api/auth/passkey/register/begin", method: http.MethodPost, session: true, handle: (*Service).handlePasskeyRegisterBegin},
-	{path: "/api/auth/passkey/register/finish", method: http.MethodPost, session: true, handle: (*Service).handlePasskeyRegisterFinish},
-	{path: "/api/auth/passkeys/", prefix: true, method: http.MethodDelete, session: true, handle: (*Service).handlePasskeyDelete},
+	{path: "/api/auth/passkeys", method: http.MethodGet, session: true, requiredGrant: "ldap", handle: (*Service).handlePasskeysList},
+	{path: "/api/auth/passkey/register/begin", method: http.MethodPost, session: true, requiredGrant: "ldap", handle: (*Service).handlePasskeyRegisterBegin},
+	{path: "/api/auth/passkey/register/finish", method: http.MethodPost, session: true, requiredGrant: "ldap", handle: (*Service).handlePasskeyRegisterFinish},
+	{path: "/api/auth/passkeys/", prefix: true, method: http.MethodDelete, session: true, requiredGrant: "ldap", handle: (*Service).handlePasskeyDelete},
 }
 
 // findAuthGateRoute returns the authGateRoute matching path, if any,
@@ -94,11 +98,15 @@ func findAuthGateRoute(path string) (authGateRoute, bool) {
 //     unchanged -- an unprotected module never sees a login route.
 //  4. If module is protected, the gate-owned auth routes (authGateRoutes)
 //     are served here, not by the module; a session-required route 401s
-//     before its handler runs if there is no valid session cookie.
-//  5. Any other request: an API-key module tries checkAPIKey first (no
-//     cookie involved); otherwise the uw_session cookie is parsed and its
-//     methods intersected with the module's accepted set, with a sliding
-//     cookie re-issue when the session is due for refresh.
+//     before its handler runs if there is no valid session cookie, and a
+//     route with a requiredGrant additionally 403s if the session lacks it
+//     (passkey management requires a full LDAP login).
+//  5. Any other request: module == "admin" checks only the session cookie
+//     (grantsAllow, admin_pin grant only -- no API key ever satisfies
+//     admin); every other protected module tries checkAPIKey first (no
+//     cookie involved, no per-module opt-in), then the uw_session cookie
+//     via grantsAllow, with a sliding cookie re-issue when the session is
+//     due for refresh.
 //  6. Otherwise, 401 -- HTML login-page placeholder for a browser-shaped
 //     GET on a non-/api/ path, bare JSON everywhere else (including every
 //     /api/ path, regardless of Accept).
@@ -115,7 +123,7 @@ func (s *Service) Gate(module string, next http.Handler) http.Handler {
 
 		// Step 2: mode, always unauthenticated.
 		if r.Method == http.MethodGet && r.URL.Path == "/api/auth/mode" {
-			methods := p.EffectiveMethods(module)
+			methods := p.OfferedMethods(module)
 			if methods == nil {
 				methods = []string{}
 			}
@@ -140,8 +148,14 @@ func (s *Service) Gate(module string, next http.Handler) http.Handler {
 				return
 			}
 			if rt.session {
-				if _, valid := s.sessionClaimsFromRequest(r, now); !valid {
+				claims, valid := s.sessionClaimsFromRequest(r, now)
+				if !valid {
 					response.WriteError(w, http.StatusUnauthorized, "unauthorized")
+					return
+				}
+				if rt.requiredGrant != "" && !hasGrant(claims.Grants, rt.requiredGrant) {
+					log.Printf("event=auth_passkey_denied module=%q reason=%q", module, "requires_ldap")
+					response.WriteError(w, http.StatusForbidden, "passkey management requires a full (LDAP) login")
 					return
 				}
 			}
@@ -150,26 +164,37 @@ func (s *Service) Gate(module string, next http.Handler) http.Handler {
 		}
 
 		// Step 5: everything else -- static assets, SSE, WS upgrades
-		// included, with no special-casing: an API key first (when
-		// accepted), then the session cookie, verified identically
-		// regardless of what kind of request is carrying it.
-		accepted := p.EffectiveMethods(module)
-
-		if containsMethod(accepted, "key") {
+		// included, with no special-casing. admin is PIN-only, exclusively:
+		// no API key ever satisfies it, and only a session carrying the
+		// admin_pin grant does (grantsAllow). Every other protected module
+		// accepts a bearer API key unconditionally (no per-module opt-in),
+		// falling through to the session cookie -- an identity grant
+		// (ldap/passkey) or that module's own scoped door-code grant.
+		if module == "admin" {
+			if claims, ok := s.sessionClaimsFromRequest(r, now); ok && grantsAllow(claims, "admin") {
+				if needsRefresh(claims, p.SessionTTL, p.RefreshFraction, now) {
+					if tok, err := issueToken(s.key, claims.Subject, claims.Grants, p.SessionTTL, now); err == nil {
+						setSessionCookie(w, tok, p.SessionTTL, p.CookieSecure, p.CookieDomain)
+					}
+				}
+				next.ServeHTTP(w, r)
+				return
+			}
+		} else {
 			if _, ok := s.checkAPIKey(r); ok {
 				next.ServeHTTP(w, r)
 				return
 			}
-		}
 
-		if claims, ok := s.sessionClaimsFromRequest(r, now); ok && intersects(claims.Methods, accepted) {
-			if needsRefresh(claims, p.SessionTTL, p.RefreshFraction, now) {
-				if tok, err := issueToken(s.key, claims.Subject, claims.Methods, p.SessionTTL, now); err == nil {
-					setSessionCookie(w, tok, p.SessionTTL, p.CookieSecure, p.CookieDomain)
+			if claims, ok := s.sessionClaimsFromRequest(r, now); ok && grantsAllow(claims, module) {
+				if needsRefresh(claims, p.SessionTTL, p.RefreshFraction, now) {
+					if tok, err := issueToken(s.key, claims.Subject, claims.Grants, p.SessionTTL, now); err == nil {
+						setSessionCookie(w, tok, p.SessionTTL, p.CookieSecure, p.CookieDomain)
+					}
 				}
+				next.ServeHTTP(w, r)
+				return
 			}
-			next.ServeHTTP(w, r)
-			return
 		}
 
 		// Step 6: 401. The HTML heuristic never masks an API status: any
@@ -197,30 +222,6 @@ func (s *Service) sessionClaimsFromRequest(r *http.Request, now time.Time) (*ses
 		return nil, false
 	}
 	return claims, true
-}
-
-// containsMethod reports whether method appears in list.
-func containsMethod(list []string, method string) bool {
-	for _, m := range list {
-		if m == method {
-			return true
-		}
-	}
-	return false
-}
-
-// intersects reports whether a and b share at least one element.
-func intersects(a, b []string) bool {
-	set := make(map[string]bool, len(b))
-	for _, m := range b {
-		set[m] = true
-	}
-	for _, m := range a {
-		if set[m] {
-			return true
-		}
-	}
-	return false
 }
 
 // loginPage serves the embedded, platform-owned login page (T4.4, FR-A12):

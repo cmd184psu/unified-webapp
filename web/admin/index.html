@@ -9,31 +9,22 @@
 <body>
   <header class="topbar">
     <h1>Admin</h1>
-    <button id="logout-btn" class="btn-link" type="button">Sign out</button>
+    <button id="logout-btn" class="btn-link icon-btn" type="button" title="Sign out" aria-label="Sign out">
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+    </button>
   </header>
   <main id="app">
     <p id="status">Loading&hellip;</p>
 
     <section class="panel hidden" id="panel-matrix">
       <h2>Module Access</h2>
-      <p class="hint">Sign-in methods each module accepts. Unchecking every method for a module leaves it unreachable.</p>
+      <p class="hint">A module is either open or protected. Protected modules always accept an LDAP (or passkey) sign-in; giving a module a pin file also lets it accept a standalone door-code PIN. Admin's PIN source is shown read-only below (see Operator PIN).</p>
       <div id="matrix-table"></div>
       <div class="panel-actions">
         <button id="matrix-save" type="button">Save matrix</button>
         <span id="matrix-status" class="status"></span>
       </div>
       <p id="matrix-error" class="error"></p>
-    </section>
-
-    <section class="panel hidden" id="panel-pins">
-      <h2>PINs</h2>
-      <ul id="pins-list" class="named-list"></ul>
-      <form id="pin-form" class="inline-form">
-        <input id="pin-name" placeholder="name" autocomplete="off" required>
-        <input id="pin-value" type="password" inputmode="numeric" placeholder="PIN" autocomplete="off" required>
-        <button type="submit">Add PIN</button>
-      </form>
-      <p id="pin-error" class="error"></p>
     </section>
 
     <section class="panel hidden" id="panel-keys">
@@ -48,8 +39,40 @@
 
     <section class="panel hidden" id="panel-ldap">
       <h2>LDAP</h2>
-      <dl id="ldap-settings" class="settings-list"></dl>
-      <p class="hint">Edit in config file.</p>
+      <form id="ldap-form" class="settings-form">
+        <label>URL
+          <input id="ldap-url" type="text" autocomplete="off">
+        </label>
+        <label>Base DN
+          <input id="ldap-base-dn" type="text" autocomplete="off">
+        </label>
+        <label>Bind DN
+          <input id="ldap-bind-dn" type="text" autocomplete="off">
+        </label>
+        <label>Bind password
+          <input id="ldap-bind-password" type="password" autocomplete="off">
+        </label>
+        <label>User filter
+          <input id="ldap-user-filter" type="text" autocomplete="off">
+        </label>
+        <label>Required groups (comma-separated)
+          <input id="ldap-required-groups" type="text" autocomplete="off">
+        </label>
+        <label>Timeout (seconds)
+          <input id="ldap-timeout" type="number" min="0" step="1">
+        </label>
+        <label class="checkbox-label">
+          <input id="ldap-start-tls" type="checkbox">
+          Start TLS
+        </label>
+        <label class="checkbox-label">
+          <input id="ldap-insecure-tls" type="checkbox">
+          Insecure TLS
+        </label>
+        <button type="submit">Save</button>
+      </form>
+      <p id="ldap-status" class="status"></p>
+      <p id="ldap-error" class="error"></p>
       <h3>Test bind</h3>
       <form id="ldap-test-form" class="inline-form">
         <input id="ldap-test-username" placeholder="username" autocomplete="off" required>
@@ -88,8 +111,22 @@
     </section>
 
     <section class="panel hidden" id="panel-operator-pin">
-      <h2>Operator PIN</h2>
+      <h2>Operator PIN (admin door-code)</h2>
+      <p class="hint">The Operator PIN is the door-code that unlocks this admin panel. It is read from a pin file on the server; the file's current location is shown below.</p>
       <p id="operator-pin-status" class="hint"></p>
+      <div class="inline-form">
+        <select id="operator-pin-file-select"></select>
+        <button id="operator-pin-change-file" type="button">Change file</button>
+        <button id="operator-pin-set-btn" type="button">Set PIN&hellip;</button>
+      </div>
+      <form id="operator-pin-form" class="inline-form hidden">
+        <input id="operator-pin-value" type="password" placeholder="new PIN" autocomplete="off" required>
+        <button type="submit">Save</button>
+        <button id="operator-pin-cancel" type="button">Cancel</button>
+      </form>
+      <p id="operator-pin-file-status" class="status"></p>
+      <p id="operator-pin-error" class="error"></p>
+      <p class="warn">Changing the file or PIN takes effect immediately -- make sure you know the new PIN before signing out.</p>
     </section>
   </main>
 

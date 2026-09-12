@@ -19,14 +19,27 @@ import (
 // applyAuth is the sole entry point for a live admin edit of auth.* config
 // (T5.4's handlers all funnel through this). It:
 //
-//  1. Validates newAuth with auth.ValidatePolicy, passing h.deps.KnownModules
-//     and h.deps.AdminRouted -- the exact same function and arguments boot
-//     uses (security-plan.md L12) -- so a live edit can never accept
-//     something boot would have refused, or vice versa. A rejection returns
-//     the error and changes nothing anywhere: no file write, no swap.
-//  2. Builds a fresh *auth.Policy from newAuth with auth.BuildPolicy.
-//  3. Splices newAuth into h.deps.ConfigPath in place (spliceAuthConfig),
-//     atomically (tmp file + rename) so the file is never observed partial.
+//  0. Expands every non-empty Modules[...].PinFile (including the
+//     modules.admin.pin_file spelling) relative to the config file's
+//     directory (expandModulePinFiles) -- mirroring config.Load's
+//     expandAuthPaths, which runs only at boot. Without this, a relative
+//     pin_file submitted through the live-edit API would be validated (and
+//     persisted) relative to the server process's CWD instead of the config
+//     file's location, diverging from what the very same value would mean
+//     on the next restart.
+//  1. Validates the expanded config with auth.ValidatePolicy, passing
+//     h.deps.KnownModules and h.deps.AdminRouted -- the exact same function
+//     and arguments boot uses (security-plan.md L12) -- so a live edit can
+//     never accept something boot would have refused, or vice versa. A
+//     rejection returns the error and changes nothing anywhere: no file
+//     write, no swap.
+//  2. Builds a fresh *auth.Policy from the expanded config with
+//     auth.BuildPolicy.
+//  3. Splices the expanded config into h.deps.ConfigPath in place
+//     (spliceAuthConfig), atomically (tmp file + rename) so the file is
+//     never observed partial. The persisted pin_file is therefore always the
+//     expanded absolute form -- the same value GET /api/config/auth reports
+//     and the same value boot would produce from it.
 //  4. Swaps the running Service onto the new Policy (auth.Service.SwapPolicy),
 //     taking effect on the very next request with no restart.
 //
@@ -42,22 +55,59 @@ import (
 // corresponding swap. The externally observable contract is identical
 // either way: reject changes nothing, accept changes the file and the live
 // policy together.
-func (h *Handler) applyAuth(newAuth config.AuthConfig) error {
-	if err := auth.ValidatePolicy(newAuth, h.deps.KnownModules, h.deps.AdminRouted); err != nil {
-		return err
-	}
-
-	p, err := auth.BuildPolicy(newAuth)
+//
+// The returned config.AuthConfig is newAuth after path expansion -- callers
+// (mutateAuth) must store this, not the caller's original newAuth, so the
+// Handler's in-memory copy (and therefore every subsequent GET) reflects the
+// same expanded paths that were validated and persisted.
+func (h *Handler) applyAuth(newAuth config.AuthConfig) (config.AuthConfig, error) {
+	expanded, err := expandModulePinFiles(newAuth, filepath.Dir(h.deps.ConfigPath))
 	if err != nil {
-		return err
+		return config.AuthConfig{}, err
 	}
 
-	if err := spliceAuthConfig(h.deps.ConfigPath, newAuth); err != nil {
-		return err
+	if err := auth.ValidatePolicy(expanded, h.deps.KnownModules, h.deps.AdminRouted); err != nil {
+		return config.AuthConfig{}, err
+	}
+
+	p, err := auth.BuildPolicy(expanded)
+	if err != nil {
+		return config.AuthConfig{}, err
+	}
+
+	if err := spliceAuthConfig(h.deps.ConfigPath, expanded); err != nil {
+		return config.AuthConfig{}, err
 	}
 
 	h.deps.Service.SwapPolicy(p)
-	return nil
+	return expanded, nil
+}
+
+// expandModulePinFiles returns a copy of a with every non-empty
+// Modules[...].PinFile (including the modules.admin.pin_file spelling of the
+// admin PIN source) made absolute relative to configDir via
+// config.ExpandRelativeTo -- the same treatment config.Load's expandAuthPaths
+// gives every module's pin_file at boot, reproduced here so a live-apply
+// resolves a relative path against the config file's directory rather than
+// the process's working directory. a itself is never mutated; an empty or
+// nil Modules map is returned unchanged.
+func expandModulePinFiles(a config.AuthConfig, configDir string) (config.AuthConfig, error) {
+	if len(a.Modules) == 0 {
+		return a, nil
+	}
+	modules := make(map[string]config.ModuleAuthConfig, len(a.Modules))
+	for key, m := range a.Modules {
+		if m.PinFile != "" {
+			expanded, err := config.ExpandRelativeTo(m.PinFile, configDir)
+			if err != nil {
+				return config.AuthConfig{}, fmt.Errorf("auth.modules.%s.pin_file: %w", key, err)
+			}
+			m.PinFile = expanded
+		}
+		modules[key] = m
+	}
+	a.Modules = modules
+	return a, nil
 }
 
 // authMemberLocation describes where the top-level "auth" member lives (or

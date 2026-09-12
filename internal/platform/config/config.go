@@ -43,19 +43,122 @@ func (c *Config) ConfigPath() string {
 
 // AuthConfig holds the shared authentication/authorization configuration
 // surface used across modules. Modules maps a module name (or the reserved
-// "admin" pseudo-module) to the ordered list of methods accepted for it.
+// "admin" pseudo-module) to its two-state auth config: present (even as `{}`)
+// means protected, absent means open. See ModuleAuthConfig.
 type AuthConfig struct {
-	Modules      map[string][]string `json:"modules"`
-	AdminPIN     string              `json:"admin_pin"`
-	AdminPINFile string              `json:"admin_pin_file"`
-	DataDir      string              `json:"data_dir"`
-	CookieSecure bool                `json:"cookie_secure"`
-	CookieDomain string              `json:"cookie_domain"`
-	Session      SessionConfig       `json:"session"`
-	LDAP         LDAPConfig          `json:"ldap"`
-	PINs         []NamedHash         `json:"pins"`
-	APIKeys      []NamedHash         `json:"api_keys"`
-	Passkey      PasskeyConfig       `json:"passkey"`
+	Modules      map[string]ModuleAuthConfig `json:"modules"`
+	AdminPIN     string                      `json:"admin_pin"`
+	AdminPINFile string                      `json:"admin_pin_file"`
+	DataDir      string                      `json:"data_dir"`
+	CookieSecure bool                        `json:"cookie_secure"`
+	CookieDomain string                      `json:"cookie_domain"`
+	Session      SessionConfig               `json:"session"`
+	LDAP         LDAPConfig                  `json:"ldap"`
+	// PINs is a tombstone for the removed auth.pins (identity PIN table).
+	// It is never populated by config we write ourselves -- it exists only
+	// to detect the legacy key at decode time (see Load) and to remain
+	// marshal-invisible (json:"...,omitempty" on a nil RawMessage) so the
+	// admin live-apply path never re-writes a "pins": null that would brick
+	// the next boot on this very check.
+	PINs    json.RawMessage `json:"pins,omitempty"`
+	APIKeys []NamedHash     `json:"api_keys"`
+	Passkey PasskeyConfig   `json:"passkey"`
+}
+
+// ModuleAuthConfig is the per-module auth configuration. A module present in
+// AuthConfig.Modules (even as an empty `{}`) is protected; PinFile, when
+// non-empty, offers a per-module door-code PIN alongside LDAP/passkey.
+type ModuleAuthConfig struct {
+	PinFile string `json:"pin_file"`
+}
+
+// legacyModuleAuthError is returned when a module's auth.modules entry is a
+// legacy JSON array (the old accepted-methods list) rather than an object.
+const legacyModuleAuthErrFmt = "per-module method lists were removed; use {} (protected) or {\"pin_file\": \"./todo.pin\"} — see docs/FRD-admin-identity.md"
+
+// UnmarshalJSON detects the legacy per-module accepted-methods array
+// (`["ldap", "pin"]`) and fails with a targeted migration error instead of
+// silently misinterpreting it. moduleAuthConfigsUnmarshal (used by
+// AuthConfig's decode path) additionally prefixes this error with the
+// module's key so the operator knows exactly which entry to fix.
+func (m *ModuleAuthConfig) UnmarshalJSON(data []byte) error {
+	trimmed := bytesTrimLeftSpace(data)
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		return fmt.Errorf("%s", legacyModuleAuthErrFmt)
+	}
+	type alias ModuleAuthConfig
+	var a alias
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	*m = ModuleAuthConfig(a)
+	return nil
+}
+
+// bytesTrimLeftSpace trims leading JSON whitespace without importing
+// encoding/json's internal helpers or bytes just for this one use.
+func bytesTrimLeftSpace(b []byte) []byte {
+	i := 0
+	for i < len(b) {
+		switch b[i] {
+		case ' ', '\t', '\r', '\n':
+			i++
+			continue
+		}
+		break
+	}
+	return b[i:]
+}
+
+// authConfigRemovedPINsErr is the fatal boot error for the legacy top-level
+// auth.pins key (the removed identity-PIN table). A literal `"pins": null`
+// also decodes to a non-empty json.RawMessage (the 4 bytes "null") and
+// therefore fires this error too -- deliberate (see PLAN-auth-two-state.md
+// S1): null only appears when something wrote the legacy key, and failing
+// loud names the fix.
+const authConfigRemovedPINsErr = "auth.pins was removed; identity comes from LDAP, door codes are per-module pin_file"
+
+// UnmarshalJSON decodes AuthConfig with two hard-break checks beyond plain
+// field decoding:
+//
+//  1. auth.modules is decoded key-by-key so a legacy accepted-methods-array
+//     value produces an error naming the offending module
+//     ("auth.modules.<key>: ...").
+//  2. the legacy auth.pins key (detected via the PINs json.RawMessage
+//     tombstone) fails the whole load with authConfigRemovedPINsErr.
+func (a *AuthConfig) UnmarshalJSON(data []byte) error {
+	type alias AuthConfig
+	shadow := struct {
+		Modules json.RawMessage `json:"modules"`
+		*alias
+	}{
+		alias: (*alias)(a),
+	}
+	if err := json.Unmarshal(data, &shadow); err != nil {
+		return err
+	}
+
+	if len(shadow.Modules) > 0 {
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(shadow.Modules, &raw); err != nil {
+			return fmt.Errorf("auth.modules: %w", err)
+		}
+		modules := make(map[string]ModuleAuthConfig, len(raw))
+		for key, v := range raw {
+			var m ModuleAuthConfig
+			if err := json.Unmarshal(v, &m); err != nil {
+				return fmt.Errorf("auth.modules.%s: %w", key, err)
+			}
+			modules[key] = m
+		}
+		a.Modules = modules
+	}
+
+	if len(a.PINs) > 0 {
+		return fmt.Errorf("%s", authConfigRemovedPINsErr)
+	}
+
+	return nil
 }
 
 // SessionConfig controls session lifetime and sliding-refresh behavior.
@@ -282,11 +385,13 @@ func DefaultConfig() *Config {
 			// creation both key off len()/=="" checks, which empty
 			// maps/slices satisfy exactly like nil. Written out explicitly
 			// (rather than left as Go's zero value, which would marshal
-			// Modules/PINs/APIKeys as JSON null) so an operator opening the
+			// Modules/APIKeys as JSON null) so an operator opening the
 			// generated file sees the auth surface's shape instead of an
-			// unexplained null.
-			Modules: map[string][]string{},
-			PINs:    []NamedHash{},
+			// unexplained null. PINs is deliberately left at its zero value
+			// (nil json.RawMessage) -- it is a marshal-invisible tombstone
+			// for the removed auth.pins key (json:"pins,omitempty"), and
+			// must never be written back out.
+			Modules: map[string]ModuleAuthConfig{},
 			APIKeys: []NamedHash{},
 		},
 		Server: ServerConfig{
@@ -463,36 +568,53 @@ func expandObsidianoidPaths(o *ObsidianoidConfig) error {
 	return nil
 }
 
-// expandAuthPaths makes Auth.DataDir and Auth.AdminPINFile absolute relative
-// to the config file's directory (baseDir), mirroring the other expand*Paths
+// expandAuthPaths makes Auth.DataDir, Auth.AdminPINFile, and every
+// non-empty per-module PinFile (including modules.admin.pin_file, an
+// accepted alternate spelling of the admin PIN source) absolute relative to
+// the config file's directory (baseDir), mirroring the other expand*Paths
 // functions but resolving against the config's location rather than the
 // working directory.
 func expandAuthPaths(cfg *Config, baseDir string) error {
 	var err error
 	if cfg.Auth.DataDir != "" {
-		if cfg.Auth.DataDir, err = expandRelativeTo(cfg.Auth.DataDir, baseDir); err != nil {
+		if cfg.Auth.DataDir, err = ExpandRelativeTo(cfg.Auth.DataDir, baseDir); err != nil {
 			return err
 		}
 	}
 	if cfg.Auth.AdminPINFile != "" {
-		if cfg.Auth.AdminPINFile, err = expandRelativeTo(cfg.Auth.AdminPINFile, baseDir); err != nil {
+		if cfg.Auth.AdminPINFile, err = ExpandRelativeTo(cfg.Auth.AdminPINFile, baseDir); err != nil {
 			return err
 		}
+	}
+	for key, m := range cfg.Auth.Modules {
+		if m.PinFile == "" {
+			continue
+		}
+		if m.PinFile, err = ExpandRelativeTo(m.PinFile, baseDir); err != nil {
+			return err
+		}
+		cfg.Auth.Modules[key] = m
 	}
 	return nil
 }
 
-// expandRelativeTo expands a leading ~ via ExpandPath, then makes the result
-// absolute relative to baseDir if it is not already absolute.
-func expandRelativeTo(path, baseDir string) (string, error) {
+// ExpandRelativeTo expands a leading ~ via ExpandPath, then makes the result
+// absolute: joined against baseDir if relative, and always run through
+// filepath.Abs so the returned path is absolute even when baseDir itself is
+// relative (e.g. the server was started with -config local-test/config.json).
+// Absoluteness makes expansion idempotent, which internal/admin's live-apply
+// pipeline depends on: it re-expands the handler's cached (already-expanded)
+// config on every mutation, and a merely-joined relative result would be
+// joined against baseDir a second time ("local-test/local-test/admin.pin").
+func ExpandRelativeTo(path, baseDir string) (string, error) {
 	expanded, err := ExpandPath(path)
 	if err != nil {
 		return "", err
 	}
-	if filepath.IsAbs(expanded) {
-		return expanded, nil
+	if !filepath.IsAbs(expanded) {
+		expanded = filepath.Join(baseDir, expanded)
 	}
-	return filepath.Join(baseDir, expanded), nil
+	return filepath.Abs(expanded)
 }
 
 func expandMultisshPaths(m *MultisshConfig) error {

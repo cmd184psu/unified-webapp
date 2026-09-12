@@ -20,9 +20,9 @@ func testKey() []byte {
 func TestIssueParseRoundTrip(t *testing.T) {
 	key := testKey()
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	methods := []string{"ldap", "passkey"}
+	grants := []string{"ldap", "passkey"}
 
-	tok, err := issueToken(key, "chris", methods, time.Hour, now)
+	tok, err := issueToken(key, "chris", grants, time.Hour, now)
 	if err != nil {
 		t.Fatalf("issueToken: %v", err)
 	}
@@ -34,8 +34,8 @@ func TestIssueParseRoundTrip(t *testing.T) {
 	if claims.Subject != "chris" {
 		t.Errorf("Subject = %q, want %q", claims.Subject, "chris")
 	}
-	if !reflect.DeepEqual(claims.Methods, methods) {
-		t.Errorf("Methods = %v, want %v", claims.Methods, methods)
+	if !reflect.DeepEqual(claims.Grants, grants) {
+		t.Errorf("Grants = %v, want %v", claims.Grants, grants)
 	}
 	if claims.IssuedAt == nil || !claims.IssuedAt.Time.Equal(now) {
 		t.Errorf("IssuedAt = %v, want %v", claims.IssuedAt, now)
@@ -45,11 +45,39 @@ func TestIssueParseRoundTrip(t *testing.T) {
 	}
 }
 
+// TestParseTokenClaimKeyIsGrants locks in the claim-key rename (Decision B1,
+// PLAN-auth-two-state.md): the wire JSON key is "grants", not the
+// pre-cutover "methods" -- a token whose payload uses the old key must
+// decode with an empty Grants slice, not populate it.
+func TestParseTokenClaimKeyIsGrants(t *testing.T) {
+	key := testKey()
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// A token signed exactly like a pre-cutover session, using the old
+	// "methods" claim key instead of "grants".
+	forged := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub": "chris", "methods": []string{"ldap"},
+		"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
+	})
+	signed, err := forged.SignedString(key)
+	if err != nil {
+		t.Fatalf("signing legacy-shaped token: %v", err)
+	}
+
+	claims, err := parseToken(key, signed, now)
+	if err != nil {
+		t.Fatalf("parseToken(legacy methods-keyed token): %v", err)
+	}
+	if len(claims.Grants) != 0 {
+		t.Errorf("Grants = %v, want empty for a token signed under the old \"methods\" claim key", claims.Grants)
+	}
+}
+
 func TestParseTokenExpired(t *testing.T) {
 	key := testKey()
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	tok, err := issueToken(key, "chris", []string{"pin"}, time.Hour, now)
+	tok, err := issueToken(key, "chris", []string{pinGrant("todo")}, time.Hour, now)
 	if err != nil {
 		t.Fatalf("issueToken: %v", err)
 	}
@@ -68,7 +96,7 @@ func TestParseTokenGarbage(t *testing.T) {
 
 func TestParseTokenWrongKey(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	tok, err := issueToken(testKey(), "chris", []string{"pin"}, time.Hour, now)
+	tok, err := issueToken(testKey(), "chris", []string{pinGrant("todo")}, time.Hour, now)
 	if err != nil {
 		t.Fatalf("issueToken: %v", err)
 	}
@@ -91,7 +119,7 @@ func forgeToken(t *testing.T, alg string, payload string, sig string) string {
 }
 
 func TestParseTokenRejectsAlgNone(t *testing.T) {
-	payload := `{"sub":"chris","methods":["pin"],"iat":1735689600,"exp":9999999999}`
+	payload := `{"sub":"chris","grants":["pin:todo"],"iat":1735689600,"exp":9999999999}`
 	tok := forgeToken(t, "none", payload, "")
 	if _, err := parseToken(testKey(), tok, time.Unix(1735689600, 0)); err == nil {
 		t.Fatal("expected error for alg=none forged token, got nil")
@@ -99,7 +127,7 @@ func TestParseTokenRejectsAlgNone(t *testing.T) {
 }
 
 func TestParseTokenRejectsAlgRS256(t *testing.T) {
-	payload := `{"sub":"chris","methods":["pin"],"iat":1735689600,"exp":9999999999}`
+	payload := `{"sub":"chris","grants":["pin:todo"],"iat":1735689600,"exp":9999999999}`
 	tok := forgeToken(t, "RS256", payload, "garbage-signature-bytes")
 	if _, err := parseToken(testKey(), tok, time.Unix(1735689600, 0)); err == nil {
 		t.Fatal("expected error for alg=RS256 forged token, got nil")
@@ -188,65 +216,131 @@ func TestSetSessionCookie(t *testing.T) {
 	}
 }
 
+// TestGrantsAllowTotality exercises grantsAllow across the two-state grant
+// vocabulary, including legacy/garbage values that must deny rather than
+// panic or accidentally match.
+func TestGrantsAllowTotality(t *testing.T) {
+	tests := []struct {
+		name   string
+		claims *sessionClaims
+		module string
+		want   bool
+	}{
+		{"nil claims", nil, "todo", false},
+		{"admin with admin_pin grant", &sessionClaims{Grants: []string{"admin_pin"}}, "admin", true},
+		{"admin with ldap grant does not satisfy admin", &sessionClaims{Grants: []string{"ldap"}}, "admin", false},
+		{"admin with matching pin grant does not satisfy admin", &sessionClaims{Grants: []string{"pin:admin"}}, "admin", false},
+		{"admin with no grants", &sessionClaims{Grants: nil}, "admin", false},
+		{"module with ldap identity grant", &sessionClaims{Grants: []string{"ldap"}}, "todo", true},
+		{"module with passkey identity grant", &sessionClaims{Grants: []string{"passkey"}}, "todo", true},
+		{"module with its own pin grant", &sessionClaims{Grants: []string{"pin:todo"}}, "todo", true},
+		{"module with a different module's pin grant", &sessionClaims{Grants: []string{"pin:slideshow"}}, "todo", false},
+		{"module with admin_pin grant does not satisfy a module", &sessionClaims{Grants: []string{"admin_pin"}}, "todo", false},
+		{"module with legacy bare \"pin\" grant denies", &sessionClaims{Grants: []string{"pin"}}, "todo", false},
+		{"module with legacy bare \"key\" grant denies", &sessionClaims{Grants: []string{"key"}}, "todo", false},
+		{"module with garbage grant denies", &sessionClaims{Grants: []string{"carrier_pigeon"}}, "todo", false},
+		{"module with no grants", &sessionClaims{Grants: nil}, "todo", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := grantsAllow(tt.claims, tt.module); got != tt.want {
+				t.Errorf("grantsAllow(%+v, %q) = %v, want %v", tt.claims, tt.module, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAccumulate(t *testing.T) {
 	tests := []struct {
-		name        string
-		existing    *sessionClaims
-		newSub      string
-		newMethod   string
-		wantSub     string
-		wantMethods []string
+		name       string
+		existing   *sessionClaims
+		newSub     string
+		newGrant   string
+		wantSub    string
+		wantGrants []string
 	}{
 		{
-			name:        "nil prior session",
-			existing:    nil,
-			newSub:      "chris",
-			newMethod:   "pin",
-			wantSub:     "chris",
-			wantMethods: []string{"pin"},
+			name:       "door-code grant with no prior session creates an anonymous session",
+			existing:   nil,
+			newSub:     "",
+			newGrant:   pinGrant("todo"),
+			wantSub:    "",
+			wantGrants: []string{"pin:todo"},
 		},
 		{
-			name:        "same identity, new method appended",
-			existing:    &sessionClaims{Methods: []string{"pin"}, RegisteredClaims: jwt.RegisteredClaims{Subject: "chris"}},
-			newSub:      "chris",
-			newMethod:   "ldap",
-			wantSub:     "chris",
-			wantMethods: []string{"pin", "ldap"},
+			name:       "door-code grant folds into an existing session without touching its subject",
+			existing:   &sessionClaims{Grants: []string{"ldap"}, RegisteredClaims: jwt.RegisteredClaims{Subject: "chris"}},
+			newSub:     "",
+			newGrant:   pinGrant("todo"),
+			wantSub:    "chris",
+			wantGrants: []string{"ldap", "pin:todo"},
 		},
 		{
-			name:        "same method twice, no duplicate",
-			existing:    &sessionClaims{Methods: []string{"pin", "ldap"}, RegisteredClaims: jwt.RegisteredClaims{Subject: "chris"}},
-			newSub:      "chris",
-			newMethod:   "ldap",
-			wantSub:     "chris",
-			wantMethods: []string{"pin", "ldap"},
+			name:       "identity login onto an anonymous pin-only session adopts the subject and keeps pin grants",
+			existing:   &sessionClaims{Grants: []string{"pin:todo"}, RegisteredClaims: jwt.RegisteredClaims{Subject: ""}},
+			newSub:     "chris",
+			newGrant:   "ldap",
+			wantSub:    "chris",
+			wantGrants: []string{"pin:todo", "ldap"},
 		},
 		{
-			name:        "conflicting identity replaces set",
-			existing:    &sessionClaims{Methods: []string{"pin", "ldap"}, RegisteredClaims: jwt.RegisteredClaims{Subject: "chris"}},
-			newSub:      "alex",
-			newMethod:   "pin",
-			wantSub:     "alex",
-			wantMethods: []string{"pin"},
+			name:       "identity login onto a different existing subject replaces the session outright",
+			existing:   &sessionClaims{Grants: []string{"ldap", "pin:todo"}, RegisteredClaims: jwt.RegisteredClaims{Subject: "chris"}},
+			newSub:     "alex",
+			newGrant:   "ldap",
+			wantSub:    "alex",
+			wantGrants: []string{"ldap"},
 		},
 		{
-			name:        "empty existing methods",
-			existing:    &sessionClaims{Methods: []string{}, RegisteredClaims: jwt.RegisteredClaims{Subject: "chris"}},
-			newSub:      "chris",
-			newMethod:   "pin",
-			wantSub:     "chris",
-			wantMethods: []string{"pin"},
+			name:       "identity login onto the same subject unions without duplicating",
+			existing:   &sessionClaims{Grants: []string{"ldap"}, RegisteredClaims: jwt.RegisteredClaims{Subject: "chris"}},
+			newSub:     "chris",
+			newGrant:   "passkey",
+			wantSub:    "chris",
+			wantGrants: []string{"ldap", "passkey"},
+		},
+		{
+			name:       "admin_pin is its own identity, authenticating as admin",
+			existing:   nil,
+			newSub:     "admin",
+			newGrant:   "admin_pin",
+			wantSub:    "admin",
+			wantGrants: []string{"admin_pin"},
+		},
+		{
+			name:       "admin_pin unions with an existing admin session rather than folding like a pin grant",
+			existing:   &sessionClaims{Grants: []string{"admin_pin"}, RegisteredClaims: jwt.RegisteredClaims{Subject: "admin"}},
+			newSub:     "admin",
+			newGrant:   "admin_pin",
+			wantSub:    "admin",
+			wantGrants: []string{"admin_pin"},
+		},
+		{
+			// A door-code login accumulating onto a pre-deploy token that
+			// used the old "methods" JSON key: the old grants are invisible
+			// (Grants decodes empty), but the subject -- an ordinary JWT
+			// registered claim, unaffected by the claim-key rename -- is
+			// still there. The door-code grant folds into that stale
+			// session without touching its subject, exactly as it would for
+			// a session with visible grants.
+			name:       "door-code grant onto a stale pre-rename token preserves its subject and starts a fresh grant list",
+			existing:   &sessionClaims{Grants: nil, RegisteredClaims: jwt.RegisteredClaims{Subject: "someuser"}},
+			newSub:     "",
+			newGrant:   pinGrant("todo"),
+			wantSub:    "someuser",
+			wantGrants: []string{"pin:todo"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sub, methods := accumulate(tt.existing, tt.newSub, tt.newMethod)
+			sub, grants := accumulate(tt.existing, tt.newSub, tt.newGrant)
 			if sub != tt.wantSub {
 				t.Errorf("sub = %q, want %q", sub, tt.wantSub)
 			}
-			if !reflect.DeepEqual(methods, tt.wantMethods) {
-				t.Errorf("methods = %v, want %v", methods, tt.wantMethods)
+			if !reflect.DeepEqual(grants, tt.wantGrants) {
+				t.Errorf("grants = %v, want %v", grants, tt.wantGrants)
 			}
 		})
 	}
@@ -293,7 +387,7 @@ func TestTokenFunctionsRefuseEmptyKey(t *testing.T) {
 	}
 	// A token hand-signed with an empty key must not verify either.
 	forged := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub": "admin", "methods": []string{"admin_pin"},
+		"sub": "admin", "grants": []string{"admin_pin"},
 		"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
 	})
 	forgedStr, err := forged.SignedString([]byte{})
