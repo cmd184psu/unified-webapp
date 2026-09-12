@@ -46,7 +46,9 @@ Minimal example with all four modules. Multiple hostnames can map to the same mo
     "obsidianoid.cmdhome.net":        "obsidianoid",
     "obsidianoid-test.cmdhome.net":   "obsidianoid",
     "multissh.cmdhome.net":           "multissh",
-    "multissh-test.cmdhome.net":      "multissh"
+    "multissh-test.cmdhome.net":      "multissh",
+    "smbedit.cmdhome.net":            "smbedit",
+    "smbedit-test.cmdhome.net":       "smbedit"
   },
   "grocery": {
     "static_dir": "/opt/unified-webapp/web/grocery",
@@ -93,6 +95,11 @@ Minimal example with all four modules. Multiple hostnames can map to the same mo
     "max_upload_bytes": 8589934592,
     "strict_host_key": false,
     "known_hosts_path": ""
+  },
+  "smbedit": {
+    "static_dir": "/opt/unified-webapp/web/smbedit",
+    "data_dir": "/data/smbedit",
+    "picker_root": "/opt"
   }
 }
 ```
@@ -112,6 +119,16 @@ Minimal example with all four modules. Multiple hostnames can map to the same mo
 | `known_hosts_path` | Empty resolves to `<ssh_dir>/known_hosts`. |
 
 Running and using the module — host cards, terminals, broadcasts, the proxy requirements, and the audit log — is documented separately in **[docs/multissh.md](docs/multissh.md)**. Read the [proxy section](docs/multissh.md#3-putting-it-behind-a-proxy) before putting it behind nginx: a front end that rewrites the `Host` header breaks every terminal while leaving the page looking fine. Note also that this module has **no login** — reaching its hostname is the whole access boundary.
+
+#### The `smbedit` section
+
+| Field | Meaning |
+|---|---|
+| `static_dir` | Built frontend for the module. Must exist and be readable, or smbedit fails to build. |
+| `data_dir` | Where `state.json` lives (created on first boot, mode 0600). Must be set; created if absent. |
+| `picker_root` | Root directory the share folder picker lists, one level deep. Empty resolves to `/opt`. |
+
+Running and operating the module — the sudoers grants for writing `/etc/samba/smb.conf` and restarting smbd, the SSE/proxy caveats, and migration from standalone smbed — is documented separately in **[docs/smbedit.md](docs/smbedit.md)**. Like multissh, this module has **no login**: anyone who reaches the smbedit hostname can rewrite this host's Samba configuration and restart the service, so treat the hostname as the access boundary.
 
 **Empty strings are meaningful, not omissions.** `ssh_dir`, `upload_dir`, `browse_root` and `known_hosts_path` are resolved at startup from the environment, so `make init-config` writes them as present-but-empty strings. An empty value reads as "resolve this for me"; leaving the key out entirely would be indistinguishable from a typo'd key name. Keep them present.
 
@@ -308,6 +325,14 @@ Each menu file follows this shape:
   ],
   "notes": ""
 }
+```
+
+### Smbedit
+
+A single state file, created on first boot (the running binary creates `data_dir` itself — nothing to seed):
+
+```
+/data/smbedit/state.json
 ```
 
 ---
