@@ -43,3 +43,10 @@ node_modules/
 # `go build ./cmd/server` with no -o lands here, named after the package
 # directory; a 19MB binary got left untracked in the repo root this way.
 /server
+
+# Local-testing profile runtime state (created by local-test/setup.sh).
+# The profile itself (config.json, setup.sh, glauth.cfg) stays tracked.
+/local-test/data/
+/local-test/admin.pin
+/local-test/todo.pin
+/local-test/slideshow.pin

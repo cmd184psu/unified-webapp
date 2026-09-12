@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"cmd184psu/unified-webapp/internal/platform/fspath"
 )
 
 type noteEntry struct{ Path, Name, AbsPath string }
@@ -79,22 +81,20 @@ func treeInsert(parent *TreeNode, parts []string, fullPath string) {
 }
 
 func readNote(root, relPath string) ([]byte, error) {
-	clean := filepath.Join(root, filepath.FromSlash(relPath))
-	if !strings.HasPrefix(clean, filepath.Clean(root)+string(os.PathSeparator)) &&
-		clean != filepath.Clean(root) {
+	clean, err := fspath.ConfineTo(root, filepath.FromSlash(relPath))
+	if err != nil {
 		return nil, os.ErrPermission
 	}
 	return os.ReadFile(clean)
 }
 
 func writeNote(root, relPath string, content []byte) error {
-	clean := filepath.Join(root, filepath.FromSlash(relPath))
-	if !strings.HasPrefix(clean, filepath.Clean(root)+string(os.PathSeparator)) &&
-		clean != filepath.Clean(root) {
+	clean, err := fspath.ConfineTo(root, filepath.FromSlash(relPath))
+	if err != nil {
 		return os.ErrPermission
 	}
-	if err := os.MkdirAll(filepath.Dir(clean), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(clean), 0o750); err != nil {
 		return err
 	}
-	return os.WriteFile(clean, content, 0o644)
+	return os.WriteFile(clean, content, 0o600)
 }

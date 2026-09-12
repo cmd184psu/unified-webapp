@@ -10,9 +10,22 @@ import (
 	"strings"
 	"testing"
 
+	"cmd184psu/unified-webapp/internal/platform/auth"
 	"cmd184psu/unified-webapp/internal/platform/config"
-	"cmd184psu/unified-webapp/internal/platform/middleware"
 )
+
+// noAuthService builds a Service from an empty AuthConfig -- no modules
+// protected, no admin routed -- so buildDispatcher's gate is a pass-through
+// and these dispatcher-focused tests observe the same behavior they did
+// before the gate was mounted.
+func noAuthService(t *testing.T) *auth.Service {
+	t.Helper()
+	svc, err := auth.FromConfig(config.AuthConfig{}, knownModules, false)
+	if err != nil {
+		t.Fatalf("noAuthService: %v", err)
+	}
+	return svc
+}
 
 // multisshTestConfig returns a config whose multissh module can actually build:
 // a real static dir, a real ssh dir, and paths under t.TempDir().
@@ -73,7 +86,7 @@ func TestTwoHostnamesShareOneModuleInstance(t *testing.T) {
 		"ssh-a.example": "multissh",
 		"ssh-b.example": "multissh",
 	})
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg)))
+	srv := newGateServer(t, cfg, noAuthService(t))
 	defer srv.Close()
 
 	res := doHost(t, srv, http.MethodPut, "ssh-a.example", "/api/hosts",
@@ -111,7 +124,7 @@ func TestModuleBuildFailureIsScopedToThatModule(t *testing.T) {
 	cfg.Grocery.StaticDir = groceryDir
 	cfg.Grocery.DataFile = filepath.Join(groceryDir, "grocery.json")
 
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg)))
+	srv := newGateServer(t, cfg, noAuthService(t))
 	defer srv.Close()
 
 	res := doHost(t, srv, http.MethodGet, "ssh.example", "/api/config", "")
@@ -123,8 +136,11 @@ func TestModuleBuildFailureIsScopedToThatModule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read body: %v", err)
 	}
-	if !strings.Contains(string(body), missing) {
-		t.Errorf("503 body does not name the offending path %q: %s", missing, body)
+	// The 503 surface sits outside the auth gate, so the build error -- which
+	// names filesystem paths -- must never reach the response body. The cause
+	// is boot-log-only; the body names the module and nothing else.
+	if strings.Contains(string(body), missing) {
+		t.Errorf("503 body leaks the offending path %q to unauthenticated callers: %s", missing, body)
 	}
 	if !strings.Contains(string(body), "multissh") {
 		t.Errorf("503 body does not name the module: %s", body)
@@ -153,7 +169,7 @@ func TestCertmachineBuildFailureIsScopedToThatModule(t *testing.T) {
 	cfg.Grocery.StaticDir = groceryDir
 	cfg.Grocery.DataFile = filepath.Join(groceryDir, "grocery.json")
 
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg)))
+	srv := newGateServer(t, cfg, noAuthService(t))
 	defer srv.Close()
 
 	res := doHost(t, srv, http.MethodGet, "certmachine.example", "/api/config", "")
@@ -165,8 +181,11 @@ func TestCertmachineBuildFailureIsScopedToThatModule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read body: %v", err)
 	}
-	if !strings.Contains(string(body), missing) {
-		t.Errorf("503 body does not name the offending path %q: %s", missing, body)
+	// Same contract as TestModuleBuildFailureIsScopedToThatModule: the 503
+	// surface sits outside the auth gate, so the build error -- which names
+	// filesystem paths -- must never reach the response body.
+	if strings.Contains(string(body), missing) {
+		t.Errorf("503 body leaks the offending path %q to unauthenticated callers: %s", missing, body)
 	}
 	if !strings.Contains(string(body), "certmachine") {
 		t.Errorf("503 body does not name the module: %s", body)
@@ -179,14 +198,16 @@ func TestCertmachineBuildFailureIsScopedToThatModule(t *testing.T) {
 	}
 }
 
-// middleware.Wrap sets Access-Control-Allow-Origin: * on every module's
-// response, which for certmachine means any page on the internet could read a
-// leaf's private key out of a logged-in operator's browser. certmachine strips
-// those headers back off inside its own handler (stripCORS, build.go), and this
-// test is the reason that approach is verifiable: it goes through the very same
-// middleware.Wrap(buildDispatcher(cfg)) stack main.go builds, so if Wrap ever
-// moves its header Set to after next.ServeHTTP -- where an inner Del can no
-// longer win -- this fails instead of silently regressing.
+// middleware.Wrap sets CORS headers on module responses: it reflects the
+// request's Origin into Access-Control-Allow-Origin when it is same-origin,
+// and sets Access-Control-Allow-Methods/-Headers unconditionally. certmachine
+// serves private keys, so it strips all of those back off inside its own
+// handler (stripCORS, build.go) -- defense in depth on top of Wrap's
+// same-origin policy. This test is the reason that approach is verifiable: it
+// goes through the very same middleware.Wrap(dispatcher) stack main.go builds
+// (via newGateServer), so if Wrap ever moves its header Set to after
+// next.ServeHTTP -- where an inner Del can no longer win -- this fails
+// instead of silently regressing.
 //
 // The grocery assertion at the end is the other half of the contract: the fix
 // is certmachine-scoped, and the platform middleware other modules may rely on
@@ -210,7 +231,7 @@ func TestCertmachineResponsesCarryNoCORSHeaders(t *testing.T) {
 	cfg.Grocery.StaticDir = groceryDir
 	cfg.Grocery.DataFile = filepath.Join(groceryDir, "grocery.json")
 
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg)))
+	srv := newGateServer(t, cfg, noAuthService(t))
 	defer srv.Close()
 
 	corsHeaders := []string{
@@ -218,11 +239,28 @@ func TestCertmachineResponsesCarryNoCORSHeaders(t *testing.T) {
 		"Access-Control-Allow-Methods",
 		"Access-Control-Allow-Headers",
 	}
+	// Send a same-origin Origin header so Wrap would bless the request with
+	// Access-Control-Allow-Origin -- the strongest case stripCORS must undo.
+	doOrigin := func(host, path string) *http.Response {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Host = host
+		req.Header.Set("Origin", "http://"+host)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("do request: %v", err)
+		}
+		return res
+	}
+
 	// One route per response shape: JSON API, the SPA shell, and a 404 from
 	// the API's catch-all -- the headers must be gone from all of them, not
 	// just the happy path.
 	for _, path := range []string{"/api/config", "/api/certs", "/", "/api/nope"} {
-		res := doHost(t, srv, http.MethodGet, "certmachine.example", path, "")
+		res := doOrigin("certmachine.example", path)
 		res.Body.Close()
 		if res.StatusCode == http.StatusServiceUnavailable {
 			t.Fatalf("certmachine failed to build; GET %s = 503", path)
@@ -234,10 +272,10 @@ func TestCertmachineResponsesCarryNoCORSHeaders(t *testing.T) {
 		}
 	}
 
-	grocery := doHost(t, srv, http.MethodGet, "grocery.example", "/config", "")
+	grocery := doOrigin("grocery.example", "/config")
 	grocery.Body.Close()
-	if got := grocery.Header.Get("Access-Control-Allow-Origin"); got == "" {
-		t.Error("stripping CORS for certmachine also stripped it from grocery; the fix must stay module-scoped")
+	if got := grocery.Header.Get("Access-Control-Allow-Origin"); got != "http://grocery.example" {
+		t.Errorf("stripping CORS for certmachine also broke grocery's same-origin ACAO; got %q, the fix must stay module-scoped", got)
 	}
 }
 
@@ -245,7 +283,7 @@ func TestCertmachineResponsesCarryNoCORSHeaders(t *testing.T) {
 // failure: its hostnames 503 and the binary still serves everything else.
 func TestUnknownModuleBecomesA503(t *testing.T) {
 	cfg := multisshTestConfig(t, map[string]string{"weird.example": "not-a-module"})
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg)))
+	srv := newGateServer(t, cfg, noAuthService(t))
 	defer srv.Close()
 
 	res := doHost(t, srv, http.MethodGet, "weird.example", "/", "")
@@ -266,7 +304,7 @@ func TestUnknownModuleBecomesA503(t *testing.T) {
 func TestWebSocketOriginCheckThroughDispatcher(t *testing.T) {
 	const hostname = "ssh.example"
 	cfg := multisshTestConfig(t, map[string]string{hostname: "multissh"})
-	srv := httptest.NewServer(middleware.Wrap(buildDispatcher(cfg)))
+	srv := newGateServer(t, cfg, noAuthService(t))
 	defer srv.Close()
 
 	cases := []struct {

@@ -131,10 +131,21 @@ func (s *Server) Close() error {
 	return s.db.Close()
 }
 
+// closableHandler pairs the module handler with the Server's Close. The
+// dispatcher (cmd/server/main.go) registers any module handler that
+// implements io.Closer and closes it on Dispatcher.Close, which its
+// goleak-gated tests rely on to stop the database/sql pool goroutine.
+type closableHandler struct {
+	http.Handler
+	srv *Server
+}
+
+func (c closableHandler) Close() error { return c.srv.Close() }
+
 // Build returns a ready-to-use http.Handler for the certmachine module. The
-// caller is responsible for wrapping it with middleware. buildModule
-// (cmd/server/main.go) accepts nothing but an http.Handler, so New and Close
-// exist alongside Build purely so tests can close the DB handle they open.
+// caller is responsible for wrapping it with middleware. The returned handler
+// implements io.Closer (releasing the DB handle) for the dispatcher's
+// module-shutdown hook.
 func Build(cfg config.CertmachineConfig) (http.Handler, error) {
 	srv, err := New(Options{
 		StaticDir:           cfg.StaticDir,
@@ -146,7 +157,7 @@ func Build(cfg config.CertmachineConfig) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	return srv.Handler(), nil
+	return closableHandler{Handler: srv.Handler(), srv: srv}, nil
 }
 
 // checkStaticDir refuses a static_dir that is not a readable directory. The

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -16,6 +15,8 @@ import (
 	"time"
 
 	"cmd184psu/unified-webapp/internal/multissh/sshproxy"
+	"cmd184psu/unified-webapp/internal/platform/middleware"
+	"cmd184psu/unified-webapp/internal/platform/response"
 	"github.com/gorilla/websocket"
 )
 
@@ -51,11 +52,6 @@ type broadcastCompleteFrame struct {
 	Type string `json:"type"`
 }
 
-type broadcastEvent struct {
-	frame    *broadcastProgressFrame
-	complete bool
-}
-
 type broadcastJob struct {
 	id string
 
@@ -66,7 +62,12 @@ type broadcastJob struct {
 	// reaches a terminal state (FR-N4).
 	creds []sshproxy.Secret
 	done  bool
-	subs  map[chan broadcastEvent]struct{}
+	// doneCh is closed under mu the moment done flips to true. Completion
+	// travels on it rather than as a fan-out event so a subscriber can
+	// never miss it: a buffered progress channel can drop frames when
+	// full, but a closed channel is observable forever.
+	doneCh chan struct{}
+	subs   map[chan broadcastProgressFrame]struct{}
 }
 
 type broadcastRegistry struct {
@@ -98,7 +99,7 @@ func (b *broadcastRegistry) createJob(targets []broadcastProgressFrame, creds []
 	if err != nil {
 		return "", nil, err
 	}
-	job := &broadcastJob{id: id, targets: targets, creds: creds, subs: make(map[chan broadcastEvent]struct{})}
+	job := &broadcastJob{id: id, targets: targets, creds: creds, doneCh: make(chan struct{}), subs: make(map[chan broadcastProgressFrame]struct{})}
 	b.mu.Lock()
 	b.jobs[id] = job
 	b.mu.Unlock()
@@ -120,21 +121,22 @@ func (j *broadcastJob) snapshot() ([]broadcastProgressFrame, bool) {
 	return out, j.done
 }
 
-func (j *broadcastJob) subscribe() chan broadcastEvent {
+func (j *broadcastJob) subscribe() chan broadcastProgressFrame {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	ch := make(chan broadcastEvent, 32)
+	ch := make(chan broadcastProgressFrame, 32)
 	j.subs[ch] = struct{}{}
 	return ch
 }
 
-func (j *broadcastJob) unsubscribe(ch chan broadcastEvent) {
+// unsubscribe removes ch from the fan-out set. It deliberately does not
+// close ch: update sends to its copied subscriber list outside the job
+// lock, so closing here would race those sends into a panic. The channel
+// is simply dropped and garbage-collected.
+func (j *broadcastJob) unsubscribe(ch chan broadcastProgressFrame) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	if _, ok := j.subs[ch]; ok {
-		delete(j.subs, ch)
-		close(ch)
-	}
+	delete(j.subs, ch)
 }
 
 func (j *broadcastJob) update(frame broadcastProgressFrame) {
@@ -145,12 +147,11 @@ func (j *broadcastJob) update(frame broadcastProgressFrame) {
 	if frame.Index >= 0 && frame.Index < len(j.creds) && isBroadcastTerminal(frame.State) {
 		j.creds[frame.Index].Zero()
 	}
-	done := j.done
-	if !done && allBroadcastTargetsTerminal(j.targets) {
+	if !j.done && allBroadcastTargetsTerminal(j.targets) {
 		j.done = true
-		done = true
+		close(j.doneCh)
 	}
-	subs := make([]chan broadcastEvent, 0, len(j.subs))
+	subs := make([]chan broadcastProgressFrame, 0, len(j.subs))
 	for sub := range j.subs {
 		subs = append(subs, sub)
 	}
@@ -158,14 +159,8 @@ func (j *broadcastJob) update(frame broadcastProgressFrame) {
 
 	for _, sub := range subs {
 		select {
-		case sub <- broadcastEvent{frame: &frame}:
+		case sub <- frame:
 		default:
-		}
-		if done {
-			select {
-			case sub <- broadcastEvent{complete: true}:
-			default:
-			}
 		}
 	}
 }
@@ -220,21 +215,21 @@ func (s *Server) resolveBroadcastSource(req broadcastRequest) (string, string, i
 
 func (s *Server) handleBroadcastPost(w http.ResponseWriter, r *http.Request) {
 	if s.broadcasts == nil || s.uploads == nil {
-		writeError(w, http.StatusInternalServerError, "broadcast unavailable")
+		response.WriteError(w, http.StatusInternalServerError, "broadcast unavailable")
 		return
 	}
 	var req broadcastRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		response.WriteDecodeError(w, err)
 		return
 	}
 	localPath, baseName, totalSize, err := s.resolveBroadcastSource(req)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		response.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if len(req.Targets) < 1 || len(req.Targets) > s.maxSessions {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("targets must contain 1 to %d entries", s.maxSessions))
+		response.WriteError(w, http.StatusBadRequest, fmt.Sprintf("targets must contain 1 to %d entries", s.maxSessions))
 		return
 	}
 
@@ -249,7 +244,7 @@ func (s *Server) handleBroadcastPost(w http.ResponseWriter, r *http.Request) {
 	creds := make([]sshproxy.Secret, 0, len(req.Targets))
 	for i, t := range req.Targets {
 		if strings.TrimSpace(t.Host) == "" || strings.TrimSpace(t.User) == "" {
-			writeError(w, http.StatusBadRequest, "invalid target")
+			response.WriteError(w, http.StatusBadRequest, "invalid target")
 			return
 		}
 		// A target authenticates with a key or with a password, never both and
@@ -257,14 +252,14 @@ func (s *Server) handleBroadcastPost(w http.ResponseWriter, r *http.Request) {
 		hasKey := strings.TrimSpace(t.Key) != ""
 		hasPassword := !t.Password.IsZero()
 		if hasKey == hasPassword {
-			writeError(w, http.StatusBadRequest, "each target needs exactly one of a key or a password")
+			response.WriteError(w, http.StatusBadRequest, "each target needs exactly one of a key or a password")
 			return
 		}
 		var keyPath string
 		if hasKey {
 			keyPath, err = sshproxy.ResolveKeyPath(s.opts.SSHKeyDir, t.Key)
 			if err != nil {
-				writeError(w, http.StatusBadRequest, "invalid target key")
+				response.WriteError(w, http.StatusBadRequest, "invalid target key")
 				return
 			}
 		}
@@ -290,7 +285,7 @@ func (s *Server) handleBroadcastPost(w http.ResponseWriter, r *http.Request) {
 
 	jobID, job, err := s.broadcasts.createJob(initial, creds)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "unable to start broadcast")
+		response.WriteError(w, http.StatusInternalServerError, "unable to start broadcast")
 		return
 	}
 
@@ -323,17 +318,17 @@ func (s *Server) runBroadcastTransfer(job *broadcastJob, index int, host string,
 
 func (s *Server) handleBroadcastWS(w http.ResponseWriter, r *http.Request) {
 	if s.broadcasts == nil {
-		writeError(w, http.StatusInternalServerError, "broadcast unavailable")
+		response.WriteError(w, http.StatusInternalServerError, "broadcast unavailable")
 		return
 	}
 	jobID := strings.TrimSpace(r.URL.Query().Get("job"))
 	if jobID == "" {
-		writeError(w, http.StatusBadRequest, "missing job id")
+		response.WriteError(w, http.StatusBadRequest, "missing job id")
 		return
 	}
 	job, ok := s.broadcasts.getJob(jobID)
 	if !ok {
-		writeError(w, http.StatusNotFound, "job not found")
+		response.WriteError(w, http.StatusNotFound, "job not found")
 		return
 	}
 
@@ -342,6 +337,13 @@ func (s *Server) handleBroadcastWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer ws.Close()
+
+	// Subscribe before snapshotting. With the reverse order there is a gap
+	// in which the job can reach its final state: the snapshot says "not
+	// done", the completing update fans out to nobody, and the subscriber
+	// registered a moment later waits forever for a signal already fired.
+	sub := job.subscribe()
+	defer job.unsubscribe(sub)
 
 	snapshot, done := job.snapshot()
 	for _, frame := range snapshot {
@@ -356,20 +358,24 @@ func (s *Server) handleBroadcastWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sub := job.subscribe()
-	defer job.unsubscribe(sub)
 	for {
-		ev, ok := <-sub
-		if !ok {
-			return
-		}
-		if ev.frame != nil {
+		select {
+		case frame := <-sub:
 			_ = ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := ws.WriteJSON(ev.frame); err != nil {
+			if err := ws.WriteJSON(frame); err != nil {
 				return
 			}
-		}
-		if ev.complete {
+		case <-job.doneCh:
+			// Frames still buffered in sub (or dropped when its buffer
+			// filled) may postdate the snapshot; a fresh snapshot carries
+			// every target's final state, so send that and finish.
+			final, _ := job.snapshot()
+			for _, frame := range final {
+				_ = ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				if err := ws.WriteJSON(frame); err != nil {
+					return
+				}
+			}
 			_ = ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			_ = ws.WriteJSON(broadcastCompleteFrame{Type: "complete"})
 			return
@@ -385,25 +391,14 @@ func broadcastTransferErrorMessage(err error) string {
 	return "transfer failed"
 }
 
-func sameOrigin(r *http.Request) bool {
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		return true
-	}
-	host := r.Host
-	if originHost(origin) == host {
+// sameOrigin wraps middleware.SameOrigin, adding the audit line the broadcast
+// bridge relies on when an upgrade is rejected.
+var sameOrigin = func(r *http.Request) bool {
+	if middleware.SameOrigin(r) {
 		return true
 	}
 	// R1: same diagnosis as the terminal bridge -- a Host-rewriting proxy shows
 	// up here as a rejected upgrade and nothing else.
-	sshproxy.Auditf("broadcast ws upgrade rejected origin=%q host=%q", origin, host)
+	sshproxy.Auditf("broadcast ws upgrade rejected origin=%q host=%q", r.Header.Get("Origin"), r.Host)
 	return false
-}
-
-func originHost(origin string) string {
-	u, err := url.Parse(origin)
-	if err != nil || u.Host == "" {
-		return origin
-	}
-	return u.Host
 }

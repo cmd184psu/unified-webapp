@@ -9,6 +9,7 @@ type MultiRoomBroker struct {
 	mu      sync.Mutex
 	rooms   map[string]*Broker
 	retryMs int
+	maxSubs int
 }
 
 // NewMultiRoomBroker creates a MultiRoomBroker. retryMs is passed to every
@@ -17,19 +18,37 @@ func NewMultiRoomBroker(retryMs int) *MultiRoomBroker {
 	return &MultiRoomBroker{
 		rooms:   make(map[string]*Broker),
 		retryMs: retryMs,
+		maxSubs: DefaultMaxSubscribers,
 	}
 }
 
-// Room returns the Broker for the given key, creating it if it does not exist.
+// Room returns the Broker for the given key, creating it if it does not
+// exist. Newly created rooms inherit the cap set via SetMaxSubscribers.
 func (m *MultiRoomBroker) Room(key string) *Broker {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	b, ok := m.rooms[key]
 	if !ok {
 		b = NewBroker(m.retryMs)
+		b.SetMaxSubscribers(m.maxSubs)
 		m.rooms[key] = b
 	}
 	return b
+}
+
+// SetMaxSubscribers sets the subscriber cap applied to rooms created from now
+// on via Room, and updates every room already created. n<=0 resets the cap to
+// DefaultMaxSubscribers.
+func (m *MultiRoomBroker) SetMaxSubscribers(n int) {
+	if n <= 0 {
+		n = DefaultMaxSubscribers
+	}
+	m.mu.Lock()
+	m.maxSubs = n
+	for _, b := range m.rooms {
+		b.SetMaxSubscribers(n)
+	}
+	m.mu.Unlock()
 }
 
 // Notify sends a refresh signal to all clients connected to the given room.

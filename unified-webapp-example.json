@@ -12,8 +12,13 @@
   "obsidianoid-test.cmdhome.net":      "obsidianoid",
   "obsidianoid.cmdhome.net":           "obsidianoid",
   "multissh-test.cmdhome.net":         "multissh",
-  "certmachine-test.cmdhome.net":      "certmachine"
+  "certmachine-test.cmdhome.net":      "certmachine",
+  "admin-test.cmdhome.net":            "admin"
 
+  },
+  "server": {
+    "origin_check": "enforce",
+    "sse_max_subscribers": 64
   },
   "grocery": {
     "static_dir": "./web/grocery",
@@ -75,5 +80,50 @@
     "legacy_import_dir": "",
     "default_validity_days": 365,
     "expiry_warn_days": 30
+  },
+  "admin": {
+    "static_dir": "./web/admin",
+    "max_body_bytes": 1048576
+  },
+  "auth": {
+    "modules": {
+      "grocery": ["pin"],
+      "todo": ["pin"],
+      "slideshow": ["pin"],
+      "menuserver": ["pin"],
+      "obsidianoid": ["ldap", "passkey"],
+      "multissh": ["key"],
+      "certmachine": ["pin"],
+      "admin": []
+    },
+    "admin_pin_file": "/etc/unified-webapp/admin.pin",
+    "data_dir": "/data/auth",
+    "cookie_secure": true,
+    "cookie_domain": ".cmdhome.net",
+    "session": {
+      "ttl_hours": 720,
+      "refresh_after_fraction": 0.5
+    },
+    "ldap": {
+      "url": "ldaps://ldap.cmdhome.net:636",
+      "start_tls": false,
+      "insecure_tls": false,
+      "bind_dn": "cn=readonly,dc=cmdhome,dc=net",
+      "bind_password": "REPLACE_WITH_BIND_PASSWORD",
+      "base_dn": "ou=people,dc=cmdhome,dc=net",
+      "user_filter": "(uid=%s)",
+      "required_groups": ["cn=household,ou=groups,dc=cmdhome,dc=net"],
+      "timeout_seconds": 5
+    },
+    "pins": [
+      { "name": "chris", "hash": "$2a$10$f81lJT7WsTVxIMS0bPy9xO2FZ1PjGbqcTKYnFck6RNFp9ARxcgnMe" }
+    ],
+    "api_keys": [
+      { "name": "automation", "hash": "sha256:b408256cc1181a47c036389a767e271f39da77e401ad27a28c35805a696b7d22" }
+    ],
+    "passkey": {
+      "rp_id": "cmdhome.net",
+      "rp_origins": ["https://obsidianoid.cmdhome.net"]
+    }
   }
 }

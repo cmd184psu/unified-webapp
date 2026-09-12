@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"cmd184psu/unified-webapp/internal/platform/fspath"
+	"cmd184psu/unified-webapp/internal/platform/response"
 )
 
 type fileBrowser struct {
@@ -82,12 +85,12 @@ func resolveWithinRoot(root, rel string) (absDir string, relClean string, err er
 		return "", "", fmt.Errorf("resolve browse root: %w", err)
 	}
 	rel = strings.TrimSpace(rel)
-	if rel == "" || rel == "." {
-		return rootAbs, "", nil
+	joined, err := fspath.ConfineTo(rootAbs, rel)
+	if err != nil {
+		return "", "", fmt.Errorf("path escapes browse root")
 	}
-	joined := filepath.Join(rootAbs, rel)
 	relPath, err := filepath.Rel(rootAbs, joined)
-	if err != nil || relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
+	if err != nil {
 		return "", "", fmt.Errorf("path escapes browse root")
 	}
 	if relPath == "." {
@@ -98,12 +101,12 @@ func resolveWithinRoot(root, rel string) (absDir string, relClean string, err er
 
 func (s *Server) handleFilesGet(w http.ResponseWriter, r *http.Request) {
 	if s.files == nil {
-		writeError(w, http.StatusInternalServerError, "file browser unavailable")
+		response.WriteError(w, http.StatusInternalServerError, "file browser unavailable")
 		return
 	}
 	relPath, entries, err := s.files.list(r.URL.Query().Get("path"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		response.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

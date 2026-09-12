@@ -47,12 +47,12 @@ func readThreads(vaultPath, folder string, count int, states []ThreadState) ([]T
 // writeThreads writes thread content to vault files. Disabled state is not stored in files.
 func writeThreads(vaultPath, folder string, threads []Thread) error {
 	dir := filepath.Join(vaultPath, folder)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
 	for i, t := range threads {
 		path := filepath.Join(dir, threadFileName(i))
-		if err := os.WriteFile(path, []byte(t.Content), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(t.Content), 0o600); err != nil {
 			return fmt.Errorf("thread %d: %w", i+1, err)
 		}
 	}

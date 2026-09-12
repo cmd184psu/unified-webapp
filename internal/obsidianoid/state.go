@@ -27,7 +27,7 @@ type StateStore struct {
 
 // NewStateStore initialises the store, creating DataDir if needed.
 func NewStateStore(dataDir string, threadCount int) (*StateStore, error) {
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	if err := os.MkdirAll(dataDir, 0o750); err != nil {
 		return nil, err
 	}
 	s := &StateStore{
@@ -76,5 +76,5 @@ func (s *StateStore) SetDisabled(disabled []bool) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.path, data, 0o644)
+	return os.WriteFile(s.path, data, 0o600)
 }

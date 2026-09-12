@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
 
+	"cmd184psu/unified-webapp/internal/platform/middleware"
 	"github.com/gorilla/websocket"
 )
 
@@ -298,31 +298,14 @@ func dialErrorMessage(err error) string {
 	return "connection failed: check host, user, and key"
 }
 
-// sameOrigin permits same-origin upgrades and requests with no Origin header
-// (non-browser clients). A mismatched Origin is rejected.
-func sameOrigin(r *http.Request) bool {
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		return true
-	}
-	host := r.Host
-	// Compare the Origin's host:port against the request Host.
-	if originHost(origin) == host {
+// sameOrigin wraps middleware.SameOrigin, adding the audit line the terminal
+// bridge relies on when an upgrade is rejected.
+var sameOrigin = func(r *http.Request) bool {
+	if middleware.SameOrigin(r) {
 		return true
 	}
 	// R1: a proxy that rewrites Host fails every upgrade here, and the pair is
 	// the whole diagnosis -- log it rather than making the operator guess.
-	Auditf("ws upgrade rejected origin=%q host=%q", origin, host)
+	Auditf("ws upgrade rejected origin=%q host=%q", r.Header.Get("Origin"), r.Host)
 	return false
-}
-
-// originHost extracts the host[:port] from an Origin header value, returning
-// the raw value if it cannot be parsed (which will simply fail the equality
-// check and reject the upgrade).
-func originHost(origin string) string {
-	u, err := url.Parse(origin)
-	if err != nil || u.Host == "" {
-		return origin
-	}
-	return u.Host
 }
