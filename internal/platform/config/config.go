@@ -22,6 +22,7 @@ type Config struct {
 	Menuserver  MenuserverConfig  `json:"menuserver"`
 	Obsidianoid ObsidianoidConfig `json:"obsidianoid"`
 	Multissh    MultisshConfig    `json:"multissh"`
+	Utuber      UtuberConfig      `json:"utuber"`
 }
 
 // ObsidianoidVault holds the per-vault configuration for the obsidianoid module.
@@ -117,6 +118,28 @@ const (
 	MaxMaxSessions     = 16
 )
 
+// UtuberConfig holds configuration specific to the utuber module.
+//
+// PythonBin is the Python interpreter used by the yt-dlp self-update
+// endpoint. It is a config-level default only: a value saved through the
+// module's UI settings menu overrides it at runtime. It is passed as argv[0]
+// to the executor, never through a shell.
+type UtuberConfig struct {
+	StaticDir   string `json:"static_dir"`
+	DownloadDir string `json:"download_dir"`
+	Workers     int    `json:"workers"`
+	PythonBin   string `json:"python_bin"`
+}
+
+// Utuber worker-count bounds and interpreter default. Workers is validated in
+// exactly one place (Load); utuber.Build trusts the resolved value and
+// performs no re-validation.
+const (
+	DefaultUtuberWorkers   = 1
+	MaxUtuberWorkers       = 8
+	DefaultUtuberPythonBin = "python3.12"
+)
+
 // DefaultConfig returns a Config populated with safe defaults.
 func DefaultConfig() *Config {
 	return &Config{
@@ -167,6 +190,12 @@ func DefaultConfig() *Config {
 			MaxSessions:    DefaultMaxSessions,
 			MaxUploadBytes: 8 << 30, // 8 GiB
 			StrictHostKey:  false,
+		},
+		Utuber: UtuberConfig{
+			StaticDir:   "./web/utuber",
+			DownloadDir: "./data/utuber/downloads",
+			Workers:     DefaultUtuberWorkers,
+			PythonBin:   DefaultUtuberPythonBin,
 		},
 	}
 }
@@ -222,6 +251,12 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	if err := normalizeMultissh(&cfg.Multissh); err != nil {
+		return nil, err
+	}
+	if err := expandUtuberPaths(&cfg.Utuber); err != nil {
+		return nil, err
+	}
+	if err := normalizeUtuber(&cfg.Utuber); err != nil {
 		return nil, err
 	}
 	if cfg.TLSCert != "" {
@@ -338,6 +373,42 @@ func normalizeMultissh(m *MultisshConfig) error {
 	case m.MaxSessions > MaxMaxSessions:
 		log.Printf("multissh: max_sessions %d exceeds the maximum of %d; clamping to %d", m.MaxSessions, MaxMaxSessions, MaxMaxSessions)
 		m.MaxSessions = MaxMaxSessions
+	}
+	return nil
+}
+
+// expandUtuberPaths expands ~ in the utuber directories. PythonBin is
+// deliberately not expanded: a ~-relative interpreter is not a supported
+// form, and expanding it would let the settings-menu validation regex pass a
+// value that then names a different file.
+func expandUtuberPaths(u *UtuberConfig) error {
+	var err error
+	if u.StaticDir, err = ExpandPath(u.StaticDir); err != nil {
+		return err
+	}
+	if u.DownloadDir, err = ExpandPath(u.DownloadDir); err != nil {
+		return err
+	}
+	return nil
+}
+
+// normalizeUtuber is the single validation point for the utuber module's
+// worker count and interpreter default. Zero workers means "unset" and takes
+// the default; negative is an operator error and is rejected; an absurdly
+// large value is a typo and is clamped with a warning rather than refused.
+// utuber.Build trusts the result and does not re-validate.
+func normalizeUtuber(u *UtuberConfig) error {
+	switch {
+	case u.Workers < 0:
+		return fmt.Errorf("utuber: workers must be at least 1, got %d", u.Workers)
+	case u.Workers == 0:
+		u.Workers = DefaultUtuberWorkers
+	case u.Workers > MaxUtuberWorkers:
+		log.Printf("utuber: workers %d exceeds the maximum of %d; clamping to %d", u.Workers, MaxUtuberWorkers, MaxUtuberWorkers)
+		u.Workers = MaxUtuberWorkers
+	}
+	if u.PythonBin == "" {
+		u.PythonBin = DefaultUtuberPythonBin
 	}
 	return nil
 }

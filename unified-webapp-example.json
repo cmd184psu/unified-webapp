@@ -11,7 +11,8 @@
   "menuserver-test.cmdhome.net":       "menuserver",
   "obsidianoid-test.cmdhome.net":      "obsidianoid",
   "obsidianoid.cmdhome.net":           "obsidianoid",
-  "multissh-test.cmdhome.net":         "multissh"
+  "multissh-test.cmdhome.net":         "multissh",
+  "utuber-test.cmdhome.net":           "utuber"
 
   },
   "grocery": {
@@ -67,5 +68,11 @@
     "max_upload_bytes": 8589934592,
     "strict_host_key": false,
     "known_hosts_path": ""
+  },
+  "utuber": {
+    "static_dir": "./web/utuber",
+    "download_dir": "./data/utuber/downloads",
+    "workers": 1,
+    "python_bin": "python3.12"
   }
 }
