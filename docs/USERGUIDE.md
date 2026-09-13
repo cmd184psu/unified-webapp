@@ -1,6 +1,6 @@
 # unified-webapp User Guide
 
-One Go binary serves seven modules. The `Host` header of each request picks
+One Go binary serves eight modules. The `Host` header of each request picks
 the module: `host_routing` in the config maps a hostname (port ignored) to a
 module name, so `todo.test:8080` and `todo.test` both route to whatever
 `"todo.test"` maps to. Each module is independently either open (no login)
@@ -18,6 +18,7 @@ Modules:
 | [menuserver](#menuserver) | Read-only bookmark/notes/credentials pages |
 | [obsidianoid](#obsidianoid) | Web viewer/editor for Obsidian-style markdown vaults |
 | [multissh](#multissh) | Browser SSH console for many hosts + file broadcast |
+| [taskmaster](#taskmaster) | Scheduled/on-demand command runner with live output |
 | [admin](#admin) | Web UI for editing the auth config live |
 
 ---
@@ -33,8 +34,8 @@ waiting on multicast lookups.)
 **1. Add the hostnames** (two lines in `/etc/hosts`, needs sudo):
 
 ```
-127.0.0.1 grocery.test todo.test slideshow.test menu.test menuserver.test obsidianoid.test multissh.test admin.test
-::1 grocery.test todo.test slideshow.test menu.test menuserver.test obsidianoid.test multissh.test admin.test
+127.0.0.1 grocery.test todo.test slideshow.test menu.test menuserver.test obsidianoid.test multissh.test admin.test taskmaster.test
+::1 grocery.test todo.test slideshow.test menu.test menuserver.test obsidianoid.test multissh.test admin.test taskmaster.test
 ```
 
 Add both so IPv4 and IPv6 lookups resolve straight from `/etc/hosts`.
@@ -62,6 +63,7 @@ go run ./cmd/server -config local-test/config.json
 | http://menuserver.test:8080 (or menu.test) | menuserver | yes | LDAP (or API key) |
 | http://obsidianoid.test:8080 | obsidianoid | yes | LDAP (or API key) |
 | http://multissh.test:8080 | multissh | yes | LDAP (or API key) |
+| http://taskmaster.test:8080 | taskmaster | yes | LDAP (or API key) |
 | http://admin.test:8080 | admin | yes | admin PIN `424242` only |
 
 These are throwaway test credentials, published in this repo on purpose.
@@ -69,7 +71,7 @@ Never reuse them outside local testing. LDAP credentials for all protected
 modules other than admin: `chris` / `ldap-test-1` (see below).
 
 The test API key (works on any protected non-admin module — todo,
-slideshow, menuserver, obsidianoid, multissh):
+slideshow, menuserver, obsidianoid, multissh, taskmaster):
 
 ```
 varOO_vuQyged_rklN3ujsy2tgQAcEs-9Ln13hDIyh0
@@ -96,9 +98,9 @@ That serves user `chris` (password `ldap-test-1`, member of `household`,
 which the profile requires) and a read-only bind account. LDAP is offered on
 every protected module in this profile — including menuserver, which used
 to be API-key-only — so glauth needs to be running to log into todo,
-slideshow, menuserver, obsidianoid, or multissh via the browser (todo and
-slideshow also accept their PIN instead). Verify it answers before blaming
-the webapp:
+slideshow, menuserver, obsidianoid, multissh, or taskmaster via the browser
+(todo and slideshow also accept their PIN instead). Verify it answers
+before blaming the webapp:
 
 ```
 ldapsearch -H ldap://127.0.0.1:3893 -x \
@@ -333,6 +335,38 @@ it to many hosts. See `docs/multissh.md` for the full operator guide.
   logged server-side (never with credential values).
 
 In the local profile multissh is protected like any other module: LDAP for
+browser login, or the API key for scripted access.
+
+## Taskmaster
+
+A scheduled/on-demand command runner: define tasks (`shell`/`exec`/
+`script`/`migration`) grouped into concurrency-limited groups, run them now
+or on a repeat/cooldown schedule, and watch output live. See
+`docs/taskmaster.md` for the full config/API/scheduling reference and a
+security write-up you should read before enabling sudo.
+
+**Using it:**
+
+- **Groups** cap how many tasks run concurrently (`pool_limit`) and
+  optionally restrict which task types may live in them (`allowed_types`;
+  empty means all types allowed).
+- **Tasks** belong to one group, run a command of a given type, and can be
+  `repeat`-scheduled with a `cooldown_seconds`, or triggered on demand via
+  Enqueue.
+- **Live output:** enqueueing (or opening a running task) streams its
+  stdout/stderr line-by-line over SSE as it happens; the executions list
+  shows status (pending/running/success/failed) and duration; the metrics
+  page aggregates success/failure counts and durations per task.
+- **Sudo control:** a sudo checkbox on task creation appears only when the
+  server's `taskmaster.allow_sudo` is `true` (checked via
+  `GET /api/capabilities`); when hidden, tasks can never be created with
+  `sudo: true` from the UI, and the API rejects `sudo: true` with a 403 if
+  `allow_sudo` is false regardless.
+- **`taskmasterctl`** is a companion CLI for the same API (group/task/
+  executions/output/metrics/health), authenticating with a platform API
+  key — see `docs/taskmaster.md`.
+
+In the local profile taskmaster is protected like multissh: LDAP for
 browser login, or the API key for scripted access.
 
 ## Admin

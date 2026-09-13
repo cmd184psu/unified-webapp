@@ -1,0 +1,72 @@
+package coordinator
+
+import (
+	"net/http"
+	"sync/atomic"
+
+	"github.com/go-chi/chi/v5"
+
+	"cmd184psu/unified-webapp/internal/platform/response"
+	"cmd184psu/unified-webapp/internal/taskmaster/db"
+	"cmd184psu/unified-webapp/internal/taskmaster/worker"
+)
+
+type Coordinator struct {
+	db        *db.DB
+	registry  *worker.OutputRegistry
+	allowSudo bool
+	sseMax    int
+	sseSubs   atomic.Int64
+}
+
+func New(database *db.DB, registry *worker.OutputRegistry, allowSudo bool, sseMax int) *Coordinator {
+	return &Coordinator{db: database, registry: registry, allowSudo: allowSudo, sseMax: sseMax}
+}
+
+// Routes returns the HTTP handler (exported for testing).
+func Routes(c *Coordinator) *chi.Mux { return c.routes() }
+
+func (c *Coordinator) routes() *chi.Mux {
+	r := chi.NewRouter()
+
+	r.Get("/api/health", c.handleHealth)
+	r.Get("/api/capabilities", c.handleCapabilities)
+
+	r.Get("/api/groups", c.handleListGroups)
+	r.Post("/api/groups", c.handleCreateGroup)
+	r.Get("/api/groups/{name}", c.handleGetGroup)
+	r.Put("/api/groups/{name}", c.handleUpdateGroup)
+	r.Delete("/api/groups/{name}", c.handleDeleteGroup)
+	r.Post("/api/groups/{name}/pause", c.handlePauseGroup)
+	r.Post("/api/groups/{name}/resume", c.handleResumeGroup)
+
+	r.Get("/api/tasks", c.handleListTasks)
+	r.Post("/api/tasks", c.handleAddTask)
+	r.Get("/api/tasks/{name}", c.handleGetTask)
+	r.Put("/api/tasks/{name}", c.handleUpdateTask)
+	r.Delete("/api/tasks/{name}", c.handleDeleteTask)
+	r.Post("/api/tasks/{name}/pause", c.handlePauseTask)
+	r.Post("/api/tasks/{name}/resume", c.handleResumeTask)
+	r.Post("/api/tasks/{name}/enqueue", c.handleEnqueueTask)
+
+	r.Get("/api/executions", c.handleListExecutions)
+	r.Get("/api/executions/{id}/output", c.handleExecutionOutput)
+
+	r.Get("/api/metrics", c.handleMetrics)
+
+	return r
+}
+
+// ─── Shared helpers ───────────────────────────────────────────────────────────
+
+func (c *Coordinator) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if err := c.db.Ping(); err != nil {
+		response.WriteError(w, http.StatusServiceUnavailable, "database unavailable: "+err.Error())
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (c *Coordinator) handleCapabilities(w http.ResponseWriter, r *http.Request) {
+	response.WriteJSON(w, http.StatusOK, map[string]bool{"allow_sudo": c.allowSudo})
+}

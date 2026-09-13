@@ -11,7 +11,8 @@
     "menuserver.test":  "menuserver",
     "obsidianoid.test": "obsidianoid",
     "multissh.test":    "multissh",
-    "admin.test":       "admin"
+    "admin.test":       "admin",
+    "taskmaster.test":  "taskmaster"
   },
   "server": {
     "origin_check": "enforce",
@@ -75,6 +76,15 @@
     "static_dir": "./web/admin",
     "max_body_bytes": 1048576
   },
+  "taskmaster": {
+    "static_dir": "./web/taskmaster",
+    "db_path": "./local-test/data/taskmaster/taskmaster.db",
+    "groups": [
+      { "name": "default", "pool_limit": 2, "allowed_types": [] },
+      { "name": "shell-only", "pool_limit": 1, "allowed_types": ["shell"] }
+    ],
+    "allow_sudo": false
+  },
   "auth": {
     "modules": {
       "admin": {
@@ -91,6 +101,9 @@
       },
       "slideshow": {
         "pin_file": "/opt/unified-webapp/local-test/slideshow.pin"
+      },
+      "taskmaster": {
+        "pin_file": ""
       },
       "todo": {
         "pin_file": "/opt/unified-webapp/local-test/todo.pin"
