@@ -48,11 +48,15 @@ func (p processor) Process(ctx context.Context, job jobs.Job, q *jobs.Queue) err
 
 	q.Update(job.ID, func(j *jobs.Job) { j.Progress = "downloading" })
 
-	tmp, err := media.Download(
+	// yt-dlp writes to a deterministic "<job ID>.mp4" (see media.Download), so
+	// src is the exact file just produced — no directory scan to guess which
+	// file is the download.
+	src, err := media.Download(
 		ctx,
 		p.exec,
 		job.URL,
 		p.cfg.DownloadDir,
+		job.ID,
 		func(s string) {
 			q.Update(job.ID, func(j *jobs.Job) { j.Progress = "download " + s })
 		},
@@ -72,23 +76,28 @@ func (p processor) Process(ctx context.Context, job jobs.Job, q *jobs.Queue) err
 		outPath := p.cfg.DownloadDir + "/" + out
 
 		q.Update(job.ID, func(j *jobs.Job) { j.Progress = "converting" })
-		err = media.ExtractAudio(ctx, p.exec, tmp, outPath, func(s string) {
+		err = media.ExtractAudio(ctx, p.exec, src, outPath, func(s string) {
 			q.Update(job.ID, func(j *jobs.Job) { j.Progress = "convert " + s })
 		})
-		_ = os.Remove(tmp)
+		_ = os.Remove(src)
 		if err != nil {
 			return err
 		}
 		job.OutputFile = out
 	} else {
+		// Keep the yt-dlp .mp4 as-is (Apple-compatible H.264/AAC in an mp4
+		// container); only give it the Plex-friendly name. No transcode, and
+		// no .m4v rename — the extension stays .mp4.
 		out := fmt.Sprintf(
-			"%s - S%02dE%02d - %s.m4v",
+			"%s - S%02dE%02d - %s.mp4",
 			safe(job.ShowName),
 			job.Season,
 			job.Episode,
 			safe(job.EpisodeTitle),
 		)
-		_ = os.Rename(tmp, p.cfg.DownloadDir+"/"+out)
+		if err := os.Rename(src, p.cfg.DownloadDir+"/"+out); err != nil {
+			return err
+		}
 		job.OutputFile = out
 	}
 	q.Update(job.ID, func(j *jobs.Job) { j.OutputFile = job.OutputFile })

@@ -225,13 +225,10 @@ func (f *fakeExec) Run(_ context.Context, name string, args []string, _ func(str
 
 func TestProcessFillsMetadataWhenBlank(t *testing.T) {
 	dir := t.TempDir()
-	tmp := filepath.Join(dir, "raw.mp4")
-	os.WriteFile(tmp, []byte("video"), 0644)
 
 	hist, _ := history.Open(filepath.Join(dir, "history.json"))
 	p := processor{
-		exec: &metaAndDownloadExec{dir: dir, realFile: tmp,
-			metaLine: "Cool Artist|||Cool Track"},
+		exec: &metaAndDownloadExec{metaLine: "Cool Artist|||Cool Track"},
 		cfg:  config.UtuberConfig{DownloadDir: dir},
 		hist: hist,
 	}
@@ -258,7 +255,7 @@ func TestProcessFillsMetadataWhenBlank(t *testing.T) {
 		t.Errorf("EpisodeTitle: got %q", got.EpisodeTitle)
 	}
 	// The autofill -> filename -> history chain is otherwise a silent failure mode.
-	want := "Cool Artist - S01E01 - Cool Track.m4v"
+	want := "Cool Artist - S01E01 - Cool Track.mp4"
 	if got.OutputFile != want {
 		t.Errorf("OutputFile: got %q, want %q", got.OutputFile, want)
 	}
@@ -279,12 +276,10 @@ func TestProcessFillsMetadataWhenBlank(t *testing.T) {
 
 func TestProcessKeepsExistingMetadata(t *testing.T) {
 	dir := t.TempDir()
-	tmp := filepath.Join(dir, "raw.mp4")
-	os.WriteFile(tmp, []byte("video"), 0644)
 
 	hist, _ := history.Open(filepath.Join(dir, "history.json"))
 	p := processor{
-		exec: &newestAfterExec{dir: dir, realFile: tmp},
+		exec: &downloadOnlyExec{},
 		cfg:  config.UtuberConfig{DownloadDir: dir},
 		hist: hist,
 	}
@@ -311,28 +306,18 @@ func TestProcessKeepsExistingMetadata(t *testing.T) {
 
 func TestProcessVideoMode(t *testing.T) {
 	dir := t.TempDir()
-	// create a fake downloaded file that the processor will rename
-	tmp := filepath.Join(dir, "raw.mp4")
-	os.WriteFile(tmp, []byte("video"), 0644)
 
 	hist, _ := history.Open(filepath.Join(dir, "history.json"))
-	exec := &fakeExec{}
 	p := processor{
-		exec: exec,
+		exec: &downloadOnlyExec{},
 		cfg:  config.UtuberConfig{DownloadDir: dir},
 		hist: hist,
 	}
 
-	// Make Download return our fake file by having the executor write nothing
-	// but newestFile will find tmp since we created it above.
 	job := &jobs.Job{
 		ID: "v1", URL: "http://x.com", ShowName: "Show", EpisodeTitle: "Ep",
 		Season: 1, Episode: 2, Mode: "video", Status: jobs.Queued,
 	}
-
-	// Wrap exec so Download "succeeds" and returns our tmp file path.
-	wrappedExec := &newestAfterExec{dir: dir, realFile: tmp}
-	p.exec = wrappedExec
 
 	q := jobs.New(10)
 	q.Enqueue(job)
@@ -346,7 +331,7 @@ func TestProcessVideoMode(t *testing.T) {
 	if !ok {
 		t.Fatalf("job %s vanished from queue", job.ID)
 	}
-	want := "Show - S01E02 - Ep.m4v"
+	want := "Show - S01E02 - Ep.mp4"
 	if got.OutputFile != want {
 		t.Errorf("OutputFile: got %q, want %q", got.OutputFile, want)
 	}
@@ -363,12 +348,10 @@ func TestProcessVideoMode(t *testing.T) {
 
 func TestProcessAudioMode(t *testing.T) {
 	dir := t.TempDir()
-	tmp := filepath.Join(dir, "raw.mp4")
-	os.WriteFile(tmp, []byte("video"), 0644)
 
 	hist, _ := history.Open(filepath.Join(dir, "history.json"))
 	p := processor{
-		exec: &newestAfterExec{dir: dir, realFile: tmp},
+		exec: &downloadOnlyExec{},
 		cfg:  config.UtuberConfig{DownloadDir: dir},
 		hist: hist,
 	}
@@ -394,9 +377,10 @@ func TestProcessAudioMode(t *testing.T) {
 	if got.OutputFile != want {
 		t.Errorf("OutputFile: got %q, want %q", got.OutputFile, want)
 	}
-	// tmp should be removed
-	if _, err := os.Stat(tmp); !errors.Is(err, os.ErrNotExist) {
-		t.Error("temp file should have been removed after audio extraction")
+	// the downloaded temp (media.Download's "<job ID>.mp4") should be removed
+	src := filepath.Join(dir, job.ID+".mp4")
+	if _, err := os.Stat(src); !errors.Is(err, os.ErrNotExist) {
+		t.Error("downloaded temp file should have been removed after audio extraction")
 	}
 	if got.Progress != "done" {
 		t.Errorf("Progress: got %q, want done", got.Progress)
@@ -405,13 +389,11 @@ func TestProcessAudioMode(t *testing.T) {
 
 func TestProcessAudioExtractionError(t *testing.T) {
 	dir := t.TempDir()
-	tmp := filepath.Join(dir, "raw.mp4")
-	os.WriteFile(tmp, []byte("video"), 0644)
 
 	boom := errors.New("ffmpeg failed")
 	hist, _ := history.Open(filepath.Join(dir, "history.json"))
 	p := processor{
-		exec: &newestThenErrorExec{dir: dir, realFile: tmp, extractErr: boom},
+		exec: &downloadThenErrorExec{extractErr: boom},
 		cfg:  config.UtuberConfig{DownloadDir: dir},
 		hist: hist,
 	}
@@ -427,10 +409,10 @@ func TestProcessAudioExtractionError(t *testing.T) {
 	if !ok {
 		t.Fatalf("job %s vanished from queue", job.ID)
 	}
-	// newestThenErrorExec's second call is consumed by Download (its two
-	// executor calls are FetchMeta then yt-dlp), so the failure happens while
-	// Progress is still "downloading" — proving the write-through reached the
-	// queue.
+	// downloadThenErrorExec's erroring second call is consumed by Download (the
+	// two executor calls for a job with no preset metadata are FetchMeta then
+	// yt-dlp), so the failure happens while Progress is still "downloading" —
+	// proving the write-through reached the queue.
 	if got.Progress != "downloading" {
 		t.Errorf("Progress: got %q, want downloading", got.Progress)
 	}
@@ -490,12 +472,13 @@ func (e *samplingExec) recorded() []string {
 	return append([]string(nil), e.rec...)
 }
 
-func (e *samplingExec) Run(_ context.Context, _ string, _ []string, onLine func(string)) error {
+func (e *samplingExec) Run(_ context.Context, _ string, args []string, onLine func(string)) error {
 	e.sample() // at Run entry
 	if onLine != nil && e.line != "" {
 		onLine(e.line)
 		e.sample() // AFTER onLine returns
 	}
+	simulateDownload(args)
 	return nil
 }
 
@@ -503,8 +486,6 @@ func TestProcessProgressSequence(t *testing.T) {
 	for _, mode := range []string{"video", "audio"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
-			tmp := filepath.Join(dir, "raw.mp4")
-			os.WriteFile(tmp, []byte("video"), 0644)
 
 			q := jobs.New(10)
 			// ShowName and EpisodeTitle must both be blank: the metadata
@@ -577,17 +558,30 @@ func TestSafe(t *testing.T) {
 
 // ── test executor helpers ─────────────────────────────────────────────────────
 
-// newestAfterExec does nothing on Run, leaving realFile in place so newestFile picks it up.
-type newestAfterExec struct {
-	dir      string
-	realFile string
-	callNum  int
+// simulateDownload writes the "<stem>.mp4" that the deterministic
+// media.Download returns, so the processor's rename (video) or extract (audio)
+// step finds a real file. It fires only on the yt-dlp download call — the one
+// carrying -o — and is a no-op for FetchMeta (--print, no -o) and ExtractAudio
+// (ffmpeg, no -o).
+func simulateDownload(args []string) {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-o" {
+			out := strings.Replace(args[i+1], "%(ext)s", "mp4", 1)
+			_ = os.WriteFile(out, []byte("video"), 0o644)
+			return
+		}
+	}
 }
 
-func (e *newestAfterExec) Run(_ context.Context, _ string, _ []string, _ func(string)) error {
+// downloadOnlyExec creates the deterministic download output on the yt-dlp call
+// and does nothing else, so the processor finds the file it expects.
+type downloadOnlyExec struct {
+	callNum int
+}
+
+func (e *downloadOnlyExec) Run(_ context.Context, _ string, args []string, _ func(string)) error {
 	e.callNum++
-	// On the second call (ffmpeg for audio), create the expected output file
-	// so the processor doesn't fail on a missing file.
+	simulateDownload(args)
 	return nil
 }
 
@@ -598,35 +592,35 @@ func (e *errorExec) Run(_ context.Context, _ string, _ []string, _ func(string))
 }
 
 // metaAndDownloadExec returns metaLine on the first call (FetchMeta) and
-// succeeds silently on the second call (Download), leaving realFile in place.
+// creates the download output on the second call (yt-dlp).
 type metaAndDownloadExec struct {
-	dir      string
-	realFile string
 	metaLine string
 	callNum  int
 }
 
-func (e *metaAndDownloadExec) Run(_ context.Context, _ string, _ []string, onLine func(string)) error {
+func (e *metaAndDownloadExec) Run(_ context.Context, _ string, args []string, onLine func(string)) error {
 	e.callNum++
 	if e.callNum == 1 {
 		onLine(e.metaLine)
 	}
+	simulateDownload(args)
 	return nil
 }
 
-// newestThenErrorExec succeeds on the first call (yt-dlp download) and returns
-// extractErr on the second call (ffmpeg audio extraction).
-type newestThenErrorExec struct {
-	dir        string
-	realFile   string
+// downloadThenErrorExec creates the download output on the first call and
+// returns extractErr on the second. For an audio job with no preset metadata
+// the calls are FetchMeta then yt-dlp, so the error surfaces on the download
+// call itself (see the note in TestProcessAudioExtractionError).
+type downloadThenErrorExec struct {
 	extractErr error
 	callNum    int
 }
 
-func (e *newestThenErrorExec) Run(_ context.Context, _ string, _ []string, _ func(string)) error {
+func (e *downloadThenErrorExec) Run(_ context.Context, _ string, args []string, _ func(string)) error {
 	e.callNum++
 	if e.callNum == 2 {
 		return e.extractErr
 	}
+	simulateDownload(args)
 	return nil
 }
