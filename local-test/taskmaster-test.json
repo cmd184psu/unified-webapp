@@ -1,0 +1,21 @@
+{
+  "port": 8181,
+  "tls_cert": "",
+  "tls_key": "",
+  "host_routing": {
+    "taskmaster-test.cmdhome.net": "taskmaster"
+  },
+  "server": {
+    "origin_check": "enforce",
+    "sse_max_subscribers": 64
+  },
+  "taskmaster": {
+    "static_dir": "./web/taskmaster",
+    "db_path": "./data/taskmaster-test/taskmaster.db",
+    "groups": [
+      { "name": "default", "pool_limit": 2, "allowed_types": [] },
+      { "name": "shell-only", "pool_limit": 1, "allowed_types": ["shell"] }
+    ],
+    "allow_sudo": true
+  }
+}
