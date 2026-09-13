@@ -215,7 +215,7 @@ function AppInner() {
         <main className="main-content">
           {page === 'shares'   && <SharesPage shares={config.shares} onChange={patchShares} />}
           {page === 'globals'  && <GlobalsPage globals={config.globals} onChange={patchGlobals} />}
-          {page === 'preview'  && <PreviewPage />}
+          {page === 'preview'  && <PreviewPage globals={config.globals} shares={config.shares} shareOwner={config.share_owner} />}
           {page === 'logs'     && <LogsPage />}
 
           {/* ── Restart output ──────────────────────────────────────── */}

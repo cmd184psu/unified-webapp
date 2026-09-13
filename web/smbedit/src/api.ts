@@ -74,8 +74,18 @@ export const api = {
   importConf: (path?: string) =>
     request<ImportResponse>('POST', '/api/import', path ? { path } : undefined),
 
-  preview: async (): Promise<string> => {
-    const res = await fetch('/api/preview')
+  // preview renders the current (possibly unsaved) draft so the editor sees
+  // its own edits, not the last-saved state.json.
+  preview: async (draft: {
+    globals: GlobalEntry[]
+    shares: Share[]
+    share_owner: string
+  }): Promise<string> => {
+    const res = await fetch('/api/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(draft),
+    })
     if (!res.ok) throw new Error('preview failed: ' + res.status)
     return res.text()
   },

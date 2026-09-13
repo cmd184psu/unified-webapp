@@ -1,5 +1,11 @@
 import { useState, useCallback } from 'react'
-import { api } from './api'
+import { api, GlobalEntry, Share } from './api'
+
+interface Props {
+  globals: GlobalEntry[]
+  shares: Share[]
+  shareOwner: string
+}
 
 function highlight(text: string): string {
   return text
@@ -27,7 +33,7 @@ function escHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-export function PreviewPage() {
+export function PreviewPage({ globals, shares, shareOwner }: Props) {
   const [content, setContent] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -35,11 +41,11 @@ export function PreviewPage() {
   const load = useCallback(() => {
     setLoading(true)
     setError('')
-    api.preview()
+    api.preview({ globals, shares, share_owner: shareOwner })
       .then(setContent)
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false))
-  }, [])
+  }, [globals, shares, shareOwner])
 
   return (
     <div>

@@ -70,6 +70,7 @@ func newServer(opts serverOptions) *server {
 	s.mux.HandleFunc("POST /api/import", s.handleImportConf)
 	s.mux.HandleFunc("POST /api/save-and-restart", s.handleSaveAndRestart)
 	s.mux.HandleFunc("GET /api/preview", s.handlePreview)
+	s.mux.HandleFunc("POST /api/preview", s.handlePreviewDraft)
 	s.mux.HandleFunc("GET /api/logs/ops/stream", s.handleOpsLogStream)
 	s.mux.HandleFunc("GET /api/logs/samba/stream", s.handleSambaLogStream)
 	s.mux.HandleFunc("GET /api/version", s.handleVersion)
@@ -329,8 +330,39 @@ func (s *server) handleSaveAndRestart(w http.ResponseWriter, r *http.Request) {
 
 // ── Preview ───────────────────────────────────────────────────────────────────
 
+// previewRequest is the draft state a POST /api/preview renders. It carries
+// the editor's current, possibly-unsaved edits so the preview reflects what
+// the user is looking at rather than the last-saved state.json.
+type previewRequest struct {
+	Globals    []GlobalEntry `json:"globals"`
+	Shares     []Share       `json:"shares"`
+	ShareOwner string        `json:"share_owner"`
+}
+
+// handlePreview renders the current saved state as smb.conf.
 func (s *server) handlePreview(w http.ResponseWriter, r *http.Request) {
-	rendered, err := Render(s.store.snapshot())
+	s.writePreview(w, s.store.snapshot())
+}
+
+// handlePreviewDraft renders a draft posted by the editor, so unsaved edits
+// appear in the preview. Shares whose path is missing are auto-disabled here
+// exactly as they would be on save, so the preview matches what a save would
+// actually write.
+func (s *server) handlePreviewDraft(w http.ResponseWriter, r *http.Request) {
+	var req previewRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	DisableMissingPaths(req.Shares)
+	s.writePreview(w, &State{
+		Globals:    req.Globals,
+		Shares:     req.Shares,
+		ShareOwner: req.ShareOwner,
+	})
+}
+
+func (s *server) writePreview(w http.ResponseWriter, st *State) {
+	rendered, err := Render(st)
 	if err != nil {
 		jsonErr(w, "rendering smb.conf: "+err.Error(), http.StatusInternalServerError)
 		return

@@ -109,6 +109,59 @@ func TestPreview(t *testing.T) {
 	}
 }
 
+// POST /api/preview renders the posted draft, so an unsaved share the editor
+// is holding appears in the preview even though it was never written to
+// state.json.
+func TestPreviewDraft_RendersUnsavedShare(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	srv := newTestServer(t)
+
+	draft := map[string]any{
+		"share_owner": "nobody",
+		"globals":     []map[string]string{{"key": "workgroup", "value": "DRAFT"}},
+		"shares": []map[string]any{
+			{"name": "media", "path": t.TempDir(), "enabled": true, "writable": true, "browseable": true},
+		},
+	}
+	rr := doJSON(t, srv, http.MethodPost, "/api/preview", draft)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "[media]") {
+		t.Errorf("draft preview should render the unsaved [media] share, got:\n%s", body)
+	}
+	if !strings.Contains(body, "workgroup = DRAFT") {
+		t.Errorf("draft preview should render the posted globals, got:\n%s", body)
+	}
+	// The draft must not have been persisted.
+	if shares := srv.store.snapshot().Shares; len(shares) != 0 {
+		t.Errorf("preview must not touch saved state, got %+v", shares)
+	}
+}
+
+// A draft share whose path is missing is auto-disabled before rendering, so
+// the preview matches what a save would actually write (a dangling share is
+// never exported).
+func TestPreviewDraft_AutoDisablesMissingPath(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	srv := newTestServer(t)
+
+	draft := map[string]any{
+		"share_owner": "nobody",
+		"shares": []map[string]any{
+			{"name": "gone", "path": "/does/not/exist/anywhere", "enabled": true},
+		},
+	}
+	rr := doJSON(t, srv, http.MethodPost, "/api/preview", draft)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body)
+	}
+	if strings.Contains(rr.Body.String(), "[gone]") {
+		t.Errorf("draft preview should skip a share with a missing path, got:\n%s", rr.Body.String())
+	}
+}
+
 func TestVersion(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	srv := newTestServer(t)

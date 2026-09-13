@@ -7304,8 +7304,14 @@
     putGlobals: (globals) => request("PUT", "/api/globals", globals),
     getFolders: () => request("GET", "/api/folders"),
     importConf: (path) => request("POST", "/api/import", path ? { path } : void 0),
-    preview: async () => {
-      const res = await fetch("/api/preview");
+    // preview renders the current (possibly unsaved) draft so the editor sees
+    // its own edits, not the last-saved state.json.
+    preview: async (draft) => {
+      const res = await fetch("/api/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft)
+      });
       if (!res.ok) throw new Error("preview failed: " + res.status);
       return res.text();
     },
@@ -7859,15 +7865,15 @@
   function escHtml(s) {
     return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
-  function PreviewPage() {
+  function PreviewPage({ globals, shares, shareOwner }) {
     const [content, setContent] = (0, import_react7.useState)(null);
     const [loading, setLoading] = (0, import_react7.useState)(false);
     const [error, setError] = (0, import_react7.useState)("");
     const load = (0, import_react7.useCallback)(() => {
       setLoading(true);
       setError("");
-      api.preview().then(setContent).catch((e) => setError(String(e))).finally(() => setLoading(false));
-    }, []);
+      api.preview({ globals, shares, share_owner: shareOwner }).then(setContent).catch((e) => setError(String(e))).finally(() => setLoading(false));
+    }, [globals, shares, shareOwner]);
     return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { children: [
       /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "page-header", children: /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "row-between", children: [
         /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { children: [
@@ -8139,7 +8145,7 @@
       /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("main", { className: "main-content", children: [
         page === "shares" && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(SharesPage, { shares: config.shares, onChange: patchShares }),
         page === "globals" && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(GlobalsPage, { globals: config.globals, onChange: patchGlobals }),
-        page === "preview" && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(PreviewPage, {}),
+        page === "preview" && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(PreviewPage, { globals: config.globals, shares: config.shares, shareOwner: config.share_owner }),
         page === "logs" && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(LogsPage, {}),
         restartOutput && /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "card mt-16", style: { borderColor: restartOutput.success ? "var(--green)" : "var(--red)" }, children: [
           /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "card-title", children: [
