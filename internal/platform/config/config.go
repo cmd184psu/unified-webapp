@@ -25,6 +25,7 @@ type Config struct {
 	Multissh    MultisshConfig    `json:"multissh"`
 	Auth        AuthConfig        `json:"auth"`
 	Admin       AdminConfig       `json:"admin"`
+	Smbedit     SmbeditConfig     `json:"smbedit"`
 
 	// configPath is the absolute path Load read this Config from (empty when
 	// built via DefaultConfig()/WriteDefault without going through Load, or
@@ -316,6 +317,17 @@ type MultisshConfig struct {
 	KnownHostsPath string `json:"known_hosts_path"`
 }
 
+// SmbeditConfig holds configuration specific to the smbedit module.
+//
+// DataDir is where the module persists its state file (state.json); it is
+// created at Build time if missing. PickerRoot is the directory whose
+// subdirectories the share-path folder picker lists; empty means /opt.
+type SmbeditConfig struct {
+	StaticDir  string `json:"static_dir"`
+	DataDir    string `json:"data_dir"`
+	PickerRoot string `json:"picker_root"`
+}
+
 // Multissh session-count bounds. MaxSessions is validated in exactly one place
 // (Load); Build trusts the resolved value and performs no re-validation.
 const (
@@ -394,6 +406,11 @@ func DefaultConfig() *Config {
 			Modules: map[string]ModuleAuthConfig{},
 			APIKeys: []NamedHash{},
 		},
+		Smbedit: SmbeditConfig{
+			StaticDir:  "./web/smbedit",
+			DataDir:    "./data/smbedit",
+			PickerRoot: "/opt",
+		},
 		Server: ServerConfig{
 			OriginCheck:       "enforce",
 			SSEMaxSubscribers: DefaultSSEMaxSubscribers,
@@ -465,6 +482,9 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	if err := expandAdminPaths(&cfg.Admin); err != nil {
+		return nil, err
+	}
+	if err := expandSmbeditPaths(&cfg.Smbedit); err != nil {
 		return nil, err
 	}
 	if cfg.TLSCert != "" {
@@ -635,6 +655,20 @@ func expandMultisshPaths(m *MultisshConfig) error {
 		return err
 	}
 	if m.KnownHostsPath, err = ExpandPath(m.KnownHostsPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+func expandSmbeditPaths(s *SmbeditConfig) error {
+	var err error
+	if s.StaticDir, err = ExpandPath(s.StaticDir); err != nil {
+		return err
+	}
+	if s.DataDir, err = ExpandPath(s.DataDir); err != nil {
+		return err
+	}
+	if s.PickerRoot, err = ExpandPath(s.PickerRoot); err != nil {
 		return err
 	}
 	return nil

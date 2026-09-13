@@ -1,5 +1,5 @@
 {
-  "port": 8080,
+  "port": 8181,
   "tls_cert": "",
   "tls_key": "",
   "host_routing": {
@@ -11,7 +11,8 @@
     "menuserver.test":  "menuserver",
     "obsidianoid.test": "obsidianoid",
     "multissh.test":    "multissh",
-    "admin.test":       "admin"
+    "admin.test":       "admin",
+    "smbedit-test.cmdhome.net":     "smbedit"
   },
   "server": {
     "origin_check": "enforce",
@@ -74,6 +75,11 @@
   "admin": {
     "static_dir": "./web/admin",
     "max_body_bytes": 1048576
+  },
+  "smbedit": {
+    "static_dir": "./web/smbedit",
+    "data_dir": "./local-test/data/smbedit",
+    "picker_root": "/opt"
   },
   "auth": {
     "modules": {
