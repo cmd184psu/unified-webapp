@@ -24,12 +24,13 @@ import (
 	"cmd184psu/unified-webapp/internal/menuserver"
 	"cmd184psu/unified-webapp/internal/multissh"
 	"cmd184psu/unified-webapp/internal/obsidianoid"
-	"cmd184psu/unified-webapp/internal/todo"
 	"cmd184psu/unified-webapp/internal/platform/auth"
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/platform/middleware"
 	"cmd184psu/unified-webapp/internal/slideshow"
 	"cmd184psu/unified-webapp/internal/smbedit"
+	"cmd184psu/unified-webapp/internal/todo"
+	"cmd184psu/unified-webapp/internal/utuber"
 )
 
 // Dispatcher routes incoming requests to the correct module handler based on
@@ -69,10 +70,10 @@ func (d *Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	cfgPath  := flag.String("config",      config.DefaultConfigPath, "Path to config JSON")
-	flagPort := flag.Int("port",           0,  "Override port")
-	flagCert := flag.String("tls-cert",   "", "Override TLS cert path")
-	flagKey  := flag.String("tls-key",    "", "Override TLS key path")
+	cfgPath := flag.String("config", config.DefaultConfigPath, "Path to config JSON")
+	flagPort := flag.Int("port", 0, "Override port")
+	flagCert := flag.String("tls-cert", "", "Override TLS cert path")
+	flagKey := flag.String("tls-key", "", "Override TLS key path")
 	flagInit := flag.Bool("init-config", false, "Write default config and exit")
 	flagHashPin := flag.Bool("hash-pin", false, "Read a PIN from stdin, print its bcrypt hash, and exit")
 	flagGenAPIKey := flag.Bool("gen-api-key", false, "Generate a new API key and its config hash, print both, and exit")
@@ -105,9 +106,15 @@ func main() {
 	default:
 		log.Fatalf("config: server.origin_check %q is invalid; must be one of \"\", \"enforce\", \"log\", \"off\"", cfg.Server.OriginCheck)
 	}
-	if *flagPort != 0  { cfg.Port    = *flagPort }
-	if *flagCert != "" { cfg.TLSCert = *flagCert }
-	if *flagKey  != "" { cfg.TLSKey  = *flagKey  }
+	if *flagPort != 0 {
+		cfg.Port = *flagPort
+	}
+	if *flagCert != "" {
+		cfg.TLSCert = *flagCert
+	}
+	if *flagKey != "" {
+		cfg.TLSKey = *flagKey
+	}
 
 	adminRouted := adminIsRouted(cfg.Routing)
 	svc, err := auth.FromConfig(cfg.Auth, knownModules, adminRouted)
@@ -118,9 +125,9 @@ func main() {
 
 	dispatch := buildDispatcher(cfg, svc)
 
-	addr    := fmt.Sprintf("0.0.0.0:%d", cfg.Port)
+	addr := fmt.Sprintf("0.0.0.0:%d", cfg.Port)
 	handler := middleware.Wrap(middleware.OriginCheck(cfg.Server.OriginCheck, dispatch))
-	useTLS  := cfg.TLSCert != "" && cfg.TLSKey != ""
+	useTLS := cfg.TLSCert != "" && cfg.TLSKey != ""
 
 	srv := newServer(addr, handler)
 
@@ -268,7 +275,7 @@ func limitFor(module string, cfg *config.Config) int64 {
 // knownModules is the buildModule universe -- exactly the module names the
 // switch below handles. auth.FromConfig uses it to validate that every
 // module named in auth.modules is one buildDispatcher can actually build.
-var knownModules = []string{"grocery", "todo", "slideshow", "menuserver", "obsidianoid", "multissh", "admin", "smbedit"}
+var knownModules = []string{"grocery", "todo", "slideshow", "menuserver", "obsidianoid", "multissh", "admin", "utuber", "smbedit"}
 
 // adminIsRouted reports whether "admin" appears among routing's module
 // values (config.Config.Routing / host_routing). Both main's boot-time
@@ -297,6 +304,8 @@ func buildModule(module string, cfg *config.Config, svc *auth.Service) (http.Han
 		return obsidianoid.Build(cfg.Obsidianoid)
 	case "multissh":
 		return multissh.Build(cfg.Multissh)
+	case "utuber":
+		return utuber.Build(cfg.Utuber)
 	case "admin":
 		return admin.Build(cfg, admin.Deps{
 			Service:      svc,
