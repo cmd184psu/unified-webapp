@@ -55,11 +55,14 @@ type State struct {
 }
 
 // clone returns a deep copy of s. Share and GlobalEntry are value types with
-// no reference fields, so copying the slices is a full deep copy.
+// no reference fields, so copying the slices is a full deep copy. The copies
+// start from empty (non-nil) slices so an empty list clones — and marshals —
+// as [] rather than null: the JSON API contract is that shares/globals are
+// always arrays, and the React frontend reads .length on them directly.
 func (s *State) clone() *State {
 	out := *s
-	out.Globals = append([]GlobalEntry(nil), s.Globals...)
-	out.Shares = append([]Share(nil), s.Shares...)
+	out.Globals = append([]GlobalEntry{}, s.Globals...)
+	out.Shares = append([]Share{}, s.Shares...)
 	return &out
 }
 

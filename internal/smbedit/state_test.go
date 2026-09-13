@@ -32,6 +32,43 @@ func TestLoadDefaults_NoFile(t *testing.T) {
 	}
 }
 
+// A snapshot of a state with no shares must marshal shares as [] (never
+// null): the JSON API contract is that shares/globals are always arrays, and
+// the React SharesPage reads .length on them — a null crashes it and blanks
+// the whole app. This also guards a state.json that already holds "shares":
+// null (a prior round-trip, or a migrated smbed file), which must heal to []
+// on load rather than propagate.
+func TestSnapshotEmptyListsMarshalAsArrays(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	dir := t.TempDir()
+
+	// Seed a state file whose shares/globals are explicitly null.
+	seed := `{"smb_conf_path":"/etc/samba/smb.conf","shares":null,"globals":null,"theme":"dark"}`
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(seed), 0o600); err != nil {
+		t.Fatalf("seed write: %v", err)
+	}
+
+	s, err := newStore(dir)
+	if err != nil {
+		t.Fatalf("newStore() error: %v", err)
+	}
+
+	data, err := json.Marshal(s.snapshot())
+	if err != nil {
+		t.Fatalf("marshal snapshot: %v", err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal snapshot: %v", err)
+	}
+	if got := string(raw["shares"]); got != "[]" {
+		t.Errorf("shares marshaled as %s, want []", got)
+	}
+	if got := string(raw["globals"]); got != "[]" {
+		t.Errorf("globals marshaled as %s, want []", got)
+	}
+}
+
 func TestSaveAndReload(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	dir := t.TempDir()
