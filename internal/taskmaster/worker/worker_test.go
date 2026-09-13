@@ -253,7 +253,7 @@ func TestOutputRegistry_StartGC_Stop(t *testing.T) {
 // ─── Executor tests ──────────────────────────────────────────────────────────
 
 func TestExecutor_SudoGating_Denied(t *testing.T) {
-	te := &worker.TaskExecutor{AllowSudo: false}
+	te := &worker.TaskExecutor{Sudo: worker.NewSudoGate(false)}
 	task := &models.Task{TaskType: "shell", Sudo: true, Args: `{"shell":"echo hi"}`}
 
 	err := te.Execute(context.Background(), task, io.Discard, io.Discard)

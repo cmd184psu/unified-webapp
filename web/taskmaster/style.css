@@ -321,3 +321,94 @@ input[type=checkbox] { width: auto; margin-right: 6px; }
   margin-bottom: 12px;
   font-size: 13px;
 }
+
+/* ─── Nav: hamburger menu, icons, responsive collapse ─────────────────────── */
+
+.nav-links { display: flex; align-items: center; gap: 4px; }
+
+.nav-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.nav-icon-btn:hover { color: var(--text-normal); background: var(--bg-tertiary); }
+
+.nav-menu { position: relative; }
+
+.nav-menu-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 220px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--bg-modifier-border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 24px rgba(0,0,0,.4);
+  padding: 6px;
+  z-index: 50;
+}
+
+.menu-section { padding: 6px 4px; }
+.menu-section + .menu-section { border-top: 1px solid var(--bg-modifier-border); }
+
+.menu-heading {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-faint);
+  padding: 2px 8px 6px;
+}
+
+.menu-item {
+  display: block;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 14px;
+}
+.menu-item:hover { color: var(--text-normal); background: var(--bg-tertiary); }
+.menu-item.active { color: var(--text-normal); background: var(--bg-tertiary); }
+
+.menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 8px;
+  font-size: 14px;
+  color: var(--text-normal);
+}
+.menu-control { cursor: pointer; }
+.menu-control input[type="checkbox"] { cursor: pointer; }
+.menu-row select {
+  background: var(--bg-tertiary);
+  color: var(--text-normal);
+  border: 1px solid var(--bg-modifier-border);
+  border-radius: var(--radius);
+  padding: 2px 6px;
+  font-family: var(--font-ui);
+}
+
+.st-value { font-size: 13px; }
+.st-ok { color: var(--status-green); }
+.st-err { color: var(--status-red); }
+.st-warn { color: var(--status-yellow); }
+.st-muted { color: var(--text-muted); }
+
+/* The in-menu page links exist only for the collapsed (narrow) layout. */
+.menu-nav { display: none; }
+
+@media (max-width: 640px) {
+  .nav-links { display: none; }
+  .menu-nav { display: block; }
+}

@@ -429,3 +429,26 @@ func TestCountRunningInGroup(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, count)
 }
+
+func TestSettingsRoundTrip(t *testing.T) {
+	d := newTestDB(t)
+
+	// Missing key: not present, no error.
+	_, ok, err := d.GetSetting(db.SettingAllowSudo)
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	// Set then get.
+	require.NoError(t, d.SetSetting(db.SettingAllowSudo, db.EncodeBoolSetting(true)))
+	v, ok, err := d.GetSetting(db.SettingAllowSudo)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.True(t, db.DecodeBoolSetting(v))
+
+	// Upsert overwrites.
+	require.NoError(t, d.SetSetting(db.SettingAllowSudo, db.EncodeBoolSetting(false)))
+	v, ok, err = d.GetSetting(db.SettingAllowSudo)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.False(t, db.DecodeBoolSetting(v))
+}

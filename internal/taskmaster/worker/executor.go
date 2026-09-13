@@ -24,7 +24,10 @@ type Executor interface {
 }
 
 type TaskExecutor struct {
-	AllowSudo bool
+	// Sudo gates whether tasks may run with sudo. Shared with the
+	// coordinator so a live toggle affects both create-time gating and
+	// exec-time refusal. A nil gate denies sudo.
+	Sudo *SudoGate
 }
 
 type execArgs struct {
@@ -134,8 +137,8 @@ func (te *TaskExecutor) executeMigration(ctx context.Context, task *models.Task,
 }
 
 func (te *TaskExecutor) buildCmd(ctx context.Context, sudo bool, name string, args ...string) (*exec.Cmd, error) {
-	if sudo && !te.AllowSudo {
-		return nil, errors.New("task requests sudo but allow_sudo is disabled in taskmaster config")
+	if sudo && !te.Sudo.Allowed() {
+		return nil, errors.New("task requests sudo but allow_sudo is disabled")
 	}
 	var cmd *exec.Cmd
 	if sudo {

@@ -34,7 +34,7 @@ func newTestServer(t *testing.T, allowSudo bool, sseMax int) (*httptest.Server, 
 	require.NoError(t, err)
 
 	registry := worker.NewRegistry()
-	c := coordinator.New(d, registry, allowSudo, sseMax)
+	c := coordinator.New(d, registry, worker.NewSudoGate(allowSudo), sseMax)
 	srv := httptest.NewServer(coordinator.Routes(c))
 	t.Cleanup(func() {
 		srv.Close()
@@ -93,6 +93,49 @@ func TestHandleCapabilities_AllowSudoFalse(t *testing.T) {
 	var body map[string]bool
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
 	require.False(t, body["allow_sudo"])
+}
+
+func TestSetCapabilities_TogglesPersistsAndGates(t *testing.T) {
+	srv, d, _ := newTestServer(t, false, 0)
+
+	// Turn sudo on at runtime.
+	resp, err := http.DefaultClient.Do(jsonReq(t, http.MethodPost, srv.URL+"/api/capabilities", map[string]bool{"allow_sudo": true}))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var body map[string]bool
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.True(t, body["allow_sudo"])
+
+	// GET reflects it, and it is persisted to the DB.
+	getResp, err := http.Get(srv.URL + "/api/capabilities")
+	require.NoError(t, err)
+	defer getResp.Body.Close()
+	var getBody map[string]bool
+	require.NoError(t, json.NewDecoder(getResp.Body).Decode(&getBody))
+	require.True(t, getBody["allow_sudo"])
+
+	v, ok, err := d.GetSetting(db.SettingAllowSudo)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.True(t, db.DecodeBoolSetting(v))
+
+	// A sudo task is now permitted where it was a 403 before.
+	require.NoError(t, d.UpsertGroup(&models.Group{Name: "sg", PoolLimit: 1, AllowedTypes: []string{}}))
+	taskResp, err := http.DefaultClient.Do(jsonReq(t, http.MethodPost, srv.URL+"/api/tasks",
+		map[string]any{"name": "sudo-task", "group_name": "sg", "task_type": "shell", "sudo": true, "args": `{"shell":"echo hi"}`}))
+	require.NoError(t, err)
+	defer taskResp.Body.Close()
+	require.NotEqual(t, http.StatusForbidden, taskResp.StatusCode)
+}
+
+func TestSetCapabilities_MissingField(t *testing.T) {
+	srv, _, _ := newTestServer(t, false, 0)
+	resp, err := http.DefaultClient.Do(jsonReq(t, http.MethodPost, srv.URL+"/api/capabilities", map[string]any{}))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	require.Contains(t, decodeError(t, resp), "allow_sudo")
 }
 
 // ─── Group tests ─────────────────────────────────────────────────────────────

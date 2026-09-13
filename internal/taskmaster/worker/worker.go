@@ -37,13 +37,13 @@ type Worker struct {
 	runCtx   context.Context
 }
 
-// New builds a Worker with the standard TaskExecutor, wiring allowSudo into
-// the executor's sudo-gating policy.
-func New(database *db.DB, registry *OutputRegistry, workerID string, allowSudo bool) *Worker {
+// New builds a Worker with the standard TaskExecutor, wiring the shared
+// sudo gate into the executor's sudo-gating policy.
+func New(database *db.DB, registry *OutputRegistry, workerID string, sudo *SudoGate) *Worker {
 	return &Worker{
 		db:       database,
 		registry: registry,
-		executor: &TaskExecutor{AllowSudo: allowSudo},
+		executor: &TaskExecutor{Sudo: sudo},
 		workerID: workerID,
 	}
 }

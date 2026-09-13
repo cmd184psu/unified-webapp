@@ -27,8 +27,8 @@ func (c *Coordinator) handleListTasks(w http.ResponseWriter, r *http.Request) {
 
 // validateTaskPolicy enforces allow_sudo and the group's allowed_types.
 func (c *Coordinator) validateTaskPolicy(taskType, groupName string, sudo bool) (status int, msg string) {
-	if sudo && !c.allowSudo {
-		return http.StatusForbidden, "sudo tasks are disabled (allow_sudo is false in taskmaster config)"
+	if sudo && !c.sudo.Allowed() {
+		return http.StatusForbidden, "sudo tasks are disabled (enable allow_sudo to permit them)"
 	}
 	g, err := c.db.GetGroup(groupName)
 	if err != nil {

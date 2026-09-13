@@ -63,6 +63,10 @@ export interface Capabilities {
   allow_sudo: boolean;
 }
 
+export interface AuthMode {
+  methods: string[];
+}
+
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const existingHeaders = options.headers as Record<string, string> | undefined;
@@ -93,6 +97,17 @@ export const api = {
 
   capabilities() {
     return apiFetch<Capabilities>('/api/capabilities');
+  },
+
+  setCapabilities(allowSudo: boolean) {
+    return apiFetch<Capabilities>('/api/capabilities', {
+      method: 'POST',
+      body: JSON.stringify({ allow_sudo: allowSudo }),
+    });
+  },
+
+  authMode() {
+    return apiFetch<AuthMode>('/api/auth/mode');
   },
 
   // Groups

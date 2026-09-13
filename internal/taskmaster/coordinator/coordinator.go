@@ -1,6 +1,7 @@
 package coordinator
 
 import (
+	"encoding/json"
 	"net/http"
 	"sync/atomic"
 
@@ -12,15 +13,15 @@ import (
 )
 
 type Coordinator struct {
-	db        *db.DB
-	registry  *worker.OutputRegistry
-	allowSudo bool
-	sseMax    int
-	sseSubs   atomic.Int64
+	db       *db.DB
+	registry *worker.OutputRegistry
+	sudo     *worker.SudoGate
+	sseMax   int
+	sseSubs  atomic.Int64
 }
 
-func New(database *db.DB, registry *worker.OutputRegistry, allowSudo bool, sseMax int) *Coordinator {
-	return &Coordinator{db: database, registry: registry, allowSudo: allowSudo, sseMax: sseMax}
+func New(database *db.DB, registry *worker.OutputRegistry, sudo *worker.SudoGate, sseMax int) *Coordinator {
+	return &Coordinator{db: database, registry: registry, sudo: sudo, sseMax: sseMax}
 }
 
 // Routes returns the HTTP handler (exported for testing).
@@ -31,6 +32,7 @@ func (c *Coordinator) routes() *chi.Mux {
 
 	r.Get("/api/health", c.handleHealth)
 	r.Get("/api/capabilities", c.handleCapabilities)
+	r.Post("/api/capabilities", c.handleSetCapabilities)
 
 	r.Get("/api/groups", c.handleListGroups)
 	r.Post("/api/groups", c.handleCreateGroup)
@@ -68,5 +70,29 @@ func (c *Coordinator) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *Coordinator) handleCapabilities(w http.ResponseWriter, r *http.Request) {
-	response.WriteJSON(w, http.StatusOK, map[string]bool{"allow_sudo": c.allowSudo})
+	response.WriteJSON(w, http.StatusOK, map[string]bool{"allow_sudo": c.sudo.Allowed()})
+}
+
+// handleSetCapabilities toggles allow_sudo at runtime and persists it so the
+// change survives restarts (the DB is authoritative once seeded from config).
+// The setting takes effect immediately for both task validation and the
+// executor, since both share the same SudoGate.
+func (c *Coordinator) handleSetCapabilities(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AllowSudo *bool `json:"allow_sudo"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.WriteDecodeError(w, err)
+		return
+	}
+	if req.AllowSudo == nil {
+		response.WriteError(w, http.StatusBadRequest, "allow_sudo is required")
+		return
+	}
+	if err := c.db.SetSetting(db.SettingAllowSudo, db.EncodeBoolSetting(*req.AllowSudo)); err != nil {
+		response.WriteError(w, http.StatusInternalServerError, "persisting setting: "+err.Error())
+		return
+	}
+	c.sudo.Set(*req.AllowSudo)
+	response.WriteJSON(w, http.StatusOK, map[string]bool{"allow_sudo": c.sudo.Allowed()})
 }

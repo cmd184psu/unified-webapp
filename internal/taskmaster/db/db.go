@@ -130,6 +130,7 @@ func (db *DB) applyMigrations() error {
 		sql     string
 	}{
 		{1, `ALTER TABLE tasks ADD COLUMN output_file TEXT NOT NULL DEFAULT ''`},
+		{2, `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`},
 	}
 
 	for _, m := range migrations {
@@ -144,6 +145,46 @@ func (db *DB) applyMigrations() error {
 		}
 	}
 	return nil
+}
+
+// ─── Settings (key/value) ────────────────────────────────────────────────────
+
+// SettingAllowSudo is the settings key holding the persisted allow_sudo flag.
+// The DB is authoritative for it once build.go seeds it from config.
+const SettingAllowSudo = "allow_sudo"
+
+// EncodeBoolSetting / DecodeBoolSetting are the shared "1"/"0" encoding used
+// for boolean settings, so the reader (build.go) and writer (coordinator)
+// never diverge.
+func EncodeBoolSetting(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
+}
+
+func DecodeBoolSetting(v string) bool { return v == "1" }
+
+
+// GetSetting returns the stored value for key and whether it was present.
+func (db *DB) GetSetting(key string) (value string, ok bool, err error) {
+	row := db.conn.QueryRow(`SELECT value FROM settings WHERE key = ?`, key)
+	switch err := row.Scan(&value); {
+	case errors.Is(err, sql.ErrNoRows):
+		return "", false, nil
+	case err != nil:
+		return "", false, err
+	default:
+		return value, true, nil
+	}
+}
+
+// SetSetting upserts key = value.
+func (db *DB) SetSetting(key, value string) error {
+	_, err := db.conn.Exec(`
+		INSERT INTO settings (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
+	return err
 }
 
 // ─── Group CRUD ──────────────────────────────────────────────────────────────

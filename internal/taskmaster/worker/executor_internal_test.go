@@ -12,10 +12,10 @@ import (
 // verify sudo-wrapping "on buildCmd output, don't actually run sudo".
 
 func TestBuildCmd_SudoDeniedWhenNotAllowed(t *testing.T) {
-	te := &TaskExecutor{AllowSudo: false}
+	te := &TaskExecutor{Sudo: NewSudoGate(false)}
 	_, err := te.buildCmd(context.Background(), true, "echo", "hi")
 	if err == nil {
-		t.Fatal("expected error when sudo is requested and AllowSudo is false")
+		t.Fatal("expected error when sudo is requested and the sudo gate is closed")
 	}
 	if !strings.Contains(err.Error(), "allow_sudo") {
 		t.Fatalf("expected error to mention allow_sudo, got: %v", err)
@@ -23,7 +23,7 @@ func TestBuildCmd_SudoDeniedWhenNotAllowed(t *testing.T) {
 }
 
 func TestBuildCmd_SudoPrependedWhenAllowed(t *testing.T) {
-	te := &TaskExecutor{AllowSudo: true}
+	te := &TaskExecutor{Sudo: NewSudoGate(true)}
 	cmd, err := te.buildCmd(context.Background(), true, "echo", "hi")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

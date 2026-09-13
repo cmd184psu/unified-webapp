@@ -46,20 +46,35 @@ func Build(cfg config.TaskmasterConfig) (http.Handler, error) {
 		return nil, err
 	}
 
+	// allow_sudo is DB-authoritative once seeded: the config value seeds the
+	// DB on first boot, and the runtime UI toggle (POST /api/capabilities)
+	// persists there and wins on every boot thereafter.
+	allowSudo := cfg.AllowSudo
+	if v, ok, err := database.GetSetting(db.SettingAllowSudo); err != nil {
+		database.Close()
+		return nil, err
+	} else if ok {
+		allowSudo = db.DecodeBoolSetting(v)
+	} else if err := database.SetSetting(db.SettingAllowSudo, db.EncodeBoolSetting(cfg.AllowSudo)); err != nil {
+		database.Close()
+		return nil, err
+	}
+	sudoGate := worker.NewSudoGate(allowSudo)
+
 	registry := worker.NewRegistry()
 	stopGC := registry.StartGC(time.Hour)
 
 	workerID, _ := os.Hostname()
-	w := worker.New(database, registry, workerID, cfg.AllowSudo)
+	w := worker.New(database, registry, workerID, sudoGate)
 	ctx, cancel := context.WithCancel(context.Background())
 	workerDone := make(chan struct{})
 	go func() {
 		defer close(workerDone)
 		w.Start(ctx)
 	}()
-	log.Printf("taskmaster: worker started (poll 5s, db %s, allow_sudo=%v)", cfg.DBPath, cfg.AllowSudo)
+	log.Printf("taskmaster: worker started (poll 5s, db %s, allow_sudo=%v)", cfg.DBPath, allowSudo)
 
-	c := coordinator.New(database, registry, cfg.AllowSudo, cfg.SSEMaxSubscribers)
+	c := coordinator.New(database, registry, sudoGate, cfg.SSEMaxSubscribers)
 	r := coordinator.Routes(c)
 	r.Handle("/*", static.NewHandler(cfg.StaticDir))
 
