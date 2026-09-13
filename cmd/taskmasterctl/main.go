@@ -136,7 +136,7 @@ func runGroup(args []string) {
 	verb := args[0]
 	switch verb {
 	case "list":
-		var groups []models.GroupStatus
+		var groups []models.LaneStatus
 		apiGet("/api/groups", &groups)
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(tw, "NAME\tLIMIT\tRUNNING\tPAUSED")
@@ -145,7 +145,7 @@ func runGroup(args []string) {
 			if g.Paused {
 				paused = "YES"
 			}
-			fmt.Fprintf(tw, "%s\t%d\t%d\t%s\n", g.Name, g.PoolLimit, g.RunningCount, paused)
+			fmt.Fprintf(tw, "%s\t%d\t%d\t%s\n", g.Name, g.Width, g.RunningCount, paused)
 		}
 		tw.Flush()
 
@@ -171,9 +171,9 @@ func runGroup(args []string) {
 		if *name == "" {
 			fatalf("--name is required")
 		}
-		var result models.Group
-		apiPost("/api/groups", map[string]any{"name": *name, "pool_limit": *limit, "allowed_types": []string{}}, &result)
-		fmt.Printf("created group %q (pool_limit=%d)\n", result.Name, result.PoolLimit)
+		var result models.Lane
+		apiPost("/api/groups", map[string]any{"name": *name, "width": *limit}, &result)
+		fmt.Printf("created group %q (pool_limit=%d)\n", result.Name, result.Width)
 
 	case "update":
 		if len(args) < 2 {
@@ -184,7 +184,7 @@ func runGroup(args []string) {
 		fs.Parse(args[2:])
 		updates := map[string]any{}
 		if *limit > 0 {
-			updates["pool_limit"] = *limit
+			updates["width"] = *limit
 		}
 		apiPut("/api/groups/"+args[1], updates, nil)
 		fmt.Printf("group %q updated\n", args[1])
@@ -221,22 +221,21 @@ func runTask(args []string) {
 		var tasks []models.Task
 		apiGet(path, &tasks)
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "NAME\tGROUP\tTYPE\tENABLED\tPAUSED\tREPEAT\tCOOLDOWN")
+		fmt.Fprintln(tw, "NAME\tLANE\tCOMMAND\tENABLED\tPAUSED\tREPEAT\tCOOLDOWN")
 		for _, t := range tasks {
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%v\t%v\t%v\t%ds\n",
-				t.Name, t.GroupName, t.TaskType, t.Enabled, t.Paused, t.Repeat, t.CooldownSeconds)
+				t.Name, t.LaneName, t.Command, t.Enabled, t.Paused, t.Repeat, t.CooldownSeconds)
 		}
 		tw.Flush()
 
 	case "add":
 		fs := flag.NewFlagSet("task add", flag.ExitOnError)
 		name := fs.String("name", "", "task name (required)")
-		group := fs.String("group", "", "group name (required)")
-		taskType := fs.String("type", "shell", "task type: exec|shell|script|migration")
-		taskArgs := fs.String("args", "{}", "task args JSON")
+		group := fs.String("group", "", "lane name (required)")
+		command := fs.String("command", "", "command line to run (required)")
 		repeat := fs.Bool("repeat", false, "re-enqueue after cooldown")
 		cooldown := fs.Int("cooldown", 0, "cooldown seconds between runs")
-		priority := fs.Int("priority", 50, "priority (lower runs first)")
+		position := fs.Int("position", 0, "position within the lane (lower runs first)")
 		sudo := fs.Bool("sudo", false, "run with sudo")
 		enabled := fs.Bool("enabled", true, "enable task immediately")
 		outputFile := fs.String("output-file", "", "append output to this file path ({task} and {exec_id} supported)")
@@ -245,33 +244,33 @@ func runTask(args []string) {
 			fatalf("--name and --group are required")
 		}
 		body := map[string]any{
-			"name": *name, "group_name": *group, "task_type": *taskType,
-			"args": *taskArgs, "repeat": *repeat, "cooldown_seconds": *cooldown,
-			"priority": *priority, "sudo": *sudo, "enabled": *enabled,
+			"name": *name, "lane_name": *group, "command": *command,
+			"repeat": *repeat, "cooldown_seconds": *cooldown,
+			"position": *position, "sudo": *sudo, "enabled": *enabled,
 			"output_file": *outputFile,
 		}
 		var task models.Task
 		apiPostStatus("/api/tasks", body, &task, http.StatusCreated)
-		fmt.Printf("added task %q in group %q\n", task.Name, task.GroupName)
+		fmt.Printf("added task %q in lane %q\n", task.Name, task.LaneName)
 
 	case "update":
 		if len(args) < 2 {
-			fatalf("usage: taskmasterctl task update <name> [--priority N] [--cooldown N] [--enabled] [--repeat] [--args JSON]")
+			fatalf("usage: taskmasterctl task update <name> [--position N] [--cooldown N] [--enabled] [--repeat] [--command CMD]")
 		}
 		name := args[1]
 		fs := flag.NewFlagSet("task update", flag.ExitOnError)
-		priority := fs.Int("priority", -1, "new priority")
+		position := fs.Int("position", -1, "new position")
 		cooldown := fs.Int("cooldown", -1, "new cooldown seconds")
 		repeat := fs.Bool("repeat", false, "set repeat")
 		noRepeat := fs.Bool("no-repeat", false, "unset repeat")
 		enabled := fs.Bool("enabled", false, "enable task")
 		disabled := fs.Bool("disabled", false, "disable task")
-		taskArgs := fs.String("args", "", "new args JSON")
+		command := fs.String("command", "", "new command line")
 		outputFile := fs.String("output-file", "\x00", "output file path (set to empty string to clear)")
 		fs.Parse(args[2:])
 		updates := map[string]any{}
-		if *priority >= 0 {
-			updates["priority"] = *priority
+		if *position >= 0 {
+			updates["position"] = *position
 		}
 		if *cooldown >= 0 {
 			updates["cooldown_seconds"] = *cooldown
@@ -288,8 +287,8 @@ func runTask(args []string) {
 		if *disabled {
 			updates["enabled"] = 0
 		}
-		if *taskArgs != "" {
-			updates["args"] = *taskArgs
+		if *command != "" {
+			updates["command"] = *command
 		}
 		if *outputFile != "\x00" {
 			updates["output_file"] = *outputFile

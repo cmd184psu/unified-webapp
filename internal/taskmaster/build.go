@@ -41,7 +41,7 @@ func Build(cfg config.TaskmasterConfig) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := seedGroups(database, cfg.Groups); err != nil {
+	if err := seedLanes(database, cfg.Lanes); err != nil {
 		database.Close()
 		return nil, err
 	}
@@ -87,21 +87,17 @@ func Build(cfg config.TaskmasterConfig) (http.Handler, error) {
 	}}, nil
 }
 
-// seedGroups upserts each configured group into the DB at startup, ported
-// from reference/continuous-task-runner-queue/cmd/ctrq.go:76-89. The DB is
-// authoritative thereafter — this only seeds/updates name/pool_limit/
-// allowed_types.
-func seedGroups(database *db.DB, groups []config.TaskmasterGroup) error {
-	for _, gc := range groups {
-		g := &models.Group{
-			Name:         gc.Name,
-			PoolLimit:    gc.PoolLimit,
-			AllowedTypes: gc.AllowedTypes,
+// seedLanes upserts each configured lane into the DB at startup, ported
+// from reference/continuous-task-runner-queue/cmd/ctrq.go:76-89 (originally
+// "groups"; renamed to lanes per taskmaster-ui-plan.md D1). The DB is
+// authoritative thereafter — this only seeds/updates name/width.
+func seedLanes(database *db.DB, lanes []config.TaskmasterLane) error {
+	for _, lc := range lanes {
+		l := &models.Lane{
+			Name:  lc.Name,
+			Width: lc.Width,
 		}
-		if g.AllowedTypes == nil {
-			g.AllowedTypes = []string{}
-		}
-		if err := database.UpsertGroup(g); err != nil {
+		if err := database.UpsertLane(l); err != nil {
 			return err
 		}
 	}

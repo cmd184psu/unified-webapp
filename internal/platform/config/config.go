@@ -324,19 +324,18 @@ const (
 	MaxMaxSessions     = 16
 )
 
-// TaskmasterGroup seeds one concurrency group into the taskmaster DB at startup.
-type TaskmasterGroup struct {
-	Name         string   `json:"name"`
-	PoolLimit    int      `json:"pool_limit"`
-	AllowedTypes []string `json:"allowed_types"`
+// TaskmasterLane seeds one lane into the taskmaster DB at startup.
+type TaskmasterLane struct {
+	Name  string `json:"name"`
+	Width int    `json:"width"`
 }
 
 // TaskmasterConfig holds configuration specific to the taskmaster module.
 type TaskmasterConfig struct {
-	StaticDir string            `json:"static_dir"`
-	DBPath    string            `json:"db_path"`
-	Groups    []TaskmasterGroup `json:"groups"`
-	AllowSudo bool              `json:"allow_sudo"` // default false; see FRD §8
+	StaticDir string           `json:"static_dir"`
+	DBPath    string           `json:"db_path"`
+	Lanes     []TaskmasterLane `json:"lanes"`
+	AllowSudo bool             `json:"allow_sudo"` // default false; see FRD §8
 	// SSEMaxSubscribers is the effective SSE subscriber cap, copied from
 	// Config.Server.SSEMaxSubscribers by Load. Not read from the config file.
 	SSEMaxSubscribers int `json:"-"`
@@ -396,7 +395,7 @@ func DefaultConfig() *Config {
 		Taskmaster: TaskmasterConfig{
 			StaticDir: "./web/taskmaster",
 			DBPath:    "./data/taskmaster/taskmaster.db",
-			Groups:    []TaskmasterGroup{},
+			Lanes:     []TaskmasterLane{},
 			AllowSudo: false,
 		},
 		Admin: AdminConfig{

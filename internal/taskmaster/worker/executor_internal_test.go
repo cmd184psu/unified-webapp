@@ -13,7 +13,7 @@ import (
 
 func TestBuildCmd_SudoDeniedWhenNotAllowed(t *testing.T) {
 	te := &TaskExecutor{Sudo: NewSudoGate(false)}
-	_, err := te.buildCmd(context.Background(), true, "echo", "hi")
+	_, err := te.buildCmd(context.Background(), true, "echo hi")
 	if err == nil {
 		t.Fatal("expected error when sudo is requested and the sudo gate is closed")
 	}
@@ -24,15 +24,15 @@ func TestBuildCmd_SudoDeniedWhenNotAllowed(t *testing.T) {
 
 func TestBuildCmd_SudoPrependedWhenAllowed(t *testing.T) {
 	te := &TaskExecutor{Sudo: NewSudoGate(true)}
-	cmd, err := te.buildCmd(context.Background(), true, "echo", "hi")
+	cmd, err := te.buildCmd(context.Background(), true, "echo hi")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.HasSuffix(cmd.Path, "sudo") {
 		t.Fatalf("expected command path to resolve to sudo, got %q", cmd.Path)
 	}
-	if len(cmd.Args) < 3 || cmd.Args[1] != "echo" || cmd.Args[2] != "hi" {
-		t.Fatalf("expected sudo-wrapped args [sudo echo hi], got %v", cmd.Args)
+	if len(cmd.Args) < 4 || cmd.Args[1] != "sh" || cmd.Args[2] != "-c" || cmd.Args[3] != "echo hi" {
+		t.Fatalf("expected sudo-wrapped args [sudo sh -c \"echo hi\"], got %v", cmd.Args)
 	}
 	if cmd.WaitDelay != waitDelay {
 		t.Fatalf("expected WaitDelay %v, got %v", waitDelay, cmd.WaitDelay)
@@ -41,12 +41,15 @@ func TestBuildCmd_SudoPrependedWhenAllowed(t *testing.T) {
 
 func TestBuildCmd_NoSudoPassthrough(t *testing.T) {
 	te := &TaskExecutor{}
-	cmd, err := te.buildCmd(context.Background(), false, "echo", "hi")
+	cmd, err := te.buildCmd(context.Background(), false, "echo hi")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if strings.HasSuffix(cmd.Path, "sudo") {
 		t.Fatalf("did not expect sudo wrapping, got path %q", cmd.Path)
+	}
+	if len(cmd.Args) < 3 || cmd.Args[1] != "-c" || cmd.Args[2] != "echo hi" {
+		t.Fatalf("expected plain shell args [/bin/sh -c \"echo hi\"], got %v", cmd.Args)
 	}
 	if cmd.WaitDelay != waitDelay {
 		t.Fatalf("expected WaitDelay %v, got %v", waitDelay, cmd.WaitDelay)

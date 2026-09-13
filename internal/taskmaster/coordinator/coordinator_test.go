@@ -30,7 +30,7 @@ func newTestServer(t *testing.T, allowSudo bool, sseMax int) (*httptest.Server, 
 	d, err := db.Open(":memory:")
 	require.NoError(t, err)
 
-	err = d.UpsertGroup(&models.Group{Name: "test", PoolLimit: 2, AllowedTypes: []string{}})
+	err = d.UpsertLane(&models.Lane{Name: "test", Width: 2})
 	require.NoError(t, err)
 
 	registry := worker.NewRegistry()
@@ -121,9 +121,9 @@ func TestSetCapabilities_TogglesPersistsAndGates(t *testing.T) {
 	require.True(t, db.DecodeBoolSetting(v))
 
 	// A sudo task is now permitted where it was a 403 before.
-	require.NoError(t, d.UpsertGroup(&models.Group{Name: "sg", PoolLimit: 1, AllowedTypes: []string{}}))
+	require.NoError(t, d.UpsertLane(&models.Lane{Name: "sg", Width: 1}))
 	taskResp, err := http.DefaultClient.Do(jsonReq(t, http.MethodPost, srv.URL+"/api/tasks",
-		map[string]any{"name": "sudo-task", "group_name": "sg", "task_type": "shell", "sudo": true, "args": `{"shell":"echo hi"}`}))
+		map[string]any{"name": "sudo-task", "lane_name": "sg", "sudo": true, "command": "echo hi"}))
 	require.NoError(t, err)
 	defer taskResp.Body.Close()
 	require.NotEqual(t, http.StatusForbidden, taskResp.StatusCode)
@@ -138,7 +138,7 @@ func TestSetCapabilities_MissingField(t *testing.T) {
 	require.Contains(t, decodeError(t, resp), "allow_sudo")
 }
 
-// ─── Group tests ─────────────────────────────────────────────────────────────
+// ─── Lane (groups route) tests ───────────────────────────────────────────────
 
 func TestHandleListGroups(t *testing.T) {
 	srv, _, _ := newTestServer(t, false, 0)
@@ -146,16 +146,16 @@ func TestHandleListGroups(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	var groups []models.GroupStatus
-	json.NewDecoder(resp.Body).Decode(&groups)
-	require.Len(t, groups, 1)
-	require.Equal(t, "test", groups[0].Name)
+	var lanes []models.LaneStatus
+	json.NewDecoder(resp.Body).Decode(&lanes)
+	require.Len(t, lanes, 1)
+	require.Equal(t, "test", lanes[0].Name)
 }
 
 func TestHandleCreateGroup(t *testing.T) {
 	srv, _, _ := newTestServer(t, false, 0)
 	req := jsonReq(t, "POST", srv.URL+"/api/groups", map[string]any{
-		"name": "new-group", "pool_limit": 3,
+		"name": "new-lane", "width": 3,
 	})
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
@@ -183,7 +183,7 @@ func TestHandleResumeGroup(t *testing.T) {
 
 func TestHandleDeleteGroup_WithTasks(t *testing.T) {
 	srv, d, _ := newTestServer(t, false, 0)
-	_, err := d.AddTask(&models.Task{Name: "t", GroupName: "test", TaskType: "shell", Enabled: true, Priority: 50, Args: "{}"})
+	_, err := d.AddTask(&models.Task{Name: "t", LaneName: "test", Enabled: true, Position: 50, Command: "echo hi"})
 	require.NoError(t, err)
 
 	req := jsonReq(t, "DELETE", srv.URL+"/api/groups/test", nil)
@@ -198,11 +198,10 @@ func TestHandleDeleteGroup_WithTasks(t *testing.T) {
 func TestHandleAddTask_Valid(t *testing.T) {
 	srv, _, _ := newTestServer(t, false, 0)
 	req := jsonReq(t, "POST", srv.URL+"/api/tasks", map[string]any{
-		"name":       "my-task",
-		"group_name": "test",
-		"task_type":  "shell",
-		"args":       `{"shell":"echo hi"}`,
-		"enabled":    true,
+		"name":      "my-task",
+		"lane_name": "test",
+		"command":   "echo hi",
+		"enabled":   true,
 	})
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
@@ -210,10 +209,10 @@ func TestHandleAddTask_Valid(t *testing.T) {
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 }
 
-func TestHandleAddTask_UnknownGroup(t *testing.T) {
+func TestHandleAddTask_UnknownLane(t *testing.T) {
 	srv, _, _ := newTestServer(t, false, 0)
 	req := jsonReq(t, "POST", srv.URL+"/api/tasks", map[string]any{
-		"name": "bad", "group_name": "no-such-group", "task_type": "shell",
+		"name": "bad", "lane_name": "no-such-lane", "command": "echo hi",
 	})
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
@@ -224,7 +223,7 @@ func TestHandleAddTask_UnknownGroup(t *testing.T) {
 func TestHandleAddTask_SudoDisallowed(t *testing.T) {
 	srv, _, _ := newTestServer(t, false, 0)
 	req := jsonReq(t, "POST", srv.URL+"/api/tasks", map[string]any{
-		"name": "sudo-task", "group_name": "test", "task_type": "shell", "sudo": true,
+		"name": "sudo-task", "lane_name": "test", "command": "echo hi", "sudo": true,
 	})
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
@@ -236,7 +235,7 @@ func TestHandleAddTask_SudoDisallowed(t *testing.T) {
 func TestHandleAddTask_SudoAllowed(t *testing.T) {
 	srv, _, _ := newTestServer(t, true, 0)
 	req := jsonReq(t, "POST", srv.URL+"/api/tasks", map[string]any{
-		"name": "sudo-task", "group_name": "test", "task_type": "shell", "sudo": true,
+		"name": "sudo-task", "lane_name": "test", "command": "echo hi", "sudo": true,
 	})
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
@@ -244,51 +243,9 @@ func TestHandleAddTask_SudoAllowed(t *testing.T) {
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 }
 
-func TestHandleAddTask_DisallowedType(t *testing.T) {
-	srv, d, _ := newTestServer(t, false, 0)
-	require.NoError(t, d.UpsertGroup(&models.Group{Name: "restricted", PoolLimit: 1, AllowedTypes: []string{"shell"}}))
-
-	req := jsonReq(t, "POST", srv.URL+"/api/tasks", map[string]any{
-		"name": "exec-task", "group_name": "restricted", "task_type": "exec",
-	})
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
-	msg := decodeError(t, resp)
-	require.Contains(t, msg, "exec")
-	require.Contains(t, msg, "restricted")
-}
-
-func TestHandleUpdateTask_DisallowedType(t *testing.T) {
-	srv, d, _ := newTestServer(t, false, 0)
-	require.NoError(t, d.UpsertGroup(&models.Group{Name: "restricted", PoolLimit: 1, AllowedTypes: []string{"shell"}}))
-	_, err := d.AddTask(&models.Task{Name: "t1", GroupName: "restricted", TaskType: "shell", Enabled: true, Priority: 50, Args: "{}"})
-	require.NoError(t, err)
-
-	req := jsonReq(t, "PUT", srv.URL+"/api/tasks/t1", map[string]any{"task_type": "exec"})
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
-}
-
-func TestHandleUpdateTask_MoveToRestrictedGroup(t *testing.T) {
-	srv, d, _ := newTestServer(t, false, 0)
-	require.NoError(t, d.UpsertGroup(&models.Group{Name: "restricted", PoolLimit: 1, AllowedTypes: []string{"exec"}}))
-	_, err := d.AddTask(&models.Task{Name: "t2", GroupName: "test", TaskType: "shell", Enabled: true, Priority: 50, Args: "{}"})
-	require.NoError(t, err)
-
-	req := jsonReq(t, "PUT", srv.URL+"/api/tasks/t2", map[string]any{"group_name": "restricted"})
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
-}
-
 func TestHandleUpdateTask_SudoDisallowed(t *testing.T) {
 	srv, d, _ := newTestServer(t, false, 0)
-	_, err := d.AddTask(&models.Task{Name: "t3", GroupName: "test", TaskType: "shell", Enabled: true, Priority: 50, Args: "{}"})
+	_, err := d.AddTask(&models.Task{Name: "t3", LaneName: "test", Enabled: true, Position: 50, Command: "echo hi"})
 	require.NoError(t, err)
 
 	req := jsonReq(t, "PUT", srv.URL+"/api/tasks/t3", map[string]any{"sudo": true})
@@ -300,7 +257,7 @@ func TestHandleUpdateTask_SudoDisallowed(t *testing.T) {
 
 func TestHandleUpdateTask_WrongTypedField(t *testing.T) {
 	srv, d, _ := newTestServer(t, false, 0)
-	_, err := d.AddTask(&models.Task{Name: "t4", GroupName: "test", TaskType: "shell", Enabled: true, Priority: 50, Args: "{}"})
+	_, err := d.AddTask(&models.Task{Name: "t4", LaneName: "test", Enabled: true, Position: 50, Command: "echo hi"})
 	require.NoError(t, err)
 
 	req := jsonReq(t, "PUT", srv.URL+"/api/tasks/t4", map[string]any{"sudo": "yes"})
@@ -313,9 +270,24 @@ func TestHandleUpdateTask_WrongTypedField(t *testing.T) {
 	require.Contains(t, msg, "must be a")
 }
 
+func TestHandleUpdateTask_Command(t *testing.T) {
+	srv, d, _ := newTestServer(t, false, 0)
+	_, err := d.AddTask(&models.Task{Name: "t5", LaneName: "test", Enabled: true, Position: 50, Command: "echo hi"})
+	require.NoError(t, err)
+
+	req := jsonReq(t, "PUT", srv.URL+"/api/tasks/t5", map[string]any{"command": "echo bye"})
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	got, _ := d.GetTask("t5")
+	require.Equal(t, "echo bye", got.Command)
+}
+
 func TestHandleDeleteTask(t *testing.T) {
 	srv, d, _ := newTestServer(t, false, 0)
-	_, err := d.AddTask(&models.Task{Name: "del-me", GroupName: "test", TaskType: "shell", Enabled: true, Priority: 50, Args: "{}"})
+	_, err := d.AddTask(&models.Task{Name: "del-me", LaneName: "test", Enabled: true, Position: 50, Command: "echo hi"})
 	require.NoError(t, err)
 
 	req := jsonReq(t, "DELETE", srv.URL+"/api/tasks/del-me", nil)
@@ -327,7 +299,7 @@ func TestHandleDeleteTask(t *testing.T) {
 
 func TestHandleEnqueueTask(t *testing.T) {
 	srv, d, _ := newTestServer(t, false, 0)
-	_, err := d.AddTask(&models.Task{Name: "enq", GroupName: "test", TaskType: "shell", Enabled: true, Priority: 50, Args: "{}"})
+	_, err := d.AddTask(&models.Task{Name: "enq", LaneName: "test", Enabled: true, Position: 50, Command: "echo hi"})
 	require.NoError(t, err)
 
 	req := jsonReq(t, "POST", srv.URL+"/api/tasks/enq/enqueue", nil)
@@ -342,7 +314,7 @@ func TestHandleEnqueueTask(t *testing.T) {
 
 func TestHandlePauseResumeTask(t *testing.T) {
 	srv, d, _ := newTestServer(t, false, 0)
-	_, err := d.AddTask(&models.Task{Name: "pausable", GroupName: "test", TaskType: "shell", Enabled: true, Priority: 50, Args: "{}"})
+	_, err := d.AddTask(&models.Task{Name: "pausable", LaneName: "test", Enabled: true, Position: 50, Command: "echo hi"})
 	require.NoError(t, err)
 
 	req := jsonReq(t, "POST", srv.URL+"/api/tasks/pausable/pause", nil)
@@ -394,7 +366,7 @@ func TestHandleExecutionOutput_NotFound(t *testing.T) {
 func TestHandleExecutionOutput_CompletedExecution(t *testing.T) {
 	srv, d, _ := newTestServer(t, false, 0)
 
-	task := &models.Task{Name: "t", GroupName: "test", TaskType: "shell", Enabled: true, Priority: 50, Args: "{}"}
+	task := &models.Task{Name: "t", LaneName: "test", Enabled: true, Position: 50, Command: "echo hi"}
 	id, _ := d.AddTask(task)
 	execID, _ := d.CreateExecution(id, "w", time.Now())
 	d.StartExecution(execID, "w")

@@ -1,6 +1,7 @@
 package db_test
 
 import (
+	"database/sql"
 	"testing"
 	"time"
 
@@ -8,7 +9,15 @@ import (
 	"cmd184psu/unified-webapp/internal/taskmaster/models"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	_ "modernc.org/sqlite"
 )
+
+// sqlOpenLegacy opens a raw sqlite connection (bypassing db.Open's
+// migration machinery entirely) so tests can hand-build an on-disk database
+// in the shape a pre-B1 binary would have left behind.
+func sqlOpenLegacy(path string) (*sql.DB, error) {
+	return sql.Open("sqlite", path)
+}
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m)
@@ -22,17 +31,17 @@ func newTestDB(t *testing.T) *db.DB {
 	return d
 }
 
-func seedGroup(t *testing.T, d *db.DB, name string, poolLimit int) {
+func seedLane(t *testing.T, d *db.DB, name string, width int) {
 	t.Helper()
-	err := d.UpsertGroup(&models.Group{Name: name, PoolLimit: poolLimit, AllowedTypes: []string{}})
+	err := d.UpsertLane(&models.Lane{Name: name, Width: width})
 	require.NoError(t, err)
 }
 
-func seedTask(t *testing.T, d *db.DB, name, group, taskType string) *models.Task {
+func seedTask(t *testing.T, d *db.DB, name, lane string) *models.Task {
 	t.Helper()
 	task := &models.Task{
-		Name: name, GroupName: group, TaskType: taskType,
-		Enabled: true, Priority: 50, Args: `{"shell":"echo test"}`,
+		Name: name, LaneName: lane,
+		Enabled: true, Command: "echo test",
 	}
 	id, err := d.AddTask(task)
 	require.NoError(t, err)
@@ -40,80 +49,79 @@ func seedTask(t *testing.T, d *db.DB, name, group, taskType string) *models.Task
 	return task
 }
 
-// ─── Group tests ─────────────────────────────────────────────────────────────
+// ─── Lane tests ──────────────────────────────────────────────────────────────
 
-func TestUpsertGroup_CreateAndUpdate(t *testing.T) {
+func TestUpsertLane_CreateAndUpdate(t *testing.T) {
 	d := newTestDB(t)
-	err := d.UpsertGroup(&models.Group{Name: "batch", PoolLimit: 5, AllowedTypes: []string{"shell"}})
+	err := d.UpsertLane(&models.Lane{Name: "batch", Width: 5})
 	require.NoError(t, err)
 
-	g, err := d.GetGroup("batch")
+	l, err := d.GetLane("batch")
 	require.NoError(t, err)
-	require.NotNil(t, g)
-	require.Equal(t, 5, g.PoolLimit)
-	require.Equal(t, []string{"shell"}, g.AllowedTypes)
+	require.NotNil(t, l)
+	require.Equal(t, 5, l.Width)
 
 	// update
-	err = d.UpsertGroup(&models.Group{Name: "batch", PoolLimit: 10, AllowedTypes: []string{}})
+	err = d.UpsertLane(&models.Lane{Name: "batch", Width: 10})
 	require.NoError(t, err)
-	g, _ = d.GetGroup("batch")
-	require.Equal(t, 10, g.PoolLimit)
+	l, _ = d.GetLane("batch")
+	require.Equal(t, 10, l.Width)
 }
 
-func TestGetGroup_NotFound(t *testing.T) {
+func TestGetLane_NotFound(t *testing.T) {
 	d := newTestDB(t)
-	g, err := d.GetGroup("nonexistent")
+	l, err := d.GetLane("nonexistent")
 	require.NoError(t, err)
-	require.Nil(t, g)
+	require.Nil(t, l)
 }
 
-func TestListGroups(t *testing.T) {
+func TestListLanes(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "alpha", 2)
-	seedGroup(t, d, "beta", 3)
+	seedLane(t, d, "alpha", 2)
+	seedLane(t, d, "beta", 3)
 
-	groups, err := d.ListGroups()
+	lanes, err := d.ListLanes()
 	require.NoError(t, err)
-	require.Len(t, groups, 2)
-	require.Equal(t, "alpha", groups[0].Name)
-	require.Equal(t, "beta", groups[1].Name)
+	require.Len(t, lanes, 2)
+	require.Equal(t, "alpha", lanes[0].Name)
+	require.Equal(t, "beta", lanes[1].Name)
 }
 
-func TestDeleteGroup_NoTasks(t *testing.T) {
+func TestDeleteLane_NoTasks(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "empty", 1)
-	require.NoError(t, d.DeleteGroup("empty"))
-	g, _ := d.GetGroup("empty")
-	require.Nil(t, g)
+	seedLane(t, d, "empty", 1)
+	require.NoError(t, d.DeleteLane("empty"))
+	l, _ := d.GetLane("empty")
+	require.Nil(t, l)
 }
 
-func TestDeleteGroup_WithTasks(t *testing.T) {
+func TestDeleteLane_WithTasks(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "used", 1)
-	seedTask(t, d, "t1", "used", "shell")
-	err := d.DeleteGroup("used")
+	seedLane(t, d, "used", 1)
+	seedTask(t, d, "t1", "used")
+	err := d.DeleteLane("used")
 	require.Error(t, err)
 }
 
-func TestSetGroupPaused(t *testing.T) {
+func TestSetLanePaused(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "g1", 2)
-	require.NoError(t, d.SetGroupPaused("g1", true, "admin"))
+	seedLane(t, d, "g1", 2)
+	require.NoError(t, d.SetLanePaused("g1", true, "admin"))
 
-	g, _ := d.GetGroup("g1")
-	require.True(t, g.Paused)
-	require.Equal(t, "admin", g.PausedBy)
-	require.NotNil(t, g.PausedAt)
+	l, _ := d.GetLane("g1")
+	require.True(t, l.Paused)
+	require.Equal(t, "admin", l.PausedBy)
+	require.NotNil(t, l.PausedAt)
 }
 
 // ─── Task tests ───────────────────────────────────────────────────────────────
 
 func TestAddTask_Basic(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "bg", 2)
+	seedLane(t, d, "bg", 2)
 	task := &models.Task{
-		Name: "my-task", GroupName: "bg", TaskType: "shell",
-		Enabled: true, Priority: 10, Args: `{"shell":"ls"}`,
+		Name: "my-task", LaneName: "bg",
+		Enabled: true, Position: 10, Command: "ls",
 	}
 	id, err := d.AddTask(task)
 	require.NoError(t, err)
@@ -123,24 +131,25 @@ func TestAddTask_Basic(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, "my-task", got.Name)
-	require.Equal(t, 10, got.Priority)
+	require.Equal(t, 10, got.Position)
+	require.Equal(t, "ls", got.Command)
 	require.True(t, got.Enabled)
 }
 
 func TestAddTask_Upsert(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "bg", 2)
-	task := &models.Task{Name: "t", GroupName: "bg", TaskType: "shell", Enabled: true, Priority: 50, Args: "{}"}
+	seedLane(t, d, "bg", 2)
+	task := &models.Task{Name: "t", LaneName: "bg", Enabled: true, Position: 50, Command: "echo hi"}
 	id1, _ := d.AddTask(task)
 
-	task.Priority = 99
+	task.Position = 99
 	id2, err := d.AddTask(task)
 	require.NoError(t, err)
 	// upsert returns lastInsertId which may be 0 on update; check the value was updated
 	_ = id1
 	_ = id2
 	got, _ := d.GetTask("t")
-	require.Equal(t, 99, got.Priority)
+	require.Equal(t, 99, got.Position)
 }
 
 func TestGetTask_NotFound(t *testing.T) {
@@ -150,12 +159,12 @@ func TestGetTask_NotFound(t *testing.T) {
 	require.Nil(t, got)
 }
 
-func TestListTasks_GroupFilter(t *testing.T) {
+func TestListTasks_LaneFilter(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "g1", 1)
-	seedGroup(t, d, "g2", 1)
-	seedTask(t, d, "t-g1", "g1", "shell")
-	seedTask(t, d, "t-g2", "g2", "shell")
+	seedLane(t, d, "g1", 1)
+	seedLane(t, d, "g2", 1)
+	seedTask(t, d, "t-g1", "g1")
+	seedTask(t, d, "t-g2", "g2")
 
 	all, _ := d.ListTasks("")
 	require.Len(t, all, 2)
@@ -167,8 +176,8 @@ func TestListTasks_GroupFilter(t *testing.T) {
 
 func TestDeleteTask_CascadesExecutions(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "g", 1)
-	task := seedTask(t, d, "mytask", "g", "shell")
+	seedLane(t, d, "g", 1)
+	task := seedTask(t, d, "mytask", "g")
 
 	execID, err := d.CreateExecution(task.ID, "worker1", time.Now())
 	require.NoError(t, err)
@@ -184,8 +193,8 @@ func TestDeleteTask_CascadesExecutions(t *testing.T) {
 
 func TestSetTaskPaused(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "g", 1)
-	seedTask(t, d, "t", "g", "shell")
+	seedLane(t, d, "g", 1)
+	seedTask(t, d, "t", "g")
 
 	require.NoError(t, d.SetTaskPaused("t", true))
 	got, _ := d.GetTask("t")
@@ -200,19 +209,19 @@ func TestSetTaskPaused(t *testing.T) {
 
 func TestGetEligibleTasks_NewTask(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "g", 2)
-	seedTask(t, d, "new-task", "g", "shell")
+	seedLane(t, d, "g", 2)
+	seedTask(t, d, "new-task", "g")
 
 	tasks, err := d.GetEligibleTasks()
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 }
 
-func TestGetEligibleTasks_Priority(t *testing.T) {
+func TestGetEligibleTasks_Position(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "g", 5)
-	t1 := &models.Task{Name: "high", GroupName: "g", TaskType: "shell", Enabled: true, Priority: 10, Args: "{}"}
-	t2 := &models.Task{Name: "low", GroupName: "g", TaskType: "shell", Enabled: true, Priority: 90, Args: "{}"}
+	seedLane(t, d, "g", 5)
+	t1 := &models.Task{Name: "high", LaneName: "g", Enabled: true, Position: 10, Command: "echo hi"}
+	t2 := &models.Task{Name: "low", LaneName: "g", Enabled: true, Position: 90, Command: "echo hi"}
 	d.AddTask(t1)
 	d.AddTask(t2)
 
@@ -223,9 +232,9 @@ func TestGetEligibleTasks_Priority(t *testing.T) {
 
 func TestGetEligibleTasks_Cooldown(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "g", 2)
-	task := &models.Task{Name: "cooldown-task", GroupName: "g", TaskType: "shell", Enabled: true,
-		Priority: 50, Args: "{}", Repeat: true, CooldownSeconds: 3600}
+	seedLane(t, d, "g", 2)
+	task := &models.Task{Name: "cooldown-task", LaneName: "g", Enabled: true,
+		Position: 50, Command: "echo hi", Repeat: true, CooldownSeconds: 3600}
 	id, _ := d.AddTask(task)
 
 	execID, _ := d.CreateExecution(id, "w", time.Now())
@@ -235,11 +244,11 @@ func TestGetEligibleTasks_Cooldown(t *testing.T) {
 	require.Empty(t, tasks, "task in cooldown should not be eligible")
 }
 
-func TestGetEligibleTasks_GroupPaused(t *testing.T) {
+func TestGetEligibleTasks_LanePaused(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "g", 2)
-	seedTask(t, d, "t", "g", "shell")
-	require.NoError(t, d.SetGroupPaused("g", true, "admin"))
+	seedLane(t, d, "g", 2)
+	seedTask(t, d, "t", "g")
+	require.NoError(t, d.SetLanePaused("g", true, "admin"))
 
 	tasks, _ := d.GetEligibleTasks()
 	require.Empty(t, tasks)
@@ -247,8 +256,8 @@ func TestGetEligibleTasks_GroupPaused(t *testing.T) {
 
 func TestGetEligibleTasks_TaskPaused(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "g", 2)
-	seedTask(t, d, "t", "g", "shell")
+	seedLane(t, d, "g", 2)
+	seedTask(t, d, "t", "g")
 	require.NoError(t, d.SetTaskPaused("t", true))
 
 	tasks, _ := d.GetEligibleTasks()
@@ -257,8 +266,8 @@ func TestGetEligibleTasks_TaskPaused(t *testing.T) {
 
 func TestGetEligibleTasks_Locked(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "g", 2)
-	task := seedTask(t, d, "locked-task", "g", "shell")
+	seedLane(t, d, "g", 2)
+	task := seedTask(t, d, "locked-task", "g")
 
 	ok, err := d.AcquireLock(task.ID, "worker1", 10*time.Minute)
 	require.NoError(t, err)
@@ -270,9 +279,9 @@ func TestGetEligibleTasks_Locked(t *testing.T) {
 
 func TestGetEligibleTasks_PendingEnqueue(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "g", 2)
-	task := &models.Task{Name: "once", GroupName: "g", TaskType: "shell", Enabled: true,
-		Priority: 50, Args: "{}", Repeat: false}
+	seedLane(t, d, "g", 2)
+	task := &models.Task{Name: "once", LaneName: "g", Enabled: true,
+		Position: 50, Command: "echo hi", Repeat: false}
 	id, _ := d.AddTask(task)
 
 	// Mark as already completed once
@@ -295,8 +304,8 @@ func TestGetEligibleTasks_PendingEnqueue(t *testing.T) {
 
 func TestAcquireLock_Exclusive(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "g", 2)
-	task := seedTask(t, d, "t", "g", "shell")
+	seedLane(t, d, "g", 2)
+	task := seedTask(t, d, "t", "g")
 
 	ok1, err := d.AcquireLock(task.ID, "worker1", time.Minute)
 	require.NoError(t, err)
@@ -309,8 +318,8 @@ func TestAcquireLock_Exclusive(t *testing.T) {
 
 func TestAcquireLock_AfterExpiry(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "g", 2)
-	task := seedTask(t, d, "t", "g", "shell")
+	seedLane(t, d, "g", 2)
+	task := seedTask(t, d, "t", "g")
 
 	ok, _ := d.AcquireLock(task.ID, "worker1", -time.Second) // already expired
 	require.True(t, ok)
@@ -323,8 +332,8 @@ func TestAcquireLock_AfterExpiry(t *testing.T) {
 
 func TestReleaseLock(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "g", 2)
-	task := seedTask(t, d, "t", "g", "shell")
+	seedLane(t, d, "g", 2)
+	task := seedTask(t, d, "t", "g")
 
 	d.AcquireLock(task.ID, "w1", time.Minute)
 	require.NoError(t, d.ReleaseLock(task.ID, "w1"))
@@ -337,8 +346,8 @@ func TestReleaseLock(t *testing.T) {
 
 func TestCreateExecution_FinishExecution(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "g", 2)
-	task := seedTask(t, d, "t", "g", "shell")
+	seedLane(t, d, "g", 2)
+	task := seedTask(t, d, "t", "g")
 
 	scheduled := time.Now().Add(-500 * time.Millisecond)
 	execID, err := d.CreateExecution(task.ID, "worker1", scheduled)
@@ -362,8 +371,8 @@ func TestCreateExecution_FinishExecution(t *testing.T) {
 
 func TestListExecutions(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "g", 2)
-	task := seedTask(t, d, "t", "g", "shell")
+	seedLane(t, d, "g", 2)
+	task := seedTask(t, d, "t", "g")
 
 	for i := 0; i < 3; i++ {
 		id, _ := d.CreateExecution(task.ID, "w", time.Now())
@@ -379,8 +388,8 @@ func TestListExecutions(t *testing.T) {
 
 func TestRecordMetric_GetMetrics(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "g", 2)
-	task := seedTask(t, d, "t", "g", "shell")
+	seedLane(t, d, "g", 2)
+	task := seedTask(t, d, "t", "g")
 
 	execID, _ := d.CreateExecution(task.ID, "w", time.Now())
 	require.NoError(t, d.RecordMetric(task.ID, execID, "success", 500, 10))
@@ -396,12 +405,12 @@ func TestRecordMetric_GetMetrics(t *testing.T) {
 	require.NotNil(t, s.AvgDurationMs)
 }
 
-func TestGetMetrics_GroupFilter(t *testing.T) {
+func TestGetMetrics_LaneFilter(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "g1", 1)
-	seedGroup(t, d, "g2", 1)
-	task1 := seedTask(t, d, "t1", "g1", "shell")
-	task2 := seedTask(t, d, "t2", "g2", "shell")
+	seedLane(t, d, "g1", 1)
+	seedLane(t, d, "g2", 1)
+	task1 := seedTask(t, d, "t1", "g1")
+	task2 := seedTask(t, d, "t2", "g2")
 
 	e1, _ := d.CreateExecution(task1.ID, "w", time.Now())
 	d.RecordMetric(task1.ID, e1, "success", 100, 0)
@@ -413,19 +422,19 @@ func TestGetMetrics_GroupFilter(t *testing.T) {
 	require.Equal(t, "t1", summaries[0].TaskName)
 }
 
-func TestCountRunningInGroup(t *testing.T) {
+func TestCountRunningInLane(t *testing.T) {
 	d := newTestDB(t)
-	seedGroup(t, d, "g", 5)
-	task := seedTask(t, d, "t", "g", "shell")
+	seedLane(t, d, "g", 5)
+	task := seedTask(t, d, "t", "g")
 
-	count, err := d.CountRunningInGroup("g")
+	count, err := d.CountRunningInLane("g")
 	require.NoError(t, err)
 	require.Equal(t, 0, count)
 
 	execID, _ := d.CreateExecution(task.ID, "w", time.Now())
 	d.StartExecution(execID, "w")
 
-	count, err = d.CountRunningInGroup("g")
+	count, err = d.CountRunningInLane("g")
 	require.NoError(t, err)
 	require.Equal(t, 1, count)
 }
@@ -451,4 +460,119 @@ func TestSettingsRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.False(t, db.DecodeBoolSetting(v))
+}
+
+// ─── Migration tests ──────────────────────────────────────────────────────────
+
+// TestMigration_FreshDB verifies a brand new database opens cleanly and ends
+// up with the final lane/task shape (no error implies the bootstrap +
+// migration-3 rebuild both ran without a hitch).
+func TestMigration_FreshDB(t *testing.T) {
+	d := newTestDB(t)
+	seedLane(t, d, "default", 2)
+	task := &models.Task{Name: "t", LaneName: "default", Enabled: true, Command: "echo hi", Position: 1}
+	_, err := d.AddTask(task)
+	require.NoError(t, err)
+
+	got, err := d.GetTask("t")
+	require.NoError(t, err)
+	require.Equal(t, "echo hi", got.Command)
+	require.Equal(t, 1, got.Position)
+}
+
+// TestMigration_LegacyOnDiskDB simulates an existing on-disk database created
+// by the pre-B1 schema (groups/tasks with pool_limit/allowed_types/
+// group_name/task_type/args/priority, schema_version=2) and verifies that
+// opening it with the current code migrates it cleanly to the lane/task
+// shape, carrying forward a legacy shell task's command from its args JSON,
+// and that a second Open() (simulating a service restart) still succeeds.
+func TestMigration_LegacyOnDiskDB(t *testing.T) {
+	path := t.TempDir() + "/legacy.db"
+
+	legacy, err := sqlOpenLegacy(path)
+	require.NoError(t, err)
+
+	_, err = legacy.Exec(`
+CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+INSERT INTO schema_version (version) VALUES (2);
+
+CREATE TABLE groups (
+  name TEXT PRIMARY KEY,
+  pool_limit INTEGER NOT NULL DEFAULT 1,
+  allowed_types TEXT NOT NULL DEFAULT '[]',
+  paused INTEGER NOT NULL DEFAULT 0,
+  paused_at INTEGER,
+  paused_by TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+INSERT INTO groups (name, pool_limit, allowed_types, paused, created_at, updated_at)
+  VALUES ('legacy-lane', 3, '[]', 0, 1000, 1000);
+
+CREATE TABLE tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT UNIQUE NOT NULL,
+  group_name TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  paused INTEGER NOT NULL DEFAULT 0,
+  priority INTEGER NOT NULL DEFAULT 50,
+  cooldown_seconds INTEGER NOT NULL DEFAULT 0,
+  repeat INTEGER NOT NULL DEFAULT 0,
+  task_type TEXT NOT NULL,
+  args TEXT NOT NULL DEFAULT '{}',
+  sudo INTEGER NOT NULL DEFAULT 0,
+  output_file TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+INSERT INTO tasks (name, group_name, enabled, paused, priority, cooldown_seconds, repeat, task_type, args, sudo, output_file, created_at, updated_at)
+  VALUES ('legacy-shell', 'legacy-lane', 1, 0, 20, 0, 0, 'shell', '{"shell":"echo legacy"}', 0, '', 1000, 1000);
+INSERT INTO tasks (name, group_name, enabled, paused, priority, cooldown_seconds, repeat, task_type, args, sudo, output_file, created_at, updated_at)
+  VALUES ('legacy-exec', 'legacy-lane', 1, 0, 10, 0, 0, 'exec', '{"command":"true"}', 0, '', 1000, 1000);
+
+CREATE TABLE task_executions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  scheduled_at INTEGER,
+  started_at INTEGER,
+  finished_at INTEGER,
+  status TEXT NOT NULL DEFAULT 'pending',
+  error_message TEXT,
+  worker_id TEXT,
+  duration_ms INTEGER,
+  schedule_delay_ms INTEGER
+);
+`)
+	require.NoError(t, err)
+	require.NoError(t, legacy.Close())
+
+	// First Open(): must run migration 3 and land on the final shape.
+	d, err := db.Open(path)
+	require.NoError(t, err)
+
+	lane, err := d.GetLane("legacy-lane")
+	require.NoError(t, err)
+	require.NotNil(t, lane, "lane should carry forward from the old group")
+	require.Equal(t, 3, lane.Width)
+
+	shellTask, err := d.GetTask("legacy-shell")
+	require.NoError(t, err)
+	require.NotNil(t, shellTask)
+	require.Equal(t, "echo legacy", shellTask.Command, "legacy shell task_type should carry its command forward from args.shell")
+	require.Equal(t, "legacy-lane", shellTask.LaneName)
+	require.Equal(t, 20, shellTask.Position, "position carries forward from the old priority column")
+
+	execTask, err := d.GetTask("legacy-exec")
+	require.NoError(t, err)
+	require.NotNil(t, execTask)
+	require.Empty(t, execTask.Command, "non-shell legacy task_type is left blank for manual fixup")
+
+	require.NoError(t, d.Close())
+
+	// Second Open(): simulates a service restart against an already-migrated
+	// DB file. Must not try to recreate the dropped groups table / old
+	// indexes referencing columns that no longer exist.
+	d2, err := db.Open(path)
+	require.NoError(t, err)
+	require.NoError(t, d2.Close())
 }

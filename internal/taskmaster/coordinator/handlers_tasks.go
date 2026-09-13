@@ -2,7 +2,6 @@ package coordinator
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -13,8 +12,8 @@ import (
 )
 
 func (c *Coordinator) handleListTasks(w http.ResponseWriter, r *http.Request) {
-	groupFilter := r.URL.Query().Get("group")
-	tasks, err := c.db.ListTasks(groupFilter)
+	laneFilter := r.URL.Query().Get("group")
+	tasks, err := c.db.ListTasks(laneFilter)
 	if err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -25,26 +24,12 @@ func (c *Coordinator) handleListTasks(w http.ResponseWriter, r *http.Request) {
 	response.WriteJSON(w, http.StatusOK, tasks)
 }
 
-// validateTaskPolicy enforces allow_sudo and the group's allowed_types.
-func (c *Coordinator) validateTaskPolicy(taskType, groupName string, sudo bool) (status int, msg string) {
+// validateTaskPolicy enforces allow_sudo. The old allowed_types/task_type
+// check is gone along with task "types" (FRD §6, plan D2/D4) — sudo is the
+// only remaining gate.
+func (c *Coordinator) validateTaskPolicy(sudo bool) (status int, msg string) {
 	if sudo && !c.sudo.Allowed() {
 		return http.StatusForbidden, "sudo tasks are disabled (enable allow_sudo to permit them)"
-	}
-	g, err := c.db.GetGroup(groupName)
-	if err != nil {
-		return http.StatusInternalServerError, err.Error()
-	}
-	if g != nil && len(g.AllowedTypes) > 0 {
-		allowed := false
-		for _, t := range g.AllowedTypes {
-			if t == taskType {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			return http.StatusBadRequest, fmt.Sprintf("task_type %q not permitted in group %q (allowed: %v)", taskType, groupName, g.AllowedTypes)
-		}
 	}
 	return 0, ""
 }
@@ -55,33 +40,23 @@ func (c *Coordinator) handleAddTask(w http.ResponseWriter, r *http.Request) {
 		response.WriteDecodeError(w, err)
 		return
 	}
-	if task.Name == "" || task.GroupName == "" || task.TaskType == "" {
-		response.WriteError(w, http.StatusBadRequest, "name, group_name, and task_type are required")
+	if task.Name == "" || task.LaneName == "" {
+		response.WriteError(w, http.StatusBadRequest, "name and lane_name are required")
 		return
-	}
-	if task.Args == "" {
-		task.Args = "{}"
-	}
-	if !json.Valid([]byte(task.Args)) {
-		response.WriteError(w, http.StatusBadRequest, "args must be a valid JSON object")
-		return
-	}
-	if task.Priority == 0 {
-		task.Priority = 50
 	}
 
-	// validate group exists
-	g, err := c.db.GetGroup(task.GroupName)
+	// validate lane exists
+	l, err := c.db.GetLane(task.LaneName)
 	if err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if g == nil {
-		response.WriteError(w, http.StatusBadRequest, "unknown group: "+task.GroupName)
+	if l == nil {
+		response.WriteError(w, http.StatusBadRequest, "unknown lane: "+task.LaneName)
 		return
 	}
 
-	if status, msg := c.validateTaskPolicy(task.TaskType, task.GroupName, task.Sudo); status != 0 {
+	if status, msg := c.validateTaskPolicy(task.Sudo); status != 0 {
 		response.WriteError(w, status, msg)
 		return
 	}
@@ -131,47 +106,19 @@ func (c *Coordinator) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	delete(updates, "name")
 	delete(updates, "created_at")
 
-	if argsVal, ok := updates["args"]; ok {
-		argsStr, _ := argsVal.(string)
-		if argsStr == "" {
-			updates["args"] = "{}"
-		} else if !json.Valid([]byte(argsStr)) {
-			response.WriteError(w, http.StatusBadRequest, "args must be a valid JSON object")
-			return
-		}
-	}
-
-	// Compute the effective post-merge (task_type, group_name, sudo) triple and
-	// validate it — covers moving a task into a stricter group and flipping sudo on.
-	taskType := existing.TaskType
-	if v, ok := updates["task_type"]; ok {
-		s, ok := v.(string)
-		if !ok {
-			response.WriteError(w, http.StatusBadRequest, fmt.Sprintf("field %q must be a %s", "task_type", "string"))
-			return
-		}
-		taskType = s
-	}
-	groupName := existing.GroupName
-	if v, ok := updates["group_name"]; ok {
-		s, ok := v.(string)
-		if !ok {
-			response.WriteError(w, http.StatusBadRequest, fmt.Sprintf("field %q must be a %s", "group_name", "string"))
-			return
-		}
-		groupName = s
-	}
+	// Compute the effective post-merge sudo flag and validate it — covers
+	// flipping sudo on via update.
 	sudo := existing.Sudo
 	if v, ok := updates["sudo"]; ok {
 		b, ok := v.(bool)
 		if !ok {
-			response.WriteError(w, http.StatusBadRequest, fmt.Sprintf("field %q must be a %s", "sudo", "bool"))
+			response.WriteError(w, http.StatusBadRequest, `field "sudo" must be a bool`)
 			return
 		}
 		sudo = b
 	}
 
-	if status, msg := c.validateTaskPolicy(taskType, groupName, sudo); status != 0 {
+	if status, msg := c.validateTaskPolicy(sudo); status != 0 {
 		response.WriteError(w, status, msg)
 		return
 	}

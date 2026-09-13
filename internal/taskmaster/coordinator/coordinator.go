@@ -34,6 +34,9 @@ func (c *Coordinator) routes() *chi.Mux {
 	r.Get("/api/capabilities", c.handleCapabilities)
 	r.Post("/api/capabilities", c.handleSetCapabilities)
 
+	// Route paths stay "/api/groups*" for now — the /api/lanes rename is a
+	// later story (taskmaster-ui-plan.md Phase B5). Handlers operate on the
+	// renamed lane DB functions underneath.
 	r.Get("/api/groups", c.handleListGroups)
 	r.Post("/api/groups", c.handleCreateGroup)
 	r.Get("/api/groups/{name}", c.handleGetGroup)

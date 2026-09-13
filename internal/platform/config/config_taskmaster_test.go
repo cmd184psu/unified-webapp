@@ -21,8 +21,8 @@ func TestTaskmasterDefaults(t *testing.T) {
 	if tm.AllowSudo {
 		t.Error("allow_sudo should default to false")
 	}
-	if len(tm.Groups) != 0 {
-		t.Errorf("groups = %v, want empty", tm.Groups)
+	if len(tm.Lanes) != 0 {
+		t.Errorf("lanes = %v, want empty", tm.Lanes)
 	}
 }
 
@@ -30,7 +30,7 @@ func TestTaskmasterLoadFromFile(t *testing.T) {
 	path := writeCfg(t, `{"taskmaster":{
 		"static_dir":"/srv/web/taskmaster",
 		"db_path":"/var/lib/taskmaster/taskmaster.db",
-		"groups":[{"name":"default","pool_limit":2,"allowed_types":["shell","exec"]}],
+		"lanes":[{"name":"default","width":2}],
 		"allow_sudo":true
 	}}`)
 
@@ -48,19 +48,19 @@ func TestTaskmasterLoadFromFile(t *testing.T) {
 	if !tm.AllowSudo {
 		t.Error("allow_sudo should be true from file")
 	}
-	if len(tm.Groups) != 1 {
-		t.Fatalf("groups = %v, want 1 entry", tm.Groups)
+	if len(tm.Lanes) != 1 {
+		t.Fatalf("lanes = %v, want 1 entry", tm.Lanes)
 	}
-	g := tm.Groups[0]
-	if g.Name != "default" || g.PoolLimit != 2 || len(g.AllowedTypes) != 2 || g.AllowedTypes[0] != "shell" || g.AllowedTypes[1] != "exec" {
-		t.Errorf("group = %+v", g)
+	l := tm.Lanes[0]
+	if l.Name != "default" || l.Width != 2 {
+		t.Errorf("lane = %+v", l)
 	}
 }
 
 func TestTaskmasterRoundTrip(t *testing.T) {
 	want := config.DefaultConfig().Taskmaster
-	want.Groups = []config.TaskmasterGroup{
-		{Name: "default", PoolLimit: 2, AllowedTypes: []string{"shell"}},
+	want.Lanes = []config.TaskmasterLane{
+		{Name: "default", Width: 2},
 	}
 	data, err := json.Marshal(map[string]any{"taskmaster": want})
 	if err != nil {
@@ -76,12 +76,10 @@ func TestTaskmasterRoundTrip(t *testing.T) {
 	if got.StaticDir != want.StaticDir || got.DBPath != want.DBPath || got.AllowSudo != want.AllowSudo {
 		t.Errorf("round trip changed the struct:\n got %+v\nwant %+v", got, want)
 	}
-	if len(got.Groups) != len(want.Groups) ||
-		got.Groups[0].Name != want.Groups[0].Name ||
-		got.Groups[0].PoolLimit != want.Groups[0].PoolLimit ||
-		len(got.Groups[0].AllowedTypes) != len(want.Groups[0].AllowedTypes) ||
-		got.Groups[0].AllowedTypes[0] != want.Groups[0].AllowedTypes[0] {
-		t.Errorf("groups round trip changed:\n got %+v\nwant %+v", got.Groups, want.Groups)
+	if len(got.Lanes) != len(want.Lanes) ||
+		got.Lanes[0].Name != want.Lanes[0].Name ||
+		got.Lanes[0].Width != want.Lanes[0].Width {
+		t.Errorf("lanes round trip changed:\n got %+v\nwant %+v", got.Lanes, want.Lanes)
 	}
 }
 

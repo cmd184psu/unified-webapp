@@ -87,25 +87,25 @@ func (w *Worker) poll() error {
 		return nil
 	}
 
-	groups, err := w.db.ListGroups()
+	lanes, err := w.db.ListLanes()
 	if err != nil {
 		return err
 	}
 
-	for _, group := range groups {
-		running, err := w.db.CountRunningInGroup(group.Name)
+	for _, lane := range lanes {
+		running, err := w.db.CountRunningInLane(lane.Name)
 		if err != nil {
-			log.Printf("count running in %s: %v", group.Name, err)
+			log.Printf("count running in %s: %v", lane.Name, err)
 			continue
 		}
-		slots := group.PoolLimit - running
+		slots := lane.Width - running
 		if slots <= 0 {
 			continue
 		}
 
 		var candidates []*models.Task
 		for _, t := range eligible {
-			if t.GroupName == group.Name {
+			if t.LaneName == lane.Name {
 				candidates = append(candidates, t)
 			}
 		}

@@ -79,9 +79,9 @@
   "taskmaster": {
     "static_dir": "./web/taskmaster",
     "db_path": "./local-test/data/taskmaster/taskmaster.db",
-    "groups": [
-      { "name": "default", "pool_limit": 2, "allowed_types": [] },
-      { "name": "shell-only", "pool_limit": 1, "allowed_types": ["shell"] }
+    "lanes": [
+      { "name": "default", "width": 2 },
+      { "name": "shell-only", "width": 1 }
     ],
     "allow_sudo": false
   },

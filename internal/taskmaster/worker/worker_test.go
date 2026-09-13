@@ -32,7 +32,7 @@ func newTestWorker(t *testing.T, exec worker.Executor) (*worker.Worker, *db.DB) 
 	require.NoError(t, err)
 	t.Cleanup(func() { d.Close() })
 
-	err = d.UpsertGroup(&models.Group{Name: "test", PoolLimit: 2, AllowedTypes: []string{}})
+	err = d.UpsertLane(&models.Lane{Name: "test", Width: 2})
 	require.NoError(t, err)
 
 	w := worker.NewWithExecutor(d, worker.NewRegistry(), "test-worker", exec)
@@ -42,8 +42,8 @@ func newTestWorker(t *testing.T, exec worker.Executor) (*worker.Worker, *db.DB) 
 func addTask(t *testing.T, d *db.DB, name string) *models.Task {
 	t.Helper()
 	task := &models.Task{
-		Name: name, GroupName: "test", TaskType: "shell",
-		Enabled: true, Priority: 50, Args: `{"shell":"echo hi"}`,
+		Name: name, LaneName: "test",
+		Enabled: true, Position: 50, Command: "echo hi",
 	}
 	id, err := d.AddTask(task)
 	require.NoError(t, err)
@@ -74,7 +74,7 @@ func TestWorker_PicksEligibleTask(t *testing.T) {
 	w.Wait()
 }
 
-func TestWorker_RespectsPoolLimit(t *testing.T) {
+func TestWorker_RespectsWidth(t *testing.T) {
 	started := make(chan string, 10)
 	release := make(chan struct{})
 	exec := &mockExecutor{fn: func(ctx context.Context, task *models.Task, stdout, stderr io.Writer) error {
@@ -100,7 +100,7 @@ func TestWorker_RespectsPoolLimit(t *testing.T) {
 	// Third should not start yet
 	select {
 	case <-started:
-		t.Fatal("pool limit exceeded — third task started while two were running")
+		t.Fatal("lane width exceeded — third task started while two were running")
 	case <-time.After(7 * time.Second):
 		// correct: no third task started
 	}
@@ -109,7 +109,7 @@ func TestWorker_RespectsPoolLimit(t *testing.T) {
 	w2.Wait()
 }
 
-func TestWorker_SkipsPausedGroup(t *testing.T) {
+func TestWorker_SkipsPausedLane(t *testing.T) {
 	executed := make(chan string, 1)
 	exec := &mockExecutor{fn: func(ctx context.Context, task *models.Task, stdout, stderr io.Writer) error {
 		executed <- task.Name
@@ -117,8 +117,8 @@ func TestWorker_SkipsPausedGroup(t *testing.T) {
 	}}
 
 	w, d := newTestWorker(t, exec)
-	addTask(t, d, "task-in-paused-group")
-	require.NoError(t, d.SetGroupPaused("test", true, "admin"))
+	addTask(t, d, "task-in-paused-lane")
+	require.NoError(t, d.SetLanePaused("test", true, "admin"))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
@@ -126,7 +126,7 @@ func TestWorker_SkipsPausedGroup(t *testing.T) {
 
 	select {
 	case <-executed:
-		t.Fatal("task in paused group should not have run")
+		t.Fatal("task in paused lane should not have run")
 	case <-ctx.Done():
 		// correct
 	}
@@ -155,6 +155,51 @@ func TestWorker_SkipsPausedTask(t *testing.T) {
 		// correct
 	}
 	w.Wait()
+}
+
+func TestWorker_RunsInPositionOrder(t *testing.T) {
+	var mu = make(chan struct{}, 1)
+	mu <- struct{}{}
+	var order []string
+	done := make(chan struct{})
+
+	exec := &mockExecutor{fn: func(ctx context.Context, task *models.Task, stdout, stderr io.Writer) error {
+		<-mu
+		order = append(order, task.Name)
+		mu <- struct{}{}
+		if len(order) == 2 {
+			close(done)
+		}
+		return nil
+	}}
+
+	d, err := db.Open(":memory:")
+	require.NoError(t, err)
+	t.Cleanup(func() { d.Close() })
+	require.NoError(t, d.UpsertLane(&models.Lane{Name: "seq", Width: 1}))
+
+	// Insert "second" first (so id ordering alone wouldn't produce the
+	// expected result) with a higher position, then "first" with a lower
+	// position — the ready-next order must follow position, not insertion
+	// order or priority.
+	_, err = d.AddTask(&models.Task{Name: "second", LaneName: "seq", Enabled: true, Position: 90, Command: "echo hi"})
+	require.NoError(t, err)
+	_, err = d.AddTask(&models.Task{Name: "first", LaneName: "seq", Enabled: true, Position: 10, Command: "echo hi"})
+	require.NoError(t, err)
+
+	w := worker.NewWithExecutor(d, worker.NewRegistry(), "w", exec)
+	ctx, cancel := context.WithCancel(context.Background())
+	go w.Start(ctx)
+
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("tasks did not both run within timeout")
+	}
+	cancel()
+	w.Wait()
+
+	require.Equal(t, []string{"first", "second"}, order)
 }
 
 // ─── OutputCapture tests ─────────────────────────────────────────────────────
@@ -254,18 +299,36 @@ func TestOutputRegistry_StartGC_Stop(t *testing.T) {
 
 func TestExecutor_SudoGating_Denied(t *testing.T) {
 	te := &worker.TaskExecutor{Sudo: worker.NewSudoGate(false)}
-	task := &models.Task{TaskType: "shell", Sudo: true, Args: `{"shell":"echo hi"}`}
+	task := &models.Task{Sudo: true, Command: "echo hi"}
 
 	err := te.Execute(context.Background(), task, io.Discard, io.Discard)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "allow_sudo")
 }
 
+func TestExecutor_EmptyCommand(t *testing.T) {
+	te := &worker.TaskExecutor{}
+	task := &models.Task{Command: ""}
+
+	err := te.Execute(context.Background(), task, io.Discard, io.Discard)
+	require.Error(t, err)
+}
+
+func TestExecutor_RunsCommand(t *testing.T) {
+	te := &worker.TaskExecutor{}
+	task := &models.Task{Command: "echo hi"}
+
+	var out bytesBuf
+	err := te.Execute(context.Background(), task, &out, io.Discard)
+	require.NoError(t, err)
+	require.Contains(t, out.String(), "hi")
+}
+
 // TestExecutor_ContextCancel verifies a long-running task's Execute call
 // returns promptly once runCtx is cancelled.
 func TestExecutor_ContextCancel(t *testing.T) {
 	te := &worker.TaskExecutor{}
-	task := &models.Task{TaskType: "shell", Args: `{"shell":"sleep 300"}`}
+	task := &models.Task{Command: "sleep 300"}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
@@ -292,7 +355,7 @@ func TestExecutor_ContextCancel(t *testing.T) {
 // within its bound (~10s).
 func TestExecutor_GrandchildPipe(t *testing.T) {
 	te := &worker.TaskExecutor{}
-	task := &models.Task{TaskType: "shell", Args: `{"shell":"sleep 300 & wait"}`}
+	task := &models.Task{Command: "sleep 300 & wait"}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
@@ -311,3 +374,16 @@ func TestExecutor_GrandchildPipe(t *testing.T) {
 		t.Fatal("Execute did not return within the WaitDelay bound")
 	}
 }
+
+// bytesBuf is a tiny concurrency-safe-enough buffer for capturing a single
+// command's stdout in tests (no concurrent writers here).
+type bytesBuf struct {
+	data []byte
+}
+
+func (b *bytesBuf) Write(p []byte) (int, error) {
+	b.data = append(b.data, p...)
+	return len(p), nil
+}
+
+func (b *bytesBuf) String() string { return string(b.data) }

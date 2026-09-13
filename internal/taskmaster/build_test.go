@@ -37,8 +37,8 @@ func TestBuild_FullCycle(t *testing.T) {
 	cfg := config.TaskmasterConfig{
 		StaticDir: staticDir,
 		DBPath:    filepath.Join(t.TempDir(), "taskmaster.db"),
-		Groups: []config.TaskmasterGroup{
-			{Name: "seeded", PoolLimit: 2, AllowedTypes: []string{"shell"}},
+		Lanes: []config.TaskmasterLane{
+			{Name: "seeded", Width: 2},
 		},
 		AllowSudo:         false,
 		SSEMaxSubscribers: 0,
@@ -79,9 +79,9 @@ func TestBuild_FullCycle(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.False(t, caps["allow_sudo"])
 
-	// POST a trivial shell task, enabled so the worker's poll loop picks it
-	// up without an explicit enqueue.
-	taskBody := `{"name":"echo-task","group_name":"seeded","task_type":"shell","enabled":true,"args":"{\"shell\":\"echo hi\"}"}`
+	// POST a trivial task, enabled so the worker's poll loop picks it up
+	// without an explicit enqueue.
+	taskBody := `{"name":"echo-task","lane_name":"seeded","command":"echo hi","enabled":true}`
 	resp, err = http.Post(srv.URL+"/api/tasks", "application/json", strings.NewReader(taskBody))
 	require.NoError(t, err)
 	resp.Body.Close()

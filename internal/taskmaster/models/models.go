@@ -2,30 +2,28 @@ package models
 
 import "time"
 
-type GroupConfig struct {
-	Name         string   `json:"name"`
-	PoolLimit    int      `json:"pool_limit"`
-	AllowedTypes []string `json:"allowed_types,omitempty"`
+type LaneConfig struct {
+	Name  string `json:"name"`
+	Width int    `json:"width"`
 }
 
 type Config struct {
-	Port      int           `json:"port"`
-	UIEnabled bool          `json:"ui_enabled"`
-	DBPath    string        `json:"db_path"`
-	Groups    []GroupConfig `json:"groups"`
+	Port      int          `json:"port"`
+	UIEnabled bool         `json:"ui_enabled"`
+	DBPath    string       `json:"db_path"`
+	Lanes     []LaneConfig `json:"lanes"`
 }
 
 type Task struct {
 	ID              int64     `json:"id"`
 	Name            string    `json:"name"`
-	GroupName       string    `json:"group_name"`
+	LaneName        string    `json:"lane_name"`
 	Enabled         bool      `json:"enabled"`
 	Paused          bool      `json:"paused"`
-	Priority        int       `json:"priority"`
 	CooldownSeconds int       `json:"cooldown_seconds"`
 	Repeat          bool      `json:"repeat"`
-	TaskType        string    `json:"task_type"`
-	Args            string    `json:"args"`
+	Command         string    `json:"command"`
+	Position        int       `json:"position"`
 	Sudo            bool      `json:"sudo"`
 	OutputFile      string    `json:"output_file,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
@@ -46,19 +44,18 @@ type TaskExecution struct {
 	ScheduleDelayMs *int64     `json:"schedule_delay_ms"`
 }
 
-type Group struct {
-	Name         string     `json:"name"`
-	PoolLimit    int        `json:"pool_limit"`
-	AllowedTypes []string   `json:"allowed_types"`
-	Paused       bool       `json:"paused"`
-	PausedAt     *time.Time `json:"paused_at,omitempty"`
-	PausedBy     string     `json:"paused_by,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+type Lane struct {
+	Name      string     `json:"name"`
+	Width     int        `json:"width"`
+	Paused    bool       `json:"paused"`
+	PausedAt  *time.Time `json:"paused_at,omitempty"`
+	PausedBy  string     `json:"paused_by,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
-type GroupStatus struct {
-	Group
+type LaneStatus struct {
+	Lane
 	RunningCount int `json:"running_count"`
 }
 

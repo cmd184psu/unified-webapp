@@ -9,7 +9,7 @@ import (
 )
 
 func (c *Coordinator) handleMetrics(w http.ResponseWriter, r *http.Request) {
-	groupFilter := r.URL.Query().Get("group")
+	laneFilter := r.URL.Query().Get("group")
 	taskFilter := r.URL.Query().Get("task")
 	hours := 24
 	if h := r.URL.Query().Get("hours"); h != "" {
@@ -17,7 +17,7 @@ func (c *Coordinator) handleMetrics(w http.ResponseWriter, r *http.Request) {
 			hours = n
 		}
 	}
-	summaries, err := c.db.GetMetrics(groupFilter, taskFilter, hours)
+	summaries, err := c.db.GetMetrics(laneFilter, taskFilter, hours)
 	if err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return

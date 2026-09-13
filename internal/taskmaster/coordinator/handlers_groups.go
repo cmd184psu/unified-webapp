@@ -11,94 +11,87 @@ import (
 )
 
 func (c *Coordinator) handleListGroups(w http.ResponseWriter, r *http.Request) {
-	groups, err := c.db.ListGroups()
+	lanes, err := c.db.ListLanes()
 	if err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	statuses := make([]models.GroupStatus, 0, len(groups))
-	for _, g := range groups {
-		count, _ := c.db.CountRunningInGroup(g.Name)
-		statuses = append(statuses, models.GroupStatus{Group: *g, RunningCount: count})
+	statuses := make([]models.LaneStatus, 0, len(lanes))
+	for _, l := range lanes {
+		count, _ := c.db.CountRunningInLane(l.Name)
+		statuses = append(statuses, models.LaneStatus{Lane: *l, RunningCount: count})
 	}
 	response.WriteJSON(w, http.StatusOK, statuses)
 }
 
 func (c *Coordinator) handleGetGroup(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	g, err := c.db.GetGroup(name)
+	l, err := c.db.GetLane(name)
 	if err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if g == nil {
-		response.WriteError(w, http.StatusNotFound, "group not found: "+name)
+	if l == nil {
+		response.WriteError(w, http.StatusNotFound, "lane not found: "+name)
 		return
 	}
-	count, _ := c.db.CountRunningInGroup(name)
-	response.WriteJSON(w, http.StatusOK, models.GroupStatus{Group: *g, RunningCount: count})
+	count, _ := c.db.CountRunningInLane(name)
+	response.WriteJSON(w, http.StatusOK, models.LaneStatus{Lane: *l, RunningCount: count})
 }
 
 func (c *Coordinator) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
-	var g models.Group
-	if err := json.NewDecoder(r.Body).Decode(&g); err != nil {
+	var l models.Lane
+	if err := json.NewDecoder(r.Body).Decode(&l); err != nil {
 		response.WriteDecodeError(w, err)
 		return
 	}
-	if g.Name == "" {
+	if l.Name == "" {
 		response.WriteError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if g.PoolLimit <= 0 {
-		g.PoolLimit = 1
+	if l.Width <= 0 {
+		l.Width = 1
 	}
-	if g.AllowedTypes == nil {
-		g.AllowedTypes = []string{}
-	}
-	if err := c.db.UpsertGroup(&g); err != nil {
+	if err := c.db.UpsertLane(&l); err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	created, _ := c.db.GetGroup(g.Name)
+	created, _ := c.db.GetLane(l.Name)
 	response.WriteJSON(w, http.StatusCreated, created)
 }
 
 func (c *Coordinator) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	existing, err := c.db.GetGroup(name)
+	existing, err := c.db.GetLane(name)
 	if err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if existing == nil {
-		response.WriteError(w, http.StatusNotFound, "group not found: "+name)
+		response.WriteError(w, http.StatusNotFound, "lane not found: "+name)
 		return
 	}
 	var updates struct {
-		PoolLimit    *int     `json:"pool_limit"`
-		AllowedTypes []string `json:"allowed_types"`
+		Width *int `json:"width"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 		response.WriteDecodeError(w, err)
 		return
 	}
-	if updates.PoolLimit != nil {
-		existing.PoolLimit = *updates.PoolLimit
+	if updates.Width != nil {
+		existing.Width = *updates.Width
 	}
-	if updates.AllowedTypes != nil {
-		existing.AllowedTypes = updates.AllowedTypes
-	}
-	if err := c.db.UpsertGroup(existing); err != nil {
+	if err := c.db.UpsertLane(existing); err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	updated, _ := c.db.GetGroup(name)
+	updated, _ := c.db.GetLane(name)
 	response.WriteJSON(w, http.StatusOK, updated)
 }
 
 func (c *Coordinator) handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	if err := c.db.DeleteGroup(name); err != nil {
+	if err := c.db.DeleteLane(name); err != nil {
 		response.WriteError(w, http.StatusConflict, err.Error())
 		return
 	}
@@ -111,7 +104,7 @@ func (c *Coordinator) handlePauseGroup(w http.ResponseWriter, r *http.Request) {
 	if by == "" {
 		by = "api"
 	}
-	if err := c.db.SetGroupPaused(name, true, by); err != nil {
+	if err := c.db.SetLanePaused(name, true, by); err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -120,7 +113,7 @@ func (c *Coordinator) handlePauseGroup(w http.ResponseWriter, r *http.Request) {
 
 func (c *Coordinator) handleResumeGroup(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	if err := c.db.SetGroupPaused(name, false, ""); err != nil {
+	if err := c.db.SetLanePaused(name, false, ""); err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
