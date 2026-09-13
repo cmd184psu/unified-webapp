@@ -12,6 +12,7 @@ import (
 
 	"cmd184psu/unified-webapp/internal/platform/auth"
 	"cmd184psu/unified-webapp/internal/platform/config"
+	"cmd184psu/unified-webapp/internal/platform/middleware"
 )
 
 // noAuthService builds a Service from an empty AuthConfig -- no modules
@@ -366,5 +367,120 @@ func TestWebSocketOriginCheckThroughDispatcher(t *testing.T) {
 				t.Fatalf("status = %d, want %d (body %q)", res.StatusCode, tc.wantStatus, body)
 			}
 		})
+	}
+}
+
+// smbeditTestConfig returns a config whose smbedit module can actually build:
+// a real static dir with an index.html and a data dir under t.TempDir().
+func smbeditTestConfig(t *testing.T, routing map[string]string) *config.Config {
+	t.Helper()
+	root := t.TempDir()
+	staticDir := filepath.Join(root, "web")
+	if err := os.MkdirAll(staticDir, 0o755); err != nil {
+		t.Fatalf("mkdir static: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(staticDir, "index.html"), []byte("SMBEDIT INDEX"), 0o644); err != nil {
+		t.Fatalf("write index: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Routing = routing
+	cfg.Smbedit = config.SmbeditConfig{
+		StaticDir:  staticDir,
+		DataDir:    filepath.Join(root, "data"),
+		PickerRoot: root,
+	}
+	return cfg
+}
+
+// A smbedit routing entry builds and serves through the dispatcher, routed by
+// Host header like every other module.
+func TestSmbeditRoutesThroughDispatcher(t *testing.T) {
+	cfg := smbeditTestConfig(t, map[string]string{"smb.example": "smbedit"})
+	dispatch := buildDispatcher(cfg, noAuthService(t))
+	t.Cleanup(dispatch.Close)
+	srv := httptest.NewServer(middleware.Wrap(dispatch))
+	defer srv.Close()
+
+	res := doHost(t, srv, http.MethodGet, "smb.example", "/api/version", "")
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/version via dispatcher: status %d", res.StatusCode)
+	}
+	var v map[string]string
+	if err := json.NewDecoder(res.Body).Decode(&v); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if v["version"] == "" {
+		t.Errorf("version endpoint returned empty version: %#v", v)
+	}
+
+	index := doHost(t, srv, http.MethodGet, "smb.example", "/", "")
+	defer index.Body.Close()
+	body, err := io.ReadAll(index.Body)
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	if !strings.Contains(string(body), "SMBEDIT INDEX") {
+		t.Errorf("dispatcher did not serve smbedit's index.html: %q", body)
+	}
+}
+
+// A broken smbedit config 503s its own hostname and nothing else.
+func TestSmbeditBuildFailureIsScopedToSmbedit(t *testing.T) {
+	cfg := smbeditTestConfig(t, map[string]string{
+		"smb.example":     "smbedit",
+		"grocery.example": "grocery",
+	})
+	missing := filepath.Join(t.TempDir(), "no-such-frontend")
+	cfg.Smbedit.StaticDir = missing
+	groceryDir := t.TempDir()
+	cfg.Grocery.StaticDir = groceryDir
+	cfg.Grocery.DataFile = filepath.Join(groceryDir, "grocery.json")
+
+	dispatch := buildDispatcher(cfg, noAuthService(t))
+	t.Cleanup(dispatch.Close)
+	srv := httptest.NewServer(middleware.Wrap(dispatch))
+	defer srv.Close()
+
+	res := doHost(t, srv, http.MethodGet, "smb.example", "/api/config", "")
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("failed smbedit status = %d, want 503", res.StatusCode)
+	}
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if strings.Contains(string(body), missing) {
+		t.Errorf("503 body leaks the offending path %q: %s", missing, body)
+	}
+	if !strings.Contains(string(body), "smbedit") {
+		t.Errorf("503 body does not name the module: %s", body)
+	}
+
+	healthy := doHost(t, srv, http.MethodGet, "grocery.example", "/config", "")
+	defer healthy.Body.Close()
+	if healthy.StatusCode == http.StatusServiceUnavailable {
+		t.Fatalf("a smbedit misconfiguration took grocery offline (status %d)", healthy.StatusCode)
+	}
+}
+
+// Adding smbedit to the switch must not change the unknown-module path.
+func TestUnknownModuleStill503sWithSmbeditWired(t *testing.T) {
+	cfg := smbeditTestConfig(t, map[string]string{"weird.example": "still-not-a-module"})
+	dispatch := buildDispatcher(cfg, noAuthService(t))
+	t.Cleanup(dispatch.Close)
+	srv := httptest.NewServer(middleware.Wrap(dispatch))
+	defer srv.Close()
+
+	res := doHost(t, srv, http.MethodGet, "weird.example", "/", "")
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", res.StatusCode)
+	}
+	body, _ := io.ReadAll(res.Body)
+	if !strings.Contains(string(body), "still-not-a-module") {
+		t.Errorf("503 body does not name the unknown module: %s", body)
 	}
 }

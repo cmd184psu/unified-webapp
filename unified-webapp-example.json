@@ -13,7 +13,9 @@
   "obsidianoid.cmdhome.net":           "obsidianoid",
   "multissh-test.cmdhome.net":         "multissh",
   "utuber-test.cmdhome.net":           "utuber",
-  "admin-test.cmdhome.net":            "admin"
+  "admin-test.cmdhome.net":            "admin",
+  "smbedit-test.cmdhome.net":          "smbedit",
+  "smbedit.cmdhome.net":               "smbedit"
 
   },
   "server": {
@@ -83,6 +85,11 @@
   "admin": {
     "static_dir": "./web/admin",
     "max_body_bytes": 1048576
+  },
+  "smbedit": {
+    "static_dir": "./web/smbedit",
+    "data_dir": "./data/smbedit",
+    "picker_root": "/opt"
   },
   "auth": {
     "modules": {
