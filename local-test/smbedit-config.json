@@ -1,5 +1,5 @@
 {
-  "port": 8080,
+  "port": 8181,
   "tls_cert": "",
   "tls_key": "",
   "host_routing": {
@@ -12,7 +12,7 @@
     "obsidianoid.test": "obsidianoid",
     "multissh.test":    "multissh",
     "admin.test":       "admin",
-    "smbedit.test":     "smbedit"
+    "smbedit-test.cmdhome.net":     "smbedit"
   },
   "server": {
     "origin_check": "enforce",
