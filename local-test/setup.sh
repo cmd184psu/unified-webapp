@@ -12,6 +12,7 @@
 #   multissh.test:                LDAP only
 #   certmachine.test:             PIN 333333
 #   admin.test:                   admin PIN 424242 (PIN-only, no LDAP)
+#   smbedit.test:                 open, no login (no auth wired in yet)
 #   LDAP (all protected non-admin modules) via glauth (see glauth.cfg):
 #     user "chris" / password "ldap-test-1"
 #   API key (works on any protected non-admin module, never admin, ignored
@@ -30,7 +31,8 @@ mkdir -p "$LT/data/todo/home" \
          "$LT/data/vault/Threads" \
          "$LT/data/multissh/uploads" \
          "$LT/data/certmachine" \
-         "$LT/data/auth"
+         "$LT/data/auth" \
+         "$LT/data/smbedit"
 
 echo "== admin PIN file (plaintext PIN, must be chmod 0400) =="
 if [ ! -f "$LT/admin.pin" ]; then
@@ -131,7 +133,7 @@ echo "== /etc/hosts check =="
 # .local, which belongs to Bonjour/mDNS on macOS and stalls every page load
 # ~5s waiting on multicast AAAA lookups. Add both lines so IPv4 and IPv6
 # lookups resolve from /etc/hosts without touching a DNS server.
-HOSTNAMES="grocery.test todo.test slideshow.test menu.test menuserver.test obsidianoid.test multissh.test certmachine.test admin.test"
+HOSTNAMES="grocery.test todo.test slideshow.test menu.test menuserver.test obsidianoid.test multissh.test certmachine.test admin.test smbedit.test"
 MISSING4=""
 MISSING6=""
 for h in $HOSTNAMES; do

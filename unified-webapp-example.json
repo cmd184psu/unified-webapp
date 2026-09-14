@@ -13,8 +13,10 @@
   "obsidianoid.cmdhome.net":           "obsidianoid",
   "multissh-test.cmdhome.net":         "multissh",
   "certmachine-test.cmdhome.net":      "certmachine",
-  "admin-test.cmdhome.net":            "admin"
-
+  "utuber-test.cmdhome.net":           "utuber",
+  "admin-test.cmdhome.net":            "admin",
+  "smbedit-test.cmdhome.net":          "smbedit",
+  "smbedit.cmdhome.net":               "smbedit"
   },
   "server": {
     "origin_check": "enforce",
@@ -82,9 +84,20 @@
     "expiry_warn_days": 30,
     "trust_device_enabled": false
   },
+  "utuber": {
+    "static_dir": "./web/utuber",
+    "download_dir": "./data/utuber/downloads",
+    "workers": 1,
+    "python_bin": "python3.12"
+  },
   "admin": {
     "static_dir": "./web/admin",
     "max_body_bytes": 1048576
+  },
+  "smbedit": {
+    "static_dir": "./web/smbedit",
+    "data_dir": "./data/smbedit",
+    "picker_root": "/opt"
   },
   "auth": {
     "modules": {

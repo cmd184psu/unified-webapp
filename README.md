@@ -48,7 +48,11 @@ Minimal example with all seven modules. Multiple hostnames can map to the same m
     "multissh.cmdhome.net":           "multissh",
     "multissh-test.cmdhome.net":      "multissh",
     "certmachine.cmdhome.net":        "certmachine",
-    "certmachine-test.cmdhome.net":   "certmachine"
+    "certmachine-test.cmdhome.net":   "certmachine",
+    "utuber.cmdhome.net":             "utuber",
+    "utuber-test.cmdhome.net":        "utuber",
+    "smbedit.cmdhome.net":            "smbedit",
+    "smbedit-test.cmdhome.net":       "smbedit"
   },
   "grocery": {
     "static_dir": "/opt/unified-webapp/web/grocery",
@@ -103,6 +107,17 @@ Minimal example with all seven modules. Multiple hostnames can map to the same m
     "default_validity_days": 365,
     "expiry_warn_days": 30,
     "trust_device_enabled": false
+  },
+  "utuber": {
+    "static_dir": "/opt/unified-webapp/web/utuber",
+    "download_dir": "/data/utuber/downloads",
+    "workers": 1,
+    "python_bin": "python3.12"
+  },
+  "smbedit": {
+    "static_dir": "/opt/unified-webapp/web/smbedit",
+    "data_dir": "/data/smbedit",
+    "picker_root": "/opt"
   }
 }
 ```
@@ -123,6 +138,16 @@ Minimal example with all seven modules. Multiple hostnames can map to the same m
 
 Running and using the module — host cards, terminals, broadcasts, the proxy requirements, and the audit log — is documented separately in **[docs/multissh.md](docs/multissh.md)**. Read the [proxy section](docs/multissh.md#3-putting-it-behind-a-proxy) before putting it behind nginx: a front end that rewrites the `Host` header breaks every terminal while leaving the page looking fine. Note also that this module has **no login** — reaching its hostname is the whole access boundary.
 
+#### The `smbedit` section
+
+| Field | Meaning |
+|---|---|
+| `static_dir` | Built frontend for the module. Must exist and be readable, or smbedit fails to build. |
+| `data_dir` | Where `state.json` lives (created on first boot, mode 0600). Must be set; created if absent. |
+| `picker_root` | Root directory the share folder picker lists, one level deep. Empty resolves to `/opt`. |
+
+Running and operating the module — the sudoers grants for writing `/etc/samba/smb.conf` and restarting smbd, the SSE/proxy caveats, and migration from standalone smbed — is documented separately in **[docs/smbedit.md](docs/smbedit.md)**. Like multissh, this module has **no login**: anyone who reaches the smbedit hostname can rewrite this host's Samba configuration and restart the service, so treat the hostname as the access boundary.
+
 **Empty strings are meaningful, not omissions.** `ssh_dir`, `upload_dir`, `browse_root` and `known_hosts_path` are resolved at startup from the environment, so `make init-config` writes them as present-but-empty strings. An empty value reads as "resolve this for me"; leaving the key out entirely would be indistinguishable from a typo'd key name. Keep them present.
 
 #### The `certmachine` section
@@ -137,6 +162,17 @@ Running and using the module — host cards, terminals, broadcasts, the proxy re
 | `trust_device_enabled` | Default `false`. When `true`, the CA panel gets a **Trust this CA on this device** button that runs `sudo` on this host to add the root CA to its system trust store (macOS Keychain, RHEL `update-ca-trust`, or Debian/Ubuntu `update-ca-certificates`, auto-detected). Requires a passwordless-sudo entry for the specific commands involved — see [docs/certmachine.md § Automatic device trust](docs/certmachine.md#automatic-device-trust) before turning this on; it is meant for a single-operator lab host, not a shared deployment. |
 
 Running and using the module — the download-to-HAProxy workflow, the import wizard, trusting the root CA, the status badge vocabulary, backup, and the manual procedure for replacing the root CA — is documented separately in **[docs/certmachine.md](docs/certmachine.md)**. Note also that this module has **no login** — reaching its hostname is the whole access boundary, same as multissh above.
+
+#### The `utuber` section
+
+| Field | Meaning |
+|---|---|
+| `static_dir` | Frontend for the module (a single `index.html`). |
+| `download_dir` | Where finished downloads land, alongside `history.json` and `settings.json`. Created at startup if absent. |
+| `workers` | Concurrent download workers. `0` means "unset" and takes the default of 1; values above 8 are clamped with a warning; negative values are a config error. |
+| `python_bin` | Python interpreter used by the "Update yt-dlp" button. Default `python3.12`. Can be overridden from the UI's ☰ settings menu, which persists the override in `settings.json`. |
+
+Running and using the module — endpoints, runtime dependencies (`yt-dlp`, `ffmpeg`), the settings menu, and shutdown behavior — is documented separately in **[docs/utuber.md](docs/utuber.md)**. Like multissh, this module has **no login** — reaching its hostname is the whole access boundary.
 
 ### 3. Run
 
@@ -342,6 +378,25 @@ A single SQLite database, created (with its parent directory at `0700`) on first
 ```
 
 There is no `meta.json` and no other on-disk state — the certificate authority row, every leaf certificate row, and everything the UI displays about them (CN, SANs, serial, fingerprint, validity window) live in this one file and are derived from the stored PEM data, not a sidecar. See [docs/certmachine.md](docs/certmachine.md#9-backup) for the backup story: stop the binary and copy this file.
+
+### Utuber
+
+`download_dir` holds the finished output files plus two housekeeping files: `history.json` (the download dedup log) and `settings.json` (UI settings, e.g. the Python interpreter override). All of it — housekeeping files included — is reachable over HTTP via the module's `/downloads/` file server.
+
+```
+/data/utuber/downloads/
+  history.json
+  settings.json
+  Cool Artist - S01E01 - Cool Track.m4v
+```
+
+### Smbedit
+
+A single state file, created on first boot (the running binary creates `data_dir` itself — nothing to seed):
+
+```
+/data/smbedit/state.json
+```
 
 ---
 
