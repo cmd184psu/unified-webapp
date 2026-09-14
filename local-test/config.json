@@ -1,5 +1,5 @@
 {
-  "port": 8181,
+  "port": 8080,
   "tls_cert": "",
   "tls_key": "",
   "host_routing": {
@@ -11,6 +11,7 @@
     "menuserver.test":  "menuserver",
     "obsidianoid.test": "obsidianoid",
     "multissh.test":    "multissh",
+    "certmachine-test.cmdhome.net": "certmachine",
     "admin.test":       "admin",
     "smbedit-test.cmdhome.net":     "smbedit"
   },
@@ -72,6 +73,14 @@
     "strict_host_key": false,
     "known_hosts_path": ""
   },
+  "certmachine": {
+    "static_dir": "./web/certmachine",
+    "db_path": "./local-test/data/certmachine/certmachine.db",
+    "legacy_import_dir": "/opt/certmachine/pki",
+    "default_validity_days": 365,
+    "expiry_warn_days": 30,
+    "trust_device_enabled": true
+  },
   "admin": {
     "static_dir": "./web/admin",
     "max_body_bytes": 1048576
@@ -85,6 +94,9 @@
     "modules": {
       "admin": {
         "pin_file": "/opt/unified-webapp/local-test/admin.pin"
+      },
+      "certmachine": {
+        "pin_file": "/opt/unified-webapp/local-test/certmachine.pin"
       },
       "menuserver": {
         "pin_file": ""
