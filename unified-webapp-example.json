@@ -79,7 +79,8 @@
     "db_path": "./data/certmachine/certmachine.db",
     "legacy_import_dir": "",
     "default_validity_days": 365,
-    "expiry_warn_days": 30
+    "expiry_warn_days": 30,
+    "trust_device_enabled": false
   },
   "admin": {
     "static_dir": "./web/admin",

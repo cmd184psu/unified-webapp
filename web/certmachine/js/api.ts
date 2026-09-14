@@ -14,6 +14,7 @@ const FALLBACK_CONFIG: AppConfig = {
   legacyImportAvailable: false,
   legacyImportDir: "",
   legacyImportReason: "",
+  trustDeviceAvailable: false,
 };
 
 /**
@@ -218,4 +219,48 @@ export async function runImport(confirmNonEmpty: boolean): Promise<ImportReport>
     throw new ImportFailedError(message, report);
   }
   return (await res.json()) as ImportReport;
+}
+
+/** POST /api/ca/trust's response body. */
+export interface TrustResult {
+  platform?: string;
+  output?: string;
+}
+
+/**
+ * Rejection type for `trustDevice`. `output` carries the ran commands'
+ * combined stdout+stderr whenever any command was actually attempted (e.g. a
+ * `sudo -n` permission refusal, or `update-ca-certificates` failing) -- a
+ * bare error message would leave the operator guessing which of the (up to
+ * two) commands failed and why.
+ */
+export class TrustFailedError extends Error {
+  readonly output: string;
+
+  constructor(message: string, output: string) {
+    super(message);
+    this.name = "TrustFailedError";
+    this.output = output;
+  }
+}
+
+/**
+ * Run this host's native "trust this root CA system-wide" procedure via
+ * sudo (server-side; see `internal/certmachine/trust.go`). Only meaningful
+ * when `AppConfig.trustDeviceAvailable` is true -- the server refuses with
+ * 409 otherwise, surfaced here the same way any other disabled-feature
+ * refusal is. Rejects with `TrustFailedError` on failure.
+ */
+export async function trustDevice(): Promise<TrustResult> {
+  const res = await fetch("/api/ca/trust", { method: "POST" });
+  let body: TrustResult & { error?: string } = {};
+  try {
+    body = (await res.json()) as TrustResult & { error?: string };
+  } catch {
+    /* body wasn't JSON -- keep the status-based message below */
+  }
+  if (!res.ok) {
+    throw new TrustFailedError(body.error ?? `device trust install failed: ${res.status}`, body.output ?? "");
+  }
+  return body;
 }

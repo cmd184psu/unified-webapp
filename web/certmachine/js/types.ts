@@ -54,6 +54,10 @@ export interface AppConfig {
   legacyImportAvailable: boolean;
   legacyImportDir: string;
   legacyImportReason: string;
+  /** True only when `certmachine.trust_device_enabled` is set AND this host's OS was recognized. */
+  trustDeviceAvailable: boolean;
+  /** The detected platform ("darwin" / "rhel" / "debian"). Absent unless `trustDeviceAvailable` is true. */
+  trustPlatform?: string;
 }
 
 /**

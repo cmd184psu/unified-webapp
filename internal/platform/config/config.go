@@ -323,12 +323,22 @@ type MultisshConfig struct {
 // Load time). LegacyImportDir left empty means no legacy PKI import is
 // attempted; DefaultValidityDays and ExpiryWarnDays of 0 take their FR-1
 // defaults, validated once by normalizeCertmachine.
+//
+// TrustDeviceEnabled gates the "Trust this CA on this device" button
+// (POST /api/ca/trust, internal/certmachine/trust.go): when false (the
+// default) the route refuses with 409 and the button stays out of the UI.
+// It defaults to false because turning it on means this process will run
+// sudo -- platform trust-store commands against the host it runs on,
+// whenever the button is clicked, with no per-click confirmation beyond
+// whatever the operator's sudoers NOPASSWD entry already grants. See the
+// README's "Automatic device trust" section before setting this true.
 type CertmachineConfig struct {
 	StaticDir           string `json:"static_dir"`
 	DBPath              string `json:"db_path"`
 	LegacyImportDir     string `json:"legacy_import_dir"`
 	DefaultValidityDays int    `json:"default_validity_days"`
 	ExpiryWarnDays      int    `json:"expiry_warn_days"`
+	TrustDeviceEnabled  bool   `json:"trust_device_enabled"`
 }
 
 // Certmachine defaults (FR-1).

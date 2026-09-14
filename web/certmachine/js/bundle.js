@@ -7,7 +7,8 @@
     certCount: 0,
     legacyImportAvailable: false,
     legacyImportDir: "",
-    legacyImportReason: ""
+    legacyImportReason: "",
+    trustDeviceAvailable: false
   };
   async function fetchConfig() {
     try {
@@ -118,6 +119,25 @@
       throw new ImportFailedError(message, report);
     }
     return await res.json();
+  }
+  var TrustFailedError = class extends Error {
+    constructor(message, output) {
+      super(message);
+      this.name = "TrustFailedError";
+      this.output = output;
+    }
+  };
+  async function trustDevice() {
+    const res = await fetch("/api/ca/trust", { method: "POST" });
+    let body = {};
+    try {
+      body = await res.json();
+    } catch {
+    }
+    if (!res.ok) {
+      throw new TrustFailedError(body.error ?? `device trust install failed: ${res.status}`, body.output ?? "");
+    }
+    return body;
   }
 
   // web/certmachine/js/status.ts
@@ -1098,26 +1118,6 @@
     dd.textContent = value;
     dl.append(dt, dd);
   }
-  var TRUST_INSTRUCTIONS = [
-    ["macOS", 'Open the downloaded rootCA.crt in Keychain Access, then set it to "Always Trust".'],
-    ["Linux", "Copy rootCA.crt to /usr/local/share/ca-certificates/ and run update-ca-certificates."],
-    ["Windows", 'Import rootCA.crt into the "Trusted Root Certification Authorities" store.'],
-    [
-      "iOS",
-      "Install the configuration profile for rootCA.crt, then enable full trust under Settings > General > About > Certificate Trust Settings."
-    ]
-  ];
-  function buildTrustInstructions() {
-    const list = el5("dl", "cert-trust-list");
-    for (const [os, instr] of TRUST_INSTRUCTIONS) {
-      const dt = el5("dt", "cert-trust-os");
-      dt.textContent = os;
-      const dd = el5("dd", "cert-trust-instr");
-      dd.textContent = instr;
-      list.append(dt, dd);
-    }
-    return list;
-  }
   function handleInitCA(button, onCAChanged) {
     button.disabled = true;
     initCA().then(() => {
@@ -1126,6 +1126,26 @@
     }).catch((err) => {
       button.disabled = false;
       showToast(errorText(err), "error");
+    });
+  }
+  function handleTrustDevice(button, output) {
+    button.disabled = true;
+    output.hidden = true;
+    output.textContent = "";
+    trustDevice().then((result) => {
+      button.disabled = false;
+      showToast(`Trusted on this device${result.platform ? ` (${result.platform})` : ""}.`, "success");
+      if (result.output) {
+        output.textContent = result.output;
+        output.hidden = false;
+      }
+    }).catch((err) => {
+      button.disabled = false;
+      showToast(errorText(err), "error");
+      if (err instanceof TrustFailedError && err.output) {
+        output.textContent = err.output;
+        output.hidden = false;
+      }
     });
   }
   function renderCAPanel(container, ca, config, onCAChanged, onOpenWizard) {
@@ -1146,12 +1166,21 @@
       download.href = "/api/ca/root.crt";
       download.textContent = "Download root CA";
       actions.append(download);
-      panel.append(actions);
-      const trust = el5("details", "cert-trust");
-      const summary = el5("summary");
-      summary.textContent = "Trust this CA on your device";
-      trust.append(summary, buildTrustInstructions());
-      panel.append(trust);
+      if (config.trustDeviceAvailable) {
+        const trustBtn = el5("button", "cert-btn cert-btn-secondary");
+        trustBtn.type = "button";
+        trustBtn.textContent = config.trustPlatform ? `Trust this CA on this device (${config.trustPlatform})` : "Trust this CA on this device";
+        const trustOutput = el5("pre", "cert-trust-output");
+        trustOutput.hidden = true;
+        trustBtn.addEventListener("click", () => handleTrustDevice(trustBtn, trustOutput));
+        actions.append(trustBtn);
+        panel.append(actions, trustOutput);
+      } else {
+        panel.append(actions);
+      }
+      const trustNote = el5("p", "cert-ca-note");
+      trustNote.textContent = "For other devices, or if the button above isn't available: manual per-OS trust instructions are in the README (and docs/certmachine.md).";
+      panel.append(trustNote);
     } else {
       const preferImport = config.legacyImportAvailable && config.certCount === 0;
       const note = el5("p", "cert-ca-note");

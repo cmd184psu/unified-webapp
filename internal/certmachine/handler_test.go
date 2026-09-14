@@ -168,6 +168,7 @@ func TestAllowHeadersMatchRegisteredRoutes(t *testing.T) {
 		allow string
 	}{
 		{"/api/ca/init", "POST"},
+		{"/api/ca/trust", "POST"},
 		{"/api/certs", "GET, POST"},
 		{"/api/certs/1", "GET, DELETE"},
 		{"/api/certs/1/renew", "POST"},

@@ -101,7 +101,8 @@ Minimal example with all seven modules. Multiple hostnames can map to the same m
     "db_path": "/data/certmachine/certmachine.db",
     "legacy_import_dir": "",
     "default_validity_days": 365,
-    "expiry_warn_days": 30
+    "expiry_warn_days": 30,
+    "trust_device_enabled": false
   }
 }
 ```
@@ -133,6 +134,7 @@ Running and using the module — host cards, terminals, broadcasts, the proxy re
 | `legacy_import_dir` | Directory holding a standalone `certmachine` installation's PKI (`rootCA.crt`, `rootCA.key`, `certs/`). Empty means no import is offered. If set but unreadable, the module still builds and serves — the UI shows the reason instead of the import wizard. |
 | `default_validity_days` | Validity period for newly generated and renewed leaf certificates, in days. `0` means "unset" and takes the default of **365**. |
 | `expiry_warn_days` | How many days before a certificate's (or the CA's own) expiry the UI shows an "expiring soon" badge, and the threshold below which `POST /api/certs` and renew refuse with 409 rather than mint something a client would soon distrust along with its issuer. `0` means "unset" and takes the default of **30** — **`expiry_warn_days` cannot express "never warn."** Following `max_sessions`'s convention above, `0` normalizes to the default rather than disabling the check, so the smallest effective warning horizon is `1` day, not `0`. Set it to `1` if you want the closest thing to "only warn when it's actually about to expire," never `0` expecting silence — you'll get the 30-day default instead, and since this same value also gates the CA's own expiring-CA 409, the surprise would not be confined to badge colors. |
+| `trust_device_enabled` | Default `false`. When `true`, the CA panel gets a **Trust this CA on this device** button that runs `sudo` on this host to add the root CA to its system trust store (macOS Keychain, RHEL `update-ca-trust`, or Debian/Ubuntu `update-ca-certificates`, auto-detected). Requires a passwordless-sudo entry for the specific commands involved — see [docs/certmachine.md § Automatic device trust](docs/certmachine.md#automatic-device-trust) before turning this on; it is meant for a single-operator lab host, not a shared deployment. |
 
 Running and using the module — the download-to-HAProxy workflow, the import wizard, trusting the root CA, the status badge vocabulary, backup, and the manual procedure for replacing the root CA — is documented separately in **[docs/certmachine.md](docs/certmachine.md)**. Note also that this module has **no login** — reaching its hostname is the whole access boundary, same as multissh above.
 

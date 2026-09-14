@@ -22,6 +22,7 @@ This document covers running and using it.
 4. [The interface](#4-the-interface)
 5. [Status badges](#5-status-badges)
 6. [Trusting the root CA](#6-trusting-the-root-ca)
+   - [Automatic device trust](#automatic-device-trust)
 7. [Downloads and the HAProxy workflow](#7-downloads-and-the-haproxy-workflow)
 8. [The import wizard](#8-the-import-wizard)
 9. [Backup](#9-backup)
@@ -168,6 +169,53 @@ it:
 Every client that needs to trust certificates issued by this CA needs this
 done once. When the root CA is ever replaced (see [§10](#10-replacing-the-root-ca)),
 every one of those clients needs it done again for the new root.
+
+### Automatic device trust
+
+The CA panel shows a **Trust this CA on this device** button when
+`certmachine.trust_device_enabled` is `true` in config. Clicking it runs the
+detected platform's native trust-install procedure, via `sudo`, against the
+host **the unified-webapp process itself is running on** — not the browser's
+machine. This only does something useful when certmachine and the services
+whose certificates it issues live on the same box (the intended case: a lab
+host running both), and it is off by default.
+
+| Detected platform | What runs |
+|---|---|
+| macOS (`darwin`) | `sudo -n security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain <rootCA.crt>` |
+| RHEL family (`ID`/`ID_LIKE` matches `rhel`/`rocky`/`centos`/`fedora`/`almalinux`) | `sudo -n cp <rootCA.crt> /etc/pki/ca-trust/source/anchors/certmachine-rootCA.pem` then `sudo -n update-ca-trust extract` |
+| Debian family (`ID`/`ID_LIKE` matches `debian`/`ubuntu`) | `sudo -n cp <rootCA.crt> /usr/local/share/ca-certificates/certmachine-rootCA.crt` then `sudo -n update-ca-certificates` |
+| Anything else (Windows, an unrecognized Linux distro) | Not automated — the button doesn't appear (`GET /api/config`'s `trustPlatform` comes back empty); use the manual procedure in [§6](#6-trusting-the-root-ca) above. |
+
+**Every command runs `sudo -n`** (non-interactive): an HTTP handler has no
+TTY to answer a password prompt on, so without `-n` a host that needs a
+password would hang the request until the client gave up, rather than fail
+immediately with a readable error. This means the operator must grant
+passwordless sudo for these specific commands ahead of time, e.g. via a
+`sudoers.d` drop-in:
+
+```
+# /etc/sudoers.d/certmachine-trust — only as specific as InstallTrust's own commands
+<service-user> ALL=(root) NOPASSWD: /usr/bin/security add-trusted-cert *, /usr/bin/cp * /etc/pki/ca-trust/source/anchors/certmachine-rootCA.pem, /usr/bin/update-ca-trust extract, /usr/bin/cp * /usr/local/share/ca-certificates/certmachine-rootCA.crt, /usr/sbin/update-ca-certificates
+```
+
+(Adjust binary paths and pick only the lines for your platform.) Whatever the
+button ran — success or failure — its full combined output is returned to
+the browser and shown under the button, not just a pass/fail toast, so a
+`sudo: a password is required` refusal or a missing `update-ca-trust` binary
+is immediately visible.
+
+**Accept the risk deliberately before turning this on.** `trust_device_enabled`
+hands a web-facing button the ability to run `sudo` on the host — anyone who
+can reach this hostname and click the button (subject to whatever
+`auth.modules.certmachine` gate is configured, see [§1](#1-before-you-start))
+triggers it. This is a deliberate, scoped-down version of "give the webapp
+sudo": it is not a general command channel, only ever runs the fixed command
+list above against the current root CA, and is meant for a single-operator
+lab box, not a shared or internet-facing deployment. A platform-wide,
+better-scoped mechanism for actions like this is expected eventually; until
+then, this is the whole safety story, and the default is `false` for exactly
+that reason.
 
 ---
 
@@ -392,6 +440,11 @@ what an operator should know before exposing this hostname:
   CA's.
 - **No TLS of its own.** Like every other module in this server, certmachine
   serves plain HTTP; TLS termination is the front proxy's job.
+- **`trust_device_enabled` (default `false`) runs `sudo` on the host from a
+  button click.** See [Automatic device trust](#automatic-device-trust) under
+  §6 for exactly what runs and the sudoers entry it requires — this is an
+  explicit, opt-in tradeoff for a single-operator lab box, not something to
+  turn on in a shared or internet-facing deployment.
 - **What *was* addressed in this branch, deliberately, because it is
   certmachine-specific and structural rather than a platform-wide auth
   concern:** path traversal in downloads (routes are keyed by database row
@@ -472,10 +525,11 @@ are the exception by design (generic to the client, detailed in the log).
 
 | Method & path | Purpose | Notes |
 |---|---|---|
-| `GET /api/config` | Runtime config for the SPA | `defaultValidityDays`, `expiryWarnDays`, `certCount`, `legacyImportAvailable`, `legacyImportDir`, `legacyImportReason` |
+| `GET /api/config` | Runtime config for the SPA | `defaultValidityDays`, `expiryWarnDays`, `certCount`, `legacyImportAvailable`, `legacyImportDir`, `legacyImportReason`, `trustDeviceAvailable`, `trustPlatform` |
 | `GET /api/ca` | Current CA status | `{"exists": false}` if none yet |
 | `POST /api/ca/init` | Initialize a new root CA | 201 with none stored, 409 if one exists, 409 `ErrImportPending` if an import is pending |
 | `GET /api/ca/root.crt` | Download the root CA certificate | `Content-Disposition: attachment; filename="rootCA.crt"` |
+| `POST /api/ca/trust` | Run this host's device-trust install (see [Automatic device trust](#automatic-device-trust)) | 409 if `trust_device_enabled` is false or no CA exists; body always carries `output` (the ran commands' combined stdout+stderr) alongside `platform` and, on failure, `error` |
 | `GET /api/certs` | List certificates | Metadata only — no PEM in the response |
 | `POST /api/certs` | Generate a certificate | `{fqdn, dnsSans[], ipSans[]}` → 201; no validity field, it is always `default_validity_days` (possibly clamped) |
 | `GET /api/certs/{id}` | Certificate detail | Includes `certPem`; never `keyPem` |

@@ -24,6 +24,7 @@ type Options struct {
 	LegacyImportDir     string
 	DefaultValidityDays int
 	ExpiryWarnDays      int
+	TrustDeviceEnabled  bool
 }
 
 // Server holds the resolved dependencies and the routing mux.
@@ -153,6 +154,7 @@ func Build(cfg config.CertmachineConfig) (http.Handler, error) {
 		LegacyImportDir:     cfg.LegacyImportDir,
 		DefaultValidityDays: cfg.DefaultValidityDays,
 		ExpiryWarnDays:      cfg.ExpiryWarnDays,
+		TrustDeviceEnabled:  cfg.TrustDeviceEnabled,
 	})
 	if err != nil {
 		return nil, err

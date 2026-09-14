@@ -1,4 +1,4 @@
-import { fetchConfig, fetchCerts, fetchCA, initCA } from "./api";
+import { fetchConfig, fetchCerts, fetchCA, initCA, trustDevice, TrustFailedError } from "./api";
 import type { CAStatus } from "./api";
 import { renderCertList } from "./render";
 import { filterCerts, sortCerts } from "./listmodel";
@@ -44,29 +44,6 @@ function addMetaRow(dl: HTMLDListElement, label: string, value: string): void {
   dl.append(dt, dd);
 }
 
-/** Per-OS trust instructions, carried over from `reference/certmachine/static/index.html:24-27` (FR-3). */
-const TRUST_INSTRUCTIONS: Array<[string, string]> = [
-  ["macOS", 'Open the downloaded rootCA.crt in Keychain Access, then set it to "Always Trust".'],
-  ["Linux", "Copy rootCA.crt to /usr/local/share/ca-certificates/ and run update-ca-certificates."],
-  ["Windows", 'Import rootCA.crt into the "Trusted Root Certification Authorities" store.'],
-  [
-    "iOS",
-    "Install the configuration profile for rootCA.crt, then enable full trust under Settings > General > About > Certificate Trust Settings.",
-  ],
-];
-
-function buildTrustInstructions(): HTMLElement {
-  const list = el("dl", "cert-trust-list");
-  for (const [os, instr] of TRUST_INSTRUCTIONS) {
-    const dt = el("dt", "cert-trust-os");
-    dt.textContent = os;
-    const dd = el("dd", "cert-trust-instr");
-    dd.textContent = instr;
-    list.append(dt, dd);
-  }
-  return list;
-}
-
 function handleInitCA(button: HTMLButtonElement, onCAChanged: () => void): void {
   button.disabled = true;
   initCA()
@@ -81,11 +58,45 @@ function handleInitCA(button: HTMLButtonElement, onCAChanged: () => void): void 
 }
 
 /**
- * CA status panel: root CA metadata + download + per-OS trust instructions
- * when a CA exists (FR-3); the init/import choice when it doesn't. Init CA
- * is demoted to a secondary action whenever `legacyImportAvailable &&
- * certCount === 0` -- the wizard leads in that case, per the plan's binding
- * decision (the server's own half of this is `ErrImportPending`, slice 5).
+ * Run the device-trust install and reflect the result: a toast for the
+ * headline outcome, plus the ran commands' full output in `output` (kept
+ * visible until the next click) since a sudo permission refusal or a missing
+ * update-ca-trust binary is exactly the kind of thing "alert-and-hope" would
+ * hide.
+ */
+function handleTrustDevice(button: HTMLButtonElement, output: HTMLElement): void {
+  button.disabled = true;
+  output.hidden = true;
+  output.textContent = "";
+  trustDevice()
+    .then((result) => {
+      button.disabled = false;
+      showToast(`Trusted on this device${result.platform ? ` (${result.platform})` : ""}.`, "success");
+      if (result.output) {
+        output.textContent = result.output;
+        output.hidden = false;
+      }
+    })
+    .catch((err: unknown) => {
+      button.disabled = false;
+      showToast(errorText(err), "error");
+      if (err instanceof TrustFailedError && err.output) {
+        output.textContent = err.output;
+        output.hidden = false;
+      }
+    });
+}
+
+/**
+ * CA status panel: root CA metadata + download + (when
+ * `trustDeviceAvailable`) the one-click device-trust button, when a CA
+ * exists; the init/import choice when it doesn't. Manual per-OS trust
+ * instructions for platforms this app cannot automate live in the README /
+ * docs/certmachine.md, not here -- keeping them out of the bundle avoids
+ * maintaining the same OS list in two places. Init CA is demoted to a
+ * secondary action whenever `legacyImportAvailable && certCount === 0` -- the
+ * wizard leads in that case, per the plan's binding decision (the server's
+ * own half of this is `ErrImportPending`, slice 5).
  */
 function renderCAPanel(
   container: HTMLElement,
@@ -113,13 +124,26 @@ function renderCAPanel(
     download.href = "/api/ca/root.crt";
     download.textContent = "Download root CA";
     actions.append(download);
-    panel.append(actions);
 
-    const trust = el("details", "cert-trust");
-    const summary = el("summary");
-    summary.textContent = "Trust this CA on your device";
-    trust.append(summary, buildTrustInstructions());
-    panel.append(trust);
+    if (config.trustDeviceAvailable) {
+      const trustBtn = el("button", "cert-btn cert-btn-secondary");
+      trustBtn.type = "button";
+      trustBtn.textContent = config.trustPlatform
+        ? `Trust this CA on this device (${config.trustPlatform})`
+        : "Trust this CA on this device";
+      const trustOutput = el("pre", "cert-trust-output");
+      trustOutput.hidden = true;
+      trustBtn.addEventListener("click", () => handleTrustDevice(trustBtn, trustOutput));
+      actions.append(trustBtn);
+      panel.append(actions, trustOutput);
+    } else {
+      panel.append(actions);
+    }
+
+    const trustNote = el("p", "cert-ca-note");
+    trustNote.textContent =
+      "For other devices, or if the button above isn't available: manual per-OS trust instructions are in the README (and docs/certmachine.md).";
+    panel.append(trustNote);
   } else {
     const preferImport = config.legacyImportAvailable && config.certCount === 0;
     const note = el("p", "cert-ca-note");

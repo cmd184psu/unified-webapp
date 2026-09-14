@@ -1,6 +1,7 @@
-// handler.go wires the certmachine HTTP API onto Server.mux: the twelve
-// routes in the slice 8 doc, their method-less 405 fallthroughs, and the
-// single sentinel-to-status mapping every handler funnels errors through.
+// handler.go wires the certmachine HTTP API onto Server.mux: the slice 8
+// doc's routes (plus POST /api/ca/trust, the device-trust button), their
+// method-less 405 fallthroughs, and the single sentinel-to-status mapping
+// every handler funnels errors through.
 //
 // Route shape follows Option B (plan §"API route shape"): each mutating path
 // gets a method-prefixed handler ("POST /api/certs") plus a method-less
@@ -36,6 +37,7 @@ func (s *Server) mountRoutes() {
 	s.mux.HandleFunc("GET /api/ca", s.handleCAGet)
 	s.mux.HandleFunc("POST /api/ca/init", s.handleCAInit)
 	s.mux.HandleFunc("GET /api/ca/root.crt", s.handleCARootGet)
+	s.mux.HandleFunc("POST /api/ca/trust", s.handleCATrust)
 
 	s.mux.HandleFunc("GET /api/certs", s.handleCertsGet)
 	s.mux.HandleFunc("POST /api/certs", s.handleCertsPost)
@@ -52,6 +54,7 @@ func (s *Server) mountRoutes() {
 	// Each Allow string is hand-maintained and asserted against these exact
 	// registrations by TestAllowHeadersMatchRegisteredRoutes.
 	s.mux.HandleFunc("/api/ca/init", methodNotAllowed("POST"))
+	s.mux.HandleFunc("/api/ca/trust", methodNotAllowed("POST"))
 	s.mux.HandleFunc("/api/certs", methodNotAllowed("GET, POST"))
 	s.mux.HandleFunc("/api/certs/{id}", methodNotAllowed("GET, DELETE"))
 	s.mux.HandleFunc("/api/certs/{id}/renew", methodNotAllowed("POST"))
@@ -208,6 +211,8 @@ type configResponse struct {
 	LegacyImportAvailable bool   `json:"legacyImportAvailable"`
 	LegacyImportDir       string `json:"legacyImportDir"`
 	LegacyImportReason    string `json:"legacyImportReason"`
+	TrustDeviceAvailable  bool   `json:"trustDeviceAvailable"`
+	TrustPlatform         string `json:"trustPlatform,omitempty"`
 }
 
 func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
@@ -216,6 +221,16 @@ func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	// The platform is only reported when the feature is enabled: an operator
+	// who left trust_device_enabled at its default false has no reason to
+	// see this box's OS reflected back at them from every module's config
+	// response, and DetectTrustPlatform runs an /etc/os-release read for it.
+	var trustPlatform string
+	if s.opts.TrustDeviceEnabled {
+		if platform, err := DetectTrustPlatform(); err == nil {
+			trustPlatform = string(platform)
+		}
+	}
 	response.WriteJSON(w, http.StatusOK, configResponse{
 		DefaultValidityDays:   s.opts.DefaultValidityDays,
 		ExpiryWarnDays:        s.opts.ExpiryWarnDays,
@@ -223,6 +238,8 @@ func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
 		LegacyImportAvailable: s.opts.LegacyImportDir != "" && s.legacyImportReason == "",
 		LegacyImportDir:       s.opts.LegacyImportDir,
 		LegacyImportReason:    s.legacyImportReason,
+		TrustDeviceAvailable:  s.opts.TrustDeviceEnabled && trustPlatform != "",
+		TrustPlatform:         trustPlatform,
 	})
 }
 
@@ -285,6 +302,53 @@ func (s *Server) handleCARootGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeDownload(w, "rootCA.crt", pemContentType, []byte(ca.CertPEM))
+}
+
+// trustResponse is POST /api/ca/trust's body, on both success and failure:
+// Output always carries the ran commands' combined stdout+stderr (empty only
+// when the request never got as far as running one, e.g. the feature is
+// disabled or no CA exists yet) so a sudo refusal is visible to whoever
+// clicked the button, not just the server log.
+type trustResponse struct {
+	Platform string `json:"platform,omitempty"`
+	Output   string `json:"output,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+// handleCATrust runs InstallTrust against the current root CA -- the server
+// side of the "Trust this CA on this device" button. See trust.go's package
+// doc for exactly what runs and why every command is `sudo -n`.
+func (s *Server) handleCATrust(w http.ResponseWriter, r *http.Request) {
+	if !s.opts.TrustDeviceEnabled {
+		response.WriteJSON(w, http.StatusConflict, trustResponse{
+			Error: "device trust install is unavailable: certmachine.trust_device_enabled is not set",
+		})
+		return
+	}
+	ca, err := s.db.GetCA(r.Context())
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	platform, platErr := DetectTrustPlatform()
+	output, err := InstallTrust(r.Context(), []byte(ca.CertPEM))
+	if err != nil {
+		if platErr != nil {
+			log.Printf("certmachine: device trust install unsupported: %v", err)
+		} else {
+			log.Printf("certmachine: device trust install failed: %v", err)
+		}
+		response.WriteJSON(w, http.StatusConflict, trustResponse{
+			Platform: string(platform),
+			Output:   output,
+			Error:    err.Error(),
+		})
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, trustResponse{
+		Platform: string(platform),
+		Output:   output,
+	})
 }
 
 func (s *Server) handleCertsGet(w http.ResponseWriter, r *http.Request) {
