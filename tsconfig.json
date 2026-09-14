@@ -8,5 +8,5 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["web/obsidianoid/js/*.ts", "web/slideshow/js/*.ts", "web/multissh/js/*.ts", "web/certmachine/js/*.ts", "web/smbedit/src/**/*.ts", "web/smbedit/src/**/*.tsx"]
+  "include": ["web/obsidianoid/js/*.ts", "web/slideshow/js/*.ts", "web/multissh/js/*.ts", "web/certmachine/js/*.ts", "web/smbedit/src/**/*.ts", "web/smbedit/src/**/*.tsx", "web/issuetracker/src/**/*.ts", "web/issuetracker/src/**/*.tsx"]
 }

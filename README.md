@@ -52,7 +52,8 @@ Minimal example with all seven modules. Multiple hostnames can map to the same m
     "utuber.cmdhome.net":             "utuber",
     "utuber-test.cmdhome.net":        "utuber",
     "smbedit.cmdhome.net":            "smbedit",
-    "smbedit-test.cmdhome.net":       "smbedit"
+    "smbedit-test.cmdhome.net":       "smbedit",
+    "issuetracker-test.cmdhome.net":  "issuetracker"
   },
   "grocery": {
     "static_dir": "/opt/unified-webapp/web/grocery",
@@ -118,6 +119,11 @@ Minimal example with all seven modules. Multiple hostnames can map to the same m
     "static_dir": "/opt/unified-webapp/web/smbedit",
     "data_dir": "/data/smbedit",
     "picker_root": "/opt"
+  },
+  "issuetracker": {
+    "static_dir": "/opt/unified-webapp/web/issuetracker",
+    "db_path": "/data/issuetracker/issues.db",
+    "default_user": { "name": "Unassigned", "email": "unassigned@localhost" }
   }
 }
 ```

@@ -936,6 +936,215 @@ func TestGateAdminSwapDeletingMatrixEntryStaysProtected(t *testing.T) {
 	}
 }
 
+// --- FR6: context principal injection ---
+
+// principalCapturingHandler returns a next handler that records whatever
+// Principal (if any) it finds on the request's context, so a test can
+// assert what the gate attached before calling next.ServeHTTP.
+func principalCapturingHandler() (http.Handler, *Principal, *bool) {
+	var got Principal
+	var ok bool
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, ok = PrincipalFromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+	return h, &got, &ok
+}
+
+// TestGatePrincipalAbsentOnUnprotectedPassthrough proves an unprotected
+// module's pass-through request carries no Principal at all -- FR6 is
+// purely additive on the protected path only.
+func TestGatePrincipalAbsentOnUnprotectedPassthrough(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	svc := newGateService(t, now, &Policy{Modules: map[string]ModulePolicy{}})
+
+	next, _, ok := principalCapturingHandler()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/items", nil)
+	svc.Gate("grocery", next).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if *ok {
+		t.Fatal("PrincipalFromContext: ok = true on unprotected passthrough, want false")
+	}
+}
+
+// TestGatePrincipalOnAPIKeyPath proves a successful API-key request attaches
+// {Method:"apikey", Subject:<key name>} to the module's request context.
+func TestGatePrincipalOnAPIKeyPath(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	p := &Policy{
+		Modules: map[string]ModulePolicy{"menuserver": {}},
+		APIKeys: []config.NamedHash{{Name: "svc-a", Hash: hashKey("secret-key")}},
+	}
+	svc := newGateService(t, now, p)
+
+	next, got, ok := principalCapturingHandler()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/items", nil)
+	req.Header.Set("X-API-Key", "secret-key")
+	svc.Gate("menuserver", next).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !*ok {
+		t.Fatal("PrincipalFromContext: ok = false, want true on API-key path")
+	}
+	if got.Method != "apikey" || got.Subject != "svc-a" {
+		t.Fatalf("principal = %+v, want {Method:apikey Subject:svc-a}", *got)
+	}
+}
+
+// TestGatePrincipalOnSessionPath proves a successful session request
+// attaches {Method:<identity grant>, Subject:claims.Subject} to the
+// module's request context.
+func TestGatePrincipalOnSessionPath(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	p := &Policy{
+		Modules:         map[string]ModulePolicy{"grocery": {}},
+		LDAP:            config.LDAPConfig{URL: "ldap://fake"},
+		SessionTTL:      time.Hour,
+		RefreshFraction: 0.5,
+	}
+	svc := newGateService(t, now, p)
+	tok := sessionCookieToken(t, "alice", []string{"ldap"}, time.Hour, now)
+
+	next, got, ok := principalCapturingHandler()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/items", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
+	svc.Gate("grocery", next).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !*ok {
+		t.Fatal("PrincipalFromContext: ok = false, want true on session path")
+	}
+	if got.Method != "ldap" || got.Subject != "alice" {
+		t.Fatalf("principal = %+v, want {Method:ldap Subject:alice}", *got)
+	}
+}
+
+// --- FR6: /api/auth/whoami ---
+
+func TestGateWhoamiAPIKey(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	p := &Policy{
+		Modules: map[string]ModulePolicy{"menuserver": {}},
+		APIKeys: []config.NamedHash{{Name: "svc-a", Hash: hashKey("secret-key")}},
+	}
+	svc := newGateService(t, now, p)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/whoami", nil)
+	req.Header.Set("X-API-Key", "secret-key")
+	svc.Gate("menuserver", echoHandler()).ServeHTTP(rec, req)
+	mustNotReached(t, rec)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body struct {
+		Authenticated bool   `json:"authenticated"`
+		Method        string `json:"method"`
+		Identity      string `json:"identity"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode whoami body: %v", err)
+	}
+	if !body.Authenticated || body.Method != "apikey" || body.Identity != "svc-a" {
+		t.Fatalf("whoami body = %+v, want {true apikey svc-a}", body)
+	}
+}
+
+func TestGateWhoamiSession(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	p := &Policy{
+		Modules:         map[string]ModulePolicy{"grocery": {}},
+		LDAP:            config.LDAPConfig{URL: "ldap://fake"},
+		SessionTTL:      time.Hour,
+		RefreshFraction: 0.5,
+	}
+	svc := newGateService(t, now, p)
+	tok := sessionCookieToken(t, "alice", []string{"ldap"}, time.Hour, now)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/whoami", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
+	svc.Gate("grocery", echoHandler()).ServeHTTP(rec, req)
+	mustNotReached(t, rec)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body struct {
+		Authenticated bool   `json:"authenticated"`
+		Method        string `json:"method"`
+		Identity      string `json:"identity"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode whoami body: %v", err)
+	}
+	if !body.Authenticated || body.Method != "ldap" || body.Identity != "alice" {
+		t.Fatalf("whoami body = %+v, want {true ldap alice}", body)
+	}
+}
+
+func TestGateWhoamiAnonymous(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	for name, p := range map[string]*Policy{
+		"open module":      {Modules: map[string]ModulePolicy{}},
+		"protected module": {Modules: map[string]ModulePolicy{"grocery": {}}, LDAP: config.LDAPConfig{URL: "ldap://fake"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc := newGateService(t, now, p)
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/auth/whoami", nil)
+			svc.Gate("grocery", echoHandler()).ServeHTTP(rec, req)
+			mustNotReached(t, rec)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rec.Code)
+			}
+			var body struct {
+				Authenticated bool   `json:"authenticated"`
+				Method        string `json:"method"`
+				Identity      string `json:"identity"`
+			}
+			if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+				t.Fatalf("decode whoami body: %v (body=%q)", err, rec.Body.String())
+			}
+			if body.Authenticated || body.Method != "" || body.Identity != "" {
+				t.Fatalf("whoami body = %+v, want {false \"\" \"\"}", body)
+			}
+		})
+	}
+}
+
+// TestGateWhoamiAvailableRegardlessOfProtection proves whoami never 401s,
+// even on a protected module with no credentials presented.
+func TestGateWhoamiAvailableRegardlessOfProtection(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	p := &Policy{
+		Modules: map[string]ModulePolicy{"grocery": {PinFile: "/tmp/does-not-matter"}},
+		LDAP:    config.LDAPConfig{URL: "ldap://fake"},
+	}
+	svc := newGateService(t, now, p)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/whoami", nil)
+	svc.Gate("grocery", echoHandler()).ServeHTTP(rec, req)
+	mustNotReached(t, rec)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (whoami never 401s)", rec.Code)
+	}
+}
+
 // adminModeMethods issues GET /api/auth/mode against svc for the admin
 // module and returns the decoded methods list.
 func adminModeMethods(t *testing.T, svc *Service) []string {
