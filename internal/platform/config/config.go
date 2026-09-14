@@ -24,8 +24,10 @@ type Config struct {
 	Obsidianoid ObsidianoidConfig `json:"obsidianoid"`
 	Multissh    MultisshConfig    `json:"multissh"`
 	Taskmaster  TaskmasterConfig  `json:"taskmaster"`
+	Utuber      UtuberConfig      `json:"utuber"`
 	Auth        AuthConfig        `json:"auth"`
 	Admin       AdminConfig       `json:"admin"`
+	Smbedit     SmbeditConfig     `json:"smbedit"`
 
 	// configPath is the absolute path Load read this Config from (empty when
 	// built via DefaultConfig()/WriteDefault without going through Load, or
@@ -317,6 +319,17 @@ type MultisshConfig struct {
 	KnownHostsPath string `json:"known_hosts_path"`
 }
 
+// SmbeditConfig holds configuration specific to the smbedit module.
+//
+// DataDir is where the module persists its state file (state.json); it is
+// created at Build time if missing. PickerRoot is the directory whose
+// subdirectories the share-path folder picker lists; empty means /opt.
+type SmbeditConfig struct {
+	StaticDir  string `json:"static_dir"`
+	DataDir    string `json:"data_dir"`
+	PickerRoot string `json:"picker_root"`
+}
+
 // Multissh session-count bounds. MaxSessions is validated in exactly one place
 // (Load); Build trusts the resolved value and performs no re-validation.
 const (
@@ -340,6 +353,28 @@ type TaskmasterConfig struct {
 	// Config.Server.SSEMaxSubscribers by Load. Not read from the config file.
 	SSEMaxSubscribers int `json:"-"`
 }
+
+// UtuberConfig holds configuration specific to the utuber module.
+//
+// PythonBin is the Python interpreter used by the yt-dlp self-update
+// endpoint. It is a config-level default only: a value saved through the
+// module's UI settings menu overrides it at runtime. It is passed as argv[0]
+// to the executor, never through a shell.
+type UtuberConfig struct {
+	StaticDir   string `json:"static_dir"`
+	DownloadDir string `json:"download_dir"`
+	Workers     int    `json:"workers"`
+	PythonBin   string `json:"python_bin"`
+}
+
+// Utuber worker-count bounds and interpreter default. Workers is validated in
+// exactly one place (Load); utuber.Build trusts the resolved value and
+// performs no re-validation.
+const (
+	DefaultUtuberWorkers   = 1
+	MaxUtuberWorkers       = 8
+	DefaultUtuberPythonBin = "python3.12"
+)
 
 // DefaultConfig returns a Config populated with safe defaults.
 func DefaultConfig() *Config {
@@ -398,6 +433,12 @@ func DefaultConfig() *Config {
 			Lanes:     []TaskmasterLane{},
 			AllowSudo: false,
 		},
+		Utuber: UtuberConfig{
+			StaticDir:   "./web/utuber",
+			DownloadDir: "./data/utuber/downloads",
+			Workers:     DefaultUtuberWorkers,
+			PythonBin:   DefaultUtuberPythonBin,
+		},
 		Admin: AdminConfig{
 			StaticDir:    "./web/admin",
 			MaxBodyBytes: defaultModuleBodyBytes,
@@ -417,6 +458,11 @@ func DefaultConfig() *Config {
 			// must never be written back out.
 			Modules: map[string]ModuleAuthConfig{},
 			APIKeys: []NamedHash{},
+		},
+		Smbedit: SmbeditConfig{
+			StaticDir:  "./web/smbedit",
+			DataDir:    "./data/smbedit",
+			PickerRoot: "/opt",
 		},
 		Server: ServerConfig{
 			OriginCheck:       "enforce",
@@ -488,10 +534,19 @@ func Load(path string) (*Config, error) {
 	if err := expandTaskmasterPaths(&cfg.Taskmaster); err != nil {
 		return nil, err
 	}
+	if err := expandUtuberPaths(&cfg.Utuber); err != nil {
+		return nil, err
+	}
+	if err := normalizeUtuber(&cfg.Utuber); err != nil {
+		return nil, err
+	}
 	if err := expandAuthPaths(cfg, filepath.Dir(expanded)); err != nil {
 		return nil, err
 	}
 	if err := expandAdminPaths(&cfg.Admin); err != nil {
+		return nil, err
+	}
+	if err := expandSmbeditPaths(&cfg.Smbedit); err != nil {
 		return nil, err
 	}
 	if cfg.TLSCert != "" {
@@ -679,6 +734,20 @@ func expandTaskmasterPaths(t *TaskmasterConfig) error {
 	return nil
 }
 
+func expandSmbeditPaths(s *SmbeditConfig) error {
+	var err error
+	if s.StaticDir, err = ExpandPath(s.StaticDir); err != nil {
+		return err
+	}
+	if s.DataDir, err = ExpandPath(s.DataDir); err != nil {
+		return err
+	}
+	if s.PickerRoot, err = ExpandPath(s.PickerRoot); err != nil {
+		return err
+	}
+	return nil
+}
+
 // normalizeMultissh is the single validation point for max_sessions (FR-N1).
 // Zero means "unset" and takes the default; negative is an operator error and
 // is rejected; an absurdly large value is a typo and is clamped with a warning
@@ -692,6 +761,42 @@ func normalizeMultissh(m *MultisshConfig) error {
 	case m.MaxSessions > MaxMaxSessions:
 		log.Printf("multissh: max_sessions %d exceeds the maximum of %d; clamping to %d", m.MaxSessions, MaxMaxSessions, MaxMaxSessions)
 		m.MaxSessions = MaxMaxSessions
+	}
+	return nil
+}
+
+// expandUtuberPaths expands ~ in the utuber directories. PythonBin is
+// deliberately not expanded: a ~-relative interpreter is not a supported
+// form, and expanding it would let the settings-menu validation regex pass a
+// value that then names a different file.
+func expandUtuberPaths(u *UtuberConfig) error {
+	var err error
+	if u.StaticDir, err = ExpandPath(u.StaticDir); err != nil {
+		return err
+	}
+	if u.DownloadDir, err = ExpandPath(u.DownloadDir); err != nil {
+		return err
+	}
+	return nil
+}
+
+// normalizeUtuber is the single validation point for the utuber module's
+// worker count and interpreter default. Zero workers means "unset" and takes
+// the default; negative is an operator error and is rejected; an absurdly
+// large value is a typo and is clamped with a warning rather than refused.
+// utuber.Build trusts the result and does not re-validate.
+func normalizeUtuber(u *UtuberConfig) error {
+	switch {
+	case u.Workers < 0:
+		return fmt.Errorf("utuber: workers must be at least 1, got %d", u.Workers)
+	case u.Workers == 0:
+		u.Workers = DefaultUtuberWorkers
+	case u.Workers > MaxUtuberWorkers:
+		log.Printf("utuber: workers %d exceeds the maximum of %d; clamping to %d", u.Workers, MaxUtuberWorkers, MaxUtuberWorkers)
+		u.Workers = MaxUtuberWorkers
+	}
+	if u.PythonBin == "" {
+		u.PythonBin = DefaultUtuberPythonBin
 	}
 	return nil
 }

@@ -12,7 +12,8 @@
     "obsidianoid.test": "obsidianoid",
     "multissh.test":    "multissh",
     "admin.test":       "admin",
-    "taskmaster.test":  "taskmaster"
+    "taskmaster.test":  "taskmaster",
+    "smbedit.test":     "smbedit"
   },
   "server": {
     "origin_check": "enforce",
@@ -84,6 +85,11 @@
       { "name": "shell-only", "width": 1 }
     ],
     "allow_sudo": false
+  },
+  "smbedit": {
+    "static_dir": "./web/smbedit",
+    "data_dir": "./local-test/data/smbedit",
+    "picker_root": "/opt"
   },
   "auth": {
     "modules": {

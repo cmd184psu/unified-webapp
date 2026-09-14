@@ -43,9 +43,20 @@ node_modules/
 /taskmasterctl
 /taskmasterctl-arm64-linux
 
+# Frozen upstream snapshot used as the utuber port's fidelity baseline; the
+# Step 1 commit body carries a git hash-object manifest of the ported files.
+/reference/
+
 # Local-testing profile runtime state (created by local-test/setup.sh).
 # The profile itself (config.json, setup.sh, glauth.cfg) stays tracked.
 /local-test/data/
 /local-test/admin.pin
 /local-test/todo.pin
 /local-test/slideshow.pin
+
+# smbedit port: vendored read-only reference checkout + run-baseline files (T0.1)
+reference/
+/.smbedit-reference.sha
+/.smbedit-base.sha
+# OMC session state (never committed)
+.omc/
