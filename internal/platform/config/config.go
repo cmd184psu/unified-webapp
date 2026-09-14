@@ -23,8 +23,11 @@ type Config struct {
 	Menuserver  MenuserverConfig  `json:"menuserver"`
 	Obsidianoid ObsidianoidConfig `json:"obsidianoid"`
 	Multissh    MultisshConfig    `json:"multissh"`
+	Certmachine CertmachineConfig `json:"certmachine"`
+	Utuber      UtuberConfig      `json:"utuber"`
 	Auth        AuthConfig        `json:"auth"`
 	Admin       AdminConfig       `json:"admin"`
+	Smbedit     SmbeditConfig     `json:"smbedit"`
 
 	// configPath is the absolute path Load read this Config from (empty when
 	// built via DefaultConfig()/WriteDefault without going through Load, or
@@ -316,11 +319,74 @@ type MultisshConfig struct {
 	KnownHostsPath string `json:"known_hosts_path"`
 }
 
+// CertmachineConfig holds configuration specific to the certmachine module.
+//
+// StaticDir, DBPath and LegacyImportDir all accept a leading ~ (expanded at
+// Load time). LegacyImportDir left empty means no legacy PKI import is
+// attempted; DefaultValidityDays and ExpiryWarnDays of 0 take their FR-1
+// defaults, validated once by normalizeCertmachine.
+//
+// TrustDeviceEnabled gates the "Trust this CA on this device" button
+// (POST /api/ca/trust, internal/certmachine/trust.go): when false (the
+// default) the route refuses with 409 and the button stays out of the UI.
+// It defaults to false because turning it on means this process will run
+// sudo -- platform trust-store commands against the host it runs on,
+// whenever the button is clicked, with no per-click confirmation beyond
+// whatever the operator's sudoers NOPASSWD entry already grants. See the
+// README's "Automatic device trust" section before setting this true.
+type CertmachineConfig struct {
+	StaticDir           string `json:"static_dir"`
+	DBPath              string `json:"db_path"`
+	LegacyImportDir     string `json:"legacy_import_dir"`
+	DefaultValidityDays int    `json:"default_validity_days"`
+	ExpiryWarnDays      int    `json:"expiry_warn_days"`
+	TrustDeviceEnabled  bool   `json:"trust_device_enabled"`
+}
+
+// Certmachine defaults (FR-1).
+const (
+	DefaultCertValidityDays = 365
+	DefaultExpiryWarnDays   = 30
+)
+
+// SmbeditConfig holds configuration specific to the smbedit module.
+//
+// DataDir is where the module persists its state file (state.json); it is
+// created at Build time if missing. PickerRoot is the directory whose
+// subdirectories the share-path folder picker lists; empty means /opt.
+type SmbeditConfig struct {
+	StaticDir  string `json:"static_dir"`
+	DataDir    string `json:"data_dir"`
+	PickerRoot string `json:"picker_root"`
+}
+
 // Multissh session-count bounds. MaxSessions is validated in exactly one place
 // (Load); Build trusts the resolved value and performs no re-validation.
 const (
 	DefaultMaxSessions = 3
 	MaxMaxSessions     = 16
+)
+
+// UtuberConfig holds configuration specific to the utuber module.
+//
+// PythonBin is the Python interpreter used by the yt-dlp self-update
+// endpoint. It is a config-level default only: a value saved through the
+// module's UI settings menu overrides it at runtime. It is passed as argv[0]
+// to the executor, never through a shell.
+type UtuberConfig struct {
+	StaticDir   string `json:"static_dir"`
+	DownloadDir string `json:"download_dir"`
+	Workers     int    `json:"workers"`
+	PythonBin   string `json:"python_bin"`
+}
+
+// Utuber worker-count bounds and interpreter default. Workers is validated in
+// exactly one place (Load); utuber.Build trusts the resolved value and
+// performs no re-validation.
+const (
+	DefaultUtuberWorkers   = 1
+	MaxUtuberWorkers       = 8
+	DefaultUtuberPythonBin = "python3.12"
 )
 
 // DefaultConfig returns a Config populated with safe defaults.
@@ -374,6 +440,19 @@ func DefaultConfig() *Config {
 			MaxUploadBytes: 8 << 30, // 8 GiB
 			StrictHostKey:  false,
 		},
+		Certmachine: CertmachineConfig{
+			StaticDir:           "./web/certmachine",
+			DBPath:              "./data/certmachine/certmachine.db",
+			LegacyImportDir:     "",
+			DefaultValidityDays: DefaultCertValidityDays,
+			ExpiryWarnDays:      DefaultExpiryWarnDays,
+		},
+		Utuber: UtuberConfig{
+			StaticDir:   "./web/utuber",
+			DownloadDir: "./data/utuber/downloads",
+			Workers:     DefaultUtuberWorkers,
+			PythonBin:   DefaultUtuberPythonBin,
+		},
 		Admin: AdminConfig{
 			StaticDir:    "./web/admin",
 			MaxBodyBytes: defaultModuleBodyBytes,
@@ -393,6 +472,11 @@ func DefaultConfig() *Config {
 			// must never be written back out.
 			Modules: map[string]ModuleAuthConfig{},
 			APIKeys: []NamedHash{},
+		},
+		Smbedit: SmbeditConfig{
+			StaticDir:  "./web/smbedit",
+			DataDir:    "./data/smbedit",
+			PickerRoot: "/opt",
 		},
 		Server: ServerConfig{
 			OriginCheck:       "enforce",
@@ -461,10 +545,25 @@ func Load(path string) (*Config, error) {
 	if err := normalizeMultissh(&cfg.Multissh); err != nil {
 		return nil, err
 	}
+	if err := expandCertmachinePaths(&cfg.Certmachine); err != nil {
+		return nil, err
+	}
+	if err := normalizeCertmachine(&cfg.Certmachine); err != nil {
+		return nil, err
+	}
+	if err := expandUtuberPaths(&cfg.Utuber); err != nil {
+		return nil, err
+	}
+	if err := normalizeUtuber(&cfg.Utuber); err != nil {
+		return nil, err
+	}
 	if err := expandAuthPaths(cfg, filepath.Dir(expanded)); err != nil {
 		return nil, err
 	}
 	if err := expandAdminPaths(&cfg.Admin); err != nil {
+		return nil, err
+	}
+	if err := expandSmbeditPaths(&cfg.Smbedit); err != nil {
 		return nil, err
 	}
 	if cfg.TLSCert != "" {
@@ -640,6 +739,54 @@ func expandMultisshPaths(m *MultisshConfig) error {
 	return nil
 }
 
+func expandCertmachinePaths(cm *CertmachineConfig) error {
+	var err error
+	if cm.StaticDir, err = ExpandPath(cm.StaticDir); err != nil {
+		return err
+	}
+	if cm.DBPath, err = ExpandPath(cm.DBPath); err != nil {
+		return err
+	}
+	if cm.LegacyImportDir, err = ExpandPath(cm.LegacyImportDir); err != nil {
+		return err
+	}
+	return nil
+}
+
+func expandSmbeditPaths(s *SmbeditConfig) error {
+	var err error
+	if s.StaticDir, err = ExpandPath(s.StaticDir); err != nil {
+		return err
+	}
+	if s.DataDir, err = ExpandPath(s.DataDir); err != nil {
+		return err
+	}
+	if s.PickerRoot, err = ExpandPath(s.PickerRoot); err != nil {
+		return err
+	}
+	return nil
+}
+
+// normalizeCertmachine is the single validation point for
+// default_validity_days and expiry_warn_days (FR-1). Zero means "unset" and
+// takes the default; negative is an operator error and is rejected, naming
+// the field. certmachine.Build trusts the result and does not re-check.
+func normalizeCertmachine(cm *CertmachineConfig) error {
+	switch {
+	case cm.DefaultValidityDays < 0:
+		return fmt.Errorf("certmachine: default_validity_days must be at least 0, got %d", cm.DefaultValidityDays)
+	case cm.DefaultValidityDays == 0:
+		cm.DefaultValidityDays = DefaultCertValidityDays
+	}
+	switch {
+	case cm.ExpiryWarnDays < 0:
+		return fmt.Errorf("certmachine: expiry_warn_days must be at least 0, got %d", cm.ExpiryWarnDays)
+	case cm.ExpiryWarnDays == 0:
+		cm.ExpiryWarnDays = DefaultExpiryWarnDays
+	}
+	return nil
+}
+
 // normalizeMultissh is the single validation point for max_sessions (FR-N1).
 // Zero means "unset" and takes the default; negative is an operator error and
 // is rejected; an absurdly large value is a typo and is clamped with a warning
@@ -653,6 +800,42 @@ func normalizeMultissh(m *MultisshConfig) error {
 	case m.MaxSessions > MaxMaxSessions:
 		log.Printf("multissh: max_sessions %d exceeds the maximum of %d; clamping to %d", m.MaxSessions, MaxMaxSessions, MaxMaxSessions)
 		m.MaxSessions = MaxMaxSessions
+	}
+	return nil
+}
+
+// expandUtuberPaths expands ~ in the utuber directories. PythonBin is
+// deliberately not expanded: a ~-relative interpreter is not a supported
+// form, and expanding it would let the settings-menu validation regex pass a
+// value that then names a different file.
+func expandUtuberPaths(u *UtuberConfig) error {
+	var err error
+	if u.StaticDir, err = ExpandPath(u.StaticDir); err != nil {
+		return err
+	}
+	if u.DownloadDir, err = ExpandPath(u.DownloadDir); err != nil {
+		return err
+	}
+	return nil
+}
+
+// normalizeUtuber is the single validation point for the utuber module's
+// worker count and interpreter default. Zero workers means "unset" and takes
+// the default; negative is an operator error and is rejected; an absurdly
+// large value is a typo and is clamped with a warning rather than refused.
+// utuber.Build trusts the result and does not re-validate.
+func normalizeUtuber(u *UtuberConfig) error {
+	switch {
+	case u.Workers < 0:
+		return fmt.Errorf("utuber: workers must be at least 1, got %d", u.Workers)
+	case u.Workers == 0:
+		u.Workers = DefaultUtuberWorkers
+	case u.Workers > MaxUtuberWorkers:
+		log.Printf("utuber: workers %d exceeds the maximum of %d; clamping to %d", u.Workers, MaxUtuberWorkers, MaxUtuberWorkers)
+		u.Workers = MaxUtuberWorkers
+	}
+	if u.PythonBin == "" {
+		u.PythonBin = DefaultUtuberPythonBin
 	}
 	return nil
 }

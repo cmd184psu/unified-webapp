@@ -11,7 +11,9 @@
     "menuserver.test":  "menuserver",
     "obsidianoid.test": "obsidianoid",
     "multissh.test":    "multissh",
-    "admin.test":       "admin"
+    "certmachine-test.cmdhome.net": "certmachine",
+    "admin.test":       "admin",
+    "smbedit-test.cmdhome.net":     "smbedit"
   },
   "server": {
     "origin_check": "enforce",
@@ -71,14 +73,30 @@
     "strict_host_key": false,
     "known_hosts_path": ""
   },
+  "certmachine": {
+    "static_dir": "./web/certmachine",
+    "db_path": "./local-test/data/certmachine/certmachine.db",
+    "legacy_import_dir": "/opt/certmachine/pki",
+    "default_validity_days": 365,
+    "expiry_warn_days": 30,
+    "trust_device_enabled": true
+  },
   "admin": {
     "static_dir": "./web/admin",
     "max_body_bytes": 1048576
+  },
+  "smbedit": {
+    "static_dir": "./web/smbedit",
+    "data_dir": "./local-test/data/smbedit",
+    "picker_root": "/opt"
   },
   "auth": {
     "modules": {
       "admin": {
         "pin_file": "/opt/unified-webapp/local-test/admin.pin"
+      },
+      "certmachine": {
+        "pin_file": "/opt/unified-webapp/local-test/certmachine.pin"
       },
       "menuserver": {
         "pin_file": ""

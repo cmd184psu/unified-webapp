@@ -40,6 +40,13 @@ node_modules/
 # unified-webapp-example.json or anything nested.
 /unified-webapp
 /unified-webapp-arm64-linux
+# `go build ./cmd/server` with no -o lands here, named after the package
+# directory; a 19MB binary got left untracked in the repo root this way.
+/server
+
+# Frozen upstream snapshot used as the utuber port's fidelity baseline; the
+# Step 1 commit body carries a git hash-object manifest of the ported files.
+/reference/
 
 # Local-testing profile runtime state (created by local-test/setup.sh).
 # The profile itself (config.json, setup.sh, glauth.cfg) stays tracked.
@@ -47,3 +54,10 @@ node_modules/
 /local-test/admin.pin
 /local-test/todo.pin
 /local-test/slideshow.pin
+
+# smbedit port: vendored read-only reference checkout + run-baseline files (T0.1)
+reference/
+/.smbedit-reference.sha
+/.smbedit-base.sha
+# OMC session state (never committed)
+.omc/

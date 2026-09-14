@@ -19,6 +19,7 @@ Modules:
 | [obsidianoid](#obsidianoid) | Web viewer/editor for Obsidian-style markdown vaults |
 | [multissh](#multissh) | Browser SSH console for many hosts + file broadcast |
 | [admin](#admin) | Web UI for editing the auth config live |
+| [smbedit](../docs/smbedit.md) | Edit Samba shares (shares, globals, smb.conf preview, save & restart) |
 
 ---
 
@@ -33,8 +34,8 @@ waiting on multicast lookups.)
 **1. Add the hostnames** (two lines in `/etc/hosts`, needs sudo):
 
 ```
-127.0.0.1 grocery.test todo.test slideshow.test menu.test menuserver.test obsidianoid.test multissh.test admin.test
-::1 grocery.test todo.test slideshow.test menu.test menuserver.test obsidianoid.test multissh.test admin.test
+127.0.0.1 grocery.test todo.test slideshow.test menu.test menuserver.test obsidianoid.test multissh.test admin.test smbedit.test
+::1 grocery.test todo.test slideshow.test menu.test menuserver.test obsidianoid.test multissh.test admin.test smbedit.test
 ```
 
 Add both so IPv4 and IPv6 lookups resolve straight from `/etc/hosts`.
@@ -63,6 +64,7 @@ go run ./cmd/server -config local-test/config.json
 | http://obsidianoid.test:8080 | obsidianoid | yes | LDAP (or API key) |
 | http://multissh.test:8080 | multissh | yes | LDAP (or API key) |
 | http://admin.test:8080 | admin | yes | admin PIN `424242` only |
+| http://smbedit.test:8080 | smbedit | open | — (no auth wired in yet) |
 
 These are throwaway test credentials, published in this repo on purpose.
 Never reuse them outside local testing. LDAP credentials for all protected
