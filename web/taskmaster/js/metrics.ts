@@ -1,94 +1,138 @@
+// metrics.ts — the global Metrics tab (plan Phase F5, FRD §8).
+//
+// A fleet-wide, cross-task overview from api.getMetrics() (no task filter):
+// a card grid with per-task success/failed/canceled counts, avg/min/max
+// duration, and last run. Per-task metrics still live in the task drill-in
+// (taskdetail.ts) — this is the "how's everything doing" view. Live via the
+// shared LiveController (board events trigger a refetch); patched with
+// patchList so re-renders never repaint the whole page.
+
 import { api, MetricSummary } from './api.js';
+import { LiveController, patchList } from './ui/live.js';
 
-function tile(label: string, value: string): HTMLElement {
-  const div = document.createElement('div');
-  div.className = 'metric-tile';
-
-  const lbl = document.createElement('div');
-  lbl.className = 'metric-label';
-  lbl.textContent = label;
-
-  const val = document.createElement('div');
-  val.className = 'metric-value';
-  val.textContent = value;
-
-  div.appendChild(lbl);
-  div.appendChild(val);
-  return div;
+function fmtMs(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined) return '—';
+  return (ms / 1000).toFixed(2) + 's';
 }
 
-function renderMetricCard(s: MetricSummary, container: HTMLElement): void {
-  const card = document.createElement('div');
-  card.className = 'card';
-
-  const header = document.createElement('div');
-  header.className = 'card-header';
-
-  const title = document.createElement('h2');
-  title.textContent = s.task_name;
-  header.appendChild(title);
-
-  const groupBadge = document.createElement('span');
-  groupBadge.className = 'badge badge-muted';
-  groupBadge.textContent = s.group_name;
-  header.appendChild(groupBadge);
-
-  card.appendChild(header);
-
-  const grid = document.createElement('div');
-  grid.className = 'metrics-grid';
-
-  const total = s.success_count + s.failed_count;
-  const successPct = total > 0 ? Math.round((s.success_count / total) * 100) : 0;
-
-  grid.appendChild(tile('Success', String(s.success_count)));
-  grid.appendChild(tile('Failed', String(s.failed_count)));
-  grid.appendChild(tile('Success rate', successPct + '%'));
-  grid.appendChild(tile('Avg duration', s.avg_duration_ms != null ? Math.round(s.avg_duration_ms) + 'ms' : '—'));
-  grid.appendChild(tile('Min duration', s.min_duration_ms != null ? s.min_duration_ms + 'ms' : '—'));
-  grid.appendChild(tile('Max duration', s.max_duration_ms != null ? s.max_duration_ms + 'ms' : '—'));
-  grid.appendChild(tile('Avg delay', s.avg_schedule_delay_ms != null ? Math.round(s.avg_schedule_delay_ms) + 'ms' : '—'));
-  grid.appendChild(tile('Last run', s.last_execution ? new Date(s.last_execution).toLocaleString() : '—'));
-
-  card.appendChild(grid);
-  container.appendChild(card);
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
 }
 
-export function renderMetrics(container: HTMLElement, groupFilter?: string): void {
+let gridEl: HTMLElement | null = null;
+let unsubscribe: (() => void) | null = null;
+let loadSeq = 0;
+
+/** Mounts the metrics overview into `container`. Returns a cleanup function. */
+export function mountMetrics(container: HTMLElement, live: LiveController): () => void {
   container.textContent = '';
 
-  const toolbar = document.createElement('div');
-  toolbar.className = 'toolbar';
+  const heading = document.createElement('div');
+  heading.className = 'metrics-heading';
+  heading.textContent = 'Fleet-wide metrics (last 24h)';
+  container.appendChild(heading);
 
-  const h1 = document.createElement('h1');
-  h1.textContent = 'Metrics';
-  toolbar.appendChild(h1);
+  gridEl = document.createElement('div');
+  gridEl.className = 'metrics-grid';
+  container.appendChild(gridEl);
 
-  const spacer = document.createElement('div');
-  spacer.className = 'toolbar-spacer';
-  toolbar.appendChild(spacer);
+  void refresh();
+  unsubscribe = live.onEvent(() => void refresh());
 
-  const btnRefresh = document.createElement('button');
-  btnRefresh.className = 'btn btn-secondary';
-  btnRefresh.textContent = 'Refresh';
-  btnRefresh.addEventListener('click', () => renderMetrics(container, groupFilter));
-  toolbar.appendChild(btnRefresh);
+  return () => {
+    if (unsubscribe) unsubscribe();
+    unsubscribe = null;
+    gridEl = null;
+  };
+}
 
-  container.appendChild(toolbar);
+async function refresh(): Promise<void> {
+  const seq = ++loadSeq;
+  let rows: MetricSummary[] = [];
+  try {
+    rows = await api.getMetrics();
+  } catch {
+    return;
+  }
+  if (seq !== loadSeq || !gridEl) return;
+  render(rows);
+}
 
-  api.getMetrics(groupFilter, undefined, 24).then((summaries) => {
-    if (summaries.length === 0) {
+function render(rows: MetricSummary[]): void {
+  if (!gridEl) return;
+  if (rows.length === 0) {
+    if (!gridEl.querySelector('.empty-state')) {
+      gridEl.textContent = '';
       const empty = document.createElement('div');
       empty.className = 'empty-state';
-      empty.textContent = 'No metrics yet. Run some tasks first.';
-      container.appendChild(empty);
-      return;
+      empty.textContent = 'No executions recorded yet.';
+      gridEl.appendChild(empty);
     }
-    summaries.forEach((s) => renderMetricCard(s, container));
-  }).catch((e: Error) => {
-    const err = document.createElement('div');
-    err.className = 'error-banner';
-    err.textContent = e.message;
-    container.appendChild(err);
+    return;
+  }
+  gridEl.querySelector('.empty-state')?.remove();
+
+  const sorted = [...rows].sort((a, b) => a.task_name.localeCompare(b.task_name));
+  patchList(gridEl, sorted, {
+    key: (m) => m.task_name,
+    create: (m) => createCard(m),
+    update: (el, m) => updateCard(el, m),
   });
+}
+
+function createCard(m: MetricSummary): HTMLElement {
+  const card = document.createElement('div');
+  card.className = 'metric-card';
+
+  const title = document.createElement('div');
+  title.className = 'metric-card-title';
+  card.appendChild(title);
+
+  const lane = document.createElement('div');
+  lane.className = 'metric-card-lane';
+  card.appendChild(lane);
+
+  const stats = document.createElement('div');
+  stats.className = 'metric-card-stats';
+  const fields = ['success', 'failed', 'canceled', 'avg', 'min', 'max', 'last run'];
+  for (const f of fields) {
+    const cell = document.createElement('div');
+    cell.className = 'metric-card-stat metric-stat-' + f.replace(' ', '-');
+    const v = document.createElement('div');
+    v.className = 'metric-card-stat-val';
+    const l = document.createElement('div');
+    l.className = 'metric-card-stat-label';
+    l.textContent = f;
+    cell.append(v, l);
+    stats.appendChild(cell);
+  }
+  card.appendChild(stats);
+
+  updateCard(card, m);
+  return card;
+}
+
+function updateCard(card: HTMLElement, m: MetricSummary): void {
+  const title = card.querySelector<HTMLElement>('.metric-card-title');
+  if (title) title.textContent = m.task_name;
+  const lane = card.querySelector<HTMLElement>('.metric-card-lane');
+  if (lane) lane.textContent = 'lane: ' + m.group_name;
+
+  const values: Record<string, string> = {
+    success: String(m.success_count),
+    failed: String(m.failed_count),
+    canceled: String(m.canceled_count),
+    avg: fmtMs(m.avg_duration_ms),
+    min: fmtMs(m.min_duration_ms),
+    max: fmtMs(m.max_duration_ms),
+    'last-run': fmtDate(m.last_execution),
+  };
+  for (const [key, val] of Object.entries(values)) {
+    const cell = card.querySelector<HTMLElement>('.metric-stat-' + key);
+    const v = cell?.querySelector<HTMLElement>('.metric-card-stat-val');
+    if (v) v.textContent = val;
+  }
 }

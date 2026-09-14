@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -228,6 +229,17 @@ PRAGMA foreign_keys=ON;
 // The DB is authoritative for it once build.go seeds it from config.
 const SettingAllowSudo = "allow_sudo"
 
+// SettingBrakeEngaged is the settings key holding the persisted hand-brake
+// flag. build.go reads it on boot and starts the worker braked if set;
+// the /api/brake handlers keep it in sync with the runtime BrakeGate.
+const SettingBrakeEngaged = "brake_engaged"
+
+// SettingBrakePausedLanes is the settings key holding the JSON list of lane
+// names the hand brake paused (i.e. the ones that were NOT already paused
+// when the brake engaged), so release can restore exactly those lanes and
+// leave independently-paused lanes alone.
+const SettingBrakePausedLanes = "brake_paused_lanes"
+
 // EncodeBoolSetting / DecodeBoolSetting are the shared "1"/"0" encoding used
 // for boolean settings, so the reader (build.go) and writer (coordinator)
 // never diverge.
@@ -259,6 +271,31 @@ func (db *DB) SetSetting(key, value string) error {
 		INSERT INTO settings (key, value) VALUES (?, ?)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
 	return err
+}
+
+// GetBrakePausedLanes returns the lane names recorded under
+// SettingBrakePausedLanes (the lanes the hand brake paused and should
+// restore on release), or nil if the key is absent/empty.
+func (db *DB) GetBrakePausedLanes() ([]string, error) {
+	v, ok, err := db.GetSetting(SettingBrakePausedLanes)
+	if err != nil || !ok || v == "" {
+		return nil, err
+	}
+	var lanes []string
+	if err := json.Unmarshal([]byte(v), &lanes); err != nil {
+		return nil, err
+	}
+	return lanes, nil
+}
+
+// SetBrakePausedLanes persists the lane names the hand brake paused, as
+// JSON, under SettingBrakePausedLanes.
+func (db *DB) SetBrakePausedLanes(lanes []string) error {
+	b, err := json.Marshal(lanes)
+	if err != nil {
+		return err
+	}
+	return db.SetSetting(SettingBrakePausedLanes, string(b))
 }
 
 // ─── Lane CRUD ───────────────────────────────────────────────────────────────
@@ -311,6 +348,15 @@ func (db *DB) DeleteLane(name string) error {
 		return fmt.Errorf("lane %q has %d task(s); delete or move them first", name, count)
 	}
 	_, err = db.conn.Exec(`DELETE FROM lanes WHERE name = ?`, name)
+	return err
+}
+
+// SetLaneWidth updates only a lane's width, leaving paused/paused_at/paused_by
+// untouched (UpsertLane would require reloading those fields first to avoid
+// clobbering them).
+func (db *DB) SetLaneWidth(name string, width int) error {
+	_, err := db.conn.Exec(`UPDATE lanes SET width = ?, updated_at = ? WHERE name = ?`,
+		width, epochMs(time.Now()), name)
 	return err
 }
 
@@ -412,6 +458,35 @@ func (db *DB) UpdateTask(name string, updates map[string]any) error {
 	q := "UPDATE tasks SET " + strings.Join(setClauses, ", ") + " WHERE name = ?"
 	_, err := db.conn.Exec(q, vals...)
 	return err
+}
+
+// SetTaskPositions sets each named task's position to its index in
+// orderedNames. The UPDATE is scoped to lane_name, so a name that doesn't
+// belong to this lane simply matches no row and is silently ignored.
+func (db *DB) SetTaskPositions(laneName string, orderedNames []string) error {
+	now := epochMs(time.Now())
+	for i, name := range orderedNames {
+		if _, err := db.conn.Exec(`UPDATE tasks SET position = ?, updated_at = ? WHERE name = ? AND lane_name = ?`,
+			i, now, name, laneName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// MaxTaskPosition returns the highest position value among tasks currently
+// in laneName, or -1 if the lane has no tasks (so callers can add 1 to get
+// the first/next position uniformly).
+func (db *DB) MaxTaskPosition(laneName string) (int, error) {
+	var max sql.NullInt64
+	err := db.conn.QueryRow(`SELECT MAX(position) FROM tasks WHERE lane_name = ?`, laneName).Scan(&max)
+	if err != nil {
+		return 0, err
+	}
+	if !max.Valid {
+		return -1, nil
+	}
+	return int(max.Int64), nil
 }
 
 func (db *DB) DeleteTask(name string) error {
@@ -581,6 +656,25 @@ func (db *DB) ListExecutions(taskFilter string, limit int) ([]*models.TaskExecut
 	return execs, rows.Err()
 }
 
+// ListRunningExecutionIDs returns the IDs of every execution currently
+// recorded as "running", for the hand-brake's cancel-all-running step.
+func (db *DB) ListRunningExecutionIDs() ([]int64, error) {
+	rows, err := db.conn.Query(`SELECT id FROM task_executions WHERE status = 'running'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // ─── Locking ──────────────────────────────────────────────────────────────────
 
 func (db *DB) AcquireLock(taskID int64, workerID string, ttl time.Duration) (bool, error) {
@@ -601,6 +695,20 @@ func (db *DB) AcquireLock(taskID int64, workerID string, ttl time.Duration) (boo
 
 func (db *DB) ReleaseLock(taskID int64, workerID string) error {
 	_, err := db.conn.Exec(`DELETE FROM task_locks WHERE task_id = ? AND worker_id = ?`, taskID, workerID)
+	return err
+}
+
+// RefreshLock extends the expiry of a lock already held by workerID on
+// taskID, as if just acquired with the given ttl. Used by the worker's
+// per-run heartbeat so a long-running (or suspended) task's lock doesn't
+// expire mid-run and let CleanupExpiredLocks + another worker's poll()
+// double-pick the same task. A no-op (not an error) if the lock isn't held
+// by workerID — e.g. it already expired and was cleaned up.
+func (db *DB) RefreshLock(taskID int64, workerID string, ttl time.Duration) error {
+	expiresMs := epochMs(time.Now().Add(ttl))
+	_, err := db.conn.Exec(`
+		UPDATE task_locks SET expires_at = ? WHERE task_id = ? AND worker_id = ?`,
+		expiresMs, taskID, workerID)
 	return err
 }
 
@@ -642,6 +750,7 @@ func (db *DB) GetMetrics(laneFilter, taskFilter string, hours int) ([]*models.Me
 		SELECT t.name, t.lane_name,
 		  SUM(CASE WHEN m.status = 'success' THEN 1 ELSE 0 END) as success_count,
 		  SUM(CASE WHEN m.status = 'failed' THEN 1 ELSE 0 END) as failed_count,
+		  SUM(CASE WHEN m.status = 'canceled' THEN 1 ELSE 0 END) as canceled_count,
 		  AVG(m.duration_ms) as avg_duration_ms,
 		  MIN(m.duration_ms) as min_duration_ms,
 		  MAX(m.duration_ms) as max_duration_ms,
@@ -664,7 +773,7 @@ func (db *DB) GetMetrics(laneFilter, taskFilter string, hours int) ([]*models.Me
 		var ms models.MetricSummary
 		var lastExecMs *int64
 		err := rows.Scan(&ms.TaskName, &ms.GroupName,
-			&ms.SuccessCount, &ms.FailedCount,
+			&ms.SuccessCount, &ms.FailedCount, &ms.CanceledCount,
 			&ms.AvgDurationMs, &ms.MinDurationMs, &ms.MaxDurationMs,
 			&ms.AvgDelayMs, &lastExecMs)
 		if err != nil {

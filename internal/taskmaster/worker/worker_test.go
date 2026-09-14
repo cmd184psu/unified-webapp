@@ -22,7 +22,10 @@ type mockExecutor struct {
 	fn func(ctx context.Context, task *models.Task, stdout, stderr io.Writer) error
 }
 
-func (m *mockExecutor) Execute(ctx context.Context, task *models.Task, stdout, stderr io.Writer) error {
+func (m *mockExecutor) Execute(ctx context.Context, task *models.Task, stdout, stderr io.Writer, onStart func(pid int)) error {
+	if onStart != nil {
+		onStart(0)
+	}
 	return m.fn(ctx, task, stdout, stderr)
 }
 
@@ -35,7 +38,7 @@ func newTestWorker(t *testing.T, exec worker.Executor) (*worker.Worker, *db.DB) 
 	err = d.UpsertLane(&models.Lane{Name: "test", Width: 2})
 	require.NoError(t, err)
 
-	w := worker.NewWithExecutor(d, worker.NewRegistry(), "test-worker", exec)
+	w := worker.NewWithExecutor(d, worker.NewRegistry(), "test-worker", exec, worker.NewCancelRegistry(), worker.NewBrakeGate(false), worker.NewProcessRegistry(), nil)
 	return w, d
 }
 
@@ -84,7 +87,7 @@ func TestWorker_RespectsWidth(t *testing.T) {
 	}}
 
 	_, d := newTestWorker(t, exec)
-	w2 := worker.NewWithExecutor(d, worker.NewRegistry(), "w2", exec)
+	w2 := worker.NewWithExecutor(d, worker.NewRegistry(), "w2", exec, worker.NewCancelRegistry(), worker.NewBrakeGate(false), worker.NewProcessRegistry(), nil)
 
 	addTask(t, d, "task-a")
 	addTask(t, d, "task-b")
@@ -187,7 +190,7 @@ func TestWorker_RunsInPositionOrder(t *testing.T) {
 	_, err = d.AddTask(&models.Task{Name: "first", LaneName: "seq", Enabled: true, Position: 10, Command: "echo hi"})
 	require.NoError(t, err)
 
-	w := worker.NewWithExecutor(d, worker.NewRegistry(), "w", exec)
+	w := worker.NewWithExecutor(d, worker.NewRegistry(), "w", exec, worker.NewCancelRegistry(), worker.NewBrakeGate(false), worker.NewProcessRegistry(), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	go w.Start(ctx)
 
@@ -200,6 +203,169 @@ func TestWorker_RunsInPositionOrder(t *testing.T) {
 	w.Wait()
 
 	require.Equal(t, []string{"first", "second"}, order)
+}
+
+// ─── Cancel / brake tests ────────────────────────────────────────────────────
+
+// TestWorker_CancelRunningTask_RecordsCanceled cancels a running execution
+// via the shared CancelRegistry and verifies runTask records the distinct
+// "canceled" status (not "failed").
+func TestWorker_CancelRunningTask_RecordsCanceled(t *testing.T) {
+	started := make(chan struct{})
+	exec := &mockExecutor{fn: func(ctx context.Context, task *models.Task, stdout, stderr io.Writer) error {
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
+	}}
+
+	d, err := db.Open(":memory:")
+	require.NoError(t, err)
+	t.Cleanup(func() { d.Close() })
+	require.NoError(t, d.UpsertLane(&models.Lane{Name: "test", Width: 2}))
+	task := addTask(t, d, "cancel-me")
+
+	cancels := worker.NewCancelRegistry()
+	w := worker.NewWithExecutor(d, worker.NewRegistry(), "w", exec, cancels, worker.NewBrakeGate(false), worker.NewProcessRegistry(), nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go w.Start(ctx)
+	defer func() {
+		cancel()
+		w.Wait()
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(15 * time.Second):
+		t.Fatal("task did not start within timeout")
+	}
+
+	var execID int64
+	require.Eventually(t, func() bool {
+		execs, err := d.ListExecutions(task.Name, 1)
+		if err != nil || len(execs) == 0 || execs[0].Status != "running" {
+			return false
+		}
+		execID = execs[0].ID
+		return true
+	}, 5*time.Second, 25*time.Millisecond, "execution never reached running status")
+
+	require.True(t, cancels.Cancel(execID), "Cancel should report the execution was running")
+
+	require.Eventually(t, func() bool {
+		execs, err := d.ListExecutions(task.Name, 1)
+		return err == nil && len(execs) > 0 && execs[0].Status == "canceled"
+	}, 5*time.Second, 25*time.Millisecond, "execution status never became canceled")
+}
+
+// TestWorker_ShutdownCancel_StillRecordsFailed verifies that canceling the
+// whole worker (w.runCtx, not routed through the CancelRegistry) preserves
+// existing shutdown semantics: in-flight executions record "failed", not
+// "canceled".
+func TestWorker_ShutdownCancel_StillRecordsFailed(t *testing.T) {
+	started := make(chan struct{})
+	exec := &mockExecutor{fn: func(ctx context.Context, task *models.Task, stdout, stderr io.Writer) error {
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
+	}}
+
+	d, err := db.Open(":memory:")
+	require.NoError(t, err)
+	t.Cleanup(func() { d.Close() })
+	require.NoError(t, d.UpsertLane(&models.Lane{Name: "test", Width: 2}))
+	task := addTask(t, d, "shutdown-me")
+
+	w := worker.NewWithExecutor(d, worker.NewRegistry(), "w", exec, worker.NewCancelRegistry(), worker.NewBrakeGate(false), worker.NewProcessRegistry(), nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go w.Start(ctx)
+
+	select {
+	case <-started:
+	case <-time.After(15 * time.Second):
+		t.Fatal("task did not start within timeout")
+	}
+
+	cancel() // whole-worker shutdown, not a per-execution Cancel
+	w.Wait()
+
+	require.Eventually(t, func() bool {
+		execs, err := d.ListExecutions(task.Name, 1)
+		return err == nil && len(execs) > 0 && execs[0].Status == "failed"
+	}, 5*time.Second, 25*time.Millisecond, "shutdown-canceled execution should record failed, not canceled")
+}
+
+// TestWorker_BrakeEngaged_LaunchesNothing verifies poll() launches no
+// eligible task while the shared BrakeGate is engaged.
+func TestWorker_BrakeEngaged_LaunchesNothing(t *testing.T) {
+	executed := make(chan string, 1)
+	exec := &mockExecutor{fn: func(ctx context.Context, task *models.Task, stdout, stderr io.Writer) error {
+		executed <- task.Name
+		return nil
+	}}
+
+	d, err := db.Open(":memory:")
+	require.NoError(t, err)
+	t.Cleanup(func() { d.Close() })
+	require.NoError(t, d.UpsertLane(&models.Lane{Name: "test", Width: 2}))
+	addTask(t, d, "should-not-run")
+
+	w := worker.NewWithExecutor(d, worker.NewRegistry(), "w", exec, worker.NewCancelRegistry(), worker.NewBrakeGate(true), worker.NewProcessRegistry(), nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	go w.Start(ctx)
+
+	select {
+	case <-executed:
+		t.Fatal("brake engaged: task should not have launched")
+	case <-ctx.Done():
+		// correct: nothing launched
+	}
+	w.Wait()
+}
+
+// TestWorker_LockHeartbeat_KeepsLockAliveForLongTask verifies runTask's
+// per-run heartbeat keeps refreshing the task lock while a long (here:
+// mock, blocked-on-a-channel) task is in flight, so the lock doesn't expire
+// mid-run and let a second worker's poll() double-pick the same task.
+func TestWorker_LockHeartbeat_KeepsLockAliveForLongTask(t *testing.T) {
+	worker.SetLockTTLForTest(150 * time.Millisecond)
+	t.Cleanup(func() { worker.SetLockTTLForTest(10 * time.Minute) })
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	exec := &mockExecutor{fn: func(ctx context.Context, task *models.Task, stdout, stderr io.Writer) error {
+		close(started)
+		<-release
+		return nil
+	}}
+
+	w, d := newTestWorker(t, exec)
+	task := addTask(t, d, "long-task")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go w.Start(ctx)
+
+	select {
+	case <-started:
+	case <-time.After(15 * time.Second):
+		t.Fatal("task did not start within timeout")
+	}
+
+	// The heartbeat ticks at lockTTL/3 (=50ms here); give it well past the
+	// original 150ms TTL to fire several times before checking.
+	time.Sleep(500 * time.Millisecond)
+	require.NoError(t, d.CleanupExpiredLocks())
+
+	ok, err := d.AcquireLock(task.ID, "other-worker", 150*time.Millisecond)
+	require.NoError(t, err)
+	require.False(t, ok, "lock should still be held by the original worker — heartbeat must have refreshed it past its original TTL")
+
+	close(release)
+	cancel()
+	w.Wait()
 }
 
 // ─── OutputCapture tests ─────────────────────────────────────────────────────
@@ -301,7 +467,7 @@ func TestExecutor_SudoGating_Denied(t *testing.T) {
 	te := &worker.TaskExecutor{Sudo: worker.NewSudoGate(false)}
 	task := &models.Task{Sudo: true, Command: "echo hi"}
 
-	err := te.Execute(context.Background(), task, io.Discard, io.Discard)
+	err := te.Execute(context.Background(), task, io.Discard, io.Discard, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "allow_sudo")
 }
@@ -310,7 +476,7 @@ func TestExecutor_EmptyCommand(t *testing.T) {
 	te := &worker.TaskExecutor{}
 	task := &models.Task{Command: ""}
 
-	err := te.Execute(context.Background(), task, io.Discard, io.Discard)
+	err := te.Execute(context.Background(), task, io.Discard, io.Discard, nil)
 	require.Error(t, err)
 }
 
@@ -319,7 +485,7 @@ func TestExecutor_RunsCommand(t *testing.T) {
 	task := &models.Task{Command: "echo hi"}
 
 	var out bytesBuf
-	err := te.Execute(context.Background(), task, &out, io.Discard)
+	err := te.Execute(context.Background(), task, &out, io.Discard, nil)
 	require.NoError(t, err)
 	require.Contains(t, out.String(), "hi")
 }
@@ -333,7 +499,7 @@ func TestExecutor_ContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- te.Execute(ctx, task, io.Discard, io.Discard)
+		errCh <- te.Execute(ctx, task, io.Discard, io.Discard, nil)
 	}()
 
 	time.Sleep(200 * time.Millisecond)
@@ -360,7 +526,7 @@ func TestExecutor_GrandchildPipe(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- te.Execute(ctx, task, io.Discard, io.Discard)
+		errCh <- te.Execute(ctx, task, io.Discard, io.Discard, nil)
 	}()
 
 	time.Sleep(200 * time.Millisecond)

@@ -25,5 +25,15 @@ func (c *Coordinator) handleListExecutions(w http.ResponseWriter, r *http.Reques
 	if execs == nil {
 		execs = []*models.TaskExecution{}
 	}
+	// Pid/Suspended live only in the in-memory ProcessRegistry (never
+	// persisted — the process, and any suspended state, is gone on
+	// restart), so merge them in here rather than in the DB layer.
+	for _, e := range execs {
+		if pid, ok := c.procs.Get(e.ID); ok {
+			p := pid
+			e.Pid = &p
+			e.Suspended = c.procs.Suspended(e.ID)
+		}
+	}
 	response.WriteJSON(w, http.StatusOK, execs)
 }

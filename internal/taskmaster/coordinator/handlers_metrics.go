@@ -9,7 +9,7 @@ import (
 )
 
 func (c *Coordinator) handleMetrics(w http.ResponseWriter, r *http.Request) {
-	laneFilter := r.URL.Query().Get("group")
+	laneFilter := r.URL.Query().Get("lane")
 	taskFilter := r.URL.Query().Get("task")
 	hours := 24
 	if h := r.URL.Query().Get("hours"); h != "" {

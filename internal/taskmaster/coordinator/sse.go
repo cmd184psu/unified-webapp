@@ -12,6 +12,18 @@ import (
 	"cmd184psu/unified-webapp/internal/taskmaster/worker"
 )
 
+// handleBoardEvents streams the shared board-events broker as text/event-
+// stream. It does not replay history on connect (see the route comment in
+// coordinator.go); the broker enforces the SSEMaxSubscribers cap itself,
+// rejecting with 503 before any SSE header is written once the cap is hit.
+func (c *Coordinator) handleBoardEvents(w http.ResponseWriter, r *http.Request) {
+	if c.board == nil {
+		response.WriteError(w, http.StatusServiceUnavailable, "board events unavailable")
+		return
+	}
+	c.board.ServeSSE("board", nil)(w, r)
+}
+
 func (c *Coordinator) handleExecutionOutput(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	execID, err := strconv.ParseInt(idStr, 10, 64)

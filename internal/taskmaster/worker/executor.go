@@ -3,9 +3,11 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"cmd184psu/unified-webapp/internal/taskmaster/models"
@@ -18,8 +20,11 @@ import (
 const waitDelay = 10 * time.Second
 
 // Executor executes a task and writes output to the provided captures.
+// onStart, if non-nil, is called once the process has started with the PID
+// of the process-group leader (before Execute blocks on completion) so the
+// caller can register it (e.g. worker.ProcessRegistry) for pause/resume/kill.
 type Executor interface {
-	Execute(ctx context.Context, task *models.Task, stdout, stderr io.Writer) error
+	Execute(ctx context.Context, task *models.Task, stdout, stderr io.Writer, onStart func(pid int)) error
 }
 
 type TaskExecutor struct {
@@ -32,7 +37,7 @@ type TaskExecutor struct {
 // Execute runs task.Command through a shell. This is the single execution
 // path — there is no task "type" and no JSON args; the command line is the
 // whole task (FRD §6/§9).
-func (te *TaskExecutor) Execute(ctx context.Context, task *models.Task, stdout, stderr io.Writer) error {
+func (te *TaskExecutor) Execute(ctx context.Context, task *models.Task, stdout, stderr io.Writer, onStart func(pid int)) error {
 	if strings.TrimSpace(task.Command) == "" {
 		return errors.New("task has no command")
 	}
@@ -42,7 +47,13 @@ func (te *TaskExecutor) Execute(ctx context.Context, task *models.Task, stdout, 
 	}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	return cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	if onStart != nil {
+		onStart(cmd.Process.Pid)
+	}
+	return cmd.Wait()
 }
 
 func (te *TaskExecutor) buildCmd(ctx context.Context, sudo bool, command string) (*exec.Cmd, error) {
@@ -56,5 +67,51 @@ func (te *TaskExecutor) buildCmd(ctx context.Context, sudo bool, command string)
 		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", command)
 	}
 	cmd.WaitDelay = waitDelay
+	// Setpgid puts the command (and any children `sh -c` spawns) in their own
+	// process group, so pause/resume/kill can signal the whole group as a
+	// unit via the negative PID rather than just the shell itself.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if sudo {
+		// CommandContext's default cancel (os.Process.Kill, i.e. SIGKILL on
+		// just the shell) does two things wrong for a sudo child: it doesn't
+		// reach the process group, and it's an unprivileged kill against a
+		// root-owned process — EPERM. Escalate via `sudo kill` instead, same
+		// as ProcessRegistry's Suspend/Resume. Homelab-only workaround
+		// (allow_sudo-gated); the future curated setuid helper replaces this
+		// shell-out.
+		cmd.Cancel = func() error {
+			return sendGroupSignal(cmd.Process.Pid, true, syscall.SIGKILL)
+		}
+	}
 	return cmd, nil
+}
+
+// sendGroupSignal signals the process group led by pid (i.e. syscall.Kill
+// with the negated pid). A sudo-launched task's group is root-owned, so an
+// unprivileged syscall.Kill fails with EPERM — escalate via `sudo kill`
+// instead. Shelling out per-signal is acceptable for a homelab; the curated
+// setuid helper (future work, see taskmaster-future-ssh notes) replaces this.
+func sendGroupSignal(pid int, sudo bool, sig syscall.Signal) error {
+	if !sudo {
+		return syscall.Kill(-pid, sig)
+	}
+	name := sigName(sig)
+	out, err := exec.Command("sudo", "kill", "-"+name, "--", fmt.Sprintf("-%d", pid)).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("sudo kill -%s: %w: %s", name, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func sigName(sig syscall.Signal) string {
+	switch sig {
+	case syscall.SIGSTOP:
+		return "STOP"
+	case syscall.SIGCONT:
+		return "CONT"
+	case syscall.SIGKILL:
+		return "KILL"
+	default:
+		return sig.String()
+	}
 }

@@ -55,20 +55,20 @@ func TestBuild_FullCycle(t *testing.T) {
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
-	// GET /api/groups shows the seeded group.
-	resp, err := http.Get(srv.URL + "/api/groups")
+	// GET /api/lanes shows the seeded lane.
+	resp, err := http.Get(srv.URL + "/api/lanes")
 	require.NoError(t, err)
-	var groups []map[string]any
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&groups))
+	var lanes []map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&lanes))
 	resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	found := false
-	for _, g := range groups {
-		if g["name"] == "seeded" {
+	for _, l := range lanes {
+		if l["name"] == "seeded" {
 			found = true
 		}
 	}
-	require.True(t, found, "seeded group missing from /api/groups: %+v", groups)
+	require.True(t, found, "seeded lane missing from /api/lanes: %+v", lanes)
 
 	// GET /api/capabilities reflects allow_sudo from config.
 	resp, err = http.Get(srv.URL + "/api/capabilities")
@@ -122,6 +122,133 @@ func TestBuild_FullCycle(t *testing.T) {
 		}
 	}
 	require.True(t, sawDone, "SSE stream never reported completion")
+}
+
+// TestBuild_BrakePersistsAcrossRestart engages the hand brake, closes the
+// module (simulating shutdown), rebuilds it against the same DB file
+// (simulating a restart), and verifies the brake gate boots engaged —
+// SettingBrakeEngaged is DB-authoritative like allow_sudo.
+func TestBuild_BrakePersistsAcrossRestart(t *testing.T) {
+	staticDir := t.TempDir()
+	writeIndexHTML(t, staticDir)
+	dbPath := filepath.Join(t.TempDir(), "taskmaster.db")
+
+	cfg := config.TaskmasterConfig{
+		StaticDir: staticDir,
+		DBPath:    dbPath,
+		Lanes: []config.TaskmasterLane{
+			{Name: "seeded", Width: 2},
+		},
+	}
+
+	h, err := taskmaster.Build(cfg)
+	require.NoError(t, err)
+	srv := httptest.NewServer(h)
+
+	resp, err := http.Post(srv.URL+"/api/brake", "application/json", nil)
+	require.NoError(t, err)
+	var body map[string]bool
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	resp.Body.Close()
+	require.True(t, body["engaged"])
+
+	srv.Close()
+	closer := h.(interface{ Close() error })
+	require.NoError(t, closer.Close())
+
+	// Rebuild the module against the same DB file, simulating a restart.
+	h2, err := taskmaster.Build(cfg)
+	require.NoError(t, err)
+	defer func() {
+		closer2 := h2.(interface{ Close() error })
+		require.NoError(t, closer2.Close())
+	}()
+	srv2 := httptest.NewServer(h2)
+	defer srv2.Close()
+
+	resp2, err := http.Get(srv2.URL + "/api/brake")
+	require.NoError(t, err)
+	defer resp2.Body.Close()
+	var body2 map[string]bool
+	require.NoError(t, json.NewDecoder(resp2.Body).Decode(&body2))
+	require.True(t, body2["engaged"], "hand brake should stay engaged across a simulated restart")
+}
+
+// TestBuild_BoardEvents_PublishAndClose exercises the full board-events
+// lifecycle wired by Build: a subscriber connects to GET /api/board/events,
+// a task is posted and immediately enqueued via up-next, and the subscriber
+// must see a task-enqueued event. Close() must then shut down cleanly with
+// no goroutine leak (checked by this package's TestMain via goleak).
+func TestBuild_BoardEvents_PublishAndClose(t *testing.T) {
+	staticDir := t.TempDir()
+	writeIndexHTML(t, staticDir)
+
+	cfg := config.TaskmasterConfig{
+		StaticDir: staticDir,
+		DBPath:    filepath.Join(t.TempDir(), "taskmaster.db"),
+		Lanes: []config.TaskmasterLane{
+			{Name: "seeded", Width: 2},
+		},
+		SSEMaxSubscribers: 0,
+	}
+
+	h, err := taskmaster.Build(cfg)
+	require.NoError(t, err)
+	closer := h.(interface{ Close() error })
+	// t.Cleanup (not defer) so teardown runs exactly once, in LIFO order,
+	// on every exit path including t.Fatal: sub.Body.Close() first (so the
+	// still-open SSE stream unblocks and srv.Close() doesn't deadlock
+	// waiting for it), then srv.Close(), then closer.Close().
+	t.Cleanup(func() { require.NoError(t, closer.Close()) })
+
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	taskBody := `{"name":"board-task","lane_name":"seeded","command":"echo hi","enabled":false}`
+	resp, err := http.Post(srv.URL+"/api/tasks", "application/json", strings.NewReader(taskBody))
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	sub, err := http.Get(srv.URL + "/api/board/events")
+	require.NoError(t, err)
+	t.Cleanup(func() { sub.Body.Close() })
+
+	events := make(chan string, 16)
+	go func() {
+		scanner := bufio.NewScanner(sub.Body)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "data:") {
+				events <- strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			}
+		}
+	}()
+
+	// See the equivalent comment in coordinator's board_test.go: the broker
+	// subscribes this connection's payload channel just after flushing its
+	// initial ": connected" line, so retry the trigger instead of assuming
+	// a single POST lands after the subscription is in place.
+	deadline := time.After(5 * time.Second)
+	tick := time.NewTicker(50 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		resp, err = http.Post(srv.URL+"/api/tasks/board-task/up-next", "application/json", nil)
+		require.NoError(t, err)
+		resp.Body.Close()
+		require.Equal(t, http.StatusCreated, resp.StatusCode)
+
+		select {
+		case ev := <-events:
+			require.Contains(t, ev, `"type":"task-enqueued"`)
+			require.Contains(t, ev, `"task":"board-task"`)
+			return
+		case <-tick.C:
+			continue
+		case <-deadline:
+			t.Fatal("timed out waiting for task-enqueued board event")
+		}
+	}
 }
 
 func TestBuild_ErrorPath_UnwritableDBPath(t *testing.T) {

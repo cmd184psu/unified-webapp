@@ -107,14 +107,18 @@ func main() {
 	rest := args[1:]
 
 	switch noun {
-	case "group":
-		runGroup(rest)
+	case "lane":
+		runLane(rest)
 	case "task":
 		runTask(rest)
 	case "executions":
 		runExecutions(rest)
 	case "output":
 		runOutput(rest)
+	case "cancel":
+		runCancel(rest)
+	case "brake":
+		runBrake(rest)
 	case "metrics":
 		runMetrics(rest)
 	case "health":
@@ -126,78 +130,97 @@ func main() {
 	}
 }
 
-// ─── Group commands ───────────────────────────────────────────────────────────
+// ─── Lane commands ────────────────────────────────────────────────────────────
 
-func runGroup(args []string) {
+func runLane(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: taskmasterctl group <list|pause|resume|create|update|delete> [name] [flags]")
+		fmt.Fprintln(os.Stderr, "usage: taskmasterctl lane <list|pause|resume|create|update|delete|width|order> [name] [flags]")
 		os.Exit(1)
 	}
 	verb := args[0]
 	switch verb {
 	case "list":
-		var groups []models.LaneStatus
-		apiGet("/api/groups", &groups)
+		var lanes []models.LaneStatus
+		apiGet("/api/lanes", &lanes)
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "NAME\tLIMIT\tRUNNING\tPAUSED")
-		for _, g := range groups {
+		fmt.Fprintln(tw, "NAME\tWIDTH\tRUNNING\tPAUSED")
+		for _, l := range lanes {
 			paused := "no"
-			if g.Paused {
+			if l.Paused {
 				paused = "YES"
 			}
-			fmt.Fprintf(tw, "%s\t%d\t%d\t%s\n", g.Name, g.Width, g.RunningCount, paused)
+			fmt.Fprintf(tw, "%s\t%d\t%d\t%s\n", l.Name, l.Width, l.RunningCount, paused)
 		}
 		tw.Flush()
 
 	case "pause":
 		if len(args) < 2 {
-			fatalf("usage: taskmasterctl group pause <name>")
+			fatalf("usage: taskmasterctl lane pause <name>")
 		}
-		apiPost("/api/groups/"+args[1]+"/pause", nil, nil)
-		fmt.Printf("group %q paused\n", args[1])
+		apiPost("/api/lanes/"+args[1]+"/pause", nil, nil)
+		fmt.Printf("lane %q paused\n", args[1])
 
 	case "resume":
 		if len(args) < 2 {
-			fatalf("usage: taskmasterctl group resume <name>")
+			fatalf("usage: taskmasterctl lane resume <name>")
 		}
-		apiPost("/api/groups/"+args[1]+"/resume", nil, nil)
-		fmt.Printf("group %q resumed\n", args[1])
+		apiPost("/api/lanes/"+args[1]+"/resume", nil, nil)
+		fmt.Printf("lane %q resumed\n", args[1])
 
 	case "create":
-		fs := flag.NewFlagSet("group create", flag.ExitOnError)
-		name := fs.String("name", "", "group name (required)")
-		limit := fs.Int("limit", 1, "pool limit")
+		fs := flag.NewFlagSet("lane create", flag.ExitOnError)
+		name := fs.String("name", "", "lane name (required)")
+		width := fs.Int("width", 1, "lane width")
 		fs.Parse(args[1:])
 		if *name == "" {
 			fatalf("--name is required")
 		}
 		var result models.Lane
-		apiPost("/api/groups", map[string]any{"name": *name, "width": *limit}, &result)
-		fmt.Printf("created group %q (pool_limit=%d)\n", result.Name, result.Width)
+		apiPost("/api/lanes", map[string]any{"name": *name, "width": *width}, &result)
+		fmt.Printf("created lane %q (width=%d)\n", result.Name, result.Width)
 
 	case "update":
 		if len(args) < 2 {
-			fatalf("usage: taskmasterctl group update <name> [--limit N]")
+			fatalf("usage: taskmasterctl lane update <name> [--width N]")
 		}
-		fs := flag.NewFlagSet("group update", flag.ExitOnError)
-		limit := fs.Int("limit", 0, "new pool limit")
+		fs := flag.NewFlagSet("lane update", flag.ExitOnError)
+		width := fs.Int("width", 0, "new width")
 		fs.Parse(args[2:])
 		updates := map[string]any{}
-		if *limit > 0 {
-			updates["width"] = *limit
+		if *width > 0 {
+			updates["width"] = *width
 		}
-		apiPut("/api/groups/"+args[1], updates, nil)
-		fmt.Printf("group %q updated\n", args[1])
+		apiPut("/api/lanes/"+args[1], updates, nil)
+		fmt.Printf("lane %q updated\n", args[1])
 
 	case "delete":
 		if len(args) < 2 {
-			fatalf("usage: taskmasterctl group delete <name>")
+			fatalf("usage: taskmasterctl lane delete <name>")
 		}
-		apiDelete("/api/groups/" + args[1])
-		fmt.Printf("group %q deleted\n", args[1])
+		apiDelete("/api/lanes/" + args[1])
+		fmt.Printf("lane %q deleted\n", args[1])
+
+	case "width":
+		if len(args) < 3 {
+			fatalf("usage: taskmasterctl lane width <name> <n>")
+		}
+		n, err := strconv.Atoi(args[2])
+		if err != nil {
+			fatalf("invalid width %q: %v", args[2], err)
+		}
+		apiPut("/api/lanes/"+args[1]+"/width", map[string]any{"width": n}, nil)
+		fmt.Printf("lane %q width set to %d\n", args[1], n)
+
+	case "order":
+		if len(args) < 3 {
+			fatalf("usage: taskmasterctl lane order <name> <t1,t2,...>")
+		}
+		order := strings.Split(args[2], ",")
+		apiPut("/api/lanes/"+args[1]+"/order", map[string]any{"order": order}, nil)
+		fmt.Printf("lane %q order updated\n", args[1])
 
 	default:
-		fatalf("unknown group verb: %s", verb)
+		fatalf("unknown lane verb: %s", verb)
 	}
 }
 
@@ -205,18 +228,18 @@ func runGroup(args []string) {
 
 func runTask(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: taskmasterctl task <list|add|update|pause|resume|delete|enqueue> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: taskmasterctl task <list|add|update|pause|resume|delete|up-next|move> [flags]")
 		os.Exit(1)
 	}
 	verb := args[0]
 	switch verb {
 	case "list":
 		fs := flag.NewFlagSet("task list", flag.ExitOnError)
-		group := fs.String("group", "", "filter by group")
+		lane := fs.String("lane", "", "filter by lane")
 		fs.Parse(args[1:])
 		path := "/api/tasks"
-		if *group != "" {
-			path += "?group=" + *group
+		if *lane != "" {
+			path += "?lane=" + *lane
 		}
 		var tasks []models.Task
 		apiGet(path, &tasks)
@@ -231,22 +254,21 @@ func runTask(args []string) {
 	case "add":
 		fs := flag.NewFlagSet("task add", flag.ExitOnError)
 		name := fs.String("name", "", "task name (required)")
-		group := fs.String("group", "", "lane name (required)")
+		lane := fs.String("lane", "", "lane name (required)")
 		command := fs.String("command", "", "command line to run (required)")
 		repeat := fs.Bool("repeat", false, "re-enqueue after cooldown")
 		cooldown := fs.Int("cooldown", 0, "cooldown seconds between runs")
-		position := fs.Int("position", 0, "position within the lane (lower runs first)")
 		sudo := fs.Bool("sudo", false, "run with sudo")
 		enabled := fs.Bool("enabled", true, "enable task immediately")
 		outputFile := fs.String("output-file", "", "append output to this file path ({task} and {exec_id} supported)")
 		fs.Parse(args[1:])
-		if *name == "" || *group == "" {
-			fatalf("--name and --group are required")
+		if *name == "" || *lane == "" {
+			fatalf("--name and --lane are required")
 		}
 		body := map[string]any{
-			"name": *name, "lane_name": *group, "command": *command,
+			"name": *name, "lane_name": *lane, "command": *command,
 			"repeat": *repeat, "cooldown_seconds": *cooldown,
-			"position": *position, "sudo": *sudo, "enabled": *enabled,
+			"sudo": *sudo, "enabled": *enabled,
 			"output_file": *outputFile,
 		}
 		var task models.Task
@@ -255,37 +277,41 @@ func runTask(args []string) {
 
 	case "update":
 		if len(args) < 2 {
-			fatalf("usage: taskmasterctl task update <name> [--position N] [--cooldown N] [--enabled] [--repeat] [--command CMD]")
+			fatalf("usage: taskmasterctl task update <name> [--cooldown N] [--enabled] [--disabled] [--repeat] [--no-repeat] [--command CMD] [--sudo] [--no-sudo] [--output-file PATH]")
 		}
 		name := args[1]
 		fs := flag.NewFlagSet("task update", flag.ExitOnError)
-		position := fs.Int("position", -1, "new position")
 		cooldown := fs.Int("cooldown", -1, "new cooldown seconds")
 		repeat := fs.Bool("repeat", false, "set repeat")
 		noRepeat := fs.Bool("no-repeat", false, "unset repeat")
 		enabled := fs.Bool("enabled", false, "enable task")
 		disabled := fs.Bool("disabled", false, "disable task")
+		sudo := fs.Bool("sudo", false, "enable sudo")
+		noSudo := fs.Bool("no-sudo", false, "disable sudo")
 		command := fs.String("command", "", "new command line")
 		outputFile := fs.String("output-file", "\x00", "output file path (set to empty string to clear)")
 		fs.Parse(args[2:])
 		updates := map[string]any{}
-		if *position >= 0 {
-			updates["position"] = *position
-		}
 		if *cooldown >= 0 {
 			updates["cooldown_seconds"] = *cooldown
 		}
 		if *repeat {
-			updates["repeat"] = 1
+			updates["repeat"] = true
 		}
 		if *noRepeat {
-			updates["repeat"] = 0
+			updates["repeat"] = false
 		}
 		if *enabled {
-			updates["enabled"] = 1
+			updates["enabled"] = true
 		}
 		if *disabled {
-			updates["enabled"] = 0
+			updates["enabled"] = false
+		}
+		if *sudo {
+			updates["sudo"] = true
+		}
+		if *noSudo {
+			updates["sudo"] = false
 		}
 		if *command != "" {
 			updates["command"] = *command
@@ -317,16 +343,58 @@ func runTask(args []string) {
 		apiDelete("/api/tasks/" + args[1])
 		fmt.Printf("task %q deleted\n", args[1])
 
-	case "enqueue":
+	case "up-next":
 		if len(args) < 2 {
-			fatalf("usage: taskmasterctl task enqueue <name>")
+			fatalf("usage: taskmasterctl task up-next <name>")
 		}
 		var result map[string]int64
-		apiPostStatus("/api/tasks/"+args[1]+"/enqueue", nil, &result, http.StatusCreated)
-		fmt.Printf("enqueued task %q → execution id %d\n", args[1], result["execution_id"])
+		apiPostStatus("/api/tasks/"+args[1]+"/up-next", nil, &result, http.StatusCreated)
+		fmt.Printf("task %q up next → execution id %d\n", args[1], result["execution_id"])
+
+	case "move":
+		if len(args) < 3 {
+			fatalf("usage: taskmasterctl task move <name> <lane>")
+		}
+		apiPost("/api/tasks/"+args[1]+"/move", map[string]any{"lane_name": args[2]}, nil)
+		fmt.Printf("task %q moved to lane %q\n", args[1], args[2])
 
 	default:
 		fatalf("unknown task verb: %s", verb)
+	}
+}
+
+// ─── Cancel / brake commands ──────────────────────────────────────────────────
+
+func runCancel(args []string) {
+	if len(args) < 1 {
+		fatalf("usage: taskmasterctl cancel <execution-id>")
+	}
+	apiPost("/api/executions/"+args[0]+"/cancel", nil, nil)
+	fmt.Printf("execution %s canceling\n", args[0])
+}
+
+func runBrake(args []string) {
+	if len(args) < 1 {
+		var status struct {
+			Engaged bool `json:"engaged"`
+		}
+		apiGet("/api/brake", &status)
+		if status.Engaged {
+			fmt.Println("engaged")
+		} else {
+			fmt.Println("released")
+		}
+		return
+	}
+	switch args[0] {
+	case "on":
+		apiPost("/api/brake", nil, nil)
+		fmt.Println("brake engaged")
+	case "off":
+		apiDelete("/api/brake")
+		fmt.Println("brake released")
+	default:
+		fatalf("unknown brake verb: %s (use \"on\" or \"off\")", args[0])
 	}
 }
 
@@ -421,13 +489,13 @@ func runOutput(args []string) {
 
 func runMetrics(args []string) {
 	fs := flag.NewFlagSet("metrics", flag.ExitOnError)
-	group := fs.String("group", "", "filter by group")
+	lane := fs.String("lane", "", "filter by lane")
 	task := fs.String("task", "", "filter by task")
 	hours := fs.Int("hours", 24, "time window in hours")
 	fs.Parse(args)
 	path := fmt.Sprintf("/api/metrics?hours=%d", *hours)
-	if *group != "" {
-		path += "&group=" + url.QueryEscape(*group)
+	if *lane != "" {
+		path += "&lane=" + url.QueryEscape(*lane)
 	}
 	if *task != "" {
 		path += "&task=" + url.QueryEscape(*task)
@@ -435,7 +503,7 @@ func runMetrics(args []string) {
 	var summaries []models.MetricSummary
 	apiGet(path, &summaries)
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "TASK\tGROUP\tOK\tFAIL\tAVG(ms)\tMIN\tMAX\tLAST")
+	fmt.Fprintln(tw, "TASK\tLANE\tOK\tFAIL\tCANCELED\tAVG(ms)\tMIN\tMAX\tLAST")
 	for _, s := range summaries {
 		avg, minD, maxD := "-", "-", "-"
 		if s.AvgDurationMs != nil {
@@ -451,8 +519,8 @@ func runMetrics(args []string) {
 		if s.LastExecution != nil {
 			last = s.LastExecution.Format("2006-01-02 15:04:05")
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\n",
-			s.TaskName, s.GroupName, s.SuccessCount, s.FailedCount, avg, minD, maxD, last)
+		fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%d\t%s\t%s\t%s\t%s\n",
+			s.TaskName, s.GroupName, s.SuccessCount, s.FailedCount, s.CanceledCount, avg, minD, maxD, last)
 	}
 	tw.Flush()
 }
@@ -597,12 +665,36 @@ func usage() {
 Usage: taskmasterctl [-url URL] [-key KEY] <noun> <verb> [flags]
 
 Nouns:
-  group       list|create|update|delete|pause|resume
-  task        list|add|update|pause|resume|delete|enqueue
+  lane        list|create|update|delete|pause|resume|width|order
+  task        list|add|update|pause|resume|delete|up-next|move
   executions  [--task NAME] [--limit N]
   output      <execution-id|task-name>
-  metrics     [--group G] [--task T] [--hours N]
+  cancel      <execution-id>
+  brake       [on|off]              (no verb: prints engaged/released)
+  metrics     [--lane L] [--task T] [--hours N]
   health
+
+Lane verbs:
+  lane list
+  lane create -name NAME [-width N]
+  lane update <name> [-width N]
+  lane delete <name>
+  lane pause <name>
+  lane resume <name>
+  lane width <name> <n>
+  lane order <name> <t1,t2,...>
+
+Task verbs:
+  task list [-lane L]
+  task add -name NAME -lane LANE -command CMD [-repeat] [-cooldown N]
+           [-sudo] [-enabled] [-output-file PATH]
+  task update <name> [-command CMD] [-cooldown N] [-repeat] [-no-repeat]
+              [-enabled] [-disabled] [-sudo] [-no-sudo] [-output-file PATH]
+  task pause <name>
+  task resume <name>
+  task delete <name>
+  task up-next <name>
+  task move <name> <lane>
 
 Every request (including health) is sent with an Authorization: Bearer
 <key> header when a key is configured. The server URL and API key are

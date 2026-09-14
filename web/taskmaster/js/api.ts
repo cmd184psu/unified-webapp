@@ -1,10 +1,22 @@
-export interface GroupConfig {
+// api.ts — typed client for the taskmaster API (lane board rework, Slice A).
+//
+// Every endpoint the coordinator exposes (internal/taskmaster/coordinator/
+// coordinator.go is authoritative for the route list) gets a typed method
+// here. On error, callers get a rejected Promise — this module never calls
+// the native alert(); UI code surfaces failures via ui/modal.ts's
+// alertDialog per the global "no native dialogs" policy (FRD §8a). A 401
+// reloads the page so the platform auth gate can re-challenge.
+
+import { alertDialog } from './ui/modal.js';
+
+// ─── Model shapes (mirror internal/taskmaster/models/models.go) ────────────
+
+export interface LaneConfig {
   name: string;
-  pool_limit: number;
-  allowed_types: string[];
+  width: number;
 }
 
-export interface Group extends GroupConfig {
+export interface Lane extends LaneConfig {
   paused: boolean;
   paused_at?: string;
   paused_by?: string;
@@ -12,21 +24,20 @@ export interface Group extends GroupConfig {
   updated_at: string;
 }
 
-export interface GroupStatus extends Group {
+export interface LaneStatus extends Lane {
   running_count: number;
 }
 
 export interface Task {
   id: number;
   name: string;
-  group_name: string;
+  lane_name: string;
+  command: string;
+  position: number;
   enabled: boolean;
   paused: boolean;
-  priority: number;
-  cooldown_seconds: number;
   repeat: boolean;
-  task_type: string;
-  args: string;
+  cooldown_seconds: number;
   sudo: boolean;
   output_file?: string;
   created_at: string;
@@ -45,6 +56,9 @@ export interface TaskExecution {
   worker_id?: string;
   duration_ms?: number;
   schedule_delay_ms?: number;
+  /** Present only for a running execution, merged in from the in-memory process registry. */
+  pid?: number;
+  suspended?: boolean;
 }
 
 export interface MetricSummary {
@@ -52,6 +66,7 @@ export interface MetricSummary {
   group_name: string;
   success_count: number;
   failed_count: number;
+  canceled_count: number;
   avg_duration_ms?: number;
   min_duration_ms?: number;
   max_duration_ms?: number;
@@ -67,13 +82,26 @@ export interface AuthMode {
   methods: string[];
 }
 
+export interface BrakeState {
+  engaged: boolean;
+}
+
+// ─── Fetch plumbing ──────────────────────────────────────────────────────
+
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const existingHeaders = options.headers as Record<string, string> | undefined;
   if (existingHeaders) {
     Object.assign(headers, existingHeaders);
   }
-  const resp = await fetch(path, { ...options, headers });
+  let resp: Response;
+  try {
+    resp = await fetch(path, { ...options, headers });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    void alertDialog('Network error contacting the server: ' + msg);
+    throw err;
+  }
   if (resp.status === 401) {
     window.location.reload();
     throw new Error('unauthorized');
@@ -81,9 +109,12 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   if (!resp.ok) {
     let errMsg = resp.statusText;
     try {
-      const body = await resp.json() as { error?: string };
+      const body = (await resp.json()) as { error?: string };
       if (body.error) errMsg = body.error;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore — non-JSON error body */
+    }
+    void alertDialog('Request failed: ' + errMsg);
     throw new Error(errMsg);
   }
   if (resp.status === 204) return undefined as unknown as T;
@@ -110,62 +141,130 @@ export const api = {
     return apiFetch<AuthMode>('/api/auth/mode');
   },
 
-  // Groups
-  listGroups() { return apiFetch<GroupStatus[]>('/api/groups'); },
-  getGroup(name: string) { return apiFetch<GroupStatus>('/api/groups/' + name); },
-  createGroup(g: Partial<GroupConfig>) {
-    return apiFetch<Group>('/api/groups', { method: 'POST', body: JSON.stringify(g) });
-  },
-  updateGroup(name: string, updates: Partial<GroupConfig>) {
-    return apiFetch<Group>('/api/groups/' + name, { method: 'PUT', body: JSON.stringify(updates) });
-  },
-  deleteGroup(name: string) {
-    return apiFetch<void>('/api/groups/' + name, { method: 'DELETE' });
-  },
-  pauseGroup(name: string) {
-    return apiFetch<void>('/api/groups/' + name + '/pause', { method: 'POST' });
-  },
-  resumeGroup(name: string) {
-    return apiFetch<void>('/api/groups/' + name + '/resume', { method: 'POST' });
+  logout() {
+    return fetch('/api/auth/logout', { method: 'POST' });
   },
 
-  // Tasks
-  listTasks(group?: string) {
-    const q = group ? '?group=' + encodeURIComponent(group) : '';
+  // ─── Lanes ────────────────────────────────────────────────────────────
+  listLanes() {
+    return apiFetch<LaneStatus[]>('/api/lanes');
+  },
+  getLane(name: string) {
+    return apiFetch<LaneStatus>('/api/lanes/' + encodeURIComponent(name));
+  },
+  createLane(l: LaneConfig) {
+    return apiFetch<Lane>('/api/lanes', { method: 'POST', body: JSON.stringify(l) });
+  },
+  updateLane(name: string, updates: Partial<LaneConfig>) {
+    return apiFetch<Lane>('/api/lanes/' + encodeURIComponent(name), {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+  },
+  deleteLane(name: string) {
+    return apiFetch<void>('/api/lanes/' + encodeURIComponent(name), { method: 'DELETE' });
+  },
+  pauseLane(name: string) {
+    return apiFetch<{ status: string }>('/api/lanes/' + encodeURIComponent(name) + '/pause', {
+      method: 'POST',
+    });
+  },
+  resumeLane(name: string) {
+    return apiFetch<{ status: string }>('/api/lanes/' + encodeURIComponent(name) + '/resume', {
+      method: 'POST',
+    });
+  },
+  setLaneWidth(name: string, width: number) {
+    return apiFetch<Lane>('/api/lanes/' + encodeURIComponent(name) + '/width', {
+      method: 'PUT',
+      body: JSON.stringify({ width }),
+    });
+  },
+  setLaneOrder(name: string, order: string[]) {
+    return apiFetch<Task[]>('/api/lanes/' + encodeURIComponent(name) + '/order', {
+      method: 'PUT',
+      body: JSON.stringify({ order }),
+    });
+  },
+
+  // ─── Tasks ────────────────────────────────────────────────────────────
+  listTasks(lane?: string) {
+    const q = lane ? '?lane=' + encodeURIComponent(lane) : '';
     return apiFetch<Task[]>('/api/tasks' + q);
   },
-  getTask(name: string) { return apiFetch<Task>('/api/tasks/' + name); },
+  getTask(name: string) {
+    return apiFetch<Task>('/api/tasks/' + encodeURIComponent(name));
+  },
   addTask(task: Partial<Task>) {
     return apiFetch<Task>('/api/tasks', { method: 'POST', body: JSON.stringify(task) });
   },
   updateTask(name: string, updates: Partial<Task>) {
-    return apiFetch<Task>('/api/tasks/' + name, { method: 'PUT', body: JSON.stringify(updates) });
+    return apiFetch<Task>('/api/tasks/' + encodeURIComponent(name), {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
   },
   deleteTask(name: string) {
-    return apiFetch<void>('/api/tasks/' + name, { method: 'DELETE' });
+    return apiFetch<void>('/api/tasks/' + encodeURIComponent(name), { method: 'DELETE' });
   },
   pauseTask(name: string) {
-    return apiFetch<void>('/api/tasks/' + name + '/pause', { method: 'POST' });
+    return apiFetch<{ status: string }>('/api/tasks/' + encodeURIComponent(name) + '/pause', {
+      method: 'POST',
+    });
   },
   resumeTask(name: string) {
-    return apiFetch<void>('/api/tasks/' + name + '/resume', { method: 'POST' });
+    return apiFetch<{ status: string }>('/api/tasks/' + encodeURIComponent(name) + '/resume', {
+      method: 'POST',
+    });
   },
-  enqueueTask(name: string) {
-    return apiFetch<{ execution_id: number }>('/api/tasks/' + name + '/enqueue', { method: 'POST' });
+  upNext(name: string) {
+    return apiFetch<{ execution_id: number }>('/api/tasks/' + encodeURIComponent(name) + '/up-next', {
+      method: 'POST',
+    });
+  },
+  moveTask(name: string, laneName: string) {
+    return apiFetch<Task>('/api/tasks/' + encodeURIComponent(name) + '/move', {
+      method: 'POST',
+      body: JSON.stringify({ lane_name: laneName }),
+    });
   },
 
-  // Executions
+  // ─── Executions ───────────────────────────────────────────────────────
   listExecutions(taskName?: string, limit = 50) {
     const params = new URLSearchParams({ limit: String(limit) });
     if (taskName) params.set('task', taskName);
     return apiFetch<TaskExecution[]>('/api/executions?' + params);
   },
+  cancelExecution(id: number) {
+    return apiFetch<{ status: string }>('/api/executions/' + id + '/cancel', { method: 'POST' });
+  },
+  pauseExecution(id: number) {
+    return apiFetch<{ status: string }>('/api/executions/' + id + '/pause', { method: 'POST' });
+  },
+  resumeExecution(id: number) {
+    return apiFetch<{ status: string }>('/api/executions/' + id + '/resume', { method: 'POST' });
+  },
+  /** Opens a live SSE stream of an execution's stdout/stderr. Caller owns close(). */
+  openExecutionOutput(id: number): EventSource {
+    return new EventSource('/api/executions/' + id + '/output');
+  },
 
-  // Metrics
-  getMetrics(group?: string, task?: string, hours = 24) {
+  // ─── Metrics ──────────────────────────────────────────────────────────
+  getMetrics(lane?: string, task?: string, hours = 24) {
     const params = new URLSearchParams({ hours: String(hours) });
-    if (group) params.set('group', group);
+    if (lane) params.set('lane', lane);
     if (task) params.set('task', task);
     return apiFetch<MetricSummary[]>('/api/metrics?' + params);
+  },
+
+  // ─── Hand brake ───────────────────────────────────────────────────────
+  getBrake() {
+    return apiFetch<BrakeState>('/api/brake');
+  },
+  engageBrake() {
+    return apiFetch<BrakeState>('/api/brake', { method: 'POST' });
+  },
+  releaseBrake() {
+    return apiFetch<BrakeState>('/api/brake', { method: 'DELETE' });
   },
 };

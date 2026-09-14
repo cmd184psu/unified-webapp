@@ -341,32 +341,46 @@ browser login, or the API key for scripted access.
 
 ## Taskmaster
 
-A scheduled/on-demand command runner: define tasks (`shell`/`exec`/
-`script`/`migration`) grouped into concurrency-limited groups, run them now
-or on a repeat/cooldown schedule, and watch output live. See
-`docs/taskmaster.md` for the full config/API/scheduling reference and a
-security write-up you should read before enabling sudo.
+A command runner: define tasks — each a single shell command — that live
+in ordered, width-limited **lanes**; run them on demand or let them repeat
+after a cooldown rest; watch a live lane board and each task's output over
+SSE. See `docs/taskmaster.md` for the full config/API/scheduling reference
+and a security write-up you should read before enabling sudo.
 
 **Using it:**
 
-- **Groups** cap how many tasks run concurrently (`pool_limit`) and
-  optionally restrict which task types may live in them (`allowed_types`;
-  empty means all types allowed).
-- **Tasks** belong to one group, run a command of a given type, and can be
-  `repeat`-scheduled with a `cooldown_seconds`, or triggered on demand via
-  Enqueue.
-- **Live output:** enqueueing (or opening a running task) streams its
+- **Lanes** replace the old "groups." A lane is an ordered playlist of
+  tasks with a **width**: width 1 runs tasks one at a time in order; width
+  N runs up to N concurrently, pulled off the top in position order. There
+  is no per-task priority — order within a lane is drag-reorder (or
+  `PUT /api/lanes/{name}/order`).
+- **Tasks** belong to one lane and run a single **command** through a
+  shell — there is no task "type" selector and no JSON args blob. A task
+  can be `repeat`-scheduled with a `cooldown_seconds` (a minimum rest
+  between runs, not a cron-style cadence), or triggered on demand via
+  "Up next," which puts it at the front of its lane's queue.
+- **Live output:** triggering a task (or opening a running one) streams its
   stdout/stderr line-by-line over SSE as it happens; the executions list
-  shows status (pending/running/success/failed) and duration; the metrics
-  page aggregates success/failure counts and durations per task.
-- **Sudo control:** a sudo checkbox on task creation appears only when the
+  shows status (pending/running/success/failed/canceled) and duration; the
+  metrics page aggregates success/failed/canceled counts and durations per
+  task. The lane board itself updates live over a separate board-events SSE
+  stream rather than polling or full-page refresh.
+- **Cancel and the hand brake:** a running execution can be force-killed
+  individually (recorded as `canceled`, distinct from `failed`), or the
+  global **hand brake** can pause every lane and kill every running
+  execution in one action — it latches until explicitly released, and
+  persists across a restart. A `sudo`-run task's child process is
+  root-owned and may survive either kind of cancel; see
+  `docs/taskmaster.md`.
+- **Sudo control:** a sudo toggle on task creation appears only when the
   server's `taskmaster.allow_sudo` is `true` (checked via
   `GET /api/capabilities`); when hidden, tasks can never be created with
   `sudo: true` from the UI, and the API rejects `sudo: true` with a 403 if
-  `allow_sudo` is false regardless.
-- **`taskmasterctl`** is a companion CLI for the same API (group/task/
-  executions/output/metrics/health), authenticating with a platform API
-  key — see `docs/taskmaster.md`.
+  `allow_sudo` is false regardless. `allow_sudo` is runtime-togglable
+  (`POST /api/capabilities`) and DB-authoritative once seeded from config.
+- **`taskmasterctl`** is a companion CLI for the same API (lane/task/
+  executions/output/cancel/brake/metrics/health), authenticating with a
+  platform API key — see `docs/taskmaster.md`.
 
 In the local profile taskmaster is protected like multissh: LDAP for
 browser login, or the API key for scripted access.

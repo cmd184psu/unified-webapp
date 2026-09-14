@@ -9,10 +9,11 @@ import (
 
 	"cmd184psu/unified-webapp/internal/platform/response"
 	"cmd184psu/unified-webapp/internal/taskmaster/models"
+	"cmd184psu/unified-webapp/internal/taskmaster/worker"
 )
 
 func (c *Coordinator) handleListTasks(w http.ResponseWriter, r *http.Request) {
-	laneFilter := r.URL.Query().Get("group")
+	laneFilter := r.URL.Query().Get("lane")
 	tasks, err := c.db.ListTasks(laneFilter)
 	if err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
@@ -67,6 +68,7 @@ func (c *Coordinator) handleAddTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	created, _ := c.db.GetTask(task.Name)
+	c.publishBoard(worker.BoardEvent{Type: "lane-updated", Lane: task.LaneName, Task: task.Name})
 	response.WriteJSON(w, http.StatusCreated, created)
 }
 
@@ -128,42 +130,114 @@ func (c *Coordinator) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	updated, _ := c.db.GetTask(name)
+	if updated != nil {
+		c.publishBoard(worker.BoardEvent{Type: "lane-updated", Lane: updated.LaneName, Task: name})
+	}
 	response.WriteJSON(w, http.StatusOK, updated)
 }
 
 func (c *Coordinator) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	existing, _ := c.db.GetTask(name)
 	if err := c.db.DeleteTask(name); err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if existing != nil {
+		c.publishBoard(worker.BoardEvent{Type: "lane-updated", Lane: existing.LaneName, Task: name})
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (c *Coordinator) handlePauseTask(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	existing, _ := c.db.GetTask(name)
 	if err := c.db.SetTaskPaused(name, true); err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if existing != nil {
+		c.publishBoard(worker.BoardEvent{Type: "lane-updated", Lane: existing.LaneName, Task: name})
 	}
 	response.WriteJSON(w, http.StatusOK, map[string]string{"status": "paused"})
 }
 
 func (c *Coordinator) handleResumeTask(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	existing, _ := c.db.GetTask(name)
 	if err := c.db.SetTaskPaused(name, false); err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if existing != nil {
+		c.publishBoard(worker.BoardEvent{Type: "lane-updated", Lane: existing.LaneName, Task: name})
+	}
 	response.WriteJSON(w, http.StatusOK, map[string]string{"status": "resumed"})
 }
 
-func (c *Coordinator) handleEnqueueTask(w http.ResponseWriter, r *http.Request) {
+func (c *Coordinator) handleUpNext(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	execID, err := c.db.EnqueueTask(name, time.Now())
 	if err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	lane := ""
+	if task, _ := c.db.GetTask(name); task != nil {
+		lane = task.LaneName
+	}
+	c.publishBoard(worker.BoardEvent{Type: "task-enqueued", Lane: lane, Task: name, ExecutionID: execID})
 	response.WriteJSON(w, http.StatusCreated, map[string]int64{"execution_id": execID})
+}
+
+// handleMoveTask moves a task to a different lane, validating the target
+// lane exists first.
+func (c *Coordinator) handleMoveTask(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	existing, err := c.db.GetTask(name)
+	if err != nil {
+		response.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if existing == nil {
+		response.WriteError(w, http.StatusNotFound, "task not found: "+name)
+		return
+	}
+
+	var req struct {
+		LaneName string `json:"lane_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.WriteDecodeError(w, err)
+		return
+	}
+	if req.LaneName == "" {
+		response.WriteError(w, http.StatusBadRequest, "lane_name is required")
+		return
+	}
+
+	lane, err := c.db.GetLane(req.LaneName)
+	if err != nil {
+		response.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if lane == nil {
+		response.WriteError(w, http.StatusBadRequest, "unknown lane: "+req.LaneName)
+		return
+	}
+
+	maxPos, err := c.db.MaxTaskPosition(req.LaneName)
+	if err != nil {
+		response.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if err := c.db.UpdateTask(name, map[string]any{"lane_name": req.LaneName, "position": maxPos + 1}); err != nil {
+		response.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	updated, _ := c.db.GetTask(name)
+	c.publishBoard(worker.BoardEvent{Type: "lane-updated", Lane: existing.LaneName, Task: name})
+	c.publishBoard(worker.BoardEvent{Type: "lane-updated", Lane: req.LaneName, Task: name})
+	response.WriteJSON(w, http.StatusOK, updated)
 }

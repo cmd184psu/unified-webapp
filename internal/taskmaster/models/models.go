@@ -42,6 +42,11 @@ type TaskExecution struct {
 	WorkerID        *string    `json:"worker_id"`
 	DurationMs      *int64     `json:"duration_ms"`
 	ScheduleDelayMs *int64     `json:"schedule_delay_ms"`
+	// Pid and Suspended are in-memory only (from worker.ProcessRegistry),
+	// merged into the API response for a running execution — never persisted,
+	// since the process (and any suspended state) is gone on restart.
+	Pid       *int `json:"pid,omitempty"`
+	Suspended bool `json:"suspended,omitempty"`
 }
 
 type Lane struct {
@@ -64,6 +69,7 @@ type MetricSummary struct {
 	GroupName     string     `json:"group_name"`
 	SuccessCount  int        `json:"success_count"`
 	FailedCount   int        `json:"failed_count"`
+	CanceledCount int        `json:"canceled_count"`
 	AvgDurationMs *float64   `json:"avg_duration_ms"`
 	MinDurationMs *int64     `json:"min_duration_ms"`
 	MaxDurationMs *int64     `json:"max_duration_ms"`

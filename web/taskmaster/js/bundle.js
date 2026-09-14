@@ -1,5 +1,244 @@
 "use strict";
 (() => {
+  // web/taskmaster/js/ui/modal.ts
+  var STYLE_ATTR = "data-tm-ui-modal-styles";
+  function ensureStyles() {
+    if (document.head.querySelector(`style[${STYLE_ATTR}]`)) return;
+    const style = document.createElement("style");
+    style.setAttribute(STYLE_ATTR, "");
+    style.textContent = `
+.tm-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  font-family: var(--font-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+}
+.tm-modal-panel {
+  background: var(--bg-secondary, #252525);
+  color: var(--text-normal, #dcddde);
+  border: 1px solid var(--bg-modifier-border, #3a3a3a);
+  border-radius: var(--radius, 6px);
+  min-width: 20em;
+  max-width: min(32em, calc(100vw - 2em));
+  max-height: calc(100vh - 2em);
+  overflow: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  padding: 1.25em;
+}
+.tm-modal-title {
+  font-size: 1.05em;
+  font-weight: 600;
+  margin: 0 0 0.75em 0;
+}
+.tm-modal-message {
+  margin: 0 0 1em 0;
+  white-space: pre-wrap;
+  line-height: 1.4;
+}
+.tm-modal-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.5em;
+  margin-bottom: 1em;
+  background: var(--bg-primary, #1e1e1e);
+  color: var(--text-normal, #dcddde);
+  border: 1px solid var(--bg-modifier-border, #3a3a3a);
+  border-radius: var(--radius, 6px);
+  font-family: inherit;
+  font-size: 1em;
+}
+.tm-modal-input:focus-visible {
+  outline: none;
+  border-color: var(--interactive-accent, #7f6df2);
+}
+.tm-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5em;
+}
+.tm-modal-btn {
+  padding: 0.45em 1em;
+  border-radius: var(--radius, 6px);
+  border: 1px solid var(--bg-modifier-border, #3a3a3a);
+  background: var(--bg-tertiary, #2d2d2d);
+  color: var(--text-normal, #dcddde);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.9em;
+}
+.tm-modal-btn:hover {
+  border-color: var(--interactive-accent, #7f6df2);
+}
+.tm-modal-btn:focus-visible {
+  outline: none;
+  border-color: var(--interactive-accent, #7f6df2);
+  box-shadow: 0 0 0 2px var(--interactive-accent-hover, #9d8fff);
+}
+.tm-modal-btn-primary {
+  background: var(--interactive-accent, #7f6df2);
+  border-color: var(--interactive-accent, #7f6df2);
+  color: #fff;
+}
+.tm-modal-btn-primary:hover {
+  background: var(--interactive-accent-hover, #9d8fff);
+}
+`;
+    document.head.appendChild(style);
+  }
+  function openModal(contentEl, opts = {}) {
+    ensureStyles();
+    const closeOnEscape = opts.closeOnEscape !== false;
+    const closeOnOverlayClick = opts.closeOnOverlayClick !== false;
+    const previouslyFocused = document.activeElement;
+    const overlay = document.createElement("div");
+    overlay.className = "tm-modal-overlay";
+    const panel = document.createElement("div");
+    panel.className = "tm-modal-panel";
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    panel.tabIndex = -1;
+    if (opts.title) {
+      const titleEl = document.createElement("h2");
+      titleEl.className = "tm-modal-title";
+      titleEl.textContent = opts.title;
+      panel.appendChild(titleEl);
+    }
+    panel.appendChild(contentEl);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+    let closed = false;
+    function getFocusable() {
+      return Array.from(
+        panel.querySelectorAll(
+          'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      );
+    }
+    function onKeydown(e) {
+      if (e.key === "Escape" && closeOnEscape) {
+        e.preventDefault();
+        close();
+        return;
+      }
+      if (e.key === "Tab") {
+        const focusable2 = getFocusable();
+        if (focusable2.length === 0) {
+          e.preventDefault();
+          panel.focus();
+          return;
+        }
+        const first = focusable2[0];
+        const last = focusable2[focusable2.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+    function onOverlayClick(e) {
+      if (closeOnOverlayClick && e.target === overlay) {
+        close();
+      }
+    }
+    function close() {
+      if (closed) return;
+      closed = true;
+      document.removeEventListener("keydown", onKeydown, true);
+      overlay.removeEventListener("mousedown", onOverlayClick);
+      overlay.remove();
+      if (previouslyFocused && typeof previouslyFocused.focus === "function") {
+        previouslyFocused.focus();
+      }
+      opts.onClose?.();
+    }
+    document.addEventListener("keydown", onKeydown, true);
+    overlay.addEventListener("mousedown", onOverlayClick);
+    const focusable = getFocusable();
+    (focusable[0] ?? panel).focus();
+    return { overlay, panel, close };
+  }
+  function confirmDialog(message, opts = {}) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const content = document.createElement("div");
+      const msg = document.createElement("p");
+      msg.className = "tm-modal-message";
+      msg.textContent = message;
+      content.appendChild(msg);
+      const actions = document.createElement("div");
+      actions.className = "tm-modal-actions";
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "tm-modal-btn";
+      cancelBtn.textContent = opts.cancelLabel ?? "Cancel";
+      const okBtn = document.createElement("button");
+      okBtn.type = "button";
+      okBtn.className = "tm-modal-btn tm-modal-btn-primary";
+      okBtn.textContent = opts.confirmLabel ?? "OK";
+      actions.appendChild(cancelBtn);
+      actions.appendChild(okBtn);
+      content.appendChild(actions);
+      const handle = openModal(content, {
+        title: opts.title,
+        onClose: () => {
+          if (!settled) {
+            settled = true;
+            resolve(false);
+          }
+        }
+      });
+      cancelBtn.addEventListener("click", () => {
+        settled = true;
+        resolve(false);
+        handle.close();
+      });
+      okBtn.addEventListener("click", () => {
+        settled = true;
+        resolve(true);
+        handle.close();
+      });
+    });
+  }
+  function alertDialog(message, opts = {}) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const content = document.createElement("div");
+      const msg = document.createElement("p");
+      msg.className = "tm-modal-message";
+      msg.textContent = message;
+      content.appendChild(msg);
+      const actions = document.createElement("div");
+      actions.className = "tm-modal-actions";
+      const okBtn = document.createElement("button");
+      okBtn.type = "button";
+      okBtn.className = "tm-modal-btn tm-modal-btn-primary";
+      okBtn.textContent = opts.confirmLabel ?? "OK";
+      actions.appendChild(okBtn);
+      content.appendChild(actions);
+      const handle = openModal(content, {
+        title: opts.title,
+        onClose: () => {
+          if (!settled) {
+            settled = true;
+            resolve();
+          }
+        }
+      });
+      okBtn.addEventListener("click", () => {
+        settled = true;
+        resolve();
+        handle.close();
+      });
+    });
+  }
+
   // web/taskmaster/js/api.ts
   async function apiFetch(path, options = {}) {
     const headers = { "Content-Type": "application/json" };
@@ -7,7 +246,14 @@
     if (existingHeaders) {
       Object.assign(headers, existingHeaders);
     }
-    const resp = await fetch(path, { ...options, headers });
+    let resp;
+    try {
+      resp = await fetch(path, { ...options, headers });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      void alertDialog("Network error contacting the server: " + msg);
+      throw err;
+    }
     if (resp.status === 401) {
       window.location.reload();
       throw new Error("unauthorized");
@@ -19,6 +265,7 @@
         if (body.error) errMsg = body.error;
       } catch {
       }
+      void alertDialog("Request failed: " + errMsg);
       throw new Error(errMsg);
     }
     if (resp.status === 204) return void 0;
@@ -40,863 +287,1676 @@
     authMode() {
       return apiFetch("/api/auth/mode");
     },
-    // Groups
-    listGroups() {
-      return apiFetch("/api/groups");
+    logout() {
+      return fetch("/api/auth/logout", { method: "POST" });
     },
-    getGroup(name) {
-      return apiFetch("/api/groups/" + name);
+    // ─── Lanes ────────────────────────────────────────────────────────────
+    listLanes() {
+      return apiFetch("/api/lanes");
     },
-    createGroup(g) {
-      return apiFetch("/api/groups", { method: "POST", body: JSON.stringify(g) });
+    getLane(name) {
+      return apiFetch("/api/lanes/" + encodeURIComponent(name));
     },
-    updateGroup(name, updates) {
-      return apiFetch("/api/groups/" + name, { method: "PUT", body: JSON.stringify(updates) });
+    createLane(l) {
+      return apiFetch("/api/lanes", { method: "POST", body: JSON.stringify(l) });
     },
-    deleteGroup(name) {
-      return apiFetch("/api/groups/" + name, { method: "DELETE" });
+    updateLane(name, updates) {
+      return apiFetch("/api/lanes/" + encodeURIComponent(name), {
+        method: "PUT",
+        body: JSON.stringify(updates)
+      });
     },
-    pauseGroup(name) {
-      return apiFetch("/api/groups/" + name + "/pause", { method: "POST" });
+    deleteLane(name) {
+      return apiFetch("/api/lanes/" + encodeURIComponent(name), { method: "DELETE" });
     },
-    resumeGroup(name) {
-      return apiFetch("/api/groups/" + name + "/resume", { method: "POST" });
+    pauseLane(name) {
+      return apiFetch("/api/lanes/" + encodeURIComponent(name) + "/pause", {
+        method: "POST"
+      });
     },
-    // Tasks
-    listTasks(group) {
-      const q = group ? "?group=" + encodeURIComponent(group) : "";
+    resumeLane(name) {
+      return apiFetch("/api/lanes/" + encodeURIComponent(name) + "/resume", {
+        method: "POST"
+      });
+    },
+    setLaneWidth(name, width) {
+      return apiFetch("/api/lanes/" + encodeURIComponent(name) + "/width", {
+        method: "PUT",
+        body: JSON.stringify({ width })
+      });
+    },
+    setLaneOrder(name, order) {
+      return apiFetch("/api/lanes/" + encodeURIComponent(name) + "/order", {
+        method: "PUT",
+        body: JSON.stringify({ order })
+      });
+    },
+    // ─── Tasks ────────────────────────────────────────────────────────────
+    listTasks(lane) {
+      const q = lane ? "?lane=" + encodeURIComponent(lane) : "";
       return apiFetch("/api/tasks" + q);
     },
     getTask(name) {
-      return apiFetch("/api/tasks/" + name);
+      return apiFetch("/api/tasks/" + encodeURIComponent(name));
     },
     addTask(task) {
       return apiFetch("/api/tasks", { method: "POST", body: JSON.stringify(task) });
     },
     updateTask(name, updates) {
-      return apiFetch("/api/tasks/" + name, { method: "PUT", body: JSON.stringify(updates) });
+      return apiFetch("/api/tasks/" + encodeURIComponent(name), {
+        method: "PUT",
+        body: JSON.stringify(updates)
+      });
     },
     deleteTask(name) {
-      return apiFetch("/api/tasks/" + name, { method: "DELETE" });
+      return apiFetch("/api/tasks/" + encodeURIComponent(name), { method: "DELETE" });
     },
     pauseTask(name) {
-      return apiFetch("/api/tasks/" + name + "/pause", { method: "POST" });
+      return apiFetch("/api/tasks/" + encodeURIComponent(name) + "/pause", {
+        method: "POST"
+      });
     },
     resumeTask(name) {
-      return apiFetch("/api/tasks/" + name + "/resume", { method: "POST" });
+      return apiFetch("/api/tasks/" + encodeURIComponent(name) + "/resume", {
+        method: "POST"
+      });
     },
-    enqueueTask(name) {
-      return apiFetch("/api/tasks/" + name + "/enqueue", { method: "POST" });
+    upNext(name) {
+      return apiFetch("/api/tasks/" + encodeURIComponent(name) + "/up-next", {
+        method: "POST"
+      });
     },
-    // Executions
+    moveTask(name, laneName) {
+      return apiFetch("/api/tasks/" + encodeURIComponent(name) + "/move", {
+        method: "POST",
+        body: JSON.stringify({ lane_name: laneName })
+      });
+    },
+    // ─── Executions ───────────────────────────────────────────────────────
     listExecutions(taskName, limit = 50) {
       const params = new URLSearchParams({ limit: String(limit) });
       if (taskName) params.set("task", taskName);
       return apiFetch("/api/executions?" + params);
     },
-    // Metrics
-    getMetrics(group, task, hours = 24) {
+    cancelExecution(id) {
+      return apiFetch("/api/executions/" + id + "/cancel", { method: "POST" });
+    },
+    pauseExecution(id) {
+      return apiFetch("/api/executions/" + id + "/pause", { method: "POST" });
+    },
+    resumeExecution(id) {
+      return apiFetch("/api/executions/" + id + "/resume", { method: "POST" });
+    },
+    /** Opens a live SSE stream of an execution's stdout/stderr. Caller owns close(). */
+    openExecutionOutput(id) {
+      return new EventSource("/api/executions/" + id + "/output");
+    },
+    // ─── Metrics ──────────────────────────────────────────────────────────
+    getMetrics(lane, task, hours = 24) {
       const params = new URLSearchParams({ hours: String(hours) });
-      if (group) params.set("group", group);
+      if (lane) params.set("lane", lane);
       if (task) params.set("task", task);
       return apiFetch("/api/metrics?" + params);
+    },
+    // ─── Hand brake ───────────────────────────────────────────────────────
+    getBrake() {
+      return apiFetch("/api/brake");
+    },
+    engageBrake() {
+      return apiFetch("/api/brake", { method: "POST" });
+    },
+    releaseBrake() {
+      return apiFetch("/api/brake", { method: "DELETE" });
     }
   };
 
-  // web/taskmaster/js/groups.ts
-  function statusBadge(paused) {
-    const span = document.createElement("span");
-    span.className = paused ? "badge badge-yellow" : "badge badge-green";
-    span.textContent = paused ? "paused" : "active";
-    return span;
-  }
-  function renderGroupRow(g, tbody, onRefresh) {
-    const tr = document.createElement("tr");
-    const tdName = document.createElement("td");
-    tdName.textContent = g.name;
-    const tdLimit = document.createElement("td");
-    tdLimit.textContent = String(g.pool_limit);
-    const tdRunning = document.createElement("td");
-    tdRunning.textContent = String(g.running_count);
-    const tdStatus = document.createElement("td");
-    tdStatus.appendChild(statusBadge(g.paused));
-    const tdActions = document.createElement("td");
-    const btnGroup = document.createElement("div");
-    btnGroup.className = "btn-group";
-    if (g.paused) {
-      const btnResume = document.createElement("button");
-      btnResume.className = "btn btn-secondary btn-sm";
-      btnResume.textContent = "Resume";
-      btnResume.addEventListener("click", async () => {
-        try {
-          await api.resumeGroup(g.name);
-          onRefresh();
-        } catch (e) {
-          showError(String(e));
-        }
-      });
-      btnGroup.appendChild(btnResume);
-    } else {
-      const btnPause = document.createElement("button");
-      btnPause.className = "btn btn-secondary btn-sm";
-      btnPause.textContent = "Pause";
-      btnPause.addEventListener("click", async () => {
-        try {
-          await api.pauseGroup(g.name);
-          onRefresh();
-        } catch (e) {
-          showError(String(e));
-        }
-      });
-      btnGroup.appendChild(btnPause);
+  // web/taskmaster/js/ui/live.ts
+  var LIVE_ENABLED_KEY = "tm.live.enabled";
+  var LIVE_INTERVAL_KEY = "tm.live.interval";
+  var DEFAULT_INTERVAL_MS = 5e3;
+  var BOARD_EVENTS_URL = "/api/board/events";
+  var BOARD_EVENT_NAME = "board";
+  function readStoredEnabled() {
+    try {
+      const raw = localStorage.getItem(LIVE_ENABLED_KEY);
+      if (raw === null) return true;
+      return raw === "true";
+    } catch {
+      return true;
     }
-    const btnEdit = document.createElement("button");
-    btnEdit.className = "btn btn-secondary btn-sm";
-    btnEdit.textContent = "Edit";
-    btnEdit.addEventListener("click", () => showEditModal(g, onRefresh));
-    btnGroup.appendChild(btnEdit);
-    const btnDel = document.createElement("button");
-    btnDel.className = "btn btn-danger btn-sm";
-    btnDel.textContent = "Delete";
-    btnDel.addEventListener("click", async () => {
-      if (!confirm('Delete group "' + g.name + '"? This fails if tasks exist.')) return;
-      try {
-        await api.deleteGroup(g.name);
-        onRefresh();
-      } catch (e) {
-        showError(String(e));
-      }
-    });
-    btnGroup.appendChild(btnDel);
-    tdActions.appendChild(btnGroup);
-    tr.appendChild(tdName);
-    tr.appendChild(tdLimit);
-    tr.appendChild(tdRunning);
-    tr.appendChild(tdStatus);
-    tr.appendChild(tdActions);
-    tbody.appendChild(tr);
   }
-  function showCreateModal(onRefresh) {
-    const overlay = document.createElement("div");
-    overlay.className = "modal-overlay";
-    const modal = document.createElement("div");
-    modal.className = "modal";
-    const title = document.createElement("h2");
-    title.textContent = "Create Group";
-    modal.appendChild(title);
-    const fgName = document.createElement("div");
-    fgName.className = "form-group";
-    const lblName = document.createElement("label");
-    lblName.textContent = "Name";
-    const inputName = document.createElement("input");
-    inputName.type = "text";
-    inputName.placeholder = "my-group";
-    fgName.appendChild(lblName);
-    fgName.appendChild(inputName);
-    modal.appendChild(fgName);
-    const fgLimit = document.createElement("div");
-    fgLimit.className = "form-group";
-    const lblLimit = document.createElement("label");
-    lblLimit.textContent = "Pool Limit";
-    const inputLimit = document.createElement("input");
-    inputLimit.type = "number";
-    inputLimit.value = "1";
-    inputLimit.min = "1";
-    fgLimit.appendChild(lblLimit);
-    fgLimit.appendChild(inputLimit);
-    modal.appendChild(fgLimit);
-    const actions = document.createElement("div");
-    actions.className = "form-actions";
-    const btnCreate = document.createElement("button");
-    btnCreate.className = "btn btn-primary";
-    btnCreate.textContent = "Create";
-    btnCreate.addEventListener("click", async () => {
-      try {
-        await api.createGroup({ name: inputName.value.trim(), pool_limit: Number(inputLimit.value), allowed_types: [] });
-        overlay.remove();
-        onRefresh();
-      } catch (e) {
-        showError(String(e));
-      }
-    });
-    const btnCancel = document.createElement("button");
-    btnCancel.className = "btn btn-secondary";
-    btnCancel.textContent = "Cancel";
-    btnCancel.addEventListener("click", () => overlay.remove());
-    actions.appendChild(btnCreate);
-    actions.appendChild(btnCancel);
-    modal.appendChild(actions);
-    overlay.appendChild(modal);
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) overlay.remove();
-    });
-    document.body.appendChild(overlay);
-  }
-  function showEditModal(g, onRefresh) {
-    const overlay = document.createElement("div");
-    overlay.className = "modal-overlay";
-    const modal = document.createElement("div");
-    modal.className = "modal";
-    const title = document.createElement("h2");
-    title.textContent = "Edit Group: " + g.name;
-    modal.appendChild(title);
-    const fgLimit = document.createElement("div");
-    fgLimit.className = "form-group";
-    const lblLimit = document.createElement("label");
-    lblLimit.textContent = "Pool Limit";
-    const inputLimit = document.createElement("input");
-    inputLimit.type = "number";
-    inputLimit.value = String(g.pool_limit);
-    inputLimit.min = "1";
-    fgLimit.appendChild(lblLimit);
-    fgLimit.appendChild(inputLimit);
-    modal.appendChild(fgLimit);
-    const actions = document.createElement("div");
-    actions.className = "form-actions";
-    const btnSave = document.createElement("button");
-    btnSave.className = "btn btn-primary";
-    btnSave.textContent = "Save";
-    btnSave.addEventListener("click", async () => {
-      try {
-        await api.updateGroup(g.name, { pool_limit: Number(inputLimit.value) });
-        overlay.remove();
-        onRefresh();
-      } catch (e) {
-        showError(String(e));
-      }
-    });
-    const btnCancel = document.createElement("button");
-    btnCancel.className = "btn btn-secondary";
-    btnCancel.textContent = "Cancel";
-    btnCancel.addEventListener("click", () => overlay.remove());
-    actions.appendChild(btnSave);
-    actions.appendChild(btnCancel);
-    modal.appendChild(actions);
-    overlay.appendChild(modal);
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) overlay.remove();
-    });
-    document.body.appendChild(overlay);
-  }
-  var errorTimer = null;
-  function showError(msg) {
-    let banner = document.getElementById("global-error");
-    if (!banner) {
-      banner = document.createElement("div");
-      banner.id = "global-error";
-      banner.className = "error-banner";
-      const app = document.getElementById("app");
-      if (app) app.prepend(banner);
+  function readStoredInterval() {
+    try {
+      const raw = localStorage.getItem(LIVE_INTERVAL_KEY);
+      const n = raw !== null ? Number(raw) : NaN;
+      return Number.isFinite(n) && n > 0 ? n : DEFAULT_INTERVAL_MS;
+    } catch {
+      return DEFAULT_INTERVAL_MS;
     }
-    banner.textContent = msg;
-    if (errorTimer) clearTimeout(errorTimer);
-    errorTimer = setTimeout(() => banner?.remove(), 5e3);
   }
-  function renderGroups(container) {
-    container.textContent = "";
-    const toolbar = document.createElement("div");
-    toolbar.className = "toolbar";
-    const h1 = document.createElement("h1");
-    h1.textContent = "Groups";
-    toolbar.appendChild(h1);
-    const spacer = document.createElement("div");
-    spacer.className = "toolbar-spacer";
-    toolbar.appendChild(spacer);
-    const refresh = () => {
-      renderGroups(container);
-    };
-    const btnNew = document.createElement("button");
-    btnNew.className = "btn btn-primary";
-    btnNew.textContent = "+ New Group";
-    btnNew.addEventListener("click", () => showCreateModal(refresh));
-    toolbar.appendChild(btnNew);
-    const btnRefresh = document.createElement("button");
-    btnRefresh.className = "btn btn-secondary";
-    btnRefresh.textContent = "Refresh";
-    btnRefresh.addEventListener("click", refresh);
-    toolbar.appendChild(btnRefresh);
-    container.appendChild(toolbar);
-    api.listGroups().then((groups) => {
-      if (groups.length === 0) {
-        const empty = document.createElement("div");
-        empty.className = "empty-state";
-        empty.textContent = "No groups yet. Create one to get started.";
-        container.appendChild(empty);
-        return;
+  var LiveController = class {
+    constructor(url = BOARD_EVENTS_URL) {
+      this.source = null;
+      this.eventListeners = /* @__PURE__ */ new Set();
+      this.tickListeners = /* @__PURE__ */ new Set();
+      this.enabledListeners = /* @__PURE__ */ new Set();
+      this.url = url;
+      this.enabled = readStoredEnabled();
+      this.intervalMs = readStoredInterval();
+      if (this.enabled) {
+        this.open();
       }
-      const card = document.createElement("div");
-      card.className = "card";
-      const table = document.createElement("table");
-      const thead = document.createElement("thead");
-      const headerRow = document.createElement("tr");
-      ["Name", "Pool Limit", "Running", "Status", "Actions"].forEach((h) => {
-        const th = document.createElement("th");
-        th.textContent = h;
-        headerRow.appendChild(th);
+    }
+    /** Registers a listener invoked for every parsed board event. */
+    onEvent(listener) {
+      this.eventListeners.add(listener);
+      return () => this.eventListeners.delete(listener);
+    }
+    /** Registers a listener invoked on each fallback-poll tick. */
+    onTick(listener) {
+      this.tickListeners.add(listener);
+      return () => this.tickListeners.delete(listener);
+    }
+    /** Registers a listener invoked whenever live/pause state changes. */
+    onEnabledChange(listener) {
+      this.enabledListeners.add(listener);
+      return () => this.enabledListeners.delete(listener);
+    }
+    /** Fires all registered tick listeners. Callers own the actual timer. */
+    tick() {
+      for (const l of this.tickListeners) l();
+    }
+    isEnabled() {
+      return this.enabled;
+    }
+    /** Turns the live stream on/off and persists the choice. */
+    setEnabled(enabled) {
+      if (this.enabled === enabled) return;
+      this.enabled = enabled;
+      try {
+        localStorage.setItem(LIVE_ENABLED_KEY, String(enabled));
+      } catch {
+      }
+      if (enabled) {
+        this.open();
+      } else {
+        this.closeSource();
+      }
+      for (const l of this.enabledListeners) l(enabled);
+    }
+    getInterval() {
+      return this.intervalMs;
+    }
+    /** Sets the fallback poll interval (ms) and persists it. */
+    setInterval(ms) {
+      if (!Number.isFinite(ms) || ms <= 0) return;
+      this.intervalMs = ms;
+      try {
+        localStorage.setItem(LIVE_INTERVAL_KEY, String(ms));
+      } catch {
+      }
+    }
+    /** Closes the EventSource and releases all listeners. */
+    destroy() {
+      this.closeSource();
+      this.eventListeners.clear();
+      this.tickListeners.clear();
+      this.enabledListeners.clear();
+    }
+    open() {
+      if (this.source) return;
+      if (typeof EventSource === "undefined") return;
+      const source = new EventSource(this.url);
+      source.addEventListener(BOARD_EVENT_NAME, (e) => {
+        let parsed = null;
+        try {
+          parsed = JSON.parse(e.data);
+        } catch {
+          return;
+        }
+        if (!parsed) return;
+        for (const l of this.eventListeners) l(parsed);
       });
-      thead.appendChild(headerRow);
-      table.appendChild(thead);
-      const tbody = document.createElement("tbody");
-      groups.forEach((g) => renderGroupRow(g, tbody, refresh));
-      table.appendChild(tbody);
-      card.appendChild(table);
-      container.appendChild(card);
-    }).catch((e) => showError(e.message));
+      this.source = source;
+    }
+    closeSource() {
+      if (this.source) {
+        this.source.close();
+        this.source = null;
+      }
+    }
+  };
+  var KEY_ATTR = "data-tm-key";
+  function patchList(container, items, opts) {
+    const existingByKey = /* @__PURE__ */ new Map();
+    for (const child of Array.from(container.children)) {
+      const el = child;
+      const k = el.getAttribute(KEY_ATTR);
+      if (k !== null) existingByKey.set(k, el);
+    }
+    const seenKeys = /* @__PURE__ */ new Set();
+    let cursor = container.firstChild;
+    for (const item of items) {
+      const key = String(opts.key(item));
+      seenKeys.add(key);
+      let el = existingByKey.get(key);
+      if (el) {
+        opts.update(el, item);
+      } else {
+        el = opts.create(item);
+        el.setAttribute(KEY_ATTR, key);
+      }
+      if (cursor !== el) {
+        container.insertBefore(el, cursor);
+      } else {
+        cursor = cursor.nextSibling;
+        continue;
+      }
+      cursor = el.nextSibling;
+    }
+    for (const [key, el] of existingByKey) {
+      if (!seenKeys.has(key)) {
+        el.remove();
+      }
+    }
   }
 
-  // web/taskmaster/js/tasks.ts
-  function taskStatusBadge(task) {
-    const span = document.createElement("span");
-    if (!task.enabled) {
-      span.className = "badge badge-muted";
-      span.textContent = "disabled";
-    } else if (task.paused) {
-      span.className = "badge badge-yellow";
-      span.textContent = "paused";
-    } else {
-      span.className = "badge badge-green";
-      span.textContent = "active";
-    }
-    return span;
+  // web/taskmaster/js/ui/toggle.ts
+  var STYLE_ATTR2 = "data-tm-ui-toggle-styles";
+  function ensureStyles2() {
+    if (document.head.querySelector(`style[${STYLE_ATTR2}]`)) return;
+    const style = document.createElement("style");
+    style.setAttribute(STYLE_ATTR2, "");
+    style.textContent = `
+.tm-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  cursor: pointer;
+  font-family: var(--font-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  color: var(--text-normal, #dcddde);
+  user-select: none;
+}
+.tm-toggle[data-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.tm-toggle-track {
+  position: relative;
+  flex: 0 0 auto;
+  width: 2.25em;
+  height: 1.25em;
+  border-radius: 999px;
+  background: var(--bg-modifier-border, #3a3a3a);
+  transition: background-color 0.15s ease;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+}
+.tm-toggle-track:focus-visible {
+  outline: none;
+  border-color: var(--interactive-accent, #7f6df2);
+  box-shadow: 0 0 0 2px var(--interactive-accent-hover, #9d8fff);
+}
+.tm-toggle[data-checked="true"] .tm-toggle-track {
+  background: var(--interactive-accent, #7f6df2);
+}
+.tm-toggle-thumb {
+  position: absolute;
+  top: 0.1em;
+  left: 0.1em;
+  width: 1.05em;
+  height: 1.05em;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s ease;
+}
+.tm-toggle[data-checked="true"] .tm-toggle-thumb {
+  transform: translateX(1em);
+}
+.tm-toggle-label {
+  font-size: 0.9em;
+  line-height: 1;
+}
+`;
+    document.head.appendChild(style);
   }
-  function renderTaskRow(task, tbody, onRefresh) {
-    const tr = document.createElement("tr");
-    const cells = [];
-    const tdName = document.createElement("td");
-    tdName.textContent = task.name;
-    cells.push(tdName);
-    const tdGroup = document.createElement("td");
-    tdGroup.textContent = task.group_name;
-    cells.push(tdGroup);
-    const tdType = document.createElement("td");
-    const typeSpan = document.createElement("code");
-    typeSpan.textContent = task.task_type;
-    tdType.appendChild(typeSpan);
-    cells.push(tdType);
-    const tdStatus = document.createElement("td");
-    tdStatus.appendChild(taskStatusBadge(task));
-    cells.push(tdStatus);
-    const tdRepeat = document.createElement("td");
-    tdRepeat.textContent = task.repeat ? task.cooldown_seconds + "s" : "once";
-    cells.push(tdRepeat);
-    const tdActions = document.createElement("td");
-    const btnGroup = document.createElement("div");
-    btnGroup.className = "btn-group";
-    const btnEnqueue = document.createElement("button");
-    btnEnqueue.className = "btn btn-primary btn-sm";
-    btnEnqueue.textContent = "Run now";
-    btnEnqueue.addEventListener("click", async () => {
-      try {
-        const res = await api.enqueueTask(task.name);
-        window.location.hash = "#output/" + res.execution_id;
-      } catch (e) {
-        alert(String(e));
-      }
-    });
-    btnGroup.appendChild(btnEnqueue);
-    const btnTogglePause = document.createElement("button");
-    btnTogglePause.className = "btn btn-secondary btn-sm";
-    btnTogglePause.textContent = task.paused ? "Resume" : "Pause";
-    btnTogglePause.addEventListener("click", async () => {
-      try {
-        if (task.paused) await api.resumeTask(task.name);
-        else await api.pauseTask(task.name);
-        onRefresh();
-      } catch (e) {
-        alert(String(e));
-      }
-    });
-    btnGroup.appendChild(btnTogglePause);
-    const btnDel = document.createElement("button");
-    btnDel.className = "btn btn-danger btn-sm";
-    btnDel.textContent = "Delete";
-    btnDel.addEventListener("click", async () => {
-      if (!confirm('Delete task "' + task.name + '"?')) return;
-      try {
-        await api.deleteTask(task.name);
-        onRefresh();
-      } catch (e) {
-        alert(String(e));
-      }
-    });
-    btnGroup.appendChild(btnDel);
-    tdActions.appendChild(btnGroup);
-    cells.push(tdActions);
-    cells.forEach((c) => tr.appendChild(c));
-    tbody.appendChild(tr);
-  }
-  function showAddTaskModal(groups, onRefresh) {
-    const overlay = document.createElement("div");
-    overlay.className = "modal-overlay";
-    const modal = document.createElement("div");
-    modal.className = "modal";
-    const title = document.createElement("h2");
-    title.textContent = "Add Task";
-    modal.appendChild(title);
-    function formGroup(label, input) {
-      const fg = document.createElement("div");
-      fg.className = "form-group";
-      const lbl = document.createElement("label");
-      lbl.textContent = label;
-      fg.appendChild(lbl);
-      fg.appendChild(input);
-      return fg;
+  function createToggleHandle(opts) {
+    ensureStyles2();
+    let checked = !!opts.checked;
+    let disabled = !!opts.disabled;
+    const wrapper = document.createElement("span");
+    wrapper.className = "tm-toggle";
+    const track = document.createElement("span");
+    track.className = "tm-toggle-track";
+    track.setAttribute("role", "switch");
+    track.tabIndex = disabled ? -1 : 0;
+    const thumb = document.createElement("span");
+    thumb.className = "tm-toggle-thumb";
+    track.appendChild(thumb);
+    wrapper.appendChild(track);
+    let labelEl = null;
+    if (opts.label) {
+      labelEl = document.createElement("span");
+      labelEl.className = "tm-toggle-label";
+      labelEl.textContent = opts.label;
+      wrapper.appendChild(labelEl);
     }
-    const inputName = document.createElement("input");
-    inputName.type = "text";
-    inputName.placeholder = "my-task";
-    modal.appendChild(formGroup("Name *", inputName));
-    const selectGroup = document.createElement("select");
-    groups.forEach((g) => {
-      const opt = document.createElement("option");
-      opt.value = g.name;
-      opt.textContent = g.name;
-      selectGroup.appendChild(opt);
+    function render3() {
+      wrapper.setAttribute("data-checked", String(checked));
+      wrapper.setAttribute("data-disabled", String(disabled));
+      track.setAttribute("aria-checked", String(checked));
+      track.setAttribute("aria-disabled", String(disabled));
+      track.tabIndex = disabled ? -1 : 0;
+      if (opts.label) {
+        track.setAttribute("aria-label", opts.label);
+      }
+    }
+    function toggle() {
+      if (disabled) return;
+      checked = !checked;
+      render3();
+      opts.onChange(checked);
+    }
+    track.addEventListener("click", toggle);
+    if (labelEl) {
+      labelEl.addEventListener("click", toggle);
+    }
+    track.addEventListener("keydown", (e) => {
+      if (e.key === " " || e.key === "Enter") {
+        e.preventDefault();
+        toggle();
+      }
     });
-    modal.appendChild(formGroup("Group *", selectGroup));
-    const argsTemplates = {
-      shell: '{"shell":"echo hello"}',
-      exec: '{"command":"ls","args":["-la"],"workdir":"/tmp"}',
-      script: '{"path":"/opt/scripts/run.sh","args":["--dry"]}',
-      migration: '{"name":"0001_example"}'
+    render3();
+    return {
+      el: wrapper,
+      setChecked: (v) => {
+        checked = v;
+        render3();
+      },
+      setDisabled: (v) => {
+        disabled = v;
+        render3();
+      },
+      getChecked: () => checked
     };
-    const selectType = document.createElement("select");
-    ["shell", "exec", "script", "migration"].forEach((t) => {
+  }
+
+  // web/taskmaster/js/designer.ts
+  function shQuote(s) {
+    if (s === "") return "''";
+    if (/^[A-Za-z0-9_\-./:=@%,]+$/.test(s)) return s;
+    return "'" + s.replace(/'/g, `'\\''`) + "'";
+  }
+  function buildCtlExport(f) {
+    const origin = window.location.origin;
+    const parts = ["taskmasterctl", "-url", shQuote(origin), "-key", '"$API_KEY"', "task", "add"];
+    parts.push("-name", shQuote(f.name || "<name>"));
+    parts.push("-lane", shQuote(f.lane || "<lane>"));
+    parts.push("-command", shQuote(f.command || "<command>"));
+    if (f.repeat) parts.push("-repeat", "-cooldown", String(f.cooldown || 60));
+    if (f.sudo) parts.push("-sudo");
+    if (f.outputFile) parts.push("-output-file", shQuote(f.outputFile));
+    return parts.join(" ");
+  }
+  function buildTaskBody(f) {
+    const body = {
+      name: f.name || "<name>",
+      lane_name: f.lane || "<lane>",
+      command: f.command || "<command>",
+      enabled: true,
+      repeat: f.repeat,
+      cooldown_seconds: f.repeat ? f.cooldown || 60 : 0,
+      sudo: f.sudo
+    };
+    if (f.outputFile) body.output_file = f.outputFile;
+    return body;
+  }
+  function buildCurlExport(f) {
+    const body = JSON.stringify(buildTaskBody(f), null, 2);
+    const origin = window.location.origin;
+    return `curl -X POST ${origin}/api/tasks \\
+  -H 'Content-Type: application/json' \\
+  -H "Authorization: Bearer $API_KEY" \\
+  -d '${body.replace(/'/g, `'\\''`)}'`;
+  }
+  function buildExportPanel(title, render3) {
+    const wrap = document.createElement("div");
+    wrap.className = "export-panel";
+    const header = document.createElement("button");
+    header.type = "button";
+    header.className = "export-panel-header";
+    const caret = document.createElement("span");
+    caret.className = "export-panel-caret";
+    caret.textContent = "\u25B8";
+    const label = document.createElement("span");
+    label.textContent = title;
+    header.append(caret, label);
+    const body = document.createElement("div");
+    body.className = "export-panel-body";
+    body.hidden = true;
+    const pre = document.createElement("pre");
+    pre.className = "export-panel-code";
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "btn btn-secondary btn-sm export-panel-copy";
+    copyBtn.textContent = "Copy";
+    copyBtn.addEventListener("click", () => {
+      void navigator.clipboard.writeText(pre.textContent ?? "").then(
+        () => {
+          copyBtn.textContent = "Copied";
+          setTimeout(() => copyBtn.textContent = "Copy", 1200);
+        },
+        () => {
+          copyBtn.textContent = "Copy failed";
+          setTimeout(() => copyBtn.textContent = "Copy", 1200);
+        }
+      );
+    });
+    body.append(pre, copyBtn);
+    wrap.append(header, body);
+    header.addEventListener("click", () => {
+      body.hidden = !body.hidden;
+      caret.textContent = body.hidden ? "\u25B8" : "\u25BE";
+    });
+    function refresh2() {
+      pre.textContent = render3();
+    }
+    refresh2();
+    return { el: wrap, refresh: refresh2 };
+  }
+  async function openTaskDesigner(lanes, preselectLane, caps3) {
+    const content = document.createElement("div");
+    content.className = "designer-form";
+    const nameGroup = document.createElement("div");
+    nameGroup.className = "form-group";
+    const nameLabel = document.createElement("label");
+    nameLabel.textContent = "Task name";
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.placeholder = "e.g. nightly-backup";
+    nameGroup.append(nameLabel, nameInput);
+    const cmdGroup = document.createElement("div");
+    cmdGroup.className = "form-group";
+    const cmdLabel = document.createElement("label");
+    cmdLabel.textContent = "Command";
+    const cmdHint = document.createElement("span");
+    cmdHint.className = "form-hint";
+    cmdHint.textContent = " \u2014 run as a single shell string (sh -c)";
+    cmdLabel.appendChild(cmdHint);
+    const cmdInput = document.createElement("textarea");
+    cmdInput.rows = 3;
+    cmdInput.placeholder = "e.g. /usr/local/bin/backup.sh --quiet";
+    cmdGroup.append(cmdLabel, cmdInput);
+    const laneGroup = document.createElement("div");
+    laneGroup.className = "form-group";
+    const laneLabel = document.createElement("label");
+    laneLabel.textContent = "Lane";
+    const laneSelect = document.createElement("select");
+    for (const lane of lanes) {
       const opt = document.createElement("option");
-      opt.value = t;
-      opt.textContent = t;
-      selectType.appendChild(opt);
+      opt.value = lane.name;
+      opt.textContent = lane.name;
+      if (lane.name === preselectLane) opt.selected = true;
+      laneSelect.appendChild(opt);
+    }
+    laneGroup.append(laneLabel, laneSelect);
+    content.append(nameGroup, cmdGroup, laneGroup);
+    const repeatRow = document.createElement("div");
+    repeatRow.className = "menu-row form-toggle-row";
+    const repeatLabel = document.createElement("span");
+    repeatLabel.textContent = "Repeat (re-enqueue after cooldown)";
+    const repeatToggle = createToggleHandle({
+      checked: false,
+      onChange: (checked) => {
+        cooldownGroup.hidden = !checked;
+        refreshExports();
+      }
     });
-    modal.appendChild(formGroup("Task Type", selectType));
-    const textArgs = document.createElement("textarea");
-    textArgs.rows = 3;
-    textArgs.value = argsTemplates["shell"];
-    modal.appendChild(formGroup("Args (JSON)", textArgs));
-    selectType.addEventListener("change", () => {
-      textArgs.value = argsTemplates[selectType.value] ?? "{}";
+    repeatRow.append(repeatLabel, repeatToggle.el);
+    const cooldownGroup = document.createElement("div");
+    cooldownGroup.className = "form-group";
+    cooldownGroup.hidden = true;
+    const cooldownLabel2 = document.createElement("label");
+    cooldownLabel2.textContent = "Cooldown seconds (minimum rest between runs)";
+    const cooldownInput = document.createElement("input");
+    cooldownInput.type = "number";
+    cooldownInput.min = "0";
+    cooldownInput.value = "60";
+    cooldownGroup.append(cooldownLabel2, cooldownInput);
+    content.append(repeatRow, cooldownGroup);
+    const advToggleBtn = document.createElement("button");
+    advToggleBtn.type = "button";
+    advToggleBtn.className = "advanced-toggle";
+    const advCaret = document.createElement("span");
+    advCaret.className = "export-panel-caret";
+    advCaret.textContent = "\u25B8";
+    advToggleBtn.append(advCaret, document.createTextNode("Advanced"));
+    const advBody = document.createElement("div");
+    advBody.className = "advanced-body";
+    advBody.hidden = true;
+    const outputGroup = document.createElement("div");
+    outputGroup.className = "form-group";
+    const outputLabel = document.createElement("label");
+    outputLabel.textContent = "Output file (optional; tees stdout/stderr)";
+    const outputInput = document.createElement("input");
+    outputInput.type = "text";
+    outputInput.placeholder = "e.g. /var/log/taskmaster/{task}-{exec_id}.log";
+    outputGroup.append(outputLabel, outputInput);
+    advBody.append(outputGroup);
+    let sudoToggle = null;
+    if (caps3.allow_sudo) {
+      const sudoRow = document.createElement("div");
+      sudoRow.className = "menu-row form-toggle-row";
+      const sudoLabel = document.createElement("span");
+      sudoLabel.textContent = "Run with sudo";
+      sudoToggle = createToggleHandle({ checked: false, onChange: () => refreshExports() });
+      sudoRow.append(sudoLabel, sudoToggle.el);
+      advBody.appendChild(sudoRow);
+    }
+    advToggleBtn.addEventListener("click", () => {
+      advBody.hidden = !advBody.hidden;
+      advCaret.textContent = advBody.hidden ? "\u25B8" : "\u25BE";
     });
+    content.append(advToggleBtn, advBody);
+    function currentForm() {
+      return {
+        name: nameInput.value.trim(),
+        command: cmdInput.value.trim(),
+        lane: laneSelect.value,
+        repeat: repeatToggle.getChecked(),
+        cooldown: parseInt(cooldownInput.value, 10) || 0,
+        outputFile: outputInput.value.trim(),
+        sudo: sudoToggle ? sudoToggle.getChecked() : false
+      };
+    }
+    const ctlPanel = buildExportPanel("taskmasterctl export", () => buildCtlExport(currentForm()));
+    const curlPanel = buildExportPanel("curl export", () => buildCurlExport(currentForm()));
+    content.append(ctlPanel.el, curlPanel.el);
+    function refreshExports() {
+      ctlPanel.refresh();
+      curlPanel.refresh();
+    }
+    nameInput.addEventListener("input", refreshExports);
+    cmdInput.addEventListener("input", refreshExports);
+    laneSelect.addEventListener("change", refreshExports);
+    cooldownInput.addEventListener("input", refreshExports);
+    outputInput.addEventListener("input", refreshExports);
+    const actions = document.createElement("div");
+    actions.className = "form-actions";
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "btn btn-secondary";
+    cancelBtn.textContent = "Cancel";
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "btn btn-primary";
+    addBtn.textContent = "Add to lane";
+    actions.append(cancelBtn, addBtn);
+    content.appendChild(actions);
+    return new Promise((resolve) => {
+      const handle = openModal(content, { title: "Add task", onClose: () => resolve() });
+      cancelBtn.addEventListener("click", () => handle.close());
+      addBtn.addEventListener("click", () => {
+        void (async () => {
+          const f = currentForm();
+          if (!f.name || !f.command || !f.lane) {
+            await alertDialog("Name, command, and lane are all required.");
+            return;
+          }
+          try {
+            await api.addTask(buildTaskBody(f));
+            handle.close();
+          } catch {
+          }
+        })();
+      });
+      nameInput.focus();
+    });
+  }
+
+  // web/taskmaster/js/board.ts
+  var RAN_PER_LANE = 5;
+  var state = { lanes: [], tasks: [], executions: [] };
+  var boardEl = null;
+  var unsubscribeEvent = null;
+  var countdownTimer;
+  var loadSeq = 0;
+  var caps = { allow_sudo: false };
+  var laneFilter;
+  function openTaskRoute(taskName) {
+    window.location.hash = "#task/" + encodeURIComponent(taskName);
+  }
+  function mountBoard(container, live2, capabilities, options = {}) {
+    container.textContent = "";
+    caps = capabilities;
+    laneFilter = options.laneFilter;
+    if (!laneFilter) {
+      const toolbar = document.createElement("div");
+      toolbar.className = "board-toolbar";
+      const addLaneBtn = document.createElement("button");
+      addLaneBtn.className = "btn btn-secondary";
+      addLaneBtn.textContent = "+ new lane";
+      addLaneBtn.addEventListener("click", () => void openAddLaneModal());
+      toolbar.appendChild(addLaneBtn);
+      container.appendChild(toolbar);
+    }
+    boardEl = document.createElement("div");
+    boardEl.className = "board-lanes" + (laneFilter ? " board-lanes-single" : "");
+    container.appendChild(boardEl);
+    void refreshAll();
+    unsubscribeEvent = live2.onEvent((ev) => void handleBoardEvent(ev));
+    countdownTimer = window.setInterval(() => render(), 1e3);
+    return () => {
+      if (unsubscribeEvent) unsubscribeEvent();
+      unsubscribeEvent = null;
+      if (countdownTimer !== void 0) {
+        clearInterval(countdownTimer);
+        countdownTimer = void 0;
+      }
+      boardEl = null;
+    };
+  }
+  async function handleBoardEvent(ev) {
+    void ev;
+    await refreshAll();
+  }
+  async function refreshAll() {
+    const seq = ++loadSeq;
+    try {
+      const [lanes, tasks, executions] = await Promise.all([
+        api.listLanes(),
+        api.listTasks(),
+        api.listExecutions(void 0, 300)
+      ]);
+      if (seq !== loadSeq) return;
+      state.lanes = lanes;
+      state.tasks = tasks;
+      state.executions = executions;
+      render();
+    } catch {
+    }
+  }
+  function tasksByLane(laneName) {
+    return state.tasks.filter((t) => t.lane_name === laneName).sort((a, b) => a.position - b.position);
+  }
+  function executionsByTask(taskName) {
+    return state.executions.filter((e) => e.task_name === taskName);
+  }
+  function render() {
+    if (!boardEl) return;
+    const visible = laneFilter ? state.lanes.filter((l) => l.name === laneFilter) : state.lanes;
+    if (visible.length === 0) {
+      if (!boardEl.querySelector(".empty-state")) {
+        boardEl.textContent = "";
+        const empty = document.createElement("div");
+        empty.className = "empty-state";
+        empty.textContent = laneFilter ? "Lane not found." : "No lanes yet. Create one to start running tasks.";
+        boardEl.appendChild(empty);
+      }
+      return;
+    }
+    boardEl.querySelector(".empty-state")?.remove();
+    const sorted = [...visible].sort((a, b) => a.name.localeCompare(b.name));
+    patchList(boardEl, sorted, {
+      key: (l) => l.name,
+      create: (l) => createLaneEl(l),
+      update: (el, l) => updateLaneEl(el, l)
+    });
+  }
+  function createLaneEl(lane) {
+    const el = document.createElement("section");
+    el.className = "lane";
+    const header = document.createElement("div");
+    header.className = "lane-header";
+    const nameEl = document.createElement("span");
+    nameEl.className = "lane-name";
+    header.appendChild(nameEl);
+    const pauseWrap = document.createElement("div");
+    pauseWrap.className = "lane-pause";
+    const pauseBtn = document.createElement("button");
+    pauseBtn.type = "button";
+    pauseBtn.className = "btn-icon lane-pause-btn";
+    const pauseLabel = document.createElement("span");
+    pauseLabel.className = "lane-pause-label";
+    pauseLabel.textContent = "Paused";
+    pauseWrap.append(pauseBtn, pauseLabel);
+    header.appendChild(pauseWrap);
+    const widthWrap = document.createElement("div");
+    widthWrap.className = "lane-width";
+    const widthDown = document.createElement("button");
+    widthDown.type = "button";
+    widthDown.className = "lane-width-btn";
+    widthDown.textContent = "\u2212";
+    widthDown.setAttribute("aria-label", "Decrease lane width");
+    const widthVal = document.createElement("span");
+    widthVal.className = "lane-width-val";
+    const widthUp = document.createElement("button");
+    widthUp.type = "button";
+    widthUp.className = "lane-width-btn";
+    widthUp.textContent = "+";
+    widthUp.setAttribute("aria-label", "Increase lane width");
+    widthWrap.append(widthDown, widthVal, widthUp);
+    header.appendChild(widthWrap);
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "lane-delete-btn";
+    deleteBtn.title = "Delete lane";
+    deleteBtn.setAttribute("aria-label", "Delete lane");
+    deleteBtn.textContent = "\xD7";
+    header.appendChild(deleteBtn);
+    el.appendChild(header);
+    const addBtn = document.createElement("button");
+    addBtn.className = "btn btn-primary btn-sm lane-add-task";
+    addBtn.textContent = "+ add task";
+    el.appendChild(addBtn);
+    const body = document.createElement("div");
+    body.className = "lane-body";
+    const runningSection = buildSection("running", "Running");
+    const upNextSection = buildSection("upnext", "Up next");
+    const ranSection = buildRanSection();
+    body.append(runningSection.wrap, upNextSection.wrap, ranSection.wrap);
+    el.appendChild(body);
+    wireDropTarget(upNextSection.list, el);
+    updateLaneEl(el, lane);
+    return el;
+  }
+  function buildSection(kind, title) {
+    const wrap = document.createElement("div");
+    wrap.className = "lane-section lane-section-" + kind;
+    const h = document.createElement("div");
+    h.className = "lane-section-title";
+    h.textContent = title;
+    const list = document.createElement("div");
+    list.className = "lane-list lane-list-" + kind;
+    wrap.append(h, list);
+    return { wrap, list };
+  }
+  function buildRanSection() {
+    const wrap = document.createElement("details");
+    wrap.className = "lane-section lane-section-ran";
+    const summary = document.createElement("summary");
+    summary.className = "lane-section-title";
+    summary.textContent = "Recent runs";
+    const list = document.createElement("div");
+    list.className = "lane-list lane-list-ran";
+    wrap.append(summary, list);
+    return { wrap, list };
+  }
+  function updateLaneEl(el, lane) {
+    el.setAttribute("data-lane", lane.name);
+    el.classList.toggle("lane-paused", lane.paused);
+    const nameEl = el.querySelector(".lane-name");
+    if (nameEl) {
+      nameEl.textContent = lane.name;
+    }
+    const pauseBtn = el.querySelector(".lane-pause-btn");
+    if (pauseBtn) {
+      pauseBtn.textContent = lane.paused ? "\u25B6" : "\u23F9";
+      pauseBtn.title = lane.paused ? "Resume lane" : "Stop lane (finish current run, start nothing new)";
+      pauseBtn.setAttribute("aria-label", pauseBtn.title);
+      pauseBtn.onclick = () => {
+        pauseBtn.disabled = true;
+        const req = lane.paused ? api.resumeLane(lane.name) : api.pauseLane(lane.name);
+        void req.finally(() => {
+          pauseBtn.disabled = false;
+          void refreshAll();
+        });
+      };
+    }
+    const pauseLabel = el.querySelector(".lane-pause-label");
+    if (pauseLabel) pauseLabel.style.display = lane.paused ? "" : "none";
+    const widthVal = el.querySelector(".lane-width-val");
+    if (widthVal) widthVal.textContent = String(lane.width);
+    const widthDown = el.querySelector(".lane-width-btn:first-child");
+    const widthUp = el.querySelector(".lane-width-btn:last-of-type");
+    if (widthDown) {
+      widthDown.disabled = lane.width <= 1;
+      widthDown.onclick = () => void changeWidth(lane, lane.width - 1);
+    }
+    if (widthUp) {
+      widthUp.onclick = () => void changeWidth(lane, lane.width + 1);
+    }
+    const deleteBtn = el.querySelector(".lane-delete-btn");
+    if (deleteBtn) {
+      deleteBtn.onclick = () => void deleteLane(lane.name);
+    }
+    const addBtn = el.querySelector(".lane-add-task");
+    if (addBtn) {
+      addBtn.onclick = () => void openTaskDesigner(state.lanes, lane.name, caps).then(() => refreshAll());
+    }
+    const laneTasks = tasksByLane(lane.name);
+    const laneTaskNames = new Set(laneTasks.map((t) => t.name));
+    const laneExecs = state.executions.filter((e) => e.task_name && laneTaskNames.has(e.task_name));
+    const runningExecs = laneExecs.filter((e) => e.status === "running").sort((a, b) => b.id - a.id);
+    const ranExecs = laneExecs.filter((e) => e.status === "success" || e.status === "failed" || e.status === "canceled").sort((a, b) => b.id - a.id).slice(0, RAN_PER_LANE);
+    const runningTaskNames = new Set(runningExecs.map((e) => e.task_name));
+    const pendingByTask = /* @__PURE__ */ new Map();
+    for (const e of laneExecs) {
+      if (e.status === "pending" && e.task_name && !pendingByTask.has(e.task_name)) {
+        pendingByTask.set(e.task_name, e);
+      }
+    }
+    const upNextTasks = laneTasks.filter((t) => !runningTaskNames.has(t.name));
+    const runningList = el.querySelector(".lane-list-running");
+    if (runningList) {
+      patchList(runningList, runningExecs, {
+        key: (e) => e.id,
+        create: (e) => createExecRow(e, "running"),
+        update: (row, e) => updateExecRow(row, e, "running")
+      });
+      toggleEmptyNote(runningList, runningExecs.length === 0, "nothing running");
+    }
+    const ranList = el.querySelector(".lane-list-ran");
+    if (ranList) {
+      patchList(ranList, ranExecs, {
+        key: (e) => e.id,
+        create: (e) => createExecRow(e, "ran"),
+        update: (row, e) => updateExecRow(row, e, "ran")
+      });
+      toggleEmptyNote(ranList, ranExecs.length === 0, "no history yet");
+    }
+    const upNextList = el.querySelector(".lane-list-upnext");
+    if (upNextList) {
+      patchList(upNextList, upNextTasks, {
+        key: (t) => t.name,
+        create: (t) => createTaskRow(t, pendingByTask.get(t.name) ?? null),
+        update: (row, t) => updateTaskRow(row, t, pendingByTask.get(t.name) ?? null)
+      });
+      toggleEmptyNote(upNextList, upNextTasks.length === 0, "lane is empty");
+    }
+  }
+  function toggleEmptyNote(list, empty, text) {
+    let note = list.querySelector(".lane-empty-note");
+    if (empty) {
+      if (!note) {
+        note = document.createElement("div");
+        note.className = "lane-empty-note";
+        note.setAttribute("data-tm-key", "__empty__");
+        list.appendChild(note);
+      }
+      note.textContent = text;
+    } else {
+      note?.remove();
+    }
+  }
+  function statusBadgeClass(status) {
+    switch (status) {
+      case "success":
+        return "badge-green";
+      case "failed":
+        return "badge-red";
+      case "canceled":
+        return "badge-yellow";
+      case "running":
+        return "badge-blue";
+      default:
+        return "badge-muted";
+    }
+  }
+  function createExecRow(exec, kind) {
     const row = document.createElement("div");
-    row.className = "form-row";
-    const inputPriority = document.createElement("input");
-    inputPriority.type = "number";
-    inputPriority.value = "50";
-    row.appendChild(formGroup("Priority", inputPriority));
-    const inputCooldown = document.createElement("input");
-    inputCooldown.type = "number";
-    inputCooldown.value = "0";
-    row.appendChild(formGroup("Cooldown (sec)", inputCooldown));
-    modal.appendChild(row);
-    const checkRepeat = document.createElement("input");
-    checkRepeat.type = "checkbox";
-    checkRepeat.id = "task-repeat";
-    const lblRepeat = document.createElement("label");
-    lblRepeat.className = "checkbox-label form-group";
-    lblRepeat.appendChild(checkRepeat);
-    const lblText = document.createElement("span");
-    lblText.textContent = "Repeat";
-    lblRepeat.appendChild(lblText);
-    modal.appendChild(lblRepeat);
-    let checkSudo = null;
-    if (caps.allow_sudo) {
-      checkSudo = document.createElement("input");
-      checkSudo.type = "checkbox";
-      const lblSudo = document.createElement("label");
-      lblSudo.className = "checkbox-label form-group";
-      lblSudo.appendChild(checkSudo);
-      const lblSudoText = document.createElement("span");
-      lblSudoText.textContent = "Run with sudo";
-      lblSudo.appendChild(lblSudoText);
-      modal.appendChild(lblSudo);
+    row.className = "exec-row exec-row-" + kind;
+    const name = document.createElement("span");
+    name.className = "exec-row-name exec-row-name-clickable";
+    name.setAttribute("role", "button");
+    name.tabIndex = 0;
+    const badge = document.createElement("span");
+    badge.className = "badge";
+    const meta = document.createElement("span");
+    meta.className = "exec-row-meta";
+    row.append(name, badge, meta);
+    if (kind === "running") {
+      const pidSeam = document.createElement("span");
+      pidSeam.className = "exec-row-pid-seam";
+      const pidLabel = document.createElement("span");
+      pidLabel.className = "exec-row-pid";
+      const suspendedBadge = document.createElement("span");
+      suspendedBadge.className = "badge badge-yellow exec-row-suspended-badge";
+      suspendedBadge.textContent = "suspended";
+      const pauseBtn = document.createElement("button");
+      pauseBtn.type = "button";
+      pauseBtn.className = "btn-icon exec-row-pause-btn";
+      pidSeam.append(pidLabel, suspendedBadge, pauseBtn);
+      row.appendChild(pidSeam);
     }
-    const inputOutputFile = document.createElement("input");
-    inputOutputFile.type = "text";
-    inputOutputFile.placeholder = "/var/log/taskmaster/{task}.log  (optional; {exec_id} also supported)";
-    modal.appendChild(formGroup("Output File", inputOutputFile));
+    updateExecRow(row, exec, kind);
+    return row;
+  }
+  function wireProcessToggle(btn, exec) {
+    const suspended = !!exec.suspended;
+    btn.textContent = suspended ? "\u25B6" : "\u23F8";
+    btn.title = suspended ? "Resume process" : "Pause process";
+    btn.setAttribute("aria-label", btn.title);
+    btn.onclick = () => {
+      btn.disabled = true;
+      const req = suspended ? api.resumeExecution(exec.id) : api.pauseExecution(exec.id);
+      void req.then(() => refreshAll()).finally(() => {
+        btn.disabled = false;
+      });
+    };
+  }
+  function updateExecRow(row, exec, kind) {
+    const name = row.querySelector(".exec-row-name");
+    if (name) {
+      name.textContent = exec.task_name ?? "(unknown task)";
+      const taskName = exec.task_name;
+      const openDetail = () => {
+        if (!taskName) return;
+        openTaskRoute(taskName);
+      };
+      name.onclick = openDetail;
+      name.onkeydown = (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openDetail();
+        }
+      };
+    }
+    const badge = row.querySelector(".badge");
+    if (badge) {
+      badge.className = "badge " + statusBadgeClass(exec.status);
+      badge.textContent = exec.status;
+    }
+    const meta = row.querySelector(".exec-row-meta");
+    if (meta) {
+      if (exec.duration_ms !== void 0 && exec.duration_ms !== null) {
+        meta.textContent = (exec.duration_ms / 1e3).toFixed(1) + "s";
+      } else if (exec.started_at) {
+        meta.textContent = "running\u2026";
+      } else {
+        meta.textContent = "";
+      }
+    }
+    if (kind === "running") {
+      const pidLabel = row.querySelector(".exec-row-pid");
+      if (pidLabel) pidLabel.textContent = exec.pid !== void 0 ? "pid " + exec.pid : "";
+      const suspendedBadge = row.querySelector(".exec-row-suspended-badge");
+      if (suspendedBadge) suspendedBadge.style.display = exec.suspended ? "" : "none";
+      const pauseBtn = row.querySelector(".exec-row-pause-btn");
+      if (pauseBtn) wireProcessToggle(pauseBtn, exec);
+    }
+  }
+  function createTaskRow(task, pending) {
+    const row = document.createElement("div");
+    row.className = "task-row";
+    row.draggable = true;
+    const name = document.createElement("span");
+    name.className = "task-row-name task-row-name-clickable";
+    name.setAttribute("role", "button");
+    name.tabIndex = 0;
+    const openDetail = () => {
+      openTaskRoute(task.name);
+    };
+    name.addEventListener("click", openDetail);
+    name.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        openDetail();
+      }
+    });
+    const status = document.createElement("span");
+    status.className = "task-row-status";
+    const upNextBtn = document.createElement("button");
+    upNextBtn.type = "button";
+    upNextBtn.className = "btn btn-secondary btn-sm task-row-upnext";
+    upNextBtn.textContent = "Up next";
+    row.append(name, status, upNextBtn);
+    row.addEventListener("dragstart", (e) => {
+      if (!e.dataTransfer) return;
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", JSON.stringify({ task: task.name, lane: task.lane_name }));
+      row.classList.add("dragging");
+    });
+    row.addEventListener("dragend", () => row.classList.remove("dragging"));
+    updateTaskRow(row, task, pending);
+    return row;
+  }
+  function updateTaskRow(row, task, pending) {
+    row.setAttribute("data-task", task.name);
+    row.classList.toggle("task-row-disabled", !task.enabled || task.paused);
+    const name = row.querySelector(".task-row-name");
+    if (name) name.textContent = task.name;
+    const status = row.querySelector(".task-row-status");
+    if (status) {
+      if (!task.enabled) {
+        status.textContent = "disabled";
+      } else if (task.paused) {
+        status.textContent = "paused";
+      } else if (pending) {
+        status.textContent = "queued";
+      } else if (task.repeat) {
+        status.textContent = cooldownLabel(task);
+      } else {
+        status.textContent = "ready";
+      }
+    }
+    const btn = row.querySelector(".task-row-upnext");
+    if (btn) {
+      btn.disabled = !task.enabled || task.paused;
+      btn.onclick = () => void api.upNext(task.name).then(() => refreshAll());
+    }
+  }
+  function cooldownLabel(task) {
+    const execs = executionsByTask(task.name).filter((e) => e.finished_at).sort((a, b) => b.id - a.id);
+    const last = execs[0];
+    if (!last || !last.finished_at) return "ready";
+    const readyAt = new Date(last.finished_at).getTime() + task.cooldown_seconds * 1e3;
+    const remainingMs = readyAt - Date.now();
+    if (remainingMs <= 0) return "ready";
+    const totalSec = Math.ceil(remainingMs / 1e3);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return "again in " + m + ":" + String(s).padStart(2, "0");
+  }
+  function wireDropTarget(list, laneEl) {
+    list.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+      list.classList.add("drag-over");
+      const dragging = list.querySelector(".dragging");
+      const after = rowAfter(list, e.clientY);
+      if (dragging) {
+        if (after == null) {
+          list.appendChild(dragging);
+        } else if (after !== dragging) {
+          list.insertBefore(dragging, after);
+        }
+      }
+    });
+    list.addEventListener("dragleave", (e) => {
+      if (e.target === list) list.classList.remove("drag-over");
+    });
+    list.addEventListener("drop", (e) => {
+      e.preventDefault();
+      list.classList.remove("drag-over");
+      const raw = e.dataTransfer?.getData("text/plain");
+      if (!raw) return;
+      let payload;
+      try {
+        payload = JSON.parse(raw);
+      } catch {
+        return;
+      }
+      const destLane = laneEl.getAttribute("data-lane");
+      if (!destLane) return;
+      void handleDrop(payload.task, payload.lane, destLane, list);
+    });
+  }
+  function rowAfter(list, y) {
+    const rows = Array.from(list.querySelectorAll(".task-row:not(.dragging)"));
+    let closest = null;
+    for (const row of rows) {
+      const box = row.getBoundingClientRect();
+      const offset = y - box.top - box.height / 2;
+      if (offset < 0 && (closest === null || offset > closest.offset)) {
+        closest = { el: row, offset };
+      }
+    }
+    return closest ? closest.el : null;
+  }
+  async function handleDrop(taskName, sourceLane, destLane, list) {
+    const currentOrder = Array.from(list.querySelectorAll(".task-row")).map(
+      (r) => r.getAttribute("data-task")
+    );
+    try {
+      if (sourceLane !== destLane) {
+        await api.moveTask(taskName, destLane);
+      }
+      await api.setLaneOrder(destLane, currentOrder);
+    } finally {
+      await refreshAll();
+    }
+  }
+  async function changeWidth(lane, width) {
+    if (width < 1) return;
+    try {
+      await api.setLaneWidth(lane.name, width);
+    } finally {
+      await refreshAll();
+    }
+  }
+  async function deleteLane(name) {
+    const ok = await confirmDialog('Delete lane "' + name + '"? Tasks in it must be moved or removed first.', {
+      title: "Delete lane",
+      confirmLabel: "Delete"
+    });
+    if (!ok) return;
+    try {
+      await api.deleteLane(name);
+    } finally {
+      await refreshAll();
+    }
+  }
+  async function openAddLaneModal() {
+    const content = document.createElement("div");
+    const nameGroup = document.createElement("div");
+    nameGroup.className = "form-group";
+    const nameLabel = document.createElement("label");
+    nameLabel.textContent = "Lane name";
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.placeholder = "e.g. backups";
+    nameGroup.append(nameLabel, nameInput);
+    const widthGroup = document.createElement("div");
+    widthGroup.className = "form-group";
+    const widthLabel = document.createElement("label");
+    widthLabel.textContent = "Width (concurrent slots)";
+    const widthInput = document.createElement("input");
+    widthInput.type = "number";
+    widthInput.min = "1";
+    widthInput.value = "1";
+    widthGroup.append(widthLabel, widthInput);
     const actions = document.createElement("div");
     actions.className = "form-actions";
-    const errDiv = document.createElement("div");
-    errDiv.className = "error-banner";
-    errDiv.style.display = "none";
-    const btnAdd = document.createElement("button");
-    btnAdd.className = "btn btn-primary";
-    btnAdd.textContent = "Add Task";
-    btnAdd.addEventListener("click", async () => {
-      errDiv.style.display = "none";
-      try {
-        const newTask = {
-          name: inputName.value.trim(),
-          group_name: selectGroup.value,
-          task_type: selectType.value,
-          args: textArgs.value.trim() || "{}",
-          priority: Number(inputPriority.value),
-          cooldown_seconds: Number(inputCooldown.value),
-          repeat: checkRepeat.checked,
-          enabled: true
-        };
-        if (checkSudo && checkSudo.checked) newTask.sudo = true;
-        const outFile = inputOutputFile.value.trim();
-        if (outFile) newTask.output_file = outFile;
-        await api.addTask(newTask);
-        overlay.remove();
-        onRefresh();
-      } catch (e) {
-        errDiv.textContent = String(e);
-        errDiv.style.display = "block";
-      }
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "btn btn-secondary";
+    cancelBtn.textContent = "Cancel";
+    const createBtn = document.createElement("button");
+    createBtn.type = "button";
+    createBtn.className = "btn btn-primary";
+    createBtn.textContent = "Create lane";
+    actions.append(cancelBtn, createBtn);
+    content.append(nameGroup, widthGroup, actions);
+    const handle = openModal(content, { title: "New lane" });
+    cancelBtn.addEventListener("click", () => handle.close());
+    createBtn.addEventListener("click", () => {
+      void (async () => {
+        const name = nameInput.value.trim();
+        const width = parseInt(widthInput.value, 10) || 1;
+        if (!name) {
+          await alertDialog("Lane name is required.");
+          return;
+        }
+        try {
+          await api.createLane({ name, width });
+          handle.close();
+          await refreshAll();
+        } catch {
+        }
+      })();
     });
-    const btnCancel = document.createElement("button");
-    btnCancel.className = "btn btn-secondary";
-    btnCancel.textContent = "Cancel";
-    btnCancel.addEventListener("click", () => overlay.remove());
-    actions.appendChild(btnAdd);
-    actions.appendChild(btnCancel);
-    modal.appendChild(errDiv);
-    modal.appendChild(actions);
-    overlay.appendChild(modal);
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) overlay.remove();
-    });
-    document.body.appendChild(overlay);
-  }
-  function renderTasks(container, groupFilter) {
-    container.textContent = "";
-    const refresh = () => {
-      renderTasks(container, groupFilter);
-    };
-    const toolbar = document.createElement("div");
-    toolbar.className = "toolbar";
-    const h1 = document.createElement("h1");
-    h1.textContent = groupFilter ? "Tasks \u2014 " + groupFilter : "Tasks";
-    toolbar.appendChild(h1);
-    const spacer = document.createElement("div");
-    spacer.className = "toolbar-spacer";
-    toolbar.appendChild(spacer);
-    const btnRefresh = document.createElement("button");
-    btnRefresh.className = "btn btn-secondary";
-    btnRefresh.textContent = "Refresh";
-    btnRefresh.addEventListener("click", refresh);
-    toolbar.appendChild(btnRefresh);
-    container.appendChild(toolbar);
-    Promise.all([api.listTasks(groupFilter), api.listGroups()]).then(([tasks, groups]) => {
-      const btnNew = document.createElement("button");
-      btnNew.className = "btn btn-primary";
-      btnNew.textContent = "+ New Task";
-      btnNew.addEventListener("click", () => showAddTaskModal(groups, refresh));
-      toolbar.insertBefore(btnNew, btnRefresh);
-      if (tasks.length === 0) {
-        const empty = document.createElement("div");
-        empty.className = "empty-state";
-        empty.textContent = "No tasks yet.";
-        container.appendChild(empty);
-        return;
-      }
-      const card = document.createElement("div");
-      card.className = "card";
-      const table = document.createElement("table");
-      const thead = document.createElement("thead");
-      const headerRow = document.createElement("tr");
-      ["Name", "Group", "Type", "Status", "Schedule", "Actions"].forEach((h) => {
-        const th = document.createElement("th");
-        th.textContent = h;
-        headerRow.appendChild(th);
-      });
-      thead.appendChild(headerRow);
-      table.appendChild(thead);
-      const tbody = document.createElement("tbody");
-      tasks.forEach((t) => renderTaskRow(t, tbody, refresh));
-      table.appendChild(tbody);
-      card.appendChild(table);
-      container.appendChild(card);
-    }).catch((e) => {
-      const err = document.createElement("div");
-      err.className = "error-banner";
-      err.textContent = e.message;
-      container.appendChild(err);
-    });
-  }
-
-  // web/taskmaster/js/executions.ts
-  function statusBadge2(status) {
-    const span = document.createElement("span");
-    const map = {
-      success: "badge-green",
-      failed: "badge-red",
-      running: "badge-blue",
-      pending: "badge-yellow"
-    };
-    span.className = "badge " + (map[status] ?? "badge-muted");
-    span.textContent = status;
-    return span;
-  }
-  function renderExecRow(exec, tbody) {
-    const tr = document.createElement("tr");
-    const tdId = document.createElement("td");
-    const link = document.createElement("a");
-    link.href = "#output/" + exec.id;
-    link.textContent = String(exec.id);
-    link.style.color = "var(--text-accent)";
-    tdId.appendChild(link);
-    tr.appendChild(tdId);
-    const tdTask = document.createElement("td");
-    tdTask.textContent = exec.task_name ?? String(exec.task_id);
-    tr.appendChild(tdTask);
-    const tdStatus = document.createElement("td");
-    tdStatus.appendChild(statusBadge2(exec.status));
-    tr.appendChild(tdStatus);
-    const tdDuration = document.createElement("td");
-    tdDuration.textContent = exec.duration_ms != null ? exec.duration_ms + "ms" : "-";
-    tr.appendChild(tdDuration);
-    const tdDelay = document.createElement("td");
-    tdDelay.textContent = exec.schedule_delay_ms != null ? exec.schedule_delay_ms + "ms" : "-";
-    tr.appendChild(tdDelay);
-    const tdStarted = document.createElement("td");
-    tdStarted.textContent = exec.started_at ? new Date(exec.started_at).toLocaleString() : "-";
-    tr.appendChild(tdStarted);
-    const tdError = document.createElement("td");
-    if (exec.error_message) {
-      const code = document.createElement("code");
-      code.textContent = exec.error_message.slice(0, 80);
-      code.title = exec.error_message;
-      tdError.appendChild(code);
-    } else {
-      tdError.textContent = "-";
-    }
-    tr.appendChild(tdError);
-    tbody.appendChild(tr);
-  }
-  function renderExecutions(container, taskFilter) {
-    container.textContent = "";
-    const toolbar = document.createElement("div");
-    toolbar.className = "toolbar";
-    const h1 = document.createElement("h1");
-    h1.textContent = taskFilter ? "Executions \u2014 " + taskFilter : "Executions";
-    toolbar.appendChild(h1);
-    const spacer = document.createElement("div");
-    spacer.className = "toolbar-spacer";
-    toolbar.appendChild(spacer);
-    const btnRefresh = document.createElement("button");
-    btnRefresh.className = "btn btn-secondary";
-    btnRefresh.textContent = "Refresh";
-    btnRefresh.addEventListener("click", () => renderExecutions(container, taskFilter));
-    toolbar.appendChild(btnRefresh);
-    container.appendChild(toolbar);
-    api.listExecutions(taskFilter, 50).then((execs) => {
-      if (execs.length === 0) {
-        const empty = document.createElement("div");
-        empty.className = "empty-state";
-        empty.textContent = "No executions yet.";
-        container.appendChild(empty);
-        return;
-      }
-      const card = document.createElement("div");
-      card.className = "card";
-      const table = document.createElement("table");
-      const thead = document.createElement("thead");
-      const headerRow = document.createElement("tr");
-      ["ID", "Task", "Status", "Duration", "Delay", "Started", "Error"].forEach((h) => {
-        const th = document.createElement("th");
-        th.textContent = h;
-        headerRow.appendChild(th);
-      });
-      thead.appendChild(headerRow);
-      table.appendChild(thead);
-      const tbody = document.createElement("tbody");
-      execs.forEach((e) => renderExecRow(e, tbody));
-      table.appendChild(tbody);
-      card.appendChild(table);
-      container.appendChild(card);
-    }).catch((e) => {
-      const err = document.createElement("div");
-      err.className = "error-banner";
-      err.textContent = e.message;
-      container.appendChild(err);
-    });
+    nameInput.focus();
   }
 
   // web/taskmaster/js/metrics.ts
-  function tile(label, value) {
-    const div = document.createElement("div");
-    div.className = "metric-tile";
-    const lbl = document.createElement("div");
-    lbl.className = "metric-label";
-    lbl.textContent = label;
-    const val = document.createElement("div");
-    val.className = "metric-value";
-    val.textContent = value;
-    div.appendChild(lbl);
-    div.appendChild(val);
-    return div;
+  function fmtMs(ms) {
+    if (ms === null || ms === void 0) return "\u2014";
+    return (ms / 1e3).toFixed(2) + "s";
   }
-  function renderMetricCard(s, container) {
-    const card = document.createElement("div");
-    card.className = "card";
-    const header = document.createElement("div");
-    header.className = "card-header";
-    const title = document.createElement("h2");
-    title.textContent = s.task_name;
-    header.appendChild(title);
-    const groupBadge = document.createElement("span");
-    groupBadge.className = "badge badge-muted";
-    groupBadge.textContent = s.group_name;
-    header.appendChild(groupBadge);
-    card.appendChild(header);
-    const grid = document.createElement("div");
-    grid.className = "metrics-grid";
-    const total = s.success_count + s.failed_count;
-    const successPct = total > 0 ? Math.round(s.success_count / total * 100) : 0;
-    grid.appendChild(tile("Success", String(s.success_count)));
-    grid.appendChild(tile("Failed", String(s.failed_count)));
-    grid.appendChild(tile("Success rate", successPct + "%"));
-    grid.appendChild(tile("Avg duration", s.avg_duration_ms != null ? Math.round(s.avg_duration_ms) + "ms" : "\u2014"));
-    grid.appendChild(tile("Min duration", s.min_duration_ms != null ? s.min_duration_ms + "ms" : "\u2014"));
-    grid.appendChild(tile("Max duration", s.max_duration_ms != null ? s.max_duration_ms + "ms" : "\u2014"));
-    grid.appendChild(tile("Avg delay", s.avg_schedule_delay_ms != null ? Math.round(s.avg_schedule_delay_ms) + "ms" : "\u2014"));
-    grid.appendChild(tile("Last run", s.last_execution ? new Date(s.last_execution).toLocaleString() : "\u2014"));
-    card.appendChild(grid);
-    container.appendChild(card);
+  function fmtDate(iso) {
+    if (!iso) return "\u2014";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleString();
   }
-  function renderMetrics(container, groupFilter) {
+  var gridEl = null;
+  var unsubscribe = null;
+  var loadSeq2 = 0;
+  function mountMetrics(container, live2) {
     container.textContent = "";
-    const toolbar = document.createElement("div");
-    toolbar.className = "toolbar";
-    const h1 = document.createElement("h1");
-    h1.textContent = "Metrics";
-    toolbar.appendChild(h1);
-    const spacer = document.createElement("div");
-    spacer.className = "toolbar-spacer";
-    toolbar.appendChild(spacer);
-    const btnRefresh = document.createElement("button");
-    btnRefresh.className = "btn btn-secondary";
-    btnRefresh.textContent = "Refresh";
-    btnRefresh.addEventListener("click", () => renderMetrics(container, groupFilter));
-    toolbar.appendChild(btnRefresh);
-    container.appendChild(toolbar);
-    api.getMetrics(groupFilter, void 0, 24).then((summaries) => {
-      if (summaries.length === 0) {
+    const heading = document.createElement("div");
+    heading.className = "metrics-heading";
+    heading.textContent = "Fleet-wide metrics (last 24h)";
+    container.appendChild(heading);
+    gridEl = document.createElement("div");
+    gridEl.className = "metrics-grid";
+    container.appendChild(gridEl);
+    void refresh();
+    unsubscribe = live2.onEvent(() => void refresh());
+    return () => {
+      if (unsubscribe) unsubscribe();
+      unsubscribe = null;
+      gridEl = null;
+    };
+  }
+  async function refresh() {
+    const seq = ++loadSeq2;
+    let rows = [];
+    try {
+      rows = await api.getMetrics();
+    } catch {
+      return;
+    }
+    if (seq !== loadSeq2 || !gridEl) return;
+    render2(rows);
+  }
+  function render2(rows) {
+    if (!gridEl) return;
+    if (rows.length === 0) {
+      if (!gridEl.querySelector(".empty-state")) {
+        gridEl.textContent = "";
         const empty = document.createElement("div");
         empty.className = "empty-state";
-        empty.textContent = "No metrics yet. Run some tasks first.";
-        container.appendChild(empty);
-        return;
+        empty.textContent = "No executions recorded yet.";
+        gridEl.appendChild(empty);
       }
-      summaries.forEach((s) => renderMetricCard(s, container));
-    }).catch((e) => {
-      const err = document.createElement("div");
-      err.className = "error-banner";
-      err.textContent = e.message;
-      container.appendChild(err);
+      return;
+    }
+    gridEl.querySelector(".empty-state")?.remove();
+    const sorted = [...rows].sort((a, b) => a.task_name.localeCompare(b.task_name));
+    patchList(gridEl, sorted, {
+      key: (m) => m.task_name,
+      create: (m) => createCard(m),
+      update: (el, m) => updateCard(el, m)
     });
   }
-
-  // web/taskmaster/js/output.ts
-  function renderOutput(container, execID) {
-    container.textContent = "";
-    const h1 = document.createElement("h1");
-    h1.textContent = "Output \u2014 execution " + execID;
-    container.appendChild(h1);
-    const statusDiv = document.createElement("div");
-    statusDiv.style.marginBottom = "12px";
-    container.appendChild(statusDiv);
-    const pre = document.createElement("pre");
-    pre.className = "output-terminal";
-    container.appendChild(pre);
-    function appendLine(parsed) {
-      const span = document.createElement("span");
-      span.className = "stream-" + parsed.stream;
-      span.textContent = parsed.line + "\n";
-      pre.appendChild(span);
-      pre.scrollTop = pre.scrollHeight;
+  function createCard(m) {
+    const card = document.createElement("div");
+    card.className = "metric-card";
+    const title = document.createElement("div");
+    title.className = "metric-card-title";
+    card.appendChild(title);
+    const lane = document.createElement("div");
+    lane.className = "metric-card-lane";
+    card.appendChild(lane);
+    const stats = document.createElement("div");
+    stats.className = "metric-card-stats";
+    const fields = ["success", "failed", "canceled", "avg", "min", "max", "last run"];
+    for (const f of fields) {
+      const cell = document.createElement("div");
+      cell.className = "metric-card-stat metric-stat-" + f.replace(" ", "-");
+      const v = document.createElement("div");
+      v.className = "metric-card-stat-val";
+      const l = document.createElement("div");
+      l.className = "metric-card-stat-label";
+      l.textContent = f;
+      cell.append(v, l);
+      stats.appendChild(cell);
     }
-    function showStatus(status) {
-      statusDiv.textContent = "Status: " + status;
-    }
-    function markDone() {
-      const done = document.createElement("div");
-      done.style.color = "var(--text-muted)";
-      done.style.marginTop = "8px";
-      done.style.fontSize = "12px";
-      done.textContent = "\u2014 execution complete \u2014";
-      container.appendChild(done);
-    }
-    const es = new EventSource("/api/executions/" + execID + "/output");
-    es.addEventListener("output", (e) => {
-      try {
-        appendLine(JSON.parse(e.data));
-      } catch {
-      }
-    });
-    es.addEventListener("status", (e) => {
-      showStatus(e.data);
-    });
-    es.addEventListener("done", () => {
-      es.close();
-      markDone();
-    });
-    es.onerror = () => {
-      es.close();
-      const msg = document.createElement("div");
-      msg.className = "error-banner";
-      msg.textContent = "Connection lost.";
-      container.appendChild(msg);
+    card.appendChild(stats);
+    updateCard(card, m);
+    return card;
+  }
+  function updateCard(card, m) {
+    const title = card.querySelector(".metric-card-title");
+    if (title) title.textContent = m.task_name;
+    const lane = card.querySelector(".metric-card-lane");
+    if (lane) lane.textContent = "lane: " + m.group_name;
+    const values = {
+      success: String(m.success_count),
+      failed: String(m.failed_count),
+      canceled: String(m.canceled_count),
+      avg: fmtMs(m.avg_duration_ms),
+      min: fmtMs(m.min_duration_ms),
+      max: fmtMs(m.max_duration_ms),
+      "last-run": fmtDate(m.last_execution)
     };
-    window.addEventListener("hashchange", () => es.close(), { once: true });
+    for (const [key, val] of Object.entries(values)) {
+      const cell = card.querySelector(".metric-stat-" + key);
+      const v = cell?.querySelector(".metric-card-stat-val");
+      if (v) v.textContent = val;
+    }
+  }
+
+  // web/taskmaster/js/taskdetail.ts
+  function statusBadgeClass2(status) {
+    switch (status) {
+      case "success":
+        return "badge-green";
+      case "failed":
+        return "badge-red";
+      case "canceled":
+        return "badge-yellow";
+      case "running":
+        return "badge-blue";
+      default:
+        return "badge-muted";
+    }
+  }
+  function fmtMs2(ms) {
+    if (ms === null || ms === void 0) return "\u2014";
+    return (ms / 1e3).toFixed(2) + "s";
+  }
+  function fmtDate2(iso) {
+    if (!iso) return "\u2014";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleString();
+  }
+  function mountTaskDetail(container, live2, task, onBack, onChange = () => {
+  }) {
+    container.textContent = "";
+    container.className = "task-detail";
+    const header = document.createElement("div");
+    header.className = "task-detail-header";
+    const backBtn = document.createElement("button");
+    backBtn.type = "button";
+    backBtn.className = "btn btn-secondary btn-sm task-detail-back";
+    backBtn.textContent = "\u2190 Back to board";
+    backBtn.addEventListener("click", onBack);
+    const title = document.createElement("h2");
+    title.className = "task-detail-title";
+    title.textContent = task.name;
+    header.append(backBtn, title);
+    container.appendChild(header);
+    const meta = document.createElement("div");
+    meta.className = "task-detail-meta";
+    const cmdLine = document.createElement("code");
+    cmdLine.className = "task-detail-command";
+    cmdLine.textContent = task.command;
+    meta.appendChild(cmdLine);
+    const laneLine = document.createElement("div");
+    laneLine.className = "task-detail-sub";
+    laneLine.textContent = "lane: " + task.lane_name + (task.repeat ? " \xB7 repeats, cooldown " + task.cooldown_seconds + "s" : " \xB7 one-shot") + (task.sudo ? " \xB7 sudo" : "");
+    meta.appendChild(laneLine);
+    container.appendChild(meta);
+    const metricsWrap = document.createElement("div");
+    metricsWrap.className = "task-detail-metrics";
+    metricsWrap.textContent = "Loading metrics\u2026";
+    container.appendChild(metricsWrap);
+    const outputHeader = document.createElement("div");
+    outputHeader.className = "task-detail-section-title";
+    outputHeader.textContent = "Output";
+    const outputBox = document.createElement("pre");
+    outputBox.className = "task-detail-output";
+    outputBox.textContent = "(select a run to view its output)";
+    container.append(outputHeader, outputBox);
+    const historyHeader = document.createElement("div");
+    historyHeader.className = "task-detail-section-title";
+    historyHeader.textContent = "History";
+    const historyList = document.createElement("div");
+    historyList.className = "task-detail-history";
+    container.append(historyHeader, historyList);
+    let currentSource = null;
+    let selectedExecId = null;
+    let destroyed = false;
+    function closeStream() {
+      if (currentSource) {
+        currentSource.close();
+        currentSource = null;
+      }
+    }
+    function streamExecution(exec) {
+      if (selectedExecId === exec.id && currentSource) return;
+      closeStream();
+      selectedExecId = exec.id;
+      outputBox.textContent = "";
+      updateHistorySelection();
+      const source = api.openExecutionOutput(exec.id);
+      currentSource = source;
+      source.addEventListener("output", (ev) => {
+        try {
+          const parsed = JSON.parse(ev.data);
+          outputBox.textContent += (parsed.line ?? "") + "\n";
+          outputBox.scrollTop = outputBox.scrollHeight;
+        } catch {
+        }
+      });
+      source.addEventListener("status", (ev) => {
+        if (outputBox.textContent === "") outputBox.textContent = "(execution " + ev.data + ")";
+        closeStream();
+      });
+      source.addEventListener("done", () => closeStream());
+      source.onerror = () => {
+      };
+    }
+    function updateHistorySelection() {
+      for (const row of Array.from(historyList.children)) {
+        const el = row;
+        const id = Number(el.getAttribute("data-tm-key"));
+        el.classList.toggle("history-row-selected", id === selectedExecId);
+      }
+    }
+    async function loadHistory() {
+      let execs = [];
+      try {
+        execs = await api.listExecutions(task.name, 50);
+      } catch {
+        return;
+      }
+      if (destroyed) return;
+      execs.sort((a, b) => b.id - a.id);
+      if (execs.length === 0) {
+        historyList.textContent = "";
+        const empty = document.createElement("div");
+        empty.className = "lane-empty-note";
+        empty.textContent = "no runs yet";
+        historyList.appendChild(empty);
+        return;
+      }
+      historyList.querySelector(".lane-empty-note")?.remove();
+      patchList(historyList, execs, {
+        key: (e) => e.id,
+        create: (e) => createHistoryRow(e),
+        update: (row, e) => updateHistoryRow(row, e)
+      });
+      if (selectedExecId === null) {
+        streamExecution(execs[0]);
+      }
+    }
+    function createHistoryRow(exec) {
+      const row = document.createElement("div");
+      row.className = "history-row";
+      const badge = document.createElement("span");
+      badge.className = "badge history-row-status-badge";
+      const when = document.createElement("span");
+      when.className = "history-row-when";
+      const dur = document.createElement("span");
+      dur.className = "history-row-dur";
+      const pidLabel = document.createElement("span");
+      pidLabel.className = "history-row-pid";
+      const suspendedBadge = document.createElement("span");
+      suspendedBadge.className = "badge badge-yellow history-row-suspended-badge";
+      suspendedBadge.textContent = "suspended";
+      const pauseBtn = document.createElement("button");
+      pauseBtn.type = "button";
+      pauseBtn.className = "btn-icon history-row-pause-btn";
+      const viewBtn = document.createElement("button");
+      viewBtn.type = "button";
+      viewBtn.className = "btn btn-secondary btn-sm";
+      viewBtn.textContent = "View output";
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "btn btn-danger btn-sm";
+      cancelBtn.title = "Cancel execution";
+      cancelBtn.setAttribute("aria-label", "Cancel execution");
+      cancelBtn.textContent = "\u2716";
+      row.append(pidLabel, suspendedBadge, pauseBtn, badge, when, dur, viewBtn, cancelBtn);
+      updateHistoryRow(row, exec);
+      return row;
+    }
+    function updateHistoryRow(row, exec) {
+      row.classList.toggle("history-row-selected", exec.id === selectedExecId);
+      const badge = row.querySelector(".history-row-status-badge");
+      if (badge) {
+        badge.className = "badge history-row-status-badge " + statusBadgeClass2(exec.status);
+        badge.textContent = exec.status;
+      }
+      const when = row.querySelector(".history-row-when");
+      if (when) when.textContent = fmtDate2(exec.started_at ?? exec.scheduled_at);
+      const dur = row.querySelector(".history-row-dur");
+      if (dur) dur.textContent = fmtMs2(exec.duration_ms);
+      const viewBtn = row.querySelector(".btn-secondary");
+      if (viewBtn) viewBtn.onclick = () => streamExecution(exec);
+      const isRunning = exec.status === "running";
+      const pidLabel = row.querySelector(".history-row-pid");
+      if (pidLabel) {
+        pidLabel.style.display = isRunning ? "" : "none";
+        pidLabel.textContent = exec.pid !== void 0 ? "pid " + exec.pid : "";
+      }
+      const suspendedBadge = row.querySelector(".history-row-suspended-badge");
+      if (suspendedBadge) {
+        suspendedBadge.style.display = isRunning && exec.suspended ? "" : "none";
+      }
+      const pauseBtn = row.querySelector(".history-row-pause-btn");
+      if (pauseBtn) {
+        pauseBtn.style.display = isRunning ? "" : "none";
+        if (isRunning) {
+          const suspended = !!exec.suspended;
+          pauseBtn.textContent = suspended ? "\u25B6" : "\u23F8";
+          pauseBtn.title = suspended ? "Resume process" : "Pause process";
+          pauseBtn.setAttribute("aria-label", pauseBtn.title);
+          pauseBtn.onclick = () => {
+            pauseBtn.disabled = true;
+            const req = suspended ? api.resumeExecution(exec.id) : api.pauseExecution(exec.id);
+            void req.then(() => {
+              onChange();
+              void loadHistory();
+            }).finally(() => {
+              pauseBtn.disabled = false;
+            });
+          };
+        }
+      }
+      const cancelBtn = row.querySelector(".btn-danger");
+      if (cancelBtn) {
+        cancelBtn.style.display = isRunning ? "" : "none";
+        cancelBtn.onclick = () => {
+          cancelBtn.disabled = true;
+          void api.cancelExecution(exec.id).then(() => {
+            onChange();
+            void loadHistory();
+          }).finally(() => {
+            cancelBtn.disabled = false;
+          });
+        };
+      }
+    }
+    async function loadMetrics() {
+      let rows = [];
+      try {
+        rows = await api.getMetrics(void 0, task.name);
+      } catch {
+        metricsWrap.textContent = "Metrics unavailable.";
+        return;
+      }
+      if (destroyed) return;
+      const m = rows.find((r) => r.task_name === task.name) ?? rows[0];
+      if (!m) {
+        metricsWrap.textContent = "No runs recorded yet.";
+        return;
+      }
+      if (metricsWrap.textContent !== "" && metricsWrap.children.length === 0) {
+        metricsWrap.textContent = "";
+      }
+      const stats = [
+        ["success", String(m.success_count)],
+        ["failed", String(m.failed_count)],
+        ["canceled", String(m.canceled_count)],
+        ["avg", fmtMs2(m.avg_duration_ms ?? null)],
+        ["min", fmtMs2(m.min_duration_ms ?? null)],
+        ["max", fmtMs2(m.max_duration_ms ?? null)],
+        ["last run", fmtDate2(m.last_execution ?? null)]
+      ];
+      let grid = metricsWrap.querySelector(".task-detail-metric-grid");
+      if (!grid) {
+        metricsWrap.textContent = "";
+        grid = document.createElement("div");
+        grid.className = "task-detail-metric-grid";
+        metricsWrap.appendChild(grid);
+      }
+      for (const [label, val] of stats) {
+        const key = label.replace(/\s+/g, "-");
+        let cell = grid.querySelector('[data-metric="' + key + '"]');
+        if (!cell) {
+          cell = document.createElement("div");
+          cell.className = "task-detail-metric";
+          cell.setAttribute("data-metric", key);
+          const v2 = document.createElement("div");
+          v2.className = "task-detail-metric-val";
+          const l = document.createElement("div");
+          l.className = "task-detail-metric-label";
+          l.textContent = label;
+          cell.append(v2, l);
+          grid.appendChild(cell);
+        }
+        const v = cell.querySelector(".task-detail-metric-val");
+        if (v) v.textContent = val;
+      }
+    }
+    void loadHistory();
+    void loadMetrics();
+    const unsubscribe2 = live2.onEvent(() => {
+      void loadHistory();
+      void loadMetrics();
+    });
+    return () => {
+      destroyed = true;
+      closeStream();
+      unsubscribe2();
+    };
+  }
+
+  // web/taskmaster/js/taskview.ts
+  function mountTaskView(container, live2, caps3, taskName) {
+    container.textContent = "";
+    const wrap = document.createElement("div");
+    wrap.className = "split-view";
+    const left = document.createElement("div");
+    left.className = "split-left";
+    const right = document.createElement("div");
+    right.className = "split-right";
+    wrap.append(left, right);
+    container.appendChild(wrap);
+    right.textContent = "Loading task\u2026";
+    let unmountLeft = null;
+    let unmountRight = null;
+    let cancelled = false;
+    const goBack = () => {
+      window.location.hash = "#board";
+    };
+    void api.getTask(taskName).then((task) => {
+      if (cancelled) return;
+      unmountLeft = mountBoard(left, live2, caps3, { laneFilter: task.lane_name });
+      right.textContent = "";
+      unmountRight = mountTaskDetail(right, live2, task, goBack);
+    }).catch(() => {
+      if (cancelled) return;
+      right.textContent = "";
+      const err = document.createElement("div");
+      err.className = "empty-state";
+      err.textContent = "Task not found.";
+      right.appendChild(err);
+      const back = document.createElement("button");
+      back.type = "button";
+      back.className = "btn btn-secondary";
+      back.textContent = "\u2190 Back to board";
+      back.addEventListener("click", goBack);
+      right.appendChild(back);
+    });
+    return () => {
+      cancelled = true;
+      if (unmountLeft) unmountLeft();
+      if (unmountRight) unmountRight();
+    };
   }
 
   // web/taskmaster/js/main.ts
-  var caps = { allow_sudo: false };
+  var caps2 = { allow_sudo: false };
   var authEnabled = false;
-  var NAV_LINKS = [
-    { label: "Groups", hash: "#groups" },
-    { label: "Tasks", hash: "#tasks" },
-    { label: "Executions", hash: "#executions" },
-    { label: "Metrics", hash: "#metrics" }
-  ];
+  var brake = { engaged: false };
+  var live = new LiveController();
+  var LIVE_INTERVALS_SEC = [5, 10, 30, 60];
   var ICON_MENU = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>';
   var ICON_LOGOUT = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>';
-  var AR_ENABLED_KEY = "tm.autorefresh.enabled";
-  var AR_INTERVAL_KEY = "tm.autorefresh.interval";
-  var AR_INTERVALS = [5, 10, 30, 60];
-  function lsGet(key) {
-    try {
-      return localStorage.getItem(key);
-    } catch {
-      return null;
-    }
-  }
-  function lsSet(key, val) {
-    try {
-      localStorage.setItem(key, val);
-    } catch {
-    }
-  }
-  function arEnabled() {
-    return lsGet(AR_ENABLED_KEY) === "1";
-  }
-  function arInterval() {
-    const n = parseInt(lsGet(AR_INTERVAL_KEY) || "", 10);
-    return AR_INTERVALS.includes(n) ? n : 5;
-  }
-  var arTimer;
-  function restartAutoRefresh() {
-    if (arTimer !== void 0) {
-      clearInterval(arTimer);
-      arTimer = void 0;
-    }
-    if (!arEnabled()) return;
-    arTimer = window.setInterval(() => {
-      if (currentPage() === "output") return;
-      if (document.querySelector(".modal, dialog[open]")) return;
-      renderPage();
-    }, arInterval() * 1e3);
-  }
+  var ICON_BRAKE = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="7" y1="7" x2="17" y2="17"/></svg>';
+  var NAV_LINKS = [{ label: "Metrics", hash: "#metrics" }];
   function currentPage() {
-    const hash = window.location.hash || "#groups";
-    return hash.slice(1).split("/")[0];
+    const hash = window.location.hash || "#board";
+    return hash.slice(1).split("/")[0] || "board";
   }
-  async function refreshStatusPanel() {
+  function currentTaskName() {
+    const hash = window.location.hash || "";
+    const parts = hash.slice(1).split("/");
+    if (parts[0] === "task" && parts[1]) {
+      try {
+        return decodeURIComponent(parts[1]);
+      } catch {
+        return parts[1];
+      }
+    }
+    return null;
+  }
+  function closeMenu() {
+    const panel = document.getElementById("nav-menu-panel");
+    const btn = document.getElementById("nav-menu-btn");
+    if (panel) panel.hidden = true;
+    if (btn) btn.setAttribute("aria-expanded", "false");
+  }
+  async function refreshStatusLine() {
     const statusEl = document.getElementById("st-status");
-    const sudoToggle = document.getElementById("st-sudo-toggle");
-    if (sudoToggle && !sudoToggle.disabled) sudoToggle.checked = caps.allow_sudo;
     if (!statusEl) return;
     statusEl.textContent = "checking\u2026";
     statusEl.className = "st-value st-muted";
@@ -909,12 +1969,6 @@
       statusEl.className = "st-value st-err";
     }
   }
-  function closeMenu() {
-    const panel = document.getElementById("nav-menu-panel");
-    const btn = document.getElementById("nav-menu-btn");
-    if (panel) panel.hidden = true;
-    if (btn) btn.setAttribute("aria-expanded", "false");
-  }
   function buildNav() {
     const nav = document.getElementById("nav");
     if (!nav) return;
@@ -922,13 +1976,14 @@
     const brand = document.createElement("a");
     brand.className = "nav-brand";
     brand.textContent = "taskmaster";
-    brand.href = "#groups";
+    brand.href = "#board";
     nav.appendChild(brand);
     const inlineLinks = document.createElement("div");
     inlineLinks.className = "nav-links";
+    const page = currentPage();
     NAV_LINKS.forEach(({ label, hash }) => {
       const a = document.createElement("a");
-      a.className = "nav-link" + (window.location.hash === hash ? " active" : "");
+      a.className = "nav-link" + (hash === "#" + page ? " active" : "");
       a.textContent = label;
       a.href = hash;
       inlineLinks.appendChild(a);
@@ -937,6 +1992,8 @@
     const spacer = document.createElement("div");
     spacer.className = "nav-spacer";
     nav.appendChild(spacer);
+    nav.appendChild(buildLiveControl());
+    nav.appendChild(buildBrakeControl());
     if (authEnabled) {
       const btnLogout = document.createElement("button");
       btnLogout.className = "nav-icon-btn";
@@ -944,16 +2001,37 @@
       btnLogout.setAttribute("aria-label", "Log out");
       btnLogout.innerHTML = ICON_LOGOUT;
       btnLogout.addEventListener("click", async () => {
-        await fetch("/api/auth/logout", { method: "POST" });
+        await api.logout();
         window.location.reload();
       });
       nav.appendChild(btnLogout);
     }
     nav.appendChild(buildMenu());
   }
+  function liveToggleTitle(enabled) {
+    return enabled ? "Live updates on \u2014 click to pause" : "Live updates paused \u2014 click to resume";
+  }
+  function buildLiveControl() {
+    const wrap = document.createElement("div");
+    wrap.className = "nav-live";
+    const label = document.createElement("span");
+    label.className = "nav-live-label";
+    label.textContent = "Live";
+    const toggle = createToggleHandle({
+      checked: live.isEnabled(),
+      onChange: (v) => {
+        live.setEnabled(v);
+        toggle.el.title = liveToggleTitle(v);
+      }
+    });
+    toggle.el.title = liveToggleTitle(live.isEnabled());
+    wrap.append(label, toggle.el);
+    return wrap;
+  }
   function buildMenu() {
     const wrap = document.createElement("div");
     wrap.className = "nav-menu";
+    wrap.id = "nav-menu";
     const btn = document.createElement("button");
     btn.id = "nav-menu-btn";
     btn.className = "nav-icon-btn";
@@ -968,74 +2046,59 @@
     panel.hidden = true;
     const navSection = document.createElement("div");
     navSection.className = "menu-section menu-nav";
+    const page = currentPage();
     NAV_LINKS.forEach(({ label, hash }) => {
       const a = document.createElement("a");
-      a.className = "menu-item" + (window.location.hash === hash ? " active" : "");
+      a.className = "menu-item" + (hash === "#" + page ? " active" : "");
       a.textContent = label;
       a.href = hash;
       a.addEventListener("click", closeMenu);
       navSection.appendChild(a);
     });
     panel.appendChild(navSection);
-    const arSection = document.createElement("div");
-    arSection.className = "menu-section";
-    arSection.innerHTML = '<div class="menu-heading">Auto-refresh</div>';
-    const toggleRow = document.createElement("label");
-    toggleRow.className = "menu-row menu-control";
-    const toggle = document.createElement("input");
-    toggle.type = "checkbox";
-    toggle.checked = arEnabled();
-    const toggleText = document.createElement("span");
-    toggleText.textContent = "Enabled";
-    toggleRow.append(toggle, toggleText);
-    const intervalRow = document.createElement("label");
-    intervalRow.className = "menu-row menu-control";
-    const intervalText = document.createElement("span");
-    intervalText.textContent = "Interval";
-    const select = document.createElement("select");
-    AR_INTERVALS.forEach((s) => {
+    const liveSection = document.createElement("div");
+    liveSection.className = "menu-section";
+    liveSection.innerHTML = '<div class="menu-heading">Live updates</div>';
+    const intervalRow = document.createElement("div");
+    intervalRow.className = "menu-row";
+    const intervalLabel = document.createElement("span");
+    intervalLabel.textContent = "Fallback poll interval";
+    const intervalSelect = document.createElement("select");
+    LIVE_INTERVALS_SEC.forEach((s) => {
       const opt = document.createElement("option");
-      opt.value = String(s);
+      opt.value = String(s * 1e3);
       opt.textContent = s + "s";
-      if (s === arInterval()) opt.selected = true;
-      select.appendChild(opt);
+      if (s * 1e3 === live.getInterval()) opt.selected = true;
+      intervalSelect.appendChild(opt);
     });
-    select.disabled = !toggle.checked;
-    intervalRow.append(intervalText, select);
-    toggle.addEventListener("change", () => {
-      lsSet(AR_ENABLED_KEY, toggle.checked ? "1" : "0");
-      select.disabled = !toggle.checked;
-      restartAutoRefresh();
+    intervalSelect.addEventListener("change", () => {
+      live.setInterval(parseInt(intervalSelect.value, 10));
     });
-    select.addEventListener("change", () => {
-      lsSet(AR_INTERVAL_KEY, select.value);
-      restartAutoRefresh();
-    });
-    arSection.append(toggleRow, intervalRow);
-    panel.appendChild(arSection);
+    intervalRow.append(intervalLabel, intervalSelect);
+    liveSection.append(intervalRow);
+    panel.appendChild(liveSection);
     const stSection = document.createElement("div");
     stSection.className = "menu-section";
     stSection.innerHTML = '<div class="menu-heading">Server</div><div class="menu-row"><span>Status</span><span id="st-status" class="st-value st-muted">\u2026</span></div>';
-    const sudoRow = document.createElement("label");
-    sudoRow.className = "menu-row menu-control";
-    const sudoToggle = document.createElement("input");
-    sudoToggle.id = "st-sudo-toggle";
-    sudoToggle.type = "checkbox";
-    sudoToggle.checked = caps.allow_sudo;
-    const sudoText = document.createElement("span");
-    sudoText.textContent = "Allow sudo";
-    sudoRow.append(sudoToggle, sudoText);
-    sudoToggle.addEventListener("change", async () => {
-      const desired = sudoToggle.checked;
-      sudoToggle.disabled = true;
-      try {
-        caps = await api.setCapabilities(desired);
-      } catch {
-        caps.allow_sudo = !desired;
+    const sudoRow = document.createElement("div");
+    sudoRow.className = "menu-row";
+    const sudoLabel = document.createElement("span");
+    sudoLabel.textContent = "Allow sudo";
+    const sudoToggle = createToggleHandle({
+      checked: caps2.allow_sudo,
+      onChange: (desired) => {
+        sudoToggle.setDisabled(true);
+        void api.setCapabilities(desired).then((updated) => {
+          caps2 = updated;
+        }).catch(() => {
+          caps2.allow_sudo = !desired;
+        }).finally(() => {
+          sudoToggle.setChecked(caps2.allow_sudo);
+          sudoToggle.setDisabled(false);
+        });
       }
-      sudoToggle.checked = caps.allow_sudo;
-      sudoToggle.disabled = false;
     });
+    sudoRow.append(sudoLabel, sudoToggle.el);
     stSection.appendChild(sudoRow);
     panel.appendChild(stSection);
     btn.addEventListener("click", (e) => {
@@ -1043,10 +2106,69 @@
       const open = panel.hidden;
       panel.hidden = !open;
       btn.setAttribute("aria-expanded", String(open));
-      if (open) void refreshStatusPanel();
+      if (open) void refreshStatusLine();
     });
     wrap.append(btn, panel);
     return wrap;
+  }
+  function buildBrakeControl() {
+    const btn = document.createElement("button");
+    btn.id = "brake-btn";
+    btn.type = "button";
+    btn.className = "brake-btn";
+    btn.innerHTML = ICON_BRAKE + '<span class="brake-btn-label"></span>';
+    btn.addEventListener("click", () => void toggleBrake());
+    applyBrakeUI(btn);
+    return btn;
+  }
+  function applyBrakeUI(btn) {
+    btn.classList.toggle("brake-engaged", brake.engaged);
+    btn.title = brake.engaged ? "Hand brake engaged \u2014 click to release" : "Hand brake \u2014 click to stop everything";
+    btn.setAttribute("aria-pressed", String(brake.engaged));
+    const label = btn.querySelector(".brake-btn-label");
+    if (label) label.textContent = brake.engaged ? "RELEASE BRAKE" : "HAND BRAKE";
+  }
+  function refreshBrakeUI() {
+    const btn = document.getElementById("brake-btn");
+    if (btn) applyBrakeUI(btn);
+    renderBrakeBanner();
+  }
+  function renderBrakeBanner() {
+    let banner = document.getElementById("brake-banner");
+    if (!brake.engaged) {
+      banner?.remove();
+      return;
+    }
+    if (!banner) {
+      banner = document.createElement("div");
+      banner.id = "brake-banner";
+      banner.className = "brake-banner";
+      banner.textContent = "ALL PAUSED \u2014 hand brake engaged. No tasks will launch until it is released.";
+      const nav = document.getElementById("nav");
+      nav?.insertAdjacentElement("afterend", banner);
+    }
+  }
+  async function toggleBrake() {
+    if (brake.engaged) {
+      try {
+        brake = await api.releaseBrake();
+      } catch {
+        return;
+      }
+      refreshBrakeUI();
+      return;
+    }
+    const ok = await confirmDialog(
+      "Engage the hand brake? This pauses every lane and force-kills every running task (sudo children may survive). Everything stays paused until you release it.",
+      { title: "Engage hand brake", confirmLabel: "Engage" }
+    );
+    if (!ok) return;
+    try {
+      brake = await api.engageBrake();
+    } catch {
+      return;
+    }
+    refreshBrakeUI();
   }
   document.addEventListener("click", (e) => {
     const menu = document.getElementById("nav-menu");
@@ -1055,40 +2177,43 @@
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeMenu();
   });
+  var unmountCurrentPage = null;
   function renderPage() {
     const container = document.getElementById("app");
     if (!container) return;
-    const hash = window.location.hash || "#groups";
-    const [page, param] = hash.slice(1).split("/");
+    if (unmountCurrentPage) {
+      unmountCurrentPage();
+      unmountCurrentPage = null;
+    }
+    const page = currentPage();
     switch (page) {
-      case "groups":
-        renderGroups(container);
-        break;
-      case "tasks":
-        renderTasks(container, param);
-        break;
-      case "executions":
-        renderExecutions(container, param);
-        break;
       case "metrics":
-        renderMetrics(container, param);
+        unmountCurrentPage = mountMetrics(container, live);
         break;
-      case "output":
-        if (param) renderOutput(container, param);
+      case "task": {
+        const taskName = currentTaskName();
+        if (taskName) {
+          unmountCurrentPage = mountTaskView(container, live, caps2, taskName);
+          break;
+        }
+        unmountCurrentPage = mountBoard(container, live, caps2);
         break;
+      }
+      case "board":
       default:
-        renderGroups(container);
+        unmountCurrentPage = mountBoard(container, live, caps2);
     }
   }
   function route() {
     buildNav();
+    renderBrakeBanner();
     renderPage();
   }
   async function bootstrap() {
     try {
-      caps = await api.capabilities();
+      caps2 = await api.capabilities();
     } catch {
-      caps = { allow_sudo: false };
+      caps2 = { allow_sudo: false };
     }
     try {
       const mode = await api.authMode();
@@ -1096,9 +2221,19 @@
     } catch {
       authEnabled = false;
     }
+    try {
+      brake = await api.getBrake();
+    } catch {
+      brake = { engaged: false };
+    }
+    live.onEvent((ev) => {
+      if (ev.type === "brake" && typeof ev.engaged === "boolean") {
+        brake = { engaged: ev.engaged };
+        refreshBrakeUI();
+      }
+    });
     window.addEventListener("hashchange", route);
     route();
-    restartAutoRefresh();
   }
   document.addEventListener("DOMContentLoaded", () => {
     void bootstrap();

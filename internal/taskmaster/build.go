@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"cmd184psu/unified-webapp/internal/platform/broker"
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/platform/static"
 	"cmd184psu/unified-webapp/internal/taskmaster/coordinator"
@@ -61,11 +62,42 @@ func Build(cfg config.TaskmasterConfig) (http.Handler, error) {
 	}
 	sudoGate := worker.NewSudoGate(allowSudo)
 
+	// brake_engaged is DB-authoritative once seeded, same pattern as
+	// allow_sudo: absent on first boot (seeded false), the runtime
+	// /api/brake endpoints persist it thereafter and it wins on every boot
+	// so a violent reboot doesn't silently release the hand brake.
+	brakeEngaged := false
+	if v, ok, err := database.GetSetting(db.SettingBrakeEngaged); err != nil {
+		database.Close()
+		return nil, err
+	} else if ok {
+		brakeEngaged = db.DecodeBoolSetting(v)
+	} else if err := database.SetSetting(db.SettingBrakeEngaged, db.EncodeBoolSetting(false)); err != nil {
+		database.Close()
+		return nil, err
+	}
+	brakeGate := worker.NewBrakeGate(brakeEngaged)
+	if brakeEngaged {
+		log.Printf("taskmaster: booted with hand brake ENGAGED")
+	}
+
+	cancels := worker.NewCancelRegistry()
+	procs := worker.NewProcessRegistry()
+
+	// boardBroker is the shared board-events broker (plan D7/B5): the worker
+	// publishes task lifecycle events, the coordinator publishes lane/task/
+	// brake mutation events, and GET /api/board/events streams them. It has
+	// no background goroutines of its own — each subscriber's loop runs
+	// inside that request's goroutine and exits when the request context is
+	// done — so there is nothing extra to stop on Close().
+	boardBroker := broker.NewBroker(0)
+	boardBroker.SetMaxSubscribers(cfg.SSEMaxSubscribers)
+
 	registry := worker.NewRegistry()
 	stopGC := registry.StartGC(time.Hour)
 
 	workerID, _ := os.Hostname()
-	w := worker.New(database, registry, workerID, sudoGate)
+	w := worker.New(database, registry, workerID, sudoGate, cancels, brakeGate, procs, boardBroker)
 	ctx, cancel := context.WithCancel(context.Background())
 	workerDone := make(chan struct{})
 	go func() {
@@ -74,7 +106,7 @@ func Build(cfg config.TaskmasterConfig) (http.Handler, error) {
 	}()
 	log.Printf("taskmaster: worker started (poll 5s, db %s, allow_sudo=%v)", cfg.DBPath, allowSudo)
 
-	c := coordinator.New(database, registry, sudoGate, cfg.SSEMaxSubscribers)
+	c := coordinator.New(database, registry, sudoGate, cancels, brakeGate, procs, cfg.SSEMaxSubscribers, boardBroker)
 	r := coordinator.Routes(c)
 	r.Handle("/*", static.NewHandler(cfg.StaticDir))
 
