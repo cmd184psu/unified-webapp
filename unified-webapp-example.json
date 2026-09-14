@@ -16,7 +16,8 @@
   "utuber-test.cmdhome.net":           "utuber",
   "admin-test.cmdhome.net":            "admin",
   "smbedit-test.cmdhome.net":          "smbedit",
-  "smbedit.cmdhome.net":               "smbedit"
+  "smbedit.cmdhome.net":               "smbedit",
+  "issuetracker-test.cmdhome.net":     "issuetracker"
   },
   "server": {
     "origin_check": "enforce",
@@ -99,6 +100,14 @@
     "data_dir": "./data/smbedit",
     "picker_root": "/opt"
   },
+  "issuetracker": {
+    "static_dir": "./web/issuetracker",
+    "db_path": "./data/issuetracker/issues.db",
+    "default_user": {
+      "name": "Unassigned",
+      "email": "unassigned@localhost"
+    }
+  },
   "auth": {
     "modules": {
       "grocery": { "pin_file": "/etc/unified-webapp/grocery.pin" },
@@ -108,6 +117,7 @@
       "obsidianoid": {},
       "multissh": {},
       "certmachine": { "pin_file": "/etc/unified-webapp/certmachine.pin" },
+      "issuetracker": {},
       "admin": {}
     },
     "admin_pin_file": "/etc/unified-webapp/admin.pin",

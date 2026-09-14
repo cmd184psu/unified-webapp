@@ -12,22 +12,23 @@ const DefaultConfigPath = "~/.unified-webapp.json"
 
 // Config is the top-level unified server configuration.
 type Config struct {
-	Port        int               `json:"port"`
-	TLSCert     string            `json:"tls_cert"`
-	TLSKey      string            `json:"tls_key"`
-	Routing     map[string]string `json:"host_routing"` // hostname → module name
-	Server      ServerConfig      `json:"server"`
-	Grocery     GroceryConfig     `json:"grocery"`
-	Todo        TodoConfig        `json:"todo"`
-	Slideshow   SlideshowConfig   `json:"slideshow"`
-	Menuserver  MenuserverConfig  `json:"menuserver"`
-	Obsidianoid ObsidianoidConfig `json:"obsidianoid"`
-	Multissh    MultisshConfig    `json:"multissh"`
-	Certmachine CertmachineConfig `json:"certmachine"`
-	Utuber      UtuberConfig      `json:"utuber"`
-	Auth        AuthConfig        `json:"auth"`
-	Admin       AdminConfig       `json:"admin"`
-	Smbedit     SmbeditConfig     `json:"smbedit"`
+	Port         int                `json:"port"`
+	TLSCert      string             `json:"tls_cert"`
+	TLSKey       string             `json:"tls_key"`
+	Routing      map[string]string  `json:"host_routing"` // hostname → module name
+	Server       ServerConfig       `json:"server"`
+	Grocery      GroceryConfig      `json:"grocery"`
+	Todo         TodoConfig         `json:"todo"`
+	Slideshow    SlideshowConfig    `json:"slideshow"`
+	Menuserver   MenuserverConfig   `json:"menuserver"`
+	Obsidianoid  ObsidianoidConfig  `json:"obsidianoid"`
+	Multissh     MultisshConfig     `json:"multissh"`
+	Certmachine  CertmachineConfig  `json:"certmachine"`
+	Utuber       UtuberConfig       `json:"utuber"`
+	Auth         AuthConfig         `json:"auth"`
+	Admin        AdminConfig        `json:"admin"`
+	Smbedit      SmbeditConfig      `json:"smbedit"`
+	IssueTracker IssueTrackerConfig `json:"issuetracker"`
 
 	// configPath is the absolute path Load read this Config from (empty when
 	// built via DefaultConfig()/WriteDefault without going through Load, or
@@ -343,6 +344,23 @@ type CertmachineConfig struct {
 	TrustDeviceEnabled  bool   `json:"trust_device_enabled"`
 }
 
+// IssueTrackerConfig holds configuration specific to the issuetracker module.
+// DefaultUser names the users row that owns reporter/assignee attribution when
+// a request carries no authenticated principal (open mode); it is a data row,
+// not a credential. Module auth is a platform concern (auth.modules).
+type IssueTrackerConfig struct {
+	StaticDir   string                  `json:"static_dir"`
+	DBPath      string                  `json:"db_path"`
+	DefaultUser IssueTrackerDefaultUser `json:"default_user"`
+}
+
+// IssueTrackerDefaultUser is the open-mode fallback user. Email is used as the
+// stable username key; Name is the display name.
+type IssueTrackerDefaultUser struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
 // Certmachine defaults (FR-1).
 const (
 	DefaultCertValidityDays = 365
@@ -478,6 +496,14 @@ func DefaultConfig() *Config {
 			DataDir:    "./data/smbedit",
 			PickerRoot: "/opt",
 		},
+		IssueTracker: IssueTrackerConfig{
+			StaticDir: "./web/issuetracker",
+			DBPath:    "./data/issuetracker/issues.db",
+			DefaultUser: IssueTrackerDefaultUser{
+				Name:  "Unassigned",
+				Email: "unassigned@localhost",
+			},
+		},
 		Server: ServerConfig{
 			OriginCheck:       "enforce",
 			SSEMaxSubscribers: DefaultSSEMaxSubscribers,
@@ -561,6 +587,9 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	if err := expandAdminPaths(&cfg.Admin); err != nil {
+		return nil, err
+	}
+	if err := expandIssueTrackerPaths(&cfg.IssueTracker); err != nil {
 		return nil, err
 	}
 	if err := expandSmbeditPaths(&cfg.Smbedit); err != nil {
@@ -748,6 +777,17 @@ func expandCertmachinePaths(cm *CertmachineConfig) error {
 		return err
 	}
 	if cm.LegacyImportDir, err = ExpandPath(cm.LegacyImportDir); err != nil {
+		return err
+	}
+	return nil
+}
+
+func expandIssueTrackerPaths(it *IssueTrackerConfig) error {
+	var err error
+	if it.StaticDir, err = ExpandPath(it.StaticDir); err != nil {
+		return err
+	}
+	if it.DBPath, err = ExpandPath(it.DBPath); err != nil {
 		return err
 	}
 	return nil

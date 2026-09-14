@@ -13,7 +13,8 @@
     "multissh.test":    "multissh",
     "certmachine-test.cmdhome.net": "certmachine",
     "admin.test":       "admin",
-    "smbedit-test.cmdhome.net":     "smbedit"
+    "smbedit-test.cmdhome.net":     "smbedit",
+    "issues-test.cmdhome.net": "issuetracker"
   },
   "server": {
     "origin_check": "enforce",
@@ -90,13 +91,18 @@
     "data_dir": "./local-test/data/smbedit",
     "picker_root": "/opt"
   },
+  "issuetracker": {
+    "static_dir": "./web/issuetracker",
+    "db_path": "./local-test/data/issuetracker/issues.db",
+    "default_user": { "name": "Unassigned", "email": "unassigned@localhost" }
+  },
   "auth": {
     "modules": {
       "admin": {
-        "pin_file": "/opt/unified-webapp/local-test/admin.pin"
+        "pin_file": "/opt/unified-webapp-issues/local-test/admin.pin"
       },
       "certmachine": {
-        "pin_file": "/opt/unified-webapp/local-test/certmachine.pin"
+        "pin_file": "/opt/unified-webapp-issues/local-test/certmachine.pin"
       },
       "menuserver": {
         "pin_file": ""
@@ -108,15 +114,15 @@
         "pin_file": ""
       },
       "slideshow": {
-        "pin_file": "/opt/unified-webapp/local-test/slideshow.pin"
+        "pin_file": "/opt/unified-webapp-issues/local-test/slideshow.pin"
       },
       "todo": {
-        "pin_file": "/opt/unified-webapp/local-test/todo.pin"
+        "pin_file": "/opt/unified-webapp-issues/local-test/todo.pin"
       }
     },
     "admin_pin": "",
     "admin_pin_file": "",
-    "data_dir": "/opt/unified-webapp/local-test/data/auth",
+    "data_dir": "/opt/unified-webapp-issues/local-test/data/auth",
     "cookie_secure": false,
     "cookie_domain": "",
     "session": {
