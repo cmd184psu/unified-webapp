@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -420,8 +421,8 @@ func TestImportCSVMalformedLeavesDataUntouched(t *testing.T) {
 	}
 
 	after := decodeJSON[timetracker.Data](t, hh.do(t, http.MethodGet, "/data", nil))
-	if strings.Join(names(after.Customers), ",") != strings.Join(names(before.Customers), ",") {
-		t.Errorf("data mutated by malformed import: before %v, after %v", before.Customers, after.Customers)
+	if !reflect.DeepEqual(after, before) {
+		t.Errorf("data mutated by malformed import: before %+v, after %+v", before, after)
 	}
 }
 
