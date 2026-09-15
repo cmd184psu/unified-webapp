@@ -179,7 +179,6 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(data => {
             header.innerHTML = `
                 <h1>${data.projectName}</h1>
-                <h2>Version: ${data.version}</h2>
                 <div class="form-group">
                     <label data-tooltip="author">Author:</label>
                     <input type="text" id="authorInput" value="${data.author}" readonly data-tooltip="author">
