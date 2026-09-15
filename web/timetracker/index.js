@@ -61,26 +61,51 @@ document.addEventListener('DOMContentLoaded', function() {
     addButton.style.cursor = 'pointer';
     leftPanel.appendChild(addButton);
 
+    // Adding a customer asks for the name first: the server rejects blank
+    // names, and creating an empty record up front (the reference behavior)
+    // left an unnamed row in the list that then had to be edited into shape.
+    const addModal = document.createElement('div');
+    addModal.className = 'modal hidden';
+    addModal.innerHTML = `
+        <div class="modal-content">
+            <p>New customer name:</p>
+            <input type="text" id="newCustomerNameInput" style="width: 90%; margin-bottom: 10px;">
+            <div class="modal-buttons">
+                <button id="confirmAddBtn">Add</button>
+                <button id="cancelAddBtn">Cancel</button>
+            </div>
+        </div>
+    `;
+
     addButton.onclick = function() {
-        const newCustomer = {
-            customerName: '',
-            slackChannel: '',
-            slackChannelId: '',
-            workLoadType: '',
-            cmsUrl: '',
-            supportBucket: '',
-            jira: ''
-        };
+        const nameInput = addModal.querySelector('#newCustomerNameInput');
+        nameInput.value = '';
+        addModal.classList.remove('hidden');
+        nameInput.focus();
+    };
+
+    function submitNewCustomer() {
+        const nameInput = addModal.querySelector('#newCustomerNameInput');
+        const name = nameInput.value.trim();
+        if (!name) {
+            nameInput.focus();
+            return;
+        }
 
         const requestData = {
             // The server appends regardless of index for newCustomer; any
-            // value other than -1 (the author path) works. The reference
-            // read `data.customers.length` here, but `data` is not in scope
-            // at this point in a module script, so the click threw a
-            // ReferenceError and the button did nothing.
+            // value other than -1 (the author path) works.
             index: 0,
             field: 'newCustomer',
-            value: newCustomer
+            value: {
+                customerName: name,
+                slackChannel: '',
+                slackChannelId: '',
+                workLoadType: '',
+                cmsUrl: '',
+                supportBucket: '',
+                jira: ''
+            }
         };
 
         fetch(`/update`, {
@@ -98,13 +123,22 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .then(updatedData => {
             console.log('Customer added:', updatedData);
-            showMessage('Customer added');
             location.reload();
         })
         .catch(error => {
             console.error('Error adding customer:', error);
         });
+    }
+
+    addModal.querySelector('#confirmAddBtn').onclick = submitNewCustomer;
+    addModal.querySelector('#cancelAddBtn').onclick = function() {
+        addModal.classList.add('hidden');
     };
+    addModal.querySelector('#newCustomerNameInput').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') submitNewCustomer();
+    });
+
+    document.body.appendChild(addModal);
     document.body.appendChild(modal);
 
     document.body.appendChild(footer);
@@ -329,7 +363,12 @@ document.addEventListener('DOMContentLoaded', function() {
                                 parentDiv.insertBefore(jiraLink, label.nextSibling);
                                 
                                 input.classList.add('hidden');
-                            } else if (target === 'customerName' || target === 'supportBucket') {
+                            } else if (target === 'customerName') {
+                                // Renaming can move every customer's sorted
+                                // position, so reload to resync the list and
+                                // all data-index attributes.
+                                location.reload();
+                            } else if (target === 'supportBucket') {
                                 input.setAttribute('readonly', true);
                                 input.classList.remove('hidden');
                             } else {

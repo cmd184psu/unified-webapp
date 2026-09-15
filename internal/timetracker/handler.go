@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"cmd184psu/unified-webapp/internal/platform/response"
 )
@@ -66,9 +67,12 @@ type updateRequest struct {
 //
 // Dispatch order matches FRD §3.2 literally (author check first):
 //  1. Index == -1 (any field): the author update path.
-//  2. Field == "newCustomer" (FR-F1): append a customer; the request's Index
-//     is otherwise ignored.
-//  3. Otherwise: a single-field update on the customer at Index.
+//  2. Field == "newCustomer" (FR-F1): add a customer; the request's Index
+//     is otherwise ignored. A blank customerName is rejected so the list
+//     never gains unnamed rows.
+//  3. Otherwise: a single-field update on the customer at Index, where
+//     Index addresses the same sorted order GET /data serves (the store's
+//     canonical order).
 func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	var req updateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -95,6 +99,10 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		var c Customer
 		if err := json.Unmarshal(req.Value, &c); err != nil {
 			response.WriteError(w, http.StatusBadRequest, "value must be a customer object")
+			return
+		}
+		if strings.TrimSpace(c.CustomerName) == "" {
+			response.WriteError(w, http.StatusBadRequest, "customerName must not be empty")
 			return
 		}
 		data, err := h.store.AppendCustomer(c)

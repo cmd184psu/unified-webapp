@@ -60,26 +60,24 @@ func New(filePath string) (*Store, error) {
 			d.Customers[i].SupportBucket = legacy.Customers[i].CumulusBucket
 		}
 	}
+	sortCustomers(d.Customers)
 	s.data = d
 	return s, nil
 }
 
-// Snapshot returns a deep copy of the data with customers sorted
-// case-insensitively by CustomerName. Used by GET /data and CSV export. The
-// stored insertion order is never mutated by this call.
-func (s *Store) Snapshot() Data {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	d := deepCopyData(s.data)
-	sort.SliceStable(d.Customers, func(i, j int) bool {
-		return strings.ToLower(d.Customers[i].CustomerName) < strings.ToLower(d.Customers[j].CustomerName)
+// sortCustomers sorts customers case-insensitively by CustomerName. The store
+// keeps this order canonical everywhere — in memory, on disk, in GET /data,
+// and in mutation responses — so the indexes the frontend derives from
+// GET /data address the same customers that /update and /delete mutate.
+func sortCustomers(cs []Customer) {
+	sort.SliceStable(cs, func(i, j int) bool {
+		return strings.ToLower(cs[i].CustomerName) < strings.ToLower(cs[j].CustomerName)
 	})
-	return d
 }
 
-// Raw returns a deep copy of the data in file (insertion) order. Used as the
-// mutation-response body.
-func (s *Store) Raw() Data {
+// Snapshot returns a deep copy of the data. Customers are already in the
+// canonical sorted order (see sortCustomers).
+func (s *Store) Snapshot() Data {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return deepCopyData(s.data)
@@ -93,8 +91,8 @@ func (s *Store) SetAuthor(value string) (Data, error) {
 	return deepCopyData(s.data), s.save()
 }
 
-// UpdateField updates a single field of the customer at index and persists
-// it. Unknown fields (including slackChannelId and the removed legacy
+// UpdateField updates a single field of the customer at index (in the
+// canonical sorted order) and persists it. Unknown fields (including slackChannelId and the removed legacy
 // remote-access field) return ErrInvalidField; an out-of-range index returns
 // ErrInvalidIndex (FR-F2). Neither error mutates the store.
 func (s *Store) UpdateField(index int, field, value string) (Data, error) {
@@ -120,19 +118,25 @@ func (s *Store) UpdateField(index int, field, value string) (Data, error) {
 	default:
 		return Data{}, ErrInvalidField
 	}
+	// A customerName change can move the customer's sorted position, so
+	// restore the canonical order before persisting and responding.
+	sortCustomers(s.data.Customers)
 	return deepCopyData(s.data), s.save()
 }
 
-// AppendCustomer appends a customer to the end of the list and persists it.
+// AppendCustomer adds a customer, restores the canonical sorted order, and
+// persists it.
 func (s *Store) AppendCustomer(c Customer) (Data, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.data.Customers = append(s.data.Customers, c)
+	sortCustomers(s.data.Customers)
 	return deepCopyData(s.data), s.save()
 }
 
-// DeleteCustomer removes the customer at index and persists it. An
-// out-of-range index returns ErrInvalidIndex without mutating the store.
+// DeleteCustomer removes the customer at index (in the canonical sorted
+// order) and persists it. An out-of-range index returns ErrInvalidIndex
+// without mutating the store. Removal preserves the sorted order.
 func (s *Store) DeleteCustomer(index int) (Data, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -150,13 +154,14 @@ func (s *Store) ReplaceCustomers(customers []Customer) (Data, error) {
 	defer s.mu.Unlock()
 	cp := make([]Customer, len(customers))
 	copy(cp, customers)
+	sortCustomers(cp)
 	s.data.Customers = cp
 	return deepCopyData(s.data), s.save()
 }
 
 // save writes the store to filePath atomically via a temp file plus rename
-// (FR-F3). Must be called with the lock held. File contents keep insertion
-// order; they are never sorted on disk.
+// (FR-F3). Must be called with the lock held. File contents use the same
+// canonical sorted order as everything else.
 func (s *Store) save() error {
 	if err := os.MkdirAll(filepath.Dir(s.filePath), 0750); err != nil {
 		return err

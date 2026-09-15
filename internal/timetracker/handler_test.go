@@ -228,13 +228,59 @@ func TestUpdateNewCustomer(t *testing.T) {
 	if len(got.Customers) != 2 {
 		t.Fatalf("want 2 customers after append, got %d", len(got.Customers))
 	}
-	// Mutation responses use insertion order (not Snapshot's sort), so the
-	// newly appended "Alpha" must land after "Zeta", not before it.
-	if gotNames := names(got.Customers); strings.Join(gotNames, ",") != "Zeta,Alpha" {
-		t.Errorf("customers = %v, want insertion order [Zeta Alpha]", gotNames)
+	// Mutation responses use the same canonical sorted order as GET /data,
+	// so the newly added "Alpha" sorts before "Zeta".
+	if gotNames := names(got.Customers); strings.Join(gotNames, ",") != "Alpha,Zeta" {
+		t.Errorf("customers = %v, want sorted order [Alpha Zeta]", gotNames)
 	}
-	if got.Customers[1].SlackChannelId != "C123" {
-		t.Errorf("appended customer missing fields: %+v", got.Customers[1])
+	if got.Customers[0].SlackChannelId != "C123" {
+		t.Errorf("added customer missing fields: %+v", got.Customers[0])
+	}
+}
+
+func TestUpdateNewCustomerBlankNameRejected(t *testing.T) {
+	hh := newHarness(t)
+	seedCustomers(t, hh, "Acme")
+
+	for _, name := range []string{"", "   "} {
+		w := hh.do(t, http.MethodPost, "/update", map[string]any{
+			"index": 0,
+			"field": "newCustomer",
+			"value": map[string]string{"customerName": name},
+		})
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("name %q: want 400, got %d (%s)", name, w.Code, w.Body.String())
+		}
+	}
+
+	w := hh.do(t, http.MethodGet, "/data", nil)
+	got := decodeJSON[timetracker.Data](t, w)
+	if len(got.Customers) != 1 {
+		t.Errorf("blank-name customer was added anyway: %+v", got.Customers)
+	}
+}
+
+// The frontend derives indexes from the sorted list GET /data serves; the
+// mutation endpoints must address that same order (this was the wrong-
+// customer-edited bug inherited from the reference).
+func TestUpdateIndexAddressesSortedOrder(t *testing.T) {
+	hh := newHarness(t)
+	seedCustomers(t, hh, "zeta", "Alpha")
+
+	// Sorted view is [Alpha, zeta]; index 1 must edit zeta, not Alpha.
+	w := hh.do(t, http.MethodPost, "/update",
+		map[string]any{"index": 1, "field": "jira", "value": "JIRA-9"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	w = hh.do(t, http.MethodGet, "/data", nil)
+	got := decodeJSON[timetracker.Data](t, w)
+	if got.Customers[1].CustomerName != "zeta" || got.Customers[1].Jira != "JIRA-9" {
+		t.Errorf("update hit the wrong customer: %+v", got.Customers)
+	}
+	if got.Customers[0].Jira != "" {
+		t.Errorf("update leaked onto Alpha: %+v", got.Customers)
 	}
 }
 

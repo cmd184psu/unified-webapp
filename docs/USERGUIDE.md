@@ -371,10 +371,15 @@ convenience over the admin API.
 ## Timetracker
 
 A PS/customer helper: a customer list with per-customer editable fields and
-deep links (Slack, Insight, SFDC, Jira), a 15-minute-block time selector, a
-markdown report composer with clipboard copy, and CSV export. CSV import and
+deep links (Slack, CMS, Jira), a 15-minute-block time selector, a markdown
+report composer with clipboard copy, and CSV export. CSV import and
 `/create-customer` exist as API endpoints (curl/tooling); the UI has no
 import button. One shared dataset, last write wins.
+
+The customer list is kept sorted case-insensitively by name — in memory, on
+disk, in `GET /data`, and in mutation responses — so the row indexes the
+update/delete API uses always address the customer the client saw. Adding a
+customer requires a name (blank names are rejected with a 400).
 
 **Config keys:**
 
