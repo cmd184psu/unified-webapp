@@ -1,0 +1,14 @@
+{
+    "author": "The author of the project",
+    "customerName": "The name of the customer",
+    "slackChannel": "The Slack channel for the customer",
+    "insightUrl": "The URL for customer insights",
+    "workLoadType": "The type of workload for the customer",
+    "sfdcUrl": "The Salesforce URL for the customer",
+    "cumulusBucket": "The Cumulus bucket for the customer",
+    "jira": "The JIRA ticket number for the customer",
+    "reportInput": "The input area for the report",
+    "copyReportBtn": "Copy the processed report",
+    "clearTimeSelectionBtn": "Clear the selected time blocks",
+    "copyTimeSelectionBtn": "Copy the total time spent"
+}
