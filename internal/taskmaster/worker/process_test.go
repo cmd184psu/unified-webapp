@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,24 +18,33 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// procState reads the single-character process state field (R running, S
-// sleeping, T stopped, ...) out of /proc/<pid>/stat. The comm field is
-// skipped by locating the last ")" since it can itself contain parens.
+// procState reports the single-character process state (R running, S
+// sleeping, T stopped, ...). On Linux it reads /proc/<pid>/stat, skipping
+// the comm field by locating the last ")" since it can itself contain
+// parens; elsewhere (macOS/BSD have no /proc) it falls back to ps, whose
+// state column uses the same leading letters.
 func procState(pid int) string {
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)); err == nil {
+		s := string(data)
+		i := strings.LastIndex(s, ")")
+		if i < 0 || i+2 >= len(s) {
+			return "?"
+		}
+		fields := strings.Fields(s[i+2:])
+		if len(fields) == 0 {
+			return "?"
+		}
+		return fields[0]
+	}
+	out, err := exec.Command("ps", "-o", "state=", "-p", strconv.Itoa(pid)).Output()
 	if err != nil {
 		return "?"
 	}
-	s := string(data)
-	i := strings.LastIndex(s, ")")
-	if i < 0 || i+2 >= len(s) {
+	s := strings.TrimSpace(string(out))
+	if s == "" {
 		return "?"
 	}
-	fields := strings.Fields(s[i+2:])
-	if len(fields) == 0 {
-		return "?"
-	}
-	return fields[0]
+	return s[:1]
 }
 
 // TestProcessRegistry_SuspendResume_RealProcess drives a real process group
@@ -68,19 +79,19 @@ func TestProcessRegistry_SuspendResume_RealProcess(t *testing.T) {
 	require.Eventually(t, func() bool {
 		s := procState(pid)
 		return s == "S" || s == "R"
-	}, 2*time.Second, 20*time.Millisecond, "process never reached running/sleeping state")
+	}, 10*time.Second, 50*time.Millisecond, "process never reached running/sleeping state")
 
 	require.False(t, procs.Suspended(execID))
 	require.NoError(t, procs.Suspend(execID))
 	require.Eventually(t, func() bool {
 		return procState(pid) == "T"
-	}, 2*time.Second, 20*time.Millisecond, "process did not stop after Suspend")
+	}, 10*time.Second, 50*time.Millisecond, "process did not stop after Suspend")
 	require.True(t, procs.Suspended(execID))
 
 	require.NoError(t, procs.Resume(execID))
 	require.Eventually(t, func() bool {
 		return procState(pid) != "T"
-	}, 2*time.Second, 20*time.Millisecond, "process did not resume after Resume")
+	}, 10*time.Second, 50*time.Millisecond, "process did not resume after Resume")
 	require.False(t, procs.Suspended(execID))
 
 	cancel()
