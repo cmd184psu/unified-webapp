@@ -47,6 +47,30 @@ func Build(cfg config.TaskmasterConfig) (http.Handler, error) {
 		return nil, err
 	}
 
+	// A fresh process's registries start empty — nothing "running" in the DB
+	// was ever registered with THIS process. Only a graceful Close() ever
+	// transitions an execution out of "running"; a hard kill/crash skips
+	// that. Before this existed, such a row stayed "running" forever
+	// regardless of whether its process actually survived.
+	//
+	// Each candidate's PID (persisted since worker.go's onStart — see
+	// migration 4) is checked for genuine liveness: a real process is
+	// isolated into its own process group (Setpgid) specifically so it does
+	// NOT automatically die when its parent does, so "running" in the DB is
+	// not automatically a lie. If it's still alive, it's left completely
+	// untouched (row AND lock) — the task keeps its slot exactly as it
+	// would have without a restart, and the next reconciliation (the next
+	// boot, or a manual sweep) will notice if it has since finished. Only a
+	// confirmed-dead (or PID-unknown, an accepted case with no way to check)
+	// candidate is marked failed and has its lock released, so it becomes
+	// re-schedulable right away instead of only once its lock's TTL expires.
+	if skipped, failed, err := worker.ReconcileOrphans(database); err != nil {
+		database.Close()
+		return nil, err
+	} else if skipped > 0 || failed > 0 {
+		log.Printf("taskmaster: boot reconciliation — %d execution(s) still genuinely running (left untouched), %d confirmed dead (marked failed)", skipped, failed)
+	}
+
 	// allow_sudo is DB-authoritative once seeded: the config value seeds the
 	// DB on first boot, and the runtime UI toggle (POST /api/capabilities)
 	// persists there and wins on every boot thereafter.

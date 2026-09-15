@@ -1,0 +1,65 @@
+# Ralph progress — taskmaster-ui-plan.md
+
+## Setup (iteration 1)
+- PRD authored at .omc/state/sessions/dc6e478c-c5e2-44ab-948a-45d0391c7721/prd.json — 13 stories (US-001..US-013) mapped to plan phases B1-B6, F0-F5, D.
+- Company-context: not configured (skipped Step 1e).
+- Model policy: builders on Sonnet, never Opus. Orchestrator (this session, Opus) delegates code to executor agents and verifies.
+
+## Key codebase facts / learnings
+- Module: internal/taskmaster/{build.go, coordinator/, db/, models/, worker/}; frontend web/taskmaster/ (TS→esbuild→committed bundle.js); CLI cmd/taskmasterctl.
+- DB (db/db.go): applyMigrations uses a versioned list ({version, sql}); currently version 1 (output_file), version 2 (settings table — added this branch). Next migration = version 3. Tables: groups, tasks, task_executions, task_locks, task_metrics, settings. SQLite (modernc), SetMaxOpenConns(1), WAL.
+- Current Task fields: id,name,group_name,enabled,paused,priority,cooldown_seconds,repeat,task_type,args,sudo,output_file,timestamps. Group: name,pool_limit,allowed_types,paused,paused_at,paused_by,timestamps.
+- Sudo: shared worker.SudoGate (atomic), enforced in executor + coordinator.validateTaskPolicy; POST /api/capabilities persists via settings; build.go seeds from config, DB authoritative. (Already on branch.)
+- Coordinator routes in coordinator/coordinator.go; handlers split handlers_groups.go / handlers_tasks.go / handlers_executions.go / handlers_metrics.go; SSE in sse.go.
+- Worker (worker/worker.go): 5s poll, fills group pool_limit slots by priority among eligible; per-task lock 10min TTL. executor.go branches on task_type + JSON args (to be collapsed to sh -c command).
+
+## IMPORTANT interlock
+The rename group→lane + dropping task_type/args/priority/allowed_types ripples through coordinator handlers, worker, executor, and tests. A green build REQUIRES doing US-001 (model/DB/config) together with US-002 (command exec path) and US-003 (position scheduling) as one coherent backend-reshape slice. Treat US-001/002/003 as delivered together when the slice compiles and internal/taskmaster tests pass.
+
+## Story status
+- US-001/002/003 (backend reshape): DONE & verified (passes:true, completionCriteriaRevision:1). architectVerified:false — final reviewer pass happens at PRD completion (Step 7).
+- MERGE: `git merge main` (brought in smbedit + utuber modules) resolved by orchestrator + committed by user (82463ad). All conflicts unioned (config.go/main.go/tsconfig/package.json/USERGUIDE/setup.sh keep taskmaster AND smbedit/utuber); local-test config consolidated into local-test/config.json (smbedit-config.json orphan deleted; smbedit routed at smbedit.test). Full `go test ./...` green post-merge incl. smbedit/utuber/taskmaster.
+- US-004: DONE & verified (passes:true, rev 1). Cancel registry (worker/cancel.go), BrakeGate (worker/brake.go), 4 endpoints (cancel + GET/POST/DELETE brake), canceled-vs-failed via WasCanceled, durable brake in settings (boots braked), CanceledCount metric. Orchestrator-verified: build + `go test -race ./internal/taskmaster/...` all green, goleak clean.
+- US-005: DONE & verified (passes:true, rev 1). 005a = routes /api/groups→/api/lanes + width/order/move + enqueue→up-next (db.SetLaneWidth, SetTaskPositions). 005b = board-events broker (platform/broker) wired build→worker→coordinator; GET /api/board/events (cap via broker.SetMaxSubscribers); events task-started/finished/enqueued, lane-updated, brake. Orchestrator-verified: clean full `go test -race ./internal/taskmaster/...` green + goleak.
+- US-006: DONE & verified (passes:true, rev 1). taskmasterctl fully aligned: lane noun (+width/order), task -command/-lane (+up-next/move), cancel, brake on|off, metrics --lane, CANCELED column. Build+vet green, usage surface confirmed, no stale /api/groups|/enqueue|-type refs. ALL BACKEND DONE (US-001..006).
+- US-007: DONE & verified (passes:true, rev 1). web/taskmaster/js/ui/{toggle,modal,live}.ts — extractable, self-styling (idempotent injected <style>), theme-token-based. tsconfig glob → web/taskmaster/js/**/*.ts. TOOLCHAIN FIX: ran `npm install` (post-merge package.json needed react/react-dom for smbedit + correct-arch esbuild); `npm run typecheck` now rc=0 repo-wide (was 430 smbedit react errors, pre-existing). No package-lock drift.
+- FRONTEND SLICING NOTE: F1-F5 interlock at type level (api.ts rewrite breaks old pages; new main.ts replaces old) → delivering as coherent slices that keep typecheck+build green, not 5 separate. Using the `designer` agent (Sonnet) for the UI build.
+- US-008+009 (Slice A: delete old pages + api.ts + main.ts nav/hamburger/router + lane board + lane-create + minimal add-task): IN PROGRESS (iteration 6).
+- US-008 (F1 api.ts) + US-009 (F2 board.ts): DONE & verified (passes:true). New api.ts (all endpoints, errors via modal, no alert), main.ts (nav + hamburger w/ live/sudo toggles + auth logout icon, hash router), board.ts (lane columns as playlists, live via LiveController+patchList surgical, HTML5 drag→order/move, per-lane width + minimal add-task). typecheck rc=0, build 47.7kb, old pages deleted. CAVEAT: runtime/visual QA (no-jitter, drag feel) not done — no browser tooling; defer to human acceptance.
+- NOTE: workdir/env are NOT separate task fields — command is a single shell string (sh -c), so those belong inside the command. Designer advanced fields = repeat+cooldown, output_file, sudo(gated) only.
+- US-010(F3 Designer+exports)+US-011(F4 drill-in/cancel/brake)+US-012(F5 Metrics tab): DONE & verified (passes:true). designer.ts/taskdetail.ts/metrics.ts + board.ts/main.ts/style.css. typecheck rc=0, build 68.7kb. Confirmed: NO native alert/confirm/prompt and NO checkboxes in new frontend (UI edicts honored); taskmasterctl+curl exports present; prominent hand-brake in nav + ALL PAUSED banner. (Slice B ran into one rate-limit early-fail, resumed after reset — no rework.)
+- US-013: DONE & verified. docs/taskmaster.md + USERGUIDE taskmaster section rewritten (lanes/command/cancel/brake/not-cron/board-SSE; stale terms gone). Full-repo `go test -race ./...` GREEN (every package incl. smbedit/utuber/taskmaster), typecheck rc=0, build rc=0.
+- ALL 13 STORIES passes:true. → Step 7 reviewer verification (on FABLE per D6, never Opus).
+
+### Iteration 6 — Slice A US-008/009 [designer agent a747ada, orchestrator-verified static+build]
+
+### Iteration 5 — US-007 [Sonnet executor ad9ca73, orchestrator-verified]
+- toggle.ts createToggle/createToggleHandle; modal.ts openModal/confirmDialog/alertDialog/promptDialog; live.ts LiveController (EventSource /api/board/events 'board' event; localStorage tm.live.enabled/interval) + patchList keyed reconciler. Each injects own styles. Verified: npm run typecheck rc=0 after npm install.
+
+### KNOWN MINOR FOLLOW-UPS (address in frontend slices or a cleanup)
+- Server list-tasks + metrics handlers still read query param `?group=`; CLI/frontend now use `lane`. When the frontend (US-008/009) sends `?lane=`, also switch the server handlers (handleListTasks laneFilter, handleMetrics) to read `lane` so filtering actually works. Small server edit.
+
+### Iteration 3 — US-005 [two Sonnet executors a07568c (005a) + a9186c9 (005b), orchestrator-verified]
+- 005b agent found+fixed a shutdown-deadlock (SSE subscriber left open → Close deadlock → 10min test timeout) via t.Cleanup ordering + subscribe-race retry. GOTCHA LOGGED: don't launch orchestrator verification while an executor is still editing — its premature "completed" idle-pings misled me and my race run hung on the in-flux (pre-fix) files. Wait for the executor's actual RESULTS report, then verify.
+- handleListTasks still reads ?group= (minor; frontend slice can switch to ?lane=).
+
+### Iteration 2 — US-004 [Sonnet executor ab1dd1c, orchestrator-verified]
+- New: worker/cancel.go (CancelRegistry: execID→CancelFunc + canceled-set; Register/Cancel/WasCanceled/Unregister), worker/brake.go (BrakeGate atomic), coordinator/handlers_control.go (cancel-one 404-if-not-running; engage=pause-not-already-paused-lanes+record+cancel-all-running; release=unpause-recorded+clear; get). db: SettingBrakeEngaged, SettingBrakePausedLanes (+Get/Set JSON), ListRunningExecutionIDs, GetMetrics canceled_count. models.MetricSummary.CanceledCount. build.go seeds/reads brake, boots braked. worker.New/coordinator.New gained (cancels, brake) params.
+- Shutdown-vs-cancel: per-exec child ctx registered by execID; explicit Cancel() records in canceled-set → "canceled"; whole-worker shutdown cancels runCtx directly (not via registry) → still "failed".
+
+## Learnings log
+### Iteration 1 — backend reshape (US-001/002/003) [Sonnet executor a166b03, verified by orchestrator]
+- Files changed (17, all UNCOMMITTED): db/db.go (+migration3SQL, stable/bootstrap split), db/db_test.go, models/models.go, worker/executor.go, worker/worker.go, worker/worker_test.go, worker/executor_internal_test.go, coordinator/{coordinator,handlers_tasks,handlers_groups,handlers_metrics}.go, coordinator/coordinator_test.go, build.go, build_test.go, platform/config/config.go, platform/config/config_taskmaster_test.go, local-test/config.json, local-test/taskmaster-test.json.
+- Migration necessity beyond plan: migrate() had to split into a `stable` block (schema_version/task_locks/task_metrics) + a table-existence-GUARDED `bootstrap` (old v0 groups/tasks) — otherwise every Open() re-ran CREATE groups/tasks and crashed post-migration-3 on restart (no such column group_name). Good catch by the executor; verified via TestMigration_LegacyOnDiskDB (raw on-disk v2 DB → migrate → 2nd Open).
+- Route PATHS still /api/groups* (rename deferred to US-005). handlers_metrics query param still `group`. cmd/taskmasterctl got a MINIMAL compile-fix only (Lane/command/--position); full CLI alignment = US-006.
+- Decision-(b) verified compositionally (NOT one combined test): GetEligibleTasks EXCLUDES cooling repeat tasks (cooldown filter in SQL) → TestGetEligibleTasks_Cooldown; + position order → TestWorker_RunsInPositionOrder. A cooling task is never a candidate, so it structurally cannot block its lane.
+- Verification (orchestrator, fresh): `go build ./...` rc=0; `go test -race ./internal/taskmaster/...` all ok incl. goleak gates (internal/taskmaster, coordinator, db, worker).
+- Model policy honored: executor (Sonnet) did all building; orchestrator (Opus) only verified. Did NOT write code on Opus.
+
+### COORDINATION ANOMALY (needs attention)
+- HEAD is a63b363 "." (author cdelezenski, today 11:54) — NOT made by this session; added local-test/taskmaster-test.json. Likely the user's parallel "ralph-fix" thread committing to the SAME `taskmaster` branch. Risk: two sessions writing/committing the same branch can clobber. The 17 reshape files sit UNCOMMITTED on top of a63b363.
+- The untracked repo-root taskmaster-test.json this session created earlier is GONE (executor treated the tracked local-test/ copy as canonical; content preserved there). Surfaced to user.
+
+### Step 7 REVIEW — APPROVED (Fable critic, after one fix round)
+First pass: CHANGES NEEDED (3 MAJOR: brake double-engage restore-corruption; CLI/server lane-vs-group param mismatch; brake cancel-sweep pending→running race; + minor: move didn't set dest position). All fixed by Sonnet (brakeMu+idempotency guard; standardized on ?lane= across server+api.ts+CLI; runTask brake-precheck records canceled; MaxTaskPosition+maxPos+1 on move) with regression tests. US-010 workdir/env formally amended in the ledger. Re-review: APPROVE, independently re-verified.
+OPEN non-blocking minors (accepted): cancel-API response TOCTOU (self-correcting); migration-3 legacy priority→position duplicate values (cosmetic tie-order); nice-to-have: move c.brake.Set(true) to first line of handleEngageBrake to shrink the residual race window. → Step 7.5 deslop next.

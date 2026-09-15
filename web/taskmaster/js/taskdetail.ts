@@ -4,66 +4,36 @@
 // Used to be a modal opened over the full board; it is now mounted directly
 // into the right-hand pane of the split task view (see taskview.ts), with a
 // "Back to board" control instead of a close button. Shows: run history
-// (api.listExecutions(name)), a live output viewer for a selected/most
-// recent execution (api.openExecutionOutput(id) EventSource, closed on
-// unmount or when a different execution is selected), a Cancel control on
-// any RUNNING execution, and that task's own metrics
-// (api.getMetrics(undefined, name)).
+// (api.listExecutions(name), terminal-status runs only) and that task's own
+// metrics (api.getMetrics(undefined, name)).
+//
+// The currently-running instance is NOT listed here — it lives only in the
+// lane board's card (board.ts), which is where its PID, pause/resume,
+// cancel, and live-output controls live. Showing the same running process
+// in two panels meant they could disagree (e.g. pausing on one side didn't
+// update the other); one source of truth removes that by construction.
+// History rows open their own past output in a shared modal
+// (outputmodal.ts) instead of an inline pane, since most task output is
+// more than a couple of lines.
 //
 // Refresh is event-driven, not timer-driven: there is no polling interval
 // here. Instead this subscribes to the shared LiveController's board events
 // (the same feed the board uses) and re-fetches history/metrics only when
 // something changed, patching both in place via patchList/targeted DOM
-// updates — never a full innerHTML rebuild — so the Output pane never
-// resets mid-stream and selecting a run never jitters the rest of the view.
+// updates — never a full innerHTML rebuild.
 
 import { api, MetricSummary, Task, TaskExecution } from './api.js';
 import { LiveController } from './ui/live.js';
 import { patchList } from './ui/live.js';
-
-function statusBadgeClass(status: string): string {
-  switch (status) {
-    case 'success':
-      return 'badge-green';
-    case 'failed':
-      return 'badge-red';
-    case 'canceled':
-      return 'badge-yellow';
-    case 'running':
-      return 'badge-blue';
-    default:
-      return 'badge-muted';
-  }
-}
-
-function fmtMs(ms: number | null | undefined): string {
-  if (ms === null || ms === undefined) return '—';
-  return (ms / 1000).toFixed(2) + 's';
-}
-
-function fmtDate(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString();
-}
+import { openOutputModal } from './outputmodal.js';
+import { fmtDate, fmtMs, renderStatusBadge } from './status.js';
 
 /**
  * Mounts the task detail panel into `container` (the right pane of the
  * split task view). `onBack` is invoked when the user asks to return to the
- * full board. `onChange` is invoked after any action here that might affect
- * the board (cancel), so the caller's own board mount (which listens to the
- * same live feed) can pick it up — most callers can pass a no-op since the
- * board already refreshes itself on board events. Returns a cleanup
- * function to call on navigation away.
+ * full board. Returns a cleanup function to call on navigation away.
  */
-export function mountTaskDetail(
-  container: HTMLElement,
-  live: LiveController,
-  task: Task,
-  onBack: () => void,
-  onChange: () => void = () => {}
-): () => void {
+export function mountTaskDetail(container: HTMLElement, live: LiveController, task: Task, onBack: () => void): () => void {
   container.textContent = '';
   container.className = 'task-detail';
 
@@ -99,16 +69,7 @@ export function mountTaskDetail(
   metricsWrap.textContent = 'Loading metrics…';
   container.appendChild(metricsWrap);
 
-  // --- Live output viewer (single, clear pane — always shows the selected run) ---
-  const outputHeader = document.createElement('div');
-  outputHeader.className = 'task-detail-section-title';
-  outputHeader.textContent = 'Output';
-  const outputBox = document.createElement('pre');
-  outputBox.className = 'task-detail-output';
-  outputBox.textContent = '(select a run to view its output)';
-  container.append(outputHeader, outputBox);
-
-  // --- History ---
+  // --- History (past runs only — the running instance lives on the board) ---
   const historyHeader = document.createElement('div');
   historyHeader.className = 'task-detail-section-title';
   historyHeader.textContent = 'History';
@@ -116,63 +77,30 @@ export function mountTaskDetail(
   historyList.className = 'task-detail-history';
   container.append(historyHeader, historyList);
 
-  let currentSource: EventSource | null = null;
-  let selectedExecId: number | null = null;
   let destroyed = false;
 
-  function closeStream(): void {
-    if (currentSource) {
-      currentSource.close();
-      currentSource = null;
-    }
+  function isTerminal(exec: TaskExecution): boolean {
+    return exec.status === 'success' || exec.status === 'failed' || exec.status === 'canceled';
   }
 
-  function streamExecution(exec: TaskExecution): void {
-    if (selectedExecId === exec.id && currentSource) return; // already viewing this run
-    closeStream();
-    selectedExecId = exec.id;
-    outputBox.textContent = '';
-    updateHistorySelection();
-    const source = api.openExecutionOutput(exec.id);
-    currentSource = source;
-    source.addEventListener('output', (ev: MessageEvent) => {
-      try {
-        const parsed = JSON.parse(ev.data) as { stream?: string; line?: string };
-        outputBox.textContent += (parsed.line ?? '') + '\n';
-        outputBox.scrollTop = outputBox.scrollHeight;
-      } catch {
-        // ignore malformed line
-      }
-    });
-    source.addEventListener('status', (ev: MessageEvent) => {
-      if (outputBox.textContent === '') outputBox.textContent = '(execution ' + ev.data + ')';
-      closeStream();
-    });
-    source.addEventListener('done', () => closeStream());
-    source.onerror = () => {
-      // Execution finished / stream closed server-side; EventSource will
-      // stop retrying naturally once the server ends the stream. Leave any
-      // already-received output visible — never reset it here.
-    };
+  function byIdDescending(a: TaskExecution, b: TaskExecution): number {
+    return b.id - a.id;
   }
 
-  function updateHistorySelection(): void {
-    for (const row of Array.from(historyList.children)) {
-      const el = row as HTMLElement;
-      const id = Number(el.getAttribute('data-tm-key'));
-      el.classList.toggle('history-row-selected', id === selectedExecId);
-    }
+  function keyById(exec: TaskExecution): number {
+    return exec.id;
   }
 
   async function loadHistory(): Promise<void> {
     let execs: TaskExecution[] = [];
     try {
-      execs = await api.listExecutions(task.name, 50);
+      const all = await api.listExecutions(task.name, 50);
+      execs = all.filter(isTerminal);
     } catch {
       return;
     }
     if (destroyed) return;
-    execs.sort((a, b) => b.id - a.id); // most-recent first
+    execs.sort(byIdDescending);
 
     if (execs.length === 0) {
       historyList.textContent = '';
@@ -185,16 +113,10 @@ export function mountTaskDetail(
 
     historyList.querySelector('.lane-empty-note')?.remove();
     patchList(historyList, execs, {
-      key: (e) => e.id,
-      create: (e) => createHistoryRow(e),
-      update: (row, e) => updateHistoryRow(row, e),
+      key: keyById,
+      create: createHistoryRow,
+      update: updateHistoryRow,
     });
-
-    // Default to the most recent run; never yank the user off a run they
-    // (or a prior auto-select) already picked.
-    if (selectedExecId === null) {
-      streamExecution(execs[0]);
-    }
   }
 
   function createHistoryRow(exec: TaskExecution): HTMLElement {
@@ -210,109 +132,34 @@ export function mountTaskDetail(
     const dur = document.createElement('span');
     dur.className = 'history-row-dur';
 
-    const pidLabel = document.createElement('span');
-    pidLabel.className = 'history-row-pid';
-
-    const suspendedBadge = document.createElement('span');
-    suspendedBadge.className = 'badge badge-yellow history-row-suspended-badge';
-    suspendedBadge.textContent = 'suspended';
-
-    const pauseBtn = document.createElement('button');
-    pauseBtn.type = 'button';
-    pauseBtn.className = 'btn-icon history-row-pause-btn';
-
     const viewBtn = document.createElement('button');
     viewBtn.type = 'button';
     viewBtn.className = 'btn btn-secondary btn-sm';
     viewBtn.textContent = 'View output';
 
-    const cancelBtn = document.createElement('button');
-    cancelBtn.type = 'button';
-    cancelBtn.className = 'btn btn-danger btn-sm';
-    cancelBtn.title = 'Cancel execution';
-    cancelBtn.setAttribute('aria-label', 'Cancel execution');
-    cancelBtn.textContent = '✖';
-
-    row.append(pidLabel, suspendedBadge, pauseBtn, badge, when, dur, viewBtn, cancelBtn);
+    row.append(badge, when, dur, viewBtn);
     updateHistoryRow(row, exec);
     return row;
   }
 
   function updateHistoryRow(row: HTMLElement, exec: TaskExecution): void {
-    row.classList.toggle('history-row-selected', exec.id === selectedExecId);
-
     const badge = row.querySelector<HTMLElement>('.history-row-status-badge');
-    if (badge) {
-      badge.className = 'badge history-row-status-badge ' + statusBadgeClass(exec.status);
-      badge.textContent = exec.status;
-    }
+    if (badge) renderStatusBadge(badge, exec.status, exec.suspended);
+
     const when = row.querySelector<HTMLElement>('.history-row-when');
     if (when) when.textContent = fmtDate(exec.started_at ?? exec.scheduled_at);
     const dur = row.querySelector<HTMLElement>('.history-row-dur');
     if (dur) dur.textContent = fmtMs(exec.duration_ms);
 
     const viewBtn = row.querySelector<HTMLButtonElement>('.btn-secondary');
-    if (viewBtn) viewBtn.onclick = () => streamExecution(exec);
+    if (viewBtn) viewBtn.onclick = makeViewOutputHandler(exec);
+  }
 
-    const isRunning = exec.status === 'running';
-
-    // Process PID + pause/resume (SIGSTOP/SIGCONT) — only meaningful for a
-    // genuinely running execution. Use style.display, not the `hidden`
-    // attribute — the `.btn`/`.badge` classes set `display`, which
-    // overrides `[hidden]` and would leave elements showing (and 404-ing)
-    // on finished history rows.
-    const pidLabel = row.querySelector<HTMLElement>('.history-row-pid');
-    if (pidLabel) {
-      pidLabel.style.display = isRunning ? '' : 'none';
-      pidLabel.textContent = exec.pid !== undefined ? 'pid ' + exec.pid : '';
+  function makeViewOutputHandler(exec: TaskExecution): () => void {
+    function handleClick(): void {
+      openOutputModal(exec.id, task.name + ' — run #' + exec.id);
     }
-    const suspendedBadge = row.querySelector<HTMLElement>('.history-row-suspended-badge');
-    if (suspendedBadge) {
-      suspendedBadge.style.display = isRunning && exec.suspended ? '' : 'none';
-    }
-    const pauseBtn = row.querySelector<HTMLButtonElement>('.history-row-pause-btn');
-    if (pauseBtn) {
-      pauseBtn.style.display = isRunning ? '' : 'none';
-      if (isRunning) {
-        const suspended = !!exec.suspended;
-        pauseBtn.textContent = suspended ? '▶' : '⏸';
-        pauseBtn.title = suspended ? 'Resume process' : 'Pause process';
-        pauseBtn.setAttribute('aria-label', pauseBtn.title);
-        pauseBtn.onclick = () => {
-          pauseBtn.disabled = true;
-          const req = suspended ? api.resumeExecution(exec.id) : api.pauseExecution(exec.id);
-          void req
-            .then(() => {
-              onChange();
-              void loadHistory();
-            })
-            .finally(() => {
-              pauseBtn.disabled = false;
-            });
-        };
-      }
-    }
-
-    const cancelBtn = row.querySelector<HTMLButtonElement>('.btn-danger');
-    if (cancelBtn) {
-      // Cancel only makes sense for a genuinely running execution. Use
-      // style.display, not the `hidden` attribute — the `.btn` class sets
-      // `display`, which overrides `[hidden]` and left the button showing
-      // (and 404-ing) on finished history rows.
-      cancelBtn.style.display = isRunning ? '' : 'none';
-      cancelBtn.onclick = () => {
-        cancelBtn.disabled = true;
-        void api
-          .cancelExecution(exec.id)
-          .then(() => {
-            onChange();
-            void loadHistory();
-          })
-          .finally(() => {
-            cancelBtn.disabled = false;
-          });
-      };
-    }
+    return handleClick;
   }
 
   async function loadMetrics(): Promise<void> {
@@ -370,21 +217,22 @@ export function mountTaskDetail(
     }
   }
 
-  void loadHistory();
-  void loadMetrics();
+  function refreshHistoryAndMetrics(): void {
+    void loadHistory();
+    void loadMetrics();
+  }
+
+  refreshHistoryAndMetrics();
 
   // Event-driven refresh: re-check history/metrics whenever the shared
   // board-events feed reports a change, instead of polling on a blunt
   // timer. patchList + the in-place metric-cell updates above ensure this
-  // never causes a visible repaint or resets the Output pane.
-  const unsubscribe = live.onEvent(() => {
-    void loadHistory();
-    void loadMetrics();
-  });
+  // never causes a visible repaint.
+  const unsubscribe = live.onEvent(refreshHistoryAndMetrics);
 
-  return () => {
+  function cleanup(): void {
     destroyed = true;
-    closeStream();
     unsubscribe();
-  };
+  }
+  return cleanup;
 }

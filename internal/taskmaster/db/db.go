@@ -152,6 +152,15 @@ func (db *DB) applyMigrations() error {
 		{1, `ALTER TABLE tasks ADD COLUMN output_file TEXT NOT NULL DEFAULT ''`},
 		{2, `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`},
 		{3, migration3SQL},
+		// pid: the OS process-group-leader PID an execution's command was
+		// actually started with. Persisted (not just kept in the in-memory
+		// ProcessRegistry) so that after a restart — including a non-graceful
+		// one — a still-genuinely-alive process can be recognized as such
+		// instead of every "running" row being assumed dead. NULL for any
+		// execution that predates this column, or that never got far enough
+		// to start a process; both are treated as "PID unknown" (see
+		// ReconcileOrphans), an accepted case with no way to know better.
+		{4, `ALTER TABLE task_executions ADD COLUMN pid INTEGER`},
 	}
 
 	for _, m := range migrations {
@@ -724,6 +733,96 @@ func (db *DB) RecordMetric(taskID, execID int64, status string, durationMs, sche
 		INSERT INTO task_metrics (task_id, execution_id, recorded_at, duration_ms, schedule_delay_ms, status)
 		VALUES (?, ?, ?, ?, ?, ?)`,
 		taskID, execID, epochMs(time.Now()), durationMs, schedDelay, status)
+	return err
+}
+
+// orphanedExecutionMessage is the error_message written for an execution
+// MarkOrphanFailed closes out, so its cause is visible in history rather
+// than looking like an unexplained failure.
+const orphanedExecutionMessage = "interrupted: the server was restarted (or crashed) while this execution was in progress"
+
+// OrphanCandidate is one execution still recorded "running" at boot — a
+// freshly-started process's in-memory registries are always empty, so
+// nothing here was ever registered with THIS process. Whether it's a true
+// ghost (the real process is long gone — the common case after a
+// non-graceful stop: kill -9, crash, OOM) or genuinely still alive (its
+// process group is isolated from the parent by Setpgid, so it does not
+// automatically die with it) can only be told by checking PID liveness,
+// which is OS-level and deliberately not this package's job — see
+// worker.ProcessAlive, used by the taskmaster package's boot-time
+// reconciliation (build.go) to decide MarkOrphanFailed vs. leaving it alone.
+type OrphanCandidate struct {
+	ExecID int64
+	TaskID int64
+	// PID is nil if this execution predates the pid column, or never got
+	// far enough to start a process — an accepted case where liveness
+	// simply cannot be checked, and the row is treated as dead.
+	PID *int
+}
+
+// ListOrphanCandidates returns every execution still "running" at boot,
+// with whatever PID was persisted for it (see the pid column, migration 4).
+func (db *DB) ListOrphanCandidates() ([]OrphanCandidate, error) {
+	rows, err := db.conn.Query(`SELECT id, task_id, pid FROM task_executions WHERE status = 'running'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []OrphanCandidate
+	for rows.Next() {
+		var c OrphanCandidate
+		var pid *int64
+		if err := rows.Scan(&c.ExecID, &c.TaskID, &pid); err != nil {
+			return nil, err
+		}
+		if pid != nil {
+			p := int(*pid)
+			c.PID = &p
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// MarkOrphanFailed closes out an execution whose process is confirmed gone
+// (or whose PID was never known) as "failed", records a matching metric,
+// and releases that task's lock unconditionally by task_id — a lock present
+// at this point is stale by definition, regardless of which worker_id (e.g.
+// a since-changed hostname) last held it, since the execution it belonged
+// to has just been confirmed dead.
+func (db *DB) MarkOrphanFailed(execID, taskID int64) error {
+	var durationMs int64
+	if exec, err := db.GetExecution(execID); err == nil && exec != nil && exec.StartedAt != nil {
+		durationMs = time.Since(*exec.StartedAt).Milliseconds()
+	}
+	msg := orphanedExecutionMessage
+	if err := db.FinishExecution(execID, "failed", &msg, durationMs, 0); err != nil {
+		return err
+	}
+	if err := db.RecordMetric(taskID, execID, "failed", durationMs, 0); err != nil {
+		return err
+	}
+	return db.ReleaseLockByTaskID(taskID)
+}
+
+// SetExecutionPID persists the OS process-group-leader PID an execution's
+// command was actually started with (see migration 4's pid column) — set
+// once, right after the process starts, alongside the in-memory
+// ProcessRegistry.Register call.
+func (db *DB) SetExecutionPID(execID int64, pid int) error {
+	_, err := db.conn.Exec(`UPDATE task_executions SET pid = ? WHERE id = ?`, pid, execID)
+	return err
+}
+
+// ReleaseLockByTaskID deletes taskID's lock regardless of which worker_id
+// holds it — unlike ReleaseLock (which only releases a lock held by a
+// SPECIFIC worker_id, for the normal case where the same process that
+// acquired a lock is the one finishing its task), this is for boot-time
+// reconciliation, where the lock (if any) was necessarily acquired by a
+// previous, now-confirmed-dead process — possibly under a different
+// worker_id (e.g. a changed hostname) that would never match here.
+func (db *DB) ReleaseLockByTaskID(taskID int64) error {
+	_, err := db.conn.Exec(`DELETE FROM task_locks WHERE task_id = ?`, taskID)
 	return err
 }
 

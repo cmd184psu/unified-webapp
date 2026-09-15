@@ -12,7 +12,7 @@
     "obsidianoid.test": "obsidianoid",
     "multissh.test":    "multissh",
     "admin.test":       "admin",
-    "taskmaster.test":  "taskmaster",
+    "taskmaster-test.cmdhome.net":  "taskmaster",
     "smbedit.test":     "smbedit"
   },
   "server": {
@@ -107,9 +107,6 @@
       },
       "slideshow": {
         "pin_file": "/opt/unified-webapp/local-test/slideshow.pin"
-      },
-      "taskmaster": {
-        "pin_file": ""
       },
       "todo": {
         "pin_file": "/opt/unified-webapp/local-test/todo.pin"

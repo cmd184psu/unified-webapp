@@ -14,6 +14,8 @@ import (
 
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/taskmaster"
+	"cmd184psu/unified-webapp/internal/taskmaster/db"
+	"cmd184psu/unified-webapp/internal/taskmaster/models"
 	"cmd184psu/unified-webapp/internal/taskmaster/worker"
 
 	"github.com/stretchr/testify/require"
@@ -28,6 +30,58 @@ func TestMain(m *testing.M) {
 func writeIndexHTML(t *testing.T, dir string) {
 	t.Helper()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "index.html"), []byte("index"), 0o644))
+}
+
+// TestBuild_ReconcilesOrphanedRunningExecutionOnBoot is the integration-level
+// regression test for a real production bug: an execution left "running" by
+// a previous, non-gracefully-killed process (kill -9, crash, OOM — anything
+// that skips Close()) used to stay "running" in the DB forever, since
+// nothing ever reconciled it on the next boot. The UI would show it as
+// perpetually active, and pause/cancel against it would (correctly, but
+// confusingly) report "not_running", since no live process was ever
+// registered for it in THIS process's registries. This proves Build() fixes
+// that by the time the module is serving requests.
+func TestBuild_ReconcilesOrphanedRunningExecutionOnBoot(t *testing.T) {
+	staticDir := t.TempDir()
+	writeIndexHTML(t, staticDir)
+	dbPath := filepath.Join(t.TempDir(), "taskmaster.db")
+
+	// Simulate exactly what a hard-killed previous process leaves behind:
+	// open the DB directly, start an execution, then close without ever
+	// finishing it.
+	seedDB, err := db.Open(dbPath)
+	require.NoError(t, err)
+	require.NoError(t, seedDB.UpsertLane(&models.Lane{Name: "seeded", Width: 2}))
+	taskID, err := seedDB.AddTask(&models.Task{Name: "orphan", LaneName: "seeded", Enabled: true, Command: "echo hi"})
+	require.NoError(t, err)
+	execID, err := seedDB.CreateExecution(taskID, "old-hero", time.Now())
+	require.NoError(t, err)
+	require.NoError(t, seedDB.StartExecution(execID, "old-hero"))
+	require.NoError(t, seedDB.Close())
+
+	cfg := config.TaskmasterConfig{
+		StaticDir: staticDir,
+		DBPath:    dbPath,
+		Lanes:     []config.TaskmasterLane{{Name: "seeded", Width: 2}},
+	}
+	h, err := taskmaster.Build(cfg)
+	require.NoError(t, err)
+	closer := h.(interface{ Close() error })
+	defer func() {
+		require.NoError(t, closer.Close())
+	}()
+
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/executions")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	var execs []map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&execs))
+	require.Len(t, execs, 1)
+	require.Equal(t, "failed", execs[0]["status"],
+		"an execution left running by a previous process must be reconciled before Build() returns, not shown as still running")
 }
 
 func TestBuild_FullCycle(t *testing.T) {

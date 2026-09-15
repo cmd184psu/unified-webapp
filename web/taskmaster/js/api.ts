@@ -123,7 +123,7 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
 
 export const api = {
   health() {
-    return apiFetch<{ status: string }>('/api/health');
+    return apiFetch<{ status: string; build?: string }>('/api/health');
   },
 
   capabilities() {
@@ -235,6 +235,12 @@ export const api = {
     if (taskName) params.set('task', taskName);
     return apiFetch<TaskExecution[]>('/api/executions?' + params);
   },
+  // If the execution already finished (a genuine race for a fast task —
+  // between the board rendering it as running and the click landing), the
+  // server answers 200 {"status":"not_running"} rather than an error: that
+  // outcome isn't a mistake, so there is nothing here to special-case — a
+  // real error status (400 signal failure, 404 no-such-execution) still
+  // surfaces through the normal apiFetch error path.
   cancelExecution(id: number) {
     return apiFetch<{ status: string }>('/api/executions/' + id + '/cancel', { method: 'POST' });
   },

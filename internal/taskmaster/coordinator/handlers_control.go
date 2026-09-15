@@ -12,6 +12,27 @@ import (
 	"cmd184psu/unified-webapp/internal/taskmaster/worker"
 )
 
+// writeNotRunningResult answers a pause/resume/cancel request for an
+// execution ID that isn't currently registered as a controllable process.
+// That is NOT necessarily a client mistake: an execution that finished
+// naturally between the board rendering it as running and this request
+// landing is a normal, expected outcome (fast tasks especially), not an
+// error — so a real execution ID gets a plain 200 "not_running" no-op
+// instead of a 404. Only an ID that doesn't correspond to any execution at
+// all is a genuine 404, distinguished here by looking the row up in the DB.
+func writeNotRunningResult(w http.ResponseWriter, database *db.DB, id int64) {
+	exec, err := database.GetExecution(id)
+	if err != nil {
+		response.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if exec == nil {
+		response.WriteError(w, http.StatusNotFound, "no such execution: "+strconv.FormatInt(id, 10))
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, map[string]string{"status": "not_running"})
+}
+
 // handleCancelExecution cancels a running execution by ID. The "canceled"
 // status itself is written by the worker's runTask once Execute unwinds —
 // this handler only signals the cancel and reports whether the execution
@@ -24,7 +45,7 @@ func (c *Coordinator) handleCancelExecution(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if !c.cancels.Cancel(id) {
-		response.WriteError(w, http.StatusNotFound, "execution not running: "+idStr)
+		writeNotRunningResult(w, c.db, id)
 		return
 	}
 	response.WriteJSON(w, http.StatusOK, map[string]string{"status": "canceling"})
@@ -43,7 +64,7 @@ func (c *Coordinator) handlePauseExecution(w http.ResponseWriter, r *http.Reques
 	}
 	if err := c.procs.Suspend(id); err != nil {
 		if errors.Is(err, worker.ErrProcessNotRunning) {
-			response.WriteError(w, http.StatusNotFound, "execution not running: "+idStr)
+			writeNotRunningResult(w, c.db, id)
 			return
 		}
 		response.WriteError(w, http.StatusBadRequest, "pause failed: "+err.Error())
@@ -63,7 +84,7 @@ func (c *Coordinator) handleResumeExecution(w http.ResponseWriter, r *http.Reque
 	}
 	if err := c.procs.Resume(id); err != nil {
 		if errors.Is(err, worker.ErrProcessNotRunning) {
-			response.WriteError(w, http.StatusNotFound, "execution not running: "+idStr)
+			writeNotRunningResult(w, c.db, id)
 			return
 		}
 		response.WriteError(w, http.StatusBadRequest, "resume failed: "+err.Error())

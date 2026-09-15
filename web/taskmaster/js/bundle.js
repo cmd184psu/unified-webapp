@@ -378,6 +378,12 @@
       if (taskName) params.set("task", taskName);
       return apiFetch("/api/executions?" + params);
     },
+    // If the execution already finished (a genuine race for a fast task —
+    // between the board rendering it as running and the click landing), the
+    // server answers 200 {"status":"not_running"} rather than an error: that
+    // outcome isn't a mistake, so there is nothing here to special-case — a
+    // real error status (400 signal failure, 404 no-such-execution) still
+    // surfaces through the normal apiFetch error path.
     cancelExecution(id) {
       return apiFetch("/api/executions/" + id + "/cancel", { method: "POST" });
     },
@@ -915,6 +921,132 @@
     });
   }
 
+  // web/taskmaster/js/outputmodal.ts
+  var STYLE_ATTR3 = "data-tm-output-modal-styles";
+  function ensureStyles3() {
+    if (document.head.querySelector("style[" + STYLE_ATTR3 + "]")) return;
+    const style = document.createElement("style");
+    style.setAttribute(STYLE_ATTR3, "");
+    style.textContent = ".output-modal-panel { max-width: min(90vw, 900px); width: 90vw; }\n.output-modal-box { height: 70vh; max-height: 70vh; overflow: auto; margin: 0; white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono, monospace); font-size: 13px; }\n";
+    document.head.appendChild(style);
+  }
+  function parseOutputLine(raw) {
+    try {
+      const data = JSON.parse(raw);
+      return data.line ?? "";
+    } catch {
+      return null;
+    }
+  }
+  function appendOutputLine(box, ev) {
+    const line = parseOutputLine(ev.data);
+    if (line === null) return;
+    box.textContent += line + "\n";
+    box.scrollTop = box.scrollHeight;
+  }
+  function showStatusIfEmpty(box, statusText) {
+    if (box.textContent === "") box.textContent = "(execution " + statusText + ")";
+  }
+  function markDoneIfEmpty(box) {
+    if (box.textContent === "") box.textContent = "(no output captured for this run)";
+  }
+  function openOutputModal(execId, title) {
+    ensureStyles3();
+    const box = document.createElement("pre");
+    box.className = "output-modal-box";
+    box.textContent = "";
+    const source = api.openExecutionOutput(execId);
+    wireOutputSource(source, box);
+    const handle = openModal(box, { title, onClose: makeCloseSource(source) });
+    handle.panel.classList.add("output-modal-panel");
+    return handle;
+  }
+  function wireOutputSource(source, box) {
+    source.addEventListener("output", makeAppendHandler(box));
+    source.addEventListener("status", makeStatusHandler(box));
+    source.addEventListener("done", makeDoneHandler(box, source));
+  }
+  function makeAppendHandler(box) {
+    function onOutput(ev) {
+      appendOutputLine(box, ev);
+    }
+    return onOutput;
+  }
+  function makeStatusHandler(box) {
+    function onStatus(ev) {
+      showStatusIfEmpty(box, ev.data);
+    }
+    return onStatus;
+  }
+  function makeDoneHandler(box, source) {
+    function onDone() {
+      markDoneIfEmpty(box);
+      source.close();
+    }
+    return onDone;
+  }
+  function makeCloseSource(source) {
+    function closeSource() {
+      source.close();
+    }
+    return closeSource;
+  }
+
+  // web/taskmaster/js/status.ts
+  function statusBadgeClass(status) {
+    if (status === "success") return "badge-green";
+    if (status === "failed") return "badge-red";
+    if (status === "canceled") return "badge-yellow";
+    if (status === "suspended") return "badge-yellow";
+    if (status === "running") return "badge-blue";
+    return "badge-muted";
+  }
+  function statusSymbol(status) {
+    if (status === "success") return "\u2713";
+    if (status === "failed") return "\u2715";
+    if (status === "canceled") return "\u2298";
+    if (status === "suspended") return "\u23F8";
+    if (status === "running") return "\u25CF";
+    if (status === "pending") return "\u2026";
+    return "\u2022";
+  }
+  function effectiveStatus(status, suspended) {
+    return status === "running" && suspended ? "suspended" : status;
+  }
+  function renderStatusBadge(badge, status, suspended) {
+    const eff = effectiveStatus(status, suspended);
+    badge.className = "badge badge-symbol " + statusBadgeClass(eff);
+    badge.textContent = statusSymbol(eff);
+    badge.title = eff;
+    badge.setAttribute("aria-label", eff);
+  }
+  function pad2(n) {
+    return String(n).padStart(2, "0");
+  }
+  function fmtDurationSeconds(totalSec) {
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor(totalSec % 3600 / 60);
+    const s = totalSec % 60;
+    if (h > 0) return h + ":" + pad2(m) + ":" + pad2(s);
+    return m + ":" + pad2(s);
+  }
+  function fmtElapsed(startedAt) {
+    const startMs = new Date(startedAt).getTime();
+    if (Number.isNaN(startMs)) return "running\u2026";
+    const totalSec = Math.max(0, Math.floor((Date.now() - startMs) / 1e3));
+    return fmtDurationSeconds(totalSec);
+  }
+  function fmtMs(ms) {
+    if (ms === null || ms === void 0) return "\u2014";
+    return (ms / 1e3).toFixed(2) + "s";
+  }
+  function fmtDate(iso) {
+    if (!iso) return "\u2014";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleString();
+  }
+
   // web/taskmaster/js/board.ts
   var RAN_PER_LANE = 5;
   var state = { lanes: [], tasks: [], executions: [] };
@@ -1180,20 +1312,6 @@
       note?.remove();
     }
   }
-  function statusBadgeClass(status) {
-    switch (status) {
-      case "success":
-        return "badge-green";
-      case "failed":
-        return "badge-red";
-      case "canceled":
-        return "badge-yellow";
-      case "running":
-        return "badge-blue";
-      default:
-        return "badge-muted";
-    }
-  }
   function createExecRow(exec, kind) {
     const row = document.createElement("div");
     row.className = "exec-row exec-row-" + kind;
@@ -1211,30 +1329,87 @@
       pidSeam.className = "exec-row-pid-seam";
       const pidLabel = document.createElement("span");
       pidLabel.className = "exec-row-pid";
-      const suspendedBadge = document.createElement("span");
-      suspendedBadge.className = "badge badge-yellow exec-row-suspended-badge";
-      suspendedBadge.textContent = "suspended";
+      const outputBtn = document.createElement("button");
+      outputBtn.type = "button";
+      outputBtn.className = "btn-icon exec-row-output-btn";
+      outputBtn.textContent = "\u2197";
+      outputBtn.title = "View live output";
+      outputBtn.setAttribute("aria-label", "View live output");
       const pauseBtn = document.createElement("button");
       pauseBtn.type = "button";
       pauseBtn.className = "btn-icon exec-row-pause-btn";
-      pidSeam.append(pidLabel, suspendedBadge, pauseBtn);
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "btn-icon exec-row-cancel-btn";
+      cancelBtn.textContent = "\u2716";
+      cancelBtn.title = "Cancel execution";
+      cancelBtn.setAttribute("aria-label", "Cancel execution");
+      pidSeam.append(pidLabel, outputBtn, pauseBtn, cancelBtn);
       row.appendChild(pidSeam);
     }
     updateExecRow(row, exec, kind);
     return row;
+  }
+  function openRunningOutput(exec) {
+    const title = (exec.task_name ?? "task") + " \u2014 run #" + exec.id;
+    openOutputModal(exec.id, title);
+  }
+  function requestProcessToggle(btn, execId, suspended) {
+    btn.disabled = true;
+    const request = suspended ? api.resumeExecution(execId) : api.pauseExecution(execId);
+    finishProcessToggle(request, btn);
+  }
+  function finishProcessToggle(request, btn) {
+    request.then(reenableProcessButton(btn), reenableProcessButton(btn));
+  }
+  function reenableProcessButton(btn) {
+    function reenable() {
+      btn.disabled = false;
+      void refreshAll();
+    }
+    return reenable;
   }
   function wireProcessToggle(btn, exec) {
     const suspended = !!exec.suspended;
     btn.textContent = suspended ? "\u25B6" : "\u23F8";
     btn.title = suspended ? "Resume process" : "Pause process";
     btn.setAttribute("aria-label", btn.title);
-    btn.onclick = () => {
-      btn.disabled = true;
-      const req = suspended ? api.resumeExecution(exec.id) : api.pauseExecution(exec.id);
-      void req.then(() => refreshAll()).finally(() => {
-        btn.disabled = false;
-      });
-    };
+    btn.onclick = makeProcessToggleHandler(btn, exec.id, suspended);
+  }
+  function makeProcessToggleHandler(btn, execId, suspended) {
+    function handleClick() {
+      requestProcessToggle(btn, execId, suspended);
+    }
+    return handleClick;
+  }
+  function requestCancel(btn, execId) {
+    btn.disabled = true;
+    api.cancelExecution(execId).then(reenableCancelButton(btn), reenableCancelButton(btn));
+  }
+  function reenableCancelButton(btn) {
+    function reenable() {
+      btn.disabled = false;
+      void refreshAll();
+    }
+    return reenable;
+  }
+  function wireCancelButton(btn, exec) {
+    btn.onclick = makeCancelHandler(btn, exec.id);
+  }
+  function makeCancelHandler(btn, execId) {
+    function handleClick() {
+      requestCancel(btn, execId);
+    }
+    return handleClick;
+  }
+  function wireOutputButton(btn, exec) {
+    btn.onclick = makeOutputHandler(exec);
+  }
+  function makeOutputHandler(exec) {
+    function handleClick() {
+      openRunningOutput(exec);
+    }
+    return handleClick;
   }
   function updateExecRow(row, exec, kind) {
     const name = row.querySelector(".exec-row-name");
@@ -1254,16 +1429,15 @@
       };
     }
     const badge = row.querySelector(".badge");
-    if (badge) {
-      badge.className = "badge " + statusBadgeClass(exec.status);
-      badge.textContent = exec.status;
-    }
+    if (badge) renderStatusBadge(badge, exec.status, exec.suspended);
     const meta = row.querySelector(".exec-row-meta");
     if (meta) {
       if (exec.duration_ms !== void 0 && exec.duration_ms !== null) {
         meta.textContent = (exec.duration_ms / 1e3).toFixed(1) + "s";
+      } else if (exec.suspended) {
+        meta.textContent = "paused";
       } else if (exec.started_at) {
-        meta.textContent = "running\u2026";
+        meta.textContent = fmtElapsed(exec.started_at);
       } else {
         meta.textContent = "";
       }
@@ -1271,10 +1445,12 @@
     if (kind === "running") {
       const pidLabel = row.querySelector(".exec-row-pid");
       if (pidLabel) pidLabel.textContent = exec.pid !== void 0 ? "pid " + exec.pid : "";
-      const suspendedBadge = row.querySelector(".exec-row-suspended-badge");
-      if (suspendedBadge) suspendedBadge.style.display = exec.suspended ? "" : "none";
+      const outputBtn = row.querySelector(".exec-row-output-btn");
+      if (outputBtn) wireOutputButton(outputBtn, exec);
       const pauseBtn = row.querySelector(".exec-row-pause-btn");
       if (pauseBtn) wireProcessToggle(pauseBtn, exec);
+      const cancelBtn = row.querySelector(".exec-row-cancel-btn");
+      if (cancelBtn) wireCancelButton(cancelBtn, exec);
     }
   }
   function createTaskRow(task, pending) {
@@ -1481,11 +1657,11 @@
   }
 
   // web/taskmaster/js/metrics.ts
-  function fmtMs(ms) {
+  function fmtMs2(ms) {
     if (ms === null || ms === void 0) return "\u2014";
     return (ms / 1e3).toFixed(2) + "s";
   }
-  function fmtDate(iso) {
+  function fmtDate2(iso) {
     if (!iso) return "\u2014";
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return iso;
@@ -1578,10 +1754,10 @@
       success: String(m.success_count),
       failed: String(m.failed_count),
       canceled: String(m.canceled_count),
-      avg: fmtMs(m.avg_duration_ms),
-      min: fmtMs(m.min_duration_ms),
-      max: fmtMs(m.max_duration_ms),
-      "last-run": fmtDate(m.last_execution)
+      avg: fmtMs2(m.avg_duration_ms),
+      min: fmtMs2(m.min_duration_ms),
+      max: fmtMs2(m.max_duration_ms),
+      "last-run": fmtDate2(m.last_execution)
     };
     for (const [key, val] of Object.entries(values)) {
       const cell = card.querySelector(".metric-stat-" + key);
@@ -1591,32 +1767,7 @@
   }
 
   // web/taskmaster/js/taskdetail.ts
-  function statusBadgeClass2(status) {
-    switch (status) {
-      case "success":
-        return "badge-green";
-      case "failed":
-        return "badge-red";
-      case "canceled":
-        return "badge-yellow";
-      case "running":
-        return "badge-blue";
-      default:
-        return "badge-muted";
-    }
-  }
-  function fmtMs2(ms) {
-    if (ms === null || ms === void 0) return "\u2014";
-    return (ms / 1e3).toFixed(2) + "s";
-  }
-  function fmtDate2(iso) {
-    if (!iso) return "\u2014";
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
-    return d.toLocaleString();
-  }
-  function mountTaskDetail(container, live2, task, onBack, onChange = () => {
-  }) {
+  function mountTaskDetail(container, live2, task, onBack) {
     container.textContent = "";
     container.className = "task-detail";
     const header = document.createElement("div");
@@ -1646,68 +1797,32 @@
     metricsWrap.className = "task-detail-metrics";
     metricsWrap.textContent = "Loading metrics\u2026";
     container.appendChild(metricsWrap);
-    const outputHeader = document.createElement("div");
-    outputHeader.className = "task-detail-section-title";
-    outputHeader.textContent = "Output";
-    const outputBox = document.createElement("pre");
-    outputBox.className = "task-detail-output";
-    outputBox.textContent = "(select a run to view its output)";
-    container.append(outputHeader, outputBox);
     const historyHeader = document.createElement("div");
     historyHeader.className = "task-detail-section-title";
     historyHeader.textContent = "History";
     const historyList = document.createElement("div");
     historyList.className = "task-detail-history";
     container.append(historyHeader, historyList);
-    let currentSource = null;
-    let selectedExecId = null;
     let destroyed = false;
-    function closeStream() {
-      if (currentSource) {
-        currentSource.close();
-        currentSource = null;
-      }
+    function isTerminal(exec) {
+      return exec.status === "success" || exec.status === "failed" || exec.status === "canceled";
     }
-    function streamExecution(exec) {
-      if (selectedExecId === exec.id && currentSource) return;
-      closeStream();
-      selectedExecId = exec.id;
-      outputBox.textContent = "";
-      updateHistorySelection();
-      const source = api.openExecutionOutput(exec.id);
-      currentSource = source;
-      source.addEventListener("output", (ev) => {
-        try {
-          const parsed = JSON.parse(ev.data);
-          outputBox.textContent += (parsed.line ?? "") + "\n";
-          outputBox.scrollTop = outputBox.scrollHeight;
-        } catch {
-        }
-      });
-      source.addEventListener("status", (ev) => {
-        if (outputBox.textContent === "") outputBox.textContent = "(execution " + ev.data + ")";
-        closeStream();
-      });
-      source.addEventListener("done", () => closeStream());
-      source.onerror = () => {
-      };
+    function byIdDescending(a, b) {
+      return b.id - a.id;
     }
-    function updateHistorySelection() {
-      for (const row of Array.from(historyList.children)) {
-        const el = row;
-        const id = Number(el.getAttribute("data-tm-key"));
-        el.classList.toggle("history-row-selected", id === selectedExecId);
-      }
+    function keyById(exec) {
+      return exec.id;
     }
     async function loadHistory() {
       let execs = [];
       try {
-        execs = await api.listExecutions(task.name, 50);
+        const all = await api.listExecutions(task.name, 50);
+        execs = all.filter(isTerminal);
       } catch {
         return;
       }
       if (destroyed) return;
-      execs.sort((a, b) => b.id - a.id);
+      execs.sort(byIdDescending);
       if (execs.length === 0) {
         historyList.textContent = "";
         const empty = document.createElement("div");
@@ -1718,13 +1833,10 @@
       }
       historyList.querySelector(".lane-empty-note")?.remove();
       patchList(historyList, execs, {
-        key: (e) => e.id,
-        create: (e) => createHistoryRow(e),
-        update: (row, e) => updateHistoryRow(row, e)
+        key: keyById,
+        create: createHistoryRow,
+        update: updateHistoryRow
       });
-      if (selectedExecId === null) {
-        streamExecution(execs[0]);
-      }
     }
     function createHistoryRow(exec) {
       const row = document.createElement("div");
@@ -1735,84 +1847,29 @@
       when.className = "history-row-when";
       const dur = document.createElement("span");
       dur.className = "history-row-dur";
-      const pidLabel = document.createElement("span");
-      pidLabel.className = "history-row-pid";
-      const suspendedBadge = document.createElement("span");
-      suspendedBadge.className = "badge badge-yellow history-row-suspended-badge";
-      suspendedBadge.textContent = "suspended";
-      const pauseBtn = document.createElement("button");
-      pauseBtn.type = "button";
-      pauseBtn.className = "btn-icon history-row-pause-btn";
       const viewBtn = document.createElement("button");
       viewBtn.type = "button";
       viewBtn.className = "btn btn-secondary btn-sm";
       viewBtn.textContent = "View output";
-      const cancelBtn = document.createElement("button");
-      cancelBtn.type = "button";
-      cancelBtn.className = "btn btn-danger btn-sm";
-      cancelBtn.title = "Cancel execution";
-      cancelBtn.setAttribute("aria-label", "Cancel execution");
-      cancelBtn.textContent = "\u2716";
-      row.append(pidLabel, suspendedBadge, pauseBtn, badge, when, dur, viewBtn, cancelBtn);
+      row.append(badge, when, dur, viewBtn);
       updateHistoryRow(row, exec);
       return row;
     }
     function updateHistoryRow(row, exec) {
-      row.classList.toggle("history-row-selected", exec.id === selectedExecId);
       const badge = row.querySelector(".history-row-status-badge");
-      if (badge) {
-        badge.className = "badge history-row-status-badge " + statusBadgeClass2(exec.status);
-        badge.textContent = exec.status;
-      }
+      if (badge) renderStatusBadge(badge, exec.status, exec.suspended);
       const when = row.querySelector(".history-row-when");
-      if (when) when.textContent = fmtDate2(exec.started_at ?? exec.scheduled_at);
+      if (when) when.textContent = fmtDate(exec.started_at ?? exec.scheduled_at);
       const dur = row.querySelector(".history-row-dur");
-      if (dur) dur.textContent = fmtMs2(exec.duration_ms);
+      if (dur) dur.textContent = fmtMs(exec.duration_ms);
       const viewBtn = row.querySelector(".btn-secondary");
-      if (viewBtn) viewBtn.onclick = () => streamExecution(exec);
-      const isRunning = exec.status === "running";
-      const pidLabel = row.querySelector(".history-row-pid");
-      if (pidLabel) {
-        pidLabel.style.display = isRunning ? "" : "none";
-        pidLabel.textContent = exec.pid !== void 0 ? "pid " + exec.pid : "";
+      if (viewBtn) viewBtn.onclick = makeViewOutputHandler(exec);
+    }
+    function makeViewOutputHandler(exec) {
+      function handleClick() {
+        openOutputModal(exec.id, task.name + " \u2014 run #" + exec.id);
       }
-      const suspendedBadge = row.querySelector(".history-row-suspended-badge");
-      if (suspendedBadge) {
-        suspendedBadge.style.display = isRunning && exec.suspended ? "" : "none";
-      }
-      const pauseBtn = row.querySelector(".history-row-pause-btn");
-      if (pauseBtn) {
-        pauseBtn.style.display = isRunning ? "" : "none";
-        if (isRunning) {
-          const suspended = !!exec.suspended;
-          pauseBtn.textContent = suspended ? "\u25B6" : "\u23F8";
-          pauseBtn.title = suspended ? "Resume process" : "Pause process";
-          pauseBtn.setAttribute("aria-label", pauseBtn.title);
-          pauseBtn.onclick = () => {
-            pauseBtn.disabled = true;
-            const req = suspended ? api.resumeExecution(exec.id) : api.pauseExecution(exec.id);
-            void req.then(() => {
-              onChange();
-              void loadHistory();
-            }).finally(() => {
-              pauseBtn.disabled = false;
-            });
-          };
-        }
-      }
-      const cancelBtn = row.querySelector(".btn-danger");
-      if (cancelBtn) {
-        cancelBtn.style.display = isRunning ? "" : "none";
-        cancelBtn.onclick = () => {
-          cancelBtn.disabled = true;
-          void api.cancelExecution(exec.id).then(() => {
-            onChange();
-            void loadHistory();
-          }).finally(() => {
-            cancelBtn.disabled = false;
-          });
-        };
-      }
+      return handleClick;
     }
     async function loadMetrics() {
       let rows = [];
@@ -1835,10 +1892,10 @@
         ["success", String(m.success_count)],
         ["failed", String(m.failed_count)],
         ["canceled", String(m.canceled_count)],
-        ["avg", fmtMs2(m.avg_duration_ms ?? null)],
-        ["min", fmtMs2(m.min_duration_ms ?? null)],
-        ["max", fmtMs2(m.max_duration_ms ?? null)],
-        ["last run", fmtDate2(m.last_execution ?? null)]
+        ["avg", fmtMs(m.avg_duration_ms ?? null)],
+        ["min", fmtMs(m.min_duration_ms ?? null)],
+        ["max", fmtMs(m.max_duration_ms ?? null)],
+        ["last run", fmtDate(m.last_execution ?? null)]
       ];
       let grid = metricsWrap.querySelector(".task-detail-metric-grid");
       if (!grid) {
@@ -1866,17 +1923,17 @@
         if (v) v.textContent = val;
       }
     }
-    void loadHistory();
-    void loadMetrics();
-    const unsubscribe2 = live2.onEvent(() => {
+    function refreshHistoryAndMetrics() {
       void loadHistory();
       void loadMetrics();
-    });
-    return () => {
+    }
+    refreshHistoryAndMetrics();
+    const unsubscribe2 = live2.onEvent(refreshHistoryAndMetrics);
+    function cleanup() {
       destroyed = true;
-      closeStream();
       unsubscribe2();
-    };
+    }
+    return cleanup;
   }
 
   // web/taskmaster/js/taskview.ts
@@ -1923,6 +1980,9 @@
     };
   }
 
+  // web/taskmaster/js/buildinfo.ts
+  var FRONTEND_BUILD_TIME = "2026-09-15T20:09:42Z";
+
   // web/taskmaster/js/main.ts
   var caps2 = { allow_sudo: false };
   var authEnabled = false;
@@ -1957,6 +2017,7 @@
   }
   async function refreshStatusLine() {
     const statusEl = document.getElementById("st-status");
+    const backendBuildEl = document.getElementById("st-backend-build");
     if (!statusEl) return;
     statusEl.textContent = "checking\u2026";
     statusEl.className = "st-value st-muted";
@@ -1964,9 +2025,11 @@
       const h = await api.health();
       statusEl.textContent = h.status === "ok" ? "healthy" : h.status;
       statusEl.className = "st-value st-ok";
+      if (backendBuildEl) backendBuildEl.textContent = h.build ?? "dev";
     } catch {
       statusEl.textContent = "unreachable";
       statusEl.className = "st-value st-err";
+      if (backendBuildEl) backendBuildEl.textContent = "\u2014";
     }
   }
   function buildNav() {
@@ -2079,7 +2142,7 @@
     panel.appendChild(liveSection);
     const stSection = document.createElement("div");
     stSection.className = "menu-section";
-    stSection.innerHTML = '<div class="menu-heading">Server</div><div class="menu-row"><span>Status</span><span id="st-status" class="st-value st-muted">\u2026</span></div>';
+    stSection.innerHTML = '<div class="menu-heading">Server</div><div class="menu-row"><span>Status</span><span id="st-status" class="st-value st-muted">\u2026</span></div><div class="menu-row"><span>Backend build</span><span id="st-backend-build" class="st-value st-muted">\u2026</span></div><div class="menu-row"><span>Frontend build</span><span class="st-value">' + FRONTEND_BUILD_TIME + "</span></div>";
     const sudoRow = document.createElement("div");
     sudoRow.className = "menu-row";
     const sudoLabel = document.createElement("span");

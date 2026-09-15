@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -603,6 +604,66 @@ func TestHandleExecutionOutput_CompletedExecution(t *testing.T) {
 	require.Contains(t, string(body), "success")
 }
 
+// TestHandleExecutionOutput_PendingBecomesRegistered is the regression test
+// for the real bug behind "View output shows nothing": a client opening the
+// output stream for an execution that hasn't started yet ("pending" — e.g.
+// the instant after enqueueing, before the worker's next poll) used to get
+// one "status: pending" event and an immediate close, with nothing telling
+// it to come back once real output existed. The fix keeps that SAME
+// connection open and waits; this test proves it without ever reconnecting.
+func TestHandleExecutionOutput_PendingBecomesRegistered(t *testing.T) {
+	srv, d, registry := newTestServer(t, false, 0)
+
+	task := &models.Task{Name: "pending-output-task", LaneName: "test", Enabled: true, Position: 50, Command: "echo hi"}
+	taskID, err := d.AddTask(task)
+	require.NoError(t, err)
+	execID, err := d.CreateExecution(taskID, "w", time.Now())
+	require.NoError(t, err)
+	// Deliberately NOT calling d.StartExecution / registry.Register yet —
+	// this execution is genuinely still "pending" when the client connects.
+
+	received := make(chan string, 1)
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		resp, getErr := http.Get(srv.URL + "/api/executions/" + itoa(execID) + "/output")
+		if getErr != nil {
+			return
+		}
+		defer resp.Body.Close()
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "data:") && strings.Contains(line, "hello-from-worker") {
+				received <- line
+				return
+			}
+		}
+	}()
+
+	// Give the handler a moment to reach its wait loop, then simulate the
+	// worker picking the task up moments later — exactly what a real 5s
+	// poll cycle does.
+	time.Sleep(100 * time.Millisecond)
+	require.NoError(t, d.StartExecution(execID, "w"))
+	stdout, stderr := registry.Register(execID)
+	stdout.Write([]byte("hello-from-worker\n"))
+
+	select {
+	case <-received:
+	case <-time.After(5 * time.Second):
+		t.Fatal("client never received output after the execution was registered — the original connection was not kept open")
+	}
+
+	stdout.MarkDone()
+	stderr.MarkDone()
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the subscriber goroutine to finish")
+	}
+}
+
 func TestHandleExecutionOutput_SSECap(t *testing.T) {
 	srv, _, registry := newTestServer(t, false, 1)
 
@@ -678,6 +739,28 @@ func TestHandleCancelExecution_NotRunning(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+// TestHandleCancelExecution_ExistsButFinished_ReturnsOKNotRunning covers the
+// benign race: canceling an execution that finished naturally before this
+// request landed is a normal outcome, not a client error — a real execution
+// ID gets 200 {"status":"not_running"}, distinct from the 404 above for an
+// ID that never existed at all.
+func TestHandleCancelExecution_ExistsButFinished_ReturnsOKNotRunning(t *testing.T) {
+	srv, d, _, _, _, _ := newTestServerFull(t, false, 0)
+	taskID, err := d.AddTask(&models.Task{Name: "p5", LaneName: "test", Enabled: true, Position: 50, Command: "echo hi"})
+	require.NoError(t, err)
+	execID, err := d.CreateExecution(taskID, "w", time.Now())
+	require.NoError(t, err)
+	require.NoError(t, d.FinishExecution(execID, "success", nil, 5, 0))
+
+	resp, err := http.DefaultClient.Do(jsonReq(t, "POST", fmt.Sprintf("%s/api/executions/%d/cancel", srv.URL, execID), nil))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, "not_running", body["status"])
 }
 
 func TestHandleCancelExecution_Running(t *testing.T) {

@@ -241,6 +241,22 @@ h2 { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
   letter-spacing: 0.5px;
 }
 
+/* A status shown as a symbol (✓ ✕ ⏸ ● …) instead of a word — compact,
+   square, no uppercase/letter-spacing (there's no word to transform).
+   The full status name lives in title/aria-label for anyone who wants it. */
+.badge-symbol {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 12px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
 .badge-green { background: rgba(76,175,80,.15); color: var(--status-green); }
 .badge-red   { background: rgba(244,67,54,.15); color: var(--status-red); }
 .badge-yellow{ background: rgba(255,152,0,.15); color: var(--status-yellow); }
@@ -319,8 +335,8 @@ textarea { font-family: var(--font-mono); resize: vertical; }
 }
 
 .lane {
-  flex: 0 0 280px;
-  width: 280px;
+  flex: 0 0 380px;
+  width: 380px;
   background: var(--bg-secondary);
   border: 1px solid var(--bg-modifier-border);
   border-radius: var(--radius);
@@ -470,7 +486,9 @@ textarea { font-family: var(--font-mono); resize: vertical; }
 
 .exec-row-meta { color: var(--text-muted); font-size: 11px; flex: 0 0 auto; }
 
-/* PID label + process pause/resume control on a running execution row. */
+/* PID label + view-output/pause/cancel controls on a running execution row
+   — the ONLY place these controls live (the task-detail split view no
+   longer duplicates the running instance; see taskdetail.ts). */
 .exec-row-pid-seam {
   flex: 0 0 auto;
   display: flex;
@@ -746,19 +764,6 @@ textarea { font-family: var(--font-mono); resize: vertical; }
 }
 .task-detail-metric-val { font-size: 15px; font-weight: 700; }
 .task-detail-metric-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
-
-.task-detail-output {
-  background: var(--bg-primary);
-  border: 1px solid var(--bg-modifier-border);
-  border-radius: var(--radius);
-  padding: 8px;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  max-height: 16em;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
 
 .task-detail-history { display: flex; flex-direction: column; gap: 4px; max-height: 14em; overflow: auto; }
 

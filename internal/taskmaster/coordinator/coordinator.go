@@ -108,7 +108,7 @@ func (c *Coordinator) handleHealth(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, http.StatusServiceUnavailable, "database unavailable: "+err.Error())
 		return
 	}
-	response.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	response.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "build": BuildTime})
 }
 
 func (c *Coordinator) handleCapabilities(w http.ResponseWriter, r *http.Request) {

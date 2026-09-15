@@ -32,6 +32,47 @@ func TestHandleResumeExecution_NotRunning(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
+// TestHandlePauseExecution_ExistsButFinished_ReturnsOKNotRunning covers the
+// benign race: an execution that finished naturally before this request
+// landed (e.g. a fast task) is a normal outcome, not a client error — a real
+// execution ID gets 200 {"status":"not_running"}, distinct from the 404
+// above for an ID that never existed at all.
+func TestHandlePauseExecution_ExistsButFinished_ReturnsOKNotRunning(t *testing.T) {
+	srv, d, _, _, _, _ := newTestServerFull(t, false, 0)
+	taskID, err := d.AddTask(&models.Task{Name: "p3", LaneName: "test", Enabled: true, Position: 50, Command: "echo hi"})
+	require.NoError(t, err)
+	execID, err := d.CreateExecution(taskID, "w", time.Now())
+	require.NoError(t, err)
+	require.NoError(t, d.FinishExecution(execID, "success", nil, 5, 0))
+
+	resp, err := http.DefaultClient.Do(jsonReq(t, "POST", fmt.Sprintf("%s/api/executions/%d/pause", srv.URL, execID), nil))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, "not_running", body["status"])
+}
+
+// TestHandleResumeExecution_ExistsButFinished_ReturnsOKNotRunning mirrors
+// TestHandlePauseExecution_ExistsButFinished_ReturnsOKNotRunning for resume.
+func TestHandleResumeExecution_ExistsButFinished_ReturnsOKNotRunning(t *testing.T) {
+	srv, d, _, _, _, _ := newTestServerFull(t, false, 0)
+	taskID, err := d.AddTask(&models.Task{Name: "p4", LaneName: "test", Enabled: true, Position: 50, Command: "echo hi"})
+	require.NoError(t, err)
+	execID, err := d.CreateExecution(taskID, "w", time.Now())
+	require.NoError(t, err)
+	require.NoError(t, d.FinishExecution(execID, "success", nil, 5, 0))
+
+	resp, err := http.DefaultClient.Do(jsonReq(t, "POST", fmt.Sprintf("%s/api/executions/%d/resume", srv.URL, execID), nil))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, "not_running", body["status"])
+}
+
 // TestHandlePauseExecution_SignalFailure_ReturnsBadRequest registers a PID
 // that (essentially certainly) doesn't correspond to a running process, so
 // the underlying signal fails — a distinct outcome from "not registered"

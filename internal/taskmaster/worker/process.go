@@ -114,3 +114,16 @@ func (r *ProcessRegistry) signal(execID int64, sig syscall.Signal, suspended boo
 	r.mu.Unlock()
 	return nil
 }
+
+// ProcessAlive reports whether a process-group leader with this PID exists
+// right now. Used by boot-time orphan reconciliation (build.go) to tell a
+// genuinely-still-running process (its process group is isolated from the
+// old parent by Setpgid, so it survives a restart) from a true ghost (the
+// common case after a non-graceful stop). Deliberately simple — a bare
+// existence check via signal 0, not a PID-reuse sanity check (e.g. cross-
+// referencing /proc/<pid>/cmdline against the stored command): the window
+// for a reused PID to coincidentally pass this check is vanishingly small in
+// practice, and guarding against it isn't worth the added complexity here.
+func ProcessAlive(pid int) bool {
+	return syscall.Kill(pid, 0) == nil
+}

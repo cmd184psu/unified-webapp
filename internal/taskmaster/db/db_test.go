@@ -576,3 +576,77 @@ CREATE TABLE task_executions (
 	require.NoError(t, err)
 	require.NoError(t, d2.Close())
 }
+
+// ─── Orphaned-execution reconciliation primitives ───────────────────────────
+//
+// The liveness-aware ORCHESTRATION (worker.ReconcileOrphans, which decides
+// skip-vs-mark-failed by checking whether a candidate's PID is actually
+// alive) is tested in the worker package, where spawning/killing real
+// processes to test liveness naturally belongs. These test the smaller DB
+// primitives it's built from.
+
+func TestListOrphanCandidates_ReturnsOnlyRunning(t *testing.T) {
+	d := newTestDB(t)
+	seedLane(t, d, "g", 2)
+	task := seedTask(t, d, "orphan-task", "g")
+	finishedTask := seedTask(t, d, "done-task", "g")
+
+	runningID, err := d.CreateExecution(task.ID, "hero", time.Now())
+	require.NoError(t, err)
+	require.NoError(t, d.StartExecution(runningID, "hero"))
+	require.NoError(t, d.SetExecutionPID(runningID, 424242))
+
+	doneID, err := d.CreateExecution(finishedTask.ID, "hero", time.Now())
+	require.NoError(t, err)
+	require.NoError(t, d.FinishExecution(doneID, "success", nil, 10, 0))
+
+	candidates, err := d.ListOrphanCandidates()
+	require.NoError(t, err)
+	require.Len(t, candidates, 1)
+	require.Equal(t, runningID, candidates[0].ExecID)
+	require.Equal(t, task.ID, candidates[0].TaskID)
+	require.NotNil(t, candidates[0].PID)
+	require.Equal(t, 424242, *candidates[0].PID)
+}
+
+func TestListOrphanCandidates_NilPIDWhenNeverSet(t *testing.T) {
+	d := newTestDB(t)
+	seedLane(t, d, "g", 2)
+	task := seedTask(t, d, "t", "g")
+	execID, err := d.CreateExecution(task.ID, "hero", time.Now())
+	require.NoError(t, err)
+	require.NoError(t, d.StartExecution(execID, "hero"))
+
+	candidates, err := d.ListOrphanCandidates()
+	require.NoError(t, err)
+	require.Len(t, candidates, 1)
+	require.Nil(t, candidates[0].PID, "an execution whose PID was never persisted must report PID as unknown, not a zero value")
+}
+
+func TestMarkOrphanFailed_ClosesOutAndReleasesLock(t *testing.T) {
+	d := newTestDB(t)
+	seedLane(t, d, "g", 2)
+	task := seedTask(t, d, "t", "g")
+	execID, err := d.CreateExecution(task.ID, "hero", time.Now())
+	require.NoError(t, err)
+	require.NoError(t, d.StartExecution(execID, "hero"))
+	// Simulate a lock held under a DIFFERENT worker_id than the one about to
+	// call MarkOrphanFailed — e.g. the hostname changed across a restart.
+	_, err = d.AcquireLock(task.ID, "old-hostname", 10*time.Minute)
+	require.NoError(t, err)
+
+	require.NoError(t, d.MarkOrphanFailed(execID, task.ID))
+
+	exec, err := d.GetExecution(execID)
+	require.NoError(t, err)
+	require.Equal(t, "failed", exec.Status)
+	require.NotNil(t, exec.FinishedAt)
+	require.NotNil(t, exec.ErrorMessage)
+	require.Contains(t, *exec.ErrorMessage, "interrupted")
+
+	// The lock must be gone regardless of worker_id, or the task could
+	// never be re-picked until its 10-minute TTL happened to expire.
+	locked, err := d.AcquireLock(task.ID, "new-hostname", 10*time.Minute)
+	require.NoError(t, err)
+	require.True(t, locked, "lock should have been released by MarkOrphanFailed regardless of worker_id")
+}

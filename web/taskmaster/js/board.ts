@@ -26,6 +26,8 @@ import { api, Capabilities, Lane, LaneStatus, Task, TaskExecution } from './api.
 import { LiveController, BoardEvent, patchList } from './ui/live.js';
 import { openModal, confirmDialog, alertDialog } from './ui/modal.js';
 import { openTaskDesigner } from './designer.js';
+import { openOutputModal } from './outputmodal.js';
+import { fmtElapsed, renderStatusBadge } from './status.js';
 
 const RAN_PER_LANE = 5;
 
@@ -379,21 +381,6 @@ function toggleEmptyNote(list: HTMLElement, empty: boolean, text: string): void 
 
 // ─── Rows ────────────────────────────────────────────────────────────────
 
-function statusBadgeClass(status: string): string {
-  switch (status) {
-    case 'success':
-      return 'badge-green';
-    case 'failed':
-      return 'badge-red';
-    case 'canceled':
-      return 'badge-yellow';
-    case 'running':
-      return 'badge-blue';
-    default:
-      return 'badge-muted';
-  }
-}
-
 function createExecRow(exec: TaskExecution, kind: 'running' | 'ran'): HTMLElement {
   const row = document.createElement('div');
   row.className = 'exec-row exec-row-' + kind;
@@ -407,27 +394,66 @@ function createExecRow(exec: TaskExecution, kind: 'running' | 'ran'): HTMLElemen
   meta.className = 'exec-row-meta';
   row.append(name, badge, meta);
   if (kind === 'running') {
-    // PID label + a process pause/resume control for the running
-    // execution's OS process (SIGSTOP/SIGCONT), independent of cancel.
+    // The running instance lives ONLY in the lane card — the task-detail
+    // split view no longer lists it (that would be the same process shown
+    // twice, disagreeing whenever one side updated and the other didn't).
+    // So every control for a running execution belongs here: PID, process
+    // pause/resume (SIGSTOP/SIGCONT), cancel, and viewing its live output.
     const pidSeam = document.createElement('span');
     pidSeam.className = 'exec-row-pid-seam';
 
     const pidLabel = document.createElement('span');
     pidLabel.className = 'exec-row-pid';
 
-    const suspendedBadge = document.createElement('span');
-    suspendedBadge.className = 'badge badge-yellow exec-row-suspended-badge';
-    suspendedBadge.textContent = 'suspended';
+    const outputBtn = document.createElement('button');
+    outputBtn.type = 'button';
+    outputBtn.className = 'btn-icon exec-row-output-btn';
+    // Not ⏹ (that means Stop) or any other square — a square already means
+    // something else in this app. ↗ reads as "open in a window", matching
+    // what the button actually does.
+    outputBtn.textContent = '↗';
+    outputBtn.title = 'View live output';
+    outputBtn.setAttribute('aria-label', 'View live output');
 
     const pauseBtn = document.createElement('button');
     pauseBtn.type = 'button';
     pauseBtn.className = 'btn-icon exec-row-pause-btn';
 
-    pidSeam.append(pidLabel, suspendedBadge, pauseBtn);
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn-icon exec-row-cancel-btn';
+    cancelBtn.textContent = '✖';
+    cancelBtn.title = 'Cancel execution';
+    cancelBtn.setAttribute('aria-label', 'Cancel execution');
+
+    pidSeam.append(pidLabel, outputBtn, pauseBtn, cancelBtn);
     row.appendChild(pidSeam);
   }
   updateExecRow(row, exec, kind);
   return row;
+}
+
+function openRunningOutput(exec: TaskExecution): void {
+  const title = (exec.task_name ?? 'task') + ' — run #' + exec.id;
+  openOutputModal(exec.id, title);
+}
+
+function requestProcessToggle(btn: HTMLButtonElement, execId: number, suspended: boolean): void {
+  btn.disabled = true;
+  const request = suspended ? api.resumeExecution(execId) : api.pauseExecution(execId);
+  finishProcessToggle(request, btn);
+}
+
+function finishProcessToggle(request: Promise<unknown>, btn: HTMLButtonElement): void {
+  request.then(reenableProcessButton(btn), reenableProcessButton(btn));
+}
+
+function reenableProcessButton(btn: HTMLButtonElement): () => void {
+  function reenable(): void {
+    btn.disabled = false;
+    void refreshAll();
+  }
+  return reenable;
 }
 
 function wireProcessToggle(btn: HTMLButtonElement, exec: TaskExecution): void {
@@ -435,13 +461,49 @@ function wireProcessToggle(btn: HTMLButtonElement, exec: TaskExecution): void {
   btn.textContent = suspended ? '▶' : '⏸';
   btn.title = suspended ? 'Resume process' : 'Pause process';
   btn.setAttribute('aria-label', btn.title);
-  btn.onclick = () => {
-    btn.disabled = true;
-    const req = suspended ? api.resumeExecution(exec.id) : api.pauseExecution(exec.id);
-    void req.then(() => refreshAll()).finally(() => {
-      btn.disabled = false;
-    });
-  };
+  btn.onclick = makeProcessToggleHandler(btn, exec.id, suspended);
+}
+
+function makeProcessToggleHandler(btn: HTMLButtonElement, execId: number, suspended: boolean): () => void {
+  function handleClick(): void {
+    requestProcessToggle(btn, execId, suspended);
+  }
+  return handleClick;
+}
+
+function requestCancel(btn: HTMLButtonElement, execId: number): void {
+  btn.disabled = true;
+  api.cancelExecution(execId).then(reenableCancelButton(btn), reenableCancelButton(btn));
+}
+
+function reenableCancelButton(btn: HTMLButtonElement): () => void {
+  function reenable(): void {
+    btn.disabled = false;
+    void refreshAll();
+  }
+  return reenable;
+}
+
+function wireCancelButton(btn: HTMLButtonElement, exec: TaskExecution): void {
+  btn.onclick = makeCancelHandler(btn, exec.id);
+}
+
+function makeCancelHandler(btn: HTMLButtonElement, execId: number): () => void {
+  function handleClick(): void {
+    requestCancel(btn, execId);
+  }
+  return handleClick;
+}
+
+function wireOutputButton(btn: HTMLButtonElement, exec: TaskExecution): void {
+  btn.onclick = makeOutputHandler(exec);
+}
+
+function makeOutputHandler(exec: TaskExecution): () => void {
+  function handleClick(): void {
+    openRunningOutput(exec);
+  }
+  return handleClick;
 }
 
 function updateExecRow(row: HTMLElement, exec: TaskExecution, kind: 'running' | 'ran'): void {
@@ -462,16 +524,22 @@ function updateExecRow(row: HTMLElement, exec: TaskExecution, kind: 'running' | 
     };
   }
   const badge = row.querySelector<HTMLElement>('.badge');
-  if (badge) {
-    badge.className = 'badge ' + statusBadgeClass(exec.status);
-    badge.textContent = exec.status;
-  }
+  if (badge) renderStatusBadge(badge, exec.status, exec.suspended);
   const meta = row.querySelector<HTMLElement>('.exec-row-meta');
   if (meta) {
     if (exec.duration_ms !== undefined && exec.duration_ms !== null) {
       meta.textContent = (exec.duration_ms / 1000).toFixed(1) + 's';
+    } else if (exec.suspended) {
+      // A paused process's wall-clock time keeps passing even though it's
+      // doing nothing — a ticking counter here would make a genuinely
+      // frozen process look like pause had no effect. Say so plainly
+      // instead (the badge already shows ⏸ too).
+      meta.textContent = 'paused';
     } else if (exec.started_at) {
-      meta.textContent = 'running…';
+      // "running…" said nothing useful — show live elapsed time instead.
+      // The board's 1s tick (render()) re-runs this via patchList's update
+      // callback, so this counts up on its own.
+      meta.textContent = fmtElapsed(exec.started_at);
     } else {
       meta.textContent = '';
     }
@@ -481,11 +549,14 @@ function updateExecRow(row: HTMLElement, exec: TaskExecution, kind: 'running' | 
     const pidLabel = row.querySelector<HTMLElement>('.exec-row-pid');
     if (pidLabel) pidLabel.textContent = exec.pid !== undefined ? 'pid ' + exec.pid : '';
 
-    const suspendedBadge = row.querySelector<HTMLElement>('.exec-row-suspended-badge');
-    if (suspendedBadge) suspendedBadge.style.display = exec.suspended ? '' : 'none';
+    const outputBtn = row.querySelector<HTMLButtonElement>('.exec-row-output-btn');
+    if (outputBtn) wireOutputButton(outputBtn, exec);
 
     const pauseBtn = row.querySelector<HTMLButtonElement>('.exec-row-pause-btn');
     if (pauseBtn) wireProcessToggle(pauseBtn, exec);
+
+    const cancelBtn = row.querySelector<HTMLButtonElement>('.exec-row-cancel-btn');
+    if (cancelBtn) wireCancelButton(cancelBtn, exec);
   }
 }
 

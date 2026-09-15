@@ -17,6 +17,7 @@ import { confirmDialog } from './ui/modal.js';
 import { mountBoard } from './board.js';
 import { mountMetrics } from './metrics.js';
 import { mountTaskView } from './taskview.js';
+import { FRONTEND_BUILD_TIME } from './buildinfo.js';
 
 let caps: Capabilities = { allow_sudo: false };
 let authEnabled = false;
@@ -63,6 +64,7 @@ function closeMenu(): void {
 
 async function refreshStatusLine(): Promise<void> {
   const statusEl = document.getElementById('st-status');
+  const backendBuildEl = document.getElementById('st-backend-build');
   if (!statusEl) return;
   statusEl.textContent = 'checking…';
   statusEl.className = 'st-value st-muted';
@@ -70,9 +72,11 @@ async function refreshStatusLine(): Promise<void> {
     const h = await api.health();
     statusEl.textContent = h.status === 'ok' ? 'healthy' : h.status;
     statusEl.className = 'st-value st-ok';
+    if (backendBuildEl) backendBuildEl.textContent = h.build ?? 'dev';
   } catch {
     statusEl.textContent = 'unreachable';
     statusEl.className = 'st-value st-err';
+    if (backendBuildEl) backendBuildEl.textContent = '—';
   }
 }
 
@@ -210,7 +214,9 @@ function buildMenu(): HTMLElement {
   stSection.className = 'menu-section';
   stSection.innerHTML =
     '<div class="menu-heading">Server</div>' +
-    '<div class="menu-row"><span>Status</span><span id="st-status" class="st-value st-muted">…</span></div>';
+    '<div class="menu-row"><span>Status</span><span id="st-status" class="st-value st-muted">…</span></div>' +
+    '<div class="menu-row"><span>Backend build</span><span id="st-backend-build" class="st-value st-muted">…</span></div>' +
+    '<div class="menu-row"><span>Frontend build</span><span class="st-value">' + FRONTEND_BUILD_TIME + '</span></div>';
 
   const sudoRow = document.createElement('div');
   sudoRow.className = 'menu-row';

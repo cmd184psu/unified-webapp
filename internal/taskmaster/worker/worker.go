@@ -240,52 +240,86 @@ func (w *Worker) runTask(task *models.Task, execID int64, scheduledAt time.Time)
 		}
 	}
 
-	startedAt := time.Now()
-	if err := w.db.StartExecution(execID, w.workerID); err != nil {
-		log.Printf("start execution %d: %v", execID, err)
-	}
-	PublishBoardEvent(w.board, BoardEvent{Type: "task-started", Lane: task.LaneName, Task: task.Name, ExecutionID: execID})
-
-	// Heartbeat: while the command is in flight, periodically re-extend this
-	// task's lock (acquired with lockTTL in poll()) so a long or suspended
-	// run doesn't let it expire — which would let CleanupExpiredLocks +
-	// another worker's poll() double-pick the same task. Stopped
-	// deterministically (hbWG.Wait) before runTask returns, so it never
-	// leaks past this goroutine (goleak-safe).
-	hbStop := make(chan struct{})
+	// startedAt, and the "started"/"running" state this task, are only set
+	// once the process has ACTUALLY started (inside onStart below) — not
+	// before Execute() is even called. Marking an execution "running" and
+	// registering it as controllable must happen at the same moment: doing
+	// it earlier (as the reference/earlier version of this code did) leaves
+	// a window where the DB and the board say "running" but there is no
+	// process yet for pause/resume/cancel to act on — any click landing in
+	// that window 404s ("execution not running") deterministically, not as
+	// a rare race. Zero window now: onStart fires exactly once Start()
+	// succeeded and a PID exists.
+	var startedAt time.Time
+	var hbStop chan struct{}
 	var hbWG sync.WaitGroup
-	hbWG.Add(1)
-	go func() {
-		defer hbWG.Done()
-		ticker := time.NewTicker(lockTTL / 3)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-hbStop:
-				return
-			case <-ticker.C:
-				if err := w.db.RefreshLock(task.ID, w.workerID, lockTTL); err != nil {
-					log.Printf("refresh lock for task %d: %v", task.ID, err)
+
+	onStart := func(pid int) {
+		startedAt = time.Now()
+		if err := w.db.StartExecution(execID, w.workerID); err != nil {
+			log.Printf("start execution %d: %v", execID, err)
+		}
+		w.procs.Register(execID, pid, task.Sudo)
+		// Persisted (not just in the in-memory ProcessRegistry) so that a
+		// still-genuinely-alive process can be recognized as such after a
+		// restart, instead of every "running" row being assumed dead — see
+		// db.OrphanCandidate / worker.ProcessAlive / build.go's boot-time
+		// reconciliation. A failure here doesn't stop the task: liveness
+		// detection just degrades to "PID unknown", an accepted case.
+		if err := w.db.SetExecutionPID(execID, pid); err != nil {
+			log.Printf("persist pid for execution %d: %v", execID, err)
+		}
+		PublishBoardEvent(w.board, BoardEvent{Type: "task-started", Lane: task.LaneName, Task: task.Name, ExecutionID: execID})
+
+		// Heartbeat: while the command is in flight, periodically re-extend
+		// this task's lock (acquired with lockTTL in poll()) so a long or
+		// suspended run doesn't let it expire — which would let
+		// CleanupExpiredLocks + another worker's poll() double-pick the same
+		// task. Only meaningful once there is an actual process to protect;
+		// stopped deterministically below (goleak-safe).
+		hbStop = make(chan struct{})
+		hbWG.Add(1)
+		go func() {
+			defer hbWG.Done()
+			ticker := time.NewTicker(lockTTL / 3)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-hbStop:
+					return
+				case <-ticker.C:
+					if err := w.db.RefreshLock(task.ID, w.workerID, lockTTL); err != nil {
+						log.Printf("refresh lock for task %d: %v", task.ID, err)
+					}
 				}
 			}
-		}
-	}()
-	defer func() {
+		}()
+	}
+
+	err := w.executor.Execute(execCtx, task, stdoutW, stderrW, onStart)
+
+	// hbStop is nil if onStart never fired (cmd.Start() itself failed) —
+	// nothing was ever registered as running, so there is no heartbeat to
+	// stop and no "started" state to correct; FinishExecution below still
+	// records the failure.
+	if hbStop != nil {
 		close(hbStop)
 		hbWG.Wait()
-	}()
-
-	err := w.executor.Execute(execCtx, task, stdoutW, stderrW, func(pid int) {
-		w.procs.Register(execID, pid, task.Sudo)
-	})
+	}
 
 	stdout.MarkDone()
 	stderr.MarkDone()
 	w.registry.MarkFinished(execID)
 
 	finishedAt := time.Now()
-	durationMs := finishedAt.Sub(startedAt).Milliseconds()
-	schedDelay := startedAt.Sub(scheduledAt).Milliseconds()
+	// startedAt stays zero if the process never actually started (Start()
+	// itself failed, before onStart could run) — report 0 rather than a
+	// nonsense multi-decade duration computed against the zero time.
+	var durationMs, schedDelay int64
+	if !startedAt.IsZero() {
+		durationMs = finishedAt.Sub(startedAt).Milliseconds()
+		schedDelay = startedAt.Sub(scheduledAt).Milliseconds()
+	}
 
 	status := "success"
 	var errMsg *string
