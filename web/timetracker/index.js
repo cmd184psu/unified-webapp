@@ -123,6 +123,8 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .then(updatedData => {
             console.log('Customer added:', updatedData);
+            // Jump straight to the new customer's form after the reload.
+            sessionStorage.setItem('tt-select-customer', name);
             location.reload();
         })
         .catch(error => {
@@ -231,6 +233,19 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 });
                 window.timeSelector = timeSelector;
+            }
+
+            // After a reload triggered by add-customer or rename, jump
+            // straight to that customer's form.
+            const pendingSelect = sessionStorage.getItem('tt-select-customer');
+            if (pendingSelect) {
+                sessionStorage.removeItem('tt-select-customer');
+                const idx = data.customers.findIndex(c => c.customerName === pendingSelect);
+                if (idx !== -1) {
+                    const item = customerList.children[idx];
+                    item.click();
+                    item.scrollIntoView({ block: 'nearest' });
+                }
             }
 
             function showCustomerDetails(customer, index) {
@@ -482,7 +497,9 @@ document.addEventListener('DOMContentLoaded', function() {
                             } else if (target === 'customerName') {
                                 // Renaming can move every customer's sorted
                                 // position, so reload to resync the list and
-                                // all data-index attributes.
+                                // all data-index attributes — then jump back
+                                // to this customer under its new name.
+                                sessionStorage.setItem('tt-select-customer', input.value.trim());
                                 location.reload();
                             } else if (target === 'supportBucket') {
                                 input.setAttribute('readonly', true);
