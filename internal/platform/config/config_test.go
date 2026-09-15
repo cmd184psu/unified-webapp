@@ -104,6 +104,74 @@ func TestLoadMissingFile_MenuserverDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadMissingFile_TimetrackerDefaults(t *testing.T) {
+	cfg, err := config.Load(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Timetracker.StaticDir != "./web/timetracker" {
+		t.Errorf("timetracker static_dir: got %q, want %q", cfg.Timetracker.StaticDir, "./web/timetracker")
+	}
+	if cfg.Timetracker.DataFile != "./data/timetracker.json" {
+		t.Errorf("timetracker data_file: got %q, want %q", cfg.Timetracker.DataFile, "./data/timetracker.json")
+	}
+}
+
+func TestLoadFile_TimetrackerPathsExpanded(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot determine home dir")
+	}
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "test.json")
+
+	data, _ := json.Marshal(map[string]any{
+		"timetracker": map[string]any{
+			"static_dir": "~/timetracker/web",
+			"data_file":  "~/timetracker/data.json",
+		},
+	})
+	if err := os.WriteFile(cfgFile, data, 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	wantStatic := filepath.Join(home, "timetracker/web")
+	if cfg.Timetracker.StaticDir != wantStatic {
+		t.Errorf("timetracker static_dir: got %q, want %q", cfg.Timetracker.StaticDir, wantStatic)
+	}
+	wantData := filepath.Join(home, "timetracker/data.json")
+	if cfg.Timetracker.DataFile != wantData {
+		t.Errorf("timetracker data_file: got %q, want %q", cfg.Timetracker.DataFile, wantData)
+	}
+}
+
+func TestLoadFile_TimetrackerSectionOmitted_UsesDefaults(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "test.json")
+
+	data, _ := json.Marshal(map[string]any{
+		"port": 9090,
+	})
+	if err := os.WriteFile(cfgFile, data, 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Timetracker.StaticDir != "./web/timetracker" {
+		t.Errorf("timetracker static_dir: got %q, want %q", cfg.Timetracker.StaticDir, "./web/timetracker")
+	}
+	if cfg.Timetracker.DataFile != "./data/timetracker.json" {
+		t.Errorf("timetracker data_file: got %q, want %q", cfg.Timetracker.DataFile, "./data/timetracker.json")
+	}
+}
+
 func TestLoadMissingFile_SlideshowDefaults(t *testing.T) {
 	cfg, err := config.Load(filepath.Join(t.TempDir(), "nonexistent.json"))
 	if err != nil {
