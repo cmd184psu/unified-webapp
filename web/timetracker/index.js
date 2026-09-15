@@ -74,7 +74,12 @@ document.addEventListener('DOMContentLoaded', function() {
         };
 
         const requestData = {
-            index: data.customers.length,
+            // The server appends regardless of index for newCustomer; any
+            // value other than -1 (the author path) works. The reference
+            // read `data.customers.length` here, but `data` is not in scope
+            // at this point in a module script, so the click threw a
+            // ReferenceError and the button did nothing.
+            index: 0,
             field: 'newCustomer',
             value: newCustomer
         };
