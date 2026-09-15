@@ -12,10 +12,14 @@
   "obsidianoid-test.cmdhome.net":      "obsidianoid",
   "obsidianoid.cmdhome.net":           "obsidianoid",
   "multissh-test.cmdhome.net":         "multissh",
+  "certmachine-test.cmdhome.net":      "certmachine",
+  "utuber-test.cmdhome.net":           "utuber",
   "admin-test.cmdhome.net":            "admin",
+  "smbedit-test.cmdhome.net":          "smbedit",
+  "smbedit.cmdhome.net":               "smbedit",
+  "issuetracker-test.cmdhome.net":     "issuetracker",
   "timetracker.cmdhome.net":           "timetracker",
   "timetracker-test.cmdhome.net":      "timetracker"
-
   },
   "server": {
     "origin_check": "enforce",
@@ -75,9 +79,36 @@
     "strict_host_key": false,
     "known_hosts_path": ""
   },
+  "certmachine": {
+    "static_dir": "./web/certmachine",
+    "db_path": "./data/certmachine/certmachine.db",
+    "legacy_import_dir": "",
+    "default_validity_days": 365,
+    "expiry_warn_days": 30,
+    "trust_device_enabled": false
+  },
+  "utuber": {
+    "static_dir": "./web/utuber",
+    "download_dir": "./data/utuber/downloads",
+    "workers": 1,
+    "python_bin": "python3.12"
+  },
   "admin": {
     "static_dir": "./web/admin",
     "max_body_bytes": 1048576
+  },
+  "smbedit": {
+    "static_dir": "./web/smbedit",
+    "data_dir": "./data/smbedit",
+    "picker_root": "/opt"
+  },
+  "issuetracker": {
+    "static_dir": "./web/issuetracker",
+    "db_path": "./data/issuetracker/issues.db",
+    "default_user": {
+      "name": "Unassigned",
+      "email": "unassigned@localhost"
+    }
   },
   "timetracker": {
     "static_dir": "./web/timetracker",
@@ -86,13 +117,15 @@
   },
   "auth": {
     "modules": {
-      "grocery": ["pin"],
-      "todo": ["pin"],
-      "slideshow": ["pin"],
-      "menuserver": ["pin"],
-      "obsidianoid": ["ldap", "passkey"],
-      "multissh": ["key"],
-      "admin": []
+      "grocery": { "pin_file": "/etc/unified-webapp/grocery.pin" },
+      "todo": { "pin_file": "/etc/unified-webapp/todo.pin" },
+      "slideshow": { "pin_file": "/etc/unified-webapp/slideshow.pin" },
+      "menuserver": { "pin_file": "/etc/unified-webapp/menuserver.pin" },
+      "obsidianoid": {},
+      "multissh": {},
+      "certmachine": { "pin_file": "/etc/unified-webapp/certmachine.pin" },
+      "issuetracker": {},
+      "admin": {}
     },
     "admin_pin_file": "/etc/unified-webapp/admin.pin",
     "data_dir": "/data/auth",
@@ -113,9 +146,6 @@
       "required_groups": ["cn=household,ou=groups,dc=cmdhome,dc=net"],
       "timeout_seconds": 5
     },
-    "pins": [
-      { "name": "chris", "hash": "$2a$10$f81lJT7WsTVxIMS0bPy9xO2FZ1PjGbqcTKYnFck6RNFp9ARxcgnMe" }
-    ],
     "api_keys": [
       { "name": "automation", "hash": "sha256:b408256cc1181a47c036389a767e271f39da77e401ad27a28c35805a696b7d22" }
     ],
