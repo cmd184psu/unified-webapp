@@ -1,0 +1,820 @@
+/* The `hidden` attribute must win over element `display` rules, otherwise
+   `el.hidden = true` on anything styled with display:flex/inline-flex/etc.
+   (buttons, form groups, collapsibles) silently fails to hide it. */
+[hidden] { display: none !important; }
+
+:root {
+  --bg-primary: #1e1e1e;
+  --bg-secondary: #252525;
+  --bg-tertiary: #2d2d2d;
+  --bg-modifier-border: #3a3a3a;
+  --text-normal: #dcddde;
+  --text-muted: #888;
+  --text-faint: #555;
+  --text-accent: #7f6df2;
+  --interactive-accent: #7f6df2;
+  --interactive-accent-hover: #9d8fff;
+  --status-green: #4caf50;
+  --status-red: #f44336;
+  --status-yellow: #ff9800;
+  --status-blue: #2196f3;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --radius: 6px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-normal);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+/* ─── Nav ─────────────────────────────────────────────────────────────────── */
+
+#nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 16px;
+  height: 48px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--bg-modifier-border);
+}
+
+.nav-brand {
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--text-accent);
+  margin-right: 16px;
+  text-decoration: none;
+}
+
+.nav-links { display: flex; align-items: center; gap: 4px; }
+
+.nav-link {
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  text-decoration: none;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  font-family: var(--font-ui);
+  transition: color 0.15s, background 0.15s;
+}
+
+.nav-link:hover { color: var(--text-normal); background: var(--bg-tertiary); }
+.nav-link.active { color: var(--text-normal); background: var(--bg-tertiary); }
+
+.nav-spacer { flex: 1; }
+
+.nav-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.nav-icon-btn:hover { color: var(--text-normal); background: var(--bg-tertiary); }
+
+.nav-menu { position: relative; }
+
+.nav-menu-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 240px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--bg-modifier-border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 24px rgba(0,0,0,.4);
+  padding: 6px;
+  z-index: 50;
+}
+
+.menu-section { padding: 6px 4px; }
+.menu-section + .menu-section { border-top: 1px solid var(--bg-modifier-border); }
+
+.menu-heading {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-faint);
+  padding: 2px 8px 6px;
+}
+
+.menu-item {
+  display: block;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 14px;
+}
+.menu-item:hover { color: var(--text-normal); background: var(--bg-tertiary); }
+.menu-item.active { color: var(--text-normal); background: var(--bg-tertiary); }
+
+.menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 8px;
+  font-size: 14px;
+  color: var(--text-normal);
+}
+.menu-row select {
+  background: var(--bg-tertiary);
+  color: var(--text-normal);
+  border: 1px solid var(--bg-modifier-border);
+  border-radius: var(--radius);
+  padding: 2px 6px;
+  font-family: var(--font-ui);
+}
+
+.st-value { font-size: 13px; }
+.st-ok { color: var(--status-green); }
+.st-err { color: var(--status-red); }
+.st-warn { color: var(--status-yellow); }
+.st-muted { color: var(--text-muted); }
+
+.menu-nav { display: none; }
+
+@media (max-width: 640px) {
+  .nav-links { display: none; }
+  .menu-nav { display: block; }
+}
+
+/* ─── Main layout ─────────────────────────────────────────────────────────── */
+
+#app {
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+h1 { font-size: 20px; font-weight: 600; margin-bottom: 16px; }
+h2 { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+
+/* ─── Buttons ─────────────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: var(--radius);
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: var(--font-ui);
+  font-weight: 500;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.btn-primary {
+  background: var(--interactive-accent);
+  color: #fff;
+}
+.btn-primary:hover { background: var(--interactive-accent-hover); }
+.btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+
+.btn-secondary {
+  background: var(--bg-tertiary);
+  color: var(--text-normal);
+  border: 1px solid var(--bg-modifier-border);
+}
+.btn-secondary:hover { background: var(--bg-modifier-border); }
+.btn-secondary:disabled { opacity: .5; cursor: not-allowed; }
+
+.btn-danger {
+  background: transparent;
+  color: var(--status-red);
+  border: 1px solid var(--status-red);
+}
+.btn-danger:hover { background: var(--status-red); color: #fff; }
+
+.btn-sm { padding: 3px 9px; font-size: 12px; }
+
+/* Small icon-only control (pause/resume/stop/play glyphs) shared by the
+   lane header and any running execution's process control. */
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: var(--radius);
+  background: var(--bg-tertiary);
+  color: var(--text-normal);
+  border: 1px solid var(--bg-modifier-border);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.btn-icon:hover { background: var(--bg-modifier-border); }
+.btn-icon:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ─── Badges / status ─────────────────────────────────────────────────────── */
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* A status shown as a symbol (✓ ✕ ⏸ ● …) instead of a word — compact,
+   square, no uppercase/letter-spacing (there's no word to transform).
+   The full status name lives in title/aria-label for anyone who wants it. */
+.badge-symbol {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 12px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.badge-green { background: rgba(76,175,80,.15); color: var(--status-green); }
+.badge-red   { background: rgba(244,67,54,.15); color: var(--status-red); }
+.badge-yellow{ background: rgba(255,152,0,.15); color: var(--status-yellow); }
+.badge-blue  { background: rgba(33,150,243,.15); color: var(--status-blue); }
+.badge-muted { background: var(--bg-tertiary); color: var(--text-muted); }
+
+/* ─── Forms ───────────────────────────────────────────────────────────────── */
+
+.form-group { margin-bottom: 12px; }
+.form-group label { display: block; margin-bottom: 4px; color: var(--text-muted); font-size: 12px; }
+
+input[type=text], input[type=password], input[type=number], select, textarea {
+  width: 100%;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--bg-modifier-border);
+  border-radius: var(--radius);
+  color: var(--text-normal);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  padding: 8px 12px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+input[type=text]:focus, input[type=password]:focus, input[type=number]:focus, select:focus, textarea:focus {
+  border-color: var(--interactive-accent);
+}
+
+textarea { font-family: var(--font-mono); resize: vertical; }
+
+.form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+/* ─── Login ───────────────────────────────────────────────────────────────── */
+
+.login-wrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 70vh;
+}
+
+.login-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--bg-modifier-border);
+  border-radius: var(--radius);
+  padding: 32px;
+  width: 320px;
+  text-align: center;
+}
+
+.login-card h2 { margin-bottom: 20px; }
+.login-error { color: var(--status-red); font-size: 13px; margin-top: 8px; }
+
+/* ─── Empty state ─────────────────────────────────────────────────────────── */
+
+.empty-state {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 40px 20px;
+}
+
+/* ─── Lane board ──────────────────────────────────────────────────────────── */
+
+.board-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.board-lanes {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.lane {
+  flex: 0 0 380px;
+  width: 380px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--bg-modifier-border);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Single-lane board rendered in the split task view's left pane: let the
+   lane column fill the available width instead of the fixed board width. */
+.board-lanes-single { overflow-x: visible; }
+.board-lanes-single .lane { flex: 1 1 auto; width: 100%; }
+
+.lane-paused { opacity: 0.65; }
+
+.lane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+}
+
+.lane-name {
+  font-weight: 600;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.lane-pause {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.lane-width {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.lane-width-btn {
+  width: 20px;
+  height: 20px;
+  line-height: 1;
+  border: 1px solid var(--bg-modifier-border);
+  background: var(--bg-tertiary);
+  color: var(--text-normal);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0;
+}
+.lane-width-btn:hover { border-color: var(--interactive-accent); }
+.lane-width-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+.lane-width-val { font-size: 12px; color: var(--text-muted); min-width: 1.2em; text-align: center; }
+
+.lane-delete-btn {
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  border-radius: 4px;
+}
+.lane-delete-btn:hover { color: var(--status-red); background: var(--bg-tertiary); }
+
+.lane-add-task { width: 100%; justify-content: center; }
+
+.lane-body { display: flex; flex-direction: column; gap: 10px; }
+
+.lane-section-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+}
+
+.lane-list { display: flex; flex-direction: column; gap: 4px; min-height: 8px; }
+
+/* Recent runs: de-emphasized and collapsible (native <details>/<summary>). */
+.lane-section-ran { opacity: 0.7; }
+.lane-section-ran .lane-list { margin-top: 4px; }
+.lane-section-ran > summary.lane-section-title {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.lane-section-ran > summary.lane-section-title::-webkit-details-marker { display: none; }
+.lane-section-ran > summary.lane-section-title::before {
+  content: '▸';
+  font-size: 9px;
+  color: var(--text-faint);
+}
+.lane-section-ran[open] > summary.lane-section-title::before { content: '▾'; }
+
+.lane-list-upnext {
+  min-height: 36px;
+  border-radius: var(--radius);
+  transition: background-color 0.1s;
+}
+.lane-list-upnext.drag-over { background: rgba(127, 109, 242, 0.12); }
+
+.lane-empty-note {
+  color: var(--text-faint);
+  font-size: 12px;
+  padding: 4px 2px;
+  font-style: italic;
+}
+
+.exec-row, .task-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--bg-modifier-border);
+  font-size: 12px;
+}
+
+.exec-row-name, .task-row-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exec-row-meta { color: var(--text-muted); font-size: 11px; flex: 0 0 auto; }
+
+/* PID label + view-output/pause/cancel controls on a running execution row
+   — the ONLY place these controls live (the task-detail split view no
+   longer duplicates the running instance; see taskdetail.ts). */
+.exec-row-pid-seam {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.exec-row-pid, .history-row-pid {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.exec-row-suspended-badge, .history-row-suspended-badge { flex: 0 0 auto; }
+
+.task-row { cursor: grab; }
+.task-row.dragging { opacity: 0.4; }
+.task-row-disabled { opacity: 0.55; }
+
+.task-row-status {
+  color: var(--text-muted);
+  font-size: 11px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.task-row-upnext { flex: 0 0 auto; }
+
+.exec-row-name-clickable,
+.task-row-name-clickable {
+  cursor: pointer;
+}
+.exec-row-name-clickable:hover,
+.task-row-name-clickable:hover {
+  color: var(--text-accent);
+  text-decoration: underline;
+}
+.exec-row-name-clickable:focus-visible,
+.task-row-name-clickable:focus-visible {
+  outline: none;
+  color: var(--text-accent);
+  text-decoration: underline;
+}
+
+/* ─── Live/pause (top nav, left of hand brake) ─────────────────────────── */
+
+.nav-live {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.nav-live-label { user-select: none; }
+
+/* ─── Hand brake (top nav, always visible) ─────────────────────────────── */
+
+.brake-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  margin-right: 8px;
+  border-radius: var(--radius);
+  border: 1px solid var(--status-red);
+  background: transparent;
+  color: var(--status-red);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.brake-btn:hover { background: rgba(244, 67, 54, 0.12); }
+.brake-btn.brake-engaged {
+  background: var(--status-red);
+  color: #fff;
+  animation: brake-pulse 1.4s ease-in-out infinite;
+}
+.brake-btn.brake-engaged:hover { background: #d8382c; }
+
+@keyframes brake-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.5); }
+  50% { box-shadow: 0 0 0 5px rgba(244, 67, 54, 0); }
+}
+
+.brake-banner {
+  background: var(--status-red);
+  color: #fff;
+  text-align: center;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  padding: 8px 16px;
+}
+
+/* ─── Task Designer form ────────────────────────────────────────────────── */
+
+.designer-form { min-width: 26em; max-width: 100%; }
+
+.form-hint {
+  font-weight: 400;
+  color: var(--text-faint);
+  text-transform: none;
+}
+
+.form-group textarea,
+.form-group input[type="text"],
+.form-group input[type="number"],
+.form-group select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  background: var(--bg-primary);
+  color: var(--text-normal);
+  border: 1px solid var(--bg-modifier-border);
+  border-radius: var(--radius);
+  font-family: inherit;
+  font-size: 13px;
+}
+.form-group textarea { font-family: var(--font-mono); resize: vertical; }
+.form-group textarea:focus-visible,
+.form-group input:focus-visible,
+.form-group select:focus-visible {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+.form-toggle-row { padding: 6px 0; }
+
+.advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 4px;
+  margin: 4px 0;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--bg-modifier-border);
+  color: var(--text-normal);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+.advanced-body { padding: 4px 4px 8px; }
+
+.export-panel {
+  border: 1px solid var(--bg-modifier-border);
+  border-radius: var(--radius);
+  margin-top: 8px;
+  overflow: hidden;
+}
+.export-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-tertiary);
+  border: none;
+  color: var(--text-normal);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+.export-panel-caret { color: var(--text-muted); font-size: 10px; }
+.export-panel-body { padding: 10px; }
+.export-panel-code {
+  margin: 0 0 8px 0;
+  padding: 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--bg-modifier-border);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 12em;
+  overflow: auto;
+}
+
+/* ─── Split task view (`#task/<name>`) ───────────────────────────────────── */
+/* Left pane: that task's lane only (~30%). Right pane: the task detail
+   (~70%). Stacks to a single column on narrow screens. */
+
+.split-view {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.split-left {
+  flex: 0 0 30%;
+  max-width: 360px;
+  min-width: 240px;
+}
+
+.split-right {
+  flex: 1 1 70%;
+  min-width: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--bg-modifier-border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+@media (max-width: 800px) {
+  .split-view { flex-direction: column; }
+  .split-left { max-width: 100%; width: 100%; }
+  .split-right { width: 100%; }
+}
+
+/* ─── Task detail drill-in ─────────────────────────────────────────────── */
+
+.task-detail { min-width: 0; max-width: 100%; }
+
+.task-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.task-detail-back { flex: 0 0 auto; }
+.task-detail-title {
+  font-size: 16px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-detail-meta { margin-bottom: 12px; }
+.task-detail-command {
+  display: block;
+  padding: 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--bg-modifier-border);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  word-break: break-all;
+}
+.task-detail-sub { color: var(--text-muted); font-size: 11px; margin-top: 6px; }
+
+.task-detail-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin: 14px 0 6px;
+}
+
+.task-detail-metrics { min-height: 1.5em; }
+
+.task-detail-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(4.5em, 1fr));
+  gap: 8px;
+}
+.task-detail-metric {
+  text-align: center;
+  padding: 8px 4px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--bg-modifier-border);
+  border-radius: var(--radius);
+}
+.task-detail-metric-val { font-size: 15px; font-weight: 700; }
+.task-detail-metric-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
+
+.task-detail-history { display: flex; flex-direction: column; gap: 4px; max-height: 14em; overflow: auto; }
+
+.history-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--bg-modifier-border);
+  font-size: 11.5px;
+}
+.history-row-selected { border-color: var(--interactive-accent); }
+.history-row-when { flex: 1 1 auto; color: var(--text-muted); }
+.history-row-dur { flex: 0 0 auto; color: var(--text-muted); }
+.history-row-pause-btn { flex: 0 0 auto; }
+
+/* ─── Metrics tab ────────────────────────────────────────────────────────── */
+
+.metrics-heading {
+  padding: 14px 16px 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(18em, 1fr));
+  gap: 12px;
+  padding: 12px 16px;
+}
+
+.metric-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--bg-modifier-border);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+.metric-card-title { font-weight: 700; font-size: 13px; }
+.metric-card-lane { color: var(--text-muted); font-size: 11px; margin-bottom: 8px; }
+
+.metric-card-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.metric-card-stat { text-align: center; }
+.metric-card-stat-val { font-size: 13px; font-weight: 700; }
+.metric-card-stat-label { font-size: 9.5px; color: var(--text-muted); text-transform: uppercase; }
+.metric-stat-last-run { grid-column: span 4; text-align: left; }
+.metric-stat-last-run .metric-card-stat-val { font-size: 11px; font-weight: 500; }
+
+.lane-section-running .exec-row { border-color: var(--status-blue); }

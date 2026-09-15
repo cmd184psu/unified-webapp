@@ -2,18 +2,22 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -31,6 +35,7 @@ import (
 	"cmd184psu/unified-webapp/internal/platform/middleware"
 	"cmd184psu/unified-webapp/internal/slideshow"
 	"cmd184psu/unified-webapp/internal/smbedit"
+	"cmd184psu/unified-webapp/internal/taskmaster"
 	"cmd184psu/unified-webapp/internal/timetracker"
 	"cmd184psu/unified-webapp/internal/todo"
 	"cmd184psu/unified-webapp/internal/utuber"
@@ -133,15 +138,66 @@ func main() {
 	useTLS := cfg.TLSCert != "" && cfg.TLSKey != ""
 
 	srv := newServer(addr, handler)
+	runAndWaitForShutdown(srv, dispatch, useTLS, cfg.TLSCert, cfg.TLSKey, addr)
+}
 
-	if useTLS {
-		log.Printf("unified-webapp → https://%s (TLS)", addr)
-		log.Fatalf("HTTPS error: %v", srv.ListenAndServeTLS(cfg.TLSCert, cfg.TLSKey))
-	} else {
-		log.Printf("unified-webapp → http://%s", addr)
-		log.Fatalf("HTTP error: %v", srv.ListenAndServe())
+// runAndWaitForShutdown starts srv and blocks until either it fails to start
+// (fatal) or the process receives SIGINT/SIGTERM, at which point it performs
+// a graceful shutdown: stop accepting new connections, give in-flight HTTP
+// requests a bounded window to finish, then run dispatch.Close() — which is
+// what actually matters for a module like taskmaster: it cancels the
+// worker's context, which kills every in-flight task command via
+// CommandContext, joins those goroutines, and records each one "failed"
+// with a clean, immediate error rather than leaving it as a "running" ghost
+// in the database for ReconcileOrphanedExecutions to clean up on the NEXT
+// boot. That reconciliation-on-boot path is the safety net for a genuine
+// crash or `kill -9` (which cannot be intercepted, by design, in any Unix
+// program) — this graceful path is what makes a NORMAL restart (`kill`
+// without -9, Ctrl-C, `systemctl stop`) resolve immediately and cleanly
+// instead of relying on that safety net at all.
+//
+// The HTTP shutdown itself is bounded (not unbounded like a "wait for every
+// connection to finish" shutdown would be): slideshow's SSE streams and
+// multissh's WebSocket/terminal sessions are deliberately long-lived
+// (newServer's comment) and may never go idle on their own, so an unbounded
+// http.Server.Shutdown could hang forever waiting for a client that simply
+// never disconnects. After the bound, dispatch.Close() runs regardless.
+func runAndWaitForShutdown(srv *http.Server, dispatch *Dispatcher, useTLS bool, tlsCert, tlsKey, addr string) {
+	serveErr := make(chan error, 1)
+	go func() {
+		if useTLS {
+			log.Printf("unified-webapp → https://%s (TLS)", addr)
+			serveErr <- srv.ListenAndServeTLS(tlsCert, tlsKey)
+		} else {
+			log.Printf("unified-webapp → http://%s", addr)
+			serveErr <- srv.ListenAndServe()
+		}
+	}()
+
+	sigCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stopSignals()
+
+	select {
+	case err := <-serveErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("HTTP error: %v", err)
+		}
+	case <-sigCtx.Done():
+		log.Printf("shutdown signal received, draining (up to %s) then closing modules…", shutdownDrainTimeout)
+		drainCtx, cancelDrain := context.WithTimeout(context.Background(), shutdownDrainTimeout)
+		defer cancelDrain()
+		if err := srv.Shutdown(drainCtx); err != nil {
+			log.Printf("HTTP shutdown: %v (proceeding to close modules anyway)", err)
+		}
+		dispatch.Close()
+		log.Printf("shutdown complete")
 	}
 }
+
+// shutdownDrainTimeout bounds how long graceful shutdown waits for in-flight
+// HTTP requests before moving on to dispatch.Close() regardless — see
+// runAndWaitForShutdown's comment on why this must not be unbounded.
+const shutdownDrainTimeout = 15 * time.Second
 
 // hashPINAndExit reads a PIN from stdin, prints its bcrypt hash to stdout,
 // and exits. When stdin is a terminal, the PIN is prompted for on stderr
@@ -278,7 +334,7 @@ func limitFor(module string, cfg *config.Config) int64 {
 // knownModules is the buildModule universe -- exactly the module names the
 // switch below handles. auth.FromConfig uses it to validate that every
 // module named in auth.modules is one buildDispatcher can actually build.
-var knownModules = []string{"grocery", "todo", "slideshow", "menuserver", "obsidianoid", "multissh", "certmachine", "admin", "utuber", "smbedit", "issuetracker", "timetracker"}
+var knownModules = []string{"grocery", "todo", "slideshow", "menuserver", "obsidianoid", "multissh", "certmachine", "taskmaster", "admin", "utuber", "smbedit", "issuetracker", "timetracker"}
 
 // adminIsRouted reports whether "admin" appears among routing's module
 // values (config.Config.Routing / host_routing). Both main's boot-time
@@ -307,6 +363,8 @@ func buildModule(module string, cfg *config.Config, svc *auth.Service) (http.Han
 		return obsidianoid.Build(cfg.Obsidianoid)
 	case "multissh":
 		return multissh.Build(cfg.Multissh)
+	case "taskmaster":
+		return taskmaster.Build(cfg.Taskmaster)
 	case "timetracker":
 		return timetracker.Build(cfg.Timetracker)
 	case "certmachine":

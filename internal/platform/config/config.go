@@ -24,6 +24,7 @@ type Config struct {
 	Obsidianoid  ObsidianoidConfig  `json:"obsidianoid"`
 	Multissh     MultisshConfig     `json:"multissh"`
 	Certmachine  CertmachineConfig  `json:"certmachine"`
+	Taskmaster   TaskmasterConfig   `json:"taskmaster"`
 	Utuber       UtuberConfig       `json:"utuber"`
 	Auth         AuthConfig         `json:"auth"`
 	Admin        AdminConfig        `json:"admin"`
@@ -395,6 +396,23 @@ const (
 	MaxMaxSessions     = 16
 )
 
+// TaskmasterLane seeds one lane into the taskmaster DB at startup.
+type TaskmasterLane struct {
+	Name  string `json:"name"`
+	Width int    `json:"width"`
+}
+
+// TaskmasterConfig holds configuration specific to the taskmaster module.
+type TaskmasterConfig struct {
+	StaticDir string           `json:"static_dir"`
+	DBPath    string           `json:"db_path"`
+	Lanes     []TaskmasterLane `json:"lanes"`
+	AllowSudo bool             `json:"allow_sudo"` // default false; see FRD §8
+	// SSEMaxSubscribers is the effective SSE subscriber cap, copied from
+	// Config.Server.SSEMaxSubscribers by Load. Not read from the config file.
+	SSEMaxSubscribers int `json:"-"`
+}
+
 // UtuberConfig holds configuration specific to the utuber module.
 //
 // PythonBin is the Python interpreter used by the yt-dlp self-update
@@ -471,6 +489,12 @@ func DefaultConfig() *Config {
 			MaxSessions:    DefaultMaxSessions,
 			MaxUploadBytes: 8 << 30, // 8 GiB
 			StrictHostKey:  false,
+		},
+		Taskmaster: TaskmasterConfig{
+			StaticDir: "./web/taskmaster",
+			DBPath:    "./data/taskmaster/taskmaster.db",
+			Lanes:     []TaskmasterLane{},
+			AllowSudo: false,
 		},
 		Certmachine: CertmachineConfig{
 			StaticDir:           "./web/certmachine",
@@ -588,6 +612,9 @@ func Load(path string) (*Config, error) {
 	if err := normalizeMultissh(&cfg.Multissh); err != nil {
 		return nil, err
 	}
+	if err := expandTaskmasterPaths(&cfg.Taskmaster); err != nil {
+		return nil, err
+	}
 	if err := expandCertmachinePaths(&cfg.Certmachine); err != nil {
 		return nil, err
 	}
@@ -638,6 +665,7 @@ func applyServerDefaults(cfg *Config) {
 	cfg.Todo.SSEMaxSubscribers = max
 	cfg.Slideshow.SSEMaxSubscribers = max
 	cfg.Obsidianoid.SSEMaxSubscribers = max
+	cfg.Taskmaster.SSEMaxSubscribers = max
 }
 
 func expandMenuserverPaths(m *MenuserverConfig) error {
@@ -796,6 +824,17 @@ func expandMultisshPaths(m *MultisshConfig) error {
 		return err
 	}
 	if m.KnownHostsPath, err = ExpandPath(m.KnownHostsPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+func expandTaskmasterPaths(t *TaskmasterConfig) error {
+	var err error
+	if t.StaticDir, err = ExpandPath(t.StaticDir); err != nil {
+		return err
+	}
+	if t.DBPath, err = ExpandPath(t.DBPath); err != nil {
 		return err
 	}
 	return nil

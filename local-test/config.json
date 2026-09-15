@@ -13,6 +13,7 @@
     "multissh.test":    "multissh",
     "certmachine-test.cmdhome.net": "certmachine",
     "admin.test":       "admin",
+    "taskmaster-test.cmdhome.net":  "taskmaster",
     "smbedit-test.cmdhome.net":     "smbedit",
     "issues-test.cmdhome.net": "issuetracker",
     "timetracker.test": "timetracker"
@@ -86,6 +87,15 @@
   "admin": {
     "static_dir": "./web/admin",
     "max_body_bytes": 1048576
+  },
+  "taskmaster": {
+    "static_dir": "./web/taskmaster",
+    "db_path": "./local-test/data/taskmaster/taskmaster.db",
+    "lanes": [
+      { "name": "default", "width": 2 },
+      { "name": "shell-only", "width": 1 }
+    ],
+    "allow_sudo": false
   },
   "smbedit": {
     "static_dir": "./web/smbedit",
