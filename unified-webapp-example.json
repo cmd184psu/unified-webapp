@@ -12,7 +12,9 @@
   "obsidianoid-test.cmdhome.net":      "obsidianoid",
   "obsidianoid.cmdhome.net":           "obsidianoid",
   "multissh-test.cmdhome.net":         "multissh",
-  "admin-test.cmdhome.net":            "admin"
+  "admin-test.cmdhome.net":            "admin",
+  "timetracker.cmdhome.net":           "timetracker",
+  "timetracker-test.cmdhome.net":      "timetracker"
 
   },
   "server": {
@@ -76,6 +78,10 @@
   "admin": {
     "static_dir": "./web/admin",
     "max_body_bytes": 1048576
+  },
+  "timetracker": {
+    "static_dir": "./web/timetracker",
+    "data_file": "./data/timetracker.json"
   },
   "auth": {
     "modules": {

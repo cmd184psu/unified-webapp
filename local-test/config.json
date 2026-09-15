@@ -11,7 +11,8 @@
     "menuserver.test":  "menuserver",
     "obsidianoid.test": "obsidianoid",
     "multissh.test":    "multissh",
-    "admin.test":       "admin"
+    "admin.test":       "admin",
+    "timetracker.test": "timetracker"
   },
   "server": {
     "origin_check": "enforce",
@@ -74,6 +75,10 @@
   "admin": {
     "static_dir": "./web/admin",
     "max_body_bytes": 1048576
+  },
+  "timetracker": {
+    "static_dir": "./web/timetracker",
+    "data_file": "./local-test/data/timetracker.json"
   },
   "auth": {
     "modules": {
