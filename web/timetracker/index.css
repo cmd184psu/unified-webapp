@@ -192,3 +192,20 @@
 .hidden {
     display: none;
 }
+
+.date-selector {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.date-selector button {
+    padding: 4px 10px;
+    cursor: pointer;
+}
+
+.date-selector button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}

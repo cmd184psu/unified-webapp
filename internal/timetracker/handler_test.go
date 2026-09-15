@@ -20,6 +20,7 @@ import (
 
 type harness struct {
 	s        *timetracker.Store
+	reports  *timetracker.ReportStore
 	dataFile string
 	mux      *http.ServeMux
 }
@@ -32,10 +33,15 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatalf("timetracker.New: %v", err)
 	}
-	h := timetracker.NewHandler(s)
+	reports, err := timetracker.NewReportStore(filepath.Join(dir, "reports.db"))
+	if err != nil {
+		t.Fatalf("timetracker.NewReportStore: %v", err)
+	}
+	t.Cleanup(func() { reports.Close() })
+	h := timetracker.NewHandler(s, reports)
 	mux := http.NewServeMux()
 	h.Register(mux)
-	return &harness{s: s, dataFile: dataFile, mux: mux}
+	return &harness{s: s, reports: reports, dataFile: dataFile, mux: mux}
 }
 
 func (hh *harness) do(t *testing.T, method, path string, body any) *httptest.ResponseRecorder {

@@ -262,6 +262,9 @@ type MenuserverConfig struct {
 type TimetrackerConfig struct {
 	StaticDir string `json:"static_dir"` // e.g. ./web/timetracker
 	DataFile  string `json:"data_file"`  // e.g. ./data/timetracker.json
+	// ReportDB is the SQLite file holding per-customer per-day reports.
+	// Empty means "timetracker-reports.db" next to DataFile.
+	ReportDB string `json:"report_db"`
 }
 
 // MusicConfig holds music configuration. Collections are discovered automatically
@@ -528,6 +531,9 @@ func expandTimetrackerPaths(t *TimetrackerConfig) error {
 		return err
 	}
 	if t.DataFile, err = ExpandPath(t.DataFile); err != nil {
+		return err
+	}
+	if t.ReportDB, err = ExpandPath(t.ReportDB); err != nil {
 		return err
 	}
 	return nil

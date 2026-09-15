@@ -19,7 +19,15 @@ func Build(cfg config.TimetrackerConfig) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := NewHandler(s)
+	reportDB := cfg.ReportDB
+	if reportDB == "" {
+		reportDB = filepath.Join(filepath.Dir(cfg.DataFile), "timetracker-reports.db")
+	}
+	reports, err := NewReportStore(reportDB)
+	if err != nil {
+		return nil, err
+	}
+	h := NewHandler(s, reports)
 
 	mux := http.NewServeMux()
 	h.Register(mux)

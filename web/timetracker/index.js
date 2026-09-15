@@ -210,23 +210,40 @@ document.addEventListener('DOMContentLoaded', function() {
                 customerList.appendChild(li);
             });
 
-            // Re-render the currently shown report when the time selection
-            // changes; showCustomerDetails points this at its processReport.
+            // Hooks the active customer view installs so the shared time
+            // selector and page-level events can reach its report state:
+            // refreshReport re-renders the preview, notifyTimeChanged queues
+            // an auto-save, flushActiveReport saves pending edits immediately.
             let refreshReport = null;
+            let notifyTimeChanged = null;
+            let flushActiveReport = null;
+
+            window.addEventListener('beforeunload', () => {
+                if (flushActiveReport) flushActiveReport();
+            });
 
             // Initialize TimeSelector once after data is loaded
             if (!timeSelector) {
                 timeSelector = new TimeSelector('timeSelectorContainer', {
-                    onChange: () => { if (refreshReport) refreshReport(); }
+                    onChange: () => {
+                        if (refreshReport) refreshReport();
+                        if (notifyTimeChanged) notifyTimeChanged();
+                    }
                 });
                 window.timeSelector = timeSelector;
             }
 
             function showCustomerDetails(customer, index) {
-                // Show the time selector and clear it when switching customers
+                // Save the outgoing customer's pending report edits, then
+                // detach the hooks so nothing fires mid-rebuild.
+                if (flushActiveReport) flushActiveReport();
+                refreshReport = null;
+                notifyTimeChanged = null;
+                flushActiveReport = null;
+
                 timeSelectorContainer.classList.remove('hidden');
                 if (timeSelector) {
-                    timeSelector.clearSelection();
+                    timeSelector.setSelection([]);
                 }
                 rightPanel.innerHTML = `
                     <div class="form-group">
@@ -274,7 +291,10 @@ document.addEventListener('DOMContentLoaded', function() {
                         <div class="report-editor">
                             <div class="date-selector">
                                 <label for="reportDate" data-tooltip="reportDate">Report Date:</label>
+                                <button type="button" id="prevReportBtn" title="Previous saved report" disabled>&#9664;</button>
                                 <input type="date" id="reportDate" data-tooltip="reportDate">
+                                <button type="button" id="nextReportBtn" title="Next saved report" disabled>&#9654;</button>
+                                <button type="button" id="todayReportBtn" title="Jump to today's report">Today</button>
                             </div>
                             <label data-tooltip="reportInput">Report:</label>
                             <textarea id="reportInput" data-tooltip="reportInput" placeholder="Type your report here..."></textarea>
@@ -290,18 +310,114 @@ document.addEventListener('DOMContentLoaded', function() {
                 rightPanel.appendChild(deleteButton);
 
                 const reportInput = document.getElementById('reportInput');
-                reportInput.value = "Type your report here...";
                 const processedReport = document.getElementById('processedReport');
                 const copyReportBtn = document.getElementById('copyReportBtn');
                 const reportDate = document.getElementById('reportDate');
+                const prevReportBtn = document.getElementById('prevReportBtn');
+                const nextReportBtn = document.getElementById('nextReportBtn');
+                const todayReportBtn = document.getElementById('todayReportBtn');
 
-                const today = new Date();
-                reportDate.value = today.toISOString().split('T')[0];
+                // Reports persist server-side per (customer, date). Edits
+                // auto-save after a short pause; the arrows rewind through
+                // the dates that actually have a stored report.
+                let currentDate = localToday();
+                let prevDate = '';
+                let nextDate = '';
+                let saveTimer = null;
+                let dirty = false;
+                let applyingRemote = false;
 
-                reportInput.addEventListener('input', processReport);
-                reportDate.addEventListener('change', processReport);
+                function localToday() {
+                    const d = new Date();
+                    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                }
+
+                function updateNavState(state) {
+                    prevDate = state.prevDate || '';
+                    nextDate = state.nextDate || '';
+                    prevReportBtn.disabled = !prevDate;
+                    nextReportBtn.disabled = !nextDate;
+                }
+
+                function scheduleSave() {
+                    if (applyingRemote) return;
+                    dirty = true;
+                    clearTimeout(saveTimer);
+                    saveTimer = setTimeout(saveReportNow, 600);
+                }
+
+                function saveReportNow() {
+                    clearTimeout(saveTimer);
+                    saveTimer = null;
+                    if (!dirty) return Promise.resolve();
+                    dirty = false;
+                    return fetch(`/report`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        // keepalive lets the flush on page unload complete
+                        keepalive: true,
+                        body: JSON.stringify({
+                            customerName: customer.customerName,
+                            date: currentDate,
+                            body: reportInput.value,
+                            timeBlocks: timeSelector.getSelectedTimeBlocks()
+                        })
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            return response.text().then(text => { throw new Error(text) });
+                        }
+                        return response.json();
+                    })
+                    .then(state => updateNavState(state))
+                    .catch(error => {
+                        dirty = true;  // retry on the next edit or flush
+                        console.error('Error saving report:', error);
+                    });
+                }
+
+                function loadReport(date) {
+                    // Flush pending edits for the current date before the
+                    // view swings to another one.
+                    saveReportNow()
+                        .then(() => fetch(`/report?customer=${encodeURIComponent(customer.customerName)}&date=${encodeURIComponent(date)}`))
+                        .then(response => {
+                            if (!response.ok) {
+                                return response.text().then(text => { throw new Error(text) });
+                            }
+                            return response.json();
+                        })
+                        .then(state => {
+                            applyingRemote = true;
+                            currentDate = state.date;
+                            reportDate.value = state.date;
+                            reportInput.value = state.body || '';
+                            timeSelector.setSelection(state.timeBlocks || []);
+                            updateNavState(state);
+                            processReport();
+                            applyingRemote = false;
+                        })
+                        .catch(error => {
+                            console.error('Error loading report:', error);
+                        });
+                }
+
+                reportInput.addEventListener('input', () => {
+                    processReport();
+                    scheduleSave();
+                });
+                reportDate.addEventListener('change', () => {
+                    if (reportDate.value) loadReport(reportDate.value);
+                });
+                prevReportBtn.addEventListener('click', () => { if (prevDate) loadReport(prevDate); });
+                nextReportBtn.addEventListener('click', () => { if (nextDate) loadReport(nextDate); });
+                todayReportBtn.addEventListener('click', () => loadReport(localToday()));
                 copyReportBtn.addEventListener('click', copyReportToClipboard);
+
                 refreshReport = processReport;
+                notifyTimeChanged = scheduleSave;
+                flushActiveReport = saveReportNow;
+                loadReport(currentDate);
 
                 document.querySelectorAll('.edit-btn').forEach(btn => {
                     btn.addEventListener('click', function() {
@@ -329,7 +445,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                         console.log('Sending request data:', requestData);
 
-                        fetch(`/update`, {
+                        const sendUpdate = () => fetch(`/update`, {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json'
@@ -385,6 +501,15 @@ document.addEventListener('DOMContentLoaded', function() {
                         .catch(error => {
                             console.error('Error updating customer:', error);
                         });
+
+                        if (target === 'customerName' && flushActiveReport) {
+                            // Save pending report edits under the old name
+                            // first so the server-side rename migrates them
+                            // along with the rest of the report history.
+                            flushActiveReport().then(sendUpdate);
+                        } else {
+                            sendUpdate();
+                        }
                     });
                 });
 

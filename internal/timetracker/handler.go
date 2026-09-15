@@ -10,14 +10,15 @@ import (
 	"cmd184psu/unified-webapp/internal/platform/response"
 )
 
-// Handler wires HTTP routes to the timetracker store.
+// Handler wires HTTP routes to the timetracker store and report store.
 type Handler struct {
-	store *Store
+	store   *Store
+	reports *ReportStore
 }
 
 // NewHandler returns a Handler.
-func NewHandler(s *Store) *Handler {
-	return &Handler{store: s}
+func NewHandler(s *Store, reports *ReportStore) *Handler {
+	return &Handler{store: s, reports: reports}
 }
 
 // Register mounts all timetracker API routes on mux.
@@ -37,6 +38,10 @@ func (h *Handler) Register(mux *http.ServeMux) {
 
 	mux.HandleFunc("POST /create-customer", h.handleCreateCustomer)
 	mux.HandleFunc("/create-customer", methodNotAllowed)
+
+	mux.HandleFunc("GET /report", h.handleGetReport)
+	mux.HandleFunc("POST /report", h.handleSaveReport)
+	mux.HandleFunc("/report", methodNotAllowed)
 
 	mux.HandleFunc("GET /export-csv", h.handleExportCSV)
 	mux.HandleFunc("/export-csv", methodNotAllowed)
@@ -119,6 +124,17 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, http.StatusBadRequest, "value must be a string")
 		return
 	}
+
+	// A rename must carry the customer's report history along, so capture
+	// the old name before the update. Snapshot and UpdateField address the
+	// same canonical sorted order.
+	var oldName string
+	if req.Field == "customerName" {
+		if snap := h.store.Snapshot(); req.Index >= 0 && req.Index < len(snap.Customers) {
+			oldName = snap.Customers[req.Index].CustomerName
+		}
+	}
+
 	data, err := h.store.UpdateField(req.Index, req.Field, value)
 	if err != nil {
 		if errors.Is(err, ErrInvalidIndex) || errors.Is(err, ErrInvalidField) {
@@ -128,7 +144,75 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	if req.Field == "customerName" && oldName != "" {
+		if err := h.reports.RenameCustomer(oldName, value); err != nil {
+			response.WriteError(w, http.StatusInternalServerError,
+				"customer renamed but report history migration failed: "+err.Error())
+			return
+		}
+	}
 	response.WriteJSON(w, http.StatusOK, data)
+}
+
+// reportResponse is the GET/POST /report payload: the report itself plus the
+// rewind-navigation state (nearest stored report dates on either side).
+type reportResponse struct {
+	Report
+	Exists   bool   `json:"exists"`
+	PrevDate string `json:"prevDate"`
+	NextDate string `json:"nextDate"`
+}
+
+func (h *Handler) reportState(customer, date string) (reportResponse, error) {
+	rep, exists, err := h.reports.Get(customer, date)
+	if err != nil {
+		return reportResponse{}, err
+	}
+	prev, next, err := h.reports.Neighbors(customer, date)
+	if err != nil {
+		return reportResponse{}, err
+	}
+	return reportResponse{Report: rep, Exists: exists, PrevDate: prev, NextDate: next}, nil
+}
+
+func writeReportError(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrInvalidReport) {
+		response.WriteError(w, http.StatusBadRequest, "customer and date (YYYY-MM-DD) are required")
+		return
+	}
+	response.WriteError(w, http.StatusInternalServerError, err.Error())
+}
+
+// GET /report?customer=NAME&date=YYYY-MM-DD
+func (h *Handler) handleGetReport(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.reportState(r.URL.Query().Get("customer"), r.URL.Query().Get("date"))
+	if err != nil {
+		writeReportError(w, err)
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, resp)
+}
+
+// POST /report — the auto-save upsert. An empty report (no body, no time
+// blocks) deletes the stored row instead. Responds with the post-save state
+// so the client can refresh its rewind arrows.
+func (h *Handler) handleSaveReport(w http.ResponseWriter, r *http.Request) {
+	var rep Report
+	if err := json.NewDecoder(r.Body).Decode(&rep); err != nil {
+		response.WriteDecodeError(w, err)
+		return
+	}
+	if err := h.reports.Save(rep); err != nil {
+		writeReportError(w, err)
+		return
+	}
+	resp, err := h.reportState(rep.CustomerName, rep.Date)
+	if err != nil {
+		writeReportError(w, err)
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, resp)
 }
 
 // POST /delete

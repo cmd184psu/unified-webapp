@@ -195,6 +195,28 @@ export default class TimeSelector {
     }
   }
 
+  // Replace the current selection with the given {hour, quarter} slots.
+  // Silent by default so restoring a saved report doesn't re-trigger the
+  // auto-save/refresh hooks that user interaction fires.
+  setSelection(slots, notify = false) {
+    this.selectedBlocks.forEach(b => {
+      b.classList.remove('selected');
+      b.setAttribute('aria-pressed', 'false');
+    });
+    this.selectedBlocks = [];
+    (slots || []).forEach(({ hour, quarter }) => {
+      const block = this.container.querySelector(
+        `.time-block[data-hour="${hour}"][data-quarter="${quarter}"]`);
+      if (block) {
+        block.classList.add('selected');
+        block.setAttribute('aria-pressed', 'true');
+        this.selectedBlocks.push(block);
+      }
+    });
+    this._updateTotalTime();
+    if (notify) this._notifyChange();
+  }
+
   clearSelection() {
     this.selectedBlocks.forEach(b => {
       b.classList.remove('selected');

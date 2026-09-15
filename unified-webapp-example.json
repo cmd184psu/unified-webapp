@@ -81,7 +81,8 @@
   },
   "timetracker": {
     "static_dir": "./web/timetracker",
-    "data_file": "./data/timetracker.json"
+    "data_file": "./data/timetracker.json",
+    "report_db": "./data/timetracker-reports.db"
   },
   "auth": {
     "modules": {

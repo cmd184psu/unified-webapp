@@ -381,11 +381,25 @@ disk, in `GET /data`, and in mutation responses — so the row indexes the
 update/delete API uses always address the customer the client saw. Adding a
 customer requires a name (blank names are rejected with a 400).
 
+**Reports persist per customer per day** in a SQLite database. Selecting a
+customer shows today's report; edits to the report text or the time
+selector auto-save after a short pause (and on customer switch, date
+change, and page close). The ◀/▶ arrows beside the date picker rewind
+through the dates that actually have a stored report for that customer —
+the date picker, markdown preview, and time selector all swing together —
+and the Today button jumps back to the current day. Picking any date in
+the date picker loads that day's report. Clearing a report (empty text, no
+time blocks) removes its stored row. Renaming a customer migrates their
+report history to the new name; deleting a customer keeps the history
+(reachable again by re-adding the same name).
+
 **Config keys:**
 
 - `timetracker.static_dir` — built frontend (default `./web/timetracker`)
 - `timetracker.data_file` — the single JSON data file (default
   `./data/timetracker.json`); created empty-but-valid on first boot
+- `timetracker.report_db` — the SQLite report database (default:
+  `timetracker-reports.db` next to `data_file`); created on first boot
 
 **Migrating from the standalone app:** copy the old app's `public/data.json`
 to the configured `data_file`. The legacy `sfdcUrl` and `cumulusBucket`
