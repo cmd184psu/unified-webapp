@@ -418,6 +418,54 @@ convenience over the admin API.
 
 ---
 
+## Timetracker
+
+A PS/customer helper: a customer list with per-customer editable fields and
+deep links (Slack, CMS, Jira), a 15-minute-block time selector, a markdown
+report composer with clipboard copy, and CSV export. CSV import and
+`/create-customer` exist as API endpoints (curl/tooling); the UI has no
+import button. One shared dataset, last write wins.
+
+The customer list is kept sorted case-insensitively by name — in memory, on
+disk, in `GET /data`, and in mutation responses — so the row indexes the
+update/delete API uses always address the customer the client saw. Adding a
+customer requires a name (blank names are rejected with a 400).
+
+**Reports persist per customer per day** in a SQLite database. Selecting a
+customer shows today's report; edits to the report text or the time
+selector auto-save after a short pause (and on customer switch, date
+change, and page close). The ◀/▶ arrows beside the date picker rewind
+through the dates that actually have a stored report for that customer —
+the date picker, markdown preview, and time selector all swing together —
+and the Today button jumps back to the current day. Picking any date in
+the date picker loads that day's report. Clearing a report (empty text, no
+time blocks) removes its stored row. Renaming a customer migrates their
+report history to the new name; deleting a customer keeps the history
+(reachable again by re-adding the same name).
+
+**Config keys:**
+
+- `timetracker.static_dir` — built frontend (default `./web/timetracker`)
+- `timetracker.data_file` — the single JSON data file (default
+  `./data/timetracker.json`); created empty-but-valid on first boot
+- `timetracker.report_db` — the SQLite report database (default:
+  `timetracker-reports.db` next to `data_file`); created on first boot
+
+**Migrating from the standalone app:** copy the old app's `public/data.json`
+to the configured `data_file`. The legacy `sfdcUrl` and `cumulusBucket`
+keys are mapped to `cmsUrl` and `supportBucket` on load; other removed
+legacy per-customer fields (`insightUrl` and the remote-access field) are
+ignored on load. The file is rewritten under the current keys on the first
+save. CSV import likewise accepts the legacy 8- and 9-column exports in
+addition to the current 7-column format.
+
+**Auth:** the module ships open. Customer names, Slack IDs, and Jira
+numbers are mildly sensitive, so production configs SHOULD add an
+`auth.modules.timetracker` entry — the login gate is inherited from the
+dispatcher with no module-code change.
+
+---
+
 ## Server CLI helpers
 
 ```

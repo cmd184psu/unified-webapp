@@ -1,0 +1,13 @@
+{
+    "author": "The author of the project",
+    "customerName": "The name of the customer",
+    "slackChannel": "The Slack channel for the customer",
+    "workLoadType": "The type of workload for the customer",
+    "cmsUrl": "The CMS URL for the customer",
+    "supportBucket": "The support bucket for the customer",
+    "jira": "The JIRA ticket number for the customer",
+    "reportInput": "The input area for the report",
+    "copyReportBtn": "Copy the processed report",
+    "clearTimeSelectionBtn": "Clear the selected time blocks",
+    "copyTimeSelectionBtn": "Copy the total time spent"
+}

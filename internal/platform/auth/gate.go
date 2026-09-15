@@ -93,9 +93,14 @@ func findAuthGateRoute(path string) (authGateRoute, bool) {
 //
 //  1. GET /healthz -> 200 {"ok":true}, always, before anything else.
 //  2. GET /api/auth/mode -> 200 {"methods":[...]}, always unauthenticated.
+//     2b. GET /api/auth/whoami -> 200 {"authenticated","method","identity"}
+//     (FR6), always available on every module, protected or not, exactly
+//     like mode -- a read-only identity probe, never an authorization
+//     decision, so it adds no allow/deny outcome of its own.
 //  3. If module is not protected by the current policy, everything else
 //     (including the gate's own auth routes) passes through to next
-//     unchanged -- an unprotected module never sees a login route.
+//     unchanged -- an unprotected module never sees a login route. No
+//     Principal is attached to the request context in this branch.
 //  4. If module is protected, the gate-owned auth routes (authGateRoutes)
 //     are served here, not by the module; a session-required route 401s
 //     before its handler runs if there is no valid session cookie, and a
@@ -106,7 +111,12 @@ func findAuthGateRoute(path string) (authGateRoute, bool) {
 //     admin); every other protected module tries checkAPIKey first (no
 //     cookie involved, no per-module opt-in), then the uw_session cookie
 //     via grantsAllow, with a sliding cookie re-issue when the session is
-//     due for refresh.
+//     due for refresh. Every branch that lets a request through in this
+//     step attaches a Principal (FR6, principal.go) to the request's
+//     context via WithPrincipal, immediately before calling next.ServeHTTP,
+//     naming the API-key's configured name or the session's identity grant
+//     and subject -- purely additive: it changes no allow/deny outcome,
+//     only what a module can read back via PrincipalFromContext.
 //  6. Otherwise, 401 -- HTML login-page placeholder for a browser-shaped
 //     GET on a non-/api/ path, bare JSON everywhere else (including every
 //     /api/ path, regardless of Accept).
@@ -128,6 +138,15 @@ func (s *Service) Gate(module string, next http.Handler) http.Handler {
 				methods = []string{}
 			}
 			response.WriteJSON(w, http.StatusOK, map[string]any{"methods": methods})
+			return
+		}
+
+		// Step 2b: whoami, always available, before the protected check --
+		// exactly like mode (step 2) -- so every module, protected or not,
+		// can ask the gate who (if anyone) this request was authorized as.
+		// FR6: purely informational, adds no allow/deny outcome of its own.
+		if r.Method == http.MethodGet && r.URL.Path == "/api/auth/whoami" {
+			s.handleWhoami(w, r, now)
 			return
 		}
 
@@ -177,11 +196,13 @@ func (s *Service) Gate(module string, next http.Handler) http.Handler {
 						setSessionCookie(w, tok, p.SessionTTL, p.CookieSecure, p.CookieDomain)
 					}
 				}
+				r = r.WithContext(WithPrincipal(r.Context(), Principal{Method: identityGrantOf(claims.Grants), Subject: claims.Subject}))
 				next.ServeHTTP(w, r)
 				return
 			}
 		} else {
-			if _, ok := s.checkAPIKey(r); ok {
+			if name, ok := s.checkAPIKey(r); ok {
+				r = r.WithContext(WithPrincipal(r.Context(), Principal{Method: "apikey", Subject: name}))
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -192,6 +213,7 @@ func (s *Service) Gate(module string, next http.Handler) http.Handler {
 						setSessionCookie(w, tok, p.SessionTTL, p.CookieSecure, p.CookieDomain)
 					}
 				}
+				r = r.WithContext(WithPrincipal(r.Context(), Principal{Method: identityGrantOf(claims.Grants), Subject: claims.Subject}))
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -204,6 +226,43 @@ func (s *Service) Gate(module string, next http.Handler) http.Handler {
 			return
 		}
 		response.WriteError(w, http.StatusUnauthorized, "unauthorized")
+	})
+}
+
+// handleWhoami backs GET /api/auth/whoami (FR6): resolves the effective
+// principal for r exactly as step 5 would -- API key first, then the
+// session cookie -- but never falls through to a 401. It reports whatever
+// it finds, including "found nothing", because whoami is a read-only
+// identity probe, not an authorization decision; a module or an
+// unprotected caller may hit it regardless of that module's protected
+// state. It never mutates the session cookie (no sliding-refresh reissue
+// here -- that only happens on a request that actually authorizes into a
+// module).
+func (s *Service) handleWhoami(w http.ResponseWriter, r *http.Request, now time.Time) {
+	if name, ok := s.checkAPIKey(r); ok {
+		response.WriteJSON(w, http.StatusOK, map[string]any{
+			"authenticated": true,
+			"method":        "apikey",
+			"identity":      name,
+		})
+		return
+	}
+
+	if claims, ok := s.sessionClaimsFromRequest(r, now); ok {
+		if grant := identityGrantOf(claims.Grants); grant != "" {
+			response.WriteJSON(w, http.StatusOK, map[string]any{
+				"authenticated": true,
+				"method":        grant,
+				"identity":      claims.Subject,
+			})
+			return
+		}
+	}
+
+	response.WriteJSON(w, http.StatusOK, map[string]any{
+		"authenticated": false,
+		"method":        "",
+		"identity":      "",
 	})
 }
 

@@ -1,0 +1,69 @@
+/* Time selector container */
+.time-selector-container {
+    width: 20%;
+    padding: 20px;
+}
+
+/* Time selector table */
+.time-selector-table {
+    width: 100%;
+    border-collapse: collapse;
+    user-select: none; /* Prevent text selection */
+}
+
+.time-selector-table th, 
+.time-selector-table td {
+    border: 1px solid black;
+    text-align: center;
+    padding: 5px;
+}
+
+/* Time block (selectable cells) */
+.time-block {
+    cursor: pointer;
+    background-color: white;
+    transition: background-color 0.2s;
+}
+
+.time-block:hover {
+    background-color: #f0f0f0;
+}
+
+.time-block.selected {
+    background-color: lightblue;
+}
+
+/* Time buttons container */
+.time-buttons {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+/* Clear and copy buttons */
+#clearTimeSelectionBtn, 
+#copyTimeSelectionBtn {
+    padding: 5px 10px;
+    background-color: #f44336;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#clearTimeSelectionBtn:hover, 
+#copyTimeSelectionBtn:hover {
+    background-color: #d32f2f;
+}
+
+/* Total time input */
+#totalTimeInput {
+    width: 120px;
+    padding: 5px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    background-color: #f9f9f9;
+}

@@ -12,22 +12,25 @@ const DefaultConfigPath = "~/.unified-webapp.json"
 
 // Config is the top-level unified server configuration.
 type Config struct {
-	Port        int               `json:"port"`
-	TLSCert     string            `json:"tls_cert"`
-	TLSKey      string            `json:"tls_key"`
-	Routing     map[string]string `json:"host_routing"` // hostname → module name
-	Server      ServerConfig      `json:"server"`
-	Grocery     GroceryConfig     `json:"grocery"`
-	Todo        TodoConfig        `json:"todo"`
-	Slideshow   SlideshowConfig   `json:"slideshow"`
-	Menuserver  MenuserverConfig  `json:"menuserver"`
-	Obsidianoid ObsidianoidConfig `json:"obsidianoid"`
-	Multissh    MultisshConfig    `json:"multissh"`
-	Taskmaster  TaskmasterConfig  `json:"taskmaster"`
-	Utuber      UtuberConfig      `json:"utuber"`
-	Auth        AuthConfig        `json:"auth"`
-	Admin       AdminConfig       `json:"admin"`
-	Smbedit     SmbeditConfig     `json:"smbedit"`
+	Port         int                `json:"port"`
+	TLSCert      string             `json:"tls_cert"`
+	TLSKey       string             `json:"tls_key"`
+	Routing      map[string]string  `json:"host_routing"` // hostname → module name
+	Server       ServerConfig       `json:"server"`
+	Grocery      GroceryConfig      `json:"grocery"`
+	Todo         TodoConfig         `json:"todo"`
+	Slideshow    SlideshowConfig    `json:"slideshow"`
+	Menuserver   MenuserverConfig   `json:"menuserver"`
+	Obsidianoid  ObsidianoidConfig  `json:"obsidianoid"`
+	Multissh     MultisshConfig     `json:"multissh"`
+	Certmachine  CertmachineConfig  `json:"certmachine"`
+	Taskmaster   TaskmasterConfig   `json:"taskmaster"`
+	Utuber       UtuberConfig       `json:"utuber"`
+	Auth         AuthConfig         `json:"auth"`
+	Admin        AdminConfig        `json:"admin"`
+	Smbedit      SmbeditConfig      `json:"smbedit"`
+	IssueTracker IssueTrackerConfig `json:"issuetracker"`
+	Timetracker  TimetrackerConfig  `json:"timetracker"`
 
 	// configPath is the absolute path Load read this Config from (empty when
 	// built via DefaultConfig()/WriteDefault without going through Load, or
@@ -260,6 +263,15 @@ type MenuserverConfig struct {
 	ShowAllPages bool   `json:"show_all_pages"`
 }
 
+// TimetrackerConfig holds configuration specific to the timetracker module.
+type TimetrackerConfig struct {
+	StaticDir string `json:"static_dir"` // e.g. ./web/timetracker
+	DataFile  string `json:"data_file"`  // e.g. ./data/timetracker.json
+	// ReportDB is the SQLite file holding per-customer per-day reports.
+	// Empty means "timetracker-reports.db" next to DataFile.
+	ReportDB string `json:"report_db"`
+}
+
 // MusicConfig holds music configuration. Collections are discovered automatically
 // by scanning subdirectories of AudioDir; no explicit list is needed.
 type MusicConfig struct {
@@ -318,6 +330,53 @@ type MultisshConfig struct {
 	StrictHostKey  bool   `json:"strict_host_key"`
 	KnownHostsPath string `json:"known_hosts_path"`
 }
+
+// CertmachineConfig holds configuration specific to the certmachine module.
+//
+// StaticDir, DBPath and LegacyImportDir all accept a leading ~ (expanded at
+// Load time). LegacyImportDir left empty means no legacy PKI import is
+// attempted; DefaultValidityDays and ExpiryWarnDays of 0 take their FR-1
+// defaults, validated once by normalizeCertmachine.
+//
+// TrustDeviceEnabled gates the "Trust this CA on this device" button
+// (POST /api/ca/trust, internal/certmachine/trust.go): when false (the
+// default) the route refuses with 409 and the button stays out of the UI.
+// It defaults to false because turning it on means this process will run
+// sudo -- platform trust-store commands against the host it runs on,
+// whenever the button is clicked, with no per-click confirmation beyond
+// whatever the operator's sudoers NOPASSWD entry already grants. See the
+// README's "Automatic device trust" section before setting this true.
+type CertmachineConfig struct {
+	StaticDir           string `json:"static_dir"`
+	DBPath              string `json:"db_path"`
+	LegacyImportDir     string `json:"legacy_import_dir"`
+	DefaultValidityDays int    `json:"default_validity_days"`
+	ExpiryWarnDays      int    `json:"expiry_warn_days"`
+	TrustDeviceEnabled  bool   `json:"trust_device_enabled"`
+}
+
+// IssueTrackerConfig holds configuration specific to the issuetracker module.
+// DefaultUser names the users row that owns reporter/assignee attribution when
+// a request carries no authenticated principal (open mode); it is a data row,
+// not a credential. Module auth is a platform concern (auth.modules).
+type IssueTrackerConfig struct {
+	StaticDir   string                  `json:"static_dir"`
+	DBPath      string                  `json:"db_path"`
+	DefaultUser IssueTrackerDefaultUser `json:"default_user"`
+}
+
+// IssueTrackerDefaultUser is the open-mode fallback user. Email is used as the
+// stable username key; Name is the display name.
+type IssueTrackerDefaultUser struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+// Certmachine defaults (FR-1).
+const (
+	DefaultCertValidityDays = 365
+	DefaultExpiryWarnDays   = 30
+)
 
 // SmbeditConfig holds configuration specific to the smbedit module.
 //
@@ -414,6 +473,10 @@ func DefaultConfig() *Config {
 			StaticDir: "./web/menuserver",
 			DataDir:   "./data/menuserver",
 		},
+		Timetracker: TimetrackerConfig{
+			StaticDir: "./web/timetracker",
+			DataFile:  "./data/timetracker.json",
+		},
 		Obsidianoid: ObsidianoidConfig{
 			StaticDir:     "./web/obsidianoid",
 			DataDir:       "./data/obsidianoid",
@@ -432,6 +495,13 @@ func DefaultConfig() *Config {
 			DBPath:    "./data/taskmaster/taskmaster.db",
 			Lanes:     []TaskmasterLane{},
 			AllowSudo: false,
+		},
+		Certmachine: CertmachineConfig{
+			StaticDir:           "./web/certmachine",
+			DBPath:              "./data/certmachine/certmachine.db",
+			LegacyImportDir:     "",
+			DefaultValidityDays: DefaultCertValidityDays,
+			ExpiryWarnDays:      DefaultExpiryWarnDays,
 		},
 		Utuber: UtuberConfig{
 			StaticDir:   "./web/utuber",
@@ -463,6 +533,14 @@ func DefaultConfig() *Config {
 			StaticDir:  "./web/smbedit",
 			DataDir:    "./data/smbedit",
 			PickerRoot: "/opt",
+		},
+		IssueTracker: IssueTrackerConfig{
+			StaticDir: "./web/issuetracker",
+			DBPath:    "./data/issuetracker/issues.db",
+			DefaultUser: IssueTrackerDefaultUser{
+				Name:  "Unassigned",
+				Email: "unassigned@localhost",
+			},
 		},
 		Server: ServerConfig{
 			OriginCheck:       "enforce",
@@ -522,6 +600,9 @@ func Load(path string) (*Config, error) {
 	if err := expandMenuserverPaths(&cfg.Menuserver); err != nil {
 		return nil, err
 	}
+	if err := expandTimetrackerPaths(&cfg.Timetracker); err != nil {
+		return nil, err
+	}
 	if err := expandObsidianoidPaths(&cfg.Obsidianoid); err != nil {
 		return nil, err
 	}
@@ -534,6 +615,12 @@ func Load(path string) (*Config, error) {
 	if err := expandTaskmasterPaths(&cfg.Taskmaster); err != nil {
 		return nil, err
 	}
+	if err := expandCertmachinePaths(&cfg.Certmachine); err != nil {
+		return nil, err
+	}
+	if err := normalizeCertmachine(&cfg.Certmachine); err != nil {
+		return nil, err
+	}
 	if err := expandUtuberPaths(&cfg.Utuber); err != nil {
 		return nil, err
 	}
@@ -544,6 +631,9 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	if err := expandAdminPaths(&cfg.Admin); err != nil {
+		return nil, err
+	}
+	if err := expandIssueTrackerPaths(&cfg.IssueTracker); err != nil {
 		return nil, err
 	}
 	if err := expandSmbeditPaths(&cfg.Smbedit); err != nil {
@@ -584,6 +674,22 @@ func expandMenuserverPaths(m *MenuserverConfig) error {
 		return err
 	}
 	if m.DataDir, err = ExpandPath(m.DataDir); err != nil {
+		return err
+	}
+	return nil
+}
+
+// expandTimetrackerPaths expands ~ in the timetracker module's StaticDir
+// and DataFile, mirroring expandGroceryPaths.
+func expandTimetrackerPaths(t *TimetrackerConfig) error {
+	var err error
+	if t.StaticDir, err = ExpandPath(t.StaticDir); err != nil {
+		return err
+	}
+	if t.DataFile, err = ExpandPath(t.DataFile); err != nil {
+		return err
+	}
+	if t.ReportDB, err = ExpandPath(t.ReportDB); err != nil {
 		return err
 	}
 	return nil
@@ -734,6 +840,31 @@ func expandTaskmasterPaths(t *TaskmasterConfig) error {
 	return nil
 }
 
+func expandCertmachinePaths(cm *CertmachineConfig) error {
+	var err error
+	if cm.StaticDir, err = ExpandPath(cm.StaticDir); err != nil {
+		return err
+	}
+	if cm.DBPath, err = ExpandPath(cm.DBPath); err != nil {
+		return err
+	}
+	if cm.LegacyImportDir, err = ExpandPath(cm.LegacyImportDir); err != nil {
+		return err
+	}
+	return nil
+}
+
+func expandIssueTrackerPaths(it *IssueTrackerConfig) error {
+	var err error
+	if it.StaticDir, err = ExpandPath(it.StaticDir); err != nil {
+		return err
+	}
+	if it.DBPath, err = ExpandPath(it.DBPath); err != nil {
+		return err
+	}
+	return nil
+}
+
 func expandSmbeditPaths(s *SmbeditConfig) error {
 	var err error
 	if s.StaticDir, err = ExpandPath(s.StaticDir); err != nil {
@@ -744,6 +875,26 @@ func expandSmbeditPaths(s *SmbeditConfig) error {
 	}
 	if s.PickerRoot, err = ExpandPath(s.PickerRoot); err != nil {
 		return err
+	}
+	return nil
+}
+
+// normalizeCertmachine is the single validation point for
+// default_validity_days and expiry_warn_days (FR-1). Zero means "unset" and
+// takes the default; negative is an operator error and is rejected, naming
+// the field. certmachine.Build trusts the result and does not re-check.
+func normalizeCertmachine(cm *CertmachineConfig) error {
+	switch {
+	case cm.DefaultValidityDays < 0:
+		return fmt.Errorf("certmachine: default_validity_days must be at least 0, got %d", cm.DefaultValidityDays)
+	case cm.DefaultValidityDays == 0:
+		cm.DefaultValidityDays = DefaultCertValidityDays
+	}
+	switch {
+	case cm.ExpiryWarnDays < 0:
+		return fmt.Errorf("certmachine: expiry_warn_days must be at least 0, got %d", cm.ExpiryWarnDays)
+	case cm.ExpiryWarnDays == 0:
+		cm.ExpiryWarnDays = DefaultExpiryWarnDays
 	}
 	return nil
 }

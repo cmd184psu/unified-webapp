@@ -24,7 +24,9 @@ import (
 	"golang.org/x/term"
 
 	"cmd184psu/unified-webapp/internal/admin"
+	"cmd184psu/unified-webapp/internal/certmachine"
 	"cmd184psu/unified-webapp/internal/grocery"
+	"cmd184psu/unified-webapp/internal/issuetracker"
 	"cmd184psu/unified-webapp/internal/menuserver"
 	"cmd184psu/unified-webapp/internal/multissh"
 	"cmd184psu/unified-webapp/internal/obsidianoid"
@@ -34,6 +36,7 @@ import (
 	"cmd184psu/unified-webapp/internal/slideshow"
 	"cmd184psu/unified-webapp/internal/smbedit"
 	"cmd184psu/unified-webapp/internal/taskmaster"
+	"cmd184psu/unified-webapp/internal/timetracker"
 	"cmd184psu/unified-webapp/internal/todo"
 	"cmd184psu/unified-webapp/internal/utuber"
 )
@@ -331,7 +334,7 @@ func limitFor(module string, cfg *config.Config) int64 {
 // knownModules is the buildModule universe -- exactly the module names the
 // switch below handles. auth.FromConfig uses it to validate that every
 // module named in auth.modules is one buildDispatcher can actually build.
-var knownModules = []string{"grocery", "todo", "slideshow", "menuserver", "obsidianoid", "multissh", "taskmaster", "admin", "utuber", "smbedit"}
+var knownModules = []string{"grocery", "todo", "slideshow", "menuserver", "obsidianoid", "multissh", "certmachine", "taskmaster", "admin", "utuber", "smbedit", "issuetracker", "timetracker"}
 
 // adminIsRouted reports whether "admin" appears among routing's module
 // values (config.Config.Routing / host_routing). Both main's boot-time
@@ -362,6 +365,10 @@ func buildModule(module string, cfg *config.Config, svc *auth.Service) (http.Han
 		return multissh.Build(cfg.Multissh)
 	case "taskmaster":
 		return taskmaster.Build(cfg.Taskmaster)
+	case "timetracker":
+		return timetracker.Build(cfg.Timetracker)
+	case "certmachine":
+		return certmachine.Build(cfg.Certmachine)
 	case "utuber":
 		return utuber.Build(cfg.Utuber)
 	case "admin":
@@ -373,6 +380,8 @@ func buildModule(module string, cfg *config.Config, svc *auth.Service) (http.Han
 		})
 	case "smbedit":
 		return smbedit.Build(cfg.Smbedit)
+	case "issuetracker":
+		return issuetracker.Build(cfg.IssueTracker)
 	default:
 		return nil, fmt.Errorf("unknown module %q", module)
 	}
