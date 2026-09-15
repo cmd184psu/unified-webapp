@@ -124,6 +124,25 @@ Result: `go test -race ./...` → all PASS
 
 ---
 
+### Phase 5 — Timetracker Module ✅ DONE
+
+**Goal:** `timetracker.test` live; pshelper ported per `docs/timetracker-FRD.md` and `docs/PLAN-timetracker.md`.
+
+Files created:
+- `internal/timetracker/model.go` — `Customer`, `Data` structs (JSON tags = API contract), sentinel errors
+- `internal/timetracker/store.go` — grocery-pattern single-file store: `sync.RWMutex`, deep-copy `Snapshot` (case-insensitive sort) / `Raw` (insertion order), bounds-checked mutators, atomic temp-file + rename saves
+- `internal/timetracker/handler.go` — `GET /data`, `POST /update` (incl. server-side Add-Customer fix, FRD FR-F1), `POST /delete`, `POST /create-customer`, `GET /export-csv` (8 columns), `POST /import-csv` (full-parse-before-replace, FR-F4); JSON error envelopes, 405 fallbacks
+- `internal/timetracker/build.go` — `Build(TimetrackerConfig) (http.Handler, error)`, static mount at `/`
+- `internal/timetracker/store_test.go` + `handler_test.go` — 38 tests under `-race`
+- `web/timetracker/` — frontend copied from the read-only reference; only edits are the FRD FR-F6 removals (legacy remote-access feature removed per owner decision); `data.json` lives at `timetracker.data_file`, never in `web/`
+- `internal/platform/config/config.go` — `TimetrackerConfig` (`static_dir`, `data_file`) with path expansion
+- `cmd/server/main.go` — `knownModules` + `case "timetracker":`
+- `docs/reference-pshelper.sha256` — checksum manifest guarding the untracked read-only reference tree
+
+Result: `go test -race ./...` → all PASS; smoke test: fresh boot on `local-test/config.json`, `curl -H 'Host: timetracker.test' /data` → empty-valid `Data` envelope
+
+---
+
 ## Target Directory Structure
 
 ```

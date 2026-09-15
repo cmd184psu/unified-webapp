@@ -368,6 +368,31 @@ convenience over the admin API.
 
 ---
 
+## Timetracker
+
+A PS/customer helper: a customer list with per-customer editable fields and
+deep links (Slack, Insight, SFDC, Jira), a 15-minute-block time selector, a
+markdown report composer with clipboard copy, and CSV export. CSV import and
+`/create-customer` exist as API endpoints (curl/tooling); the UI has no
+import button. One shared dataset, last write wins.
+
+**Config keys:**
+
+- `timetracker.static_dir` — built frontend (default `./web/timetracker`)
+- `timetracker.data_file` — the single JSON data file (default
+  `./data/timetracker.json`); created empty-but-valid on first boot
+
+**Migrating from the standalone app:** copy the old app's `public/data.json`
+to the configured `data_file`. Removed legacy per-customer fields are
+ignored on load and dropped on the first save.
+
+**Auth:** the module ships open. Customer names, Slack IDs, and Jira
+numbers are mildly sensitive, so production configs SHOULD add an
+`auth.modules.timetracker` entry — the login gate is inherited from the
+dispatcher with no module-code change.
+
+---
+
 ## Server CLI helpers
 
 ```
