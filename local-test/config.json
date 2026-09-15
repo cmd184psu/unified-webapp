@@ -14,7 +14,8 @@
     "certmachine-test.cmdhome.net": "certmachine",
     "admin.test":       "admin",
     "smbedit-test.cmdhome.net":     "smbedit",
-    "issues-test.cmdhome.net": "issuetracker"
+    "issues-test.cmdhome.net": "issuetracker",
+    "timetracker.test": "timetracker"
   },
   "server": {
     "origin_check": "enforce",
@@ -95,6 +96,10 @@
     "static_dir": "./web/issuetracker",
     "db_path": "./local-test/data/issuetracker/issues.db",
     "default_user": { "name": "Unassigned", "email": "unassigned@localhost" }
+  },
+  "timetracker": {
+    "static_dir": "./web/timetracker",
+    "data_file": "./local-test/data/timetracker.json"
   },
   "auth": {
     "modules": {

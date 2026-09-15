@@ -1,6 +1,6 @@
 # unified-webapp
 
-Unified Go server for todo-list, slideshow, menuserver, grocery-list, and obsidianoid (Obsidian-vault viewer/editor). A single binary replaces separate services. HAProxy (or `/etc/hosts`) routes hostnames to the correct module; the Go server dispatches on the `Host` header.
+Unified Go server for todo-list, slideshow, menuserver, grocery-list, obsidianoid (Obsidian-vault viewer/editor), and timetracker (customer/PS helper with time selector and report composer, routed as `timetracker.*`). A single binary replaces separate services. HAProxy (or `/etc/hosts`) routes hostnames to the correct module; the Go server dispatches on the `Host` header.
 
 ---
 

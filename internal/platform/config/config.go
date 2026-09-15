@@ -29,6 +29,7 @@ type Config struct {
 	Admin        AdminConfig        `json:"admin"`
 	Smbedit      SmbeditConfig      `json:"smbedit"`
 	IssueTracker IssueTrackerConfig `json:"issuetracker"`
+	Timetracker  TimetrackerConfig  `json:"timetracker"`
 
 	// configPath is the absolute path Load read this Config from (empty when
 	// built via DefaultConfig()/WriteDefault without going through Load, or
@@ -261,6 +262,15 @@ type MenuserverConfig struct {
 	ShowAllPages bool   `json:"show_all_pages"`
 }
 
+// TimetrackerConfig holds configuration specific to the timetracker module.
+type TimetrackerConfig struct {
+	StaticDir string `json:"static_dir"` // e.g. ./web/timetracker
+	DataFile  string `json:"data_file"`  // e.g. ./data/timetracker.json
+	// ReportDB is the SQLite file holding per-customer per-day reports.
+	// Empty means "timetracker-reports.db" next to DataFile.
+	ReportDB string `json:"report_db"`
+}
+
 // MusicConfig holds music configuration. Collections are discovered automatically
 // by scanning subdirectories of AudioDir; no explicit list is needed.
 type MusicConfig struct {
@@ -445,6 +455,10 @@ func DefaultConfig() *Config {
 			StaticDir: "./web/menuserver",
 			DataDir:   "./data/menuserver",
 		},
+		Timetracker: TimetrackerConfig{
+			StaticDir: "./web/timetracker",
+			DataFile:  "./data/timetracker.json",
+		},
 		Obsidianoid: ObsidianoidConfig{
 			StaticDir:     "./web/obsidianoid",
 			DataDir:       "./data/obsidianoid",
@@ -562,6 +576,9 @@ func Load(path string) (*Config, error) {
 	if err := expandMenuserverPaths(&cfg.Menuserver); err != nil {
 		return nil, err
 	}
+	if err := expandTimetrackerPaths(&cfg.Timetracker); err != nil {
+		return nil, err
+	}
 	if err := expandObsidianoidPaths(&cfg.Obsidianoid); err != nil {
 		return nil, err
 	}
@@ -629,6 +646,22 @@ func expandMenuserverPaths(m *MenuserverConfig) error {
 		return err
 	}
 	if m.DataDir, err = ExpandPath(m.DataDir); err != nil {
+		return err
+	}
+	return nil
+}
+
+// expandTimetrackerPaths expands ~ in the timetracker module's StaticDir
+// and DataFile, mirroring expandGroceryPaths.
+func expandTimetrackerPaths(t *TimetrackerConfig) error {
+	var err error
+	if t.StaticDir, err = ExpandPath(t.StaticDir); err != nil {
+		return err
+	}
+	if t.DataFile, err = ExpandPath(t.DataFile); err != nil {
+		return err
+	}
+	if t.ReportDB, err = ExpandPath(t.ReportDB); err != nil {
 		return err
 	}
 	return nil

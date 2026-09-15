@@ -13,6 +13,7 @@
 #   certmachine.test:             PIN 333333
 #   admin.test:                   admin PIN 424242 (PIN-only, no LDAP)
 #   smbedit.test:                 open, no login (no auth wired in yet)
+#   timetracker.test:             open, no login
 #   LDAP (all protected non-admin modules) via glauth (see glauth.cfg):
 #     user "chris" / password "ldap-test-1"
 #   API key (works on any protected non-admin module, never admin, ignored
@@ -133,7 +134,7 @@ echo "== /etc/hosts check =="
 # .local, which belongs to Bonjour/mDNS on macOS and stalls every page load
 # ~5s waiting on multicast AAAA lookups. Add both lines so IPv4 and IPv6
 # lookups resolve from /etc/hosts without touching a DNS server.
-HOSTNAMES="grocery.test todo.test slideshow.test menu.test menuserver.test obsidianoid.test multissh.test certmachine.test admin.test smbedit.test"
+HOSTNAMES="grocery.test todo.test slideshow.test menu.test menuserver.test obsidianoid.test multissh.test certmachine.test admin.test smbedit.test timetracker.test"
 MISSING4=""
 MISSING6=""
 for h in $HOSTNAMES; do

@@ -17,7 +17,9 @@
   "admin-test.cmdhome.net":            "admin",
   "smbedit-test.cmdhome.net":          "smbedit",
   "smbedit.cmdhome.net":               "smbedit",
-  "issuetracker-test.cmdhome.net":     "issuetracker"
+  "issuetracker-test.cmdhome.net":     "issuetracker",
+  "timetracker.cmdhome.net":           "timetracker",
+  "timetracker-test.cmdhome.net":      "timetracker"
   },
   "server": {
     "origin_check": "enforce",
@@ -107,6 +109,11 @@
       "name": "Unassigned",
       "email": "unassigned@localhost"
     }
+  },
+  "timetracker": {
+    "static_dir": "./web/timetracker",
+    "data_file": "./data/timetracker.json",
+    "report_db": "./data/timetracker-reports.db"
   },
   "auth": {
     "modules": {
