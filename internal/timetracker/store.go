@@ -38,6 +38,28 @@ func New(filePath string) (*Store, error) {
 	if d.Customers == nil {
 		d.Customers = []Customer{}
 	}
+	// Legacy pshelper data files use sfdcUrl and cumulusBucket for what are
+	// now cmsUrl and supportBucket; map them so the values survive the first
+	// save under the new keys. (insightUrl and the removed remote-access
+	// field remain silently dropped.) New keys win when both are present.
+	var legacy struct {
+		Customers []struct {
+			SfdcUrl       string `json:"sfdcUrl"`
+			CumulusBucket string `json:"cumulusBucket"`
+		} `json:"customers"`
+	}
+	// The legacy decode can fail partway (e.g. a non-string legacy value)
+	// even though the lenient decode above succeeded, so bound the loop by
+	// what it actually produced.
+	_ = json.Unmarshal(raw, &legacy)
+	for i := range min(len(d.Customers), len(legacy.Customers)) {
+		if d.Customers[i].CmsUrl == "" {
+			d.Customers[i].CmsUrl = legacy.Customers[i].SfdcUrl
+		}
+		if d.Customers[i].SupportBucket == "" {
+			d.Customers[i].SupportBucket = legacy.Customers[i].CumulusBucket
+		}
+	}
 	s.data = d
 	return s, nil
 }
@@ -87,14 +109,12 @@ func (s *Store) UpdateField(index int, field, value string) (Data, error) {
 		c.CustomerName = value
 	case "slackChannel":
 		c.SlackChannel = value
-	case "insightUrl":
-		c.InsightUrl = value
 	case "workLoadType":
 		c.WorkLoadType = value
-	case "sfdcUrl":
-		c.SfdcUrl = value
-	case "cumulusBucket":
-		c.CumulusBucket = value
+	case "cmsUrl":
+		c.CmsUrl = value
+	case "supportBucket":
+		c.SupportBucket = value
 	case "jira":
 		c.Jira = value
 	default:

@@ -130,14 +130,18 @@ export default class TimeSelector {
     this.clearBtn?.addEventListener('click', () => this.clearSelection());
     this.copyBtn?.addEventListener('click', () => this.copySelection());
 
-    // global mouseup to end dragging if user releases outside table
-    document.addEventListener('mouseup', () => (this.isDragging = false));
+    // global mouseup to end dragging if user releases outside table —
+    // routed through _endSelection so onChange still fires for that drag
+    document.addEventListener('mouseup', () => {
+      if (this.isDragging) this._endSelection();
+    });
   }
 
   _startSelection(event, block) {
     event.preventDefault();
     this.isDragging = true;
     this._toggleBlock(block);
+    this._notifyChange();
   }
 
   _dragSelection(event, block) {
@@ -148,6 +152,7 @@ export default class TimeSelector {
         this.selectedBlocks.push(block);
       }
       this._updateTotalTime();
+      this._notifyChange();
     }
   }
 

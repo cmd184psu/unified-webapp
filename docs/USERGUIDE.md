@@ -383,8 +383,12 @@ import button. One shared dataset, last write wins.
   `./data/timetracker.json`); created empty-but-valid on first boot
 
 **Migrating from the standalone app:** copy the old app's `public/data.json`
-to the configured `data_file`. Removed legacy per-customer fields are
-ignored on load and dropped on the first save.
+to the configured `data_file`. The legacy `sfdcUrl` and `cumulusBucket`
+keys are mapped to `cmsUrl` and `supportBucket` on load; other removed
+legacy per-customer fields (`insightUrl` and the remote-access field) are
+ignored on load. The file is rewritten under the current keys on the first
+save. CSV import likewise accepts the legacy 8- and 9-column exports in
+addition to the current 7-column format.
 
 **Auth:** the module ships open. Customer names, Slack IDs, and Jira
 numbers are mildly sensitive, so production configs SHOULD add an

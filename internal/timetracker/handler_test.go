@@ -177,10 +177,9 @@ func TestUpdateEachField(t *testing.T) {
 	}{
 		{"customerName", func(c timetracker.Customer) string { return c.CustomerName }},
 		{"slackChannel", func(c timetracker.Customer) string { return c.SlackChannel }},
-		{"insightUrl", func(c timetracker.Customer) string { return c.InsightUrl }},
 		{"workLoadType", func(c timetracker.Customer) string { return c.WorkLoadType }},
-		{"sfdcUrl", func(c timetracker.Customer) string { return c.SfdcUrl }},
-		{"cumulusBucket", func(c timetracker.Customer) string { return c.CumulusBucket }},
+		{"cmsUrl", func(c timetracker.Customer) string { return c.CmsUrl }},
+		{"supportBucket", func(c timetracker.Customer) string { return c.SupportBucket }},
 		{"jira", func(c timetracker.Customer) string { return c.Jira }},
 	}
 	for _, c := range cases {
@@ -215,10 +214,9 @@ func TestUpdateNewCustomer(t *testing.T) {
 			"customerName":   "Alpha",
 			"slackChannel":   "#alpha",
 			"slackChannelId": "C123",
-			"insightUrl":     "http://insight",
 			"workLoadType":   "type",
-			"sfdcUrl":        "http://sfdc",
-			"cumulusBucket":  "bucket",
+			"cmsUrl":         "http://cms",
+			"supportBucket":  "bucket",
 			"jira":           "JIRA-1",
 		},
 	}
@@ -328,7 +326,7 @@ func TestCreateCustomer(t *testing.T) {
 
 // ── GET /export-csv ──────────────────────────────────────────────────────────
 
-const csvHeader = "CustomerName,SlackChannel,SlackChannelId,InsightUrl,WorkLoadType,SfdcUrl,CumulusBucket,Jira"
+const csvHeader = "CustomerName,SlackChannel,SlackChannelId,WorkLoadType,CmsUrl,SupportBucket,Jira"
 
 func TestExportCSV(t *testing.T) {
 	hh := newHarness(t)
@@ -362,11 +360,11 @@ func TestExportCSV(t *testing.T) {
 
 // ── POST /import-csv ─────────────────────────────────────────────────────────
 
-func TestImportCSV8Columns(t *testing.T) {
+func TestImportCSV7Columns(t *testing.T) {
 	hh := newHarness(t)
 	body := csvHeader + "\n" +
-		"Acme,#acme,C1,http://insight,typeA,http://sfdc,bucketA,JIRA-1\n" +
-		"Globex,#globex,C2,http://insight2,typeB,http://sfdc2,bucketB,JIRA-2\n"
+		"Acme,#acme,C1,typeA,http://cms,bucketA,JIRA-1\n" +
+		"Globex,#globex,C2,typeB,http://cms2,bucketB,JIRA-2\n"
 
 	w := hh.doMultipart(t, "/import-csv", "file", "customers.csv", []byte(body))
 	if w.Code != http.StatusOK {
@@ -379,8 +377,30 @@ func TestImportCSV8Columns(t *testing.T) {
 	if got.Customers[0].CustomerName != "Acme" || got.Customers[0].Jira != "JIRA-1" {
 		t.Errorf("row 0 mapped incorrectly: %+v", got.Customers[0])
 	}
-	if got.Customers[1].CustomerName != "Globex" || got.Customers[1].CumulusBucket != "bucketB" {
+	if got.Customers[1].CustomerName != "Globex" || got.Customers[1].SupportBucket != "bucketB" {
 		t.Errorf("row 1 mapped incorrectly: %+v", got.Customers[1])
+	}
+}
+
+func TestImportCSV8ColumnLegacy(t *testing.T) {
+	hh := newHarness(t)
+	legacyHeader := "CustomerName,SlackChannel,SlackChannelId,InsightUrl,WorkLoadType,SfdcUrl,CumulusBucket,Jira"
+	body := legacyHeader + "\n" +
+		"Acme,#acme,C1,http://insight,typeA,http://sfdc,bucketA,JIRA-1\n"
+
+	w := hh.doMultipart(t, "/import-csv", "file", "legacy8.csv", []byte(body))
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d (%s)", w.Code, w.Body.String())
+	}
+	got := decodeJSON[timetracker.Data](t, w)
+	if len(got.Customers) != 1 {
+		t.Fatalf("want 1 customer, got %d", len(got.Customers))
+	}
+	c := got.Customers[0]
+	if c.CustomerName != "Acme" || c.SlackChannel != "#acme" || c.SlackChannelId != "C1" ||
+		c.WorkLoadType != "typeA" || c.CmsUrl != "http://sfdc" ||
+		c.SupportBucket != "bucketA" || c.Jira != "JIRA-1" {
+		t.Errorf("legacy 8-column row mapped incorrectly (column 3, InsightUrl, should be dropped): %+v", c)
 	}
 }
 
@@ -400,9 +420,9 @@ func TestImportCSV9ColumnLegacy(t *testing.T) {
 	}
 	c := got.Customers[0]
 	if c.CustomerName != "Acme" || c.SlackChannel != "#acme" || c.SlackChannelId != "C1" ||
-		c.InsightUrl != "http://insight" || c.WorkLoadType != "typeA" || c.SfdcUrl != "http://sfdc" ||
-		c.CumulusBucket != "bucketA" || c.Jira != "JIRA-1" {
-		t.Errorf("legacy 9-column row mapped incorrectly (column 6 should be dropped): %+v", c)
+		c.WorkLoadType != "typeA" || c.CmsUrl != "http://sfdc" ||
+		c.SupportBucket != "bucketA" || c.Jira != "JIRA-1" {
+		t.Errorf("legacy 9-column row mapped incorrectly (columns 3 and 6 should be dropped): %+v", c)
 	}
 }
 

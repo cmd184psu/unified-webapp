@@ -3,15 +3,16 @@ package timetracker
 import "errors"
 
 // Customer is a single tracked customer/project entry. The legacy
-// remote-access field is deliberately absent (FR-F6): that feature is removed.
+// remote-access field is deliberately absent (FR-F6): that feature is
+// removed, as are pshelper's insightUrl field and its sfdcUrl/cumulusBucket
+// names (now cmsUrl/supportBucket; New maps the legacy keys on load).
 type Customer struct {
 	CustomerName   string `json:"customerName"`
 	SlackChannel   string `json:"slackChannel"`
 	SlackChannelId string `json:"slackChannelId"`
-	InsightUrl     string `json:"insightUrl"`
 	WorkLoadType   string `json:"workLoadType"`
-	SfdcUrl        string `json:"sfdcUrl"`
-	CumulusBucket  string `json:"cumulusBucket"`
+	CmsUrl         string `json:"cmsUrl"`
+	SupportBucket  string `json:"supportBucket"`
 	Jira           string `json:"jira"`
 }
 

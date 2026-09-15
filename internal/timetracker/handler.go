@@ -154,11 +154,13 @@ func (h *Handler) handleCreateCustomer(w http.ResponseWriter, r *http.Request) {
 	response.WriteJSON(w, http.StatusOK, data)
 }
 
-// csvColumns is the export/import column order (reference order minus the
-// removed legacy remote-access field, FR-F6).
+// csvColumns is the export/import column order: the reference order minus
+// the removed legacy remote-access field (FR-F6) and InsightUrl, with
+// SfdcUrl/CumulusBucket renamed to CmsUrl/SupportBucket. Import still
+// accepts the legacy 8- and 9-column widths positionally.
 var csvColumns = []string{
-	"CustomerName", "SlackChannel", "SlackChannelId", "InsightUrl",
-	"WorkLoadType", "SfdcUrl", "CumulusBucket", "Jira",
+	"CustomerName", "SlackChannel", "SlackChannelId",
+	"WorkLoadType", "CmsUrl", "SupportBucket", "Jira",
 }
 
 // GET /export-csv
@@ -172,8 +174,8 @@ func (h *Handler) handleExportCSV(w http.ResponseWriter, r *http.Request) {
 	_ = writer.Write(csvColumns)
 	for _, c := range data.Customers {
 		_ = writer.Write([]string{
-			c.CustomerName, c.SlackChannel, c.SlackChannelId, c.InsightUrl,
-			c.WorkLoadType, c.SfdcUrl, c.CumulusBucket, c.Jira,
+			c.CustomerName, c.SlackChannel, c.SlackChannelId,
+			c.WorkLoadType, c.CmsUrl, c.SupportBucket, c.Jira,
 		})
 	}
 	writer.Flush()
@@ -182,10 +184,12 @@ func (h *Handler) handleExportCSV(w http.ResponseWriter, r *http.Request) {
 // POST /import-csv
 //
 // Reads every row into memory before mutating the store (FR-F4): each data
-// row must have 8 fields (mapped positionally) or 9 fields (legacy pshelper
-// export — index 6, the removed legacy remote-access field, is dropped). Any
-// other width, a failed header read, or a header-only file with zero data
-// rows is a 400 with no store mutation.
+// row must have 7 fields (the current column order, mapped positionally),
+// 8 fields (legacy pshelper export — index 3, InsightUrl, is dropped and
+// SfdcUrl/CumulusBucket land in CmsUrl/SupportBucket), or 9 fields (older
+// legacy export — index 6, the removed remote-access field, is dropped
+// too). Any other width, a failed header read, or a header-only file with
+// zero data rows is a 400 with no store mutation.
 func (h *Handler) handleImportCSV(w http.ResponseWriter, r *http.Request) {
 	file, _, err := r.FormFile("file")
 	if err != nil {
@@ -216,15 +220,24 @@ func (h *Handler) handleImportCSV(w http.ResponseWriter, r *http.Request) {
 	for _, row := range dataRows {
 		var c Customer
 		switch len(row) {
+		case 7:
+			c = Customer{
+				CustomerName:   row[0],
+				SlackChannel:   row[1],
+				SlackChannelId: row[2],
+				WorkLoadType:   row[3],
+				CmsUrl:         row[4],
+				SupportBucket:  row[5],
+				Jira:           row[6],
+			}
 		case 8:
 			c = Customer{
 				CustomerName:   row[0],
 				SlackChannel:   row[1],
 				SlackChannelId: row[2],
-				InsightUrl:     row[3],
 				WorkLoadType:   row[4],
-				SfdcUrl:        row[5],
-				CumulusBucket:  row[6],
+				CmsUrl:         row[5],
+				SupportBucket:  row[6],
 				Jira:           row[7],
 			}
 		case 9:
@@ -232,10 +245,9 @@ func (h *Handler) handleImportCSV(w http.ResponseWriter, r *http.Request) {
 				CustomerName:   row[0],
 				SlackChannel:   row[1],
 				SlackChannelId: row[2],
-				InsightUrl:     row[3],
 				WorkLoadType:   row[4],
-				SfdcUrl:        row[5],
-				CumulusBucket:  row[7],
+				CmsUrl:         row[5],
+				SupportBucket:  row[7],
 				Jira:           row[8],
 			}
 		default:

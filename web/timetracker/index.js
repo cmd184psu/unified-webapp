@@ -66,10 +66,9 @@ document.addEventListener('DOMContentLoaded', function() {
             customerName: '',
             slackChannel: '',
             slackChannelId: '',
-            insightUrl: '',
             workLoadType: '',
-            sfdcUrl: '',
-            cumulusBucket: '',
+            cmsUrl: '',
+            supportBucket: '',
             jira: ''
         };
 
@@ -177,9 +176,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 customerList.appendChild(li);
             });
 
+            // Re-render the currently shown report when the time selection
+            // changes; showCustomerDetails points this at its processReport.
+            let refreshReport = null;
+
             // Initialize TimeSelector once after data is loaded
             if (!timeSelector) {
-                timeSelector = new TimeSelector('timeSelectorContainer');
+                timeSelector = new TimeSelector('timeSelectorContainer', {
+                    onChange: () => { if (refreshReport) refreshReport(); }
+                });
                 window.timeSelector = timeSelector;
             }
 
@@ -204,13 +209,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         <button class="submit-btn hidden" data-target="slackChannel" data-index="${index}">Submit</button>
                     </div>
                     <div class="form-group">
-                        <label data-tooltip="insightUrl">Insight URL:</label>
-                        <a href="https://loginsight.cloudian.com/d/i9GXdwqZz/loginsight-hw-and-sw-configuration-and-status?var-CustomerRegion=${customer.insightUrl}" id="insightUrl" data-tooltip="insightUrl">${customer.insightUrl}</a>
-                        <i class="fas fa-edit edit-btn" data-target="insightUrl"></i>
-                        <input type="text" id="insightUrlInput" class="hidden" value="${customer.insightUrl}" data-tooltip="insightUrl">
-                        <button class="submit-btn hidden" data-target="insightUrl" data-index="${index}">Submit</button>
-                    </div>
-                    <div class="form-group">
                         <label data-tooltip="workLoadType">Work Load Type:</label>
                         <select id="workLoadTypeSelect" data-index="${index}" data-tooltip="workLoadType">
                             <option ${customer.workLoadType === 'Bucket Migration' ? 'selected' : ''}>Bucket Migration</option>
@@ -219,17 +217,17 @@ document.addEventListener('DOMContentLoaded', function() {
                         </select>
                     </div>
                     <div class="form-group">
-                        <label data-tooltip="sfdcUrl">SFDC URL:</label>
-                        <a href="${customer.sfdcUrl}" id="sfdcUrl" data-tooltip="sfdcUrl">${customer.sfdcUrl}</a>
-                        <i class="fas fa-edit edit-btn" data-target="sfdcUrl"></i>
-                        <input type="text" id="sfdcUrlInput" class="hidden" value="${customer.sfdcUrl}" data-tooltip="sfdcUrl">
-                        <button class="submit-btn hidden" data-target="sfdcUrl" data-index="${index}">Submit</button>
+                        <label data-tooltip="cmsUrl">CMS URL:</label>
+                        <a href="${customer.cmsUrl}" id="cmsUrl" data-tooltip="cmsUrl">${customer.cmsUrl}</a>
+                        <i class="fas fa-edit edit-btn" data-target="cmsUrl"></i>
+                        <input type="text" id="cmsUrlInput" class="hidden" value="${customer.cmsUrl}" data-tooltip="cmsUrl">
+                        <button class="submit-btn hidden" data-target="cmsUrl" data-index="${index}">Submit</button>
                     </div>
                     <div class="form-group">
-                        <label data-tooltip="cumulusBucket">Cumulus Bucket:</label>
-                        <input type="text" id="cumulusBucketInput" value="${customer.cumulusBucket}" readonly data-tooltip="cumulusBucket">
-                        <i class="fas fa-edit edit-btn" data-target="cumulusBucket"></i>
-                        <button class="submit-btn hidden" data-target="cumulusBucket" data-index="${index}">Submit</button>
+                        <label data-tooltip="supportBucket">Support Bucket:</label>
+                        <input type="text" id="supportBucketInput" value="${customer.supportBucket}" readonly data-tooltip="supportBucket">
+                        <i class="fas fa-edit edit-btn" data-target="supportBucket"></i>
+                        <button class="submit-btn hidden" data-target="supportBucket" data-index="${index}">Submit</button>
                     </div>
                     <div class="form-group">
                         <label data-tooltip="jira">JIRA #:</label>
@@ -269,6 +267,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 reportInput.addEventListener('input', processReport);
                 reportDate.addEventListener('change', processReport);
                 copyReportBtn.addEventListener('click', copyReportToClipboard);
+                refreshReport = processReport;
 
                 document.querySelectorAll('.edit-btn').forEach(btn => {
                     btn.addEventListener('click', function() {
@@ -319,8 +318,10 @@ document.addEventListener('DOMContentLoaded', function() {
                                 
                                 const jiraLink = document.createElement('a');
                                 jiraLink.id = 'jiraUrl';
-                                jiraLink.href = `https://cloudian.atlassian.net/browse/PS-${updatedCustomer.jira}`;
-                                jiraLink.textContent = updatedCustomer.jira;
+                                // The /update response is the full Data envelope, not a
+                                // customer, so render the value that was just submitted.
+                                jiraLink.href = `https://cloudian.atlassian.net/browse/PS-${input.value}`;
+                                jiraLink.textContent = input.value;
                                 jiraLink.setAttribute('data-tooltip', 'jira');
                                 
                                 const parentDiv = input.parentNode;
@@ -328,13 +329,16 @@ document.addEventListener('DOMContentLoaded', function() {
                                 parentDiv.insertBefore(jiraLink, label.nextSibling);
                                 
                                 input.classList.add('hidden');
-                            } else if (target === 'customerName' || target === 'cumulusBucket') {
+                            } else if (target === 'customerName' || target === 'supportBucket') {
                                 input.setAttribute('readonly', true);
                                 input.classList.remove('hidden');
                             } else {
                                 if (link) {
-                                    link.textContent = updatedCustomer[target];
-                                    link.href = updatedCustomer[target];
+                                    link.textContent = input.value;
+                                    if (target === 'cmsUrl') {
+                                        link.href = input.value;
+                                    }
+                                    input.classList.add('hidden');
                                 }
                             }
                             this.classList.add('hidden');

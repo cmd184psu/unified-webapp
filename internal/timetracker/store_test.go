@@ -105,12 +105,12 @@ func TestPersistAcrossReopen(t *testing.T) {
 	}
 }
 
-func TestLoadIgnoresLegacySupportTunnel(t *testing.T) {
+func TestLoadMigratesLegacyFields(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "timetracker.json")
 	legacy := `{"companyName":"","projectName":"","author":"","version":"","customers":[
-		{"customerName":"Acme","slackChannel":"","slackChannelId":"","insightUrl":"",
-		 "workLoadType":"","sfdcUrl":"","supportTunnel":"x","cumulusBucket":"","jira":""}]}`
+		{"customerName":"Acme","slackChannel":"","slackChannelId":"","insightUrl":"drop-me",
+		 "workLoadType":"","sfdcUrl":"http://sfdc","supportTunnel":"x","cumulusBucket":"bucket-a","jira":""}]}`
 	if err := os.WriteFile(path, []byte(legacy), 0644); err != nil {
 		t.Fatalf("write legacy file: %v", err)
 	}
@@ -123,6 +123,12 @@ func TestLoadIgnoresLegacySupportTunnel(t *testing.T) {
 	if len(raw.Customers) != 1 || raw.Customers[0].CustomerName != "Acme" {
 		t.Fatalf("legacy load failed: %v", raw.Customers)
 	}
+	if got := raw.Customers[0].CmsUrl; got != "http://sfdc" {
+		t.Errorf("legacy sfdcUrl not migrated to cmsUrl: got %q", got)
+	}
+	if got := raw.Customers[0].SupportBucket; got != "bucket-a" {
+		t.Errorf("legacy cumulusBucket not migrated to supportBucket: got %q", got)
+	}
 
 	if _, err := s.SetAuthor("Chris"); err != nil {
 		t.Fatalf("SetAuthor: %v", err)
@@ -131,8 +137,10 @@ func TestLoadIgnoresLegacySupportTunnel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read back: %v", err)
 	}
-	if strings.Contains(string(data), "supportTunnel") {
-		t.Errorf("on-disk file still contains supportTunnel after save:\n%s", data)
+	for _, key := range []string{"supportTunnel", "insightUrl", "sfdcUrl", "cumulusBucket"} {
+		if strings.Contains(string(data), key) {
+			t.Errorf("on-disk file still contains legacy key %s after save:\n%s", key, data)
+		}
 	}
 }
 
@@ -237,10 +245,9 @@ func TestUpdateFieldEveryField(t *testing.T) {
 	}{
 		{"customerName", func(c timetracker.Customer) string { return c.CustomerName }},
 		{"slackChannel", func(c timetracker.Customer) string { return c.SlackChannel }},
-		{"insightUrl", func(c timetracker.Customer) string { return c.InsightUrl }},
 		{"workLoadType", func(c timetracker.Customer) string { return c.WorkLoadType }},
-		{"sfdcUrl", func(c timetracker.Customer) string { return c.SfdcUrl }},
-		{"cumulusBucket", func(c timetracker.Customer) string { return c.CumulusBucket }},
+		{"cmsUrl", func(c timetracker.Customer) string { return c.CmsUrl }},
+		{"supportBucket", func(c timetracker.Customer) string { return c.SupportBucket }},
 		{"jira", func(c timetracker.Customer) string { return c.Jira }},
 	}
 
