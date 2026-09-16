@@ -1,4 +1,5 @@
-"use strict";
+// web/obsidianoid/js/threads.ts
+import { showToast } from "/shared/dist/shared.mjs";
 window.ThreadsView = /* @__PURE__ */ (function() {
   let threads = [];
   let editingIndex = null;
@@ -36,7 +37,7 @@ window.ThreadsView = /* @__PURE__ */ (function() {
       renderCache.set(content, html);
       return html;
     } catch {
-      return '<em style="color:var(--color-error)">Render failed</em>';
+      return '<em style="color:var(--color-danger)">Render failed</em>';
     }
   }
   function escapeHtml(str) {

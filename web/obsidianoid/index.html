@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="obsidian">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Obsidianoid</title>
-  <link rel="stylesheet" href="/css/themes.css" />
+  <link rel="stylesheet" href="/shared/dist/shared.css" />
   <link rel="stylesheet" href="/css/app.css" />
 </head>
 <body>
@@ -57,18 +57,14 @@
       </div>
     </header>
 
-    <!-- Theme panel (toggled by hamburger) -->
-    <div id="theme-panel" hidden>
-      <p>Theme</p>
-      <div id="theme-options"></div>
-    </div>
-
     <div id="workspace">
       <!-- Resizable sidebar -->
       <aside id="sidebar">
         <div id="sidebar-header">
           <span>Files</span>
-          <select id="vault-selector" aria-label="Switch vault"></select>
+          <div class="vault-select">
+            <select id="vault-selector" aria-label="Switch vault"></select>
+          </div>
           <input id="search-input" type="search" placeholder="Filter notes…" aria-label="Filter notes" />
         </div>
         <div id="file-tree" role="tree" aria-label="Vault file tree">
@@ -98,9 +94,6 @@
       <div id="threads-grid"></div>
     </div>
 
-    <!-- Toast notification -->
-    <div id="toast" role="status" aria-live="polite"></div>
-
     <!-- New Note Dialog -->
     <dialog id="new-note-dialog">
       <form method="dialog" id="new-note-form">
@@ -128,7 +121,7 @@
     </dialog>
   </div>
 
-  <script src="/js/threads.js"></script>
-  <script src="/js/app.js"></script>
+  <script type="module" src="/js/threads.js"></script>
+  <script type="module" src="/js/app.js"></script>
 </body>
 </html>

@@ -37,7 +37,7 @@ func newHarness(t *testing.T) *harness {
 		StaticDir: t.TempDir(),
 		DataDir:   dataDir,
 		Vaults: []config.ObsidianoidVault{
-			{Path: v0, Name: "Vault0", Theme: "dark"},
+			{Path: v0, Name: "Vault0", Theme: "obsidian"},
 			{Path: v1, Name: "Vault1", Theme: "forest"},
 		},
 		ThreadsFolder:    "Threads",

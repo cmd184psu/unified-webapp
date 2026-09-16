@@ -64,7 +64,7 @@
     "static_dir": "./web/obsidianoid",
     "data_dir": "./data/obsidianoid",
     "vaults": [
-      { "path": "/path/to/your/vault", "name": "My Vault", "theme": "dark" }
+      { "path": "/path/to/your/vault", "name": "My Vault", "theme": "obsidian" }
     ],
     "threads_folder": "Threads",
     "thread_count": 4,

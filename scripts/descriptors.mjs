@@ -81,8 +81,10 @@ export const descriptors = [
     entry: ["web/obsidianoid/js/threads.ts", "web/obsidianoid/js/app.ts"],
     mode: "transpile",
     out: "web/obsidianoid/js/",
-    bundle: false,
+    bundle: true,
+    format: "esm",
     target: "es2020",
+    sharedConsumer: true,
   },
   {
     name: "slideshow",

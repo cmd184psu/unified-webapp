@@ -1,3 +1,5 @@
+import { HamburgerMenu, ThemeManager, showToast } from "@shared";
+
 interface VaultInfo { name: string; theme: string; }
 interface TreeNode { name: string; path?: string; is_dir?: boolean; children?: TreeNode[]; }
 declare const ThreadsView: { init(): void; activate(): Promise<void>; flush(): Promise<void>; };
@@ -28,7 +30,6 @@ const modeLabel      = document.getElementById('mode-label')!;
 const btnSave        = document.getElementById('btn-save') as HTMLButtonElement;
 const btnNewNote     = document.getElementById('btn-new-note') as HTMLButtonElement;
 const noteTitle      = document.getElementById('note-title')!;
-const toastEl        = document.getElementById('toast')!;
 const searchInput    = document.getElementById('search-input') as HTMLInputElement;
 const sidebar        = document.getElementById('sidebar') as HTMLElement;
 const resizeHandle   = document.getElementById('resize-handle')!;
@@ -38,27 +39,9 @@ const newNotePath    = document.getElementById('new-note-path') as HTMLInputElem
 const btnCancelNew   = document.getElementById('btn-cancel-new')!;
 const vaultSelector  = document.getElementById('vault-selector') as HTMLSelectElement;
 const btnHamburger   = document.getElementById('btn-hamburger')!;
-const themePanel     = document.getElementById('theme-panel')!;
-const themeOptions   = document.getElementById('theme-options')!;
 const btnAutoSave    = document.getElementById('btn-autosave')!;
 
-/* ─── Theme definitions ─── */
-const THEMES = [
-  { name: 'dark',   label: 'Dark',   color: '#7c6af7' },
-  { name: 'forest', label: 'Forest', color: '#4dbb6e' },
-  { name: 'ocean',  label: 'Ocean',  color: '#5b9cf6' },
-  { name: 'ember',  label: 'Ember',  color: '#f0a04a' },
-  { name: 'rose',   label: 'Rose',   color: '#e05c7a' },
-];
 function vaultParam() { return `vault=${state.activeVault}`; }
-/* ─── Toast ─── */
-let toastTimer: ReturnType<typeof setTimeout> | undefined;
-function showToast(msg: string, type = 'success') {
-  clearTimeout(toastTimer);
-  toastEl.textContent = msg;
-  toastEl.className = `show ${type}`;
-  toastTimer = setTimeout(() => { toastEl.className = ''; }, 2800);
-}
 
 /* ─── Icon helpers ─── */
 function fileIcon() {
@@ -139,7 +122,7 @@ async function fetchTree() {
     state.treeData = await res.json() as TreeNode;
     renderTree();
   } catch (e) {
-    fileTree.innerHTML = `<div style="padding:var(--space-3);font-size:var(--text-xs);color:var(--color-error)">⚠ Failed to load vault</div>`;
+    fileTree.innerHTML = `<div style="padding:var(--space-3);font-size:var(--text-xs);color:var(--color-danger)">⚠ Failed to load vault</div>`;
   }
 }
 
@@ -185,7 +168,7 @@ async function renderPreview(text: string) {
     const html = await res.text();
     previewPane.innerHTML = `<div class="md-body">${html}</div>`;
   } catch (e) {
-    previewPane.innerHTML = `<div class="md-body"><p style="color:var(--color-error)">Render failed</p></div>`;
+    previewPane.innerHTML = `<div class="md-body"><p style="color:var(--color-danger)">Render failed</p></div>`;
   }
 }
 
@@ -421,38 +404,30 @@ function setMode(mode: string) {
 document.getElementById('btn-mode-notes')!.addEventListener('click', () => setMode('notes'));
 document.getElementById('btn-mode-threads')!.addEventListener('click', () => setMode('threads'));
 
-/* ─── Theme panel ─── */
-function themeStorageKey() { return `obsidianoid-theme-${state.activeVault}`; }
-
-function setTheme(name: string, persist = true) {
-  document.documentElement.dataset.theme = name;
-  document.querySelectorAll('.theme-btn').forEach(b => b.classList.toggle('active', (b as HTMLElement).dataset.theme === name));
-  if (persist) localStorage.setItem(themeStorageKey(), name);
-}
-
-function buildThemePanel() {
-  THEMES.forEach(t => {
-    const btn = document.createElement('button');
-    btn.className = 'theme-btn';
-    btn.dataset.theme = t.name;
-    btn.innerHTML = `<span class="theme-swatch" style="background:${t.color}"></span>${t.label}`;
-    btn.addEventListener('click', () => setTheme(t.name));
-    themeOptions.appendChild(btn);
-  });
-}
-
-function toggleThemePanel() {
-  const nowHidden = themePanel.toggleAttribute('hidden');
-  btnHamburger.classList.toggle('active', !nowHidden);
-}
-
-btnHamburger.addEventListener('click', (e) => { e.stopPropagation(); toggleThemePanel(); });
-document.addEventListener('click', (e) => {
-  if (!themePanel.hasAttribute('hidden') && !themePanel.contains(e.target as Node) && e.target !== btnHamburger) {
-    themePanel.setAttribute('hidden', '');
-    btnHamburger.classList.remove('active');
+/* ─── Theme ─── */
+// One-time storage migration for the palette rename: this module's own
+// near-black palette used to be stored under the name the shared matrix now
+// gives to GitHub-dark, so a browser carrying an explicit choice would
+// silently resolve to a different (and much bluer) ground.
+//
+// The keys are discovered from STORAGE, not from the vault roster: the roster
+// arrives over the network at the bottom of this file, so it is empty for the
+// whole of module evaluation, and deferring the rewrite until after it would
+// mean rewriting storage the resolver had already read. Three properties come
+// out of the prefix scan and would not come out of a roster loop: it reaches
+// keys for vaults no longer in the config, Object.keys is snapshotted before
+// the writes, and the test is on the KEY prefix, so no other module's stored
+// theme is reachable by construction. The equality on the value is exact, so
+// forest/ocean/ember/rose and an already-migrated value are left alone.
+const MIGRATED = 'ui-theme-migrated:obsidianoid';
+if (!localStorage.getItem(MIGRATED)) {
+  for (const k of Object.keys(localStorage)) {
+    if (k.startsWith('obsidianoid-theme-') && localStorage.getItem(k) === 'dark') {
+      localStorage.setItem(k, 'obsidian');
+    }
   }
-});
+  localStorage.setItem(MIGRATED, '1');
+}
 
 async function fetchConfig() {
   try {
@@ -474,10 +449,13 @@ async function fetchVaults() {
       opt.textContent = v.name;
       vaultSelector.appendChild(opt);
     });
-    if (state.vaults.length > 0) {
-      const stored = localStorage.getItem(themeStorageKey());
-      setTheme(stored || state.vaults[0].theme || 'dark', false);
-    }
+    // The first moment the roster exists is the first moment serverDefault()
+    // can answer, so this is the initial per-vault resolution. It deliberately
+    // does not write storage: persisting the server's answer here would make a
+    // configured default indistinguishable from a user's own choice for ever
+    // after. Safe on an empty roster — serverDefault() returns undefined and
+    // resolution falls through.
+    themes.reresolve();
   } catch (e) { /* continue with vault 0 */ }
 }
 
@@ -490,8 +468,9 @@ function switchVault(idx: number) {
   btnToggle.disabled = true;
   btnSave.disabled = true;
   setEditorMode();
-  const storedTheme = localStorage.getItem(`obsidianoid-theme-${idx}`);
-  setTheme(storedTheme || (state.vaults[idx]?.theme) || 'dark', false);
+  // The storage key closes over state.activeVault, which has just changed, so
+  // the closure must be re-run rather than merely relied upon.
+  themes.reresolve();
   reconnectEvents();
   checkGitAvailable();
   fetchTree();
@@ -500,7 +479,25 @@ function switchVault(idx: number) {
 vaultSelector.addEventListener('change', () => switchVault(parseInt(vaultSelector.value)));
 
 /* ─── Init ─── */
-buildThemePanel(); btnAutoSave.classList.add('active');
+const themes = new ThemeManager({
+  module: 'obsidianoid',
+  default: 'obsidian',
+  storageKey: () => `obsidianoid-theme-${state.activeVault}`,
+  serverDefault: () => state.vaults[state.activeVault]?.theme,
+});
+// The trigger is the topbar button this module already ships, adopted in place
+// so it keeps its glyph and its position and gains only the a11y wiring. It
+// lives OUTSIDE #topbar-actions, which app.css hides entirely in threads mode,
+// so the picker becomes reachable from that view for the first time. The
+// picker is the drawer's only content, so there are no other items.
+new HamburgerMenu({
+  title: 'Settings',
+  items: [],
+  themePicker: true,
+  themes,
+  mountTrigger: btnHamburger,
+});
+btnAutoSave.classList.add('active');
 ThreadsView.init();
 reconnectEvents();
 checkGitAvailable();

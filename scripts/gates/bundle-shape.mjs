@@ -1,11 +1,19 @@
 #!/usr/bin/env node
 // The bundle-shape gate — A9.1, A9.2, A9.3 (ADR-001).
 //
-// Input set: exactly the `out` artifacts of descriptors declaring
+// Input set: exactly the emitted artifacts of descriptors declaring
 // `sharedConsumer: true`. That is a descriptor field, not a guess — the same
 // field selects the `@shared` onResolve plugin and triggers the driver's
 // format:"esm" assertion, so the gate, the plugin and the assertion cannot
 // range over different sets (§5 A9 preamble).
+//
+// The paths come from scripts/artifact-paths.mjs rather than from `d.out`,
+// which is a DIRECTORY for a multi-entry transpile: obsidianoid emits two
+// files from one descriptor, so `existsSync(d.out)` returned true for the
+// directory and `readFileSync(d.out)` threw an uncaught EISDIR (§4.2.1(b),
+// B9.3). Descriptors and artifacts therefore no longer coincide — 3
+// descriptors, 4 outputs — which is why the PASS line below counts the files
+// actually inspected and not `inputs.length` (B9.1 pins the string).
 //
 // Why both sides are required: with format:"iife" esbuild does not error on
 // an ESM-only construct — it silently downgrades, emits `__require(…)` and a
@@ -31,6 +39,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { descriptors } from "../descriptors.mjs";
+import { artifactPaths } from "../artifact-paths.mjs";
 
 process.chdir(path.resolve(import.meta.dirname, "..", ".."));
 
@@ -93,30 +102,35 @@ if (inputs.length === 0) {
   process.exit(0);
 }
 
+let inspected = 0;
+
 for (const d of inputs) {
-  if (!fs.existsSync(d.out)) {
-    failures.push(`${d.name}: ${d.out} does not exist`);
-    continue;
-  }
-  const text = fs.readFileSync(d.out, "utf8");
-
-  // A9.1 — positive.
-  if (!TOP_LEVEL_IMPORT.test(text)) {
-    failures.push(`${d.name}: ${d.out} has no top-level import from "${BARREL}" (A9.1)`);
-  }
-
-  // A9.2 — negative, both markers.
-  for (const marker of ["__require(", "Dynamic require of"]) {
-    if (text.includes(marker)) {
-      failures.push(`${d.name}: ${d.out} contains "${marker}" — format downgraded to iife (A9.2)`);
+  for (const artifact of artifactPaths(d)) {
+    if (!fs.existsSync(artifact)) {
+      failures.push(`${d.name}: ${artifact} does not exist`);
+      continue;
     }
-  }
+    const text = fs.readFileSync(artifact, "utf8");
+    inspected++;
 
-  // A9.3 — the define was applied, and applied once.
-  if (d.name === "taskmaster") {
-    const n = (text.match(/var FRONTEND_BUILD_TIME\b/g) || []).length;
-    if (n !== 1) {
-      failures.push(`${d.name}: ${d.out} contains "var FRONTEND_BUILD_TIME" ${n} time(s), expected exactly 1 (A9.3)`);
+    // A9.1 — positive.
+    if (!TOP_LEVEL_IMPORT.test(text)) {
+      failures.push(`${d.name}: ${artifact} has no top-level import from "${BARREL}" (A9.1)`);
+    }
+
+    // A9.2 — negative, both markers.
+    for (const marker of ["__require(", "Dynamic require of"]) {
+      if (text.includes(marker)) {
+        failures.push(`${d.name}: ${artifact} contains "${marker}" — format downgraded to iife (A9.2)`);
+      }
+    }
+
+    // A9.3 — the define was applied, and applied once.
+    if (d.name === "taskmaster") {
+      const n = (text.match(/var FRONTEND_BUILD_TIME\b/g) || []).length;
+      if (n !== 1) {
+        failures.push(`${d.name}: ${artifact} contains "var FRONTEND_BUILD_TIME" ${n} time(s), expected exactly 1 (A9.3)`);
+      }
     }
   }
 }
@@ -126,4 +140,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-process.stdout.write(`bundle-shape: PASS — ${inputs.length} sharedConsumer bundle(s) inspected\n`);
+process.stdout.write(`bundle-shape: PASS — ${inspected} sharedConsumer bundle(s) inspected\n`);

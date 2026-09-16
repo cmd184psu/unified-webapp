@@ -1,3 +1,5 @@
+import { showToast } from "@shared";
+
 /* ─── Threads View ─── */
 
 interface Thread {
@@ -11,12 +13,16 @@ interface ThreadsViewAPI {
   flush(): Promise<void>;
 }
 
-// showToast is a global defined in app.js
-declare function showToast(msg: string, type?: string): void;
-
-// Extend Window so TypeScript knows about this global
-interface Window {
-  ThreadsView: ThreadsViewAPI;
+// Extend Window so TypeScript knows about this global. The global-scope
+// augmentation wrapper below is required, not stylistic: the import above makes
+// this file a module, so a top-level Window interface at column 0 would merge
+// into a module-local type instead of the real one and the assignment below
+// would not compile. The wrapper is in turn only legal in a module, so it and
+// the import are one atomic change.
+declare global {
+  interface Window {
+    ThreadsView: ThreadsViewAPI;
+  }
 }
 
 window.ThreadsView = (function (): ThreadsViewAPI {
@@ -65,7 +71,7 @@ window.ThreadsView = (function (): ThreadsViewAPI {
       renderCache.set(content, html);
       return html;
     } catch {
-      return '<em style="color:var(--color-error)">Render failed</em>';
+      return '<em style="color:var(--color-danger)">Render failed</em>';
     }
   }
 

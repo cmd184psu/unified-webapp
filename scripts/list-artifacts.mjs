@@ -6,9 +6,11 @@
 // there rather than an empty list (A7.2, A7.7). There is no hand-maintained
 // copy of this list anywhere.
 //
-// Derivation rules, mechanical:
+// The derivation itself lives in scripts/artifact-paths.mjs and is shared with
+// scripts/gates/bundle-shape.mjs, so "which files does this descriptor emit?"
+// has exactly one definition (B9.4). Its rules, for reference:
 //   mode "transpile" — `out` is esbuild's outdir; each entry emits its own
-//                      basename with the .ts/.tsx extension replaced by .js
+//                      basename under a .js extension
 //   mode "bundle"    — `out` is esbuild's outfile; `emitsCss: true` adds the
 //                      sibling stylesheet esbuild writes beside it
 //
@@ -16,14 +18,11 @@
 
 import path from "node:path";
 import { descriptors } from "./descriptors.mjs";
+import { artifactPaths } from "./artifact-paths.mjs";
 
 function fail(message) {
   process.stderr.write(`list-artifacts: ${message}\n`);
   process.exit(1);
-}
-
-function jsName(entry) {
-  return path.basename(entry).replace(/\.tsx?$/, ".js");
 }
 
 const artifacts = [];
@@ -35,13 +34,10 @@ for (const d of descriptors) {
     if (path.isAbsolute(p)) fail(`descriptor "${d.name}": absolute path ${p}`);
   }
 
-  if (d.mode === "transpile") {
-    for (const entry of d.entry) artifacts.push(path.posix.join(d.out, jsName(entry)));
-  } else if (d.mode === "bundle") {
-    artifacts.push(d.out);
-    if (d.emitsCss) artifacts.push(d.out.replace(/\.js$/, ".css"));
-  } else {
-    fail(`descriptor "${d.name}": unknown mode ${JSON.stringify(d.mode)}`);
+  try {
+    artifacts.push(...artifactPaths(d));
+  } catch (e) {
+    fail(e.message.replace(/^artifact-paths: /, ""));
   }
 }
 

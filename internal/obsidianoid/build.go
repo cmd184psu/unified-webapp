@@ -38,7 +38,7 @@ func Build(cfg config.ObsidianoidConfig) (http.Handler, error) {
 	// Apply safe defaults for zero-value fields.
 	for i := range cfg.Vaults {
 		if cfg.Vaults[i].Theme == "" {
-			cfg.Vaults[i].Theme = "dark"
+			cfg.Vaults[i].Theme = "obsidian"
 		}
 	}
 	if cfg.ThreadCount == 0 {

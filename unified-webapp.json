@@ -50,7 +50,7 @@
     "data_dir": "./data/obsidianoid",
     "vaults": [
       { "path": "/opt/Vaults/Work", "name": "Cloudian", "theme": "forest" },
-      { "path": "/opt/Vaults/Personal", "name": "Personal", "theme": "dark" }
+      { "path": "/opt/Vaults/Personal", "name": "Personal", "theme": "obsidian" }
     ],
     "threads_folder": "Threads",
     "thread_count": 4,

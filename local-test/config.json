@@ -60,7 +60,7 @@
     "static_dir": "./web/obsidianoid",
     "data_dir": "./local-test/data/obsidianoid",
     "vaults": [
-      { "path": "./local-test/data/vault", "name": "Test Vault", "theme": "dark" }
+      { "path": "./local-test/data/vault", "name": "Test Vault", "theme": "obsidian" }
     ],
     "threads_folder": "Threads",
     "thread_count": 4,
@@ -118,10 +118,10 @@
   "auth": {
     "modules": {
       "admin": {
-        "pin_file": "/opt/unified-webapp-issues/local-test/admin.pin"
+        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/admin.pin"
       },
       "certmachine": {
-        "pin_file": "/opt/unified-webapp-issues/local-test/certmachine.pin"
+        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/certmachine.pin"
       },
       "menuserver": {
         "pin_file": ""
@@ -136,15 +136,15 @@
         "pin_file": ""
       },
       "slideshow": {
-        "pin_file": "/opt/unified-webapp-issues/local-test/slideshow.pin"
+        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/slideshow.pin"
       },
       "todo": {
-        "pin_file": "/opt/unified-webapp-issues/local-test/todo.pin"
+        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/todo.pin"
       }
     },
     "admin_pin": "",
     "admin_pin_file": "",
-    "data_dir": "/opt/unified-webapp-issues/local-test/data/auth",
+    "data_dir": "/opt/unified-webapp-ui-upgrade/local-test/data/auth",
     "cookie_secure": false,
     "cookie_domain": "",
     "session": {

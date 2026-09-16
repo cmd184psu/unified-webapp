@@ -85,7 +85,7 @@ Minimal example with all seven modules. Multiple hostnames can map to the same m
     "static_dir": "/opt/unified-webapp/web/obsidianoid",
     "data_dir":   "/data/obsidianoid",
     "vaults": [
-      { "path": "/path/to/vault", "name": "My Vault", "theme": "dark" }
+      { "path": "/path/to/vault", "name": "My Vault", "theme": "obsidian" }
     ],
     "threads_folder": "Threads",
     "thread_count": 4,

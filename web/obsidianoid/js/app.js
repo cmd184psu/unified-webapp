@@ -1,5 +1,6 @@
-"use strict";
-const state = {
+// web/obsidianoid/js/app.ts
+import { HamburgerMenu, ThemeManager, showToast } from "/shared/dist/shared.mjs";
+var state = {
   currentPath: null,
   isPreviewMode: false,
   isDirty: false,
@@ -10,51 +11,32 @@ const state = {
   vaults: [],
   autoSave: true
 };
-const fileTree = document.getElementById("file-tree");
-const btnGitSync = document.getElementById("btn-git-sync");
-const gitSyncDialog = document.getElementById("git-sync-dialog");
-const gitSyncForm = document.getElementById("git-sync-form");
-const gitCommitMsg = document.getElementById("git-commit-msg");
-const btnCancelSync = document.getElementById("btn-cancel-sync");
-const editorPane = document.getElementById("editor-pane");
-const previewPane = document.getElementById("preview-pane");
-const emptyState = document.getElementById("empty-state");
-const btnToggle = document.getElementById("btn-toggle-mode");
-const modeLabel = document.getElementById("mode-label");
-const btnSave = document.getElementById("btn-save");
-const btnNewNote = document.getElementById("btn-new-note");
-const noteTitle = document.getElementById("note-title");
-const toastEl = document.getElementById("toast");
-const searchInput = document.getElementById("search-input");
-const sidebar = document.getElementById("sidebar");
-const resizeHandle = document.getElementById("resize-handle");
-const newNoteDialog = document.getElementById("new-note-dialog");
-const newNoteForm = document.getElementById("new-note-form");
-const newNotePath = document.getElementById("new-note-path");
-const btnCancelNew = document.getElementById("btn-cancel-new");
-const vaultSelector = document.getElementById("vault-selector");
-const btnHamburger = document.getElementById("btn-hamburger");
-const themePanel = document.getElementById("theme-panel");
-const themeOptions = document.getElementById("theme-options");
-const btnAutoSave = document.getElementById("btn-autosave");
-const THEMES = [
-  { name: "dark", label: "Dark", color: "#7c6af7" },
-  { name: "forest", label: "Forest", color: "#4dbb6e" },
-  { name: "ocean", label: "Ocean", color: "#5b9cf6" },
-  { name: "ember", label: "Ember", color: "#f0a04a" },
-  { name: "rose", label: "Rose", color: "#e05c7a" }
-];
+var fileTree = document.getElementById("file-tree");
+var btnGitSync = document.getElementById("btn-git-sync");
+var gitSyncDialog = document.getElementById("git-sync-dialog");
+var gitSyncForm = document.getElementById("git-sync-form");
+var gitCommitMsg = document.getElementById("git-commit-msg");
+var btnCancelSync = document.getElementById("btn-cancel-sync");
+var editorPane = document.getElementById("editor-pane");
+var previewPane = document.getElementById("preview-pane");
+var emptyState = document.getElementById("empty-state");
+var btnToggle = document.getElementById("btn-toggle-mode");
+var modeLabel = document.getElementById("mode-label");
+var btnSave = document.getElementById("btn-save");
+var btnNewNote = document.getElementById("btn-new-note");
+var noteTitle = document.getElementById("note-title");
+var searchInput = document.getElementById("search-input");
+var sidebar = document.getElementById("sidebar");
+var resizeHandle = document.getElementById("resize-handle");
+var newNoteDialog = document.getElementById("new-note-dialog");
+var newNoteForm = document.getElementById("new-note-form");
+var newNotePath = document.getElementById("new-note-path");
+var btnCancelNew = document.getElementById("btn-cancel-new");
+var vaultSelector = document.getElementById("vault-selector");
+var btnHamburger = document.getElementById("btn-hamburger");
+var btnAutoSave = document.getElementById("btn-autosave");
 function vaultParam() {
   return `vault=${state.activeVault}`;
-}
-let toastTimer;
-function showToast(msg, type = "success") {
-  clearTimeout(toastTimer);
-  toastEl.textContent = msg;
-  toastEl.className = `show ${type}`;
-  toastTimer = setTimeout(() => {
-    toastEl.className = "";
-  }, 2800);
 }
 function fileIcon() {
   return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
@@ -129,7 +111,7 @@ async function fetchTree() {
     state.treeData = await res.json();
     renderTree();
   } catch (e) {
-    fileTree.innerHTML = `<div style="padding:var(--space-3);font-size:var(--text-xs);color:var(--color-error)">\u26A0 Failed to load vault</div>`;
+    fileTree.innerHTML = `<div style="padding:var(--space-3);font-size:var(--text-xs);color:var(--color-danger)">\u26A0 Failed to load vault</div>`;
   }
 }
 function syncActiveHighlight() {
@@ -172,7 +154,7 @@ async function renderPreview(text) {
     const html = await res.text();
     previewPane.innerHTML = `<div class="md-body">${html}</div>`;
   } catch (e) {
-    previewPane.innerHTML = `<div class="md-body"><p style="color:var(--color-error)">Render failed</p></div>`;
+    previewPane.innerHTML = `<div class="md-body"><p style="color:var(--color-danger)">Render failed</p></div>`;
   }
 }
 async function reloadCurrentNote() {
@@ -186,7 +168,7 @@ async function reloadCurrentNote() {
   } catch (e) {
   }
 }
-let eventSource = null;
+var eventSource = null;
 function reconnectEvents() {
   if (eventSource) {
     eventSource.close();
@@ -255,7 +237,7 @@ async function saveNote() {
     showToast("Network error saving note", "error");
   }
 }
-let autoSaveTimer;
+var autoSaveTimer;
 function scheduleAutoSave() {
   clearTimeout(autoSaveTimer);
   if (state.autoSave && state.isDirty && state.currentPath) {
@@ -317,7 +299,7 @@ newNoteForm.addEventListener("submit", async (e) => {
     showToast("Network error", "error");
   }
 });
-let isResizing = false;
+var isResizing = false;
 resizeHandle.addEventListener("mousedown", () => {
   isResizing = true;
   resizeHandle.classList.add("dragging");
@@ -389,38 +371,15 @@ function setMode(mode) {
 }
 document.getElementById("btn-mode-notes").addEventListener("click", () => setMode("notes"));
 document.getElementById("btn-mode-threads").addEventListener("click", () => setMode("threads"));
-function themeStorageKey() {
-  return `obsidianoid-theme-${state.activeVault}`;
-}
-function setTheme(name, persist = true) {
-  document.documentElement.dataset.theme = name;
-  document.querySelectorAll(".theme-btn").forEach((b) => b.classList.toggle("active", b.dataset.theme === name));
-  if (persist) localStorage.setItem(themeStorageKey(), name);
-}
-function buildThemePanel() {
-  THEMES.forEach((t) => {
-    const btn = document.createElement("button");
-    btn.className = "theme-btn";
-    btn.dataset.theme = t.name;
-    btn.innerHTML = `<span class="theme-swatch" style="background:${t.color}"></span>${t.label}`;
-    btn.addEventListener("click", () => setTheme(t.name));
-    themeOptions.appendChild(btn);
-  });
-}
-function toggleThemePanel() {
-  const nowHidden = themePanel.toggleAttribute("hidden");
-  btnHamburger.classList.toggle("active", !nowHidden);
-}
-btnHamburger.addEventListener("click", (e) => {
-  e.stopPropagation();
-  toggleThemePanel();
-});
-document.addEventListener("click", (e) => {
-  if (!themePanel.hasAttribute("hidden") && !themePanel.contains(e.target) && e.target !== btnHamburger) {
-    themePanel.setAttribute("hidden", "");
-    btnHamburger.classList.remove("active");
+var MIGRATED = "ui-theme-migrated:obsidianoid";
+if (!localStorage.getItem(MIGRATED)) {
+  for (const k of Object.keys(localStorage)) {
+    if (k.startsWith("obsidianoid-theme-") && localStorage.getItem(k) === "dark") {
+      localStorage.setItem(k, "obsidian");
+    }
   }
-});
+  localStorage.setItem(MIGRATED, "1");
+}
 async function fetchConfig() {
   try {
     const d = await (await fetch("/api/config")).json();
@@ -441,10 +400,7 @@ async function fetchVaults() {
       opt.textContent = v.name;
       vaultSelector.appendChild(opt);
     });
-    if (state.vaults.length > 0) {
-      const stored = localStorage.getItem(themeStorageKey());
-      setTheme(stored || state.vaults[0].theme || "dark", false);
-    }
+    themes.reresolve();
   } catch (e) {
   }
 }
@@ -457,14 +413,25 @@ function switchVault(idx) {
   btnToggle.disabled = true;
   btnSave.disabled = true;
   setEditorMode();
-  const storedTheme = localStorage.getItem(`obsidianoid-theme-${idx}`);
-  setTheme(storedTheme || state.vaults[idx]?.theme || "dark", false);
+  themes.reresolve();
   reconnectEvents();
   checkGitAvailable();
   fetchTree();
 }
 vaultSelector.addEventListener("change", () => switchVault(parseInt(vaultSelector.value)));
-buildThemePanel();
+var themes = new ThemeManager({
+  module: "obsidianoid",
+  default: "obsidian",
+  storageKey: () => `obsidianoid-theme-${state.activeVault}`,
+  serverDefault: () => state.vaults[state.activeVault]?.theme
+});
+new HamburgerMenu({
+  title: "Settings",
+  items: [],
+  themePicker: true,
+  themes,
+  mountTrigger: btnHamburger
+});
 btnAutoSave.classList.add("active");
 ThreadsView.init();
 reconnectEvents();
