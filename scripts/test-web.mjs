@@ -33,14 +33,15 @@ function fail(message) {
   process.exit(1);
 }
 
-// The four suites test:web runs today, plus web/grocery/app.test.js, wired
-// here for the first time (driver rule 11). web/shared/ts/modal.test.ts is
-// added at C4 (A7.13).
+// The four suites test:web ran before C4, plus web/grocery/app.test.js
+// (driver rule 11), plus web/shared/ts/modal.test.ts, added here at C4
+// (A7.13).
 const suites = [
   { name: "sshcommand", entry: "web/multissh/js/sshcommand.test.ts", runner: "esbuild-cjs" },
   { name: "certmachine-status", entry: "web/certmachine/js/status.test.ts", runner: "esbuild-cjs" },
   { name: "certmachine-listmodel", entry: "web/certmachine/js/listmodel.test.ts", runner: "esbuild-cjs" },
   { name: "certmachine-generate", entry: "web/certmachine/js/generate.test.ts", runner: "esbuild-cjs" },
+  { name: "shared-modal", entry: "web/shared/ts/modal.test.ts", runner: "esbuild-cjs" },
   { name: "grocery", entry: "web/grocery/app.test.js", runner: "node-test" },
 ];
 

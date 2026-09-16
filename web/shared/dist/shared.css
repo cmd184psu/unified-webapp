@@ -1,0 +1,384 @@
+/* web/shared/css/fonts.css */
+@font-face {
+  font-family: "Inter";
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  src: url(/shared/public/fonts/inter/InterVariable.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+  src: url(/shared/public/fonts/inter/InterVariable-Italic.woff2) format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url(/shared/public/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2) format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url(/shared/public/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2) format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url(/shared/public/fonts/jetbrains-mono/JetBrainsMono-SemiBold.woff2) format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+  src: url(/shared/public/fonts/jetbrains-mono/JetBrainsMono-Italic.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Sora";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url(/shared/public/fonts/sora/sora-v17-latin-regular.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Sora";
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url(/shared/public/fonts/sora/sora-v17-latin-500.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Sora";
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url(/shared/public/fonts/sora/sora-v17-latin-600.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Sora";
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url(/shared/public/fonts/sora/sora-v17-latin-700.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Sora";
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+  src: url(/shared/public/fonts/sora/sora-v17-latin-800.woff2) format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url(/shared/public/fonts/ibm-plex-mono/ibm-plex-mono-v20-latin-regular.woff2) format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url(/shared/public/fonts/ibm-plex-mono/ibm-plex-mono-v20-latin-500.woff2) format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url(/shared/public/fonts/ibm-plex-mono/ibm-plex-mono-v20-latin-600.woff2) format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+  src: url(/shared/public/fonts/ibm-plex-mono/ibm-plex-mono-v20-latin-italic.woff2) format("woff2");
+}
+
+/* web/shared/css/tokens.css */
+:root {
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 3px oklch(0 0 0 / 0.3);
+  --shadow-md: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 1.75rem;
+  --space-8: 2rem;
+  --text-xs: clamp(0.75rem, 0.7rem + 0.25vw, 0.875rem);
+  --text-sm: clamp(0.875rem, 0.8rem + 0.35vw, 1rem);
+  --text-base: clamp(1rem, 0.95rem + 0.25vw, 1.125rem);
+  --text-lg: clamp(1.125rem, 1rem + 0.75vw, 1.5rem);
+  --text-xl: clamp(1.5rem, 1.32rem + 0.75vw, 2rem);
+  --font-body: "Inter", var(--font-body-fallback);
+  --font-mono: "JetBrains Mono", var(--font-mono-fallback);
+  --font-body-fallback:
+    "Segoe UI",
+    system-ui,
+    sans-serif;
+  --font-mono-fallback:
+    "Fira Code",
+    ui-monospace,
+    monospace;
+  --sidebar-width: 280px;
+  --topbar-height: 48px;
+  --transition: 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  --overlay-scrim: rgba(0, 0, 0, 0.55);
+}
+
+/* web/shared/css/themes.css */
+:root,
+[data-theme=dark] {
+  --color-bg: #0d1117;
+  --color-surface-1: #161b22;
+  --color-surface-2: #21262d;
+  --color-surface-3: #2c3138;
+  --color-border: #30363d;
+  --color-divider: #232930;
+  --color-text: #e6edf3;
+  --color-text-muted: #8b949e;
+  --color-text-faint: #6e7681;
+  --color-primary: #7c3aed;
+  --color-primary-hover: #6d28d9;
+  --color-primary-active: #5b21b6;
+  --color-primary-tint: #2d1f5e;
+  --color-primary-fg: #ffffff;
+  --color-danger: #f85149;
+  --color-success: #3fb950;
+  --color-warning: #d29922;
+}
+[data-theme=light] {
+  --color-bg: #f4f2ee;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #f0ede8;
+  --color-surface-3: #e6e3df;
+  --color-border: #dcd9d5;
+  --color-divider: #ebe8e3;
+  --color-text: #28251d;
+  --color-text-muted: #6b6862;
+  --color-text-faint: #b0ada8;
+  --color-primary: #01696f;
+  --color-primary-hover: #0c4e54;
+  --color-primary-active: #173339;
+  --color-primary-tint: #dff0f0;
+  --color-primary-fg: #ffffff;
+  --color-danger: #b91c1c;
+  --color-success: #2d8a4e;
+  --color-warning: #c9860a;
+  --overlay-scrim: rgba(40, 37, 29, 0.35);
+}
+[data-theme=obsidian] {
+  --color-bg: #13131a;
+  --color-surface-1: #1a1a24;
+  --color-surface-2: #1f1f2e;
+  --color-surface-3: #252535;
+  --color-border: #333348;
+  --color-divider: #2a2a3a;
+  --color-text: #d4d4e8;
+  --color-text-muted: #7878a0;
+  --color-text-faint: #4a4a68;
+  --color-primary: #7c6af7;
+  --color-primary-hover: #9580ff;
+  --color-primary-active: #5a4bcc;
+  --color-primary-tint: #2a2548;
+  --color-primary-fg: #ffffff;
+  --color-danger: #e05c7a;
+  --color-success: #4dbb6e;
+  --color-warning: #f0a04a;
+}
+[data-theme=forest] {
+  --color-bg: #0d1a0f;
+  --color-surface-1: #112214;
+  --color-surface-2: #142918;
+  --color-surface-3: #1a3320;
+  --color-border: #244028;
+  --color-divider: #1d3020;
+  --color-text: #c8e6ca;
+  --color-text-muted: #6a9870;
+  --color-text-faint: #3d6644;
+  --color-primary: #4dbb6e;
+  --color-primary-hover: #6dcc88;
+  --color-primary-active: #37924f;
+  --color-primary-tint: #163d20;
+  --color-primary-fg: #0b0f14;
+  --color-danger: #e05c7a;
+  --color-success: #4dbb6e;
+  --color-warning: #f0a04a;
+}
+[data-theme=ocean] {
+  --color-bg: #0d1420;
+  --color-surface-1: #101c2c;
+  --color-surface-2: #132236;
+  --color-surface-3: #182a40;
+  --color-border: #213858;
+  --color-divider: #1a2d42;
+  --color-text: #cad8f8;
+  --color-text-muted: #6888c0;
+  --color-text-faint: #3a5080;
+  --color-primary: #5b9cf6;
+  --color-primary-hover: #7ab0ff;
+  --color-primary-active: #3d7dcc;
+  --color-primary-tint: #142040;
+  --color-primary-fg: #0b0f14;
+  --color-danger: #e05c7a;
+  --color-success: #4dbb6e;
+  --color-warning: #f0a04a;
+}
+[data-theme=ember] {
+  --color-bg: #1a1108;
+  --color-surface-1: #231809;
+  --color-surface-2: #2b1e0c;
+  --color-surface-3: #352510;
+  --color-border: #3d2a14;
+  --color-divider: #2e2010;
+  --color-text: #f5deb3;
+  --color-text-muted: #b08060;
+  --color-text-faint: #6e5030;
+  --color-primary: #f0a04a;
+  --color-primary-hover: #ffb86a;
+  --color-primary-active: #c07830;
+  --color-primary-tint: #3d2510;
+  --color-primary-fg: #0b0f14;
+  --color-danger: #e05c7a;
+  --color-success: #4dbb6e;
+  --color-warning: #f0a04a;
+}
+[data-theme=rose] {
+  --color-bg: #1a0d12;
+  --color-surface-1: #22101a;
+  --color-surface-2: #2a1420;
+  --color-surface-3: #331828;
+  --color-border: #3d1a2c;
+  --color-divider: #2e1422;
+  --color-text: #f0c8d0;
+  --color-text-muted: #a06878;
+  --color-text-faint: #6e3848;
+  --color-primary: #e05c7a;
+  --color-primary-hover: #f07090;
+  --color-primary-active: #b83d5a;
+  --color-primary-tint: #3d1428;
+  --color-primary-fg: #0b0f14;
+  --color-danger: #e05c7a;
+  --color-success: #4dbb6e;
+  --color-warning: #f0a04a;
+}
+[data-theme=puma] {
+  --color-bg: #081119;
+  --color-surface-1: #0d1823;
+  --color-surface-2: #0e1925;
+  --color-surface-3: #13202e;
+  --color-border: rgba(255, 255, 255, 0.11);
+  --color-divider: rgba(255, 255, 255, 0.2);
+  --color-text: #ecf3f6;
+  --color-text-muted: #9fb2bd;
+  --color-text-faint: #728796;
+  --color-primary: #3fbf9c;
+  --color-primary-hover: #6cd7b4;
+  --color-primary-active: #35a888;
+  --color-primary-tint: rgba(63, 191, 156, 0.12);
+  --color-primary-fg: #0b0f14;
+  --color-danger: #ff8a8a;
+  --color-success: #3fbf9c;
+  --color-warning: #fbbf24;
+  --font-body: "Sora", var(--font-body-fallback);
+  --font-mono: "IBM Plex Mono", var(--font-mono-fallback);
+}
+
+/* web/shared/css/components.css */
+.ui-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay-scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  font-family: var(--font-body);
+}
+.ui-modal-panel {
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  min-width: 20em;
+  max-width: min(32em, calc(100vw - 2em));
+  max-height: calc(100vh - 2em);
+  overflow: auto;
+  box-shadow: var(--shadow-md);
+  padding: 1.25em;
+}
+.ui-modal-title {
+  font-size: 1.05em;
+  font-weight: 600;
+  margin: 0 0 0.75em 0;
+}
+.ui-modal-message {
+  margin: 0 0 1em 0;
+  white-space: pre-wrap;
+  line-height: 1.4;
+}
+.ui-modal-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.5em;
+  margin-bottom: 1em;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  font-size: 1em;
+}
+.ui-modal-input:focus-visible {
+  outline: none;
+  border-color: var(--color-primary);
+}
+.ui-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5em;
+}
+.ui-modal-btn {
+  padding: 0.45em 1em;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-3);
+  color: var(--color-text);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.9em;
+}
+.ui-modal-btn:hover {
+  border-color: var(--color-primary);
+}
+.ui-modal-btn:focus-visible {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary-hover);
+}
+.ui-modal-btn-primary {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-primary-fg);
+}
+.ui-modal-btn-primary:hover {
+  background: var(--color-primary-hover);
+}
+
+/* web/shared/css/index.css */

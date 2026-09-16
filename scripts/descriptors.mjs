@@ -30,7 +30,9 @@
 //   sharedConsumer true for descriptors that import `@shared` — selects the
 //                  `@shared` onResolve plugin, the driver's format:"esm"
 //                  assertion, and bundle-shape.mjs's input set. Absent on all
-//                  seven descriptors below; first appears at C5.
+//                  nine descriptors below (including `shared` and
+//                  `shared-css`, added at C4 — they ARE the library, not a
+//                  consumer of it); first appears at C5.
 
 // Placeholder for a `define` value the build driver computes rather than one
 // this data module can hold. The driver substitutes the ADR-004 content
@@ -38,6 +40,28 @@
 export const BUILD_TIME_DIGEST = "@build-time-digest";
 
 export const descriptors = [
+  // Shared descriptors run first (driver rule 1): every other descriptor's
+  // consumer status is orthogonal, but the shared bundle and shared sheet
+  // must exist before anything that might resolve @shared or link
+  // /shared/dist/shared.css. Neither carries sharedConsumer — they ARE the
+  // library, not a consumer of it.
+  {
+    name: "shared",
+    entry: ["web/shared/ts/index.ts"],
+    mode: "bundle",
+    out: "web/shared/dist/shared.mjs",
+    bundle: true,
+    format: "esm",
+    target: "es2020",
+  },
+  {
+    name: "shared-css",
+    entry: ["web/shared/css/index.css"],
+    mode: "bundle",
+    out: "web/shared/dist/shared.css",
+    bundle: true,
+    external: ["*.woff2"],
+  },
   {
     name: "obsidianoid",
     entry: ["web/obsidianoid/js/threads.ts", "web/obsidianoid/js/app.ts"],
@@ -120,4 +144,4 @@ export const descriptors = [
 // failure rather than a silent pass (A7.3). The value moves during the
 // sequence — 12 through C3, 14 after C4, 15 after C5 — and each move is an
 // edit to this one line.
-export const EXPECTED_ARTIFACT_COUNT = 12;
+export const EXPECTED_ARTIFACT_COUNT = 14;

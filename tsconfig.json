@@ -6,7 +6,12 @@
     "jsx": "react-jsx",
     "strict": true,
     "noEmit": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "paths": {
+      "@shared": ["./web/shared/ts/index.ts"],
+      "@shared/*": ["./web/shared/ts/*"]
+    }
   },
-  "include": ["web/obsidianoid/js/*.ts", "web/slideshow/js/*.ts", "web/multissh/js/*.ts", "web/certmachine/js/*.ts", "web/taskmaster/js/**/*.ts", "web/smbedit/src/**/*.ts", "web/smbedit/src/**/*.tsx", "web/issuetracker/src/**/*.ts", "web/issuetracker/src/**/*.tsx"]
+  "include": ["web/obsidianoid/js/*.ts", "web/slideshow/js/*.ts", "web/multissh/js/*.ts", "web/certmachine/js/*.ts", "web/taskmaster/js/**/*.ts", "web/smbedit/src/**/*.ts", "web/smbedit/src/**/*.tsx", "web/issuetracker/src/**/*.ts", "web/issuetracker/src/**/*.tsx", "web/shared/**/*.ts", "web/sampler/js/*.ts"],
+  "exclude": ["web/shared/dist"]
 }
