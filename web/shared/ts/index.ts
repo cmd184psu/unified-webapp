@@ -9,6 +9,7 @@
 
 export { openModal, confirmDialog, alertDialog, promptDialog } from "./modal.js";
 export type { ModalOptions, ModalHandle, DialogOptions, PromptOptions } from "./modal.js";
-export { THEMES, setTheme } from "./theme.js";
+export { THEMES, setTheme, ThemeManager } from "./theme.js";
+export type { ThemeManagerOptions } from "./theme.js";
 export { showToast } from "./toast.js";
 export type { ToastTone, ToastHandle } from "./toast.js";

@@ -172,3 +172,75 @@
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
+
+/* The .ui-theme-* rules — the shared theme picker (Step 3.2). Donor:
+   web/obsidianoid/css/app.css:787-812 (#theme-options, .theme-btn,
+   .theme-swatch), retokenized through §4.3's rename table: the donor's
+   --color-surface-offset becomes --color-surface-3 and its
+   --color-primary-highlight becomes --color-primary-tint, both
+   value-preserving. The donor's hard-coded white-at-15%-alpha swatch border
+   at :810 becomes var(--color-border) (FRD :257-261, B3.7) — a literal that
+   was invisible on light themes, which is the whole point of tokenizing it.
+   The donor leans on
+   obsidianoid's global button reset, which a shared sheet cannot assume, so
+   .ui-theme-btn carries its own background/border/cursor the way
+   .ui-toast-close does, and its .active state is renamed .is-active to match
+   the .ui-* state idiom.
+   The swatch fill is var(--color-primary) and nothing else (ADR-015, §0
+   Decision 4): every themes.css block is keyed on a BARE attribute selector,
+   so the data-theme ThemeManager.renderPicker() stamps on each swatch sets
+   that swatch's OWN --color-primary and eight swatches render eight distinct
+   fills in one open picker (B4.2). One selector, not eight, and no colour
+   literal — clause 7's selector rule (:310-316) and colour-literal rule
+   (:304-308) both hold, and no inline style.background is written at all.
+   Declared consequence: a theme block sets every colour token on the stamped
+   element, so the swatch's own border follows the PREVIEWED theme's
+   --color-border — a deliberate micro-preview, and what makes the border
+   legible on light and dark swatches alike (ledger row 15 / D-15). */
+
+.ui-theme-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.ui-theme-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.ui-theme-btn:hover {
+  background: var(--color-surface-3);
+  color: var(--color-text);
+}
+
+.ui-theme-btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.ui-theme-btn.is-active {
+  background: var(--color-primary-tint);
+  color: var(--color-primary);
+}
+
+.ui-theme-swatch {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+}

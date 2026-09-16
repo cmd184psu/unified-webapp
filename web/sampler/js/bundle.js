@@ -1,6 +1,14 @@
 // web/sampler/js/main.ts
 import * as shared from "/shared/dist/shared.mjs";
-var { THEMES, setTheme, openModal, confirmDialog, alertDialog, promptDialog, showToast } = shared;
+var { THEMES, ThemeManager, openModal, confirmDialog, alertDialog, promptDialog, showToast } = shared;
+var themes = new ThemeManager({
+  module: "sampler",
+  default: "dark",
+  onChange: (name) => {
+    const select = document.getElementById("theme-select");
+    if (select instanceof HTMLSelectElement) select.value = name;
+  }
+});
 var COLOR_TOKENS = [
   "--color-bg",
   "--color-surface-1",
@@ -53,14 +61,19 @@ var STRUCTURAL_TOKENS = [
 function buildThemeSelect() {
   const select = document.getElementById("theme-select");
   if (!(select instanceof HTMLSelectElement)) return;
-  for (const theme of THEMES) {
+  for (const theme of themes.list) {
     const option = document.createElement("option");
     option.value = theme;
     option.textContent = theme;
     select.appendChild(option);
   }
   select.value = document.documentElement.dataset.theme ?? THEMES[0];
-  select.addEventListener("change", () => setTheme(select.value));
+  select.addEventListener("change", () => themes.set(select.value));
+}
+function buildThemePicker() {
+  const host = document.getElementById("theme-picker");
+  if (!host) return;
+  themes.renderPicker(host);
 }
 function buildSwatches() {
   const grid = document.getElementById("swatch-grid");
@@ -199,7 +212,9 @@ function buildToastDemos() {
     container.appendChild(row);
   }
 }
+themes.apply();
 buildThemeSelect();
+buildThemePicker();
 buildSwatches();
 buildSpecimens();
 buildModalDemos();

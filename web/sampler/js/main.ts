@@ -6,7 +6,35 @@
 
 import * as shared from "@shared";
 
-const { THEMES, setTheme, openModal, confirmDialog, alertDialog, promptDialog, showToast } = shared;
+const { THEMES, ThemeManager, openModal, confirmDialog, alertDialog, promptDialog, showToast } = shared;
+
+// The sampler's ThemeManager (phase2 §5 Step 3.5). `default: "dark"` is the
+// typed-config floor — present by construction and unreachable at runtime,
+// because the `system` step resolves under every matchMedia outcome (§5
+// Step 3.1). `setTheme` is no longer destructured here: themes.set() is the
+// persisting path, and setTheme stays the barrel's primitive (ADR-008).
+//
+// Two sanctioned deltas land with this instance, both stated in Step 3.5.
+// (1) The sampler becomes the first module with PERSISTED theme selection.
+// (2) Its default render becomes OS-DEPENDENT: index.html:2 carries no
+//     data-theme, so before C3 the page rendered `dark` unconditionally from
+//     themes.css:15's `:root, [data-theme="dark"]` half; now, on a fresh
+//     profile, resolution falls through empty storage and an absent
+//     serverDefault() to the `system` step — `light` under
+//     prefers-color-scheme: light or no-preference, `dark` only when the OS
+//     asks for dark. This is the one place the `system` step reaches a pixel
+//     in Phase 2. B10.5's premise is about the STYLESHEET, which does not
+//     move; what moves is which attribute the page stamps on itself.
+const themes = new ThemeManager({
+  module: "sampler",
+  default: "dark",
+  onChange: (name) => {
+    // Keep the header <select> and the swatch picker — two views of one state
+    // — in agreement when the choice is made in the other one.
+    const select = document.getElementById("theme-select");
+    if (select instanceof HTMLSelectElement) select.value = name;
+  },
+});
 
 // Table T1 -- the 18 --color-* keys every theme in web/shared/css/themes.css
 // declares. Not a second theme list (that would violate FRD :226-228): this
@@ -68,7 +96,7 @@ function buildThemeSelect(): void {
   const select = document.getElementById("theme-select");
   if (!(select instanceof HTMLSelectElement)) return;
 
-  for (const theme of THEMES) {
+  for (const theme of themes.list) {
     const option = document.createElement("option");
     option.value = theme;
     option.textContent = theme;
@@ -76,7 +104,17 @@ function buildThemeSelect(): void {
   }
 
   select.value = document.documentElement.dataset.theme ?? THEMES[0];
-  select.addEventListener("change", () => setTheme(select.value));
+  select.addEventListener("change", () => themes.set(select.value));
+}
+
+// The Theme picker section (phase2 §5 Step 3.5). The shared .ui-theme-picker
+// swatch grid, built by the same ThemeManager method HamburgerMenu mounts at
+// C4 — one definition of "how the picker is built", and the section B10.3
+// requires for this component.
+function buildThemePicker(): void {
+  const host = document.getElementById("theme-picker");
+  if (!host) return;
+  themes.renderPicker(host);
 }
 
 function buildSwatches(): void {
@@ -265,7 +303,11 @@ function buildToastDemos(): void {
   }
 }
 
+// apply() first: buildThemeSelect() reads the stamped attribute back to seed
+// the <select>, so the resolution has to have run before it does.
+themes.apply();
 buildThemeSelect();
+buildThemePicker();
 buildSwatches();
 buildSpecimens();
 buildModalDemos();

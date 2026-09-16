@@ -219,6 +219,116 @@ var THEMES = [
 function setTheme(name) {
   document.documentElement.dataset.theme = name;
 }
+var ThemeManager = class {
+  constructor(options) {
+    /**
+     * The roster pickers enumerate (FRD :256). Deliberately the same set as
+     * THEMES and nothing more (B3.5): `system` is the resolver's implicit third
+     * step, not an offerable name — it is absent here, absent from THEMES, and
+     * rejected on read-back from storage (§10 ledger row 22).
+     */
+    this.list = THEMES;
+    this.options = options;
+    this.media = matchMedia("(prefers-color-scheme: dark)");
+    this.media.addEventListener("change", () => {
+      if (this.storedTheme() !== void 0) return;
+      if (this.options.serverDefault?.() !== void 0) return;
+      this.apply();
+    });
+  }
+  /** Applies the resolved theme. Callable pre-paint, idempotent, and silent. */
+  apply() {
+    setTheme(this.resolve());
+  }
+  /**
+   * Re-runs the resolution order against the closures' CURRENT values and
+   * applies the result, without writing storage (ADR-008's v2 amendment,
+   * B3.10). Same operation as apply(): the separate name is the entry point
+   * obsidianoid's fetchVaults/switchVault call when the per-vault storage key
+   * changes under a live instance, and delegating keeps resolution in one
+   * place. Not writing is the load-bearing half — a writing reresolve() would
+   * overwrite the destination vault's saved choice with the source vault's.
+   */
+  reresolve() {
+    this.apply();
+  }
+  /** Writes storage, applies, and fires onChange. */
+  set(name) {
+    localStorage.setItem(this.storageKey(), name);
+    setTheme(name);
+    this.options.onChange?.(name);
+  }
+  /**
+   * Renders the shared swatch picker into `host` — the widget HamburgerMenu
+   * mounts at C4, so it has one definition and lives here beside the
+   * resolution it drives. Every node is built through createElement and every
+   * label is a text node — no markup string is assigned anywhere in this file
+   * (B3.6), unlike the donor at obsidianoid's `app.ts:438`. No colour value
+   * reaches this file either: each swatch carries `data-theme`, and themes.css
+   * keys every palette on a BARE attribute selector, so a swatch sets its OWN
+   * --color-primary and eight swatches render eight fills in one open picker
+   * (ADR-015, B4.2).
+   */
+  renderPicker(host) {
+    const picker = document.createElement("div");
+    picker.className = "ui-theme-picker";
+    const current = this.resolve();
+    const buttons = [];
+    for (const name of this.list) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = name === current ? "ui-theme-btn is-active" : "ui-theme-btn";
+      const swatch = document.createElement("span");
+      swatch.className = "ui-theme-swatch";
+      swatch.dataset.theme = name;
+      button.append(swatch, name);
+      button.addEventListener("click", () => {
+        this.set(name);
+        for (const other of buttons) {
+          other.className = other === button ? "ui-theme-btn is-active" : "ui-theme-btn";
+        }
+      });
+      buttons.push(button);
+      picker.append(button);
+    }
+    host.append(picker);
+  }
+  /** The storage key in force right now — `ui-theme:<module>` unless overridden. */
+  storageKey() {
+    const override = this.options.storageKey;
+    return override ? override() : `ui-theme:${this.options.module}`;
+  }
+  /**
+   * Step 1. Every value read from storage is validated against THEMES before
+   * use, so an unknown stored string falls through to the next step rather
+   * than stamping a nonexistent theme (B3.2).
+   */
+  storedTheme() {
+    const raw = localStorage.getItem(this.storageKey());
+    if (raw === null) return void 0;
+    return THEMES.includes(raw) ? raw : void 0;
+  }
+  /**
+   * Step 3. `matches` → dark; everything else, `no-preference` included,
+   * → light (§15 row 9). This step therefore ALWAYS resolves.
+   */
+  systemTheme() {
+    return this.media.matches ? "dark" : "light";
+  }
+  /**
+   * The resolution order, FRD :245-247: localStorage → serverDefault() →
+   * system → default. Step 3 always answers, which makes the trailing
+   * `?? this.options.default` the typed-config floor §5 Step 3.1 declares it
+   * to be — present, in order, and unreachable at runtime.
+   */
+  resolve() {
+    const stored = this.storedTheme();
+    if (stored !== void 0) return stored;
+    const server = this.options.serverDefault?.();
+    if (server !== void 0) return server;
+    return this.systemTheme() ?? this.options.default;
+  }
+};
 
 // web/shared/ts/toast.ts
 var DEFAULT_DURATION_MS = {
@@ -265,6 +375,7 @@ function showToast(message, tone = "notice", durationMs = DEFAULT_DURATION_MS[to
 }
 export {
   THEMES,
+  ThemeManager,
   alertDialog,
   confirmDialog,
   openModal,

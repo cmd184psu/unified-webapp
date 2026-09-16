@@ -53,6 +53,36 @@ the "3 at once" button, and verify per theme:
   bottom-right stack (one `role="status"` region), newest below, and none
   overlaps the others.
 
+Each theme section also carries a **Theme picker** row (Phase-2 C3). From the
+"Theme picker" section of the sampler — the shared `.ui-theme-picker` swatch
+grid that `HamburgerMenu` will mount at C4 — verify per theme:
+
+- **8 swatch fills distinct** — all eight swatches are visible at once and no
+  two render the same colour. Each swatch carries its own `data-theme`, so it
+  previews *that* theme's `--color-primary` rather than the active theme's
+  (ADR-015); eight identical fills is the specific defect this row catches.
+- **Swatch border legible** — every swatch's `var(--color-border)` ring is
+  visible against the row background, on light and dark swatches alike. This
+  is the row that replaces the donor's hard-coded
+  `rgba(255,255,255,0.15)`, which was invisible on light themes.
+- **Active row marked** — exactly one `.ui-theme-btn` carries `.is-active`, and
+  it is the theme currently applied.
+- **Hover and focus visible** — hovering a row changes its background, and
+  keyboard focus draws a ring (`:focus-visible`) distinguishable from hover.
+- **Picking applies and persists** — clicking a swatch re-themes the page
+  immediately, moves `.is-active`, updates the header `<select>` to match, and
+  survives a reload (`localStorage` key `ui-theme:sampler`).
+
+Note on the sampler's *first* render (Phase-2 C3, sanctioned delta). Before C3
+the page rendered `dark` unconditionally: `index.html:2` carries no
+`data-theme` and `web/shared/css/themes.css:15`'s `:root` half supplies dark.
+From C3 the page is backed by a `ThemeManager`, so with no stored choice its
+first render follows the **OS preference** — `light` under
+`prefers-color-scheme: light` or `no-preference`, `dark` only when the OS asks
+for dark. Set the OS preference explicitly before recording anything that
+depends on the starting theme, and note that once any theme has been picked the
+stored choice wins over the OS on every later load.
+
 Do not check the boxes below without actually performing the pass in a
 browser for that theme.
 
@@ -69,6 +99,10 @@ browser for that theme.
 | --- | --- | --- | --- | --- | --- | --- |
 | showToast | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 
+| Theme picker | 8 swatch fills distinct | Swatch border legible | Active row marked | Hover and focus visible | Picking applies and persists |
+| --- | --- | --- | --- | --- | --- |
+| .ui-theme-picker | [ ] | [ ] | [ ] | [ ] | [ ] |
+
 ## light
 
 | Dialog | Tab cycles+wraps | Shift-Tab wraps back | Escape closes | Focus returns to invoker | Backdrop mousedown closes | Primary-button text legible | Nothing unreadable |
@@ -81,6 +115,10 @@ browser for that theme.
 | Toasts | success legible | error legible | notice legible | error stays until dismissed | × dismisses | 3 at once stack in one region |
 | --- | --- | --- | --- | --- | --- | --- |
 | showToast | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
+
+| Theme picker | 8 swatch fills distinct | Swatch border legible | Active row marked | Hover and focus visible | Picking applies and persists |
+| --- | --- | --- | --- | --- | --- |
+| .ui-theme-picker | [ ] | [ ] | [ ] | [ ] | [ ] |
 
 ## obsidian
 
@@ -99,6 +137,10 @@ before this theme's row can be checked off.
 | --- | --- | --- | --- | --- | --- | --- |
 | showToast | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 
+| Theme picker | 8 swatch fills distinct | Swatch border legible | Active row marked | Hover and focus visible | Picking applies and persists |
+| --- | --- | --- | --- | --- | --- |
+| .ui-theme-picker | [ ] | [ ] | [ ] | [ ] | [ ] |
+
 ## forest
 
 | Dialog | Tab cycles+wraps | Shift-Tab wraps back | Escape closes | Focus returns to invoker | Backdrop mousedown closes | Primary-button text legible | Nothing unreadable |
@@ -111,6 +153,10 @@ before this theme's row can be checked off.
 | Toasts | success legible | error legible | notice legible | error stays until dismissed | × dismisses | 3 at once stack in one region |
 | --- | --- | --- | --- | --- | --- | --- |
 | showToast | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
+
+| Theme picker | 8 swatch fills distinct | Swatch border legible | Active row marked | Hover and focus visible | Picking applies and persists |
+| --- | --- | --- | --- | --- | --- |
+| .ui-theme-picker | [ ] | [ ] | [ ] | [ ] | [ ] |
 
 ## ocean
 
@@ -125,6 +171,10 @@ before this theme's row can be checked off.
 | --- | --- | --- | --- | --- | --- | --- |
 | showToast | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 
+| Theme picker | 8 swatch fills distinct | Swatch border legible | Active row marked | Hover and focus visible | Picking applies and persists |
+| --- | --- | --- | --- | --- | --- |
+| .ui-theme-picker | [ ] | [ ] | [ ] | [ ] | [ ] |
+
 ## ember
 
 | Dialog | Tab cycles+wraps | Shift-Tab wraps back | Escape closes | Focus returns to invoker | Backdrop mousedown closes | Primary-button text legible | Nothing unreadable |
@@ -137,6 +187,10 @@ before this theme's row can be checked off.
 | Toasts | success legible | error legible | notice legible | error stays until dismissed | × dismisses | 3 at once stack in one region |
 | --- | --- | --- | --- | --- | --- | --- |
 | showToast | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
+
+| Theme picker | 8 swatch fills distinct | Swatch border legible | Active row marked | Hover and focus visible | Picking applies and persists |
+| --- | --- | --- | --- | --- | --- |
+| .ui-theme-picker | [ ] | [ ] | [ ] | [ ] | [ ] |
 
 ## rose
 
@@ -151,6 +205,10 @@ before this theme's row can be checked off.
 | --- | --- | --- | --- | --- | --- | --- |
 | showToast | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 
+| Theme picker | 8 swatch fills distinct | Swatch border legible | Active row marked | Hover and focus visible | Picking applies and persists |
+| --- | --- | --- | --- | --- | --- |
+| .ui-theme-picker | [ ] | [ ] | [ ] | [ ] | [ ] |
+
 ## puma
 
 | Dialog | Tab cycles+wraps | Shift-Tab wraps back | Escape closes | Focus returns to invoker | Backdrop mousedown closes | Primary-button text legible | Nothing unreadable |
@@ -163,3 +221,7 @@ before this theme's row can be checked off.
 | Toasts | success legible | error legible | notice legible | error stays until dismissed | × dismisses | 3 at once stack in one region |
 | --- | --- | --- | --- | --- | --- | --- |
 | showToast | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
+
+| Theme picker | 8 swatch fills distinct | Swatch border legible | Active row marked | Hover and focus visible | Picking applies and persists |
+| --- | --- | --- | --- | --- | --- |
+| .ui-theme-picker | [ ] | [ ] | [ ] | [ ] | [ ] |

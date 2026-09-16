@@ -3,9 +3,11 @@
 // §3 Step 5).
 //
 // Asserts that web/shared/ts/index.ts's exported-name set EQUALS the
-// allowlist below: 7 named values + 6 types (phase2 §5 Step 2.4 added
-// showToast, ToastTone and ToastHandle in the same commit as the barrel line
-// that exports them — BX.2). Missing and extra are both
+// allowlist below: 8 named values + 7 types (phase2 §5 Step 2.4 added
+// showToast, ToastTone and ToastHandle, and §5 Step 3.3 added ThemeManager and
+// ThemeManagerOptions, each in the same commit as the barrel line that exports
+// them — BX.2. ThemeManager's reresolve() is a METHOD, not an export, so it
+// moves neither count). Missing and extra are both
 // failures, reported by name — a symbol added to modal.ts or theme.ts and
 // forgotten in the barrel fails here rather than producing an `undefined`
 // import in a browser, and a symbol added to the barrel without a decision
@@ -24,8 +26,8 @@ process.chdir(path.resolve(import.meta.dirname, ".."));
 
 const BARREL = "web/shared/ts/index.ts";
 
-const ALLOWED_VALUES = ["openModal", "confirmDialog", "alertDialog", "promptDialog", "THEMES", "setTheme", "showToast"];
-const ALLOWED_TYPES = ["ModalOptions", "ModalHandle", "DialogOptions", "PromptOptions", "ToastTone", "ToastHandle"];
+const ALLOWED_VALUES = ["openModal", "confirmDialog", "alertDialog", "promptDialog", "THEMES", "setTheme", "ThemeManager", "showToast"];
+const ALLOWED_TYPES = ["ModalOptions", "ModalHandle", "DialogOptions", "PromptOptions", "ThemeManagerOptions", "ToastTone", "ToastHandle"];
 
 function fail(message) {
   process.stderr.write(`check-shared-barrel: FAIL ${message}\n`);
