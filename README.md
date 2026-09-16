@@ -26,6 +26,7 @@ Open `~/.unified-webapp.json` and fill in:
 
 - `host_routing` — map hostname → module name
 - Module `static_dir` and `data_dir` / `data_file` paths (use absolute paths in production)
+- `server.shared_static_dir` — directory holding the shared asset tree served at `/shared/` on every module host (defaults to `./web/shared`; must contain `dist/` and/or `public/` subdirectories)
 
 Minimal example with all seven modules. Multiple hostnames can map to the same module — useful for adding `-test` aliases that won't collide with live services on your network:
 

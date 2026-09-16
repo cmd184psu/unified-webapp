@@ -52,6 +52,7 @@ import (
 	"cmd184psu/unified-webapp/internal/platform/auth"
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/platform/middleware"
+	"cmd184psu/unified-webapp/internal/platform/static"
 )
 
 // modulePinFile writes pin to a fresh 0400 file under a new t.TempDir() and
@@ -97,7 +98,7 @@ func buildControlDispatcher(cfg *config.Config) *Dispatcher {
 				if c, ok := hh.(io.Closer); ok {
 					dispatch.closers = append(dispatch.closers, c)
 				}
-				h = middleware.BodyLimit(limitFor(module, cfg), hh)
+				h = middleware.BodyLimit(limitFor(module, cfg), static.WithShared(hh, cfg.Server.SharedStaticDir))
 			}
 			built[module] = h
 		}
@@ -1224,6 +1225,189 @@ func TestT5_6_RestartEquivalence(t *testing.T) {
 			t.Errorf("non-auth config sections differ after config.Load:\n got: %s\nwant: %s", gotJSON, wantJSON)
 		}
 	})
+}
+
+// ---------------------------------------------------------------------
+// A8.2 / A8.3: /shared/ wired on every module host (C3, FR-8).
+// ---------------------------------------------------------------------
+
+// allModulesRouteConfig builds a config that routes every module in
+// knownModules to its own hostname (module name + ".example"), each
+// buildable from scratch under t.TempDir(), with server.shared_static_dir
+// pointing at a fixture carrying dist/shared.css -- /shared/dist/shared.css
+// does not exist in the repo tree until C4, so this test drives its own
+// fixture rather than the real web/shared tree. Returns cfg and the admin
+// operator PIN the caller needs to log in on the admin host (admin is always
+// protected, matrix or not).
+func allModulesRouteConfig(t *testing.T) (cfg *config.Config, adminPIN string) {
+	t.Helper()
+	cfg = config.DefaultConfig()
+	cfg.Routing = map[string]string{}
+	for _, module := range knownModules {
+		cfg.Routing[module+".example"] = module
+	}
+
+	sharedDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(sharedDir, "dist"), 0o755); err != nil {
+		t.Fatalf("mkdir shared dist: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedDir, "dist", "shared.css"), []byte("body{}"), 0o644); err != nil {
+		t.Fatalf("write shared.css: %v", err)
+	}
+	cfg.Server.SharedStaticDir = sharedDir
+
+	cfg.Grocery.StaticDir = mkStaticDir(t)
+	cfg.Grocery.DataFile = filepath.Join(t.TempDir(), "grocery.json")
+
+	cfg.Todo.StaticDir = mkStaticDir(t)
+	cfg.Todo.DataDir = t.TempDir()
+
+	cfg.Slideshow.StaticDir = mkStaticDir(t)
+	cfg.Slideshow.ImageDir = t.TempDir()
+
+	cfg.Obsidianoid.StaticDir = mkStaticDir(t)
+	cfg.Obsidianoid.DataDir = t.TempDir()
+	cfg.Obsidianoid.Vaults = []config.ObsidianoidVault{{Path: t.TempDir(), Name: "test"}}
+
+	cfg.Menuserver.StaticDir = mkStaticDir(t)
+	cfg.Menuserver.DataDir = t.TempDir()
+
+	sshRoot := t.TempDir()
+	sshDir := filepath.Join(sshRoot, "ssh")
+	if err := os.MkdirAll(sshDir, 0o755); err != nil {
+		t.Fatalf("mkdir ssh: %v", err)
+	}
+	cfg.Multissh.StaticDir = mkStaticDir(t)
+	cfg.Multissh.SSHDir = sshDir
+	cfg.Multissh.UploadDir = filepath.Join(sshRoot, "uploads")
+	cfg.Multissh.HostsPath = filepath.Join(sshRoot, "data", "hosts.json")
+	cfg.Multissh.BrowseRoot = filepath.Join(sshRoot, "uploads")
+	cfg.Multissh.MaxSessions = 3
+	cfg.Multissh.MaxUploadBytes = 1 << 20
+
+	cfg.Certmachine.StaticDir = mkStaticDir(t)
+	cfg.Certmachine.DBPath = filepath.Join(t.TempDir(), "certmachine.db")
+
+	cfg.Taskmaster.StaticDir = mkStaticDir(t)
+	cfg.Taskmaster.DBPath = filepath.Join(t.TempDir(), "taskmaster.db")
+
+	cfg.Admin.StaticDir = mkStaticDir(t)
+
+	cfg.Utuber.StaticDir = mkStaticDir(t)
+	cfg.Utuber.DownloadDir = t.TempDir()
+	cfg.Utuber.Workers = 0
+	cfg.Utuber.PythonBin = "python3.12"
+
+	cfg.Smbedit.StaticDir = mkStaticDir(t)
+	cfg.Smbedit.DataDir = t.TempDir()
+
+	cfg.IssueTracker.StaticDir = mkStaticDir(t)
+	cfg.IssueTracker.DBPath = filepath.Join(t.TempDir(), "issuetracker.db")
+	cfg.IssueTracker.DefaultUser = config.IssueTrackerDefaultUser{Name: "Default", Email: "default@example.com"}
+
+	cfg.Timetracker.StaticDir = mkStaticDir(t)
+	cfg.Timetracker.DataFile = filepath.Join(t.TempDir(), "timetracker.json")
+
+	adminPIN = "9999"
+	cfg.Auth = config.AuthConfig{
+		AdminPINFile: modulePinFile(t, adminPIN),
+		DataDir:      t.TempDir(),
+	}
+	return cfg, adminPIN
+}
+
+// TestSharedRouteMatrixNeverServesA404 is the A8.2 table-driven test: for
+// every module in knownModules, /shared/dist/shared.css on that module's
+// host is 200 (module built) or 503 (unavailableHandler -- module.Build
+// failed, or admin without a session, so the request never reaches
+// static.WithShared), NEVER 404, and /shared/ts/modal.ts -- a real file
+// outside the dist/public allowlist -- 404s whenever the route was actually
+// reachable (i.e. whenever shared.css was 200). This is the direct
+// regression guard for /shared/ silently falling through to a module's own
+// catch-all handler instead of static.WithShared intercepting it first.
+func TestSharedRouteMatrixNeverServesA404(t *testing.T) {
+	cfg, adminPIN := allModulesRouteConfig(t)
+	adminRouted := adminIsRouted(cfg.Routing)
+	svc, err := auth.FromConfig(cfg.Auth, knownModules, adminRouted)
+	if err != nil {
+		t.Fatalf("auth.FromConfig: %v", err)
+	}
+	srv := newGateServer(t, cfg, svc)
+	defer srv.Close()
+
+	loginRes := doHost(t, srv, http.MethodPost, "admin.example", "/api/auth/login", `{"method":"pin","pin":"`+adminPIN+`"}`)
+	loginBody, _ := io.ReadAll(loginRes.Body)
+	loginRes.Body.Close()
+	if loginRes.StatusCode != http.StatusOK {
+		t.Fatalf("admin operator PIN login: status = %d, want 200 (body %q)", loginRes.StatusCode, loginBody)
+	}
+	adminCookie, ok := firstSetCookie(loginRes)
+	if !ok {
+		t.Fatal("admin operator PIN login: expected a Set-Cookie")
+	}
+
+	for _, module := range knownModules {
+		t.Run(module, func(t *testing.T) {
+			host := module + ".example"
+			var cssRes *http.Response
+			if module == "admin" {
+				cssRes = doHostWithCookie(t, srv, http.MethodGet, host, "/shared/dist/shared.css", adminCookie)
+			} else {
+				cssRes = doHostWithCookie(t, srv, http.MethodGet, host, "/shared/dist/shared.css", nil)
+			}
+			cssBody, _ := io.ReadAll(cssRes.Body)
+			cssRes.Body.Close()
+			if cssRes.StatusCode != http.StatusOK && cssRes.StatusCode != http.StatusServiceUnavailable {
+				t.Fatalf("GET %s/shared/dist/shared.css: status = %d, want 200 or 503 (body %q)", host, cssRes.StatusCode, cssBody)
+			}
+			if cssRes.StatusCode == http.StatusNotFound {
+				t.Fatalf("GET %s/shared/dist/shared.css: got 404, never allowed", host)
+			}
+
+			var tsRes *http.Response
+			if module == "admin" {
+				tsRes = doHostWithCookie(t, srv, http.MethodGet, host, "/shared/ts/modal.ts", adminCookie)
+			} else {
+				tsRes = doHostWithCookie(t, srv, http.MethodGet, host, "/shared/ts/modal.ts", nil)
+			}
+			tsBody, _ := io.ReadAll(tsRes.Body)
+			tsRes.Body.Close()
+			if cssRes.StatusCode == http.StatusOK {
+				// Route was actually reachable through static.WithShared:
+				// the first-segment allowlist must reject ts/.
+				if tsRes.StatusCode != http.StatusNotFound {
+					t.Fatalf("GET %s/shared/ts/modal.ts: status = %d, want 404 (body %q)", host, tsRes.StatusCode, tsBody)
+				}
+			} else {
+				// The module never built (503): the request never reached
+				// static.WithShared at all, so the same 503 is expected here
+				// too, and it must still never be 404.
+				if tsRes.StatusCode != cssRes.StatusCode {
+					t.Fatalf("GET %s/shared/ts/modal.ts: status = %d, want %d (unavailable, matching shared.css)", host, tsRes.StatusCode, cssRes.StatusCode)
+				}
+			}
+		})
+	}
+}
+
+// TestCertmachineRouteHasNonEmptyClosers is the A8.3 companion: a
+// certmachine-routed dispatcher's closers slice is non-empty, the direct
+// regression guard for iteration-2's blocker 1 (static.WithShared sits
+// inside svc.Gate and after the io.Closer append in buildDispatcher, so no
+// module's closer -- certmachine's today, or a future module's -- is
+// erased by the /shared/ wiring).
+func TestCertmachineRouteHasNonEmptyClosers(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Certmachine.StaticDir = mkStaticDir(t)
+	cfg.Certmachine.DBPath = filepath.Join(t.TempDir(), "certmachine.db")
+	cfg.Routing = map[string]string{"certmachine.example": "certmachine"}
+
+	dispatch := buildDispatcher(cfg, noAuthService(t))
+	defer dispatch.Close()
+
+	if len(dispatch.closers) == 0 {
+		t.Fatal("expected dispatch.closers to be non-empty for a certmachine route")
+	}
 }
 
 // ---------------------------------------------------------------------

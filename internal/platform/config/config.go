@@ -209,6 +209,9 @@ type ServerConfig struct {
 	// SSEMaxSubscribers caps concurrent SSE subscribers per broker across all
 	// modules. 0 (unset) takes DefaultSSEMaxSubscribers.
 	SSEMaxSubscribers int `json:"sse_max_subscribers"`
+	// SharedStaticDir is the directory holding the shared asset tree served at
+	// /shared/ on every module host. Empty disables the mount.
+	SharedStaticDir string `json:"shared_static_dir"`
 }
 
 // DefaultSSEMaxSubscribers is the SSE subscriber cap applied when
@@ -666,6 +669,9 @@ func applyServerDefaults(cfg *Config) {
 	cfg.Slideshow.SSEMaxSubscribers = max
 	cfg.Obsidianoid.SSEMaxSubscribers = max
 	cfg.Taskmaster.SSEMaxSubscribers = max
+	if cfg.Server.SharedStaticDir == "" {
+		cfg.Server.SharedStaticDir = "./web/shared"
+	}
 }
 
 func expandMenuserverPaths(m *MenuserverConfig) error {

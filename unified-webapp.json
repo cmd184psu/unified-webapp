@@ -9,6 +9,9 @@
     "menuserver.cmdhome.net": "menuserver",
     "obsidianoid.cmdhome.net": "obsidianoid"
   },
+  "server": {
+    "shared_static_dir": "./web/shared"
+  },
   "grocery": {
     "static_dir": "./web/grocery",
     "data_file": "./data/grocery.json",

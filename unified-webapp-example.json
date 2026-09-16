@@ -23,7 +23,8 @@
   },
   "server": {
     "origin_check": "enforce",
-    "sse_max_subscribers": 64
+    "sse_max_subscribers": 64,
+    "shared_static_dir": "./web/shared"
   },
   "grocery": {
     "static_dir": "./web/grocery",

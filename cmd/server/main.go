@@ -33,6 +33,7 @@ import (
 	"cmd184psu/unified-webapp/internal/platform/auth"
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/platform/middleware"
+	"cmd184psu/unified-webapp/internal/platform/static"
 	"cmd184psu/unified-webapp/internal/slideshow"
 	"cmd184psu/unified-webapp/internal/smbedit"
 	"cmd184psu/unified-webapp/internal/taskmaster"
@@ -123,6 +124,8 @@ func main() {
 	if *flagKey != "" {
 		cfg.TLSKey = *flagKey
 	}
+
+	warnSharedStaticDir(cfg.Server.SharedStaticDir)
 
 	adminRouted := adminIsRouted(cfg.Routing)
 	svc, err := auth.FromConfig(cfg.Auth, knownModules, adminRouted)
@@ -286,6 +289,25 @@ func newServer(addr string, handler http.Handler) *http.Server {
 // The same table records failures. A module that cannot build gets a handler
 // that 503s with the reason, so one bad path takes down that module's
 // hostnames and leaves the rest of the binary serving.
+// warnSharedStaticDir logs a warning (not a failure) when dir does not stat
+// as a readable directory, matching the posture of the per-module
+// checkStaticDir helpers (internal/certmachine/build.go, internal/multissh,
+// internal/smbedit) while staying non-fatal: an operator who has not yet
+// deployed web/shared/ should still get a running binary.
+func warnSharedStaticDir(dir string) {
+	if dir == "" {
+		return
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		log.Printf("WARNING: server.shared_static_dir %q: %v; /shared/ will 404 on every request", dir, err)
+		return
+	}
+	if !info.IsDir() {
+		log.Printf("WARNING: server.shared_static_dir %q is not a directory; /shared/ will 404 on every request", dir)
+	}
+}
+
 func buildDispatcher(cfg *config.Config, svc *auth.Service) *Dispatcher {
 	dispatch := newDispatcher()
 	built := make(map[string]http.Handler, len(cfg.Routing))
@@ -300,7 +322,7 @@ func buildDispatcher(cfg *config.Config, svc *auth.Service) *Dispatcher {
 				if c, ok := hh.(io.Closer); ok {
 					dispatch.closers = append(dispatch.closers, c)
 				}
-				h = middleware.BodyLimit(limitFor(module, cfg), svc.Gate(module, hh))
+				h = middleware.BodyLimit(limitFor(module, cfg), svc.Gate(module, static.WithShared(hh, cfg.Server.SharedStaticDir)))
 			}
 			built[module] = h
 		}
