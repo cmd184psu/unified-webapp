@@ -3,7 +3,9 @@
 // §3 Step 5).
 //
 // Asserts that web/shared/ts/index.ts's exported-name set EQUALS the
-// allowlist below: 6 named values + 4 types. Missing and extra are both
+// allowlist below: 7 named values + 6 types (phase2 §5 Step 2.4 added
+// showToast, ToastTone and ToastHandle in the same commit as the barrel line
+// that exports them — BX.2). Missing and extra are both
 // failures, reported by name — a symbol added to modal.ts or theme.ts and
 // forgotten in the barrel fails here rather than producing an `undefined`
 // import in a browser, and a symbol added to the barrel without a decision
@@ -22,8 +24,8 @@ process.chdir(path.resolve(import.meta.dirname, ".."));
 
 const BARREL = "web/shared/ts/index.ts";
 
-const ALLOWED_VALUES = ["openModal", "confirmDialog", "alertDialog", "promptDialog", "THEMES", "setTheme"];
-const ALLOWED_TYPES = ["ModalOptions", "ModalHandle", "DialogOptions", "PromptOptions"];
+const ALLOWED_VALUES = ["openModal", "confirmDialog", "alertDialog", "promptDialog", "THEMES", "setTheme", "showToast"];
+const ALLOWED_TYPES = ["ModalOptions", "ModalHandle", "DialogOptions", "PromptOptions", "ToastTone", "ToastHandle"];
 
 function fail(message) {
   process.stderr.write(`check-shared-barrel: FAIL ${message}\n`);

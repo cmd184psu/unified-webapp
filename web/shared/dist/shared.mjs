@@ -219,11 +219,56 @@ var THEMES = [
 function setTheme(name) {
   document.documentElement.dataset.theme = name;
 }
+
+// web/shared/ts/toast.ts
+var DEFAULT_DURATION_MS = {
+  success: 6e3,
+  notice: 8e3,
+  error: 0
+};
+var stack = null;
+function ensureStack() {
+  if (stack && document.body.contains(stack)) return stack;
+  stack = document.createElement("div");
+  stack.className = "ui-toast-stack";
+  stack.setAttribute("role", "status");
+  stack.setAttribute("aria-live", "polite");
+  document.body.append(stack);
+  return stack;
+}
+function showToast(message, tone = "notice", durationMs = DEFAULT_DURATION_MS[tone]) {
+  const container = ensureStack();
+  const node = document.createElement("div");
+  node.className = "ui-toast";
+  node.dataset.tone = tone;
+  const text = document.createElement("p");
+  text.className = "ui-toast-text";
+  text.textContent = message;
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "ui-toast-close";
+  close.textContent = "\xD7";
+  close.setAttribute("aria-label", "Dismiss");
+  node.append(text, close);
+  container.append(node);
+  let timer = null;
+  let dismissed = false;
+  const dismiss = () => {
+    if (dismissed) return;
+    dismissed = true;
+    if (timer !== null) clearTimeout(timer);
+    node.remove();
+  };
+  close.addEventListener("click", dismiss);
+  if (durationMs > 0) timer = setTimeout(dismiss, durationMs);
+  return { dismiss };
+}
 export {
   THEMES,
   alertDialog,
   confirmDialog,
   openModal,
   promptDialog,
-  setTheme
+  setTheme,
+  showToast
 };

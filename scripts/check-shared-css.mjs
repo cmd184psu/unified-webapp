@@ -99,6 +99,12 @@ const THEME_ALLOW = ["--font-body", "--font-mono", "--overlay-scrim"];
 const EXPECTED_COLOR_DECLARATIONS = THEME_SELECTORS.length * T1.length; // 144
 const EXPECTED_FONT_FACES = 15;
 
+// Clause 7's subject is every sheet in CSS_DIR except these four, which have
+// clauses of their own (3 / 4-5-6 / 10 / 8) and legitimately declare no .ui-
+// selector. Naming the exemptions rather than the subject is what makes the
+// clause fail closed on a sheet nobody thought to add (Step 2.3(a)).
+const CLAUSE7_EXEMPT = ["tokens.css", "themes.css", "fonts.css", "index.css"];
+
 const COLOUR_LITERAL = /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i;
 const UI_SELECTOR = /^\.ui-[a-z0-9-]+/;
 // Font binaries and images carry no custom-property names; clause 11 skips them.
@@ -139,14 +145,36 @@ function normalizeSelector(selector) {
 // every depth-1 block as {selector, declarations[], line}. Blocks whose
 // selector starts with `@` are skipped, so a @media/@supports wrapper cannot
 // masquerade as a rule.
-function parseBlocks(text) {
+//
+// `{ intoAtRules: true }` (phase2 §5 Step 2.3(b)) replaces each at-rule block
+// with the blocks *inside* it instead of dropping it, so a rule written inside
+// a @media reaches clause 7's selector loop. It is opt-in, and only clause 7
+// passes it: clauses 3, 4 and 5 are set-equality and running-total assertions
+// over a file modelled as flat (exactly one `:root` block; a roster equal to
+// THEME_SELECTORS; EXPECTED_COLOR_DECLARATIONS --color-* cells), so an
+// unconditional descent would let one `@media print` in tokens.css or
+// themes.css fail clause 3, 4 or 5 with a message naming the wrong problem.
+//
+// POST-CONDITION, and the whole reason the descent carries an offset: for
+// every block returned at any depth, `text.split("\n")[b.line - 1]` contains
+// that block's selector — i.e. `line` is always the block's line in the FILE,
+// never its offset inside the at-rule body being walked. This reuses the
+// idiom the scanner already has one level down, where `bodyLine` is captured
+// as the depth-1 `{` opens and handed to parseDeclarations(bodyBuf, bodyLine)
+// so each declaration reconstructs its absolute coordinate. The descent hands
+// the same `bodyLine` to the recursive parseBlocks call as `startLine`.
+// B1.4 probe 1 pins it: the clause-7 failure line for a selector nested in a
+// @media is that selector's own line number in the file.
+function parseBlocks(text, options = {}) {
+  const intoAtRules = options.intoAtRules === true;
+  const startLine = options.startLine ?? 1;
   const blocks = [];
   let depth = 0;
-  let line = 1;
+  let line = startLine;
   let selBuf = "";
-  let selLine = 1;
+  let selLine = startLine;
   let bodyBuf = "";
-  let bodyLine = 1;
+  let bodyLine = startLine;
 
   for (const ch of text) {
     if (ch === "{") {
@@ -163,6 +191,8 @@ function parseBlocks(text) {
           selector: selBuf.trim().replace(/\s+/g, " "),
           declarations: parseDeclarations(bodyBuf, bodyLine),
           line: selLine,
+          body: bodyBuf,
+          bodyLine,
         });
         selBuf = "";
       } else if (depth > 1) {
@@ -180,7 +210,20 @@ function parseBlocks(text) {
     if (ch === "\n") line++;
   }
 
-  return blocks.filter((b) => !b.selector.startsWith("@"));
+  const out = [];
+  for (const block of blocks) {
+    if (!block.selector.startsWith("@")) {
+      out.push(block);
+      continue;
+    }
+    // Default: the at-rule is dropped, which is what keeps the flat model
+    // true for clauses 3-6. Opt-in: descend, passing the at-rule body's own
+    // start line so every selector/line pair comes back in file coordinates.
+    if (intoAtRules) {
+      out.push(...parseBlocks(block.body, { intoAtRules, startLine: block.bodyLine }));
+    }
+  }
+  return out;
 }
 
 // Declarations are split on `;` and each parsed as `prop: value`, with the
@@ -296,24 +339,38 @@ for (const required of ["tokens.css", "themes.css", "components.css", "index.css
   }
 }
 
-// --- clause 7 — components.css ----------------------------------------------
+// --- clause 7 — the component sheets ----------------------------------------
+//
+// Re-keyed at phase2 §5 Step 2.3(a) to fail closed: the subject is now EVERY
+// sheet in web/shared/css/ that is not one of the four exempted by name, where
+// before it named components.css and nothing else. Today that set is exactly
+// {components.css}, so behaviour is unchanged at this boundary — which is the
+// point. A future component sheet is linted without anyone remembering to add
+// it here, and the extension is verified by the existing suite still passing.
+//
+// The selector loop passes `{ intoAtRules: true }`, the descent's only caller,
+// so a rule written inside a @media is inspected rather than silently skipped.
+// The colour scan needs nothing: it is a whole-file per-line loop and has
+// always been depth-blind.
 
 {
-  const file = `${CSS_DIR}/components.css`;
-  const text = sources.get("components.css");
+  for (const [name, text] of sources) {
+    if (CLAUSE7_EXEMPT.includes(name)) continue;
+    const file = `${CSS_DIR}/${name}`;
 
-  const lines = text.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const hit = lines[i].match(COLOUR_LITERAL);
-    if (hit) fail(file, i + 1, 7, `colour literal "${hit[0]}" — every colour must come from a token`);
-  }
+    const lines = text.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const hit = lines[i].match(COLOUR_LITERAL);
+      if (hit) fail(file, i + 1, 7, `colour literal "${hit[0]}" — every colour must come from a token`);
+    }
 
-  for (const block of parseBlocks(text)) {
-    for (const selector of block.selector.split(",")) {
-      const one = selector.trim();
-      if (one === "") continue;
-      if (!UI_SELECTOR.test(one)) {
-        fail(file, block.line, 7, `selector "${one}" does not start with .ui-*`);
+    for (const block of parseBlocks(text, { intoAtRules: true })) {
+      for (const selector of block.selector.split(",")) {
+        const one = selector.trim();
+        if (one === "") continue;
+        if (!UI_SELECTOR.test(one)) {
+          fail(file, block.line, 7, `selector "${one}" does not start with .ui-*`);
+        }
       }
     }
   }

@@ -1,6 +1,6 @@
 // web/sampler/js/main.ts
 import * as shared from "/shared/dist/shared.mjs";
-var { THEMES, setTheme, openModal, confirmDialog, alertDialog, promptDialog } = shared;
+var { THEMES, setTheme, openModal, confirmDialog, alertDialog, promptDialog, showToast } = shared;
 var COLOR_TOKENS = [
   "--color-bg",
   "--color-surface-1",
@@ -152,7 +152,55 @@ function buildModalDemos() {
     container.appendChild(row);
   }
 }
+function buildToastDemos() {
+  const container = document.getElementById("toast-demos");
+  if (!container) return;
+  const demos = [
+    {
+      label: "success",
+      source: 'showToast("Saved.", "success");',
+      run: () => showToast("Saved.", "success")
+    },
+    {
+      label: "error (sticky)",
+      source: 'showToast("Could not save: disk full.", "error");',
+      run: () => showToast("Could not save: disk full.", "error")
+    },
+    {
+      label: "notice",
+      source: 'showToast("Nothing to do.", "notice");',
+      run: () => showToast("Nothing to do.", "notice")
+    },
+    {
+      label: "3 at once",
+      source: 'showToast("First.", "success");\nshowToast("Second.", "notice");\nshowToast("Third.", "error");',
+      run: () => {
+        showToast("First.", "success");
+        showToast("Second.", "notice");
+        showToast("Third.", "error");
+      }
+    }
+  ];
+  for (const demo of demos) {
+    const row = document.createElement("div");
+    row.className = "sampler-modal-demo";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ui-modal-btn ui-modal-btn-primary";
+    button.textContent = demo.label;
+    button.addEventListener("click", () => {
+      void demo.run();
+    });
+    row.appendChild(button);
+    const pre = document.createElement("pre");
+    pre.className = "sampler-modal-source";
+    pre.textContent = demo.source;
+    row.appendChild(pre);
+    container.appendChild(row);
+  }
+}
 buildThemeSelect();
 buildSwatches();
 buildSpecimens();
 buildModalDemos();
+buildToastDemos();

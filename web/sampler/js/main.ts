@@ -6,7 +6,7 @@
 
 import * as shared from "@shared";
 
-const { THEMES, setTheme, openModal, confirmDialog, alertDialog, promptDialog } = shared;
+const { THEMES, setTheme, openModal, confirmDialog, alertDialog, promptDialog, showToast } = shared;
 
 // Table T1 -- the 18 --color-* keys every theme in web/shared/css/themes.css
 // declares. Not a second theme list (that would violate FRD :226-228): this
@@ -203,7 +203,70 @@ function buildModalDemos(): void {
   }
 }
 
+// The Toasts section (phase2 §5 Step 2.6). Same row shape as
+// buildModalDemos() above — a button that runs the demo and a <pre> carrying
+// the source that produced it — one row per tone plus a stacking row, which is
+// the only way the "one aria-live region for N toasts" property (B5.1/B5.5) is
+// visible on the page rather than only in the unit suite. `error` is sticky by
+// design, so its row is also the one that demonstrates the close button.
+function buildToastDemos(): void {
+  const container = document.getElementById("toast-demos");
+  if (!container) return;
+
+  const demos: ModalDemo[] = [
+    {
+      label: "success",
+      source: 'showToast("Saved.", "success");',
+      run: () => showToast("Saved.", "success"),
+    },
+    {
+      label: "error (sticky)",
+      source: 'showToast("Could not save: disk full.", "error");',
+      run: () => showToast("Could not save: disk full.", "error"),
+    },
+    {
+      label: "notice",
+      source: 'showToast("Nothing to do.", "notice");',
+      run: () => showToast("Nothing to do.", "notice"),
+    },
+    {
+      label: "3 at once",
+      source:
+        'showToast("First.", "success");\n' +
+        'showToast("Second.", "notice");\n' +
+        'showToast("Third.", "error");',
+      run: () => {
+        showToast("First.", "success");
+        showToast("Second.", "notice");
+        showToast("Third.", "error");
+      },
+    },
+  ];
+
+  for (const demo of demos) {
+    const row = document.createElement("div");
+    row.className = "sampler-modal-demo";
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ui-modal-btn ui-modal-btn-primary";
+    button.textContent = demo.label;
+    button.addEventListener("click", () => {
+      void demo.run();
+    });
+    row.appendChild(button);
+
+    const pre = document.createElement("pre");
+    pre.className = "sampler-modal-source";
+    pre.textContent = demo.source;
+    row.appendChild(pre);
+
+    container.appendChild(row);
+  }
+}
+
 buildThemeSelect();
 buildSwatches();
 buildSpecimens();
 buildModalDemos();
+buildToastDemos();

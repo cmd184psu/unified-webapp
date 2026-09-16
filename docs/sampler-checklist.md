@@ -3,8 +3,8 @@
 This is the manual verification surface for the behaviour Phase-1 automated
 tests do not cover (ADR-005: no jsdom). It is checked once per theme before
 C5 is considered done, and re-run in every later phase that touches shared
-CSS (`web/shared/css/`) or the shared modal primitive
-(`web/shared/ts/modal.ts`).
+CSS (`web/shared/css/`) or a shared primitive (`web/shared/ts/modal.ts`,
+`web/shared/ts/toast.ts`).
 
 For each of the 8 themes (`THEMES` in `web/shared/ts/theme.ts`), open the
 sampler page (`/`), select the theme from the theme `<select>`, then open
@@ -37,6 +37,22 @@ meaningful for `openModal` as they already were for the three dialog helpers,
 which have always built real buttons. Any tick in those two cells recorded
 before C1 should be re-taken.
 
+Each theme section also carries a **Toasts** row (Phase-2 C2). From the
+"Toasts" section of the sampler, press each of the three tone buttons and then
+the "3 at once" button, and verify per theme:
+
+- **success / error / notice legible** — the toast's text and its tone border
+  are both readable against `--color-surface-1` in this theme, and the three
+  tones are distinguishable from one another.
+- **error stays until dismissed** — the `error` toast is sticky
+  (`durationMs === 0`); it must still be on screen after the `success` and
+  `notice` toasts have auto-dismissed.
+- **× dismisses** — the close button removes that one toast and leaves the
+  others alone.
+- **3 at once stack in one region** — the three toasts appear in a single
+  bottom-right stack (one `role="status"` region), newest below, and none
+  overlaps the others.
+
 Do not check the boxes below without actually performing the pass in a
 browser for that theme.
 
@@ -49,6 +65,10 @@ browser for that theme.
 | alertDialog | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 | promptDialog | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 
+| Toasts | success legible | error legible | notice legible | error stays until dismissed | × dismisses | 3 at once stack in one region |
+| --- | --- | --- | --- | --- | --- | --- |
+| showToast | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
+
 ## light
 
 | Dialog | Tab cycles+wraps | Shift-Tab wraps back | Escape closes | Focus returns to invoker | Backdrop mousedown closes | Primary-button text legible | Nothing unreadable |
@@ -57,6 +77,10 @@ browser for that theme.
 | confirmDialog | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 | alertDialog | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 | promptDialog | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
+
+| Toasts | success legible | error legible | notice legible | error stays until dismissed | × dismisses | 3 at once stack in one region |
+| --- | --- | --- | --- | --- | --- | --- |
+| showToast | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 
 ## obsidian
 
@@ -71,6 +95,10 @@ before this theme's row can be checked off.
 | alertDialog | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 | promptDialog | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 
+| Toasts | success legible | error legible | notice legible | error stays until dismissed | × dismisses | 3 at once stack in one region |
+| --- | --- | --- | --- | --- | --- | --- |
+| showToast | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
+
 ## forest
 
 | Dialog | Tab cycles+wraps | Shift-Tab wraps back | Escape closes | Focus returns to invoker | Backdrop mousedown closes | Primary-button text legible | Nothing unreadable |
@@ -79,6 +107,10 @@ before this theme's row can be checked off.
 | confirmDialog | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 | alertDialog | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 | promptDialog | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
+
+| Toasts | success legible | error legible | notice legible | error stays until dismissed | × dismisses | 3 at once stack in one region |
+| --- | --- | --- | --- | --- | --- | --- |
+| showToast | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 
 ## ocean
 
@@ -89,6 +121,10 @@ before this theme's row can be checked off.
 | alertDialog | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 | promptDialog | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 
+| Toasts | success legible | error legible | notice legible | error stays until dismissed | × dismisses | 3 at once stack in one region |
+| --- | --- | --- | --- | --- | --- | --- |
+| showToast | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
+
 ## ember
 
 | Dialog | Tab cycles+wraps | Shift-Tab wraps back | Escape closes | Focus returns to invoker | Backdrop mousedown closes | Primary-button text legible | Nothing unreadable |
@@ -97,6 +133,10 @@ before this theme's row can be checked off.
 | confirmDialog | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 | alertDialog | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 | promptDialog | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
+
+| Toasts | success legible | error legible | notice legible | error stays until dismissed | × dismisses | 3 at once stack in one region |
+| --- | --- | --- | --- | --- | --- | --- |
+| showToast | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 
 ## rose
 
@@ -107,6 +147,10 @@ before this theme's row can be checked off.
 | alertDialog | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 | promptDialog | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 
+| Toasts | success legible | error legible | notice legible | error stays until dismissed | × dismisses | 3 at once stack in one region |
+| --- | --- | --- | --- | --- | --- | --- |
+| showToast | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
+
 ## puma
 
 | Dialog | Tab cycles+wraps | Shift-Tab wraps back | Escape closes | Focus returns to invoker | Backdrop mousedown closes | Primary-button text legible | Nothing unreadable |
@@ -115,3 +159,7 @@ before this theme's row can be checked off.
 | confirmDialog | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 | alertDialog | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 | promptDialog | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
+
+| Toasts | success legible | error legible | notice legible | error stays until dismissed | × dismisses | 3 at once stack in one region |
+| --- | --- | --- | --- | --- | --- | --- |
+| showToast | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |

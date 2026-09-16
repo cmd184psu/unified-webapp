@@ -35,13 +35,14 @@ function fail(message) {
 
 // The four suites test:web ran before C4, plus web/grocery/app.test.js
 // (driver rule 11), plus web/shared/ts/modal.test.ts, added here at C4
-// (A7.13).
+// (A7.13), plus web/shared/ts/toast.test.ts, added at phase2 C2 (§5 Step 2.5).
 const suites = [
   { name: "sshcommand", entry: "web/multissh/js/sshcommand.test.ts", runner: "esbuild-cjs" },
   { name: "certmachine-status", entry: "web/certmachine/js/status.test.ts", runner: "esbuild-cjs" },
   { name: "certmachine-listmodel", entry: "web/certmachine/js/listmodel.test.ts", runner: "esbuild-cjs" },
   { name: "certmachine-generate", entry: "web/certmachine/js/generate.test.ts", runner: "esbuild-cjs" },
   { name: "shared-modal", entry: "web/shared/ts/modal.test.ts", runner: "esbuild-cjs" },
+  { name: "shared-toast", entry: "web/shared/ts/toast.test.ts", runner: "esbuild-cjs" },
   { name: "grocery", entry: "web/grocery/app.test.js", runner: "node-test" },
 ];
 
