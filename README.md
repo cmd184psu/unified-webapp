@@ -189,6 +189,25 @@ make run
 
 ---
 
+## Before Committing
+
+There is no CI on this repository; the gate suite only runs when you run it.
+
+```bash
+make check
+```
+
+`make check` is the required pre-commit gate. It composes `web-verify`
+(committed web artifacts byte-identical to a fresh build), `test-web`
+(all web test suites), `gates` (the `scripts/gates/*.mjs` +
+`scripts/check-shared-*.mjs` invariant scripts), and `test` (Go tests).
+
+Go source hygiene is mandated separately and deliberately **not** folded
+into `check`: run `gofmt -l .` (must print nothing) and `go vet ./...`
+before committing Go changes.
+
+---
+
 ## Local Testing (No DNS, No HAProxy)
 
 The server dispatches on the `Host` header, so a plain `http://localhost:8080` in a browser sends `Host: localhost` — which won't match any module unless you add a `"localhost"` entry. Three options:
