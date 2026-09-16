@@ -2,6 +2,7 @@
    structural tokens, then the per-theme colour matrix, then the rules that
    consume them. C1b prepends the fonts sheet ahead of these three. */
 
+@import "fonts.css";
 @import "tokens.css";
 @import "themes.css";
 @import "components.css";
