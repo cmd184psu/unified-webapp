@@ -13,6 +13,14 @@
 //   const name = await promptDialog("Lane name:", { defaultValue: "New lane" });
 //   const handle = openModal(myContentEl, { title: "Details" });
 //   handle.close();
+//
+// One import, added at phase2 C4: the focus trap's element predicate moved to
+// ./focusable.ts so menu.ts's trap can reuse it instead of declaring a second
+// copy (§5 Step 4.1, §10 ledger row 8, B4.8). Nothing else changed here — the
+// public surface, the call order and the trap's behaviour are identical, which
+// is what modal.test.ts still proves.
+
+import { getFocusable } from "./focusable.js";
 
 export interface ModalOptions {
   title?: string;
@@ -62,14 +70,6 @@ export function openModal(contentEl: HTMLElement, opts: ModalOptions = {}): Moda
 
   let closed = false;
 
-  function getFocusable(): HTMLElement[] {
-    return Array.from(
-      panel.querySelectorAll<HTMLElement>(
-        'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
-      )
-    );
-  }
-
   function onKeydown(e: KeyboardEvent): void {
     if (e.key === "Escape" && closeOnEscape) {
       e.preventDefault();
@@ -77,7 +77,7 @@ export function openModal(contentEl: HTMLElement, opts: ModalOptions = {}): Moda
       return;
     }
     if (e.key === "Tab") {
-      const focusable = getFocusable();
+      const focusable = getFocusable(panel);
       if (focusable.length === 0) {
         e.preventDefault();
         panel.focus();
@@ -117,7 +117,7 @@ export function openModal(contentEl: HTMLElement, opts: ModalOptions = {}): Moda
   overlay.addEventListener("mousedown", onOverlayClick);
 
   // Initial focus: first focusable element in the content, else the panel.
-  const focusable = getFocusable();
+  const focusable = getFocusable(panel);
   (focusable[0] ?? panel).focus();
 
   return { overlay, panel, close };

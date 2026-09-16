@@ -1,6 +1,6 @@
 // web/sampler/js/main.ts
 import * as shared from "/shared/dist/shared.mjs";
-var { THEMES, ThemeManager, openModal, confirmDialog, alertDialog, promptDialog, showToast } = shared;
+var { THEMES, ThemeManager, HamburgerMenu, openModal, confirmDialog, alertDialog, promptDialog, showToast } = shared;
 var themes = new ThemeManager({
   module: "sampler",
   default: "dark",
@@ -212,6 +212,108 @@ function buildToastDemos() {
     container.appendChild(row);
   }
 }
+function buildMenu() {
+  const mount = document.getElementById("menu-mount");
+  const container = document.getElementById("menu-demos");
+  if (!mount || !container) return;
+  const guard = { visible: true };
+  const menu = new HamburgerMenu({
+    title: "Sampler menu",
+    themePicker: true,
+    themes,
+    items: [
+      {
+        id: "menu-toast",
+        label: "Show a toast",
+        onSelect: () => showToast("Picked from the drawer.", "success")
+      },
+      {
+        id: "menu-dialog",
+        label: "Open a dialog",
+        onSelect: () => {
+          void alertDialog("Opened from the drawer.");
+        }
+      },
+      { id: "menu-tokens", label: "Jump to colour tokens", href: "#swatches-heading" },
+      { separator: true },
+      { section: "Density" },
+      {
+        // The verbatim-mount proof. The <select> is built HERE, by the
+        // sampler, handed to the class once, and never rebuilt: the same node
+        // answers document.getElementById("menu-density") after any number of
+        // close/open cycles, and its selected value survives them (B4.3).
+        id: "menu-density-slot",
+        render: (host) => {
+          const select = document.createElement("select");
+          select.id = "menu-density";
+          for (const density of ["comfortable", "cosy", "compact"]) {
+            const option = document.createElement("option");
+            option.value = density;
+            option.textContent = density;
+            select.appendChild(option);
+          }
+          select.addEventListener("change", () => {
+            showToast(`Density: ${select.value}`, "notice");
+          });
+          host.appendChild(select);
+        }
+      },
+      {
+        id: "menu-guarded",
+        label: "Guarded item",
+        onSelect: () => showToast("The guarded item is still wired up.", "notice"),
+        when: () => guard.visible
+      }
+    ]
+  });
+  mount.appendChild(menu.trigger);
+  const demos = [
+    {
+      label: "open()",
+      source: "menu.open();",
+      run: () => menu.open()
+    },
+    {
+      label: "toggle()",
+      source: "menu.toggle();",
+      run: () => menu.toggle()
+    },
+    {
+      label: "flip the when() guard",
+      source: 'guard.visible = !guard.visible;\n// "Guarded item" appears or disappears on the NEXT open --\n// no addItem() or removeItem() call is involved.',
+      run: () => {
+        guard.visible = !guard.visible;
+        const verb = guard.visible ? "back on the next open" : "gone on the next open";
+        showToast(`Guard flipped: "Guarded item" is ${verb}.`, "notice");
+      }
+    },
+    {
+      label: "updateItem()",
+      source: 'menu.updateItem("menu-toast", { label: "Show a toast (renamed)" });',
+      run: () => {
+        menu.updateItem("menu-toast", { label: "Show a toast (renamed)" });
+        showToast("Renamed by id; the drawer was not rebuilt.", "success");
+      }
+    }
+  ];
+  for (const demo of demos) {
+    const row = document.createElement("div");
+    row.className = "sampler-modal-demo";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ui-modal-btn ui-modal-btn-primary";
+    button.textContent = demo.label;
+    button.addEventListener("click", () => {
+      void demo.run();
+    });
+    row.appendChild(button);
+    const pre = document.createElement("pre");
+    pre.className = "sampler-modal-source";
+    pre.textContent = demo.source;
+    row.appendChild(pre);
+    container.appendChild(row);
+  }
+}
 themes.apply();
 buildThemeSelect();
 buildThemePicker();
@@ -219,3 +321,4 @@ buildSwatches();
 buildSpecimens();
 buildModalDemos();
 buildToastDemos();
+buildMenu();

@@ -13,3 +13,5 @@ export { THEMES, setTheme, ThemeManager } from "./theme.js";
 export type { ThemeManagerOptions } from "./theme.js";
 export { showToast } from "./toast.js";
 export type { ToastTone, ToastHandle } from "./toast.js";
+export { HamburgerMenu } from "./menu.js";
+export type { HamburgerMenuOptions, MenuItem } from "./menu.js";

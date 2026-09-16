@@ -73,6 +73,47 @@ grid that `HamburgerMenu` will mount at C4 — verify per theme:
   immediately, moves `.is-active`, updates the header `<select>` to match, and
   survives a reload (`localStorage` key `ui-theme:sampler`).
 
+Each theme section also carries a **Hamburger** row (Phase-2 C4). Press the
+hamburger trigger at the left of the sampler header -- or the `open()` /
+`toggle()` buttons in the "Hamburger menu" section -- and verify per theme:
+
+- **Opens and closes** -- the drawer slides in from the left edge over a
+  `var(--overlay-scrim)` backdrop, the trigger's `aria-expanded` reads `true`
+  while it is open, and a mousedown on the backdrop closes it again.
+- **Escape closes** -- pressing Escape with the drawer open closes it.
+- **Focus returns to trigger** -- on open, focus lands on the first focusable
+  item inside the drawer; on close, by any means, it returns to the trigger.
+- **Tab trapped in drawer** -- Tab and Shift-Tab cycle only through the
+  drawer's own controls and wrap at both ends; nothing behind the backdrop
+  ever takes focus. With the drawer **shut**, Tab must not reach any of the
+  drawer's controls either: construction is eager (B4.3), so they sit in the
+  document from the first frame and `.ui-menu-drawer`'s `visibility: hidden`
+  is the only thing keeping them out of the Tab order.
+- **Backdrop legible** -- the page behind the scrim is dimmed enough that the
+  drawer reads as the foreground, and the drawer's own text, its separators
+  and its `var(--color-border)` right edge are all visible against it in this
+  theme.
+- **Slot `<select>` usable** -- the Density `<select>` mounted in the drawer's
+  `render` slot opens, selects, and fires its toast; and after a close/open
+  cycle it is the same element with the same selection still chosen (pick
+  `compact`, close the drawer, reopen it, and confirm it still reads
+  `compact`). A drawer that rebuilt its contents on open would lose the
+  selection here.
+- **8 swatch fills distinct in drawer** -- the themePicker section at the foot
+  of the drawer shows all eight swatches at once with eight different fills --
+  the same `getComputedStyle` cardinality-8 check as the "Theme picker"
+  section above (ADR-015) -- and picking one re-themes the page and the open
+  drawer together.
+
+Three of the drawer's checks are theme-independent and are recorded once
+rather than per theme:
+
+| One-off check | What it proves | Done |
+| --- | --- | --- |
+| Every item kind is present and functional | B4.2's sampler row: two action items (each fires its handler and closes the drawer), one `<a href>` link item (keyboard-activatable, jumps to "Colour tokens"), one `.ui-menu-separator`, one `.ui-menu-label` section header, the `render` slot, the guarded item, and the themePicker section | [ ] |
+| "flip the when() guard" hides and restores "Guarded item" on the **next** open | B4.4: the guard is re-read on every open rather than cached at construction, and no `addItem`/`removeItem` call is involved | [ ] |
+| With `prefers-reduced-motion: reduce` set in the OS, the drawer and the backdrop appear and disappear with no slide and no fade | B4.9, and that the suppression is CSS-only: the `@media` block in `components.css` is the whole implementation, so there is no JavaScript branch to get wrong | [ ] |
+
 Note on the sampler's *first* render (Phase-2 C3, sanctioned delta). Before C3
 the page rendered `dark` unconditionally: `index.html:2` carries no
 `data-theme` and `web/shared/css/themes.css:15`'s `:root` half supplies dark.
@@ -103,6 +144,10 @@ browser for that theme.
 | --- | --- | --- | --- | --- | --- |
 | .ui-theme-picker | [ ] | [ ] | [ ] | [ ] | [ ] |
 
+| Hamburger | Opens and closes | Escape closes | Focus returns to trigger | Tab trapped in drawer | Backdrop legible | Slot `<select>` usable | 8 swatch fills distinct in drawer |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| .ui-menu-drawer | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
+
 ## light
 
 | Dialog | Tab cycles+wraps | Shift-Tab wraps back | Escape closes | Focus returns to invoker | Backdrop mousedown closes | Primary-button text legible | Nothing unreadable |
@@ -119,6 +164,10 @@ browser for that theme.
 | Theme picker | 8 swatch fills distinct | Swatch border legible | Active row marked | Hover and focus visible | Picking applies and persists |
 | --- | --- | --- | --- | --- | --- |
 | .ui-theme-picker | [ ] | [ ] | [ ] | [ ] | [ ] |
+
+| Hamburger | Opens and closes | Escape closes | Focus returns to trigger | Tab trapped in drawer | Backdrop legible | Slot `<select>` usable | 8 swatch fills distinct in drawer |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| .ui-menu-drawer | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 
 ## obsidian
 
@@ -141,6 +190,10 @@ before this theme's row can be checked off.
 | --- | --- | --- | --- | --- | --- |
 | .ui-theme-picker | [ ] | [ ] | [ ] | [ ] | [ ] |
 
+| Hamburger | Opens and closes | Escape closes | Focus returns to trigger | Tab trapped in drawer | Backdrop legible | Slot `<select>` usable | 8 swatch fills distinct in drawer |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| .ui-menu-drawer | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
+
 ## forest
 
 | Dialog | Tab cycles+wraps | Shift-Tab wraps back | Escape closes | Focus returns to invoker | Backdrop mousedown closes | Primary-button text legible | Nothing unreadable |
@@ -157,6 +210,10 @@ before this theme's row can be checked off.
 | Theme picker | 8 swatch fills distinct | Swatch border legible | Active row marked | Hover and focus visible | Picking applies and persists |
 | --- | --- | --- | --- | --- | --- |
 | .ui-theme-picker | [ ] | [ ] | [ ] | [ ] | [ ] |
+
+| Hamburger | Opens and closes | Escape closes | Focus returns to trigger | Tab trapped in drawer | Backdrop legible | Slot `<select>` usable | 8 swatch fills distinct in drawer |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| .ui-menu-drawer | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 
 ## ocean
 
@@ -175,6 +232,10 @@ before this theme's row can be checked off.
 | --- | --- | --- | --- | --- | --- |
 | .ui-theme-picker | [ ] | [ ] | [ ] | [ ] | [ ] |
 
+| Hamburger | Opens and closes | Escape closes | Focus returns to trigger | Tab trapped in drawer | Backdrop legible | Slot `<select>` usable | 8 swatch fills distinct in drawer |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| .ui-menu-drawer | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
+
 ## ember
 
 | Dialog | Tab cycles+wraps | Shift-Tab wraps back | Escape closes | Focus returns to invoker | Backdrop mousedown closes | Primary-button text legible | Nothing unreadable |
@@ -191,6 +252,10 @@ before this theme's row can be checked off.
 | Theme picker | 8 swatch fills distinct | Swatch border legible | Active row marked | Hover and focus visible | Picking applies and persists |
 | --- | --- | --- | --- | --- | --- |
 | .ui-theme-picker | [ ] | [ ] | [ ] | [ ] | [ ] |
+
+| Hamburger | Opens and closes | Escape closes | Focus returns to trigger | Tab trapped in drawer | Backdrop legible | Slot `<select>` usable | 8 swatch fills distinct in drawer |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| .ui-menu-drawer | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
 
 ## rose
 
@@ -209,6 +274,10 @@ before this theme's row can be checked off.
 | --- | --- | --- | --- | --- | --- |
 | .ui-theme-picker | [ ] | [ ] | [ ] | [ ] | [ ] |
 
+| Hamburger | Opens and closes | Escape closes | Focus returns to trigger | Tab trapped in drawer | Backdrop legible | Slot `<select>` usable | 8 swatch fills distinct in drawer |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| .ui-menu-drawer | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
+
 ## puma
 
 | Dialog | Tab cycles+wraps | Shift-Tab wraps back | Escape closes | Focus returns to invoker | Backdrop mousedown closes | Primary-button text legible | Nothing unreadable |
@@ -225,3 +294,7 @@ before this theme's row can be checked off.
 | Theme picker | 8 swatch fills distinct | Swatch border legible | Active row marked | Hover and focus visible | Picking applies and persists |
 | --- | --- | --- | --- | --- | --- |
 | .ui-theme-picker | [ ] | [ ] | [ ] | [ ] | [ ] |
+
+| Hamburger | Opens and closes | Escape closes | Focus returns to trigger | Tab trapped in drawer | Backdrop legible | Slot `<select>` usable | 8 swatch fills distinct in drawer |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| .ui-menu-drawer | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |

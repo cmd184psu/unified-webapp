@@ -244,3 +244,190 @@
   border-radius: var(--radius-full);
   background: var(--color-primary);
 }
+
+/* The .ui-menu-* rules — HamburgerMenu's chrome (Step 4.2). Structural donor:
+   todo's slide-in drawer (web/todo/css/todo.css's #sidebar/.sidebar group),
+   which FRD :265-269 names the most complete implementation in the repo. The
+   responsive rule at the foot of this group mirrors todo.css:617-619's
+   `.sidebar { width: 85vw }` breakpoint verbatim in value and in breakpoint.
+   The scrim is var(--overlay-scrim) — tokens.css:42, with light's override
+   already carried by themes.css — so the drawer's backdrop and the modal
+   overlay above darken the page by exactly the same amount.
+
+   menu.ts holds no colour, size or motion value at all: everything visual
+   lives here, which is why a module that needs a wider drawer restyles one
+   class instead of gaining an option. Same authoring constraints as the
+   groups above: every colour through a var(), every selector .ui-*, no
+   forced-priority declarations.
+
+   Two properties the TypeScript depends on, stated where they are
+   implemented. (1) A CLOSED DRAWER IS visibility: hidden, not merely
+   translated off-screen. Construction is eager (B4.3), so the drawer and
+   every control a module mounts into a slot sit in the document from the
+   first frame; without `visibility` those controls would stay in the Tab
+   order of a page whose drawer is shut, which would defeat the focus trap
+   from the outside. `visibility` also leaves getElementById and the mounted
+   controls' own state untouched, which is what todo's nine inline-handler
+   controls need (§5 Step 6.2). (2) THE SLIDE IS SUPPRESSED UNDER
+   prefers-reduced-motion (B4.9) by dropping the transition here, not by
+   branching in TypeScript — the media query is the whole implementation, and
+   it is also the first real at-rule this sheet has ever carried, which is
+   what B1.3's C4 leg checks clause 7 descends into. */
+
+.ui-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: var(--text-lg);
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.ui-menu-trigger:hover {
+  background: var(--color-surface-3);
+  border-color: var(--color-border);
+}
+
+.ui-menu-trigger:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.ui-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: var(--overlay-scrim);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--transition), visibility var(--transition);
+}
+
+.ui-menu-backdrop.is-open {
+  opacity: 1;
+  visibility: visible;
+}
+
+.ui-menu-drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 301;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: var(--sidebar-width);
+  max-width: 85vw;
+  padding: var(--space-4);
+  overflow-y: auto;
+  background: var(--color-surface-1);
+  color: var(--color-text);
+  border-right: 1px solid var(--color-border);
+  box-shadow: var(--shadow-md);
+  font-family: var(--font-body);
+  transform: translateX(-100%);
+  visibility: hidden;
+  transition: transform var(--transition), visibility var(--transition);
+}
+
+.ui-menu-drawer.is-open {
+  transform: translateX(0);
+  visibility: visible;
+  /* transform only: an untransitioned visibility change applies in the same
+     task, so menu.ts open()'s synchronous focus() lands on a visible element.
+     The base rule keeps visibility in its transition list, where visible ->
+     hidden interpolates as visible until progress 1 and the slide-out renders. */
+  transition: transform var(--transition);
+}
+
+.ui-menu-drawer:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.ui-menu-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-top: var(--space-2);
+}
+
+.ui-menu-label {
+  padding: 0 var(--space-3);
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ui-menu-item,
+.ui-menu-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.ui-menu-item:hover,
+.ui-menu-link:hover {
+  background: var(--color-surface-3);
+  color: var(--color-primary);
+}
+
+.ui-menu-item:focus-visible,
+.ui-menu-link:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.ui-menu-separator {
+  height: 1px;
+  margin: var(--space-2) 0;
+  background: var(--color-divider);
+}
+
+.ui-menu-slot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+}
+
+@media (max-width: 640px) {
+  .ui-menu-drawer {
+    width: 85vw;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-menu-backdrop {
+    transition: none;
+  }
+
+  .ui-menu-drawer,
+  .ui-menu-drawer.is-open {
+    transition: none;
+  }
+}

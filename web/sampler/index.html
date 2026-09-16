@@ -9,6 +9,12 @@
   </head>
   <body>
     <header class="sampler-header">
+      <!-- The HamburgerMenu trigger is appended here by js/main.ts (Step 4.5),
+           first in the header so the drawer's button sits at the left edge the
+           way FR-4 describes. The drawer and its backdrop are position: fixed
+           and are appended to <body> by the class itself, so nothing else in
+           this file has to make room for them. -->
+      <div id="menu-mount"></div>
       <h1 class="sampler-title">UI Sampler</h1>
       <label class="sampler-theme-picker">
         Theme
@@ -40,6 +46,11 @@
       <section class="sampler-section" aria-labelledby="theme-picker-heading">
         <h2 id="theme-picker-heading">Theme picker</h2>
         <div id="theme-picker"></div>
+      </section>
+
+      <section class="sampler-section" aria-labelledby="menu-heading">
+        <h2 id="menu-heading">Hamburger menu</h2>
+        <div id="menu-demos" class="sampler-modal-demos"></div>
       </section>
     </main>
 

@@ -1,3 +1,9 @@
+// web/shared/ts/focusable.ts
+var FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+function getFocusable(root) {
+  return Array.from(root.querySelectorAll(FOCUSABLE_SELECTOR));
+}
+
 // web/shared/ts/modal.ts
 function openModal(contentEl, opts = {}) {
   const closeOnEscape = opts.closeOnEscape !== false;
@@ -20,13 +26,6 @@ function openModal(contentEl, opts = {}) {
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
   let closed = false;
-  function getFocusable() {
-    return Array.from(
-      panel.querySelectorAll(
-        'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
-      )
-    );
-  }
   function onKeydown(e) {
     if (e.key === "Escape" && closeOnEscape) {
       e.preventDefault();
@@ -34,7 +33,7 @@ function openModal(contentEl, opts = {}) {
       return;
     }
     if (e.key === "Tab") {
-      const focusable2 = getFocusable();
+      const focusable2 = getFocusable(panel);
       if (focusable2.length === 0) {
         e.preventDefault();
         panel.focus();
@@ -69,7 +68,7 @@ function openModal(contentEl, opts = {}) {
   }
   document.addEventListener("keydown", onKeydown, true);
   overlay.addEventListener("mousedown", onOverlayClick);
-  const focusable = getFocusable();
+  const focusable = getFocusable(panel);
   (focusable[0] ?? panel).focus();
   return { overlay, panel, close };
 }
@@ -373,7 +372,284 @@ function showToast(message, tone = "notice", durationMs = DEFAULT_DURATION_MS[to
   if (durationMs > 0) timer = setTimeout(dismiss, durationMs);
   return { dismiss };
 }
+
+// web/shared/ts/menu.ts
+var SVG_NS = "http://www.w3.org/2000/svg";
+var instanceCount = 0;
+function isSeparator(item) {
+  return "separator" in item;
+}
+function isSection(item) {
+  return "section" in item;
+}
+function isRender(item) {
+  return "render" in item;
+}
+function isLink(item) {
+  return "href" in item;
+}
+function itemId(item) {
+  return "id" in item ? item.id : void 0;
+}
+function barsGlyph() {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 448 512");
+  svg.setAttribute("width", "1em");
+  svg.setAttribute("height", "1em");
+  svg.setAttribute("fill", "currentColor");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  for (const y of [64, 224, 384]) {
+    const bar = document.createElementNS(SVG_NS, "rect");
+    bar.setAttribute("x", "0");
+    bar.setAttribute("y", String(y));
+    bar.setAttribute("width", "448");
+    bar.setAttribute("height", "64");
+    bar.setAttribute("rx", "32");
+    svg.append(bar);
+  }
+  return svg;
+}
+var HamburgerMenu = class {
+  constructor(options) {
+    this.records = [];
+    this.bindings = [];
+    this.opened = false;
+    this.destroyed = false;
+    this.options = options;
+    const drawerId = `ui-menu-drawer-${++instanceCount}`;
+    this.drawer = document.createElement("aside");
+    this.drawer.className = "ui-menu-drawer";
+    this.drawer.id = drawerId;
+    this.drawer.setAttribute("role", "dialog");
+    this.drawer.setAttribute("aria-modal", "true");
+    this.drawer.setAttribute("aria-label", options.title ?? "Menu");
+    this.drawer.tabIndex = -1;
+    this.backdrop = document.createElement("div");
+    this.backdrop.className = "ui-menu-backdrop";
+    if (options.mountTrigger) {
+      this.trigger = options.mountTrigger;
+    } else {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "ui-menu-trigger";
+      button.setAttribute("aria-label", options.title ?? "Menu");
+      button.append(barsGlyph());
+      this.trigger = button;
+    }
+    this.trigger.setAttribute("aria-expanded", "false");
+    this.trigger.setAttribute("aria-controls", drawerId);
+    this.trigger.setAttribute("aria-haspopup", "true");
+    document.body.append(this.backdrop);
+    document.body.append(this.drawer);
+    for (const item of options.items) this.records.push(this.buildRecord(item));
+    this.picker = this.buildPicker();
+    this.bind(this.trigger, "click", () => this.toggle());
+    this.bind(this.backdrop, "mousedown", () => this.close());
+    this.bind(document, "keydown", (e) => this.onKeydown(e), true);
+    this.sync();
+  }
+  /** Opens the drawer, re-evaluating every `when()` first (B4.4). */
+  open() {
+    if (this.opened || this.destroyed) return;
+    this.opened = true;
+    this.sync();
+    this.paint();
+    const focusable = getFocusable(this.drawer);
+    (focusable[0] ?? this.drawer).focus();
+    this.options.onOpen?.();
+  }
+  /** Closes the drawer and returns focus to the trigger (B4.1). */
+  close() {
+    if (!this.opened) return;
+    this.opened = false;
+    this.paint();
+    this.trigger.focus();
+    this.options.onClose?.();
+  }
+  toggle() {
+    if (this.opened) this.close();
+    else this.open();
+  }
+  /** Appends an item. Visible from the next sync, which this call performs. */
+  addItem(item) {
+    this.records.push(this.buildRecord(item));
+    this.sync();
+  }
+  /** Removes the item with this `id`. A no-op on an unknown id (B4.5). */
+  removeItem(id) {
+    const index = this.records.findIndex((record2) => itemId(record2.item) === id);
+    if (index < 0) return;
+    const [record] = this.records.splice(index, 1);
+    this.unbindWithin(record.el);
+    record.el.remove();
+  }
+  /**
+   * Merges `patch` into the item with this `id`. A no-op on an unknown id
+   * (B4.5). The element is updated in place and never rebuilt, so a `render`
+   * slot patched here keeps the nodes its module mounted.
+   */
+  updateItem(id, patch) {
+    const record = this.records.find((r) => itemId(r.item) === id);
+    if (!record) return;
+    Object.assign(record.item, patch);
+    this.refresh(record);
+    this.sync();
+  }
+  /**
+   * Removes every listener this instance added and detaches its chrome. An
+   * adopted `mountTrigger` is left in the page with the three attributes this
+   * class set removed; a trigger this class created is detached with the rest.
+   * Listeners a module added inside its own `render` slot are its own and are
+   * deliberately not touched.
+   */
+  destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.opened = false;
+    for (const binding of this.bindings) {
+      binding.target.removeEventListener(binding.type, binding.fn, binding.capture);
+    }
+    this.bindings.length = 0;
+    this.drawer.remove();
+    this.backdrop.remove();
+    if (this.options.mountTrigger) {
+      this.trigger.removeAttribute("aria-expanded");
+      this.trigger.removeAttribute("aria-controls");
+      this.trigger.removeAttribute("aria-haspopup");
+    } else {
+      this.trigger.remove();
+    }
+  }
+  // --- internals -------------------------------------------------------------
+  bind(target, type, fn, capture = false) {
+    target.addEventListener(type, fn, capture);
+    this.bindings.push({ target, type, fn, capture });
+  }
+  /** Drops the bindings whose target is `el`, used when an item is removed. */
+  unbindWithin(el) {
+    for (let i = this.bindings.length - 1; i >= 0; i--) {
+      const binding = this.bindings[i];
+      if (binding.target !== el) continue;
+      binding.target.removeEventListener(binding.type, binding.fn, binding.capture);
+      this.bindings.splice(i, 1);
+    }
+  }
+  buildRecord(item) {
+    if (isSeparator(item)) {
+      const el2 = document.createElement("div");
+      el2.className = "ui-menu-separator";
+      el2.setAttribute("role", "separator");
+      return { item, el: el2 };
+    }
+    if (isSection(item)) {
+      const el2 = document.createElement("div");
+      el2.className = "ui-menu-label";
+      el2.textContent = item.section;
+      return { item, el: el2 };
+    }
+    if (isRender(item)) {
+      const el2 = document.createElement("div");
+      el2.className = "ui-menu-slot";
+      el2.id = item.id;
+      this.drawer.append(el2);
+      item.render(el2);
+      return { item, el: el2 };
+    }
+    if (isLink(item)) {
+      const el2 = document.createElement("a");
+      el2.className = "ui-menu-link";
+      el2.href = item.href;
+      el2.textContent = item.label;
+      return { item, el: el2 };
+    }
+    const el = document.createElement("button");
+    el.type = "button";
+    el.className = "ui-menu-item";
+    el.textContent = item.label;
+    if (item.icon !== void 0) el.dataset.icon = item.icon;
+    this.bind(el, "click", () => {
+      item.onSelect();
+      this.close();
+    });
+    return { item, el };
+  }
+  /** Re-states an item's label-ish properties after updateItem(). */
+  refresh(record) {
+    const item = record.item;
+    if (isSeparator(item) || isRender(item)) return;
+    if (isSection(item)) {
+      record.el.textContent = item.section;
+      return;
+    }
+    record.el.textContent = item.label;
+    if (isLink(item)) {
+      record.el.href = item.href;
+      return;
+    }
+    if (item.icon !== void 0) record.el.dataset.icon = item.icon;
+  }
+  buildPicker() {
+    const themes = this.options.themes;
+    if (this.options.themePicker !== true || themes === void 0) return null;
+    const section = document.createElement("div");
+    section.className = "ui-menu-section";
+    const label = document.createElement("div");
+    label.className = "ui-menu-label";
+    label.textContent = "Theme";
+    section.append(label);
+    themes.renderPicker(section);
+    return section;
+  }
+  /**
+   * Re-evaluates every `when()` and re-attaches the visible items in order.
+   * Appending a node that is already a child MOVES it, so ordering is restored
+   * without detaching anything that stays visible — and the nodes themselves
+   * are never recreated, which is what makes a slot's contents survive any
+   * number of close/open cycles.
+   */
+  sync() {
+    for (const record of this.records) {
+      const guard = record.item.when;
+      if (guard === void 0 || guard() === true) this.drawer.append(record.el);
+      else record.el.remove();
+    }
+    if (this.picker) this.drawer.append(this.picker);
+  }
+  /** The only place open/closed state reaches the DOM. */
+  paint() {
+    this.drawer.className = this.opened ? "ui-menu-drawer is-open" : "ui-menu-drawer";
+    this.backdrop.className = this.opened ? "ui-menu-backdrop is-open" : "ui-menu-backdrop";
+    this.trigger.setAttribute("aria-expanded", this.opened ? "true" : "false");
+  }
+  /** Escape closes; Tab is trapped. The predicate is ./focusable.js's (B4.8). */
+  onKeydown(e) {
+    if (!this.opened) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      this.close();
+      return;
+    }
+    if (e.key !== "Tab") return;
+    const focusable = getFocusable(this.drawer);
+    if (focusable.length === 0) {
+      e.preventDefault();
+      this.drawer.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+};
 export {
+  HamburgerMenu,
   THEMES,
   ThemeManager,
   alertDialog,
