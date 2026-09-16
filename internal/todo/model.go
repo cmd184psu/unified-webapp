@@ -38,7 +38,7 @@ type IndexItem struct {
 
 // IndexFile is the response shape for GET /items/{subject}/index.json.
 type IndexFile struct {
-	Type  string      `json:"type"`  // always "index" for directory listings
+	Type  string      `json:"type"` // always "index" for directory listings
 	Title string      `json:"title"`
 	List  []IndexItem `json:"list"`
 }

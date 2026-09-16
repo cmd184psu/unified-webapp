@@ -10,10 +10,10 @@ import (
 
 // captureExec records every Run call so tests can assert on args and simulate output.
 type captureExec struct {
-	name   string
-	args   []string
-	lines  []string
-	err    error
+	name  string
+	args  []string
+	lines []string
+	err   error
 }
 
 func (c *captureExec) Run(_ context.Context, name string, args []string, onLine func(string)) error {

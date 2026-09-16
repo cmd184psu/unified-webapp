@@ -41,8 +41,8 @@ type Conductor struct {
 	mu         sync.Mutex
 	state      ConductorState
 	subjects   []Subject
-	playlist   []int         // subject indices in current play order
-	playPos    int           // index into playlist (current subject)
+	playlist   []int              // subject indices in current play order
+	playPos    int                // index into playlist (current subject)
 	resetCh    chan time.Duration // send new duration to reset the ticker
 	broker     *broker.Broker
 	musicStore *MusicStore
