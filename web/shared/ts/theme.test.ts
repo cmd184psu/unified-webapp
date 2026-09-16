@@ -366,6 +366,213 @@ const UNTOUCHED = "untouched-by-the-listener";
   check("B3.10: reresolve() added no key", dom.storage.size === 2, `got keys ${JSON.stringify([...dom.storage.keys()])}`);
 }
 
+// --- C5b — the active mark follows the applied theme, from every path --------
+//
+// Regression for the defect C5's browser leg found: renderPicker() marked the
+// swatch the resolution reached at RENDER time and nothing moved it again, so
+// on obsidianoid — whose drawer is built eagerly, before the vault roster
+// arrives and therefore before serverDefault() can answer — the mark read
+// `light` while the root carried `obsidian`, and it stayed on the source
+// vault's theme across a vault switch. A mark on the wrong swatch is worse
+// than no mark, and C4's sampler leg could not catch it: no serverDefault and
+// no vault switch there.
+//
+// installFakeDom() is reused exactly as landed at C3. It deliberately supplies
+// no element tree, so these blocks layer a minimal element stub over the
+// `document` it installs — menu.test.ts's idiom — carrying the same
+// documentElement object through, so setTheme() still writes what is read back.
+
+class FakeElement {
+  tagName: string;
+  className = "";
+  type = "";
+  textContent = "";
+  dataset: Record<string, string> = {};
+  children: FakeElement[] = [];
+  listeners: Array<() => void> = [];
+
+  constructor(tagName: string) {
+    this.tagName = tagName;
+  }
+
+  /** A string argument is a TEXT node — renderPicker passes the label as one. */
+  append(...nodes: Array<FakeElement | string>): void {
+    for (const node of nodes) {
+      if (typeof node === "string") {
+        this.textContent += node;
+        continue;
+      }
+      this.children.push(node);
+    }
+  }
+
+  addEventListener(type: string, fn: () => void): void {
+    if (type === "click") this.listeners.push(fn);
+  }
+
+  click(): void {
+    for (const fn of [...this.listeners]) fn();
+  }
+}
+
+/** installFakeDom() plus the element factory it deliberately does not supply. */
+function installPickerDom(): ReturnType<typeof installFakeDom> {
+  const dom = installFakeDom();
+  Object.defineProperty(globalThis, "document", {
+    value: {
+      documentElement: dom.documentElement,
+      createElement: (tag: string): FakeElement => new FakeElement(tag),
+    },
+    writable: true,
+    configurable: true,
+  });
+  return dom;
+}
+
+/** Renders one picker into a fresh host and returns its swatch buttons. */
+function renderInto(themes: ThemeManager): FakeElement[] {
+  const host = new FakeElement("div");
+  themes.renderPicker(host as unknown as HTMLElement);
+  return host.children[0].children;
+}
+
+/** The names of the swatches carrying .is-active — one, or the mark is broken. */
+function marked(buttons: FakeElement[]): string[] {
+  return buttons.filter((b) => b.className.split(" ").includes("is-active")).map((b) => b.textContent);
+}
+
+{
+  const dom = installPickerDom();
+  let vault = 0;
+  const roster: Array<{ theme: string } | undefined> = [];
+  const themes = new ThemeManager({
+    module: "obsidianoid",
+    default: "obsidian",
+    storageKey: () => `obsidianoid-theme-${vault}`,
+    serverDefault: () => roster[vault]?.theme,
+  });
+
+  const buttons = renderInto(themes);
+  check(
+    "C5b: the render-time mark is the resolution in force at render time — here the system step, the roster being absent",
+    marked(buttons).join(",") === "light",
+    `got ${JSON.stringify(marked(buttons))}`,
+  );
+  check(
+    "C5b: renderPicker() marks only — it stamps no attribute, so a picker may be built before its module applies anything",
+    !("theme" in dom.documentElement.dataset),
+    `got "${dom.documentElement.dataset.theme}"`,
+  );
+
+  // Case (a) as observed in the browser: the roster lands, serverDefault()
+  // becomes answerable, fetchVaults() reresolve()s. Before this commit the
+  // root read "obsidian" while the mark still read "light".
+  roster[0] = { theme: "obsidian" };
+  roster[1] = { theme: "forest" };
+  themes.reresolve();
+  check(
+    "C5b case (a): reresolve() moves the mark onto a newly answerable serverDefault(), so the mark matches the root",
+    dom.documentElement.dataset.theme === "obsidian" && marked(buttons).join(",") === "obsidian",
+    `root "${dom.documentElement.dataset.theme}" vs marked ${JSON.stringify(marked(buttons))}`,
+  );
+  check(
+    "C5b case (a): exactly one swatch is marked",
+    marked(buttons).length === 1,
+    `got ${JSON.stringify(marked(buttons))}`,
+  );
+
+  // Case (b): a set() made AFTER render — the path that used to work only
+  // because the click handler moved the mark itself.
+  themes.set("rose");
+  check(
+    "C5b case (b): a set() made after render moves the mark to the chosen theme",
+    dom.documentElement.dataset.theme === "rose" && marked(buttons).join(",") === "rose",
+    `root "${dom.documentElement.dataset.theme}" vs marked ${JSON.stringify(marked(buttons))}`,
+  );
+
+  // Case (c): switchVault() re-runs both closures. The mark must leave the
+  // source vault's stored choice, which is exactly what it used not to do.
+  vault = 1;
+  themes.reresolve();
+  check(
+    "C5b case (c): a vault switch moves the mark off the source vault's stored choice and onto the destination's resolution",
+    dom.documentElement.dataset.theme === "forest" && marked(buttons).join(",") === "forest",
+    `root "${dom.documentElement.dataset.theme}" vs marked ${JSON.stringify(marked(buttons))}`,
+  );
+  check(
+    "C5b case (c): still exactly one swatch marked — no second mark left behind",
+    marked(buttons).length === 1,
+    `got ${JSON.stringify(marked(buttons))}`,
+  );
+}
+
+{
+  const dom = installPickerDom();
+  const themes = new ThemeManager({ module: "sampler", default: FLOOR, serverDefault: () => undefined });
+  themes.apply();
+  const buttons = renderInto(themes);
+
+  dom.media.fireChange(true);
+  check(
+    "C5b: a matchMedia change event moves the mark while the resolution is still reaching the system step",
+    dom.documentElement.dataset.theme === "dark" && marked(buttons).join(",") === "dark",
+    `root "${dom.documentElement.dataset.theme}" vs marked ${JSON.stringify(marked(buttons))}`,
+  );
+
+  dom.media.fireChange(false);
+  check(
+    "C5b: and the mark follows the OS back the other way",
+    dom.documentElement.dataset.theme === "light" && marked(buttons).join(",") === "light",
+    `root "${dom.documentElement.dataset.theme}" vs marked ${JSON.stringify(marked(buttons))}`,
+  );
+
+  // Once storage answers, the listener is ignored — and so the mark must not
+  // move either, since the applied theme did not.
+  themes.set("ember");
+  dom.media.fireChange(true);
+  check(
+    "C5b: an ignored change event moves no mark, because it applies nothing",
+    dom.documentElement.dataset.theme === "ember" && marked(buttons).join(",") === "ember",
+    `root "${dom.documentElement.dataset.theme}" vs marked ${JSON.stringify(marked(buttons))}`,
+  );
+}
+
+{
+  const dom = installPickerDom();
+  const themes = new ThemeManager({ module: "sampler", default: FLOOR });
+  // One instance, two rendered pickers — the sampler's page section and its
+  // drawer, three views of one state.
+  const section = renderInto(themes);
+  const drawer = renderInto(themes);
+
+  section[themes.list.indexOf("ember")].click();
+  check(
+    "C5b: choosing a swatch in one picker re-marks the other rendered picker too",
+    marked(section).join(",") === "ember" && marked(drawer).join(",") === "ember",
+    `section ${JSON.stringify(marked(section))} vs drawer ${JSON.stringify(marked(drawer))}`,
+  );
+
+  drawer[themes.list.indexOf("ocean")].click();
+  check(
+    "C5b: and it works in the other direction, with one mark per picker",
+    marked(section).join(",") === "ocean" &&
+      marked(drawer).join(",") === "ocean" &&
+      marked(section).length === 1 &&
+      marked(drawer).length === 1,
+    `section ${JSON.stringify(marked(section))} vs drawer ${JSON.stringify(marked(drawer))}`,
+  );
+
+  dom.storage.set("ui-theme:sampler", "puma");
+  themes.reresolve();
+  check(
+    "C5b: an outside-the-picker reresolve() re-marks every rendered picker",
+    dom.documentElement.dataset.theme === "puma" &&
+      marked(section).join(",") === "puma" &&
+      marked(drawer).join(",") === "puma",
+    `root "${dom.documentElement.dataset.theme}", section ${JSON.stringify(marked(section))}, drawer ${JSON.stringify(marked(drawer))}`,
+  );
+}
+
 // --- BX.2 — the barrel's export shape ---------------------------------------
 
 check("barrel exposes ThemeManager", typeof barrel.ThemeManager === "function", `got ${typeof barrel.ThemeManager}`);

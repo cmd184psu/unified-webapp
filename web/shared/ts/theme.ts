@@ -47,6 +47,9 @@ export interface ThemeManagerOptions {
   onChange?: (name: string) => void;
 }
 
+/** One rendered picker's buttons, each paired with the theme it selects. */
+type SwatchRows = ReadonlyArray<{ readonly name: string; readonly button: HTMLButtonElement }>;
+
 export class ThemeManager {
   /**
    * The roster pickers enumerate (FRD :256). Deliberately the same set as
@@ -58,6 +61,19 @@ export class ThemeManager {
 
   private readonly options: ThemeManagerOptions;
   private readonly media: MediaQueryList;
+
+  /**
+   * One row set per picker this instance has rendered, because one instance
+   * may render SEVERAL (the sampler's page section and its drawer; a module's
+   * drawer alone) and they are three views of one state. Kept on the instance
+   * because the active mark has to follow every theme change, including the
+   * ones made from outside a picker — set() from another picker, reresolve()
+   * once serverDefault() becomes answerable, and the system `change` listener
+   * (C5's browser leg: an eagerly built obsidianoid drawer marked the swatch
+   * resolution reached at RENDER time and then never moved it, so the mark sat
+   * on the wrong swatch, which is worse than no mark at all).
+   */
+  private readonly pickers: SwatchRows[] = [];
 
   constructor(options: ThemeManagerOptions) {
     this.options = options;
@@ -76,7 +92,7 @@ export class ThemeManager {
 
   /** Applies the resolved theme. Callable pre-paint, idempotent, and silent. */
   apply(): void {
-    setTheme(this.resolve());
+    this.stamp(this.resolve());
   }
 
   /**
@@ -95,8 +111,29 @@ export class ThemeManager {
   /** Writes storage, applies, and fires onChange. */
   set(name: string): void {
     localStorage.setItem(this.storageKey(), name);
-    setTheme(name);
+    this.stamp(name);
     this.options.onChange?.(name);
+  }
+
+  /**
+   * The one place a theme becomes the applied theme: apply() (and therefore
+   * reresolve() and the system `change` listener) and set() both route through
+   * here, so a change made anywhere re-marks every rendered picker. setTheme
+   * stays the single definition of the DOM write; this adds the mark beside
+   * it, and nothing else.
+   */
+  private stamp(name: string): void {
+    setTheme(name);
+    this.mark(name);
+  }
+
+  /** Moves the active mark to `name`'s swatch in every rendered picker. */
+  private mark(name: string): void {
+    for (const rows of this.pickers) {
+      for (const row of rows) {
+        row.button.className = row.name === name ? "ui-theme-btn is-active" : "ui-theme-btn";
+      }
+    }
   }
 
   /**
@@ -114,31 +151,32 @@ export class ThemeManager {
     const picker = document.createElement("div");
     picker.className = "ui-theme-picker";
 
-    const current = this.resolve();
-    const buttons: HTMLButtonElement[] = [];
+    const rows: Array<{ name: string; button: HTMLButtonElement }> = [];
 
     for (const name of this.list) {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = name === current ? "ui-theme-btn is-active" : "ui-theme-btn";
+      button.className = "ui-theme-btn";
 
       const swatch = document.createElement("span");
       swatch.className = "ui-theme-swatch";
       swatch.dataset.theme = name; // <- this is what makes the fill differ
       button.append(swatch, name); // the label is a text node, not markup
 
-      button.addEventListener("click", () => {
-        this.set(name);
-        for (const other of buttons) {
-          other.className = other === button ? "ui-theme-btn is-active" : "ui-theme-btn";
-        }
-      });
+      // set() re-marks every picker on this instance, so a choice made here
+      // needs no local mark-moving loop and lands on sibling pickers too.
+      button.addEventListener("click", () => this.set(name));
 
-      buttons.push(button);
+      rows.push({ name, button });
       picker.append(button);
     }
 
     host.append(picker);
+    this.pickers.push(rows);
+    // The initial mark, from the resolution in force right now. It marks only:
+    // rendering must not stamp the attribute, because a picker can be built
+    // before its module has applied anything.
+    this.mark(this.resolve());
   }
 
   /** The storage key in force right now — `ui-theme:<module>` unless overridden. */
