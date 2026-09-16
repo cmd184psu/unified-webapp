@@ -118,8 +118,9 @@ export const descriptors = [
     mode: "bundle",
     out: "web/taskmaster/js/bundle.js",
     bundle: true,
-    format: "iife",
+    format: "esm",
     target: "es2020",
+    sharedConsumer: true,
     // The value is the sentinel BUILD_TIME_DIGEST, not a literal: this module
     // is static data and the frontend stamp is a content digest the driver
     // computes in its two-pass build (Step 3 driver rule 4, ADR-004).
