@@ -1,0 +1,11 @@
+{
+  "name": "baseline-shots",
+  "private": true,
+  "description": "Standalone screenshot-baseline harness for the UI unification work. Deliberately NOT part of the repo root package.json to keep its devDependency footprint untouched.",
+  "scripts": {
+    "shoot": "node shoot.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  }
+}
