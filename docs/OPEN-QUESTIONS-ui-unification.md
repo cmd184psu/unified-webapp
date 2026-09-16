@@ -16,6 +16,18 @@ amendment C — which settled the unstamped `:root` default as **dark** — does
 reach Q3, whose subject is `--color-primary-fg`'s measured values and the
 obsidian-stamp premise, never a default direction.*
 
+*Reconciled again on **2026-09-16** against the **Phase-2** plan
+(`docs/PLAN-ui-unification-phase2.md`, v5) after three user rulings the same
+day. Three changes, all confined to this section's own questions: **Q9** moved
+from open to Closed (the `.mjs` half of Q8's carve-out is authorised, and the
+part it does not authorise is written down); **Q2** gained a dated amendment
+overriding its Phase-3 timing for `--color-surface-dynamic` and correcting two
+of its premises against the tree; and **Q3** is untouched — still open, still
+gated on C6 landing the attribute, and unaffected by either ruling. Section
+numbers in the entries below refer to the **Phase-1** plan unless a citation
+says otherwise; the Phase-2 entries added on 2026-09-16 name their plan
+explicitly, because the two plans number their sections differently.*
+
 - [ ] **Q3 — Do forest/ocean/ember/rose need `--color-primary-fg` values other
   than `#fff`?** The **values** are settled by measurement and unchanged from
   v3 (plan v5, §3 Step 1.4): `#ffffff` on light, dark, and obsidian; `#0b0f14`
@@ -37,15 +49,6 @@ obsidian-stamp premise, never a default direction.*
   Phase 2 owns taskmaster's visuals. *Deliberately left open until C6 actually
   lands the attribute: until then the justification is a promise, not a fact.*
   *Needed by: C6.*
-- [ ] **Q9 — Does Q8's allowlist carve-out extend to `.mjs`?** *(opened by v4;
-  narrowed same day.)* The `.woff2` half is **settled: yes, allowlisted** —
-  the user, asked directly (2026-09-15), said "fonts and css do not require
-  token protections", which covers `/shared/public/fonts/*.woff2` alongside
-  `GET /shared/dist/shared.css`, so a login page styled with shared tokens
-  also loads the face. What remains open is `/shared/dist/shared.mjs`:
-  executable JavaScript is a different posture question the user has not
-  spoken to, and the login page may not need the script at all. *Needed by:
-  Phase 2, before the login page is touched.* (Plan §9 item 6.)
 - [ ] **FRD correction — FR-6's affected-module list is incomplete.**
   *(new — opened by v4.)* `docs/FRD-ui-unification.md:338-341` names only
   grocery, smbedit, and todo as carrying Google Fonts `<link>`s. The tree has
@@ -84,6 +87,42 @@ obsidian-stamp premise, never a default direction.*
   consumer). Plan §9 item 5 carries the FRD FR-1 amendment so the vocabulary is
   updated when each key lands, rather than the plan and the FRD diverging
   silently. (Plan v5 §3 Step 1.2, §8 rows 3 and 6.)
+
+  > **Amended 2026-09-16 — the timing half of this answer is overridden, and
+  > the override is recorded rather than the original silently rewritten.**
+  > Asked about todo's inability to use the full theme roster, the user ruled:
+  > *"…In order for todo to enjoy the bredth of theming options, that means we
+  > need color choices to extend each theme in a way that works for todo. I'm
+  > in favor of doing exactly that: extend the themes so that any theme can be
+  > used with any module."* So `--color-surface-dynamic` lands as the **18th
+  > shared key in Phase 2, at commit C1** — not Phase 3.
+  >
+  > Both of this answer's premises were true when written and both were
+  > amended by the ruling, not refuted by it. (i) "7 donor-less values for 7
+  > themes that nothing reads" over-counts: **5** of the 8 shared themes take
+  > a value donated **verbatim** from `web/obsidianoid/css/themes.css` —
+  > `obsidian` `#2e2e42` (`:7`), `forest` (`:45`), `ocean` (`:83`), `ember`
+  > (`:121`), `rose` (`:159`) — the same donor of record obsidianoid's other
+  > five themes already use, so only **3** cells (`dark`, `light`, `puma`) are
+  > authored, by the same method `themes.css` already used for 14 of its
+  > existing cells. (ii) "exactly one
+  > consumer" is **wrong on the tree**: `grep -c 'var(--color-surface-dynamic)'
+  > web/obsidianoid/css/app.css` is **2** (`app.css:202`, `:455`). The
+  > inherited record therefore did not settle the question on accurate facts,
+  > which is part of why the user was asked again.
+  >
+  > **`--radius-xl` is not swept along.** It stays deferred on its original
+  > grounds — grocery-only, one consumer, and no module in Phase 2's manifest
+  > reads it. The ruling widens the *theme colour* vocabulary so any theme
+  > works with any module; it does not open the structural token set.
+  >
+  > Phase-2 plan: §9 **Q12** carries the full disposition, guardrail **G12**
+  > carries a closed one-item carve for exactly this token, §5 Step 1.5 is the
+  > derivation and the eight resolved values, **B1.1 part B** machine-checks
+  > the diff shape (8 added declarations, 0 other additions, 0 deletions), and
+  > deviation ledger row 14 is reversed. The broader mandate — retokenising
+  > `todo.css` and widening todo's picker past two themes — is **Phase 3+**
+  > (Phase-2 §11 items 1 and 2) and is in no Phase-2 commit manifest.
 - **Q4 — When does FR-7.3's literal tsconfig `include`
   (`["web/*/src/**/*", "web/shared/**/*"]`) land, and in the same commit as the
   `js/` → `src/` entry renames?** **Closed: coupled, same commit** — "I'm fine
@@ -157,4 +196,40 @@ obsidian-stamp premise, never a default direction.*
   **(b)** permanent inline styles in the login page — the user chose the posture
   change over the permanent fork. **Implementation is Phase 2; Phase 1 does not
   touch `gate.go`.** The scope of the carve-out beyond CSS is **not** settled by
-  this answer and is tracked as **Q9** above. Plan §9 item 7.
+  this answer and is tracked as **Q9** below. Plan §9 item 7.
+- **Q9 — Does Q8's allowlist carve-out extend to `.mjs`?** *(opened by the
+  Phase-1 plan's v4; narrowed same day.)* **Closed: yes, both halves**
+  (user, **2026-09-16**).
+
+  The `.woff2` half was settled on 2026-09-15 — "fonts and css do not require
+  token protections" — covering `/shared/public/fonts/*.woff2` alongside
+  `GET /shared/dist/shared.css`. The `.mjs` half was deliberately left open
+  because executable JavaScript is a different posture question and the login
+  page might not need the script at all. Asked directly, the user closed it:
+
+  > *"yes, the login page should use the theme previously selected."*
+
+  A login page that restores a previously selected theme must **run** the code
+  that reads the store, and that code ships only in the shared barrel — so
+  `GET /shared/dist/shared.mjs` is the ruling's minimum, not a convenience.
+  The carve-out is therefore **three exact GET-only path shapes**, not two.
+  What bounds it: the `.mjs` match is exact, so `/shared/dist/` does not become
+  a readable prefix; the method guard is unchanged, so `POST`/`HEAD` still
+  401; the handler is the same `static.SharedHandler` the authenticated
+  dispatcher already uses; and the barrel is already world-readable on every
+  unprotected module, so the change narrows an asymmetry rather than exposing
+  new content.
+
+  Implementation is **Phase 2, commit C8** — `docs/PLAN-ui-unification-phase2.md`
+  §5 Step 8, guardrails and deviation ledger row 20, criteria **B6.3**
+  (which **flips from a negative 401 probe to a positive 200 + Content-Type
+  probe** under this ruling and keeps its number), **B6.4** and **B6.5**.
+  Phase-2 §9 Q9 carries the full disposition.
+
+  **What this answer does *not* authorise.** *Styling* the login page — the FRD
+  scope item that motivated Q8 in the first place — is **still not in Phase 2**.
+  C8 makes the three assets reachable without a session; it does not add a
+  `<link>`, a pre-paint block or a theme control to `login.html`, and
+  `internal/platform/auth/gate.go`'s embedded page is otherwise untouched. That
+  remains a follow-up, tracked as Phase-2 §11 item 11. *Needed by: whoever
+  styles the login page.*
