@@ -1,202 +1,456 @@
 # Work Plan — UI Unification, Phase 1 (Foundation)
 
-**Status: DRAFT v2 — pending approval**
+**Status: v5 FINAL (amended per iteration-5 reviews) — APPROVED, ready for execution**
+
+*Iteration 5 closed the consensus loop: the Critic returned **APPROVE** with five mandatory pre-execution amendments (A–E) and the Architect, reviewing the same snapshot independently, returned two blockers (B1, B2) with specified fixes plus five mediums (M1–M5) and five optional polish items. All of them are applied; the record is the change log's subsection 7, "Amendments applied (iteration-5 close-out)". No section was renumbered and no verified fact was re-derived — this revision executes the approval's attached conditions, it is not a sixth iteration.*
 **Scope:** Phase 1 of `docs/FRD-ui-unification.md` only. FRD §7 "Resolved Decisions" is settled input, not a subject of this plan.
 **Branch:** `ui-upgrade`
 
+**Verification baseline.** Every empirical claim below was run against this tree at `3ea95a5` (branch `ui-upgrade`) with go1.27.1, node v26.0.0, esbuild 0.28.0, tsc 5.9.3. Where a reviewer's finding rested on a stale or incorrect premise, this plan says so explicitly instead of silently adopting it (§8, and the tables below).
+
+**The two rules this revision was written under.**
+
+1. *One definition per fact* — a key, artifact, file set, or count appears in exactly one place. **Operational test before deleting an occurrence:** confirm that another occurrence still defines the *same* fact. v4 deleted occurrences that were the only definition of their fact; that is how the platform half of the plan disappeared without a ledger row.
+2. *A gate is a command that was run* — and where a gate provably cannot run before execution it is labelled **[deferred]** and states what was verified in its place. §5's preamble states the census once.
+
+**What Phase 1 delivers is fixed.** FRD `:457` lists six deliverables for Phase 1. All six are in scope here; §12's self-audit clause (a) maps each to the plan sections that execute it. Shrinking the deliverable set is not an option this revision weighed, because the FRD settled it.
+
 ---
 
-## Changes from v1
+## Changes from v4
 
-Revision 2 synthesizes the Architect review (SOUND-WITH-AMENDMENTS) and the Critic review (ITERATE). Each converged blocker and the one major are resolved as follows.
+Revision 5 resolves the iteration-4 Architect review (NOT SOUND — 8 blocking B1–B8, 13 medium, 6 precision nits) and the iteration-4 Critic review (ITERATE — a 10-item "to APPROVE" list plus 4 unscored questions). Both reviewers reached the same diagnosis and recommended the same remedy, and this revision does exactly that:
 
-| # | Finding | Resolution in v2 |
+> **v4's data layer is verified exact and is kept verbatim. v4's compression (845 → 648 lines) deleted the platform half of the plan with no ledger record; that deletion is the defect, and it is reverted from v3.**
+
+So v5 grows back past v4 and past v3. Length is not the variable being optimised; *one definition per fact* is, and a fact with zero definitions fails that rule as surely as one with two.
+
+### 1 — Restorations from v3 (each was the only definition of its fact)
+
+| Restored | Where it lives in v5 | Why its deletion was a defect |
 |---|---|---|
-| **B1** | `static.WithShared(...)` wrapped *outside* certmachine's `closableHandler` erases its `io.Closer`, so `Dispatcher.Close` never closes the cert store → `database/sql` connectionOpener leaks → goleak in `cmd/server/dispatcher_auth_test.go:1242` fails → `make test` red at C3. Also puts `/shared/` outside `stripCORS`. | **Fixed by construction.** Adopted **option B2**: `/shared/` is mounted once in the dispatcher at `cmd/server/main.go:302`, *after* the `io.Closer` type assertion at :300 and *inside* `svc.Gate`. No module's return value is touched, so no closer can be erased and `stripCORS` keeps covering everything certmachine returns. v1's incorrect claim that certmachine's mux is unreachable from `build.go` is corrected in §2 (`s.mux.Handle("/", …)` is at `internal/certmachine/build.go:73`). The B1-style per-module fix is recorded in ADR-002 as the rejected alternative, with the correct `closableHandler{Handler: static.WithShared(srv.Handler(), dir), srv: srv}` form noted for the record. |
-| **B2** | Step 2's module list named `shared` (entry `web/shared/ts/index.ts`, which Step 4 creates) → esbuild 0.28.0 exits 1 on a missing entry → `npm run build` red at C2. `shared-css` *would* build and emit an artifact C2 did not list → G6's `git status --porcelain` clause trips. | **Fixed.** Both shared descriptors (`shared` and `shared-css`) move from Step 2 to **Step 4**, where their inputs exist. Step 2 is now a strict zero-output-change refactor of the existing 7 invocations. `web/shared/dist/` is added to C4's Touches column. No skip-on-missing-entry rule is introduced — a missing entry stays a hard build failure. |
-| **B3** | Pinning `TM_BUILD_TIME=1970-01-01T00:00:00Z` for reproducible diffs permanently ships "Frontend build: 1970-01-01T00:00:00Z" in taskmaster's hamburger (`web/taskmaster/js/main.ts:219`) and destroys the stale-bundle-detection capability `Makefile:5-8` and `web/taskmaster/js/buildinfo.ts` exist to provide. | **Fixed with the Critic's option.** `scripts/build-web.mjs` resolves the value as `process.env.TM_BUILD_TIME ?? git log -1 --format=%cI -- web/taskmaster ?? new Date().toISOString()`. This is simultaneously **reproducible** (same commit → same bytes, from any checkout, with no pin) and **meaningful** (it dates the frontend source, which is exactly the staleness signal the feature wants). The 1970 pin is deleted from `make web-verify` and from Steps 2 and 6. Chosen over the Architect's normalized-diff alternative because a normalized diff weakens the G2 gate for *every* future taskmaster change in order to tolerate one field, whereas the git-log source makes the field genuinely deterministic and lets G2 stay a byte-identity check across all seven bundles. See ADR-004. |
-| **B4** | ADR section was a skeleton — three `Why chosen: _(pending)_`, an undefined "Option 1", a dangling "see §6 Option 4" pointing at the Risks section. | **Fixed.** §10 now carries five written ADRs (001 shared-bundle delivery, 002 route wiring, 003 taskmaster modal adoption, 004 build-time determinism, 005 DOM test harness) with real drivers, honest bounded pros/cons, and filled *Why chosen*. ADR-003 weighs the re-export-shim option the Critic raised and **adopts it**. ADR-001's driver is corrected: dispatch is by `Host` header (`cmd/server/main.go:292`; `local-test/config.json` maps distinct hostnames per module), so each module is a separate browser origin and there is **no** cross-module HTTP cache sharing. The driver that holds is FRD §7.1's "one committed artifact in git instead of N". A10.4 now reads "fetched once per origin per load". FRD §7 itself is untouched. |
-| **MAJOR** | v1 chose per-module mounting (B1) after mispricing B2. | **B2 adopted.** ~4 edits instead of ~39, router-agnostic, dissolves the chi `Muxer` miswiring hazard, and makes A8.2 a table-driven Go test over `buildDispatcher` × `knownModules` instead of grep+curl. `MountShared` is retained as tested platform API and is the documented per-module path, used by the new `internal/sampler/build.go` so `docs/adding-a-module.md` has a concrete example. The FR-8.1 wording deviation is recorded in §8. |
+| `web/shared/css/components.css` | D1, Step 1's Creates, A1.6, A1.10, A5.2 | It is FR-5's CSS home. Without it the modal lift has nowhere to put the ~80 lines `ensureStyles()` currently injects, and `shared.css` has no Phase-1 consumer at all — which is what made v4's D6 cascade claim and its `--color-primary-fg` justification circular (Critic M-1). |
+| FR-5 modal lift: `web/shared/ts/modal.ts`, the re-export shim, the five untouched call sites, A5.1–A5.7 | Step 5, Step 7, §5 A5.x, ADR-003 | FRD `:457` deliverable. v4 mentioned "shared TS entry" and never lifted anything. **A5.5 — taskmaster's four dialogs exercised through the shim — is the only behavioural gate on C6** and was absent from v4 entirely. |
+| The `@shared` `onResolve` externalization, the ESM-format driver assertion, and the two-sided bundle-shape criterion | Step 3 driver rule 10, Step 5, §5 A9.x, ADR-001 | Without it `@shared` either inlines (violating FRD §7.1) or silently downgrades to iife and emits `__require(…)` **with exit 0** — a runtime-only failure no other gate in the plan can see. |
+| The FR-8 Go API — `SharedHandler` / `WithShared` / `MountShared` / `Muxer`, `shared_test.go`, the closer-ordering invariant, A8.1–A8.8, R7–R12, the `dispatcher_auth_test.go:100` mirror edit, and §8's FR-8.1 / FR-8.2 rows | Step 4, §5 A8.x, §6, §8, ADR-002 | FRD `:457` deliverable, and the subject of iteration-2's blocker 1 (a wrapper that erases `io.Closer`). v4 asserted A8.x against an API it no longer specified — Architect B2. |
+| The sampler's Go and config half: `internal/sampler/build.go`, `knownModules` 13 → 14, `SamplerConfig.StaticDir`, `host_routing`, `local-test/config.json`, the `auth.modules` entry | Step 6, §5 A10.1 | v4's A10.1–A10.4 asserted properties of a page **no server route ever served** — Architect B6. A gate that cannot run at its own commit boundary is not a gate. |
+| `docs/sampler-checklist.md` and `docs/adding-a-module.md` | Step 6's Creates/Modifies, A10.6, A10.8 | Three of v4's own follow-ups defer decisions *to the checklist* (§9 items 10, 11, and the legibility pass). A document that other rows depend on cannot be uncommitted. |
+| Driver rule "no absolute path on any esbuild field" | Step 3 driver rule 3, R2 | Highest-probability cause of a G2 false failure: esbuild embeds **relative** source paths as bundle comments, so one `path.resolve` rewrites every comment in every artifact at once. |
+| The `comm -12` token-overlap gate | Step 7, A9.5 | It is the mechanism behind R1 and R13. v4 kept the risk rows and deleted the mechanism. |
+| `make check`, `make test-web`, `.PHONY` maintenance | Step 3, A7.15 | "Green at every commit" is human-run (no CI); these three targets are what make it one command. |
+| ADR-001 and ADR-002 decision bodies with their rejected alternatives; ADR-003's real subject; ADR-005's live question | §10 | v4 compressed four ADRs to one sentence each, which is not an ADR — it is a decision with its reasoning removed. |
 
-Other reviewer findings applied throughout: `SharedHandler` first-segment allowlist (§3.1, A8.4); DOM tests deferred with a hand-rolled stub (ADR-005 — avoids the `@types/node`/`@types/jsdom` gap that would break `npm run typecheck`); G5 replaced with a positive ESM-import assertion plus a `Dynamic require of` negative (v1's sentinel probe was unsound in both directions); build-driver rules gain the no-absolute-paths rule, the cjs/node18 test flags, `check-shared-css.mjs` placement, `npm ci`, and `.PHONY`; theme key-set invariant restated so puma passes, `--color-primary-fg` added, token map completed, `--font-body` pinned, focus-ring contradiction resolved; Step 6 gains the `--font-mono` collision analysis and a corrected grep; R14 mitigation fixed and R17 added; ops items (config samples, README, boot warning, caching contract, `.mjs` Content-Type) added; Q6 deleted (grocery's test is wired unconditionally), Q8 added; verification hygiene corrected repo-wide (`gofmt` via `test -z`, `!`-prefixed negative greps, `git ls-files --error-unmatch`); §2 prose corrected; open questions moved to a tracked doc (`docs/OPEN-QUESTIONS-ui-unification.md`) because `.omc/` is gitignored.
+### 2 — Corrections (facts v4 got wrong; all re-read line by line for v5)
 
-Two findings are original to v2, from running the reviewers' own proposed commands against this tree:
+| # | v4 said | This tree says | Sites fixed |
+|---|---|---|---|
+| **B1** | `cmd/unified-webapp/main.go` | **`cmd/server/main.go`** (`Makefile:2` is `CMD := ./cmd/server`; `cmd/unified-webapp/` does not exist) | 6 explicit + 3 bare `main.go:303` references. §12 clause (e) greps the plan body for the phantom path and requires zero hits. |
+| **B1** | `internal/platform/…` (an ellipsis inside a commit manifest) | The real list: `internal/platform/static/shared.go`, `internal/platform/static/shared_test.go`, `internal/platform/config/config.go` | Step 4, §4 C3 row. An ellipsis in a Touches column is unexecutable — §12 clause (b) now requires every manifest path to exist or be created by a prior commit. |
+| **B4** | Delta 4's before-value is a "6px UA default" and its mechanism is `--radius-md` | `web/taskmaster/js/ui/modal.ts:39` is `var(--radius, 6px)` **and** `web/taskmaster/style.css:23` declares `--radius: 6px`, so the fallback never fires. The 6px is a *declared* value; the delta is real but its mechanism is `components.css` authoring `--radius-md` in the lifted rules | T7 row 4 |
+| **B8 / roster** | T5a's header reads "(dark, forest, ocean, ember, rose)" | Its five themes are **obsidian, forest, ocean, ember, rose**. FRD FR-2 renames obsidianoid's `:root, [data-theme="dark"]` block to **`obsidian`** (`:190-191`); canonical `dark` comes from `web/todo/css/todo.css:3-17` | T5a header, A2.2, Step 1.3. The rename is stated **once**, in Step 1.3's preamble. |
+| **M3** | T2's obsidianoid citations `:20-36` mapped token-by-token | Re-read `web/obsidianoid/css/themes.css`: radii `:20-23`, `--shadow-sm` `:24`, `--shadow-md` `:25`, `--space-1/2/3` all on `:26`, `--space-4/6/8` all on `:27`, `--text-xs/sm/base/lg` `:28-31`, `--font-body` `:32`, `--font-mono` `:33`, `--sidebar-width` `:34`, `--topbar-height` `:35`, `--transition` `:36`. **There is no `--space-5`, no `--space-7` and no `--text-xl` in that file** | T2, every donor cell |
+| **M4** | T2 has 25 tokens | **27.** FRD `:171-174` mandates the full `--space-1..8` scale and `--text-xl`; `--space-7` and `--text-xl` have no donor and are **authored** | T2, A1.4, Step 1.2 |
+| **M7** | `--font-body-fallback` / `--font-mono-fallback` are "obsidianoid's stack minus the first family" | Partly authored: obsidianoid `:32` is `'Inter', 'Segoe UI', sans-serif` and `:33` is `'JetBrains Mono', 'Fira Code', monospace`, so `system-ui` and `ui-monospace` are **additions** | T2's provenance column |
+| **M13 / T7** | Six deltas, all inside modal DOM | Eleven, and one is **outside** modal DOM: C1b's `@font-face` registration makes `style.css:21`'s first-named `'JetBrains Mono'` actually resolve at five existing consumers | T7 rows 1–11, §11 principle 3 |
+| **B7** | Step 6's byte-identity recipe and AX.1/P2's clean-tree gates, written as `[ -z "$(git diff …)" ]` inside a make recipe | **Proven always-pass:** make expands `$(git diff …)` as a *make* variable reference, which is empty, so the shell sees `[ -z "" ]` and exits 0 | G11 + `scripts/gates/*.mjs` (Step 3). No gate is a shell one-liner in a recipe any more. |
+| **M-6 (Critic)** | `web-verify` wrote the expected artifact count twice in one recipe and read the generator through `$(shell …)`, which discards its exit status | Both fixed by the same move: `EXPECTED_ARTIFACT_COUNT` is exported once from `scripts/descriptors.mjs`, and `scripts/gates/artifacts.mjs` is one process that reads it, so a generator crash is a non-zero exit rather than an empty string | Steps 1.8 and 3, A7.3, A7.7 |
+| nit | `Makefile:42` is the `web:` recipe body | `:42` is the `web:` target line; **`:43`** is the `@if [ ! -d node_modules ]` line being replaced | Step 3 |
+| nit | `main.ts:217` "Backend build" / `:218` "Frontend build" | **`:218`** and **`:219`** (`:216` is the `Server` heading, `:217` is the Status row) | 4 cites: §2, Step 7, §8 row 8, ADR-004 |
+| nit | tsconfig ships 10 `include` globs | **11** — 9 today + `web/shared/**/*.ts` + `web/sampler/js/*.ts` | 4 places: A7.8, Step 5, §8 row 1, and the companion doc's Q4 |
+| nit | FRD `:210` carries puma's `--color-primary`; FRD §7 decision 6 is `:483-485` | **`:211`** and **`:482-485`** respectively (the Architect's suggested `:483-487` is also wrong) | Step 1.4, ADR-007, §7 Q3, companion doc |
+| nit | `dependencies` is empty | It holds **five** runtime deps (`@xterm/addon-fit`, `@xterm/xterm`, `react`, `react-dom`, `react-router-dom`). G4's real claim is *unchanged*, not *empty* | G4 (the corrected claim lives in G4's text; no criterion asserts a dependency count) |
+| nit | grocery has `--color-success` only in `-lite`/`-bdr` variants | It has **no `--color-success` token of any kind**; it has `--color-warning-lite` `:29` and `--color-warning-bdr` `:30` | T5c |
+| nit | `dispatcher_auth_test.go:29-30` denies a goleak `TestMain` | That comment is **stale**: `func TestMain(m *testing.M) { goleak.VerifyTestMain(m) }` is at **`:1241-1243`** | A8.3 |
 
-- **The `gofmt` gate must be scoped, not repo-wide.** `gofmt -l internal/ cmd/` is already red on four untouched files (`internal/slideshow/conductor.go`, `internal/todo/model.go`, `internal/utuber/history/history.go`, `internal/utuber/media/media_test.go`). Both reviewers proposed a repo-wide `test -z "$(gofmt -l internal/ cmd/)"`, which would have failed at **every** Phase-1 commit boundary for unrelated reasons. AX.5 is now scoped to Phase-1-touched paths, with the cleanup split out as follow-up 10.
-- **The `--font-mono` collision analysis is confirmed by extraction, not by inspection.** `web/taskmaster/style.css` declares exactly 17 custom properties; `--font-mono` is the sole intersection with the shared vocabulary. Two near-misses (`--radius` vs `--radius-md`, `--text-accent/-faint/-muted/-normal` vs `--text-xs..xl`) are *not* collisions. Step 6 records the full list.
+### 3 — Additions original to v5 (neither reviewer raised them)
 
-One further de-risking fact, verified in the tree: **`web/taskmaster/index.html:12` is already `<script type="module">`**, so Step 6's iife → esm switch requires no HTML change at all — v1 had assumed otherwise.
+- **C2's Touches must include `web/taskmaster/js/bundle.js`.** ADR-004 changes how the frontend stamp is computed, so the commit that lands the driver necessarily re-stamps that artifact. A C2 whose manifest omits it cannot pass its own byte-identity gate.
+- **G6 and v4's AX.4 — "no path-scoping exceptions" — were false at C1 and C1b.** Until C2 lands, `package.json:5-6` still embeds `$(date -u …)`, so **any** rebuild dirties `web/taskmaster/js/bundle.js` unconditionally. C1 and C1b therefore carry exactly v3's one documented byte-identity exemption, which **disappears at C2** and is asserted gone by A7.4. Stating "no exceptions" while shipping a mechanism that guarantees one is worse than stating the exception.
+- **Every gate is a file.** Beyond fixing B7, this is what makes R19's mutation rule affordable: a gate you can run as one process (`node scripts/gates/artifacts.mjs`) can be run against a deliberately broken input in one command.
+- **The `[deferred]` census is honest and appears once.** v4 claimed four; the true figure is most of them, because almost every gate asserts a property of code this phase has not written yet. §5's preamble states the census once and by number — it is the only place in this document where those numbers appear — and every other passage, this one included, refers to it by name as "the §5 census".
+- **`tsconfig.json` is edited in exactly one commit.** v4's manifests had C4 and C5 both touching it (one glob each). Both globs now land in **C4**; `web/sampler/js/*.ts` matches nothing for one commit, which is harmless because `tsc` only errors when the *whole* `include` is empty. A7.8 is therefore `[deferred → C4]`, not `C4/C5`, and the C5 row no longer lists the file — one fact, one commit, one gate boundary.
+- **The companion document is reconciled in the same revision.** `docs/OPEN-QUESTIONS-ui-unification.md` is the tracked, clone-surviving copy of §7 and had drifted with v4: it was stamped "reconciled against plan v4", cited the theme-stamp gate as A10.5, cited FRD decision 6 as `:483-485`, said the tsconfig union was "10 globs", and still described Q5's count guard in the `$(words …)`/`$(shell …)` form that Architect B7 proved cannot fail. All five are corrected there, so the two documents agree line for line.
+
+### 4 — Self-audit result (§12, run before this revision was finished)
+
+| Clause | Result |
+|---|---|
+| (a) Six FRD `:457` deliverables each map to named sections | **Pass** — table in §12. |
+| (b) Every commit-manifest path exists in the tree or is created by a prior commit | **Pass** — §4's 7 rows name **57 path entries, 46 distinct** (one of them the `web/shared/public/fonts/**` group of 20 files); all resolve: **16** name files that exist in the tree today and **30** name files a commit at or before that boundary creates. Two ellipses eliminated. *(Recounted after the iteration-5 amendments. C1 gains three entries — `descriptors.mjs`, `list-artifacts.mjs`, `Makefile` — C2 loses the first two, and C4 gains `Makefile` for the one barrel-gate line: 10/7/9 → 13/5/10, so **55 → 57**. Distinct (46), existing (16) and created (30) are all unchanged, because every moved path was already counted somewhere and `Makefile` was already a repeat.)* |
+| (c) Every gate is a command that was run, or carries `[deferred]` + substitute evidence | **Pass** — 0 unlabelled; the split is the §5 census, and every deferred criterion names the boundary where it first runs. |
+| (d) Every list, set, and count is defined exactly once | **Pass** with one stated and unavoidable exception: the artifact count moves during the sequence (12 → 14 → 15), so §4 states the trajectory and `EXPECTED_ARTIFACT_COUNT` is the single executable definition. |
+| (e) Neither phantom reference survives in the plan body | **Pass** — both greps return zero over §0–§11, extracted by pattern rather than by line number so the check cannot drift as the document is edited (rc=1 each). Each string survives exactly three times in the whole file, all of them records of the correction rather than live references: its row B1 above, §12 clause (b), and the command block in §12 clause (e). |
+
+### 5 — Corrections to the reviews themselves
+
+| Review claim | This tree | Consequence |
+|---|---|---|
+| Critic: "v3 → v4 is 1244 → 648 lines". | v3 is **845** lines. The Architect's 845 → 648 is the correct figure. | The compression was 23%, not 48%. The finding stands regardless — what it deleted is what matters, not how much. |
+| Architect nit: FRD §7 decision 6 is `:483-487`. | It is **`:482-485`**. | Both v4's cite and the suggested correction were wrong; v5 cites the re-read range. |
+| Architect B4 concludes delta 4 should be dropped. | The delta is **real** — `components.css` authors `--radius-md: 0.5rem` = 8px where the donor rule resolved `--radius` to 6px. | Only v4's *reasoning* was wrong (it invoked a UA default that `style.css:23` pre-empts). The row stays, with the correct mechanism and the correct before-value.
+
+### 6 — Carried forward from v4 unchanged
+
+v4's entire data layer: T1's 17 keys, T2's structure (extended by 2 FRD-mandated tokens), T5a/b/c's remaps, Step 1.4's contrast matrix and six derived cells, Step 1.5's scrim, the fonts arithmetic (18 staged − 3 = 15 shipped) and its digest-file mechanism, ADR-004's metafile-derived input set and its `c2c572876987` digest, ADR-006, ADR-007, and the generated `WEB_ARTIFACTS`. Both reviewers verified these independently and asked for no change to any of them. Preconditions stay P1–P6.
+
+### 7 — Amendments applied (iteration-5 close-out)
+
+The iteration-5 reviews closed the loop: the **Critic returned APPROVE** with five mandatory pre-execution amendments, and the **Architect** — reviewing the same snapshot independently — returned two blockers with specified fixes plus five mediums. This subsection records where each landed. **Nothing else was reopened**: no section was renumbered, no verified fact was re-derived, and the census, the token arithmetic and the donor tables are untouched.
+
+| Item | Source | What it required | Where it landed |
+|---|---|---|---|
+| **A** | Critic | `make gates` must not invoke `check-shared-barrel.mjs` before C4 creates it; the Makefile line belongs with the script; not a C1 no-op stub; `bundle-shape.mjs`'s input set must be pinned to a descriptor field | Step 3's gate-target blocks and driver rule 9; the new `sharedConsumer` paragraph in Step 3; Step 1.8's third bullet; Step 5's "Why the barrel gate's Makefile line lands here" paragraph; §4's **Gate composition by boundary** table (row C4 carries the reasoning) |
+| **B** | Critic | A9.4 relabelled `[deferred → C5]` and removed from C4's Gates column; A9.2 annotated and moved | §5's A9 preamble (input set = `sharedConsumer: true`, empty until C5); A9.1/A9.2 → `[deferred → C5/C6]`; A9.4 → `[deferred → C5]`; §4's C4 row ("**Not A9.x**"), C5 row (+A9.1, A9.2, A9.4) |
+| **C** | Critic | Resolve the default-theme contradiction one way and propagate it | **`:root` is dark.** Decided and argued once in **ADR-007's Decision** (three ordered reasons) with the arithmetic-invariance paragraph beside it; propagated to ADR-007's Consequences and **R5**. The gate spec (`check-shared-css.mjs` clause 4, A1.3, A2.2) always encoded `dark` and is unchanged — verified, not assumed |
+| **D** | Critic | A8.5 becomes the utuber-dedup criterion; `.mjs` Content-Type folds into A8.6; census preserved | §5 **A8.5** (three clauses, two guarded greps + the `:58` route) and **A8.6** (three-clause response-header contract); **R10**'s mitigation re-pointed at A8.6; Step 4's contract clauses 8 and 9; Step 4's Verification block. Census unchanged at 74 = 8 + 66, because the content was rewritten rather than a bullet added |
+| **E** | Critic | Three citation errors | `style.css:20` → **`:21`** in **R1** and A9.5; `utuber/build.go:58-72` → **`:68-79`** harmonized to one location description across **§8 row 16**, **R14**, and Step 4's utuber paragraph |
+| **B1** | Architect | The barrel is the declared **complete public surface**: re-export `THEMES`/`setTheme`; `check-shared-barrel.mjs` asserts an explicit allowlist; the shim stays narrower | Step 5's barrel body, its "Why `theme.js` is re-exported here" paragraph, and its **allowlist table** (6 named values + 4 types); **A5.2**'s barrel half; **A5.4** ("narrower than the barrel's allowlist by design"); **A5.7**; **A10.3**; **ADR-003**'s "Where the narrow surface is enforced"; **ADR-007**'s Consequences; Step 3's **driver rule 10** (barrel-completeness is the precondition the `@shared` rewrite rests on) |
+| **B2** | Architect | Pull `descriptors.mjs` + `EXPECTED_ARTIFACT_COUNT` and the `web-verify`/`gates` targets into C1; record the `descriptors.mjs` edit trail; add Step 1's missing Verification block | New **Step 1.8** with its Verification block; Step 1's Creates/Modifies; Step 3's "What this step does *not* create" note and rescoped manifest; §4's C1 and C2 rows; §4's ordering-rationale bullets (C1-before-everything, and the four-commit `descriptors.mjs` trail); §7 Q5. `list-artifacts.mjs` moved with it, because A7.7 requires the gate to run the generator as a child process |
+| **M1** | Architect | Name the confinement mechanism for A8.4 clause 5; reconcile the contract ↔ A8.4 mapping | Step 4's contract is now **nine clauses with a per-clause criterion table**; clause 4 names `os.OpenRoot(dir)` / `root.Open(rel)` on **go1.27.1** (verified present) and the `http.ServeContent` consequence, and states why `filepath.EvalSymlinks` was rejected; **A8.1** counts nine; **A8.4**'s six clauses each carry their contract-bullet tag |
+| **M2** | Architect | — | Subsumed by Critic **D** |
+| **M3** | Architect | Scope the "no `$(shell …)`" claim to recipes; say `Makefile:9` survives by design | **§2**'s build paragraph; **G11** and **A7.17** (recipe-scoped); **ADR-001**'s Consequences; **§7 Q5** |
+| **M4** | Architect | Pick one direction for `gofmt`/`go vet` and be consistent | Direction chosen: **not** folded into `check`. **AX.7** says so explicitly and **A7.16** asserts `check`'s four prerequisites by name; the two commands stay their own line in Steps 4 and 6 |
+| **M5** | Architect | Fix ADR-002's self-contradiction on router-agnosticism | **ADR-002**'s Consequences: agnosticism is a property of the `WithShared` dispatcher wrap; `MountShared` is deliberately ServeMux-only (A8.7, R8); "the interface is a seam, not a promise of portability" |
+
+**Optional items — all ten applied**, each a one-line fix as the close-out's own rule requires; none needed new design, so none was skipped.
+
+- Architect **M6** — §12(a)'s D1 row now names where the emitted `shared.css` is produced (Step 5 / C4 / A6.5), not only its authored sources.
+- Architect **M7** — the same citation harmonization Critic **E** mandates: `internal/utuber/build.go` is described by **one** location everywhere (`:68-79` deleted, `:64-67` comment, `:58` rewritten).
+- Architect **M8** / Critic **note 3** — Step 1.7 states **11** clauses, exactly, because Step 2 and A1.9 refer to "clause 10" by number.
+- Architect **M9** — §8 row 7 now ledgers the filename deviation (`web/sampler/style.css` vs FRD `:405-406`'s `styles.css`) alongside the `js/` vs `src/` one. The FRD range was re-read while applying it: the sampler clause is `:405-406`, not the `:405-408` M9 cited nor the `:404` v5's row carried.
+- Architect **M10** — the companion doc's four v4-era prose stamps are corrected: Q1's and Q2's "Plan v4 §3 …" citations, Q3's "corrected in v4" / "v4 makes the premise true", and Q5's Step-3-only pointer, which now reads "§3 Steps 1 and 3" because B2 moved `EXPECTED_ARTIFACT_COUNT` and `artifacts.mjs` into Step 1.8.
+- Critic **note 1** — subsumed by Architect **M1**: Step 4's contract now carries a per-clause criterion table instead of the false blanket claim.
+- Critic **note 2** — §12(a)'s D3 row cites **A7.1–A7.17**, so the tsconfig half (A7.8–A7.10) is no longer omitted.
+- Critic **note 4** — clause 10 carries A1.9's **exactly 15** `@font-face` count, so gate and criterion match as every other A1.x pair does.
+- Critic **note 5** — A9.5 states the gate is **live from C1** (not C2, since B2 moved the `gates` target there) and *load-bearing* at C6, so the deferral cannot be read as "not running yet".
+- One consequential one-liner neither review raised: **R11** no longer names `http.ServeFile`, because M1's clause 4 changed which `net/http` helper serves the bytes.
+
+**Amendment C did not touch the companion document.** Q3 concerns `--color-primary-fg`'s values and the obsidian-stamp premise; it never asserts a direction for the unstamped `:root` default, so the resolution propagates entirely inside this plan.
+
+**Two places where an amendment was applied in a form the review did not write**, both stated rather than absorbed, because a synthesis that silently edits its own instructions is not auditable:
+
+1. **B2 moved one more file than it named.** The Architect asked for `scripts/descriptors.mjs` and the two Makefile targets; `scripts/list-artifacts.mjs` moved with them. Its own rationale forces it: **A7.7** requires `artifacts.mjs` to run the generator **as a child process**, so a C1 that held the gate and the data but not the generator would still fail to run A7.7 at its own boundary. Two files, not one.
+2. **The `descriptors.mjs` trail is four commits, not the Architect's "five".** C1 creates it; C4, C5 and C6 edit it; C2 and C3 do not touch it. Counted row by row against §4 — the recount is what turned the "five-commit" phrasing into "one create and three edits", and it is also what confirmed §12(b)'s entry total moves 55 → 57 rather than further.
+
+**One reconciliation the two reviews needed from each other.** Critic **A** requires `check-shared-barrel.mjs` to be added to `make gates` **at C4**; Architect **B2** requires the `gates` *target itself* to exist **at C1**. Both hold simultaneously — the target moves, the line inside it does not — but only if the recipe's composition is stated at every boundary where it differs, which is what **G6** demands. §4's new **Gate composition by boundary** table is that statement: three scripts from C1 through C3, four from C4, with the `--allow` artifact-gate form named for C1/C1b. Without it the two amendments would read as contradictory.
 
 ---
 
-## 0. Scope
+## §0 — Scope
 
-### Deliverables
+FRD `:457` is the Phase-1 row of the phase table, and it fixes this phase's deliverable set. All of it is here; D7 is the user's 2026-09-15 decision to fold FR-6 forward into this phase.
 
-| ID | Deliverable | FRD slice |
-|----|-------------|-----------|
-| D1 | `web/shared/css/{tokens,themes,components}.css` — structural tokens once on `:root`, all 8 theme palettes, component base | FR-1, FR-2 |
-| D2 | One shared runtime bundle: `web/shared/ts/index.ts` → `web/shared/dist/shared.mjs` + `shared.css`, `@shared` externalized from every module bundle | §3.2, FR-7 |
-| D3 | `internal/platform/static`: `SharedHandler`, `WithShared`, `MountShared`; `/shared/` reachable on every module host; `internal/utuber`'s duplicate handler deleted | FR-8.1, FR-8.2 |
-| D4 | `scripts/build-web.mjs` replaces the `&&` chain; tsconfig gains `paths` for `@shared/*`; `make test-web` / `web-verify` / `check` targets | FR-7 |
-| D5 | `web/shared/ts/modal.ts` — taskmaster's `ui/modal.ts` generalized onto theme tokens; taskmaster consumes it via `@shared` | FR-5 |
-| D6 | `web/sampler` + `internal/sampler/build.go` + config wiring — module 14, the shared library's dev harness | FR-10 |
+**How `:457`'s wording becomes D1–D6.** The line carries five semicolon-delimited clauses, and they cross-cut rather than map one-to-one, so the plan numbers **six** deliverables — the framing both iteration-4 reviews used:
 
-### Explicitly out of scope for Phase 1
+| FRD `:457` clause | Deliverables |
+|---|---|
+| "`web/shared/` skeleton: tokens.css, themes.css (8 themes incl. puma), components.css base" | **D1** (the sheets) + **D5** (8 themes *as data*, which is what the sampler consumes) |
+| "shared bundle build + `MountShared` + `/shared/` route" | **D1** (the bundle is a committed artifact) + **D2** (the route, FR-8) |
+| "build script + tsconfig rework" | **D3** + **D4** — the stamp is not a separate FRD item but an unavoidable consequence: a descriptor-driven driver cannot satisfy G2 while `package.json:5-6` embeds `$(date -u …)` (ADR-004) |
+| "Modal lifted from taskmaster `ui/modal.ts` into shared" | **D5** + **D6** — a lift with no consumer is unproven, so adoption on the donor is tracked separately |
+| "**sampler module skeleton (FR-10) as the dev harness**" | **D5** |
 
-- Migrating any module other than taskmaster onto shared CSS or shared TS (Phases 2–6).
-- Retiring taskmaster's `web/taskmaster/style.css` local tokens (FRD §7.6 — Phase 3).
-- `theme.ts`, `menu.ts`, `toast.ts`, `tabs.ts`, `icons.ts`, `dom.ts`, `web/shared/react/` (Phase 2+). Phase 1 ships `modal.ts` only; `index.ts` is the barrel it will grow into.
-- Self-hosted fonts under `web/shared/public/fonts/` (FR-6). Phase 1 pins `--font-body`/`--font-mono` to system fallback stacks; see Step 1 note 4.
-- Light variants of forest/ocean/ember/rose/puma (FRD §7.3).
-- Replacing `alert()`/`confirm()`/`prompt()` outside taskmaster (FRD §7.5 — later phases).
-- Entry-layout normalization (`web/<m>/js/` → `web/<m>/src/`). Step 2 keeps every module's current entry path; see Step 2 note 2.
+No clause is unassigned, and no deliverable lacks a clause. §12 clause (a) maps each of the six onward to the sections that execute it.
 
----
+| | Deliverable |
+|---|---|
+| **D1** | Create `web/shared/` — token CSS, theme CSS, **component CSS**, font CSS, and a shared TS bundle — and commit its built artifacts alongside the existing 12. |
+| **D2** | Serve it from one route, `/shared/`, reachable on every one of the 13 module hosts, inside auth, via a new tested platform handler (FR-8). |
+| **D3** | Replace `package.json`'s two `&&`-chained esbuild command strings with a descriptor-driven Node build driver, and give the test runner the same treatment. |
+| **D4** | Replace taskmaster's `$(date -u …)` frontend build stamp with a content digest (ADR-004), so a rebuild with no source change produces a byte-identical artifact. |
+| **D5** | **Lift `web/taskmaster/js/ui/modal.ts` into `web/shared/ts/modal.ts`** (FR-5) — tokenized, with its CSS moved into `components.css` — and ship all 8 themes of FR-1's vocabulary as data, plus `web/sampler/`, a page that renders every token in every theme and exercises all four dialogs. The sampler is the defect oracle for Phase 2+. |
+| **D6** | Adopt `shared.css` **and the shared modal** on exactly **one** surface (taskmaster, via ADR-003's re-export shim) to prove the route, the cascade order, the `@shared` externalization, and the byte-identity gates end to end. |
+| **D7** | **Self-host the font faces** under `/shared/public/fonts/` (FR-6, folded forward by user decision 2026-09-15), with license text and digests travelling alongside. *v3's wording — "no external font requests" — overstated this: the deliverable is that `web/shared/` requests nothing external. See G10 and §8 row 11.* |
 
-## 1. Guardrails
-
-These are mechanisms, not intentions. Each is a command someone can run.
-
-**G1 — Shared CSS is inert for non-adopting pages.**
-`web/shared/css/*.css` may contain **no** bare element selectors and no selectors outside the `--`-prefixed custom-property declarations on `:root`/`[data-theme=…]` and the `.ui-*` class namespace. Enforced by `scripts/check-shared-css.mjs` (Step 1), not by grep.
-*Softened from v1:* the claim is that shared CSS **cannot change rendering through selector matching**. Property-**name** collisions with a page's own tokens are possible and are resolved by `<link>` order; every adopting page enumerates its overlaps (Step 6 does this for taskmaster).
-
-**G2 — Byte-identity of existing bundles.**
-After Step 2, `npm run build` must reproduce all seven existing committed artifacts byte-for-byte:
-```
-git stash list >/dev/null && npm ci && npm run build && git diff --stat --exit-code -- \
-  web/obsidianoid/js/app.js web/obsidianoid/js/threads.js web/slideshow/js/app.js \
-  web/multissh/js/bundle.js web/certmachine/js/bundle.js \
-  web/taskmaster/js/bundle.js web/smbedit/js/bundle.js web/issuetracker/js/bundle.js
-```
-Deterministic because B3's git-log build time makes taskmaster's bundle a pure function of the commit.
-
-**G3 — Only taskmaster's page changes.**
-No `web/*/index.html` or `web/*/*.html` other than `web/taskmaster/index.html` and the new `web/sampler/` files may be modified in Phase 1. `git diff --name-only main... -- 'web/**/*.html'` must list only taskmaster and sampler.
-
-**G4 — Barrel completeness.**
-Every `.ts` file in `web/shared/ts/` other than `index.ts` is re-exported by `index.ts`. Asserted by `scripts/check-shared-barrel.mjs` (Step 4).
-
-**G5 — `@shared` is external, and externalization actually worked.**
-Replaces v1's sentinel probe, which was unsound in both directions: with `external: true` esbuild never inlines, so it could not fail for the stated reason; and an exported string const is precisely what esbuild constant-folds.
-Positive assertion, per adopting bundle:
-```
-grep -Eq '^\s*import\s.*from\s*["'\'']/shared/dist/shared\.mjs["'\'']' web/taskmaster/js/bundle.js
-```
-Negative assertion, repo-wide — catches the silent iife downgrade:
-```
-! grep -rl 'Dynamic require of' web/*/js/bundle.js
-```
-*Why the negative matters (verified empirically):* `esbuild --bundle --external:@shared` with **iife** output exits 0 with zero warnings and emits `var import_shared = __require("@shared")`, which throws at runtime. With the specifier rewrite in place, that iife output even **contains** the literal `shared.mjs` inside `__require("/shared/dist/shared.mjs")`, so a naive substring grep passes on a broken bundle. Any bundle importing `@shared` must therefore be `format: "esm"`, and Step 6 item 4's v1 claim that "esbuild refuses" is corrected to "esbuild silently downgrades".
-
-**G6 — Four gates green at every commit boundary.**
-`npm ci && npm run build && npm run typecheck && npm run test:web && make test`, then `git status --porcelain` empty.
-*Scoping exception at C1 only:* the pre-Step-2 `&&` chain embeds `$(date -u …)`, so running `npm run build` on the old chain makes `web/taskmaster/js/bundle.js` unconditionally dirty. At C1 the `git status --porcelain` clause is evaluated with that one path excluded; from C2 onward it applies with no exclusions.
-
-**G7 — No external host.**
-`! grep -rEn '(https?:)?//(fonts\.googleapis|fonts\.gstatic|cdn|unpkg|jsdelivr|cdnjs)' web/shared/ web/sampler/`
-No `@import url(...)` with a scheme or `//` prefix anywhere under `web/shared/`.
-
-**G8 — Committed artifacts stay tracked.**
-```
-git ls-files --error-unmatch web/shared/dist/shared.mjs web/shared/dist/shared.css
-```
-(`git status --porcelain` cannot distinguish a staged file from an untracked one; `ls-files --error-unmatch` can.)
+**Not in scope:** migrating any module's own CSS to the tokens (Phase 3+); the login page (Q8); removing the 5 surviving Google Fonts `<link>`s (§9 item 4); rewriting taskmaster's five call sites off the shim (§9 item 13); `--color-surface-dynamic` and `--radius-xl` (Q2 — each deferred to the phase that migrates its one consumer).
 
 ---
 
-## 2. Current reality (corrected)
+## §0.1 — Preconditions
 
-Facts this plan depends on, each verified first-hand in this tree.
+| | Precondition | State |
+|---|---|---|
+| **P1** | `gofmt -l .` is empty. | **Satisfied** — re-run for v5: **0 lines, repo-wide.** The four former offenders were fixed in `9e7eff9`, so v3's scoped-gofmt argument is obsolete and AX's gate is repo-wide (user-settled). |
+| **P2** | **The cleanliness mechanism.** `scripts/gates/clean-tree.mjs <paths…>` runs `git status --porcelain --untracked-files=no -- <paths>` and exits non-zero if the output is non-empty, **paired** with a `git ls-files --error-unmatch` assertion over that commit's artifacts. Untracked files are ignored deliberately — `fonts-staging/` and verification screenshots are permanently untracked — so a `??` line is never a gate failure. | **Mechanism unchanged from v3/v4; implementation moved into a file (G11).** v4 wrote it as `test -z "$(git status …)"` inside a make recipe, which make evaluates as an empty variable reference — Architect B7. The gate is **per-commit and path-scoped to that commit's paths**, not "the tree is clean before Phase 1 starts". |
+| **P3** | The 12 pre-existing committed build artifacts are byte-reproducible from a clean checkout. | **Verified for all 12** (8 JS + 4 `bundle.css`; taskmaster has no `bundle.css`), by rebuilding into a scratch directory and `cmp`-ing each. (Byte-valid only because esbuild embeds source-path comments relative to cwd, not to `outfile` — verified, and the reason for driver rule 3.) taskmaster reproduces *at a fixed instant*; it is not reproducible **across** instants, which is what D4 fixes and why C1/C1b carry the exemption in §4. Machine-checked from C2 onward by `make web-verify`. |
+| **P4** | `web/shared/` must be written **idempotently** against a possible concurrent font-integration session. | **Unchanged.** C1b creates files; it never rewrites a file it did not create. |
+| **P5** | `npx tsc --noEmit` exits 0. | **Satisfied** — verified: rc=0, `grep -c 'error TS'` = **0**. This is why there is no baseline file (Critic iteration-3 missing-item 6); v3's `docs/typecheck-baseline-phase1.txt` stays deleted. |
+| **P6** | The `tools/baseline-shots/` side-car workstream (interaction scenes) is independent of Phase 1 and may be in flight. | **In flight** — `tools/baseline-shots/README.md` and `shoot.js` are modified in the working tree right now. Every commit in §4 names its paths and P2's gate is path-scoped, so these cannot be swept in. Risk R20. |
 
-**Static mounting.** 12 of 13 modules use `*http.ServeMux`; taskmaster uses chi. Of the 12, **9 mount the static handler from `build.go`** (`internal/admin/build.go:62`, `grocery:38`, `issuetracker:45`, `menuserver:20`, `obsidianoid:78`, `slideshow:40`, `timetracker:34`, `todo:23`, `utuber:58`) and **3 own their mux inside a constructor** (`certmachine`, `multissh`, `smbedit`). taskmaster mounts at `internal/taskmaster/build.go:135` via `r.Handle("/*", …)`.
-*v1 said "11 of 13 ServeMux" and claimed certmachine's mux was unreachable from `build.go`. Both wrong:* `internal/certmachine/build.go:63` creates the mux and `:73` mounts the static handler, both inside `New`. This divergence is why per-module mounting was expensive — and why B2 sidesteps it.
+---
 
-**Dispatcher shape** (`cmd/server/main.go:288-306`):
+## §1 — Guardrails
+
+- **G1 — No source file outside the listed paths.** Each commit in §4 names every path it touches. A commit touching anything else is wrong, not merely surprising.
+- **G2 — Committed build artifacts stay byte-identical unless the commit's purpose is to change them.** Enforced by `make web-verify` over the generated `WEB_ARTIFACTS`. At C1 and C1b the same gate is invoked directly as `node scripts/gates/artifacts.mjs --allow web/taskmaster/js/bundle.js` — the flag *is* the exemption's mechanism, stated in §4 and retired by C2.
+- **G3 — Phase 1 does not edit a module's own CSS, HTML, or TS**, with exactly **two** hand-edited exceptions, both in C6 and both enumerated as sanctioned deltas: `web/taskmaster/index.html` (two edits) and `web/taskmaster/js/ui/modal.ts` (390 lines → a 2-line shim). **`web/taskmaster/js/main.ts` is *not* edited** — the frontend stamp is consumed through `web/taskmaster/js/buildinfo.ts:11,13`, which declares `__TM_BUILD_TIME__` and re-exports it as `FRONTEND_BUILD_TIME`, so D4 changes how the define is *computed* and touches no module TS (Architect M1, verified). `web/taskmaster/js/bundle.js` is a generated artifact governed by G2, not a hand edit.
+- **G4 — No new dependency.** `dependencies` and `devDependencies` are **unchanged** — not empty: `dependencies` holds 5 runtime packages and `devDependencies` holds 4 (esbuild ^0.28.0, typescript ^5.4.0, @types/react, @types/react-dom; **no `@types/node`**, which is ADR-005 driver 1).
+- **G5 — Every route claim is proved by a two-sided probe:** the thing that should be served is served, *and* the thing that should not be reachable is not.
+- **G6 — Gate composition is uniform.** Every commit runs the full gate set applicable to the tree at that commit. Composition differs only where the artifact a gate reads does not exist yet, and every such point is named in §4's Gates column. The **one** substantive exception is C1/C1b's byte-identity exemption (§4), which exists because `package.json` still carries `$(date -u)` until C2 — not because a gate was waived. See §4's exemption and A7.4.
+- **G7 — No `.omc/` path is ever committed.** Already covered by `.gitignore`.
+- **G8 — Reversibility.** Every commit in §4 is revertible in isolation except for the two stated ordering constraints: C1 → C1b (`index.css` cannot import a file that does not exist) and **C6 before C4** on the revert path (R16).
+- **G9 — Binary assets carry provenance.** Any committed binary must have (1) a digest line in the tracked `web/shared/public/fonts/SHA256SUMS` — the only file in that tree allowlisted besides `*.woff2` and `OFL.txt` — and (2) its license text travelling alongside it.
+- **G10 — `web/shared/` references no host but the origin serving it.** This is narrower than "the app makes no external requests": 5 Google Fonts `<link>`s in 4 module HTML files survive Phase 1 untouched, because removing them is an FR-6 edit to files G3 forbids this phase from touching. They are enumerated in §7 and removed by §9 item 4.
+- **G11 — No gate is a shell one-liner inside a make recipe.** *(new in v5; closes Architect B7.)* Every gate is a script file invoked as one process, so its exit code is the gate. Two mechanisms make the one-liner form unsafe, both observed in v4: make expands `$(…)` in a recipe as a *make* variable, so `[ -z "$(git diff …)" ]` reaches the shell as `[ -z "" ]` and always passes; and `$(shell …)` discards the child's exit status, so a crashed generator reads as an empty list. `scripts/gates/` holds `artifacts.mjs`, `bundle-shape.mjs`, `token-overlap.mjs`, and `clean-tree.mjs`; `scripts/check-shared-css.mjs` and `scripts/check-shared-barrel.mjs` complete the set. A7.17 asserts the form.
+
+---
+## §2 — Current reality (verified, not assumed)
+
+**Build.** `package.json:5` (`build`) and `:6` (`build:dev`) are single command strings chaining 7 esbuild invocations with `&&`. Both embed `$(date -u +%Y-%m-%dT%H:%M:%SZ)`; `grep -c 'date -u' package.json` = **2**. `Makefile:9`'s `BUILD_TIME := $(shell date -u …)` feeds Go ldflags at `:10` and is a **different** stamp, surfaced on its own UI row (`web/taskmaster/js/main.ts:218` "Backend build", `:219` "Frontend build"; `:216` is the `Server` menu heading and `:217` is the Status row). D4 changes only the frontend one: **`Makefile:9`'s backend stamp survives Phase 1 unchanged, by design**, and G11's "no `$(shell …)`" claim is scoped to make **recipes** on the gate path, not to variable assignments elsewhere in the file (Architect M3; ADR-001's consequences, §7 Q5).
+
+**Build warnings today.** `npm run build 2>&1 | grep -iv 'log-level=warning' | grep -i 'warn'` → **rc=1**: zero real esbuild warnings. The inverse filter is required because npm echoes the script text, which itself contains `--log-level=warning` — the naive form matches npm's own echo and reports a false positive. This answers iteration-3's unscored question about whether warnings-as-failures breaks smbedit or issuetracker on day one: it does not.
+
+**Test runner.** `package.json:8`'s `test:web` runs exactly **4** suites — `web/multissh/js/sshcommand.test.ts` and `web/certmachine/js/{status,listmodel,generate}.test.ts` — each as `esbuild --bundle --platform=node --format=cjs --target=node18 --log-level=warning | node -`. `web/grocery/app.test.js` exists, uses `node:test` and `import.meta.dirname` (`:16-17`), is wired to nothing, and is green when run directly (189 pass, 0 fail). Phase 1 wires it and adds `web/shared/ts/modal.test.ts`, for **five** suites (A7.13).
+
+**Typecheck.** `tsconfig.json:11` lists **9** literal `include` globs, with `moduleResolution: "bundler"` (`:5`), `strict` (`:7`), `noEmit` (`:8`), and no `baseUrl`/`paths`. None of the 9 matches `web/shared/` or `web/sampler/`, neither of which exists yet. `npx tsc --noEmit` exits 0 with zero errors.
+
+**Artifacts.** **12** built files are committed today — 8 JS (`web/obsidianoid/js/{app,threads}.js`, `web/slideshow/js/app.js`, `web/{multissh,certmachine,taskmaster,smbedit,issuetracker}/js/bundle.js`) and 4 CSS (`web/{multissh,certmachine,smbedit,issuetracker}/js/bundle.css`). taskmaster has no `bundle.css` because it imports no CSS. All 12 are tracked. Phase 1 adds 3 — `web/shared/dist/shared.mjs`, `web/shared/dist/shared.css`, `web/sampler/js/bundle.js` — for **15**.
+
+**Serving.** 13 modules are dispatched by `Host` header; taskmaster uses chi, the other 12 use `*http.ServeMux` (9 mount static from their `build.go`, 3 own the mux inside a constructor). `knownModules` is a 13-name slice at `cmd/server/main.go:337`. The dispatcher loop is `buildDispatcher` at `:289-311`:
+
 ```go
-for host, module := range cfg.Routing {
-    h, ok := built[module]
-    if !ok {
-        hh, err := buildModule(module, cfg, svc)
-        if err != nil { … h = unavailableHandler(module, err) } else {
-            if c, ok := hh.(io.Closer); ok { dispatch.closers = append(dispatch.closers, c) }  // :300
-            h = middleware.BodyLimit(limitFor(module, cfg), svc.Gate(module, hh))               // :302
-        }
-        built[module] = h
-    }
-    dispatch.register(host, h)
+hh, err := buildModule(module, cfg, svc)            // :295
+if err != nil { log.Printf(…); h = unavailableHandler(module, err) }   // :297-298
+else {
+    if c, ok := hh.(io.Closer); ok { dispatch.closers = append(dispatch.closers, c) }   // :300-302
+    h = middleware.BodyLimit(limitFor(module, cfg), svc.Gate(module, hh))               // :303
 }
 ```
-The `io.Closer` assertion is on the **direct** `buildModule` return and happens **before** the wrap. That ordering is what makes B2 safe: inserting a wrapper at :302 cannot erase any closer.
-`knownModules` is a 13-name slice at `cmd/server/main.go:337`. `cmd/server/dispatcher_auth_test.go:97-102` replicates the loop as `h = middleware.BodyLimit(limitFor(module, cfg), hh)` (no `Gate`) with the same closer append; `newGateServer` registers `t.Cleanup(dispatch.Close)`.
 
-**Existing static handler** (`internal/platform/static/static.go`, 30 lines) joins `filepath.Clean("/"+r.URL.Path)` onto its dir, stats, and falls back to `index.html` on `IsNotExist`. It does no prefix stripping and no directory-listing suppression. Both behaviours are wrong for an asset subtree: a typo under `/shared/` would return taskmaster's `index.html` with status 200. `SharedHandler` is therefore a new type, not a reuse.
+Two facts this plan depends on: the `io.Closer` assertion is made on the **direct** `buildModule` return and happens **before** the wrap at `:303`, and `unavailableHandler` is installed **outside** the per-module wrap. The first is what makes Step 4's mount unable to erase a closer; the second is what makes A8.2 assertable. `cmd/server/dispatcher_auth_test.go` replicates the loop at `:87-107` (closers at `:97-99`, the mirror `BodyLimit` line at **`:100`**, without `Gate`) and runs `goleak.VerifyTestMain` from `TestMain` at **`:1241-1243`** — note that the file's own header comment at `:29-30` denies having one and is **stale**.
 
-**Build.** `package.json`'s `build` is one 7-invocation `esbuild … && esbuild …` chain; `build:dev` repeats it with `--sourcemap`. `test:web` is 4 `esbuild --bundle --platform=node --format=cjs --target=node18 --log-level=warning | node -` pipes covering `multissh/js/sshcommand.test.ts` and `certmachine/js/{status,listmodel,generate}.test.ts`. `web/grocery/app.test.js` exists and is wired to nothing; run directly it is green (189 pass, 0 fail). devDependencies: `esbuild ^0.28.0`, `typescript ^5.4.0`, `@types/react`, `@types/react-dom` — **no `@types/node`**.
+**Existing static handler.** `internal/platform/static/static.go` is 30 lines: `Handler` `:14-16`, `NewHandler` `:19-21`, `ServeHTTP` `:23-30`. It joins `filepath.Clean("/"+r.URL.Path)` onto its dir, stats, and falls back to `index.html` on `IsNotExist`. It does no prefix stripping and suppresses no directory listing, so a typo under `/shared/` would return someone else's `index.html` with status 200. `SharedHandler` is therefore a new type in a new file, not a reuse. `internal/utuber/build.go:58` mounts a **byte-identical private copy** of it (`type staticHandler` `:68-70`, `ServeHTTP` `:72-79`, with a duplicate-acknowledging comment at `:64-67`) — FR-8.2's dedup target.
 
-**No CI exists.** There is no `.github/`. "Green at every commit" is a human-run obligation today; Step 2 gives it three `make` targets so it is one command.
+**No CI exists.** There is no `.github/`. "Green at every commit" is a human-run obligation; Step 3's three `make` targets make it one command.
 
-**Committed artifacts** (`git ls-files`): `web/{certmachine,issuetracker,multissh,smbedit}/js/bundle.{js,css}`, `web/taskmaster/js/bundle.js` (no `bundle.css`), `web/obsidianoid/js/{app,threads}.js`, `web/slideshow/js/app.js`. `.gitignore` ignores no build output — and ignores `.omc/`, which is why open questions live in a tracked doc (§7).
+**taskmaster's page.** `web/taskmaster/index.html` is 14 lines: `:2` is `<html lang="en">`, `grep -c 'data-theme' …` = **0** (rc=1); `:7` links `/style.css`; `:12` loads `/js/bundle.js` as `type="module"` — so the iife → esm switch in C6 needs no HTML change. C6 makes **two** edits here.
 
-**taskmaster's page** already uses `<script type="module" src="/js/bundle.js">` (`web/taskmaster/index.html:12`). Switching its bundle from esbuild's default iife to `format: "esm"` therefore needs **no HTML change** — a material de-risking of Step 6 relative to v1's assumption.
+**taskmaster's tokens.** `web/taskmaster/style.css` (820 lines) declares exactly 17 custom properties on `:root` at `:6-24`, including `--font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace` `:21`, `--font-ui` `:22`, and **`--radius: 6px` `:23`**. There is **no `html {` rule** (count 0), so the root size is the 16px UA default; `body { font-size: 14px }` is at `:32`. `var(--font-mono)` has **five** consumers (`:288`, `:499`, `:613`, `:671`, `:736`) — v3 said one. The string `Inter` appears nowhere in the file. `grep -c 'tm-modal' web/taskmaster/style.css` = **0**, and the file declares no `.ui-`-prefixed class, so C6's `tm-` → `ui-` rename creates zero collisions (R17).
+
+**Palette donors — all three are renames.** There is no file in the tree that already speaks FR-1's vocabulary:
+
+- `web/obsidianoid/css/themes.css` — 5 theme blocks (`:2` `:root, [data-theme="dark"]`, `:40` forest, `:78` ocean, `:116` ember, `:154` rose), **17** `--color-*` keys each, plus structural tokens at `:20-36`. Its names include `--color-surface`, `--color-surface-offset`, `--color-primary-highlight`, `--color-error`, `--color-surface-dynamic` — none of which is canonical — and it declares **no `--color-primary-fg`**.
+- `web/grocery/style.css` — near-canonical literals at `:15-33`, `--space-5: 1.25rem` at `:12` (the sole donor for it, as FRD `:171` says), radii `:39-43`, shadows in `rgb()` `:44-46`, text clamps `:6-9`.
+- `web/todo/css/todo.css` — `[data-theme="dark"]` `:3-17` and `[data-theme="light"]` `:19-33`, 13 declarations each (12 colours + `--shadow`), using **no `--color-*` name at all**.
+
+**Fonts.** `fonts-staging/` is untracked (ADR-006) and holds **24** non-`.omc` files: 18 woff2 across 4 SIL-OFL-1.1 families (Inter 5, JetBrains Mono 4, Sora 5, IBM Plex Mono 4), 4 `OFL.txt`, `NOTES.md`, and a `SHA256SUMS` covering all 18.
+
+**Surviving external requests (G10).** 5 Google Fonts `<link>` groups across 4 modules: `web/grocery/index.html:8-10`, `web/utuber/index.html:7-9`, `web/todo/index.html:8-10`, `web/todo/compare.html:8-10`, `web/smbedit/index.html:7-9`. **FRD FR-6's affected-module list at `:338-341` names only grocery, smbedit, and todo** — it omits utuber and `todo/compare.html`. §7 records the correction.
 
 ---
 
-## 3. Implementation steps
+## §3 — Steps
 
-### Step 1 — `web/shared/css/` foundation (D1)
+One step per commit, in landing order: Step 1 → C1, Step 2 → C1b, Step 3 → C2, Step 4 → C3, Step 5 → C4, Step 6 → C5, Step 7 → C6. §4 states the ordering rationale and the dependencies.
 
-**Creates**
-- `web/shared/css/tokens.css` — structural tokens, declared **once** on `:root`, never repeated per theme: `--space-1..8`, `--radius-sm/md/lg/full`, `--text-xs/sm/base/lg/xl`, `--shadow-sm/md`, `--transition`, `--topbar-height`, `--sidebar-width`, `--font-body`, `--font-mono`, plus two Phase-1 scrim/elevation primitives (`--overlay-scrim`, see note 3).
-- `web/shared/css/themes.css` — 8 blocks: `:root, [data-theme="dark"]`, then `[data-theme="light"|"obsidian"|"forest"|"ocean"|"ember"|"rose"|"puma"]`.
-- `web/shared/css/components.css` — `.ui-modal-*` base only in Phase 1 (the classes Step 4 needs).
-- `web/shared/css/index.css` — `@import` of the three, in order tokens → themes → components.
-- `scripts/check-shared-css.mjs` — the G1/A1.x gate.
+### Step 1 — `web/shared/css/`: tokens, themes, components (C1)
 
-**Palette sources** (read from the tree, transcribed, not invented):
-- `obsidian` ← `web/obsidianoid/css/themes.css:2-37` (the violet `:root, [data-theme="dark"]` block), remapped: `--color-surface` → `--color-surface-1`, `--color-surface-2` → `--color-surface-2`, `--color-surface-offset` → `--color-surface-3`, `--color-error` → `--color-danger`, `--color-primary-highlight` → `--color-primary-tint`. `--color-surface-dynamic` has no FR-1 counterpart and is dropped (Phase 3 concern for obsidianoid itself, recorded as a follow-up).
-- `forest`/`ocean`/`ember`/`rose` ← `web/obsidianoid/css/themes.css:40,78,116,154`, same remap.
-- `dark` ← `web/todo/css/todo.css:3-17` (the neutral GitHub-ish palette; FRD §7.2 makes this the `dark` identity).
-- `light` ← `web/todo/css/todo.css:19-33`, with the grocery `:root` scale (`web/grocery/style.css:4+`) supplying nothing colour-wise — grocery contributes only to the structural scale sanity-check.
-- `puma` ← FR-2's exact 16-declaration block, transcribed verbatim.
+**Creates:** `web/shared/css/tokens.css`, `web/shared/css/themes.css`, `web/shared/css/components.css`, `web/shared/css/index.css`, `scripts/check-shared-css.mjs`, `scripts/gates/{artifacts,bundle-shape,token-overlap,clean-tree}.mjs`, `scripts/descriptors.mjs`, `scripts/list-artifacts.mjs`
+**Modifies:** `.gitignore`, `Makefile` (adds the `web-verify` and `gates` targets; `.PHONY` 9 → 11)
 
-**The key-set invariant** (restated so puma passes — v1's "exactly 17 keys, no more and no less" rejected puma's block and would have failed this step's own gate):
-> The canonical key set is the set of `--color-*` properties declared by the `:root, [data-theme="dark"]` block. Every other theme block must declare **exactly** that set — no additions, no omissions. `--font-body` and `--font-mono` are allowlisted **additional** declarations inside a theme block (puma overrides both per FR-2) and are excluded from the equality test. Any property in `themes.css` that is neither a `--color-*` key nor an allowlisted `--font-*` override is a gate failure.
+`index.css` `@import`s in cascade order: `tokens.css` → `themes.css` → `components.css` (and, from C1b, `fonts.css` first). `components.css` carries **only** `.ui-modal-*` rules in Phase 1 — the retokenized bodies of what `web/taskmaster/js/ui/modal.ts`'s `ensureStyles()` (`:20-106`) injects today, which Step 5 deletes. It is the **Phase-1 consumer of `shared.css`**: without it, `shared.css` is a sheet of custom properties no rule reads, and every claim about cascade order and about `--color-primary-fg` having a consumer is circular (Critic M-1).
 
-Canonical set = FR-2's 16 puma colour keys **plus `--color-primary-fg`** (17):
+#### 1.0 How a page selects a theme
+
+Stated once, here.
+
+All tokens are declared on `:root`. A theme is selected by a `data-theme` attribute **on the `<html>` element**. It must be `<html>`, not a wrapper: `:root` *is* `html`, so a `[data-theme="x"]` rule targeting a container would create a second, lower-specificity origin for the same custom properties, and `:root`'s values would win everywhere outside that container. The sampler therefore sets `document.documentElement.dataset.theme`; C6 stamps a literal attribute.
+
+**Which theme governs which surface is that surface's own decision, in that surface's own file.** Phase 1 decides it for exactly one surface: after C6, taskmaster renders under `[data-theme="obsidian"]`. This implements FRD §7 decision 6 (`:482-485`) — "Its `ui/modal.ts` is the donor… the violet look preserved by the `obsidian` theme" — so it executes a settled decision rather than making a new one. The other 12 modules are untouched and continue rendering however they do today. ADR-007.
+
+**Passages this propagates through** (the complete list, so a reviewer can check that none still assumes the old premise): (1) this subsection; (2) Step 1.4's obsidian contrast exemption; (3) §2's "taskmaster's page" paragraph; (4) Step 7's C6 description; (5) T7's rows that cite obsidian literals (1, 2, 3, 6, 7, 8, 9, 10); (6) §4's C6 row; (7) gate **A10.7**; (8) §7's Q3 closure; (9) the companion doc's Q3 closure; (10) §8 row 5; (11) §9 item 1; (12) §6 risk R21; (13) ADR-007.
+
+#### 1.1 Table T1 — the canonical `--color-*` set (defined once)
+
+These 17 keys are the complete per-theme colour vocabulary. **No other section re-enumerates them.**
+
 `--color-bg`, `--color-surface-1`, `--color-surface-2`, `--color-surface-3`, `--color-border`, `--color-divider`, `--color-text`, `--color-text-muted`, `--color-text-faint`, `--color-primary`, `--color-primary-hover`, `--color-primary-active`, `--color-primary-tint`, `--color-primary-fg`, `--color-danger`, `--color-success`, `--color-warning`.
 
-**Notes**
+**Provenance of `--color-primary-fg`: authored by this phase, no donor.** `grep -rn -- '--color-primary-fg' web/` → **rc=1**. It appears in no donor file and in no FRD code block, the puma block included. Every claim in this plan about the shipped CSS matching the FRD or a donor must therefore exempt it — A2.1 and A2.4 do. **Its Phase-1 consumer is real:** `components.css`'s `.ui-modal-btn-primary { color: var(--color-primary-fg) }`, which is the retokenization of `modal.ts:99`'s `color: #fff`. That is why the key is authored now rather than deferred, and why Step 1.4's measurement is load-bearing rather than theoretical.
 
-1. **`--color-primary-fg` is the 18th…17th key, and it is load-bearing.** The donor's `.tm-modal-btn-primary { color: #fff }` (`web/taskmaster/js/ui/modal.ts:99`) has no target in FR-1's vocabulary. White on the light theme's `--color-primary: #01696f` is the risk case that makes a hardcoded `#fff` wrong. Every theme sets it; dark-ish themes set `#fff`, light sets `#fff` (teal `#01696f` at 4.5:1+ against white — verified acceptable), and the token exists so a future theme can differ.
-2. **Focus ring — one answer, stated in both places.** The shared focus ring is **`--color-primary`**. v1 said `--color-primary` in Step 1 and mapped the donor's `#9d8fff` ring to `--color-primary-hover` in Step 4; that contradiction is resolved in favour of `--color-primary`, and Step 4's token map below says so. (`obsidian`'s `--color-primary: #7c6af7` is within a shade of the donor's literal, so the visual delta is imperceptible and is listed as a sanctioned delta in Step 6.)
-3. **Scrim and elevation are structural, not theme-scoped.** `--overlay-scrim: rgba(0, 0, 0, 0.55)` and `--shadow-md: 0 8px 32px rgba(0, 0, 0, 0.4)` live in `tokens.css` on `:root` with a single Phase-1 value each, carrying the donor's exact literals (`modal.ts:28` and `:44`). This keeps colour literals out of `components.css` (A1.5) without inflating the theme key set. Light-theme scrim tuning is a Phase-2 follow-up.
-4. **`--font-body` is pinned to the fallback stack, deliberately.** Phase 1 ships no webfonts (FR-6 is Phase 6), so `--font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif` and `--font-mono: ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, monospace`. v1's implied `'Inter', <fallback>` would reference a face Phase 1 does not ship, making rendering machine-dependent in a way no gate can see. The `puma` block's Sora / IBM Plex Mono overrides are transcribed per FR-2 but likewise resolve to their fallbacks until FR-6 lands — recorded as a known Phase-1 limitation, not a defect.
+#### 1.2 Table T2 — structural tokens (27, defined once)
+
+Declared on `:root` in `tokens.css`. `themes.css` may override only the three marked ★ (A1.2). All obsidianoid citations below were re-read for v5; v4's were off (Architect M3).
+
+| Token | Value | Donor / note |
+|---|---|---|
+| `--radius-sm` | `0.25rem` | obsidianoid `:20`. **Conflict:** grocery `:39` says `0.35rem`. |
+| `--radius-md` | `0.5rem` | obsidianoid `:21` = grocery `:40`. **= 8px at the 16px root** — the fact behind sanctioned delta 4. |
+| `--radius-lg` | `0.75rem` | obsidianoid `:22` = grocery `:41` |
+| `--radius-full` | `9999px` | obsidianoid `:23` |
+| `--shadow-sm` | `0 1px 3px oklch(0 0 0 / 0.3)` | obsidianoid `:24`. **Conflict:** grocery `:44` uses `rgb()`. |
+| `--shadow-md` | `0 8px 32px rgba(0, 0, 0, 0.4)` | **`web/taskmaster/js/ui/modal.ts:44`** — deliberate divergence from obsidianoid `:25` (`0 4px 16px oklch(0 0 0 / 0.4)`), because the donor modal's own shadow must be reproducible from the token or C6 changes it. §8 row 12. |
+| `--space-1`, `--space-2`, `--space-3` | `0.25rem`, `0.5rem`, `0.75rem` | obsidianoid — **all three on `:26`** |
+| `--space-4`, `--space-6`, `--space-8` | `1rem`, `1.5rem`, `2rem` | obsidianoid — **all three on `:27`** |
+| `--space-5` | `1.25rem` | **`web/grocery/style.css:12`** — obsidianoid has no `--space-5`; FRD `:171` names this exact gap. |
+| `--space-7` | `1.75rem` | **Authored — no donor.** FRD `:171-174` mandates the full `--space-1..8` scale; neither donor declares `--space-7`. Value continues the scale's `0.25rem` step. *(New in v5 — Architect M4.)* |
+| `--text-xs`, `--text-sm`, `--text-base`, `--text-lg` | obsidianoid `:28`, `:29`, `:30`, `:31` clamps | obsidianoid. **Conflict:** grocery `:6-9` clamps differ. |
+| `--text-xl` | `clamp(1.5rem, 1.32rem + 0.75vw, 2rem)` | **Authored — no donor.** FRD `:172` names it; neither donor declares it. Continues obsidianoid's clamp geometry one rung up. *(New in v5 — Architect M4.)* |
+| `--font-body` | `"Inter", var(--font-body-fallback)` | restructured from obsidianoid `:32` (`'Inter', 'Segoe UI', sans-serif`); §8 row 13 |
+| `--font-mono` | `"JetBrains Mono", var(--font-mono-fallback)` | restructured from obsidianoid `:33` (`'JetBrains Mono', 'Fira Code', monospace`) |
+| `--font-body-fallback` | `"Segoe UI", system-ui, sans-serif` | **Part donor, part authored:** `"Segoe UI"` and `sans-serif` are obsidianoid `:32` minus Inter; **`system-ui` is added by this plan.** **Mandated** as a token — FRD `:222` writes `var(--font-body-fallback)`. |
+| `--font-mono-fallback` | `"Fira Code", ui-monospace, monospace` | Same split: `"Fira Code"`/`monospace` from obsidianoid `:33`, **`ui-monospace` added here.** Mandated by FRD `:223`. |
+| `--sidebar-width` | `280px` | obsidianoid `:34` |
+| `--topbar-height` | `48px` | obsidianoid `:35` |
+| `--transition` | `160ms cubic-bezier(0.16, 1, 0.3, 1)` | obsidianoid `:36` |
+| `--overlay-scrim` ★ | `rgba(0, 0, 0, 0.55)` | `modal.ts:28` literal (settled) |
+
+★ = overridable in `themes.css`. The three overridable tokens are `--font-body`, `--font-mono` (puma, FRD `:222-223`) and `--overlay-scrim` (light, Q1); A1.2 allowlists exactly these and fails on a fourth.
+
+**Conflict rule, stated once.** `web/obsidianoid/css/themes.css` is the **structural donor of record**. Three documented exceptions: `--shadow-md` and `--overlay-scrim` come from `modal.ts` literals so the donor modal stays reproducible; `--space-5` comes from grocery because obsidianoid lacks it and FRD `:171` names it. Two tokens (`--space-7`, `--text-xl`) have no donor at all and are authored because FRD `:171-174` mandates the complete scales. Where grocery and obsidianoid disagree on a token both define (`--radius-sm`, `--shadow-sm`, `--text-*`), **obsidianoid wins** and grocery's value becomes a Phase-3 migration delta, not a Phase-1 decision. §8 row 9.
+
+**Deliberately not authored:** `--color-surface-dynamic` (obsidianoid-only, Q2) and `--radius-xl` (grocery-only). Identical reasoning for both: one consumer each, in a module this phase does not migrate, and `--color-surface-dynamic` would additionally mean inventing 7 donor-less theme values that nothing reads. Each lands with its module's migration (§9 item 5). *Note the asymmetry with `--space-7`/`--text-xl`, which are authored: those two are named by FR-1's own vocabulary, so omitting them would be a deviation from the FRD, whereas authoring the other two would be an addition to it.*
+
+#### 1.3 Tables T5a/b/c — donor → canonical remaps
+
+**The `dark` / `obsidian` rename, stated once.** FRD FR-2 (`:185-196`) makes `obsidianoid`'s `:root, [data-theme="dark"]` block **canonical `obsidian`** (`:190-191`), and sources canonical **`dark`** from `web/todo/css/todo.css:3-17`. So the violet palette below is obsidian's, not dark's; v4's T5a header said "dark" and was wrong (Architect B8).
+
+**T5a — obsidianoid → canonical** (obsidian, forest, ocean, ember, rose). 17 source keys per block.
+*Identity:* `--color-bg`, `--color-surface-2`, `--color-divider`, `--color-border`, `--color-text`, `--color-text-muted`, `--color-text-faint`, `--color-primary`, `--color-primary-hover`, `--color-primary-active`, `--color-success`, `--color-warning`.
+*Renamed:* `--color-surface` → `--color-surface-1`; `--color-surface-offset` → `--color-surface-3`; `--color-primary-highlight` → `--color-primary-tint`; `--color-error` → `--color-danger`.
+*Dropped:* `--color-surface-dynamic` (Q2).
+*Gap:* `--color-primary-fg`, authored per 1.4.
+**Arithmetic: 17 − 1 dropped = 16 remapped, + 1 authored = 17 canonical.** This is the whole of iteration-3's Architect B7 / Critic C-2.
+
+**T5b — todo → canonical** (dark, light). 13 source declarations.
+`--bg`→`--color-bg`, `--surface`→`--color-surface-1`, `--surface-raised`→`--color-surface-2`, `--border`→`--color-border`, `--text`→`--color-text`, `--text-muted`→`--color-text-muted`, `--accent`→`--color-primary`, `--accent-hover`→`--color-primary-hover`, `--accent-lite`→`--color-primary-tint`, `--danger`→`--color-danger`, `--success`→`--color-success`, `--warning`→`--color-warning`.
+`--shadow` is **not** a colour key — it informs T2's `--shadow-*` and leaves the colour matrix.
+**Gaps: 5 per theme** — `--color-surface-3`, `--color-divider`, `--color-text-faint`, `--color-primary-active`, `--color-primary-fg`.
+
+**T5c — grocery → canonical** (contributes to `light` only).
+*Fills 2 of light's gaps:* `--color-divider: #ebe8e3`, `--color-text-faint: #b0ada8`.
+*Corroborates 10* keys todo-light already supplies identically: `#f4f2ee`, `#ffffff`, `#f0ede8`, `#dcd9d5`, `#28251d`, `#6b6862`, `#01696f`, `#0c4e54`, `#dff0f0`, `#b91c1c`.
+**Grocery declares no `--color-success` token at all** — it has `--color-warning-lite` (`:29`) and `--color-warning-bdr` (`:30`) but no `--color-success` in any form — so light's success and warning both come from todo-light (`#2d8a4e`, `#c9860a`). *(v4 said "only `-lite`/`-bdr` variants", which implied a base success token exists. It does not.)*
+
+#### 1.4 Non-donor cells — 14 of 136
+
+The 8 × 17 matrix has 136 cells; 122 come from a donor or from the FRD's puma block (`:202-217`). The other 14 are authored, and each derivation is written down so a reviewer can check the arithmetic rather than trust it.
+
+**8 measured cells — `--color-primary-fg`, one per theme.** `#ffffff` fails WCAG AA (4.5:1) on **six of eight**:
+
+| Theme | `--color-primary` | vs `#ffffff` | vs `#0b0f14` | Ships |
+|---|---|---|---|---|
+| light | `#01696f` | 6.46 ✓ | 2.98 | `#ffffff` |
+| dark | `#7c3aed` | 5.70 ✓ | 3.37 | `#ffffff` |
+| obsidian | `#7c6af7` | **3.99 ✗** | 4.82 | `#ffffff` — see below |
+| forest | `#4dbb6e` | 2.43 ✗ | 7.92 | `#0b0f14` |
+| ocean | `#5b9cf6` | 2.79 ✗ | 6.89 | `#0b0f14` |
+| ember | `#f0a04a` | 2.14 ✗ | 9.00 | `#0b0f14` |
+| rose | `#e05c7a` | 3.51 ✗ | 5.47 | `#0b0f14` |
+| puma | `#3fbf9c` (FRD `:211`) | 2.30 ✗ | 8.37 | `#0b0f14` |
+
+**obsidian ships `#ffffff` at 3.99:1 deliberately.** taskmaster ships `color:#fff` on `var(--interactive-accent, #7f6df2)` today (`modal.ts:97-99`) at **3.91:1**, and after C6 taskmaster *is* the surface rendering under `[data-theme="obsidian"]` — through `components.css`'s `.ui-modal-btn-primary`, which is the rule that reads the token. Raising it would be a visible restyle of a shipping button inside a foundation phase. Recorded as an inherited pre-existing condition, §9 item 1. **This reasoning is sound only because C6 stamps the attribute and because `components.css` exists to consume the token** — v4 asserted the first and deleted the second.
+
+**6 derived cells.**
+
+| Theme | Key | Value | Derivation |
+|---|---|---|---|
+| dark | `--color-surface-3` | `#2c3138` | Continues todo-dark's own step: `#161b22` → `#21262d` is `+0x0b` per channel, so the next rung is `#2c3138`. **Flag:** it lands only `0x04` below `--color-border` `#30363d`, tighter than obsidian's equivalent gap. §9 item 10. |
+| dark | `--color-divider` | `#232930` | **A chosen value, not a computed one.** Constraint it satisfies: above `--color-surface-2` `#21262d` and well below `--color-border` `#30363d`, so a divider reads quieter than a border. The midpoint (`#282e35`) would read as a second border. |
+| dark | `--color-text-faint` | `#6e7681` | GitHub Primer `fg.subtle` — the family todo-dark's other greys come from (`#8b949e` is Primer `fg.muted`). |
+| dark | `--color-primary-active` | `#5b21b6` | Tailwind violet-800, one rung below todo-dark's `--accent-hover` `#6d28d9` (violet-700). Independently present in this tree at `web/grocery/style.css:33`. |
+| light | `--color-surface-3` | `#e6e3df` | Midway between `--color-surface-2` `#f0ede8` and `--color-border` `#dcd9d5`; the exact midpoint is `#e6e3de`/`#e6e3df` and the blue channel rounds up. |
+| light | `--color-primary-active` | `#173339` | todo-light's own `--accent` → `--accent-hover` delta (`#01696f` → `#0c4e54`, i.e. `+0x0b, −0x1b, −0x1b`) applied once more. **Exact.** |
+
+#### 1.5 The `light` scrim override (user answer Q1 = yes)
+
+`--overlay-scrim`'s base is the donor's 55% black — correct on the 7 dark themes and far too heavy over a light page. `themes.css`'s `[data-theme="light"]` block therefore overrides it to `rgba(40, 37, 29, 0.35)`: light's own `--color-text` `#28251d` at 0.35 alpha, so the scrim is the theme's own ink rather than a foreign black, at an alpha where the page reads dimmed rather than blacked out. Same mechanism as puma's `--font-*` override, and the third entry in A1.2's allowlist. **The alpha is a judgement, not a derivation** — the sampler pass confirms or adjusts it (§9 item 11, via `docs/sampler-checklist.md`).
+
+#### 1.6 `components.css` — the `.ui-modal-*` rules
+
+The retokenized body of `modal.ts`'s `ensureStyles()` (`:20-106`), moved here in Step 5 and authored here in Step 1 so `shared.css` has a consumer from C4 onward. Rules for the eight classes the donor defines — `ui-modal-overlay`, `ui-modal-panel`, `ui-modal-title`, `ui-modal-message`, `ui-modal-input`, `ui-modal-actions`, `ui-modal-btn`, `ui-modal-btn-primary` (verified: those are exactly the 8 `tm-modal-*` literals in the donor, renamed per Step 5).
+
+**Two authoring constraints, both gated:**
+
+- **No colour literal** (A1.6). Every colour comes from a token. **Carve-out, restored from v3:** the ban is on colour *literals* — `#hex`, `rgb(`, `rgba(`, `hsl(` — outside comments, and it applies to **`components.css` only**, not to `themes.css` (which is nothing but literals by definition) and not to module CSS (§8 row 14). `box-shadow` and the scrim consume `var(--shadow-md)` and `var(--overlay-scrim)`, whose literals live in `tokens.css`, so the carve-out costs nothing: there is no rule in `components.css` that needs a literal.
+- **Selector discipline** (A1.10): every selector is `.ui-*`, or a state/descendant of one. No bare element selectors — this is what keeps `shared.css` inert on the 12 non-adopting modules if one ever links it, and it is why `check-shared-css.mjs` parses selector lists instead of pattern-matching lines (v1's grep missed `a:hover {` and `.ui-card > button {`).
+
+#### 1.7 `scripts/check-shared-css.mjs` — the specification
+
+*(Answers the Critic's unscored question 3, which asked how A1.3's 136-declaration check and A1.6's carve-out are actually implemented.)*
+
+Lints each file in `web/shared/css/` **individually, and does not resolve `@import` targets.** Two structural reasons, both load-bearing: at C1 `fonts.css` does not exist yet, and a linter that followed imports would make the C1/C1b split unlandable.
+
+Implementation, **11 clauses**, no CSS parser dependency (G4):
+
+1. **Strip comments first** (`/\/\*[\s\S]*?\*\//g`), before any other clause, so every "outside comments" qualifier below is structural rather than a regex afterthought.
+2. **Block scanner.** Walk the file tracking brace depth; collect `{selector, declarations[], line}` for every depth-1 block, skipping blocks whose selector starts with `@` (so `@media`/`@supports` wrappers do not masquerade as rules). Declarations are split on `;` and each parsed as `prop: value` with the property trimmed.
+3. **`tokens.css`:** exactly one depth-1 block, selector `:root`; its property set must **equal** T2 (27 names) — missing and extra are both failures, each reported by name. → A1.4.
+4. **`themes.css`:** the depth-1 selector roster must equal the 8 expected strings — `:root, [data-theme="dark"]` plus `[data-theme="light"|"obsidian"|"forest"|"ocean"|"ember"|"rose"|"puma"]`. → A1.3 clause 1.
+5. **Per theme block:** the set of `--color-*` properties must equal T1 (17), **and then** the running total of `--color-*` declarations across all 8 blocks must equal **136**. Both checks are needed: the set test alone passes when a block declares one key twice and omits another, because a set has no multiplicity. → A1.1, A1.3.
+6. **Non-`--color-*` properties in a theme block** must be members of `ALLOW = {--font-body, --font-mono, --overlay-scrim}`; a fourth is a failure naming the offending property and line. → A1.2.
+7. **`components.css`:** the colour-literal regex (`#[0-9a-f]{3,8}\b`, `rgba?\(`, `hsla?\(`) runs **only over this file**, and every selector must match `^\.ui-[a-z0-9-]+` allowing descendant/pseudo/attribute continuations. → A1.6, A1.10.
+8. **`index.css`:** every `@import` is a relative same-directory path (no `/`, no `..`, no scheme, no `url(http…)`), and the set of imported names is a subset of the files present. → A1.7. No external-URL `@import` anywhere under `web/shared/css/`. → A1.5.
+9. **`!important` appears in no file** under `web/shared/css/`. → A1.8. This is load-bearing for R17: `web/taskmaster/style.css:4`'s `[hidden] { display: none !important; }` must keep winning over any `.ui-modal-*` display rule, and it does precisely because shared CSS may not use `!important`.
+10. **From C1b, `fonts.css`:** the file declares **exactly 15 `@font-face` rules**; each `url("…")` resolves — mapping the served prefix `/shared/` back to the repo path `web/shared/` — and each `*.woff2` under `web/shared/public/fonts/` is referenced by exactly one `url()`. → A1.9, all three halves (count, forward resolution, reverse coverage) per G5. *(The count half was in A1.9 but missing from this clause — Critic note 4.)*
+11. **`--color-error` appears nowhere** under `web/shared/`; `--color-danger` is the canonical name. → A1.11.
+
+Exit 1 on the **first** failure, printing `file:line: clause: message`. Invoked by `scripts/build-web.mjs` before the first esbuild call (driver rule 8), by `make gates`, and directly in each commit's verification block.
+
+#### 1.8 `scripts/descriptors.mjs` and the two Makefile gate targets land here
+
+*(Architect blocker B2. v5 put these in C2 while making C1 assert against them.)*
+
+C1 is the commit that introduces the **gate harness**, and a harness is not shippable in halves. Four of C1's own gates — **A7.2** (`WEB_ARTIFACTS` is generated, not hand-written), **A7.3** (the artifact list is tracked and byte-identical), **A7.7** (`artifacts.mjs` runs the generator as a child process and compares against `EXPECTED_ARTIFACT_COUNT`) and **A7.17** (no gate is a shell one-liner in a make recipe) — plus **AX.3** and **AX.4** (count 12 at this boundary) are assertions *about these files*. Deferring them to C2 would mean C1's boundary named six gates that could not be invoked until the next commit.
+
+So C1 additionally lands:
+
+- **`scripts/descriptors.mjs`** — the seven existing descriptors transcribed from today's npm chain, plus `EXPECTED_ARTIFACT_COUNT = 12`. It is a **static data module**: it imports nothing, executes nothing, and depends on neither driver. Its full contents and schema are specified once, in **Step 3**, alongside the drivers that consume it; only its *timing* is decided here.
+- **`scripts/list-artifacts.mjs`** — prints one artifact path per line, derived from that array. It moves here with `descriptors.mjs` for the same reason and one more: A7.7 requires `artifacts.mjs` to run the **generator** as a child process, so the generator must exist wherever the gate does.
+- **`Makefile`** — the `web-verify` and `gates` targets, and `.PHONY` grows 9 → 11. `gates` runs **three** scripts at this boundary: `check-shared-css.mjs`, `bundle-shape.mjs`, `token-overlap.mjs`. It does **not** name `check-shared-barrel.mjs`, which C4 creates and C4 adds to the recipe (Critic amendment A; §4's gate-composition table; Step 5).
+
+`bundle-shape.mjs` therefore ships **live but with an empty input set** — its input is the `sharedConsumer: true` descriptors, of which there are none until C5. That is a vacuous pass, recorded as such in §4's composition table and in A9.5, not counted as evidence of anything. It is not a stub: the same code path that passes on zero inputs is the one that fails on a bad input at C6.
 
 **Verification**
+```sh
+node scripts/check-shared-css.mjs                                    # A1.1-A1.8, A1.10, A1.11 (clause 10 is inert: no fonts.css yet)
+node scripts/gates/artifacts.mjs --allow web/taskmaster/js/bundle.js # A7.2, A7.3, A7.7, AX.3, AX.4: count 12; the C1/C1b exemption (§4)
+make gates                                                           # A7.17: three scripts at this boundary (§4's composition table)
+make -n web-verify gates >/dev/null                                   # A7.15: both targets exist and are phony
+node scripts/gates/token-overlap.mjs                                 # A2.1-A2.5
+node scripts/gates/clean-tree.mjs web/shared/css/ scripts/ Makefile .gitignore   # AX.1, P2-scoped so P6's side-car files are untouched
+grep -rn -- '--color-error' web/shared/; rc=$?; [ "$rc" -eq 1 ]      # A1.11, guarded per AX.5
 ```
-node scripts/check-shared-css.mjs
-# asserts, and exits non-zero with the offending line on failure:
-#  A1.1 tokens.css declares each structural token exactly once, all on :root
-#  A1.2 themes.css declares no structural token
-#  A1.3 all 8 theme blocks present; key sets equal per the invariant above
-#  A1.5 components.css contains no #hex / rgb( / rgba( / hsl( outside comments
-#  G1   no bare element selectors; every non-:root/[data-theme] selector is .ui-*
-! grep -rEn '(https?:)?//(fonts\.googleapis|fonts\.gstatic|cdn|unpkg|jsdelivr|cdnjs)' web/shared/
-npm run build && npm run typecheck && npm run test:web && make test
-```
-`check-shared-css.mjs` is the gate rather than a grep because v1's element-selector grep missed `a:hover {` and `.ui-card > button {`. The script parses selector lists; it does not pattern-match lines.
+
+`make check` is **not** run here: it does not exist until C2, which adds it together with `test-web`. `make web-verify` is likewise not used at this boundary — the byte-identity exemption's mechanism is the `--allow` flag on the gate file itself (§4).
 
 ---
+### Step 2 — Fonts (C1b, deliverable D7)
 
-### Step 2 — `scripts/build-web.mjs` replaces the `&&` chain (D4, part 1)
+**Creates:** `web/shared/public/fonts/**` (15 woff2, 4 `OFL.txt`, 1 `SHA256SUMS`), `web/shared/css/fonts.css`
+**Modifies:** `web/shared/css/index.css` (adds `@import "fonts.css";` as the first import)
 
-**Creates** `scripts/build-web.mjs`. **Modifies** `package.json` (scripts), `tsconfig.json` (`paths`, `exclude`), `Makefile` (targets + `.PHONY`).
+**Shipping rule, stated once so the count follows mechanically:** ship exactly the staged woff2 files for which `fonts.css` declares an `@font-face`, preserving the family subdirectory layout. Inter's three static weights are **not** shipped — `InterVariable.woff2` plus `InterVariable-Italic.woff2` cover 100–900, so the statics would be dead bytes. 18 staged − 3 = **15**: Inter 2, JetBrains Mono 4, Sora 5, IBM Plex Mono 4.
 
-**This step changes zero build output.** Its only job is to move the same seven invocations behind a data-driven driver so Steps 4–6 can extend a list instead of editing a shell chain.
+**Why Sora and IBM Plex Mono ship in Phase 1** rather than later: the puma theme block ships in Phase 1, and FRD `:222-223` names those two families in its `--font-*` override. Shipping the block without the faces means puma silently resolves to `var(--font-body-fallback)` — and C6's screenshot pass would bless the wrong rendering as correct. Risk R22.
 
-**Module descriptor list** (exactly the seven that exist today; `shared` and `shared-css` are **not** here — see B2 above):
+**`@font-face` form for the variable faces:** `font-family: "Inter"` with `font-weight: 100 900`. **Not** `"Inter var"` — nothing in T2 references that family name, so the descriptor would be inert. A6.4.
+
+**`url()` form and the esbuild policy that makes the artifact count hold.** Every `url()` in `fonts.css` is **server-absolute**: `url("/shared/public/fonts/inter/InterVariable.woff2")`. The `shared-css` descriptor sets `external: ["*.woff2"]`, so esbuild leaves those urls untouched and emits **no** hashed side-artifacts — which is what keeps the Phase-1 artifact total at 15 rather than 15 + 15 content-hashed copies. The alternative (`loader: { ".woff2": "file" }`) would copy and rename every face into `web/shared/dist/`, doubling the committed bytes and making `SHA256SUMS` describe files no page requests. **Consequence, stated because it is a real constraint:** `fonts.css` is only correct when the tree is served at `/shared/` — which D2 guarantees on all 13 hosts and A8.1 asserts. A6.5.
+
+**Provenance (G9).** `web/shared/public/fonts/SHA256SUMS` is `fonts-staging/SHA256SUMS` minus the three `inter/Inter-{Regular,Medium,SemiBold}.woff2` lines. Because the family subdirectory layout is preserved, the remaining 15 lines transplant **verbatim** and `shasum -a 256 -c SHA256SUMS`, run with the fonts directory as cwd, resolves them — which is why the digest file lives beside the fonts rather than in `docs/`. Mechanism verified end to end on scratch files: rc=0 intact; **rc=1 with a `FAILED` line on byte mutation; rc=1 with `FAILED open or read` on a missing file.** It fails loud in both directions, which is what makes it a gate rather than a comment. Each family's `OFL.txt` travels beside its faces. The file is HTTP-reachable at `/shared/public/fonts/SHA256SUMS`; it lists digests of world-readable font files, so it discloses nothing.
+
+**Weight trimming is deferred, and the reason is quoted rather than cited.** `fonts-staging/NOTES.md:27-28` says, verbatim: *"**Sora** — 400/500/600/700/800 (puma theme headings; trim once the theme CSS pins its weights)."* Phase 1 ships all five because the puma block does not yet pin weights; §9 item 8 trims them when it does. The quote is reproduced here because `NOTES.md` is **untracked** (ADR-006), so a reviewer of this plan cannot open the citation.
+
+**Verification**
+```sh
+cd web/shared/public/fonts && shasum -a 256 -c SHA256SUMS      # A6.1, rc=0
+node scripts/check-shared-css.mjs                              # now includes clause 10 → A1.9
+node scripts/gates/clean-tree.mjs web/shared/ web/taskmaster/js/bundle.js   # see the C1b exemption in §4
+```
+
+### Step 3 — Build and test drivers, Makefile, and the generated artifact list (C2)
+
+**Creates:** `scripts/build-web.mjs`, `scripts/test-web.mjs`
+**Modifies:** `package.json` (`build`, `build:dev`, `test:web`, `engines`), `Makefile` (`web:` at `:42-44`, `typecheck:` at `:46-47`, new `test-web` and `check`, `.PHONY` extended 11 → 13), `web/taskmaster/js/bundle.js` (regenerated — see below)
+
+**What this step does *not* create, stated because v5 had it wrong** *(Architect blocker B2)*. `scripts/descriptors.mjs`, `scripts/list-artifacts.mjs`, `scripts/gates/artifacts.mjs` and the `web-verify` / `gates` Makefile targets all land at **C1** (Step 1.8), not here. Step 1's own gates A7.2/A7.3/A7.7/A7.17 and AX.3 assert against them, and a gate cannot assert against a file three commits in its future. The dependency runs the other way round: `descriptors.mjs` is a static data module that depends on nothing the drivers create, while the drivers import it. C2 does not touch `descriptors.mjs` at all — see §4's `descriptors.mjs` edit-trail bullet.
+
+One descriptor array in `scripts/descriptors.mjs` is the single source for the build driver, the test driver, **and** `WEB_ARTIFACTS`. The artifact list, the build, and the test runner therefore cannot disagree. Each descriptor: `{ name, entry, out, mode, bundle, format, jsx, define, loader, external, runner, sharedConsumer }`.
+
+**`sharedConsumer` is one field doing three jobs, deliberately.** A descriptor with `sharedConsumer: true` (a) gets the `@shared` `onResolve` plugin of rule 10, (b) is subject to the driver's `format: "esm"` assertion, and (c) is a member of `scripts/gates/bundle-shape.mjs`'s input set (A9.4). Deriving all three from one field is why they cannot drift apart: v5 described the plugin's applicability as "bundled browser descriptors" and left `bundle-shape.mjs`'s input set unstated, so the plugin could apply to a bundle the gate never inspected — Critic amendment A. The field is **absent on all seven descriptors here and on `shared`/`shared-css` at C4**: the barrel is not a consumer of itself. It first appears at C5 (`sampler`) and again at C6 (`taskmaster`), which is why A9.1/A9.2/A9.4 are deferred to those commits and not to C4.
+
+**The seven existing descriptors** — authored at **C1** (Step 1.8) and consumed unchanged here; `shared` and `shared-css` are added by C4, `sampler` by C5. None carries `sharedConsumer`:
 
 | name | entry | mode | format | extra |
 |---|---|---|---|---|
@@ -204,79 +458,100 @@ npm run build && npm run typecheck && npm run test:web && make test
 | slideshow | `web/slideshow/js/app.ts` | transpile (`outdir`) | (default) | — |
 | multissh | `web/multissh/js/main.ts` | bundle → `js/bundle.js` | iife | — |
 | certmachine | `web/certmachine/js/main.ts` | bundle → `js/bundle.js` | iife | — |
-| taskmaster | `web/taskmaster/js/main.ts` | bundle → `js/bundle.js` | iife *(→ esm in Step 6)* | `define: __TM_BUILD_TIME__` |
+| taskmaster | `web/taskmaster/js/main.ts` | bundle → `js/bundle.js` | iife *(→ esm in Step 7)* | `define: __TM_BUILD_TIME__` |
 | smbedit | `web/smbedit/src/main.tsx` | bundle → `js/bundle.js` | iife | `jsx: automatic`, `define: process.env.NODE_ENV`, `logLevel: warning` |
 | issuetracker | `web/issuetracker/src/main.tsx` | bundle → `js/bundle.js` | iife | same as smbedit |
 
 **Driver rules** — each exists because violating it breaks a specific gate.
 
-1. **esbuild JS API, one `build()` per descriptor, sequential.** Shared descriptors (from Step 4) run first so a later module could import their output.
-2. **Entry paths stay exactly as they are today.** No module is relocated in Phase 1. The descriptor schema carries `mode: "transpile" | "bundle"` precisely so `web/obsidianoid/js/app.ts` (transpile-only, `outdir`) and `web/smbedit/src/main.tsx` (bundled, `outfile`) coexist without either being forced into the other's shape. The target layout (`web/<m>/src/`) is a Phase-2 rename that touches only the `entry` field.
-3. **All paths relative to the repo root; never absolute; no `absWorkingDir`; no `path.resolve` on any esbuild input or output field.** esbuild embeds relative source paths as comments in bundles — `web/taskmaster/js/bundle.js:3` is literally `// web/taskmaster/js/ui/modal.ts`. Any absolute path rewrites every one of those comments and fails G2 everywhere at once. This is the single highest-probability cause of a G2 false failure and v1's R2 did not mention it. The driver asserts `!path.isAbsolute(v)` on every descriptor path field before calling esbuild.
-4. **`define: { __TM_BUILD_TIME__: JSON.stringify(buildTime()) }`** where
-   ```js
-   function buildTime() {
-     if (process.env.TM_BUILD_TIME) return process.env.TM_BUILD_TIME;
-     const r = spawnSync("git", ["log", "-1", "--format=%cI", "--", "web/taskmaster"], {encoding: "utf8"});
-     const t = r.status === 0 ? r.stdout.trim() : "";
-     return t || new Date().toISOString();
-   }
-   ```
-   Per-descriptor `define`, so no other module sees the flag. This is B3's fix; there is no 1970 pin anywhere.
+1. **esbuild JS API, one `build()` per descriptor, sequential.** Shared descriptors run first so a later module could import their output.
+2. **Entry paths stay exactly as they are today.** No module is relocated in Phase 1. The schema carries `mode: "transpile" | "bundle"` precisely so `web/obsidianoid/js/app.ts` (transpile-only, `outdir`) and `web/smbedit/src/main.tsx` (bundled, `outfile`) coexist without either being forced into the other's shape. The target layout (`web/<m>/src/`) is a Phase-2 rename touching only the `entry` field.
+3. **All paths relative to the repo root; never absolute; no `absWorkingDir`; no `path.resolve` on any esbuild input or output field.** *(Restored from v3; deleted by v4.)* esbuild embeds relative source paths as comments in bundles — `web/taskmaster/js/bundle.js:3` is literally `// web/taskmaster/js/ui/modal.ts`. Any absolute path rewrites every one of those comments and fails G2 everywhere at once. This is the single highest-probability cause of a G2 false failure. The driver asserts `!path.isAbsolute(v)` on every descriptor path field before calling esbuild. R2.
+4. **`define: { __TM_BUILD_TIME__: JSON.stringify(digest()) }`**, per-descriptor so no other module sees the flag, where `digest()` is ADR-004's content digest computed in the two-pass build. There is no `$(date -u)` and no `1970` pin anywhere.
 5. **`--sourcemap` via one flag.** `node scripts/build-web.mjs --dev` sets `sourcemap: true` and flips `process.env.NODE_ENV` to `"development"` for the two React modules. `build:dev` becomes that one command.
 6. **`target: "es2020"`, `platform: "browser"`, `logLevel`** mirrored per descriptor from the current chain — including `logLevel: "warning"` on exactly the two React modules, because a different default surfaces different stderr and invites someone to "fix" it by changing flags.
-7. **Test runner is the same driver, same flags.** `scripts/test-web.mjs` bundles each test entry with `bundle: true, platform: "node", format: "cjs", target: "node18", logLevel: "warning"` — the exact four flags `test:web` uses today — and pipes to `node`. Test entries: the existing four, **plus `web/grocery/app.test.js` unconditionally** (verified green: 189 pass, 0 fail). v1's Q6 asking whether to wire it is deleted; it is wired.
-8. **`check-shared-css.mjs` runs from the driver**, before the first esbuild call, and a failure aborts the build with a non-zero exit. v1's rules 1–8 never said where this ran, which would have left it a gate nobody invokes.
-9. **Barrel check** (`check-shared-barrel.mjs`, Step 4) runs alongside it, same placement, same abort semantics.
+7. **Warnings are failures.** Both drivers set `logLevel: "warning"` and exit non-zero when `result.warnings.length > 0`. Verified safe to turn on immediately: the tree produces zero real esbuild warnings today (§2). This is the mechanism that would have caught iteration-1's `import.meta` downgrade, which esbuild reported as a warning **with exit 0**.
+8. **`check-shared-css.mjs` runs from the driver**, before the first esbuild call; a failure aborts the build non-zero. Without this the linter is a gate nobody invokes.
+9. **`check-shared-barrel.mjs` runs alongside it from C4**, same placement in the driver, same abort semantics. Its **`make gates` line is added by C4**, not by this commit — the script does not exist yet, and a recipe naming it would fail C2 and C3 outright while a stub that exits 0 would be a gate that has never been able to fail (R19, AX.6). Step 5 states this; §4's gate-composition table records that `make gates` runs three scripts through C3 and four from C4. *(Critic amendment A.)*
+10. **`@shared` is externalized, not inlined.** *(Restored from v3.)* An `onResolve` plugin, applied to exactly the descriptors carrying **`sharedConsumer: true`** — not "bundled browser descriptors", which was v5's imprecise phrasing and would have swept in `shared` itself:
+    ```js
+    build.onResolve({ filter: /^@shared(\/.*)?$/ }, () => ({ path: "/shared/dist/shared.mjs", external: true }));
+    ```
+    Every `@shared/...` specifier — `@shared`, `@shared/modal`, `@shared/theme` alike — collapses to the single barrel URL. That is correct **only because the barrel is the complete public surface**: a deep specifier that resolved to something the barrel does not re-export would collapse to a URL from which the name is genuinely absent, and the failure would be a browser-console `SyntaxError`, not a build error. So barrel-completeness is not a stylistic preference — it is the precondition this rewrite rests on, and it is enforced by **A5.2's allowlist half** (`check-shared-barrel.mjs` asserts the exported-name set *equals* the six named values plus four types). `tsconfig`'s `paths` makes `tsc --noEmit` resolve the same specifiers to source, so types are checked while bytes stay external. **A descriptor with `sharedConsumer: true` must declare `format: "esm"`, and the driver asserts it** — with iife, esbuild emits `__require("/shared/dist/shared.mjs")` and a `Dynamic require of` shim, exits 0 with zero warnings, and the failure appears only in a browser console. A9.1/A9.2 are the two-sided gate; R3.
+11. **Test runner is the same driver, same flags.** `scripts/test-web.mjs` bundles each test entry with `bundle: true, platform: "node", format: "cjs", target: "node18", logLevel: "warning"` — the exact four flags `test:web` uses today — and pipes to `node`. The `runner` field selects the mode: `"esbuild-cjs"` for the four existing `.test.ts` suites plus `web/shared/ts/modal.test.ts` (C4); `"node-test"` for `web/grocery/app.test.js`, which uses `node:test` and `import.meta.dirname` (`:16-17`) and must run as `spawnSync(process.execPath, ["--test", <file>], { cwd: repoRoot })`. **Five suites after C4**; A7.13.
 
 **`package.json`**
 ```
 "build":     "node scripts/build-web.mjs",
 "build:dev": "node scripts/build-web.mjs --dev",
 "typecheck": "tsc --noEmit",
-"test:web":  "node scripts/test-web.mjs"
+"test:web":  "node scripts/test-web.mjs",
+"engines":   { "node": ">=22" }
 ```
+`engines` is declared because the drivers use `import.meta.dirname` and `node:test`; without it a Node 18 host fails obscurely. No `@types/node` is added (G4, ADR-005 driver 1).
 
-**`tsconfig.json`**
-- `compilerOptions.paths`: `{ "@shared/*": ["web/shared/ts/*"] }` (with `baseUrl: "."`).
-- `include`: the **union** of the current 7 enumerated globs **and** `web/shared/**/*`. FR-7.3's literal `["web/*/src/**/*", "web/shared/**/*"]` is **deferred to Phase 2**, because 5 modules still keep sources in `js/` and adopting the literal form now would silently drop them from `tsc --noEmit` — a coverage regression invisible to every gate. Recorded in §8.
-- `exclude`: `["node_modules", "web/shared/dist"]`. v1's exclude listed transpiled `.js` outputs that `allowJs: false` could never have included anyway; only `web/shared/dist` does real work (it keeps the emitted `.mjs` out of the program).
+**Why `web/taskmaster/js/bundle.js` is in C2's manifest.** *(Original to v5.)* ADR-004 changes how `__TM_BUILD_TIME__` is computed, so the commit that lands the driver necessarily re-stamps that artifact from a `$(date -u)` string to the digest `c2c572876987`. A C2 that did not commit the regenerated bundle would fail its own byte-identity gate at its own boundary. This is the commit where G2 becomes true for taskmaster, and it is why the C1/C1b exemption ends here.
 
-**`Makefile`** — add three targets and extend `.PHONY` (currently line 12):
+**The generated artifact list (user answer Q5 = "sure, generate the list").**
+
+`scripts/descriptors.mjs` exports both the descriptor array and `EXPECTED_ARTIFACT_COUNT`. `scripts/list-artifacts.mjs` prints the artifact paths derived from the array, one per line. The count is **defined once, in `descriptors.mjs`**, and both the generator and the gate import it — v4 wrote the number twice inside one make recipe (Critic M-6). **All three files, and the `web-verify` and `gates` targets that drive them, land at C1** (Step 1.8); this section specifies them once, here, because this is where the build driver that shares the same data module is described.
+
+**This commit's two new targets:**
+
 ```make
 test-web:
-	@if [ ! -d node_modules ]; then npm ci; fi
+	npm ci
 	npm run typecheck
 	npm run test:web
 
-web-verify: web
-	git diff --stat --exit-code -- \
-	  web/obsidianoid/js/app.js web/obsidianoid/js/threads.js web/slideshow/js/app.js \
-	  web/multissh/js/bundle.js web/certmachine/js/bundle.js \
-	  web/taskmaster/js/bundle.js web/smbedit/js/bundle.js web/issuetracker/js/bundle.js
-	! grep -rl 'Dynamic require of' web/*/js/bundle.js
-
-check: web-verify test-web test
+check: web-verify test-web gates test
 ```
-Also change the existing `web:` target (lines 42-44) from `npm install` to **`npm ci`**. `npm install` may rewrite `package-lock.json`, which both dirties `git status` under G6 and mutates the lockfile this plan treats as the authoritative esbuild pin (`^0.28.0`).
+
+**For reference, the two targets C1 already added** (Step 1.8; reproduced so the gate path is readable in one place — C2 does not edit them):
+
+```make
+web-verify:
+	node scripts/gates/artifacts.mjs
+
+gates:
+	node scripts/check-shared-css.mjs
+	node scripts/gates/bundle-shape.mjs
+	node scripts/gates/token-overlap.mjs
+```
+
+`gates` is **three** scripts here. C4 adds a fourth line, `node scripts/check-shared-barrel.mjs`, in the same commit that creates the script (driver rule 9, Step 5, §4's gate-composition table). `bundle-shape.mjs` exists from C1 and is **vacuous until C5** — its input set is the `sharedConsumer: true` descriptors, which is empty until then; A9.5 records that it is live from C1 and load-bearing from C6.
+
+`scripts/gates/artifacts.mjs` is **one process** that does all four things v4 tried to do in four recipe lines:
+
+1. **imports `EXPECTED_ARTIFACT_COUNT` from `descriptors.mjs`** and **runs `scripts/list-artifacts.mjs` as a child process**, then fails if the printed line count and the imported constant disagree (so a truncated list is a failure, not a silent pass). Running the generator rather than re-deriving the list in-process is what A7.7 requires: it is the generator's own output that `WEB_ARTIFACTS` consumes, so it is the generator's own output that must be counted.
+2. runs `git ls-files --error-unmatch -- <paths>` with an **explicit, non-empty** argv — verified asymmetry: **zero-argument `git ls-files --error-unmatch` lists the whole repo and exits 0**, a silent pass, whereas zero-path `git diff --exit-code --` diffs the whole tree and fails loud, so only the `ls-files` half needed the guard;
+3. runs `npm run build` and fails on non-zero;
+4. runs `git diff --exit-code -- <paths>` and reports the differing paths.
+
+**Why this is a file and not a recipe (G11).** Architect B7 proved v4's form always passes: in `@[ -z "$(git diff --name-only -- $(WEB_ARTIFACTS))" ]`, make expands `$(git diff …)` as a *make variable named "git diff …"*, which is empty, so the shell receives `[ -z "" ]` and exits 0 **whatever the tree contains**. The same hazard applied to v4's AX.1 and P2. Inside a `.mjs` file there is no make expansion layer: `execFileSync("git", ["diff", "--exit-code", "--", ...paths])` throws on non-zero and the process exits non-zero. Additionally, no `$(shell …)` survives anywhere in the Makefile for the gate path, because `$(shell …)` discards the child's exit status — a crashed generator would read as an empty list. *(v4's finding that a `:=` assignment runs `$(shell …)` at parse time, breaking `make build` on a node-free host, is retained as recorded evidence in ADR-001's consequences; the mechanism it describes is superseded by having no `$(shell)` at all, which satisfies ADR-001 driver 3 unconditionally rather than by careful assignment choice.)*
+
+`Makefile:42`'s `web:` target keeps its name; **`:43`**'s `@if [ ! -d node_modules ]; then npm install; fi` is replaced by `npm ci`, so a stale or partial `node_modules` cannot make a verification pass, and `npm install`'s lockfile rewrite cannot dirty `git status` under P2. `.PHONY` at `:12` today lists exactly the 9 targets the file defines (`run build build-rpi test clean clean-local-test-db init-config web typecheck`), and it grows **in two stages**: **9 → 11 at C1** (`web-verify`, `gates`) and **11 → 13 here** (`test-web`, `check`). A7.15 is therefore `[deferred → C1/C2]` and asserts membership at both boundaries, because a non-phony target named after a file that happens to exist silently never runs.
+
+`.gitignore` gains `fonts-staging/` (ADR-006) and keeps `certmachine.pin`; that edit lands at **C1** with the rest of the harness (§4's C1 row), because `fonts-staging/` must already be ignored when C1b stages faces. It does **not** gain `screenshots/` — verified: `tools/baseline-shots/baselines/` is already covered by a nested `.gitignore`, and nothing in the tree writes to `screenshots/`.
 
 **Verification**
-```
+```sh
 npm ci && npm run build
-git diff --stat --exit-code -- web/obsidianoid/js/app.js web/obsidianoid/js/threads.js \
-  web/slideshow/js/app.js web/multissh/js/bundle.js web/certmachine/js/bundle.js \
-  web/taskmaster/js/bundle.js web/smbedit/js/bundle.js web/issuetracker/js/bundle.js   # G2: empty
+make web-verify                    # A7.3 + AX.4: count 12, tracked, byte-identical — no `--allow`, the exemption ended here (A7.4)
+make gates                         # A7.17: still three scripts at this boundary (§4's composition table)
 npm run typecheck && npm run test:web && make test
-make check
-git status --porcelain    # empty
+make check                         # A7.16: exactly these four prerequisites, in this order
+grep -c 'date -u' package.json; rc=$?; [ "$rc" -eq 1 ]   # A7.5: no match, so grep -c prints 0 and exits 1
+node scripts/gates/clean-tree.mjs scripts/ package.json Makefile web/taskmaster/js/bundle.js   # AX.1; `.gitignore` belongs to C1's path set
 ```
 
 ---
+### Step 4 — Go: `/shared/` on every module host (C3, deliverable D2 / FR-8)
 
-### Step 3 — Go: `/shared/` on every module host (D3)
+**Creates:** `internal/platform/static/shared.go`, `internal/platform/static/shared_test.go`
+**Modifies:** `internal/platform/config/config.go` (one field + one default line), `cmd/server/main.go` (one line, `:303`), `cmd/server/dispatcher_auth_test.go` (one line, `:100`), `internal/utuber/build.go` (delete the duplicate), `unified-webapp-example.json`, `unified-webapp.json`, `README.md`
 
-**Creates** `internal/platform/static/shared.go` + `shared_test.go`.
-**Modifies** `internal/platform/config/config.go` (one field + one default), `cmd/server/main.go` (one line), `cmd/server/dispatcher_auth_test.go` (one line), `internal/utuber/build.go` (delete the duplicate), `unified-webapp-example.json`, `unified-webapp.json`, `README.md`.
+*(Restored from v3 in full. v4 deleted this entire specification while keeping gates that assert against it — Architect B2.)*
 
 **Three functions, one mount point.**
 
@@ -300,546 +575,754 @@ func MountShared(m Muxer, dir string) error
 type Muxer interface { Handle(pattern string, h http.Handler) }
 ```
 
-**Handler contract, pinned:**
-- **Prefix stripping happens inside `SharedHandler`.** All three entry points therefore agree, and there is no "who strips it" ambiguity between `WithShared` and `MountShared`. A test asserts the resolved on-disk path for `/shared/dist/shared.css` is `<dir>/dist/shared.css`.
-- **First-segment allowlist.** After stripping, the first path segment must be exactly `dist` or `public`; anything else → 404. This is not deferred hardening — it is the initial behaviour, so `web/shared/ts/*.ts` and `web/shared/css/*.css` are **never** HTTP-reachable. All smoke URLs and acceptance criteria therefore name **`/shared/dist/shared.css`**, never `/shared/css/tokens.css`. (v1's A8.2 canonized the latter, which would have foreclosed exactly this.)
-- **Path confinement** via `path.Clean("/"+rest)` before joining, matching `certmachine`'s `staticFileExists` discipline. Traversal cannot escape `dir`. A test drives `/shared/../../etc/passwd`, `/shared/dist/../../../etc/passwd`, and `%2e%2e%2f` forms.
-- **Directory requests 404.** No listings, ever.
-- **Methods:** GET and HEAD only; anything else 405 with `Allow: GET, HEAD`.
-- **Caching contract:** served via `http.ServeFile`, so `Last-Modified` is present on both GET and HEAD and `If-Modified-Since` yields 304. No `ETag` (`ServeFile` supplies none for a plain file). Tested explicitly so a future change of handler cannot silently drop conditional requests.
-- **Content-Type for `.mjs`:** a test asserts the response `Content-Type` starts with `text/javascript`. Go 1.26's builtin table maps `.mjs`, but `mime.TypeByExtension` consults the **system** table first, so a host with a stale `mime.types` could serve something a browser refuses for a module script. This must fail in CI-equivalent runs, not in someone's browser.
+**Handler contract, pinned — nine clauses, each a `shared_test.go` case, each mapped to its criterion.** *(v5 had seven bullets and claimed each was "a clause of A8.4". That was false for four of them — prefix stripping, caching and Content-Type are not A8.4 clauses — and it left A8.4's symlink and dotfile clauses with no bullet at all, i.e. two security clauses with no specified mechanism: Architect M1, Critic note 1. The mapping is now stated per bullet and A8.1 counts nine.)*
 
-**Route wiring — B2.** One line in `cmd/server/main.go`, at :302:
+| # | Clause | Criterion |
+|---|---|---|
+| 1 | Prefix stripping | A8.1 |
+| 2 | First-segment allowlist | A8.4 clause 2 (R9) |
+| 3 | Lexical path confinement | A8.4 clause 1 (R12) |
+| 4 | Root confinement (symlinks) | A8.4 clause 5 |
+| 5 | Dotfile refusal | A8.4 clause 6 |
+| 6 | Directory 404 | A8.4 clause 3 |
+| 7 | Method allowlist | A8.4 clause 4 |
+| 8 | Caching contract | A8.6 (R11) |
+| 9 | `.mjs` Content-Type | A8.6 (R10) |
+
+1. **Prefix stripping happens inside `SharedHandler`.** All three entry points therefore agree, and there is no "who strips it" ambiguity between `WithShared` and `MountShared`. A test asserts the resolved on-disk path for `/shared/dist/shared.css` is `<dir>/dist/shared.css`.
+2. **First-segment allowlist.** After stripping, the first path segment must be exactly `dist` or `public`; anything else → 404. This is not deferred hardening — it is the initial behaviour, so `web/shared/ts/*.ts` and `web/shared/css/*.css` are **never** HTTP-reachable. Every smoke URL and acceptance criterion in this plan therefore names **`/shared/dist/shared.css`**, never `/shared/css/tokens.css`. R9.
+3. **Lexical path confinement** via `path.Clean("/"+rest)` before joining, matching certmachine's `staticFileExists` discipline. A test drives `/shared/../../etc/passwd`, `/shared/dist/../../../etc/passwd`, and the `%2e%2e%2f` form. R12.
+4. **Root confinement, by mechanism rather than by lexical care — this is the named answer for A8.4 clause 5.** `path.Clean` cannot see a symlink: `dist/evil → /etc` survives cleaning and then escapes on the join. So the handler holds a `*os.Root` obtained once, at construction, from **`os.OpenRoot(dir)`** (available on this tree's **go1.27.1**), and every request opens through **`root.Open(rel)`**, which refuses any path that leaves the root — symlinked or not — with an error the handler answers as **404**. A test plants a symlink under the fixture's `dist/` pointing outside it and asserts 404, and a second asserts the handler still serves a regular file through the same path. **One consequence, stated because it changes a named API:** serving is then `http.ServeContent(w, r, rel, fi.ModTime(), f)` on the opened file rather than `http.ServeFile` on a joined path. `ServeContent` supplies `Last-Modified` from the passed modtime, honours `If-Modified-Since` with a bodyless 304, and derives `Content-Type` from `rel`'s extension via `mime.TypeByExtension` — the same three behaviours clauses 8 and 9 assert of `ServeFile`, so the caching and Content-Type contracts are unchanged in substance. *(The rejected alternative is `filepath.EvalSymlinks` plus a prefix comparison: it needs the target to exist, so a legitimate 404 becomes an error path, and it leaves a TOCTOU window between the check and the open. `os.Root` closes both.)*
+5. **Dotfile refusal — A8.4 clause 6.** After cleaning, any path segment beginning with `.` → 404. This is a separate clause from confinement because a dotfile *inside* the root is reachable without escaping it.
+6. **Directory requests 404.** No listings, ever — `fi.IsDir()` on the opened file is a 404, not a redirect.
+7. **Methods:** GET and HEAD only; anything else 405 with `Allow: GET, HEAD`.
+8. **Caching contract:** `Last-Modified` present on both GET and HEAD, `If-Modified-Since` yields 304 with no body, and no `ETag`. Tested explicitly so a future handler change cannot silently drop conditional requests. R11, A8.6.
+9. **Content-Type for `.mjs`:** a test asserts the response `Content-Type` starts with `text/javascript`. Go's builtin table maps `.mjs`, but `mime.TypeByExtension` consults the **system** table first, so a host with a stale `mime.types` could serve something a browser refuses for a module script. This must fail in a test run, not in someone's browser. R10, A8.6 *(folded in with clause 8 per Critic amendment D — one `ServeContent` call decides both, so they are one criterion)*.
+
+**Route wiring — one line.** `cmd/server/main.go:303` becomes:
+
 ```go
 h = middleware.BodyLimit(limitFor(module, cfg), svc.Gate(module, static.WithShared(hh, cfg.Server.SharedStaticDir)))
 ```
-and the mirror line in `cmd/server/dispatcher_auth_test.go:97-102`:
+
+and the mirror line at `cmd/server/dispatcher_auth_test.go:100` (which has no `Gate`) becomes:
+
 ```go
 h = middleware.BodyLimit(limitFor(module, cfg), static.WithShared(hh, cfg.Server.SharedStaticDir))
 ```
-`static.WithShared` sits **inside** `svc.Gate`, so `/shared/` is authenticated like everything else, and **after** the `io.Closer` assertion at :300, so no module's closer is erased. See ADR-002 for why this beats per-module mounting and §8 for the FR-8.1 wording deviation.
 
-**Config.** `ServerConfig` (`internal/platform/config/config.go:205`) gains exactly one field:
+**The invariant this placement establishes, stated as an invariant:** `static.WithShared` sits **inside** `svc.Gate`, so `/shared/` is authenticated like everything else, and **after** the `io.Closer` assertion at `:300-302`, so **no module's closer can be erased — not certmachine's today, and not a module added tomorrow.** That is a property of where the wrapper goes, not of care taken while writing it. **A8.3 asserts it** (a certmachine-routed dispatcher has a non-empty `closers` slice, and `make test` passes goleak via `dispatcher_auth_test.go:1241-1243`), because an invariant nobody checks is a comment. This was iteration-2's blocker 1; ADR-002 records the rejected per-module alternative that reintroduces it.
+
+**Config.** `ServerConfig` (`internal/platform/config/config.go:203-212`, which today holds only `OriginCheck` `:208` and `SSEMaxSubscribers` `:211`) gains exactly one field:
+
 ```go
 // SharedStaticDir is the directory holding the shared asset tree served at
 // /shared/ on every module host. Empty disables the mount.
 SharedStaticDir string `json:"shared_static_dir"`
 ```
-`applyServerDefaults` (`:659`) gains one line defaulting it to `./web/shared` when empty. **No `json:"-"` fan-out into 13 module configs and no 13 default lines** — that cost was B1's, and B2 does not pay it.
 
-**Boot-time warning.** `cmd/server` logs a warning (not a failure) when `cfg.Server.SharedStaticDir` does not stat as a readable directory, matching the posture of the existing per-module `checkStaticDir` helpers (`internal/certmachine/build.go:168`, `multissh:87`, `smbedit:56`) while keeping the degradation non-fatal — an operator who has not yet deployed `web/shared/` should still get a running binary in Phase 1.
+`applyServerDefaults` (`:659-669`) gains one line defaulting it to `./web/shared` when empty. **No `json:"-"` fan-out into 13 module configs and no 13 default lines** — that cost belongs to the per-module alternative, and ADR-002 does not pay it.
 
-**utuber de-duplication (FR-8.2).** Delete the verbatim `staticHandler` type and its `ServeHTTP` (`internal/utuber/build.go:68-79`); change `:58` to `mux.Handle("/", static.NewHandler(cfg.StaticDir))`. Behaviour is identical — the deleted code is a byte-for-byte copy of `internal/platform/static`.
+**Boot-time warning.** `cmd/server` logs a warning (not a failure) when `cfg.Server.SharedStaticDir` does not stat as a readable directory, matching the posture of the existing per-module `checkStaticDir` helpers (`internal/certmachine/build.go:168`, `internal/multissh/build.go:87`, `internal/smbedit/build.go:56`) while keeping the degradation non-fatal — an operator who has not yet deployed `web/shared/` should still get a running binary in Phase 1.
+
+**utuber de-duplication (FR-8.2).** Delete the verbatim `staticHandler` type and its `ServeHTTP` (`internal/utuber/build.go:68-79`, plus the duplicate-acknowledging comment at `:64-67`); change `:58` to `mux.Handle("/", static.NewHandler(cfg.StaticDir))`. Behaviour is identical — the deleted code is a byte-for-byte copy of `internal/platform/static`. A8.5.
 
 **Ops artifacts.**
-- `unified-webapp-example.json` gains `"shared_static_dir": "./web/shared"` in its existing `server` block.
-- `unified-webapp.json` has **no** `server` key today; add one containing only `shared_static_dir`. (Omitting it would work by default, but the sample configs are the deployment documentation.)
+- `unified-webapp-example.json` gains `"shared_static_dir": "./web/shared"` in its existing `server` block (`:24-27`).
+- `unified-webapp.json` — add a `server` block containing only `shared_static_dir`. (Omitting it would work by default, but the sample configs are the deployment documentation.)
 - `README.md` deploy section: `web/shared/` and `web/sampler/` are new required directories alongside the per-module `web/<m>/`.
 
 **Intra-step ordering, for mid-step rollback.** Land in this order so the tree compiles at each sub-point: (a) `ServerConfig` field + `applyServerDefaults` line + sample configs; (b) `shared.go` + `shared_test.go`; (c) the two call sites + boot warning; (d) utuber deletion. (a) and (b) are independently harmless; a failure at (c) reverts one line in each of two files.
 
 **Verification**
-```
-# gofmt is scoped to the files this phase touches -- see the note below.
-test -z "$(gofmt -l internal/platform/static/ internal/platform/config/config.go \
-                 cmd/server/main.go cmd/server/dispatcher_auth_test.go internal/utuber/build.go)"
-go vet ./...
+```sh
+test -z "$(gofmt -l .)"                     # A7.14, repo-wide: 0 lines today
+go vet ./...                                # A8.8, rc=0 today
 go test -race ./internal/platform/static/... -run Shared -v
-make test                                    # goleak-gated; proves no closer was erased
-! grep -rn 'staticHandler' internal/utuber/
-! grep -rn 'type staticHandler' internal/ --include=*.go   # only platform/static defines one now
-npm run build && npm run typecheck && npm run test:web
-git status --porcelain    # empty
+make test                                   # goleak-gated; proves no closer was erased (A8.3)
+grep -rn 'staticHandler' internal/utuber/; rc=$?; [ "$rc" -eq 1 ]                        # A8.5, guarded per AX.5
+grep -rn 'type staticHandler' internal/ --include=*.go; rc=$?; [ "$rc" -eq 1 ]           # A8.5, guarded per AX.5
+grep -n 'static.NewHandler' internal/utuber/build.go                                     # A8.5's third clause: `:58` routes through the platform handler
+node scripts/gates/clean-tree.mjs internal/ cmd/ unified-webapp.json unified-webapp-example.json README.md
 ```
 
-> **`gofmt` is scoped, not repo-wide — verified necessity.** `gofmt -l internal/ cmd/`
-> is **not clean in this tree today**: it lists `internal/slideshow/conductor.go`,
-> `internal/todo/model.go`, `internal/utuber/history/history.go`, and
-> `internal/utuber/media/media_test.go`. A repo-wide gate would therefore fail at
-> every Phase-1 commit boundary through no fault of this work, and the predictable
-> reaction — reformatting four untouched files — would add unrelated churn to a
-> phase whose entire premise is a minimal diff. The gate is scoped to the paths
-> Phase 1 edits (none of which are among those four; note `internal/utuber/build.go`
-> is a different file from the two dirty `internal/utuber/**` ones). Reformatting
-> those four is a separate, independently revertable commit, recorded as follow-up 10.
-> The `test -z "$(...)"` form is still required: bare `gofmt -l` exits 0 while
-> listing offenders.
-Plus the new table-driven test (A8.2): for every name in `knownModules`, build a `Dispatcher` via `buildDispatcher` with that module routed to a host, then assert `GET http://<host>/shared/dist/shared.css` reaches `SharedHandler` (200 with the tree present) and `GET /shared/ts/modal.ts` is 404. And a companion test asserting `dispatch.closers` is non-empty for a certmachine route — the direct regression guard for what was blocker 1.
+Plus the table-driven test behind A8.2: for every name in `knownModules` (`cmd/server/main.go:337`, 13 names), build a dispatcher via `buildDispatcher` with that module routed to a host, then assert `GET http://<host>/shared/dist/shared.css` is **200 or 503, never 404** — 503 being `unavailableHandler`'s response for a module that is configured off, which still proves the route exists — and that `GET /shared/ts/modal.ts` is 404. And the companion test asserting `dispatch.closers` is non-empty for a certmachine route (A8.3), the direct regression guard for iteration-2's blocker 1.
 
----
+**Why the gates in this step pass at this boundary.** `/shared/dist/shared.css` does not exist in the tree until C4, so A8.1's 200 assertion is exercised against a test fixture directory in `shared_test.go`, and A8.2's dispatcher test asserts **200-or-503-never-404** — which is satisfiable with or without the real artifact present. Nothing in this step asserts a property of a file a later commit creates.
 
-### Step 4 — Shared bundle + `modal.ts` (D2, D5)
+### Step 5 — `web/shared/ts/`: the modal lift and the shared bundle (C4, deliverable D5 part 1)
 
-**Creates** `web/shared/ts/modal.ts`, `web/shared/ts/index.ts`, `web/shared/ts/modal.test.ts`, `scripts/check-shared-barrel.mjs`, `web/shared/dist/shared.mjs`, `web/shared/dist/shared.css`.
-**Modifies** `scripts/build-web.mjs` (two descriptors), `web/shared/css/components.css` (the `.ui-modal-*` rules).
+**Creates:** `web/shared/ts/modal.ts`, `web/shared/ts/index.ts`, `web/shared/ts/theme.ts`, `web/shared/ts/modal.test.ts`, `scripts/check-shared-barrel.mjs`, `web/shared/dist/shared.mjs`, `web/shared/dist/shared.css`
+**Modifies:** `scripts/descriptors.mjs` (two descriptors + the `@shared` plugin + `EXPECTED_ARTIFACT_COUNT` → 14), `web/shared/css/components.css` (the `.ui-modal-*` rule bodies), `Makefile` (one line: `node scripts/check-shared-barrel.mjs` added to the `gates` recipe), `tsconfig.json`
 
-**The two descriptors that B2 moved here from Step 2:**
+**Why the barrel gate's Makefile line lands here and not at C1** *(Critic amendment A)*. `make gates` must not name a script that does not exist: a `gates` recipe invoking `check-shared-barrel.mjs` from C1 would fail C1, C1b, C2 and C3 outright, and a stub that exits 0 until C4 would be a gate that has never been capable of failing — exactly what R19 and AX.6 forbid. So the recipe line and the script land in the same commit, and §4's gate-composition table records that `make gates` runs three scripts through C3 and four from C4.
 
-| name | entry | mode | format | outfile |
-|---|---|---|---|---|
-| shared | `web/shared/ts/index.ts` | bundle | **esm** | `web/shared/dist/shared.mjs` |
-| shared-css | `web/shared/css/index.css` | bundle | — | `web/shared/dist/shared.css` |
+**The two new descriptors:**
 
-Both entries exist as of this step. The driver's ordering rule puts them first.
+| name | entry | mode | format | outfile | extra |
+|---|---|---|---|---|---|
+| shared | `web/shared/ts/index.ts` | bundle | **esm** | `web/shared/dist/shared.mjs` | — |
+| shared-css | `web/shared/css/index.css` | bundle | — | `web/shared/dist/shared.css` | `external: ["*.woff2"]` (Step 2) |
+
+Both entries exist as of this step; driver rule 1 puts them first.
 
 **The lift.** `web/taskmaster/js/ui/modal.ts` (390 lines) becomes `web/shared/ts/modal.ts` with three mechanical changes and nothing else:
 
-1. **`ensureStyles()` is deleted entirely** — the ~80 injected CSS lines and the `STYLE_ATTR = "data-tm-ui-modal-styles"` sentinel both go. Those rules move into `web/shared/css/components.css`, retokenized.
-2. **Class prefix `tm-modal-*` → `ui-modal-*`** throughout, matching G1's `.ui-*` namespace.
-3. **Every colour/metric literal and every Obsidian-era token resolves to a shared token.** Complete map — v1's was missing four rows:
+1. **`ensureStyles()` is deleted entirely** — the injected CSS block (`:20-106`), its `STYLE_ATTR = "data-tm-ui-modal-styles"` sentinel (`:17`), and its call site (`:130`) all go. Those rules live in `web/shared/css/components.css` (Step 1.6), retokenized.
+2. **Class prefix `tm-modal-*` → `ui-modal-*`** throughout — all 8 literals: `tm-modal-overlay`, `tm-modal-panel`, `tm-modal-title`, `tm-modal-message`, `tm-modal-input`, `tm-modal-actions`, `tm-modal-btn`, `tm-modal-btn-primary`.
+3. **Every colour/metric literal and every Obsidian-era token resolves to a shared token.** Complete map:
 
 | donor (`web/taskmaster/js/ui/modal.ts`) | shared token |
 |---|---|
-| `var(--bg-secondary, #252525)` — panel bg | `var(--color-surface-2)` |
-| `var(--bg-primary, #1e1e1e)` :62 — input bg | `var(--color-bg)` |
-| `var(--bg-tertiary, #2d2d2d)` :82 — secondary button bg | `var(--color-surface-3)` |
-| `var(--text-normal, #dcddde)` | `var(--color-text)` |
-| `var(--bg-modifier-border, #3a3a3a)` | `var(--color-border)` |
-| `var(--radius, 6px)` | `var(--radius-md)` |
-| `var(--interactive-accent, #7f6df2)` | `var(--color-primary)` |
-| `var(--interactive-accent-hover, #9d8fff)` | `var(--color-primary-hover)` |
-| `var(--font-ui, -apple-system, …)` :33 | `var(--font-body)` |
-| `rgba(0, 0, 0, 0.55)` :28 — overlay | `var(--overlay-scrim)` |
-| `0 8px 32px rgba(0, 0, 0, 0.4)` :44 — panel shadow | `var(--shadow-md)` |
-| `#9d8fff` :94 — focus ring | `var(--color-primary)` *(Step 1 note 2)* |
-| `color: #fff` :99 — primary button text | `var(--color-primary-fg)` |
+| `var(--bg-secondary, #252525)` `:36` — panel bg | `var(--color-surface-2)` |
+| `var(--bg-primary, #1e1e1e)` `:62` — input bg | `var(--color-bg)` |
+| `var(--bg-tertiary, #2d2d2d)` `:82` — secondary button bg | `var(--color-surface-3)` |
+| `var(--text-normal, #dcddde)` `:37`, `:63`, `:83` | `var(--color-text)` |
+| `var(--bg-modifier-border, #3a3a3a)` `:38`, `:64`, `:81` | `var(--color-border)` |
+| `var(--radius, 6px)` `:39`, `:65`, `:80` | `var(--radius-md)` |
+| `var(--font-ui, -apple-system, …)` `:33` | `var(--font-body)` |
+| `var(--interactive-accent, #7f6df2)` `:71`, `:88-89`, `:93`, `:97-98` | `var(--color-primary)` |
+| `var(--interactive-accent-hover, #9d8fff)` `:94`, `:102` | `var(--color-primary-hover)` |
+| `rgba(0, 0, 0, 0.55)` `:28` — overlay scrim | `var(--overlay-scrim)` |
+| `0 8px 32px rgba(0, 0, 0, 0.4)` `:44` — panel shadow | `var(--shadow-md)` |
+| `color: #fff` `:99` — primary button text | `var(--color-primary-fg)` |
 
-**What is preserved byte-for-byte:** the focus trap (`getFocusable` + the Tab-wrapping `onKeydown`, `modal.ts:181-209`), Escape-to-close, focus return via `previouslyFocused.focus()`, overlay-mousedown-to-close, and the four exported signatures — `openModal` (:129), `confirmDialog` (:226), `alertDialog` (:277), `promptDialog` (:324) — plus `ModalOptions`, `ModalHandle`, `DialogOptions`, `PromptOptions`. FR-5's behavioural requirements are met because they are the donor's existing behaviour, unmodified.
+**Focus ring — one answer.** The shared focus ring is **`--color-primary`** (`:71` and `:93` are `:focus-visible` rules); `:94`'s `box-shadow` spread colour is the one `-hover` site inside a focus rule and maps to `--color-primary-hover`, matching its donor literal `#9d8fff`. T7 rows 8 and 9 carry the resulting deltas.
 
-**Security invariants carried forward unchanged:** all user-supplied text goes through `textContent`; no `innerHTML` of an interpolated string anywhere in `modal.ts`; no `alert()`/`confirm()`/`prompt()`.
+**What is preserved byte-for-byte:** the focus trap (`getFocusable` + the Tab-wrapping `onKeydown`, `:181-187`), `onOverlayClick` (`:191-195`), `close()` and focus return via `previouslyFocused.focus()` (`:197-207`), and the four exported signatures — `openModal` (`:129`), `confirmDialog` (`:226`), `alertDialog` (`:277`), `promptDialog` (`:324`) — plus `ModalOptions`, `ModalHandle`, `DialogOptions`, `PromptOptions`. FR-5's behavioural requirements are met because they are the donor's existing behaviour, unmodified. **Reviewers should diff those ranges specifically**: the lift will *not* read as a rename (≈80 CSS lines deleted, every class renamed, 12 values retokenized), so rename detection is unlikely to fire, and the narrow checkable claim is byte-identity of the focus trap and the four signatures.
 
-**`web/shared/ts/index.ts`** — explicit named re-export barrel:
+**Security invariants carried forward unchanged:** all user-supplied text goes through `textContent`; no `innerHTML` of an interpolated string anywhere; no `alert()`/`confirm()`/`prompt()`. A5.4.
+
+**`web/shared/ts/index.ts`** — explicit named re-export barrel, and **the library's complete public surface**:
 ```ts
 export { openModal, confirmDialog, alertDialog, promptDialog } from "./modal.js";
 export type { ModalOptions, ModalHandle, DialogOptions, PromptOptions } from "./modal.js";
+export { THEMES, setTheme } from "./theme.js";
 ```
 
-**`@shared` resolution.** An esbuild `onResolve` plugin in the driver, applied only to bundled browser descriptors:
-```js
-build.onResolve({ filter: /^@shared(\/.*)?$/ }, () => ({ path: "/shared/dist/shared.mjs", external: true }));
-```
-Every `@shared/...` specifier collapses to the single barrel URL, which is correct because `shared.mjs` **is** the barrel. `tsconfig`'s `paths` (Step 2) makes `tsc --noEmit` resolve the same specifiers to source, so types are checked while bytes stay external.
+**Why `theme.js` is re-exported here, stated because it was the Architect's blocker B1.** Driver rule 10 collapses *every* `@shared/...` specifier to the single URL `/shared/dist/shared.mjs`, and that bundle's entry point is this file. A symbol reachable only by importing `./theme.js` directly is therefore reachable by **no** consumer: the sampler's `import { THEMES } from "@shared/theme"` would typecheck against source through `tsconfig`'s `paths` and then, at runtime, request a named export the emitted bundle does not have. v5 asserted both "`shared.mjs` **is** the barrel" and "`theme.ts` exposes `THEMES` … for the sampler" while the barrel re-exported only `modal.js`; the two could not both be true. Re-exporting `theme.js` is the fix that keeps the collapse — the alternative, a second bundle and a second URL, would make `@shared` two entry points and defeat FRD §7.1's one-shared-bundle requirement.
 
-**Tests.** `web/shared/ts/modal.test.ts`, run through `scripts/test-web.mjs` with the same cjs/node18 flags. Phase-1 coverage: option normalization/defaults, the `textContent`-only escaping path, and the barrel's export shape — driven against a ~20-line hand-rolled element stub in the test file. Focus-trap, Escape, focus-return and backdrop-click move to the Step-5 sampler keyboard checklist. See **ADR-005** for why no jsdom.
+**The barrel allowlist** — `scripts/check-shared-barrel.mjs` asserts that the file's exported-name set **equals**:
+
+| | Allowlisted exports |
+|---|---|
+| **6 named values** | `openModal`, `confirmDialog`, `alertDialog`, `promptDialog`, `THEMES`, `setTheme` |
+| **4 types** | `ModalOptions`, `ModalHandle`, `DialogOptions`, `PromptOptions` |
+
+Missing and extra are both failures, reported by name — so a symbol added to `modal.ts` or `theme.ts` and forgotten in the barrel fails the gate here rather than producing an `undefined` import in a browser, and a symbol added to the barrel without a decision fails it too. The gate also bans `export *` outright: a star export makes the public surface implicit, which is what an allowlist exists to prevent, and it would make A5.2's shape assertion meaningless. **An allowlist, not a hard-coded "four and four"** — that literal form was what made B1's fix impossible to express. A5.2 is the criterion that reads this table.
+
+**`web/shared/ts/theme.ts`** exports `THEMES` — the canonical 8-name array — and `setTheme(name)`, which writes `document.documentElement.dataset.theme` (Step 1.0). FRD `:226-228` makes `THEMES` the one JS-side source of the theme list — "Adding a theme = adding one CSS block + one entry to a single `THEMES` array" — which is what §9 item 12 later uses to de-duplicate obsidianoid's CSS/TS theme list, and what A10.3 makes load-bearing by requiring the sampler's `<select>` to iterate it rather than carry a second copy. Both symbols are re-exported by the barrel above; nothing in Phase 1 imports `./theme.js` by path.
+
+**`tsconfig.json`.** `include` goes from **9** globs to **11**, adding `web/shared/**/*.ts` and `web/sampler/js/*.ts`. `paths` gains exactly two keys — `"@shared": ["./web/shared/ts/index.ts"]` and `"@shared/*": ["./web/shared/ts/*"]` — with **no `baseUrl`**, which works because `moduleResolution: "bundler"` resolves `paths` against the tsconfig's own directory (verified: the one-key map alone gives TS2307 on a bare `@shared` import). `exclude` gains `web/shared/dist` so the emitted `.mjs` never enters the program. The esbuild plugin filter, the tsconfig `paths`, Step 6's sampler import, and Step 7's shim all use identical specifiers. A7.8, A7.10.
+
+**Both new globs land here, in C4 — C5 does not touch `tsconfig.json`.** `web/sampler/js/*.ts` therefore matches nothing for one commit, which is harmless (tsc's "No inputs were found" fires only when the *whole* `include` is empty, and the other 10 globs supply inputs) and it means the typecheck configuration is settled in one place rather than edited twice.
+
+**Tests.** `web/shared/ts/modal.test.ts`, run through `scripts/test-web.mjs` with the same cjs/node18 flags. Phase-1 coverage: option normalization and defaults, the `textContent`-only escaping path, and the barrel's export shape — driven against a ~20-line hand-rolled element stub defined in the test file. Focus-trap, Escape, focus-return and backdrop-click are verified per theme through `docs/sampler-checklist.md`. **ADR-005** records why there is no jsdom, and this test file is the thing that makes that ADR a live decision rather than a historical note.
 
 **Verification**
-```
-node scripts/check-shared-barrel.mjs            # G4
-npm run build
-git ls-files --error-unmatch web/shared/dist/shared.mjs web/shared/dist/shared.css   # G8 (after add)
-grep -Eq '^\s*import\s' web/shared/dist/shared.mjs || true      # barrel has no external imports; informational
-! grep -rEn 'innerHTML' web/shared/ts/
-! grep -rEn '\b(alert|confirm|prompt)\s*\(' web/shared/ts/
-! grep -rEn '(createElement\(["'\'']style|style\.textContent)' web/shared/ts/modal.ts   # A1.4, see below
+```sh
+node scripts/check-shared-barrel.mjs        # A5.2's allowlist half: 6 named values + 4 types, no `export *`
 node scripts/check-shared-css.mjs
-npm run typecheck && npm run test:web && make test
-git status --porcelain    # empty
+make gates                                  # four scripts from this commit onward (§4's composition table)
+npm run build
+git ls-files --error-unmatch web/shared/dist/shared.mjs web/shared/dist/shared.css   # after add
+grep -rEn 'innerHTML' web/shared/ts/; rc=$?; [ "$rc" -eq 1 ]                          # A5.4
+grep -rEn '\b(alert|confirm|prompt)\s*\(' web/shared/ts/; rc=$?; [ "$rc" -eq 1 ]      # A5.4
+grep -rEn '(createElement\(["'\'']style|style\.textContent)' web/shared/ts/modal.ts; rc=$?; [ "$rc" -eq 1 ]   # A5.6
+make web-verify                             # count 14
+npm run typecheck && npm run test:web       # five suites
 ```
-**A1.4 was vacuous in v1** ("modal.ts contains no CSS") — once `ensureStyles()` is deleted, `modal.ts` contains no CSS *by construction*, so the criterion could not fail. The replacement above asserts the mechanism instead: no `createElement("style")` and no `style.textContent`, i.e. the file cannot inject styles even if someone reintroduces a rule string.
+
+**A5.6 exists because the obvious criterion is vacuous.** "`modal.ts` contains no CSS" cannot fail once `ensureStyles()` is deleted — it is true by construction. The criterion above asserts the *mechanism* instead: no `createElement("style")` and no `style.textContent`, so the file cannot inject styles even if someone reintroduces a rule string.
 
 ---
+### Step 6 — `sampler`, module 14 (C5, deliverable D5 part 2 / FR-10)
 
-### Step 5 — `sampler`, module 14 (D6)
+**Creates:** `web/sampler/index.html`, `web/sampler/style.css`, `web/sampler/js/main.ts`, `web/sampler/js/bundle.js`, `internal/sampler/build.go` (+ `build_test.go`), `docs/sampler-checklist.md`
+**Modifies:** `internal/platform/config/config.go` (`SamplerConfig` + expander + default), `cmd/server/main.go` (`buildModule` case + `knownModules` 13 → 14), `scripts/descriptors.mjs` (one descriptor), `local-test/config.json`, `unified-webapp-example.json`, `docs/adding-a-module.md`
 
-**Creates** `web/sampler/{index.html,style.css,js/main.ts}`, `internal/sampler/build.go` (+ test), `docs/sampler-checklist.md`.
-**Modifies** `internal/platform/config/config.go`, `cmd/server/main.go` (`buildModule` case + `knownModules`), `scripts/build-web.mjs` (one descriptor), `local-test/config.json`, `unified-webapp-example.json`, `docs/adding-a-module.md`.
+*(The Go and config half was deleted by v4, which left A10.1–A10.4 asserting properties of a page no route served — Architect B6.)*
 
-Follows `docs/adding-a-module.md` exactly: (1) `SamplerConfig{StaticDir string}` + expander + `DefaultConfig` default `./web/sampler`; (2) `buildModule` case; (3) `knownModules` entry (13 → 14); (4) a `host_routing` entry in the sample/local configs; (5) static assets under `web/sampler/`.
+Follows `docs/adding-a-module.md`'s five-step checklist exactly (`:52`, `:62`, `:65`, `:70`, `:76`): (1) `SamplerConfig{StaticDir string}` modelled on `TimetrackerConfig` (`config.go:267-268`), with an `expandSamplerPaths` call beside `expandTimetrackerPaths` (`:603`, def `:684`) and a `DefaultConfig` entry defaulting to `./web/sampler` (beside `:476`); (2) a `buildModule` case; (3) a `knownModules` entry (`cmd/server/main.go:337`, 13 → **14**); (4) a `host_routing` entry in `local-test/config.json` (`:5-20`) and in `unified-webapp-example.json`; (5) static assets under `web/sampler/`. `docs/adding-a-module.md` gains the shared-asset line: a new module gets `/shared/` for free from the dispatcher mount, and may opt into `MountShared` if it wants the subtree inside its own middleware.
 
 `internal/sampler/build.go` is the **documented per-module `MountShared` example**:
+
 ```go
 mux := http.NewServeMux()
 if err := static.MountShared(mux, cfg.SharedStaticDir); err != nil { return nil, err }
 mux.Handle("/", static.NewHandler(cfg.StaticDir))
 ```
-B2's dispatcher-level `WithShared` already covers `/shared/` for every host including sampler's, so this mount is redundant at runtime — deliberately. It keeps `MountShared` exercised by a real module, gives `docs/adding-a-module.md` something to point at, and is the migration path for any module that later wants the subtree inside its own middleware. `MountShared` returns an error (rather than panicking) so a chi router passed by mistake is reported rather than silently registering a wrong exact-match pattern — see the `Muxer` hazard in R8.
 
-**Auth-gated like every other module** — one `auth.modules` entry in the sample configs. No special-casing.
+The dispatcher-level `WithShared` from C3 already covers `/shared/` for every host including sampler's, so this mount is redundant at runtime — **deliberately.** It keeps `MountShared` exercised by a real module, gives `docs/adding-a-module.md` something to point at, and is the migration path for any module that later wants the subtree inside its own middleware. `MountShared` returns an error (rather than panicking) and validates that it received an `*http.ServeMux`, so a chi router passed by mistake is reported at boot rather than silently registering a wrong exact-match pattern — see R8.
 
-**Page content (Phase 1):** `index.html` links `/shared/dist/shared.css` **and nothing else colour-bearing**; a theme `<select>` writing `document.documentElement.dataset.theme` through all 8 values; a token swatch grid rendered from the canonical key list; a modal section with buttons for `openModal`, `confirmDialog`, `alertDialog`, `promptDialog`; and a source snippet beside each, rendered via `textContent` into a `<pre>` (never `innerHTML`). `web/sampler/js/main.ts` imports from `@shared` and bundles to `web/sampler/js/bundle.js` with `format: "esm"`.
+**Auth-gated like every other module** — one `auth.modules` entry in the sample configs. No special-casing. (`internal/platform/auth/gate.go:157` computes `protected := hasEntry || module == "admin"`, so a module with an entry is protected; the sampler renders shared CSS and nothing private, but consistency is cheaper than an exception.)
 
-**`docs/sampler-checklist.md`** is the manual verification surface for the behaviour Phase-1 automated tests do not cover (ADR-005): for each of the 8 themes — open each dialog; Tab cycles within the panel and wraps; Shift-Tab wraps backwards; Escape closes; focus returns to the invoking button; backdrop mousedown closes; primary-button text is legible against `--color-primary` (the `--color-primary-fg` check); no element is unreadable. Checked once per theme before C5 is considered done, and re-run in every later phase that touches shared CSS.
+**Page content (Phase 1):** `index.html` links `/shared/dist/shared.css` **and its own `style.css`, and nothing else colour-bearing**; a theme `<select>` **populated by iterating `THEMES` from `@shared`** and calling **`setTheme`** on change — which writes `document.documentElement.dataset.theme` — through all 8 values; a swatch grid rendered from T1's 17 keys and a specimen block for each of T2's 27 tokens; a modal section with buttons for `openModal`, `confirmDialog`, `alertDialog`, `promptDialog`; and a source snippet beside each, rendered via `textContent` into a `<pre>` (never `innerHTML`). **The theme half of the page is why the barrel exports `THEMES` and `setTheme`** (B1): the sampler is the only Phase-1 consumer that switches themes at runtime, `@shared` collapses to one bundle URL, and a hard-coded second theme list in the sampler would violate FRD `:226-228`'s single-source requirement outright. `web/sampler/js/main.ts` imports from `@shared` and bundles to `web/sampler/js/bundle.js` with **`format: "esm"`** and **`sharedConsumer: true`** (driver rule 10 asserts the format, A9.1/A9.2 gate the result, and this descriptor is the first member of `bundle-shape.mjs`'s input set).
+
+**`docs/sampler-checklist.md`** is the manual verification surface for the behaviour Phase-1 automated tests do not cover (ADR-005). For each of the 8 themes: open each of the four dialogs; Tab cycles within the panel and wraps; Shift-Tab wraps backwards; Escape closes; focus returns to the invoking button; backdrop mousedown closes; primary-button text is legible against `--color-primary` (the `--color-primary-fg` check); no element is unreadable. Checked once per theme before C5 is considered done, and re-run in every later phase that touches shared CSS. **Three follow-ups defer decisions to this document** (§9 items 10, 11, and the obsidian legibility note in item 1), which is why it is a committed artifact rather than a paragraph in this plan.
 
 **Verification**
-```
-test -z "$(gofmt -l internal/sampler/ internal/platform/config/config.go cmd/server/main.go)"
-go vet ./... && make test
+```sh
+test -z "$(gofmt -l .)" && go vet ./... && make test
 npm run build && npm run typecheck && npm run test:web
-grep -c '"sampler"' cmd/server/main.go        # buildModule case + knownModules
-curl -sI http://sampler.local:PORT/shared/dist/shared.css   # 200 + Last-Modified, via local-test
+make web-verify                              # count 15
+node scripts/gates/bundle-shape.mjs          # A9.1/A9.2 over web/sampler/js/bundle.js — first non-empty input set
+# then seed format:"iife" on the sampler descriptor and re-run: must exit non-zero   # A9.4
+grep -c '"sampler"' cmd/server/main.go       # buildModule case + knownModules
+curl -sI http://sampler.local:PORT/shared/dist/shared.css                   # 200 + Last-Modified, via local-test
 curl -so /dev/null -w '%{http_code}' http://sampler.local:PORT/shared/ts/modal.ts   # 404
 # then: docs/sampler-checklist.md, all 8 themes
-git status --porcelain    # empty
 ```
 
----
+**Why the gates in this step pass at this boundary.** A10.1's route exists because C3 landed the handler and this commit lands the module; A10.2–A10.6 are properties of files this commit creates and a server this commit can start. This is the ordering decision §4 records: the sampler's Go half cannot come after its gates.
 
-### Step 6 — taskmaster consumes the shared modal (D5, part 2)
+### Step 7 — taskmaster consumes the shared modal (C6, deliverable D6)
 
-This is the **only** step in Phase 1 that changes a rendered pixel, and only on taskmaster's page.
+This is the **only** commit in Phase 1 that changes a rendered pixel, and only on taskmaster's page.
 
-**Modifies** `web/taskmaster/index.html` (one `<link>`), `web/taskmaster/js/ui/modal.ts` (390 lines → a 2-line re-export shim), `scripts/build-web.mjs` (taskmaster descriptor: `format: "esm"`), `web/taskmaster/js/bundle.js` (regenerated).
+**Modifies:** `web/taskmaster/index.html` (two edits), `web/taskmaster/js/ui/modal.ts` (390 lines → a 2-line re-export shim), `scripts/descriptors.mjs` (taskmaster descriptor: `format: "esm"` and `sharedConsumer: true`), `web/taskmaster/js/bundle.js` (regenerated)
 
 **Adoption via re-export shim** (ADR-003). `web/taskmaster/js/ui/modal.ts` becomes:
+
 ```ts
 export { openModal, confirmDialog, alertDialog, promptDialog } from "@shared/modal";
 export type { ModalOptions, ModalHandle, DialogOptions, PromptOptions } from "@shared/modal";
 ```
-All five importing call sites — `api.ts:10`, `designer.ts:23`, `outputmodal.ts:13`, `board.ts:27`, `main.ts:16`, each importing `'./ui/modal.js'` — are **untouched**. Two further consequences the shim buys:
 
-- The stale-comment problem disappears. `api.ts:6` ("UI code surfaces failures via `ui/modal.ts`'s …") and `designer.ts:20` ("the only dialog used for validation errors is `ui/modal.ts`'s `alertDialog`") remain **true** through the shim. v1's `grep -rn 'ui/modal' web/taskmaster/` would have matched these prose lines and reported a false failure; with the shim there is nothing to grep for. Where a negative grep is still wanted, the correct narrow form is `! grep -rn "from '\./ui/modal" web/taskmaster/js/ --include=*.ts`, and under the shim it is simply not applicable.
-- C6 shrinks to `index.html` + one file + one descriptor field + the bundle, making it a genuinely single-file revert.
+All five importing call sites — `api.ts:10`, `designer.ts:23`, `outputmodal.ts:13`, `board.ts:27`, `main.ts:16`, each importing `'./ui/modal.js'` — are **untouched**.
 
-**`index.html`** gains `<link rel="stylesheet" href="/shared/dist/shared.css">` **before** the existing `<link rel="stylesheet" href="/style.css">` (line 7). The `<script type="module" src="/js/bundle.js">` at line 12 needs **no change** — taskmaster's page is already a module script, so the iife → esm switch is invisible to the HTML.
+**The shim names four functions, the barrel exports six.** That asymmetry is the point, not an inconsistency: the barrel is the library's complete public surface (Step 5, A5.2's allowlist) because `@shared` collapses to one URL and a symbol absent from the barrel is unreachable by *any* consumer; the shim is taskmaster's surface, and ADR-003's "keep C6 small" constraint is enforced **there**. `THEMES` and `setTheme` exist in `shared.mjs` and stay unreachable through `./ui/modal.js`, which is correct — taskmaster does not pick a theme at runtime in Phase 1; its `<html>` attribute does.
 
-**Token-collision analysis — complete and mechanically verified.** `web/taskmaster/style.css` declares exactly 17 custom properties (extracted, not estimated): `--bg-modifier-border`, `--bg-primary`, `--bg-secondary`, `--bg-tertiary`, `--font-mono`, `--font-ui`, `--interactive-accent`, `--interactive-accent-hover`, `--radius`, `--status-blue`, `--status-green`, `--status-red`, `--status-yellow`, `--text-accent`, `--text-faint`, `--text-muted`, `--text-normal`. Intersected against the entire shared vocabulary (`--color-*`, `--space-1..8`, `--radius-sm/md/lg/full`, `--text-xs/sm/base/lg/xl`, `--font-body`, `--font-mono`, `--shadow-sm/md`, `--transition`, `--topbar-height`, `--sidebar-width`, `--overlay-scrim`): **`--font-mono` is the only overlap.** Note the two near-misses that are *not* collisions: taskmaster's `--radius` does not collide with `--radius-md`, and its `--text-accent`/`--text-faint`/`--text-muted`/`--text-normal` do not collide with the `--text-xs..xl` size scale — different names, so no cascade interaction. Both declarations have specificity (0,1,0) on `:root`, so source order decides; `shared.css` is linked **first**, therefore taskmaster's `'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace` wins at its single consumer (`style.css:288`, `textarea { font-family: var(--font-mono) }`). **No live regression** — and it is documented here rather than discovered later. A mechanical check runs in `web-verify`:
+Two further consequences the shim buys:
+
+- **Two prose comments stay true.** `api.ts:6` ("UI code surfaces failures via `ui/modal.ts`'s …") and `designer.ts:20` ("the only dialog used for validation errors is `ui/modal.ts`'s `alertDialog`") remain accurate through the shim. A naive `grep -rn 'ui/modal' web/taskmaster/` would match these prose lines and report a false failure; with the shim there is nothing to grep for. The correct narrow form, if one is ever wanted, is `grep -rn "from '\./ui/modal" web/taskmaster/js/ --include=*.ts` — and under the shim it is simply not applicable, by design.
+- **C6 stays a small revert.** Two hand-edited files, one descriptor field, and one regenerated artifact.
+
+**`web/taskmaster/index.html` — exactly two edits:**
+
+1. `:2` becomes `<html lang="en" data-theme="obsidian">` (Step 1.0, ADR-007, A10.7).
+2. `<link rel="stylesheet" href="/shared/dist/shared.css">` is inserted **before** `:7`'s `/style.css`, so taskmaster's own rules keep winning on equal specificity.
+
+The attribute is not cosmetic. Without it the page inherits `:root`'s canonical **`dark`** values (ADR-007), the modal renders in a generic dark palette instead of obsidian's violet, and every obsidian-specific claim in Step 1.4 and T7 is unfounded — a small enough shift that only A10.7 reliably catches it, which is why A10.7 is a gate and not a note. `:12`'s `<script type="module">` needs **no change** — the page is already a module script, so the iife → esm switch is invisible to the HTML.
+
+**`web/taskmaster/js/main.ts` is not edited.** The frontend build stamp reaches the UI through `web/taskmaster/js/buildinfo.ts:11` (`declare const __TM_BUILD_TIME__: string;`) and `:13` (`export const FRONTEND_BUILD_TIME: string = __TM_BUILD_TIME__;`), so ADR-004 changes only how the driver computes the define. `main.ts:218`'s "Backend build" row (Go ldflags) and `:219`'s "Frontend build" row (the digest) both keep working with no module TS edit. G3's exception budget is therefore **two** hand-edited files, not three (Architect M1, verified).
+
+**Token-collision analysis — complete and mechanically verified.** `web/taskmaster/style.css:6-24` declares exactly 17 custom properties: `--bg-modifier-border`, `--bg-primary`, `--bg-secondary`, `--bg-tertiary`, `--font-mono`, `--font-ui`, `--interactive-accent`, `--interactive-accent-hover`, `--radius`, `--status-blue`, `--status-green`, `--status-red`, `--status-yellow`, `--text-accent`, `--text-faint`, `--text-muted`, `--text-normal`. Intersected against the whole shared vocabulary (T1's 17 + T2's 27): **`--font-mono` is the only overlap.** Two near-misses that are *not* collisions: taskmaster's `--radius` does not collide with `--radius-md`, and its `--text-accent`/`--text-faint`/`--text-muted`/`--text-normal` do not collide with the `--text-xs..xl` size scale — different names, so no cascade interaction. Both declarations sit on `:root` at specificity (0,1,0), so source order decides; `shared.css` is linked **first**, therefore taskmaster's `'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace` wins at all **five** of its consumers (`style.css:288`, `:499`, `:613`, `:671`, `:736`). **No live regression** — and it is documented here rather than discovered later.
+
+The mechanical check is `scripts/gates/token-overlap.mjs`, run from `make gates` (A9.5). It computes:
+
 ```
-comm -12 <(grep -oE '^\s*--[a-z0-9-]+' web/shared/css/*.css | grep -oE '\--[a-z0-9-]+' | sort -u) \
-         <(grep -oE '^\s*--[a-z0-9-]+' web/taskmaster/style.css | grep -oE '\--[a-z0-9-]+' | sort -u)
-# expected output: exactly "--font-mono"
+comm -12 <(shared token names, sorted -u) <(web/taskmaster/style.css token names, sorted -u)
 ```
-If that set ever grows, the check fails and the new overlap must be analysed before landing.
 
-**Sanctioned visual deltas** — the complete list (v1 listed four; two were missing):
-1. Panel/input/button surfaces move from the donor's Obsidian fallbacks to `obsidian`-theme values (near-identical by construction — the `obsidian` palette *is* obsidianoid's violet set).
-2. Accent moves `#7f6df2` → `--color-primary` (`obsidian`: `#7c6af7`).
-3. Focus ring moves `#9d8fff` → `--color-primary` (`#7c6af7`).
-4. Border radius moves `var(--radius, 6px)` → `--radius-md`; `--radius-md` is set to `6px` so this is a no-op by design.
-5. **Dialog font stack moves `var(--font-ui, -apple-system, …)` → `var(--font-body)`.** Values are equivalent stacks; the token name differs. *(New in v2.)*
-6. **Panel shadow moves the inline `0 8px 32px rgba(0,0,0,0.4)` → `var(--shadow-md)`,** which carries that exact value. *(New in v2.)*
+with an expected output of exactly `--font-mono`. If that set ever grows, the gate fails and the new overlap must be analysed before landing. *(This is a gate file, not a shell one-liner in a recipe: G11, and process substitution is not portable inside a make recipe anyway.)*
 
-Every delta is confined to modal DOM. Nothing outside a modal on taskmaster's page changes.
+**Table T7 — sanctioned visual deltas, re-derived for v5.** This is the complete set of pixel changes C6 may produce; anything else is a defect (§11 principle 3).
 
-**iife → esm sanity checks** (v2 additions — the format switch is the one mechanically risky part of this step):
-```
-grep -Eq '^\s*import\s.*from\s*["'\'']/shared/dist/shared\.mjs["'\'']' web/taskmaster/js/bundle.js   # G5 positive
-! grep -l 'Dynamic require of' web/taskmaster/js/bundle.js                                            # G5 negative
-[ "$(grep -c 'var FRONTEND_BUILD_TIME' web/taskmaster/js/bundle.js)" = 1 ]                            # define still applied once
-! grep -nE '^\s*this\b' web/taskmaster/js/bundle.js                                                   # no top-level `this` in module scope
-```
+**How this table was built** (v4's six rows and v3's six rows are both superseded): every `var(--x, fallback)` in the donor's `ensureStyles()` block was read against `web/taskmaster/style.css:6-24`, and **every fallback turned out to equal the declared value** — `--radius: 6px` at `:23`, `--bg-secondary`, `--text-normal`, and the rest. So the fallbacks never fire, and each row's "Before" is the value `style.css` actually supplies today. "After" is the obsidian value the retokenized `components.css` rule resolves to under `[data-theme="obsidian"]`.
+
+| # | Site in `modal.ts` | Before (from `style.css`) | After (obsidian) | Net |
+|---|---|---|---|---|
+| 1 | `:36` panel background | `#252525` | `--color-surface-2` `#1f1f2e` | small shift, slightly cooler |
+| 2 | `:37`, `:63`, `:83` text | `#dcddde` | `--color-text` `#d4d4e8` | small shift, slightly cooler |
+| 3 | `:38`, `:64`, `:81` borders | `#3a3a3a` | `--color-border` `#333348` | small shift, slightly cooler |
+| 4 | `:39`, `:65`, `:80` radius | **`6px`** (declared at `style.css:23`, *not* a UA default) | `--radius-md` `0.5rem` = **8px** at the 16px root (`style.css` has no `html {` rule) | **a real 6px → 8px change** on the modal panel, input, and button corners. *v3 called this a no-op; v4 got the direction right and the mechanism wrong (Architect B4). The mechanism is that `components.css` authors `--radius-md`, which the lifted rule reads in place of `--radius`.* |
+| 5 | `:33` modal font | `--font-ui` → `-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif` | `--font-body` → `"Inter", …`, and **Inter now actually resolves** because C1b registers the face | a new face inside modal DOM |
+| 6 | `:62` input background | `#1e1e1e` | `--color-bg` `#13131a` | small shift |
+| 7 | `:82` secondary button background | `#2d2d2d` | `--color-surface-3` `#252535` | small shift |
+| 8 | `:71`, `:88-89`, `:93`, `:97-98` accent (input focus ring, button hover border, button focus ring, primary button bg+border) — **four sites** | `#7f6df2` | `--color-primary` `#7c6af7` | near-no-op; 1–2 units per channel |
+| 9 | `:94`, `:102` accent-hover (focus `box-shadow` spread, primary button hover) | `#9d8fff` | `--color-primary-hover` `#9580ff` | near-no-op |
+| 10 | `:99` primary button text | `#fff` | `--color-primary-fg` `#ffffff` | **value unchanged**; the measurable change is the contrast ratio against row 8's new background: **3.91:1 → 3.99:1** (§9 item 1) |
+| 11 | **Outside modal DOM** — `style.css:288`, `:499`, `:613`, `:671`, `:736` (`var(--font-mono)` consumers) | `'JetBrains Mono'` named but **not resolvable** — no face registered, so the stack fell through to `'Fira Code'`/`'Cascadia Code'`/`monospace` | `'JetBrains Mono'` **resolves**, because C1b registers the face and C6's `<link>` brings `fonts.css` onto the page | **the one delta that occurs regardless of the lift** (Architect M13): it follows from C1b + C6's `<link>` alone. Named so the screenshot pass has a correct oracle for the five code/`textarea` surfaces. |
+
+**Asserted-zero rows** (reproduced exactly, so they must *not* move): `:28`'s scrim `rgba(0,0,0,0.55)` → `--overlay-scrim`, same literal; `:44`'s `0 8px 32px rgba(0,0,0,0.4)` → `--shadow-md`, same literal. Those two tokens diverge from obsidianoid (§8 row 12) precisely so these rows are zero.
+
+**Blast radius outside modal DOM is row 11 and nothing else,** and that is provable rather than hopeful: `components.css` contains only `.ui-modal-*` selectors (A1.10), so no rule in `shared.css` matches a non-modal element on taskmaster's page; and the only token-name overlap between the two sheets is `--font-mono` (A9.5), on which taskmaster wins by source order. Row 11 is a *font-availability* change, not a cascade change — which is why it survives the selector argument.
+
+**Byte-identity at this boundary.** `scripts/gates/artifacts.mjs --allow web/taskmaster/js/bundle.js` rebuilds and asserts that the only artifact whose bytes moved is taskmaster's bundle. The allowance is an explicit argv flag on a gate file, not a `grep -v` inside a recipe — v4's recipe form was the always-pass hazard (Architect B7).
 
 **Verification**
-```
+```sh
 npm run build && npm run typecheck && npm run test:web && make test
 node scripts/check-shared-css.mjs && node scripts/check-shared-barrel.mjs
-# the four iife→esm checks above
-comm -12 ...   # exactly --font-mono
-git diff --name-only -- web/ | grep -v '^web/taskmaster/\|^web/sampler/\|^web/shared/'   # no output
-# manual, in local-test: load taskmaster, exercise all four dialogs, confirm Tab/Escape/focus-return,
-# confirm nothing outside a modal shifted (side-by-side against the pre-C6 build)
-git status --porcelain    # empty
+node scripts/gates/bundle-shape.mjs                 # A9.1-A9.3 over web/sampler/ and web/taskmaster/js/bundle.js
+node scripts/gates/token-overlap.mjs                # A9.5: exactly --font-mono
+node scripts/gates/artifacts.mjs --allow web/taskmaster/js/bundle.js
+grep -c 'data-theme="obsidian"' web/taskmaster/index.html    # A10.7: 1, on line 2
+# manual, in local-test: load taskmaster, exercise all four dialogs through the shim (A5.5),
+# confirm Tab/Shift-Tab/Escape/focus-return/backdrop-close, and confirm nothing outside a modal
+# moved except T7 row 11's five --font-mono surfaces (side-by-side against the pre-C6 build)
 ```
 
+`scripts/gates/bundle-shape.mjs` **derives its input set from the descriptors, not from a pattern**: it imports `scripts/descriptors.mjs` and inspects the `out` artifact of every descriptor declaring `sharedConsumer: true` — the same field driver rule 10 uses to select the `@shared` plugin and to assert `format: "esm"`, so gate and build cannot range over different sets *(Critic amendment B.4: "every bundle that consumes `@shared`" named no mechanism, and a gate whose input set is a guess can silently inspect nothing)*. It **fails if that set is empty at a boundary where §4's composition table says it should not be**, so the vacuous pass at C1–C4 is a stated condition rather than an unnoticed one. For each bundle in the set it asserts, two-sided (G5):
+- **positive:** a top-level `import … from "/shared/dist/shared.mjs"` statement is present;
+- **negative:** neither `__require(` nor `Dynamic require of` appears anywhere in the file;
+- and for taskmaster specifically: `var FRONTEND_BUILD_TIME` appears **exactly once** (the define was applied, once).
+
+v3 also grepped for `^\s*this\b` as an iife-residue check. **That is deleted, not restored:** it has 22 legitimate matches in taskmaster's committed bundle today, so it was never a gate.
+
 ---
 
-## 4. Commit sequence
+## §4 — Commit sequence
 
-Each commit is independently revertable and leaves all four gates green. Ordered so that partial landing is safe and only the last commit changes pixels.
+7 commits, one per step, pixels last. Each names every path it touches; P2's gate is `scripts/gates/clean-tree.mjs <those paths>`, which leaves P6's side-car files alone.
 
-| # | Commit | Touches | Gate at boundary | Revert impact |
+| | Commit | Touches | Gates at this boundary | Artifacts |
 |---|---|---|---|---|
-| **C1** | `web/shared: add token, theme, and component CSS foundation` | `web/shared/css/*`, `scripts/check-shared-css.mjs` | four gates + `check-shared-css`; G6 git-status clause **excluding** `web/taskmaster/js/bundle.js` (the old chain's `$(date -u)` makes it unconditionally dirty — see G6) | Deletes inert CSS nothing links yet. Zero runtime effect. |
-| **C2** | `build: replace the esbuild chain with scripts/build-web.mjs` | `scripts/build-web.mjs`, `scripts/test-web.mjs`, `package.json`, `tsconfig.json`, `Makefile` | four gates + **G2 byte-identity** + `make check`; git-status clause now unexcepted | Restores the `&&` chain. Output was byte-identical, so nothing rebuilt changes. |
-| **C3** | `platform/static: serve the shared asset tree at /shared/` | `internal/platform/static/shared.go`(+test), `internal/platform/config/config.go`, `cmd/server/main.go`, `cmd/server/dispatcher_auth_test.go`, `internal/utuber/build.go`, `unified-webapp*.json`, `README.md` | four gates + `go vet` + `gofmt` + the A8.2 table test + the certmachine-closer test | `/shared/` 404s everywhere. No page links it yet (C1's CSS is unlinked, C6 has not landed), so no module regresses. |
-| **C4** | `web/shared: lift taskmaster's modal into the shared bundle` | `web/shared/ts/*`, `web/shared/css/components.css`, **`web/shared/dist/`** *(added in v2 — B2's fix)*, `scripts/check-shared-barrel.mjs`, `scripts/build-web.mjs` | four gates + G4 + G5 negative + G8 | Removes `shared.mjs`/`shared.css` and the shared TS. taskmaster still has its own `ui/modal.ts` (untouched until C6), so it keeps working. |
-| **C5** | `sampler: add the shared-library dev harness as module 14` | `web/sampler/*`, `internal/sampler/*`, config/main.go/`local-test`, `docs/adding-a-module.md`, `docs/sampler-checklist.md` | four gates + `go vet` + `gofmt` + the sampler build test + the 8-theme checklist | Removes a net-new module. Nothing else references it. |
-| **C6** | `taskmaster: consume the shared modal via @shared` | `web/taskmaster/index.html`, `web/taskmaster/js/ui/modal.ts`, `web/taskmaster/js/bundle.js`, `scripts/build-web.mjs` | four gates + the four iife→esm checks + `comm -12` + manual dialog pass | taskmaster returns to its own modal implementation. **The only revert that changes rendering, and it reverts to today's exact rendering.** |
+| **C1** | shared CSS foundation **+ the gate harness** | `web/shared/css/{tokens,themes,components,index}.css`, `scripts/check-shared-css.mjs`, `scripts/gates/{artifacts,bundle-shape,token-overlap,clean-tree}.mjs`, `scripts/descriptors.mjs`, `scripts/list-artifacts.mjs`, `Makefile` (adds `web-verify` and `gates`), `.gitignore` | A1.1–A1.8, A1.10, A1.11, A2.1–A2.5, **A7.2, A7.3, A7.7, A7.15 (the two targets this commit defines), A7.17**, AX.1, AX.3, AX.4, AX.5 **+ the byte-identity exemption below**. Not A1.9 (no `fonts.css`), not A2.6 (no sampler), not A5.x/A6.x/A9.x/A10.x (no consumer, no faces, no `sharedConsumer` descriptor) | 12 |
+| **C1b** | fonts | `web/shared/public/fonts/**` (20 files), `web/shared/css/fonts.css`, `web/shared/css/index.css` | every C1 gate re-run, **+ A1.9, A6.1, A6.2 + the exemption** | 12 |
+| **C2** | build + test drivers, `package.json`, the remaining Makefile targets | `scripts/{build-web,test-web}.mjs`, `package.json`, `Makefile` (`web:`, `typecheck:`, `test-web`, `check`), `web/taskmaster/js/bundle.js` | A7.1, A7.4–A7.6, A7.11, A7.12, A7.14, A7.15 (roster now complete), A7.16, AX.3–AX.5, plus every C1 gate re-run (A7.2, A7.3, A7.7, A7.17). **The exemption ends here**, and A7.4 asserts it is gone | 12 |
+| **C3** | Go `/shared/` route | `internal/platform/static/{shared.go,shared_test.go}`, `internal/platform/config/config.go`, `cmd/server/main.go`, `cmd/server/dispatcher_auth_test.go`, `internal/utuber/build.go`, `unified-webapp.json`, `unified-webapp-example.json`, `README.md` | A8.1–A8.8, A7.14, AX.7, plus every C2 gate | 12 |
+| **C4** | shared TS + modal lift + emitted bundle | `web/shared/ts/{modal,index,theme,modal.test}.ts`, `web/shared/css/components.css`, `web/shared/dist/**`, `scripts/{descriptors.mjs,check-shared-barrel.mjs}`, `Makefile` (one line added to `gates`), `tsconfig.json` | A5.1, A5.2 (both halves — the barrel allowlist gate lands with the script that implements it), A5.6, A6.5, A7.8, A7.10, A7.13, AX.4 (count **14**). **Not A9.x:** the `sharedConsumer` set is still empty at this boundary | **14** |
+| **C5** | sampler, module 14 | `web/sampler/{index.html,style.css,js/main.ts,js/bundle.js}`, `internal/sampler/{build.go,build_test.go}`, `internal/platform/config/config.go`, `cmd/server/main.go`, `scripts/descriptors.mjs`, `local-test/config.json`, `unified-webapp-example.json`, `docs/{adding-a-module.md,sampler-checklist.md}` | A10.1–A10.6, A10.8, A2.6, A6.3, A6.4, **A9.1, A9.2, A9.4** (first boundary with a `sharedConsumer` descriptor), AX.4 (count **15**) | **15** |
+| **C6** | taskmaster adoption | `web/taskmaster/index.html`, `web/taskmaster/js/ui/modal.ts`, `web/taskmaster/js/bundle.js`, `scripts/descriptors.mjs` | A5.4, A5.5, A5.7, A9.1–A9.3, A9.5, A10.7, AX.6, T7's byte-identity assert with `--allow` | 15 |
 
-**Dependencies, stated rather than implied:**
-- C2's G2 gate is self-contained (it compares against artifacts already in the tree).
-- C3's verification includes `npm run build`, which requires C2 to have landed. C3 therefore **depends on C2** — v1 left this implicit. C3 does not depend on C1.
-- C4 depends on C1 (components.css) and C2 (the driver). C6 depends on C4.
-- C5 depends on C3 (`MountShared`) and C2 (the driver).
+**Ordering decision, and why every gate is passable at its own boundary.** *(This is the question v4 never answered, and the reason Architect B6 exists.)*
 
-**On C4's diff shape.** v1 claimed the modal lift would read as a `git mv`-equivalent rename. It will not: ~80 lines of CSS are deleted, every class is renamed, and 13 values are retokenized, so rename detection is unlikely to fire. The reviewable claim is narrower and checkable: the **focus trap (`modal.ts:181-209`) and the four exported signatures (`:129`, `:226`, `:277`, `:324`) are byte-identical** between donor and lift. Reviewers should diff those ranges specifically. If a cleaner history is wanted, C4 may be split into C4a (copy `ui/modal.ts` → `web/shared/ts/modal.ts` verbatim, so rename detection *does* fire) and C4b (delete `ensureStyles`, rename classes, retokenize) — both leave the tree green, and C4b is then a pure-transformation diff.
+- **C1 before everything:** `components.css` must exist before C4's lift has a destination, and the gate scripts must exist before any boundary runs them. **This is why `scripts/descriptors.mjs`, `scripts/list-artifacts.mjs` and the `web-verify`/`gates` Makefile targets are in C1's manifest and not C2's** *(Architect B2)*: `artifacts.mjs` reads `EXPECTED_ARTIFACT_COUNT` and the generated path list, so a C1 that ships the gate without its data cannot run AX.4's "12 at C1" or A7.2/A7.3/A7.7 at all — the gate would first be invokable one commit after the boundary it is supposed to guard. The dependency runs the other way round from the obvious reading: `descriptors.mjs` is **data** and needs nothing the drivers create, while `build-web.mjs` and `test-web.mjs` (C2) are what need `descriptors.mjs`.
+- **The `descriptors.mjs` trail is four commits — one create and three edits — by design.** Created at **C1** with the seven existing descriptors and `EXPECTED_ARTIFACT_COUNT = 12`; **C4** adds the `shared` and `shared-css` descriptors, the `@shared` `onResolve` plugin and the count 14; **C5** adds the `sampler` descriptor with `sharedConsumer: true` and the count 15; **C6** flips the taskmaster descriptor to `format: "esm"` and sets `sharedConsumer: true`. **C2 and C3 do not touch it at all** — this is the record B2 asked for, and it is also why C2's manifest no longer lists the file. Each of the three edits is the single definition of a fact that changes at that boundary, which is what §12 clause (d) requires — not four copies of one fact.
+- **C1b before C4:** `shared.css` is first emitted at C4, and it must contain the `@font-face` rules, or T7 row 5 and row 11 are wrong at C6.
+- **C2 before C3, C4, C5, C6:** every later commit's verification runs `npm run build`, which is the driver. (C3 is the one commit that does not otherwise depend on C2's output; it depends on it only through the verification block.)
+- **C3 before C5:** the sampler's `build.go` calls `MountShared`, and A10.1's route must exist for the sampler's own gates to run. This is the fix for Architect B6: v4 ordered the sampler before any server route existed, so A10.x could not pass at C5.
+- **C4 before C5 and C6:** both consume `@shared`, which resolves to `web/shared/dist/shared.mjs`.
+- **C6 last:** it is the only commit that changes a pixel.
 
----
+**Gate composition by boundary** (G6 requires every point where composition differs to be named here, and three of them differ):
 
-## 5. Acceptance criteria
-
-Mapped to FRD requirements. Every one is a command or a named test, not a judgement.
-
-**FR-1 — token vocabulary**
-- **A1.1** `tokens.css` declares each structural token exactly once, all on `:root`. — `check-shared-css.mjs`
-- **A1.2** `themes.css` declares zero structural tokens. — `check-shared-css.mjs`
-- **A1.3** All 8 theme blocks present; each declares exactly the canonical `--color-*` key set (17 keys), with `--font-body`/`--font-mono` allowlisted as extras. — `check-shared-css.mjs`
-- **A1.4** `web/shared/ts/modal.ts` contains no `createElement("style")` and no `style.textContent`. *(Replaces v1's vacuous "contains no CSS".)*
-- **A1.5** `components.css` contains no `#hex`, `rgb(`, `rgba(`, or `hsl(` outside comments. *(New.)*
-- **A1.6** `--color-danger` is the canonical name; `--color-error` appears nowhere in `web/shared/`.
-
-**FR-2 — theme roster**
-- **A2.1** The `puma` block matches FR-2's 16 declarations exactly, plus its two `--font-*` overrides. — byte comparison in `check-shared-css.mjs`
-- **A2.2** `obsidian` reproduces `web/obsidianoid/css/themes.css:2-37`'s violet values under the remap in Step 1.
-- **A2.3** `dark` reproduces `web/todo/css/todo.css:3-17`; `light` reproduces `:19-33`.
-- **A2.4** All 8 themes render the sampler with no unreadable element. — `docs/sampler-checklist.md`
-
-**FR-8 — Go**
-- **A8.1** `SharedHandler`, `WithShared`, `MountShared` exist with the Step-3 signatures and are covered by `internal/platform/static/shared_test.go`.
-- **A8.2** For every name in `knownModules`, a dispatcher built by `buildDispatcher` serves `/shared/dist/shared.css` (200) and 404s `/shared/ts/modal.ts`. — table-driven Go test. *(v1 had grep+curl; B2 makes this a real test.)*
-- **A8.3** A certmachine-routed dispatcher has a non-empty `closers` slice, and `make test` passes goleak. — direct guard for blocker 1.
-- **A8.4** `SharedHandler` 404s anything whose first post-strip segment is not `dist` or `public`; 404s directory requests; 405s non-GET/HEAD; confines traversal; serves `Last-Modified` and honours `If-Modified-Since`; serves `.mjs` as `text/javascript`.
-- **A8.5** `internal/utuber` defines no `staticHandler`; `type staticHandler` exists nowhere outside `internal/platform/static`.
-
-**FR-7 — build**
-- **A7.1** `npm run build` is `node scripts/build-web.mjs`; the `&&` chain is gone from `package.json`.
-- **A7.2** G2 holds: all eight pre-existing artifacts are byte-identical after C2.
-- **A7.3** `tsconfig.json` has `paths: {"@shared/*": ["web/shared/ts/*"]}`; `npm run typecheck` passes.
-- **A7.4** `make test-web`, `make web-verify`, `make check` exist and are in `.PHONY`.
-- **A7.5** `make web:` uses `npm ci`, not `npm install`.
-- **A7.6** `tsc --noEmit --listFiles` covers every `.ts`/`.tsx` covered before C2, plus `web/shared/**`. Baseline captured before C2 and stored at `docs/typecheck-baseline-phase1.txt` (tracked, so the comparison is reproducible by a reviewer). *(v1 never said where the baseline lived.)*
-- **A7.7** `TM_BUILD_TIME` resolves from `git log -1 --format=%cI -- web/taskmaster` absent an env override; two clean builds of the same commit produce identical bundles; no `1970` literal appears in `scripts/` or `Makefile`.
-
-**FR-5 — modal**
-- **A5.1** `web/shared/ts/modal.ts` exports `openModal`, `confirmDialog`, `alertDialog`, `promptDialog` with the donor's signatures.
-- **A5.2** Its CSS lives only in `components.css` and references only tokens (A1.5).
-- **A5.3** Focus trap, Escape-close, focus-return, backdrop-close verified per theme. — `docs/sampler-checklist.md`
-- **A5.4** No `innerHTML` of interpolated content, and no `alert`/`confirm`/`prompt`, anywhere in `web/shared/ts/`.
-- **A5.5** taskmaster's four dialogs work post-C6, through the shim, with all five call sites unmodified.
-
-**FR-10 — sampler**
-- **A10.1** `sampler` is in `knownModules` and has a `buildModule` case, a config struct with a `./web/sampler` default, and a `host_routing` entry in the sample configs.
-- **A10.2** It is auth-gated by a single `auth.modules` entry, like every other module.
-- **A10.3** The page demonstrates all 8 themes, the token grid, and all four dialogs, with source snippets rendered via `textContent`.
-- **A10.4** The page's only stylesheet is `/shared/dist/shared.css` plus its own `style.css`; `shared.mjs` is fetched **once per origin per load**. *(Corrected from v1's "exactly once" — Host-header dispatch means one origin per module, so there is no cross-module cache sharing. See ADR-001.)*
-
-**Cross-cutting**
-- **AX.1** G3: `git diff --name-only main... -- 'web/**/*.html'` lists only `web/taskmaster/index.html` and `web/sampler/index.html`.
-- **AX.2** G7: no external host referenced from `web/shared/` or `web/sampler/`.
-- **AX.3** G8: `shared.mjs` and `shared.css` are tracked.
-- **AX.4** G6 at all six commit boundaries (with C1's documented exception).
-- **AX.5** `gofmt -l <Phase-1-touched Go paths>` is empty, asserted via `test -z "$(…)"`. **Scoped deliberately:** the repo-wide form is already red on four untouched files (see the note in Step 3), so a repo-wide gate would fail every commit boundary for unrelated reasons.
-
----
-
-## 6. Risks
-
-| ID | Risk | Mitigation |
-|---|---|---|
-| R1 | G2 fails because the driver's esbuild options differ subtly from the chain's flags. | Transcribe flags per descriptor from the chain verbatim, including `logLevel` on exactly the two React modules. C2 does nothing else, so a G2 failure is a one-commit investigation. |
-| R2 | **G2 fails because a path became absolute.** esbuild embeds relative source paths as bundle comments (`web/taskmaster/js/bundle.js:3`). One `path.resolve` rewrites every comment in every bundle. | Driver rule 3 forbids absolute paths, `absWorkingDir`, and `path.resolve` on esbuild fields, and asserts `!path.isAbsolute()` on each before building. *(Highest-probability G2 failure mode; absent from v1.)* |
-| R3 | A module bundle silently downgrades to iife while importing `@shared`, emitting `__require("@shared")` that throws only at runtime. | G5's positive ESM-import assertion plus the `Dynamic require of` negative, both in `web-verify`. Verified empirically that esbuild exits 0 with zero warnings in this case. |
-| R4 | taskmaster's bundle changes non-reproducibly, making G2 unusable. | B3: build time comes from `git log`, so the bundle is a pure function of the commit. |
-| R5 | A theme block drifts out of key-set agreement, producing an unset custom property and an invisible element. | A1.3's equality test, gated in the build (driver rule 8). |
-| R6 | `--color-primary-fg` reads badly on some theme. | It is a per-theme token precisely so it can be tuned; the 8-theme checklist has an explicit legibility check on primary buttons. |
-| R7 | `/shared/` shadows a real module route. | No module currently registers `/shared/`; the A8.2 table test asserts the mount for all 14 and would fail on a collision. `WithShared` diverts only the `/shared/` prefix. |
-| R8 | **`Muxer` accepts chi.** `chi.Mux` satisfies `Handle(string, http.Handler)`, so `MountShared(r, dir)` would compile while registering a wrong exact-match pattern → silent 404. | B2 means no production path calls `MountShared` on chi. `MountShared` returns an error and validates that it received an `*http.ServeMux`, so a mistake is reported at boot rather than at request time. *(B1 would have left this a live hazard on taskmaster.)* |
-| R9 | `web/shared/ts/*.ts` becomes HTTP-reachable. | The first-segment allowlist is initial behaviour, not deferred hardening; A8.4 tests the 404. |
-| R10 | A stale system `mime.types` makes `.mjs` unservable as a module script. | A8.4's Content-Type test. |
-| R11 | Conditional-request behaviour silently regresses on a future handler change. | A8.4 tests `Last-Modified` + 304. |
-| R12 | Path traversal under `/shared/`. | `path.Clean("/"+rest)` before join; three traversal forms tested. |
-| R13 | A future phase links a shared stylesheet into a page whose own tokens collide by name. | G1's softened claim requires every adopting page to enumerate its overlaps; Step 6 does this for taskmaster and the `comm -12` check makes new overlaps fail the build. |
-| R14 | Shared CSS visually affects a page that links it. | *Fixed from v1, which said "G3 keeps shared.css off those pages" — wrong, because taskmaster **is** the Phase-1 adopter.* G3 keeps shared.css off the **twelve non-adopting** modules. For taskmaster, safety comes from G1 (no element selectors, `.ui-*` only) plus the enumerated `--font-mono` overlap, not from absence. |
-| R15 | `tsc` coverage silently shrinks when `include` is rewritten. | A7.6's `--listFiles` comparison against the tracked `docs/typecheck-baseline-phase1.txt`; FR-7.3's literal include is deferred (§8). |
-| R16 | A revert of C4 or C6 leaves a dangling import. | C6's shim means reverting C6 restores the full `ui/modal.ts` and removes the only `@shared` importer on taskmaster; reverting C4 with C6 still in place would break the build, so the revert order is C6-then-C4 and is recorded in the commit messages. |
-| R17 | **Modal style precedence inverts.** Today `ensureStyles()` appends a `<style>` **after** the page's `<link>`, so modal rules win ties. After the lift, `shared.css` is linked **first**, so modal rules **lose** ties against `style.css`. | *(New in v2.)* No live collision exists: taskmaster's competing rules are element-level (lower specificity than `.ui-modal-*`) and the `tm-` → `ui-` rename removes every class-name tie. Named here so a future `style.css` addition is recognized as the cause rather than rediscovered. |
-| R18 | The login page cannot link shared CSS because `/shared/` is inside the gate. | Open question Q8 — decide or defer explicitly before Phase 2 touches the login page. Phase 1 does not touch it, so this is not a Phase-1 blocker. |
-
----
-
-## 7. Open questions
-
-Tracked in `docs/OPEN-QUESTIONS-ui-unification.md` (a **tracked** doc — `.gitignore` ignores `.omc/`, so v1's `.omc/plans/open-questions.md` mirror would not have survived a clone).
-
-| ID | Question | Why it matters | Needed by |
+| Boundary | `make gates` runs | Artifact gate | Notes |
 |---|---|---|---|
-| Q1 | Does `light` get its own `--overlay-scrim`? | A 55%-black scrim over a light page is heavier than intended. | Phase 2 |
-| Q2 | Does `--color-surface-dynamic` (obsidianoid-only) need an FR-1 home? | obsidianoid's Phase-3 migration needs somewhere to put it. | Phase 3 |
-| Q3 | Do forest/ocean/ember/rose need `--color-primary-fg` values other than `#fff`? | Accent luminance varies across the four. | Phase 2 |
-| Q4 | When does FR-7.3's literal tsconfig `include` land, and in the same commit as the `js/` → `src/` renames? | Coupling the two keeps typecheck coverage constant; decoupling risks a gap. | Phase 2 |
-| Q5 | Should `web-verify`'s artifact list be generated from the descriptor list rather than hand-maintained? | A hand list drifts as modules are added. | Phase 2 |
-| Q7 | Do the remaining 12 modules adopt `shared.css` via `<link>` or via their own bundled CSS? | Determines whether `shared-css` stays a separate artifact. | Phase 2 |
-| **Q8** | **`/shared/` sits inside `svc.Gate`, so the login page cannot link `shared.css`** — `internal/platform/auth/gate.go:28` embeds and serves `login.html` before any module handler runs, yet the FRD's scope includes styling it. Options: **(a)** a narrow unauthenticated allowlist for exactly `GET /shared/dist/shared.css`, added beside `Gate`'s existing carve-outs (`GET /healthz`, `GET /api/auth/mode`, `GET /api/auth/whoami`, all before `protected := hasEntry \|\| module == "admin"`); **(b)** permanent inline styles in the login page. | (a) makes one stylesheet world-readable on a closed LAN — small but real posture change. (b) keeps the gate absolute but permanently forks the login page's styling from the token system. | **Decide before Phase 2 touches the login page.** Not a Phase-1 blocker. |
+| C1, C1b | `check-shared-css.mjs`, `bundle-shape.mjs`, `token-overlap.mjs` | `node scripts/gates/artifacts.mjs --allow web/taskmaster/js/bundle.js`, invoked **directly** | `make web-verify` (no `--allow`) is not used at these two boundaries — the flag *is* the byte-identity exemption's mechanism, and an argv flag on a gate file is auditable where a `grep -v` in a recipe is not. `bundle-shape.mjs` inspects zero files (empty `sharedConsumer` set) and passes vacuously; that is recorded rather than counted as evidence. `make check` does not exist yet. |
+| C2, C3 | same three | `make web-verify` | The exemption is gone, so the plain target is clean. `make check` exists from C2 and runs all four targets (A7.16). |
+| C4 | **four** — `check-shared-barrel.mjs` is added to the `gates` recipe by this commit, in the same commit that creates the script | `make web-verify` (count 14) | The one line of Makefile edit that C4's manifest carries. It is **not** a no-op stub placed at C1: a `gates` recipe invoking a script that does not exist would fail every boundary from C1 to C3, and a stub that exits 0 would be a gate that has never been able to fail, which R19 and AX.6 exist to forbid — *Critic amendment A*. |
+| C5, C6 | same four | `make web-verify` (count 15); C6 adds `artifacts.mjs --allow` for T7 | C5 is the first boundary at which `bundle-shape.mjs` has an input, so A9.1/A9.2/A9.4 are gates there rather than vacuous passes. |
 
-*(v1's Q6 — "should `web/grocery/app.test.js` be wired into `test:web`?" — is deleted. It is wired, unconditionally, in Step 2 driver rule 7; verified green at 189 pass, 0 fail.)*
+**The one byte-identity exemption, stated rather than denied.** At C1 and C1b, `package.json:5-6` still embeds `$(date -u …)`, so **any** rebuild re-stamps `web/taskmaster/js/bundle.js` unconditionally. Those two boundaries therefore run `clean-tree.mjs` with `web/taskmaster/js/bundle.js` excluded and `artifacts.mjs` with `--allow web/taskmaster/js/bundle.js`, and do not assert byte-identity for it. **The exemption disappears at C2**, where the digest replaces the timestamp and the artifact is committed in its new form; A7.4 (two consecutive builds produce identical bytes) is the assertion that it is gone. v4's G6 said "there are no path-scoping exceptions" while shipping the mechanism that guarantees one — this states the exception, bounds it to two commits, and names the gate that retires it.
+
+**Revert order is C6-then-C4** (R16): reverting C4 while C6 is in place would leave the shim importing a `@shared` that no longer exists. Recorded in both commit messages.
+
+**If C1b has to defer** — a license question, a digest mismatch — it defers **past C4 and C6 rather than blocking them.** `index.css` simply carries no `@import "fonts.css";` line, `check-shared-css.mjs` does not resolve imports (Step 1.7), and C4's `shared.css` is emitted without `@font-face` rules. The cost is **one extra artifact commit** to re-emit `shared.css` when C1b lands, plus T7 rows 5 and 11 becoming *deferred* deltas rather than sanctioned ones. The sequence does not pause.
+
+**Artifact count by commit:** 12 through C3, **14** after C4, **15** after C5 and C6. This is the one place a count appears more than once, and it is unavoidable — the quantity moves during the sequence. All three values are assertions made by the same gate reading `EXPECTED_ARTIFACT_COUNT`, not three independent lists; §12 clause (d) records this as the single stated exception to *one definition per fact*.
 
 ---
+## §5 — Acceptance criteria
 
-## 8. Deviations from FRD wording
+**What the labels mean, and the census.** A criterion **without** a `[deferred]` label was executed against this tree and its output is recorded with it. A criterion **with** `[deferred]` asserts a property of code Phase 1 has not written yet: it cannot be executed before the commit that creates its subject, so it names the boundary where it first runs and states what was verified in its place. **8 of the 74 criteria below were executed against this tree; 66 carry `[deferred]`.** That is the honest shape of a foundation plan — almost every gate here asserts a property of a file this phase is about to create — and v4's claim that only four were deferred was false for roughly 26 of its 46. The census is stated **once, here, by number**; every other passage in this document refers to it by name ("the §5 census"), never by figure.
 
-Recorded explicitly so review can accept or reject each one. None of these reopen FRD §7.
+Gate numbering is **A*n* = FR-*n*** (A1 ↔ FR-1, A5 ↔ FR-5, …), plus A9 for ADR-001's bundle shape and AX for cross-cutting. v4 used a different scheme; the mapping table at the end of this section shows where each v4 criterion went, so nothing is silently dropped.
 
-| FRD text | Deviation | Rationale |
+### A1 — FR-1: the token vocabulary and the shared-CSS linter
+
+*Each criterion names the `check-shared-css.mjs` clause that implements it (Step 1.7), so the gate and the criterion cannot drift.*
+
+- **A1.1** Every theme block's `--color-*` property set **equals** T1's 17 names — missing and extra are both failures, reported by name. `[deferred → C1]` *In place:* T1 was derived cell-by-cell from the three donors (Step 1.1). *(clause 5)*
+- **A1.2** The only non-`--color-*` properties permitted inside a theme block are the three-member allowlist `{--font-body, --font-mono, --overlay-scrim}` — puma's two `--font-*` overrides (FRD `:222-223`) and light's scrim (Q1). A fourth fails, naming the property and line. `[deferred → C1]` *(clause 6)*
+- **A1.3** `themes.css`'s depth-1 selector roster equals the 8 expected strings, **and** the running total of `--color-*` declarations across those 8 blocks is exactly **136**. `[deferred → C1]` *(clauses 4, 5)*
+- **A1.4** `tokens.css` is exactly one depth-1 `:root` block whose property set **equals** T2's 27 names. The two marked ★ (`--space-7`, `--text-xl`) are authored and ledgered (§8); every other one cites a donor line. `[deferred → C1]` *(clause 3)*
+- **A1.5** No `@import` anywhere under `web/shared/css/` names an external URL (no scheme, no `url(http…)`) — the shared sheet has no network dependency beyond the fonts it self-hosts. `[deferred → C1]` *(clause 8)*
+- **A1.6** No colour literal (`#[0-9a-f]{3,8}`, `rgba?(`, `hsla?(`) appears in `components.css`. **The ban is scoped to that one file** — `themes.css` is nothing but literals by definition, and module CSS is out of scope (§8 row 14). The carve-out costs nothing: `box-shadow` and the scrim consume `var(--shadow-md)` and `var(--overlay-scrim)`, whose literals live in `tokens.css`. *(v4 stated the ban unscoped, which forbids the token definitions themselves; v3's scoping is restored.)* `[deferred → C1]` *(clause 7)*
+- **A1.7** Every `@import` in `index.css` is a relative same-directory path (no `/`, no `..`), and the set of imported names is a subset of the files actually present. `[deferred → C1]` *(clause 8)*
+- **A1.8** No `!important` anywhere under `web/shared/css/`. This is load-bearing for R17: it is why `web/taskmaster/style.css:4`'s `[hidden] { display: none !important; }` keeps winning over any `.ui-modal-*` display rule. `[deferred → C1]` *(clause 9)*
+- **A1.9** `fonts.css` declares exactly **15** `@font-face` rules; each `url()` resolves to a file under `web/shared/public/fonts/` (mapping the served `/shared/` prefix back to the repo path), and each `*.woff2` present is referenced by exactly one `url()` — two-sided per G5, so neither an orphan file nor a dangling reference survives. `[deferred → C1b]` *(clause 10)*
+- **A1.10** Every selector in `components.css` matches `^\.ui-[a-z0-9-]+`, allowing descendant, pseudo, and attribute continuations. No bare element, id, or universal selector that could match a host page's DOM. This is the proof behind T7's "blast radius is row 11 only", and it is why the linter parses selector lists instead of pattern-matching lines. `[deferred → C1]` *(clause 7)*
+- **A1.11** `--color-error` appears nowhere under `web/shared/`; `--color-danger` is the canonical name. `[deferred → C1]` *(clause 11)*
+
+Two properties of the gate itself, rather than of the CSS, are asserted elsewhere: that `make gates` sees the linter's real exit code is **A7.17**, and that the linter has been observed to fail against a seeded violation is **AX.6**. Both halves of A1.3 are necessary and AX.6 proves it: set-equality alone passes a block that declares one key twice and omits another (a set has no multiplicity), and the 136-count alone passes a block of 17 wrong names.
+
+### A2 — FR-2: the eight themes
+
+- **A2.1** Each theme's 17 values match its donor of record — T5a/T5b/T5c, or the FRD's puma block (`:202-217`) — **except** the 14 authored cells enumerated in Step 1.4, of which `--color-primary-fg` is one (it has no donor anywhere: `grep -rn -- '--color-primary-fg' web/` → rc=1). `[deferred → C1]` *(The roster of 8 blocks is A1.3's first clause; this criterion is about the values inside them.)*
+- **A2.2** The five obsidianoid-derived themes are named **obsidian, forest, ocean, ember, rose** — obsidianoid's canonical `[data-theme="dark"]` block becomes **obsidian** (FRD FR-2's rename), and canonical `dark` comes from `web/todo/css/todo.css:3-17`. `[deferred → C1]`
+- **A2.3** obsidian's 17 values are byte-equal to T5a's obsidian column. `[deferred → C1]`
+- **A2.4** Every theme's `--color-primary-fg` clears 4.5:1 against its `--color-primary`, except obsidian's inherited **3.99:1**, which is an inherited condition, ledgered in §8 and carried as §9 item 1. `[deferred → C1]`
+- **A2.5** light's `--overlay-scrim` is `rgba(40,37,29,0.35)` (Q1, user-settled). `[deferred → C1]`
+- **A2.6** All 8 themes render the sampler with no unreadable pair — `docs/sampler-checklist.md`, manual, once per theme. `[deferred → C5]`
+
+### A5 — FR-5: the modal lift
+
+- **A5.1** `web/shared/ts/modal.ts` is behaviourally identical to the donor: focus trap with Tab/Shift-Tab wrap, Escape closes, backdrop mousedown closes, focus returns to the invoking element, `[hidden]` toggling, and no `innerHTML` anywhere. `[deferred → C4]` *In place:* the donor's behaviour was read line-by-line and the preserved regions are listed byte-range by byte-range in Step 5.
+- **A5.2** Two halves, one criterion, because one commit decides both. **CSS:** `shared.css` contains the `.ui-modal-*` rules and `shared.mjs` contains **no** CSS string, no `createElement("style")`, and no `STYLE_ATTR`. **Barrel surface:** `web/shared/ts/index.ts`'s exported-name set **equals** the barrel allowlist — the 6 named values `openModal`, `confirmDialog`, `alertDialog`, `promptDialog`, `THEMES`, `setTheme` and the 4 types `ModalOptions`, `ModalHandle`, `DialogOptions`, `PromptOptions` — with **no `export *`**; missing and extra are both failures, reported by name. `scripts/check-shared-barrel.mjs` implements both directions. `[deferred → C4]` *(Architect B1: an allowlist rather than a hard-coded "four and four", because the barrel must be the library's complete public surface — `@shared` collapses to one URL, so a symbol not in the barrel is unreachable by any consumer. Taskmaster's narrower four-function surface is enforced at the **shim** instead: A5.4, ADR-003.)*
+- **A5.3** taskmaster's `style.css` contains zero `tm-modal` references, and taskmaster's CSS/HTML contains zero `.ui-` class references — so the 8-class rename can collide with nothing. **Executed:** `grep -c 'tm-modal' web/taskmaster/style.css` → `0` (exit 1); `grep -rn '\.ui-' web/taskmaster --include=*.css --include=*.html` → 0 lines.
+- **A5.4** The shim re-exports exactly the four dialog functions and the four types — **narrower than the barrel's allowlist by design**, so `THEMES` and `setTheme` stay unreachable from taskmaster's `./ui/modal.js` specifier (ADR-003) — and `git diff` shows **no change** to `api.ts`, `designer.ts`, `outputmodal.ts`, `board.ts`, or `main.ts`. `[deferred → C6]`
+- **A5.5** **Manual, and mandatory:** all four of taskmaster's dialogs are opened through the shim in the running app under `[data-theme="obsidian"]`, and each one traps focus, closes on Escape, closes on backdrop mousedown, and returns focus. This is the **only behavioural gate on C6**; without it the adoption is asserted, not verified. `[deferred → C6]`
+- **A5.6** `modal.ts` contains no `createElement("style")` and no `style.textContent`. *This criterion exists because the obvious one is vacuous:* "`modal.ts` contains no CSS" is true by construction once `ensureStyles()` is deleted and can never fail. Asserting the **mechanism** means the file cannot inject styles even if someone reintroduces a rule string. `[deferred → C4]`
+- **A5.7** `web/taskmaster/js/ui/modal.ts` is the 2-line shim — the 390-line donor body is **gone**, not duplicated — and every name it re-exports is a member of the barrel allowlist A5.2 asserts (Step 5's table). The containment direction is what matters here: the shim may be narrower than the allowlist, never wider, because a name the barrel does not export is unreachable through `@shared`'s single-URL collapse. `[deferred → C6]` *(Architect B1 asked that A5.2 and A5.7 both read the allowlist rather than a hard-coded "four and four"; A5.4 asserts the shim's exact four.)*
+
+### A6 — FR-6: self-hosted fonts
+
+- **A6.1** Exactly 15 `.woff2` files ship, `shasum -c SHA256SUMS` passes, and SHA256SUMS has exactly 15 lines. `[deferred → C1b]` *In place:* the 18 staged digests were verified and the 3 dropped lines identified (Step 2).
+- **A6.2** Each shipped family carries its license text alongside it (SIL OFL 1.1), per G9. `[deferred → C1b]`
+- **A6.3** Loading the sampler issues **no** request to `fonts.googleapis.com` or `fonts.gstatic.com` (DevTools network panel, or a grep of the served HTML/CSS). `[deferred → C5]`
+- **A6.4** `--font-body`, `--font-mono`, and `--font-display` each resolve to a registered face (not a fallback) in the browser's computed style. `[deferred → C5]`
+- **A6.5** The `shared-css` descriptor sets `external: ["*.woff2"]`, so `shared.css` ships the server-absolute `url("/shared/public/fonts/…")` strings **unrewritten** and esbuild emits **no hashed side-artifacts** — which is what keeps the artifact count at 15 rather than 15 + 15. `[deferred → C4]`
+
+### A7 — FR-7: build driver, typecheck, hygiene
+
+- **A7.1** `npm run build` exits 0 and writes exactly the generated artifact list — nothing extra, nothing missing. `[deferred → C2]`
+- **A7.2** The artifact list is **generated** from `scripts/descriptors.mjs` by `scripts/list-artifacts.mjs`; no hand-maintained copy exists (Q5, user-settled). `[deferred → C1]`
+- **A7.3** `EXPECTED_ARTIFACT_COUNT` is defined **once**, in `scripts/descriptors.mjs`, and every count assertion reads it. `[deferred → C1]` *(Critic M-6: v4's recipe wrote the expected count twice in one line. Architect B2: the file lands at C1, with the gates that read it, not at C2 — otherwise AX.4's "12 at C1" asserts against a file C1 does not contain.)*
+- **A7.4** Two consecutive `npm run build` runs produce byte-identical artifacts. This is the assertion that the `$(date -u)` define is gone and the C1/C1b byte-identity exemption has been retired. `[deferred → C2]`
+- **A7.5** `package.json` contains no `date -u`: `grep -c 'date -u' package.json; rc=$?; [ "$rc" -eq 1 ]` — no match, so `grep -c` prints `0` **and exits 1**. `[deferred → C2]`
+- **A7.6** The build stamp is a content digest over the metafile input set ∪ `EXTRA`, 15 files, per ADR-004, and re-running the two-pass procedure reproduces `c2c572876987`. `[deferred → C2]`
+- **A7.7** A crashing generator **fails** the gate: `scripts/gates/artifacts.mjs` runs `scripts/list-artifacts.mjs` as a child process and propagates a non-zero exit. `[deferred → C1]` *(Critic M-6: `$(shell …)` swallows exit status. C1 per Architect B2, with the generator and the gate it feeds.)*
+- **A7.8** `tsconfig.json`'s `include` lists **11** globs — today's 9 plus `web/shared/**/*.ts` and `web/sampler/js/*.ts`. Both globs are added by **C4** (Step 5); C5 does not touch the file. `[deferred → C4]`
+- **A7.9** `package.json` declares no `@types/node`, so the shared TS must stay DOM-only. **Executed:** `grep -c '@types/node' package.json` → `0` (exit 1). *(This is ADR-005's first driver, verified rather than assumed.)*
+- **A7.10** `tsconfig.json` gains `paths` entries for `@shared` and `@shared/*` with **no** `baseUrl`, keeps `moduleResolution: "bundler"`, and adds `web/shared/dist` to `exclude` so emitted output is never typechecked. `[deferred → C4]`
+- **A7.11** `npm run typecheck` exits 0. **Executed:** rc=0 on this tree (9 globs). Re-run at every boundary, and from C4 onward against the 11 globs of A7.8.
+- **A7.12** `npm run test:web` exits 0. **Executed:** rc=0 on this tree, 4 suites, all assertions `ok`.
+- **A7.13** `npm run test:web` reports **five** suites — the four existing plus `web/shared/ts/modal.test.ts`. `[deferred → C4]` *In place:* A7.12 establishes the runner works; the fifth suite is the file C4 creates.
+- **A7.14** `gofmt -l .` outputs nothing, **repo-wide**. **Executed:** 0 lines on this tree, so the repo is already clean and the plan's Go commits inherit a repo-wide standard rather than arguing for a scoped one.
+- **A7.15** `.PHONY` lists all 13 targets: today's 9 plus `test-web`, `web-verify`, `gates`, `check`. A non-phony target named after a file that happens to exist silently never runs. The roster is complete after C2 and grows in **two stages** — 9 → 11 at **C1** (`web-verify`, `gates`; Step 1.8) and 11 → 13 at **C2** (`test-web`, `check`; Step 3's `.PHONY` sentence, §4's C1 and C2 rows) — so the criterion is checked at both boundaries against the targets defined at each. `[deferred → C1/C2]`
+- **A7.16** `make check` runs `web-verify`, `test-web`, `gates`, and `test`, and fails if any of them fails. Exactly those four: the Go hygiene commands are AX.7's separate mandate. `[deferred → C2]`
+- **A7.17** **G11's form is real:** every multi-command gate is a file under `scripts/` invoked as a single process, and no Makefile **recipe** contains `$(shell …)` or a `$(git …)` substitution. *(Recipe-scoped: `Makefile:9`'s backend `BUILD_TIME := $(shell date -u …)` is a variable assignment, not a gate, and is untouched by Phase 1 — Architect M3.)* `[deferred → C1]` *In place:* Architect B7 proved v4's recipe form always passed — make expanded `$(git diff …)` before the shell ran, so the test was `[ -z "" ]`. The same hazard was present in v4's AX.1 and P2. Seeding a byte difference must make this gate fail (R19).
+
+### A8 — FR-8: `/shared/` on every module host
+
+- **A8.1** `internal/platform/static/shared_test.go` covers all **nine** clauses of the pinned handler contract in Step 4, which states for each clause the criterion it maps to. `[deferred → C3]` *(Architect M1 / Critic note 1: v5's contract had seven bullets and claimed each was "a clause of A8.4", which was false for four of them and left A8.4's symlink and dotfile clauses with no contract bullet at all. The contract is now nine bullets with an explicit mapping, and A8.4's six clauses are each named by one.)*
+- **A8.2** A table test over all **13** `knownModules` host names asserts `GET /shared/dist/shared.css` answers **200 or 503, never 404** — 503 being the legitimate answer when a module is configured off. The test **iterates the array** rather than hard-coding a count, so C5's 14th entry (A10.6) extends it with no edit. `[deferred → C3]`
+- **A8.3** **The invariant:** the `/shared/` wrap at `cmd/server/main.go:303` sits *inside* `svc.Gate` and *after* the `io.Closer` assertion at `:300-302`. The criterion that asserts it: the closers slice is non-empty at the assertion point, and `goleak` in `TestMain` (`cmd/server/dispatcher_auth_test.go:1241-1243`) reports no leaked goroutine. Reordering the wrap above `:300` drops a closer and goleak fails. `[deferred → C3]` *(Note: the stale comment at `dispatcher_auth_test.go:29-30` predates goleak's introduction and is corrected in this commit.)*
+- **A8.4** Six security clauses, each with its own test and each named by one bullet of Step 4's contract: (1) `../` and encoded traversal are confined lexically by `path.Clean("/"+rest)` **(contract bullet 3)**; (2) only `dist` and `public` pass the first-segment allowlist **(bullet 2)**; (3) a directory path returns 404, never a listing **(bullet 6)**; (4) a non-GET/HEAD method returns 405 with an `Allow` header **(bullet 7)**; (5) a symlink escaping the root is refused — the named mechanism is `os.OpenRoot(dir)` at construction and `root.Open(rel)` per request, whose error the handler answers with 404 **(bullet 4)**; (6) a path with a dot-prefixed segment is not served **(bullet 5)**. `[deferred → C3]` *(R9–R12 record the failure each clause prevents. Clause 5 previously named no mechanism, so it was untestable as written — Architect M1; `os.Root` is available on this tree's go1.27.1.)*
+- **A8.5** utuber's private static handler is **gone**: `grep -rn 'type staticHandler' internal/ --include=*.go` → rc=1, `grep -rn 'staticHandler' internal/utuber/` → rc=1, and `internal/utuber/build.go:58` routes through `static.NewHandler(cfg.StaticDir)`. `[deferred → C3]` *(FR-8.2, R14, §8 row 16. Step 4's utuber paragraph and its two guarded greps already cited A8.5 for exactly this; the criterion now says what they assert — Critic amendment D.)*
+- **A8.6** The response-header contract, all three clauses in one criterion because one `http.ServeContent` call decides all three: `Last-Modified` is set on GET **and** HEAD; a matching `If-Modified-Since` returns 304 with no body; and `.mjs` is served with a `Content-Type` starting `text/javascript`. `[deferred → C3]` *(R10, R11. The `.mjs` clause is folded in here rather than carried separately: `mime.TypeByExtension` consults the **system** table before Go's builtin one, so a host with a stale `mime.types` serves a type a browser refuses for a module script, and that must fail in a test run — Critic amendment D.)*
+- **A8.7** `MountShared` handed something other than an `*http.ServeMux` returns an **error at boot**, not a panic and not a silently-wrong exact-match pattern. `[deferred → C3]` *(R8.)*
+- **A8.8** `go vet ./...` exits 0 and `go test -race ./...` (via `make test`) exits 0. **Executed:** vet rc=0; `make test` rc=0 with every package `ok`.
+
+### A9 — ADR-001: bundle shape
+
+**The input set these three criteria range over is a descriptor field, not a guess.** `scripts/gates/bundle-shape.mjs` inspects exactly the outputs of descriptors declaring **`sharedConsumer: true`** (Step 3, driver rule 10) — the same field that selects the `@shared` `onResolve` plugin and triggers the driver's `format: "esm"` assertion, so the gate, the plugin and the assertion cannot range over different sets. **That set is empty until C5** (`sampler` at C5, `taskmaster` at C6; the `shared` descriptor is the barrel, not a consumer of it), which is why A9.1, A9.2 and A9.4 first run at **C5** and not at C4 — *Critic amendment B: v5 listed A9.2 and A9.4 in §4's C4 row, where they would have passed over zero files and been recorded as green.*
+
+- **A9.1** Every bundle whose descriptor declares `sharedConsumer: true` contains a **top-level** `import … from "/shared/dist/shared.mjs"` statement. `[deferred → C5/C6]`
+- **A9.2** No such bundle contains `__require(` or `Dynamic require of`. Both sides are required, because esbuild downgrades an ESM-only construct under `format: "iife"` **silently, with exit 0** — the positive check alone cannot see it, and the negative check alone passes an empty file. `[deferred → C5/C6]` *(G5.)*
+- **A9.3** taskmaster's bundle contains `var FRONTEND_BUILD_TIME` **exactly once** — the define was applied, and applied once. `[deferred → C6]`
+- **A9.4** Seeding `format: "iife"` on a `sharedConsumer` descriptor makes `scripts/gates/bundle-shape.mjs` exit non-zero. `[deferred → C5]` *(R19: a gate never observed to fail is not known to be a gate. C5 is the first boundary at which there is a consumer to seed — at C4 the seed would have nothing to act on, so the mutation test could not distinguish a working gate from an empty one.)*
+- **A9.5** `scripts/gates/token-overlap.mjs` reports the shared ∩ taskmaster token-name intersection as exactly `--font-mono`. `[deferred → C6]` *(The gate itself is live from **C1**, where it already computes exactly this intersection and passes — `tokens.css` declares `--font-mono` from C1 and `style.css:21` always has. C6 is where it becomes **load-bearing**, because C6 is the commit that puts both sheets on one page, and it is therefore the criterion's boundary of record — Critic note 5.)* *In place:* the intersection was computed by hand in Step 7 from `web/taskmaster/style.css:6-24`'s 17 declared properties against T1's 17 + T2's 27, and `--font-mono` is the only member; taskmaster wins it on source order at all five of its consumers.
+
+### A10 — FR-10: the sampler, and adoption
+
+- **A10.1** `GET /shared/dist/shared.css` on the sampler's host returns 200 with a `Last-Modified` header. `[deferred → C5]`
+- **A10.2** `web/sampler/index.html` links `/shared/dist/shared.css` and its own `style.css`, and nothing else colour-bearing. `[deferred → C5]`
+- **A10.3** The theme `<select>` is populated by iterating `THEMES` imported from `@shared` — **not** a second hard-coded list (FRD `:226-228`) — and selecting an option calls `setTheme`, which writes `document.documentElement.dataset.theme`; all 8 values cycle with no reload. `[deferred → C5]` *(This is the criterion that makes the barrel's theme half load-bearing: B1.)*
+- **A10.4** The swatch grid renders T1's 17 colour tokens and T2's 27 structural tokens from a single in-page source, so a token added to `tokens.css` and not to the sampler is visible as a gap. `[deferred → C5]`
+- **A10.5** All four dialogs open from the sampler, through `@shared`, with no taskmaster code in the page. `[deferred → C5]`
+- **A10.6** `knownModules` has **14** entries, and the sampler has an `auth.modules` entry in both sample configs — gated like every other module, not special-cased. `[deferred → C5]`
+- **A10.7** `web/taskmaster/index.html:2` carries `data-theme="obsidian"` (mechanism (a), ADR-007). `[deferred → C6]` *In place:* the propagation survey found 13 passages that the attribute mechanism affects, all enumerated in Step 1.0.
+- **A10.8** All five steps of `docs/adding-a-module.md` (`:52`, `:62`, `:65`, `:70`, `:76`) are done for the sampler, and the document gains its shared-asset line. `[deferred → C5]`
+
+### AX — cross-cutting
+
+- **AX.1** At each commit boundary, `node scripts/gates/clean-tree.mjs <that commit's paths>` exits 0. Untracked files are ignored by design (P6's side-car artifacts and `fonts-staging/` must not fail a gate). `[deferred → C1]`
+- **AX.2** Every `path:line` citation in this document resolves to the content it claims. **Executed:** every citation in v5 was verified by reading the cited line; §12 clause (b) records the sweep, and the corrections table in "Changes from v4" records the 9 citations that moved.
+- **AX.3** Every artifact the build generates today is tracked by git. **Executed:** `git ls-files --error-unmatch` over all 12 → rc=0.
+- **AX.4** After each commit, the artifact count equals `EXPECTED_ARTIFACT_COUNT`: 12 at C1, C1b, C2, C3; **14** at C4; **15** at C5 and C6. `[deferred → C1]`
+- **AX.5** No gate uses a bare `! grep`. Every grep assertion uses the guarded form (`grep …; rc=$?; [ "$rc" -eq 1 ]`), because `! grep` treats exit 2 — a missing file, an unreadable directory, a bad pattern — as success. `-s` is not sufficient: it silences the message but still returns 2. `[deferred → C1]`
+- **AX.6** Every gate in this plan has been observed to fail at least once, against a deliberately seeded violation. `[deferred → C6]` *(R19. This is the criterion v4 came closest to needing and did not have: B7's always-pass recipe would have been caught by it.)*
+- **AX.7** `README.md` documents `make check` as the required pre-commit gate, since the repo has no CI and nothing else runs these checks — **and states that `gofmt -l .` and `go vet ./...` are mandated separately, by A7.14 and A8.8, rather than folded into `check`.** `[deferred → C3]` *(Architect M4 asked for one of the two directions, consistently: `check` keeps exactly the four targets A7.16 asserts (`web-verify test-web gates test`), the two Go hygiene commands stay their own step in every Verification block that runs them (Steps 4 and 6), and the README says so. Adding them to `check` was the alternative; it was not taken, because `make test` already runs the Go suite and A7.16's composition is asserted by name.)*
+
+### v4 → v5 gate mapping
+
+Numbering changed to **A*n* = FR-*n***. Every one of v4's 46 criteria has a v5 home; nothing was dropped in the renumbering.
+
+| v4 | v5 | Note |
 |---|---|---|
-| **FR-8.1** implies `MountShared` is called per module to mount `/shared/`. | `/shared/` is mounted **once** in the dispatcher via `static.WithShared` at `cmd/server/main.go:302`. `MountShared` is still built, tested, documented, and exercised by `internal/sampler/build.go`. | 4 edits instead of ~39; router-agnostic, so the chi and constructor-owned-mux divergences (§2) never have to be special-cased; removes the `Muxer`-accepts-chi hazard (R8) from every production path; and makes the mount impossible to erase a module's `io.Closer` (blocker 1). The FRD's requirement — `/shared/` reachable on every module host, inside auth — is met more completely, since a module added tomorrow gets it with zero work. See ADR-002. |
-| **FR-7.3**'s tsconfig `include` is `["web/*/src/**/*", "web/shared/**/*"]`. | Phase 1 uses the **union** of today's 7 enumerated globs plus `web/shared/**/*`. | 5 modules still keep sources in `js/`. Adopting the literal form now drops them from `tsc --noEmit` — a coverage loss no gate would catch. Lands in Phase 2 with the entry renames (Q4). |
-| **FR-6** self-hosted Sora / IBM Plex Mono. | Phase 1 transcribes puma's `--font-*` overrides but ships no font files, so they resolve to fallbacks. | FR-6 is Phase 6. Shipping a token that references an absent face would make rendering machine-dependent and invisible to every gate (Step 1 note 4). |
-| **FR-1** vocabulary. | Adds `--color-primary-fg` (theme-scoped) and `--overlay-scrim` (structural). | `modal.ts:99`'s `color:#fff` and `:28`'s scrim literal have no FR-1 home, and A1.5 forbids literals in `components.css`. Both are additive. |
+| A1.1–A1.9 | A1.1–A1.9 | all nine survive, re-ordered to match `check-shared-css.mjs`'s clause order (Step 1.7) so gate and criterion cannot drift; A1.6 regains v3's `components.css` scoping (v4's unscoped literal ban forbade the token definitions themselves); **A1.10**, **A1.11** are new |
+| A2.1–A2.6 | A2.1–A2.6 | unchanged except A2.1's authored-cell exemption and A2.2's roster fix (obsidian, not dark) |
+| A5.1–A5.4 *(fonts)* | A6.1–A6.4 | renumbered to FR-6; **A6.5** (woff2 externalization policy) is new |
+| A6.1–A6.5 *(build driver)* | A7.1–A7.7 | merged into one FR-7 family; **A7.3** and **A7.7** are new and answer Critic M-6 |
+| A7.1–A7.7 *(typecheck/hygiene)* | A7.8–A7.16 | v4 A7.4's "`dependencies` is empty" was **false** (5 runtime deps) and is restated as "unchanged"; **A7.13**, **A7.15** are new |
+| A8.1–A8.4 *(Go)* | A8.1–A8.6 | A8.3 and A8.4 regain v3's closer invariant and six security clauses; **A8.7**, **A8.8** are new |
+| A10.1–A10.5 | A10.1–A10.5 + **A10.7** | v4's deferred `data-theme` gate is now A10.7; **A10.6**, **A10.8** are new |
+| AX.1–AX.6 | AX.1–AX.4 + **A7.17** | v4's byte-identity recipe becomes A7.17 (gate files, per Architect B7); **AX.5–AX.7** are new |
+| — | **A5.5–A5.7** | restored/new behavioural gates on the lift; A5.5 is the only behavioural gate on C6 |
+| — | **A9.1–A9.5** | **restored from v3** — the bundle-shape and token-overlap family v4 deleted wholesale |
+
+---
+## §6 — Risks
+
+Each row names the mechanism that catches it, not an intention. A risk whose mitigation is "be careful" is not mitigated.
+
+| | Risk | Mitigation |
+|---|---|---|
+| **R1** | A shared token name collides with a module's own token of the same name, silently changing that module's rendering. **Live today:** `--font-mono` is declared by both `tokens.css` and `web/taskmaster/style.css:21`. | `shared.css` is linked **first**, so the module wins on source order at all five consumers; `scripts/gates/token-overlap.mjs` (A9.5) pins the intersection at exactly `--font-mono` and fails if it grows. |
+| **R2** | An absolute path on any esbuild input/output field rewrites the source-path comments esbuild embeds in every bundle (`web/taskmaster/js/bundle.js:3` is literally `// web/taskmaster/js/ui/modal.ts`), failing G2 on every artifact at once. **Highest-probability cause of a G2 false failure.** | Driver rule 3: no absolute path, no `absWorkingDir`, no `path.resolve`; the driver asserts `!path.isAbsolute(v)` on every descriptor path field before calling esbuild. |
+| **R3** | esbuild **silently** downgrades an ESM-only construct under `format: "iife"`, emitting `__require(…)` and exiting **0**. The failure appears only as a "Dynamic require" error in a browser console. | A9.1/A9.2 are two-sided (positive import present **and** negative `__require(` absent); driver rule 10 asserts `format: "esm"` for every `@shared` consumer; A9.4 mutation-tests the gate. |
+| **R4** | A gate that always passes. Make expands `$(…)` inside a recipe before the shell sees it, so `[ -z "$(git diff …)" ]` becomes `[ -z "" ]`; `$(shell …)` discards a child's exit status. Both were live in v4 (Architect B7, Critic M-6). | G11: every gate is a file invoked as one process. A7.17 asserts the form (no `$(shell …)`, no `$(git …)` in any recipe); AX.6 requires each gate to have been observed failing. |
+| **R5** | The `data-theme` attribute is never stamped, so taskmaster's modal renders on `:root`'s canonical **`dark`** defaults — a generic dark palette, not obsidian's violet — and every obsidian-specific claim in Step 1.4 and T7 is unfounded. The risk is *sharper* for `:root` being dark than light: a light-on-dark flip would be noticed on sight, whereas dark-instead-of-obsidian is a small palette shift that a screenshot pass could bless (ADR-007). | A10.7 checks the attribute at `web/taskmaster/index.html:2`; Step 1.0 enumerates the 13 passages that depend on it, so the premise cannot rot unnoticed. |
+| **R6** | esbuild rewrites `fonts.css`'s `url()`s into content-hashed copies under `web/shared/dist/`, inflating the artifact count, doubling committed bytes, and orphaning every line of `SHA256SUMS`. | A6.5: the `shared-css` descriptor sets `external: ["*.woff2"]` and the urls are server-absolute, so nothing is copied or renamed. |
+| **R7** | The `/shared/` wrapper is placed **outside** `svc.Gate` (shared assets become unauthenticated) or **above** the `io.Closer` assertion at `cmd/server/main.go:300-302` (a module's closer is erased and its goroutine leaks). This was iteration-2's blocking defect. | The invariant is stated in Step 4 and asserted by A8.3: a certmachine-routed dispatcher has a non-empty `closers` slice, and goleak (`dispatcher_auth_test.go:1241-1243`) fails on a leak. ADR-002 records the rejected per-module alternative that reintroduces it. |
+| **R8** | `MountShared` is handed a chi router or another `Muxer` whose `Handle` has different pattern semantics, registering a subtree as an exact match — a 404 that looks like a config error. | `MountShared` returns an `error` (never panics) and validates that it received an `*http.ServeMux`, so the failure surfaces at boot. A8.7. |
+| **R9** | Source disclosure: `/shared/ts/modal.ts` or `/shared/css/tokens.css` becomes fetchable, publishing the phase's un-bundled source. | First-segment allowlist (`dist`, `public`) as **initial** behaviour, not deferred hardening. Every smoke URL in this plan names `/shared/dist/shared.css`; Step 6's two-sided probe asserts `/shared/ts/modal.ts` → 404. A8.4 clause 2. |
+| **R10** | `.mjs` is served with a Content-Type a browser refuses for a module script, because `mime.TypeByExtension` consults the **system** mime table before Go's builtin one — so a host with a stale `mime.types` breaks the page while CI is green. | **A8.6**: a test asserts the response Content-Type starts with `text/javascript`. It fails in a test run rather than in someone's browser. *(Folded into A8.6 with the other response-header clauses per Critic amendment D, which frees A8.5 for the utuber de-duplication it was already cited for in Step 4.)* |
+| **R11** | A future handler change silently drops conditional requests, turning every page load into a full re-download of `shared.css`. | A8.6 tests `Last-Modified` on GET and HEAD and `If-Modified-Since` → 304 explicitly, so the behaviour is pinned rather than incidental to whichever `net/http` helper serves the bytes (`http.ServeContent`, per Step 4's contract clause 4). |
+| **R12** | Path traversal escapes the shared root and serves arbitrary files. | `path.Clean("/"+rest)` before joining, matching certmachine's `staticFileExists` discipline; tests drive `/shared/../../etc/passwd`, `/shared/dist/../../../etc/passwd`, and the `%2e%2e%2f` form. A8.4 clause 1. |
+| **R13** | A **future** token added to `tokens.css` creates a new overlap with a module's vocabulary, and nobody notices because the current overlap was analysed once by hand. | `token-overlap.mjs` is a standing gate in `make gates`, not a one-time analysis: it fails the moment the intersection differs from `--font-mono`. A9.5. |
+| **R14** | utuber's private copy of the static handler (`internal/utuber/build.go:68-79`) drifts from the platform one, so a security fix lands in one and not the other. | C3 deletes the copy and routes utuber through `static.NewHandler` — §8 row 16, FR-8.2, A8.5. |
+| **R15** | A committed font binary has no provenance, or its license text is separated from it, so nobody can establish redistribution rights later. | G9: a tracked `SHA256SUMS` line plus `OFL.txt` beside each family; `shasum -c` is a gate (A6.1) verified to fail loud in both directions (mutated byte → `FAILED`; missing file → `FAILED open or read`). |
+| **R16** | Reverting C4 while C6 is in place leaves taskmaster's shim importing a `@shared` that no longer exists — a broken build from a "safe" revert. | Revert order is **C6 then C4**, recorded in both commit messages and in G8. |
+| **R17** | The `tm-modal-*` → `ui-modal-*` rename collides with taskmaster's own CSS, or a shared rule overrides a module rule it should not. | A5.3 (executed): zero `tm-modal` references in `style.css`, zero `.ui-` class references in taskmaster. Element-level selectors are (0,0,1) against `.ui-modal-*`'s (0,1,0), and `style.css:4`'s `[hidden] { display: none !important; }` always wins — guaranteed by A1.8's `!important` ban in shared CSS. |
+| **R18** | The manual gates — the 8-theme checklist and C6's four-dialog pass — get skipped under time pressure, and the phase ships with its only behavioural evidence unexecuted. | `docs/sampler-checklist.md` is a **committed artifact** with per-theme checkboxes, and three follow-ups depend on it (§9 items 10, 11, and item 1's legibility note). A5.5 is named in §4's C6 row as the only behavioural gate on that commit. |
+| **R19** | **A gate never observed to fail is not known to be a gate.** v4 shipped three always-passing gates and called them enforcement. | AX.6: every gate must have failed once against a seeded violation. Specific instances: A9.4 (seed `format: "iife"`), A1.3 (seed a duplicated key), A7.17 (seed a byte difference), A6.1 (mutate a font byte — already demonstrated). |
+| **R20** | The in-flight `tools/baseline-shots/` side-car work (P6) gets swept into a Phase-1 commit, or its untracked screenshots fail a cleanliness gate. | Every commit in §4 names its paths, and P2's gate is `clean-tree.mjs <that commit's paths>` — path-scoped, and ignoring untracked files by design. |
+| **R21** | obsidian's 3.99:1 `--color-primary-fg` is read as a regression this phase introduced, and someone "fixes" it inside Phase 1 by changing a token that T5a pins to the donor. | It is ledgered as an **inherited** condition (§8 row 5); T7 row 10 records the direction as 3.91:1 → **3.99:1** (an improvement, not a regression); §9 item 1 owns the real fix in the phase that owns taskmaster's visuals. |
+| **R22** | The puma theme block ships without its font faces, puma silently resolves to `var(--font-body-fallback)`, and C6's screenshot pass blesses the wrong rendering as correct. | Sora and IBM Plex Mono ship in C1b precisely because the puma block ships in Phase 1 (FRD `:222-223`); A6.4 asserts the families resolve to registered faces rather than fallbacks. |
+
+### §6.5 — Pre-mortem
+
+*Three ways this phase could be reported "done" while being wrong. Each names what would have to change.*
+
+1. **"Every gate is green" while three gates never ran.** This is not hypothetical — it is what v4 shipped: a byte-identity recipe that make reduced to `[ -z "" ]`, a count guard whose `$(shell)` swallowed a generator crash, and A10.x asserting properties of a page no route served. The tell is a gate that has never failed. **What changes it:** G11 makes every gate a process with a real exit code, AX.6 requires each to have been observed failing, and §4 places every gate at a boundary where its subject exists.
+2. **The pixels move and nobody notices, because the oracle was wrong.** T7 is the oracle for C6. If T7 omits a delta — as v4 did for the `@font-face` registration that makes `JetBrains Mono` resolve at five non-modal surfaces (Architect M13) — then the screenshot pass either blesses an unsanctioned change or chases a sanctioned one as a bug. **What changes it:** T7 was re-derived cell by cell against `style.css:6-24` rather than copied from v3 or v4, and it includes the one delta that occurs regardless of the lift, plus two asserted-**zero** rows that must not move.
+3. **Phase 1 quietly becomes Phase 3.** The tokens exist, so retokenizing one module's CSS looks like a five-minute win; then the diff is 400 lines across four modules, the screenshot oracle is gone, and the foundation is unlandable. **What changes it:** G1 and G3 name every touched path, §0's "not in scope" list is explicit, A1.10 keeps `components.css` incapable of matching a non-adopting page, and §8 row 14 records module CSS as an accepted deviation rather than an oversight.
 
 ---
 
-## 9. Follow-ups (Phase 2+)
+## §7 — Open questions
 
-1. Migrate the remaining 12 modules onto shared CSS/TS (FRD Phases 2–6), one commit per module, each with its own token-overlap enumeration per G1.
-2. Retire taskmaster's local Obsidian tokens (FRD §7.6) and **delete the C6 re-export shim**, rewriting the five call sites to `@shared/modal` directly (ADR-003's deferred cost).
-3. Normalize entry layouts to `web/<m>/src/` and adopt FR-7.3's literal tsconfig `include` in the same commit (Q4).
-4. Grow `web/shared/ts/`: `theme.ts`, `menu.ts`, `toast.ts`, `tabs.ts`, `dom.ts`, `icons.ts`; `web/shared/react/`.
-5. Self-host fonts under `web/shared/public/fonts/` (FR-6) and promote puma's `--font-*` overrides from fallback to real.
-6. Replace every `alert()`/`confirm()`/`prompt()` repo-wide with the shared dialog set (FRD §7.5).
-7. Add CI. Today "green at every commit" is human-run; `make check` makes it one command, but nothing enforces it.
-8. Decide Q8 (login-page styling) before Phase 2 touches the login page.
-9. Revisit ADR-005: adopt a DOM harness (jsdom or linkedom, with the `@types/node` cost priced) when shared components outgrow a hand-rolled stub.
-10. **Reformat the four pre-existing `gofmt` offenders** — `internal/slideshow/conductor.go`, `internal/todo/model.go`, `internal/utuber/history/history.go`, `internal/utuber/media/media_test.go` — in one independent commit, then widen AX.5's gate to repo-wide. Deliberately **not** part of Phase 1: it is unrelated churn in a phase premised on a minimal diff, and folding it in would make a Phase-1 revert also revert formatting fixes.
+Two questions remain open, plus one FRD correction. Six are closed by user decision (2026-09-15) and one by measurement. The companion document `docs/OPEN-QUESTIONS-ui-unification.md` is the tracked, clone-surviving copy; this section and that document must agree, and v5 reconciles them.
 
----
+**Open**
 
-## 10. Architecture Decision Records
+- **Q3 — Do forest/ocean/ember/rose need a `--color-primary-fg` other than `#fff`?** The **values** are settled by measurement (Step 1.4): `#ffffff` on light, dark, and obsidian; `#0b0f14` on forest, ocean, ember, rose, and puma. What is deliberately left open is the *justification's* premise: obsidian keeping `#ffffff` at **3.99:1** is defensible only because obsidian is the theme taskmaster's modal actually renders in — and that becomes true only when **C6** stamps `data-theme="obsidian"` (FRD §7 decision 6, `:482-485`; ADR-007; gate **A10.7**). Until C6 lands, the justification is a promise, not a fact. *Needed by: C6.*
+- **Q9 — Does Q8's unauthenticated allowlist extend to `/shared/dist/shared.mjs`?** The **`.woff2` half is settled: yes** — the user, asked directly, said "fonts and css do not require token protections", which covers `/shared/public/fonts/*.woff2` alongside `GET /shared/dist/shared.css`, so a login page styled with shared tokens also loads its faces. What remains open is **only** the `.mjs`: executable JavaScript is a different posture question, and the login page may not need the script at all. *Needed by: Phase 2, before the login page is touched.* (§9 item 6.)
 
-### ADR-001 — Shared runtime ships as one bundle served at `/shared/`
+**FRD correction (not a question — a defect in the FRD)**
 
-**Decision.** Build `web/shared/ts/index.ts` into a single `web/shared/dist/shared.mjs` plus `shared.css`, commit both, serve them at `/shared/`, and have every module import `@shared/...` as an **external** ESM specifier rewritten to `/shared/dist/shared.mjs`.
+- **FR-6's affected-module list is incomplete.** `docs/FRD-ui-unification.md:338-341` names only grocery, smbedit, and todo. The tree has **5 Google Fonts `<link>` groups across 4 modules**: `web/grocery/index.html:8-10`, `web/utuber/index.html:7-9`, `web/todo/index.html:8-10`, `web/todo/compare.html:8-10`, `web/smbedit/index.html:7-9`. **utuber** and **`web/todo/compare.html`** are missing, so an implementer working from FR-6 alone would leave two external requests in place and believe FR-6 complete. All five survive Phase 1 untouched by design (G3, G10, §8 row 11) and are removed by §9 item 4. *Needed by: whoever lands FR-6.*
 
-**Drivers.**
-1. FRD §7.1 resolved that shared content must **not** be recompiled into each module bundle — one committed artifact in git instead of N copies, and module bundles shrink.
-2. No version skew: every module executes the same bytes, so a shared-code fix cannot land in 9 modules and miss 4.
-3. Bundles are committed and `make build` must not require node, so the artifact has to be a real file in the tree.
+**Closed**
 
-**Correction to v1.** v1 (echoing FRD §3.2's prose) cited browser cache sharing across modules as a driver. **It does not exist.** Dispatch is by `Host` header (`cmd/server/main.go:292`; `local-test/config.json` maps a distinct hostname per module), so each module is a separate browser origin with a separate HTTP cache. `shared.mjs` is fetched once **per origin per load**. Driver 1 is the one that holds; A10.4 is worded accordingly. FRD §3.2's own text is not being amended — only this plan's reasoning is corrected.
-
-**Alternatives considered.**
-- *Per-module inlining (esbuild resolves `@shared` to source).* Pros: no new HTTP dependency, no format constraint, G5 unnecessary. Cons: violates §7.1 directly; N copies in git; version skew becomes possible the moment one module is rebuilt and another is not. **Rejected** — §7.1 is settled.
-- *npm workspace package consumed as a normal dependency.* Pros: idiomatic; `tsc` resolution comes free. Cons: still inlines into each bundle (so §7.1 again), and adds a workspace layer for one internal package.
-- *Import map in each HTML page instead of an esbuild specifier rewrite.* Pros: no build-time rewrite; specifiers stay `@shared/...` in the shipped bundle. Cons: requires editing 14 HTML pages (G3 forbids 12 of them in Phase 1) and gives no typecheck-time resolution. **Rejected for Phase 1**, viable later.
-
-**Why chosen.** It is the only option satisfying §7.1 that keeps `make build` node-free, and the externalization is verifiable (G5) rather than assumed. The cost — every adopting bundle must be `format: "esm"` — is real but bounded, and taskmaster's page already uses `type="module"`, so the first adopter pays nothing in HTML.
-
-**Consequences.** Adopting bundles must be esm; G5's two assertions become permanent gates. `web/shared/dist/` is a new committed artifact under G8. A page that fails to link `shared.css` gets unstyled `.ui-*` components — which is why the sampler exists.
-
-**Follow-ups.** Q7 (link vs bundled CSS for the other 12); follow-up 4 (grow the barrel).
+- **Q1 — Does `light` get its own `--overlay-scrim`?** **Yes** (user). `rgba(40, 37, 29, 0.35)` — light's own `--color-text` at 0.35 alpha, so the scrim is the theme's ink rather than a foreign black. The alpha is a judgement, confirmed or adjusted by the sampler pass (§9 item 11). Mechanically it is the third entry in A1.2's three-key allowlist, which is why that gate allowlists rather than bans.
+- **Q2 — Does `--color-surface-dynamic` join FR-1's vocabulary?** **Yes, but in Phase 3.** It exists only in obsidianoid's themes and has exactly one consumer, in the module Phase 1 does not migrate; an 18th canonical key now would mean authoring 7 donor-less values nothing reads. **`--radius-xl` is deferred on identical grounds** (grocery-only, one consumer). §8 rows 3 and 6; the FRD amendment is §9 item 5.
+- **Q4 — When does FR-7.3's tsconfig `include` land, and in the same commit as the `js/` → `src/` renames?** **Coupled, same commit** (user) — decoupling silently drops 5 modules from typecheck. Phase 1 ships today's 9 enumerated globs plus `web/shared/**/*.ts` **and** `web/sampler/js/*.ts` = **11**. §8 rows 1 and 7; the FRD's literal two-glob form lands with the Phase-2 renames (§9 item 3).
+- **Q5 — Should the artifact list be generated from the descriptors?** **Yes** (user). `scripts/list-artifacts.mjs` derives it from `scripts/descriptors.mjs`, and `EXPECTED_ARTIFACT_COUNT` is single-sourced there (A7.2, A7.3). v4's two mechanical findings — recursive `=` rather than `:=`, and a mandatory count guard because zero-argument `git ls-files --error-unmatch` lists the whole repo and exits 0 — are **retained as recorded evidence in ADR-001's consequences**, though the mechanism they describe is superseded: under G11 no make **recipe** uses `$(shell …)` or a `$(git …)` substitution. *(Scoped to recipes, per Architect M3: `Makefile:9`'s `BUILD_TIME := $(shell date -u …)` is a variable assignment feeding Go ldflags, not a gate, and it survives Phase 1 unchanged by design — §2, §8 row 8.)* The gate targets themselves land at **C1** (Step 1.8), not C2, because a gate that cannot be invoked at its own boundary is not a gate — Architect B2.
+- **Q6 — Should `web/grocery/app.test.js` be wired into `test:web`?** **Yes, unconditionally, but not through the `esbuild --format=cjs | node -` pipeline:** it uses `node:test` and `import.meta.dirname` (`:16-17`), esbuild downgrades `import.meta` with a **warning and exit 0**, and node then throws. `scripts/test-web.mjs` carries a per-descriptor `runner` field — `"esbuild-cjs"` for the four existing suites, `"node-test"` for grocery via `spawnSync(process.execPath, ["--test", file])`. Warnings are promoted to failures in both drivers (driver rule 7), verified safe: the tree produces zero real esbuild warnings today.
+- **Q7 — `<link>` or bundled CSS for the remaining 12 modules?** **Via `<link>`** (user). Two consequences, recorded rather than absorbed: `web/shared/dist/shared.css` stays a separate committed artifact, and **ADR-006's third reason** for keeping `@font-face` out of `tokens.css` (separate importability) **weakens** — its reasons 1 and 2 stand on their own and are sufficient. §9 item 2.
+- **Q8 — `/shared/` sits inside `svc.Gate`, so the login page structurally cannot link `shared.css`.** **Direction (a) authorised** (user): a narrow unauthenticated allowlist for exactly `GET /shared/dist/shared.css`, beside `Gate`'s existing carve-outs (`/healthz` `:129`, `/api/auth/mode` `:135`, `/api/auth/whoami` `:148`, all evaluated before `protected := hasEntry || module == "admin"` at `:157`) — chosen over permanent inline styles in the login page. **Implementation is Phase 2; Phase 1 does not touch `gate.go`.** The scope beyond CSS is Q9. §9 item 7.
 
 ---
 
-### ADR-002 — `/shared/` is mounted once in the dispatcher, not per module
+## §8 — Deviation ledger
 
-**Decision.** Insert `static.WithShared(hh, cfg.Server.SharedStaticDir)` at `cmd/server/main.go:302`, inside `svc.Gate` and after the `io.Closer` assertion at :300, plus the mirror line in `cmd/server/dispatcher_auth_test.go:97-102`. Keep `SharedHandler`, `WithShared`, and `MountShared` as tested platform API; use `MountShared` in `internal/sampler/build.go` as the documented per-module path.
+Every place this plan knowingly differs from the FRD, from a donor, or from a reviewer's suggestion. A deviation that is not in this table is a defect.
 
-**Drivers.**
-1. Zero regression: the mount must not perturb any module's existing handler chain, and in particular must not erase an `io.Closer`.
-2. Cost and blast radius: fewer edits across fewer files is fewer chances to break one module.
-3. Router-agnosticism: §2 shows three distinct mounting shapes (9 `build.go` ServeMux, 3 constructor-owned, 1 chi).
-
-**Alternatives considered.**
-- *B1 — per-module mounting: call `MountShared` in each `build.go`, or wrap each returned handler.* Pros: literal reading of FR-8.1; each module's `/shared/` sits inside that module's own middleware (e.g. certmachine's `stripCORS`). Cons, all verified: **(i)** wrapping `certmachine`'s return erases `closableHandler`'s `Close` (`internal/certmachine/build.go:162`, `:144`), which the dispatcher type-asserts at `main.go:300`, so the cert store never closes, the `database/sql` connectionOpener goroutine leaks, and goleak at `dispatcher_auth_test.go:1242` fails `make test` — this was blocker 1; **(ii)** it needs a `SharedStaticDir` on all 13 module configs (`json:"-"`) plus 13 `applyServerDefaults` lines, ~39 edits versus ~4; **(iii)** it special-cases chi and the three constructor-owned muxes; **(iv)** it leaves R8 (`Muxer` accepts chi, compiles, silently 404s) live on taskmaster. **Rejected.** For the record, the correct B1 form would have been `return closableHandler{Handler: static.WithShared(srv.Handler(), dir), srv: srv}, nil` — mounting *inside* the closer and inside `stripCORS` — plus a test asserting `dispatch.closers` is non-empty for a certmachine route.
-- *Mount `/shared/` outside host dispatch, before `middleware.Wrap` selects a module.* Pros: one mount, no per-host anything. Cons: it lands **outside `svc.Gate`**, making the shared tree unauthenticated on every host — a security-posture regression on a system where every module is gated. **Rejected.**
-- *`http.FileServer` with `http.StripPrefix` at :302 instead of a new handler.* Pros: no new code. Cons: directory listings, no first-segment allowlist, no 405 discipline — exactly the holes §2 identifies in `static.NewHandler`. **Rejected.**
-
-**Why chosen.** It satisfies driver 1 *by construction* rather than by care: because the wrapper goes on the already-asserted handler, there is no module for which a closer can be lost, so blocker 1 cannot recur through a future module either. It costs ~4 edits, needs no knowledge of any module's router, and converts A8.2 from a grep-plus-curl into a table-driven Go test over `buildDispatcher` × `knownModules` — which is both stronger evidence and cheaper to maintain.
-
-**Consequences.** FR-8.1's wording is deviated from; recorded in §8. `MountShared` is redundant at runtime for sampler — deliberately, to keep it exercised and documented. `/shared/` is inside the gate, which surfaces Q8 (login page). A module that wants `/shared/` inside its own middleware must opt in with `MountShared`; the dispatcher mount is then shadowed for that host, which is the intended precedence.
-
-**Follow-ups.** Q8; R8's `*http.ServeMux` validation inside `MountShared`.
+| # | Subject | Deviation | Why, and when it resolves |
+|---|---|---|---|
+| 1 | FR-7.3 tsconfig `include` | Phase 1 ships **11** enumerated globs, not the FRD's literal `["web/*/src/**/*", "web/shared/**/*"]` | The literal form presumes the `js/` → `src/` renames, which are Phase 2. Coupling them (Q4) keeps `tsc` coverage constant. Resolves: §9 item 3. |
+| 2 | FR-1 vocabulary | `--color-danger` is canonical; `--color-error` appears nowhere | One name per concept; the donors disagree. A1.11 enforces it. Resolves: never — this is the decision. |
+| 3 | FR-1 vocabulary | `--color-surface-dynamic` is **not** among the 17 keys | Q2: one consumer, in a module Phase 1 does not migrate. Resolves: Phase 3, with obsidianoid's migration. |
+| 4 | FR-1 vocabulary | `--color-primary-fg` is **authored by this phase** — it exists in no donor and in no FRD code block (`grep -rn -- '--color-primary-fg' web/` → rc=1) | The lifted primary button needs a foreground token, and hard-coding `#fff` in `components.css` would violate A1.6. Its Phase-1 consumer is real: `.ui-modal-btn-primary`. Resolves: never; A2.1 exempts it from donor matching. |
+| 5 | FR-2 / WCAG AA | obsidian ships `--color-primary-fg: #ffffff` at **3.99:1**, below 4.5:1 | An **inherited** condition, not a new one: taskmaster ships 3.91:1 on that same surface today (`modal.ts:97-99`), so C6 improves it. Changing it would mean deviating from T5a's donor column inside a foundation commit. Resolves: §9 item 1, in the phase that owns taskmaster's visuals. |
+| 6 | FR-1 vocabulary | `--radius-xl` is **not** among the 27 structural tokens | Q2, identical grounds to row 3: grocery-only, one consumer. Resolves: Phase 3. |
+| 7 | FR-10 layout | The sampler lives at `web/sampler/js/`, not `web/sampler/src/`; and its sheet is `web/sampler/style.css`, not FRD `:405-406`'s `styles.css` (re-read: the sampler's shape is stated at `:405-406`, `web/sampler/src/main.ts` + `styles.css`; the Architect's M9 cited `:405-408`, which runs past the clause) | It matches every other module's present layout **and every other module's filename** — 12 of 13 modules ship `style.css` — so adopting the FRD's two spellings for one new module would make it the only exception until Phase 2 renames the rest. This is why the tsconfig glob is `web/sampler/js/*.ts`, and why `style.css` is the spelling used in Step 6's manifest, §4's C5 row, and A10.2 *(Architect M9: the FRD's `styles.css` is not adopted anywhere in this plan, so the ledger row is the only place the divergence is recorded)*. Resolves: §9 item 3. |
+| 8 | FR-7 build stamp | The frontend stamp is a **content digest** over 15 files, not a wall-clock timestamp | Byte-identity (G2) is impossible against `$(date -u)`. ADR-004. The UI is unaffected: `main.ts:218`'s "Backend build" row and `:219`'s "Frontend build" row read through `buildinfo.ts:11,13`, so no module TS is edited. **And it is only the frontend stamp:** `Makefile:9`'s `BUILD_TIME := $(shell date -u …)`, which feeds the Go ldflags at `:10` and the "Backend build" row, survives Phase 1 unchanged by design — a variable assignment, not a gate, so G11's recipe-scoped ban does not reach it *(Architect M3)*. Resolves: never. |
+| 9 | FR-1 donors | `web/obsidianoid/css/themes.css` is the **structural donor of record**; where grocery disagrees on a token both define (`--radius-sm`, `--shadow-sm`, `--text-*`), obsidianoid wins | Three documented exceptions: `--shadow-md` and `--overlay-scrim` (row 12) and `--space-5` (grocery, because obsidianoid lacks it and FRD `:171` names it). Grocery's differing values become Phase-3 migration deltas. |
+| 10 | FR-1 scales | `--space-7` and `--text-xl` are **authored** — no donor declares them | FRD `:171-174` mandates the complete `--space-1..8` and `--text-xs..xl` scales. Marked ★ in T2. Resolves: never. |
+| 11 | FR-6 | **5 Google Fonts `<link>` groups in 4 module HTML files survive Phase 1 untouched** | Removing them is an FR-6 edit to module HTML, which G3 forbids this phase from making. G10 is therefore scoped to "`web/shared/` references no host but the origin", not "the app makes no external request". Enumerated in §7. Resolves: §9 item 4. |
+| 12 | FR-1 donors | `--shadow-md` and `--overlay-scrim` take `modal.ts`'s literals (`0 8px 32px rgba(0,0,0,0.4)`, `rgba(0,0,0,0.55)`), **not** obsidianoid's values | Deliberate: it is what makes T7's two asserted-**zero** rows true, so the lift reproduces the donor's scrim and shadow exactly. Resolves: never. |
+| 13 | FR-1 donors | `--font-body-fallback` and `--font-mono-fallback` are **part-authored**: `system-ui` and `ui-monospace` are additions, not inheritance | obsidianoid `:32` is `'Inter', 'Segoe UI', sans-serif` and `:33` is `'JetBrains Mono', 'Fira Code', monospace`. Labelling them "the donor's stack minus the first family" (v4) was wrong — Architect M7. Resolves: never. |
+| 14 | FR-1 | The colour-literal ban applies to `components.css` only; **module CSS keeps its literals** | Phase 1 does not migrate any module's CSS (G1, G3). An unscoped ban would also forbid `themes.css`, which is nothing but literals by definition. Resolves: Phase 3+. |
+| 15 | FR-8.1 | `/shared/` is mounted **once at the dispatcher**, not per-module | ADR-002: per-module mounting reintroduces iteration-2's blocker (13 wrappers, each an opportunity to erase an `io.Closer`) and would need 13 edits for one route. `MountShared` exists for modules that later want the subtree inside their own middleware, and the sampler demonstrates it. |
+| 16 | FR-8.2 | C3 **deletes** utuber's private static handler (`internal/utuber/build.go:68-79`, `:58` rewritten to `static.NewHandler`) | A duplicate handler is where a security fix lands in one copy and not the other (R14). This edits a module's **Go** file, which G3 permits — G3 covers module CSS, HTML, and TS. |
+| 17 | FR-5 adoption | taskmaster adopts via a **2-line re-export shim**; the five call sites are not rewritten | ADR-003. It keeps C6 a two-file revert and keeps two prose comments (`api.ts:6`, `designer.ts:20`) true. Resolves: §9 item 13. |
+| 18 | FR-6 | **15** of the 18 staged faces ship; Inter's 3 static weights are dropped | `InterVariable.woff2` + `InterVariable-Italic.woff2` cover 100–900, so the statics are dead bytes. SHA256SUMS is the staged file minus exactly those 3 lines. |
+| 19 | FR-6 | woff2 files are `external` to esbuild and referenced by **server-absolute** urls | Keeps the artifact count at 15 rather than 15 + 15 hashed copies (R6). **Consequence:** `fonts.css` is correct only when the tree is served at `/shared/` — which D2 guarantees on all 13 hosts. A6.5. |
+| 20 | G2 / G6 | **C1 and C1b carry a byte-identity exemption** for `web/taskmaster/js/bundle.js` | Until C2 lands the digest, `package.json:5-6`'s `$(date -u)` re-stamps that artifact on **any** rebuild, so the exemption is forced by a mechanism, not chosen. Bounded to two commits; retired at C2 and asserted gone by A7.4. v4 claimed no exceptions while shipping the mechanism that guarantees one. |
+| 21 | FR-2 | Two per-theme **structural** overrides are allowlisted: puma's `--font-body`/`--font-mono` (FRD `:222-223`) and light's `--overlay-scrim` (Q1) | Hence A1.2 is a three-key allowlist rather than an absolute ban. A fourth override fails the gate. |
+| 22 | FR-10 | The sampler is **auth-gated** like every other module, though it renders nothing private | Consistency is cheaper than an exception in `gate.go`; one `auth.modules` entry, no special-casing. (The unauthenticated carve-out for `shared.css` itself is Q8, Phase 2.) |
 
 ---
+## §9 — Follow-ups (explicitly out of Phase 1)
+
+Each item names the phase that owns it. An item with no owner is a wish, not a follow-up.
+
+1. **obsidian's `--color-primary-fg` contrast.** 3.99:1 is an inherited condition (§8 row 5), improved from taskmaster's current 3.91:1 but still under AA. The fix — darkening `--color-primary` or moving to a dark foreground — belongs to the phase that owns taskmaster's visuals, because it changes the look of a shipped module. The legibility judgement is recorded per theme in `docs/sampler-checklist.md`. *Phase 2.*
+2. **Adopt `shared.css` on the remaining 12 modules, via `<link>`** (Q7). Phase 1 proves the mechanism on exactly one surface; this is the rollout. *Phase 2.*
+3. **`js/` → `src/` entry renames, and FR-7.3's literal tsconfig `include`.** Coupled into one commit per Q4, which is what keeps `tsc --noEmit` coverage constant. Note the layouts this must reconcile: `web/obsidianoid/js/`, `web/taskmaster/js/`, `web/sampler/js/` (§8 row 7) on one side; `web/smbedit/src/`, `web/issuetracker/src/` already on the other. *Phase 2.*
+4. **Remove the 5 Google Fonts `<link>` groups** in `web/grocery/index.html:8-10`, `web/utuber/index.html:7-9`, `web/todo/index.html:8-10`, `web/todo/compare.html:8-10`, `web/smbedit/index.html:7-9`, and amend FRD `:338-341`, which names only three of the four modules (§7). *Phase 2, with item 2.*
+5. **Amend FRD FR-1's vocabulary when each deferred key lands** — `--color-surface-dynamic` and `--radius-xl` (Q2, §8 rows 3 and 6) — so the plan and the FRD do not diverge silently. *Phase 3.*
+6. **Settle Q9's `.mjs` half** before the login page links anything executable. *Phase 2.*
+7. **Implement Q8's unauthenticated carve-out** for `GET /shared/dist/shared.css` in `internal/platform/auth/gate.go`, beside the existing `/healthz`, `/api/auth/mode`, and `/api/auth/whoami` carve-outs. Phase 1 does not touch `gate.go`. *Phase 2.*
+8. **Trim Sora's weights.** `fonts-staging/NOTES.md:27-28` says, verbatim: *"**Sora** — 400/500/600/700/800 (puma theme headings; trim once the theme CSS pins its weights)."* Phase 1 ships all five because the puma block does not pin weights yet; trimming is mechanical once it does (delete faces, delete `SHA256SUMS` lines, re-run A6.1). The sentence is quoted rather than cited because `NOTES.md` is untracked and a reviewer cannot open it. *Phase 2 or 3, whichever pins puma's weights.*
+9. **Introduce CI.** There is none today, which is why `make check` exists and why AX.7 makes the README say so. Every gate in §5 is a command, so wiring them into a runner is configuration, not redesign. *Phase 2.*
+10. **Reconcile forest/ocean/ember/rose surface-to-border contrast.** Those donors use a tighter surface/border gap than obsidian (e.g. `--color-border` `#30363d` against their surfaces), which is legible but flatter than obsidian's. Confirm or adjust from the sampler pass rather than by eye in a diff. *Phase 2, via `docs/sampler-checklist.md`.*
+11. **Confirm light's `--overlay-scrim` alpha.** `rgba(40, 37, 29, 0.35)` is a judgement, not a derivation (Q1). The sampler's modal section over a light page is the test. *Phase 2, via `docs/sampler-checklist.md`.*
+12. **De-duplicate obsidianoid's theme list.** `web/shared/ts/theme.ts`'s `THEMES` array plus `themes.css` makes "add a theme" a two-edit operation; obsidianoid currently carries its own CSS and TS theme lists, which this can replace. *Phase 3.*
+13. **Rewrite taskmaster's five call sites off the shim** (`api.ts:10`, `designer.ts:23`, `outputmodal.ts:13`, `board.ts:27`, `main.ts:16`) to import `@shared/modal` directly, and delete `web/taskmaster/js/ui/modal.ts`. Also update the two prose comments at `api.ts:6` and `designer.ts:20`, which are true through the shim and would become stale. *Phase 2 — deliberately not Phase 1 (ADR-003, §8 row 17).*
+
+---
+
+## §10 — Decision records
+
+### ADR-001 — `@shared` is externalized at build time, and every consumer bundle is ESM
+
+**Decision.** `web/shared/ts/` builds once to `web/shared/dist/shared.mjs`. Consumer bundles do **not** inline it: an esbuild `onResolve` plugin rewrites the specifier to the served URL and marks it external —
+
+```js
+build.onResolve({ filter: /^@shared(\/.*)?$/ }, () => ({ path: "/shared/dist/shared.mjs", external: true }));
+```
+
+— and every descriptor that consumes `@shared` sets `format: "esm"`.
+
+**Drivers.** (1) FRD §7.1 requires one shared bundle, not one copy per module — inlining would ship 13 copies and defeat the route entirely. (2) A bare-specifier external is meaningless to a browser; the import must be a URL the server answers, which is exactly what D2 provides. (3) The build driver must run on a host with no network and no extra dependency (G4), so the rewrite has to be a local plugin rather than an import map or a bundler feature.
+
+**Alternatives rejected.**
+- *Inline `@shared` into each consumer.* Simplest to build; defeats FR-8's purpose, makes every artifact churn whenever shared TS changes, and makes 13 artifacts re-stamp on a one-line shared edit.
+- *An import map in each module's HTML.* Needs an HTML edit per module — forbidden this phase by G3 — and leaves the bundler unable to see the dependency at all.
+- *`external: ["@shared", "@shared/*"]` without the resolve rewrite.* esbuild emits the bare specifier verbatim; the browser then throws on a non-URL module specifier. This is the failure mode the `onResolve` form exists to prevent.
+
+**Consequences.** `format: "esm"` becomes mandatory for `@shared` consumers, which is why taskmaster's descriptor flips from iife at C6. esbuild does **not** error on an ESM-only construct under iife — it silently downgrades and emits `__require(…)` with exit **0** — so A9.1/A9.2 must be two-sided and A9.4 mutation-tests them (R3, R19). Recorded evidence from v4, retained because it documents make's behaviour even though G11 supersedes the mechanism: a `$(shell …)` artifact list must be assigned with recursive `=`, never `:=`, or it runs at parse time and breaks `make build` on a node-free host; and a zero-argument `git ls-files --error-unmatch` lists the whole repo and **exits 0**, so a count guard is mandatory. Under G11 **no make recipe** uses `$(shell …)` or a `$(git …)` substitution, so both hazards are structurally absent from the gate path. *(Architect M3: the claim is scoped to recipes, not to the file. `Makefile:9`'s `BUILD_TIME := $(shell date -u …)` is a variable assignment feeding Go ldflags at `:10` — the backend stamp, a different stamp on a different UI row (§2), untouched by Phase 1 by design. D4 changes only the frontend one.)*
+
+**Follow-ups.** Item 2 (the other 12 modules), item 13 (call sites off the shim).
+
+### ADR-002 — `/shared/` is mounted once at the dispatcher, not per module
+
+**Decision.** `static.WithShared` wraps the per-module handler in `cmd/server/main.go:303`, inside `svc.Gate` and after the `io.Closer` assertion at `:300-302`. `MountShared(m Muxer, dir string) error` also ships, for modules that later want the subtree inside their own middleware; the sampler uses it as the documented example.
+
+**Drivers.** (1) One route must be reachable on all 13 module hosts (FRD FR-8) — the dispatcher is the only place that sees all 13. (2) Iteration-2's blocking defect was a wrapper that erased a module's `io.Closer`; one wrapper in one place is one opportunity for that mistake, not 13. (3) Adding a 14th module must not require remembering a mount step (`docs/adding-a-module.md`).
+
+**Alternatives rejected.**
+- *Per-module mount in each `build.go`.* 13 edits for one route, 13 chances to drop a closer, and a 14th module silently missing `/shared/`.
+- *A separate `shared.` vhost.* A new host entry, a new TLS name, and a cross-origin font fetch — for assets that must be same-origin to stay inside `svc.Gate`.
+- *Serving from each module's existing static handler.* Would need `StaticDir` to contain the shared tree, i.e. a copy per module — the problem FR-8 exists to remove.
+
+**Consequences.** `/shared/` is authenticated everywhere, which is what forces Q8's separate carve-out for the login page. **Router-agnosticism is a property of the dispatcher path, and only of it** *(Architect M5: this passage previously claimed both halves of a contradiction)*: `WithShared(next http.Handler, dir string) http.Handler` wraps an `http.Handler`, so it composes with whatever router any host uses and needs to know nothing about it — which is why one wrapper covers all 13 hosts. `MountShared` is deliberately **not** router-agnostic. It takes a `Muxer` so the behaviour is testable against a fake, but it validates that it actually received an `*http.ServeMux` and returns an error otherwise, because `Handle`'s subtree-versus-exact-match semantics are ServeMux's and a chi router given `"/shared/"` would register an exact match — a 404 that reads as a config error (R8, A8.7). The interface is a seam, not a promise of portability. *(v4 carried a separate one-line ADR about a chi shim; it is moot — `WithShared` needs no shim and `MountShared` refuses the case at boot — and is deleted rather than renumbered.)* utuber's duplicate static handler becomes indefensible once the platform one is the single path, and C3 deletes it (§8 row 16).
+
+**Follow-ups.** Item 7 (Q8's carve-out in `gate.go`).
 
 ### ADR-003 — taskmaster adopts the shared modal through a re-export shim
 
-**Decision.** In C6, reduce `web/taskmaster/js/ui/modal.ts` to a two-line named re-export from `@shared/modal` and leave all five importing call sites (`api.ts:10`, `designer.ts:23`, `outputmodal.ts:13`, `board.ts:27`, `main.ts:16`) untouched. Rewriting them to `@shared/modal` directly is deferred to Phase 3, alongside retiring taskmaster's local tokens.
+**Decision.** `web/taskmaster/js/ui/modal.ts` becomes two lines that re-export the four functions and four types from `@shared/modal`. The five importing call sites are not touched.
 
-**Drivers.**
-1. C6 is the only commit in Phase 1 that changes rendering; its diff should be as small and as revertable as possible.
-2. Zero regression in taskmaster's four dialogs.
-3. Phase 3 is already going to open all of taskmaster's UI files to retire its local tokens.
+**Drivers.** (1) C6 must stay a small, revertible diff — it is the only commit that moves a pixel. (2) Two prose comments (`api.ts:6`, `designer.ts:20`) name `ui/modal.ts` by path and stay true through the shim. (3) Phase 1's job is to prove the mechanism, not to finish the migration.
 
-**Alternatives considered.**
-- *Direct adoption: delete `ui/modal.ts`, rewrite 5 specifiers to `@shared/modal`.* Pros: no shim to remove later; the dependency is visible at every call site; arguably the "finished" state. Cons: C6 touches 6 files instead of 2, so a revert is a 6-file revert; it strands the prose comments at `api.ts:6` and `designer.ts:20` (which name `ui/modal.ts`) as stale, requiring two more edits or a false-positive grep; and it front-loads churn into the one commit that is already the riskiest.
-- *Keep both implementations, feature-flag the switch.* Pros: instant rollback without a revert. Cons: two modal code paths in one bundle, a flag nobody will remove, and the sanctioned-delta list becomes conditional. **Rejected** — a single-file `git revert` is already the faster rollback.
-- *Defer taskmaster adoption entirely; ship the shared modal unused in Phase 1.* Pros: Phase 1 changes zero pixels. Cons: the shared modal ships with no production consumer, so the lift's correctness is untested against real call sites until Phase 3, and the coordinator's Phase-1 scope explicitly wants taskmaster consuming `@shared`. **Rejected.**
+**Alternatives costed.**
+- *Rewrite all five call sites to `@shared/modal` and delete the file.* Five more edited files in the one commit that changes rendering, two prose comments to update, and a larger revert — for no Phase-1 benefit. Deferred to item 13.
+- *Keep the donor and add a second implementation in `web/shared/`.* Two modals, guaranteed to diverge; the lift would never actually happen.
+- *`export * from "@shared/modal";`* One line shorter, and it re-exports whatever the barrel gains later, including symbols taskmaster should not see. `check-shared-barrel.mjs` bans `export *` in the barrel for the same reason.
 
-**Why chosen.** The shim makes C6 a genuine single-file revert — the property the whole commit sequence is organized around — and it keeps two existing prose comments **true** rather than stale, which removes a verification false-positive rather than adding a cleanup task. The deferred cost (5 specifiers) is real but lands in a phase that is already editing those files for the token retirement, so it is nearly free later and would be pure risk now.
+**Consequences.** `grep -rn 'ui/modal' web/taskmaster/` matches the two prose comments and would read as a false failure, so no gate greps for it; A5.4 asserts the five call sites are unmodified instead. The shim's existence is a ledgered deviation (§8 row 17), not an oversight.
 
-**Consequences.** `web/taskmaster/js/ui/modal.ts` survives Phase 1 as a one-line indirection; follow-up 2 removes it. The negative grep `! grep -rn "from '\./ui/modal"` is *not* applicable in Phase 1 (by design). G5's positive import assertion is what proves the shim actually reaches `@shared`.
+**Where the narrow surface is enforced, stated because B1 moved it.** The barrel `web/shared/ts/index.ts` is the shared library's **complete** public surface — six named values and four types (Step 5, A5.2's allowlist) — because a consumer that cannot reach `THEMES` through `@shared` has no legal way to reach it at all. Taskmaster's narrow surface is therefore enforced **at the shim**, not at the barrel: the shim names exactly the four dialog functions and four types, so nothing else the barrel exports becomes reachable from taskmaster's `./ui/modal.js` specifier, and A5.4 asserts that list. The barrel growing a symbol is a library change; the shim growing one would be a taskmaster change, and it is the shim that this ADR keeps small.
 
-**Follow-ups.** Follow-up 2.
+**Follow-ups.** Item 13.
+
+### ADR-004 — the frontend build stamp is a content digest
+
+**Decision.** `__TM_BUILD_TIME__` is defined as a 12-character digest over the union of taskmaster's esbuild **metafile inputs** and an explicit `EXTRA` set (`web/taskmaster/index.html`, `web/taskmaster/style.css`) — 15 files, digest `c2c572876987` at this baseline — computed in a two-pass build: pass 1 produces the metafile, pass 2 rebuilds with the define.
+
+**Drivers.** (1) G2 requires a rebuild with no source change to produce byte-identical artifacts; `$(date -u)` makes that impossible by construction. (2) The stamp must still tell a human *which* code is deployed, so it has to be derived from content, not pinned to a constant. (3) The input set must be derived, not hand-listed, or it goes stale the first time a file is added.
+
+**Alternatives rejected.**
+- *Pin to `1970-01-01T00:00:00Z`.* Byte-identical and useless — the UI row would lie in every deployment.
+- *Use `git rev-parse HEAD`.* Unavailable from a tarball export, and wrong in the common case: it changes on commits that do not touch taskmaster, and does **not** change on uncommitted edits.
+- *Hand-list the input files.* Goes stale silently; a new module file would simply not be covered.
+
+**Consequences.** Two esbuild passes per stamped module (measurably ~200 ms here). **The `EXTRA` set's cost, stated rather than discovered:** `web/taskmaster/style.css` is in the digest input set, so a CSS-only edit re-stamps the id and therefore rewrites `bundle.js`. **That is desired** — the stamp answers "which frontend is this?", and a style-only change is a different frontend — but it means a CSS-only commit legitimately shows a bundle diff, and a reviewer must not read that as churn. The digest is not a git identity and must not be presented as one.
+
+**Follow-ups.** None. This is complete in Phase 1.
+
+### ADR-005 — the shared modal's test is DOM-level and narrow
+
+**Decision.** `web/shared/ts/modal.test.ts` ships as the fifth suite in `npm run test:web`, exercising the pure and DOM-observable behaviour that can be asserted without a browser engine: the focus-order computation, the `[hidden]` toggling, the escape/backdrop handler wiring, and the promise resolution of `confirmDialog`/`promptDialog`. Full interaction fidelity — real focus movement, real key events, real paint — stays manual, in `docs/sampler-checklist.md` and A5.5.
+
+**Drivers.** (1) `package.json` declares **no `@types/node`** (verified: `grep -c '@types/node' package.json` → 0, exit 1), and G4 forbids adding one, so the suite must be DOM-typed and dependency-free. (2) The existing runner is `esbuild --bundle --platform=node --format=cjs | node -`, which has no DOM. (3) A jsdom or Playwright dependency would be the largest new dependency in the repo, added in a foundation phase, to test 390 lines.
+
+**The live question this ADR leaves open.** A DOM-free suite cannot assert that Tab actually moves focus — only that the handler computes the right next element. That is a real coverage gap, and it is why A5.5 is mandatory rather than nice-to-have and why the checklist is a committed artifact (R18). If Phase 2 adds a browser-driven runner for other reasons, this suite should grow into it; that is a deliberate open question, not an answered one.
+
+**Alternatives rejected.** *jsdom* (a dependency, and its focus model is not the browser's, so passing tests would overstate confidence); *Playwright* (correct fidelity, wrong phase — it needs CI, which item 9 owns); *no test at all* (the lift would then have zero automated evidence).
+
+**Follow-ups.** Item 9 (CI), and revisiting this suite when a browser runner exists.
+
+### ADR-006 — `@font-face` lives in `fonts.css`, not `tokens.css`
+
+**Decision.** Font registration is its own file, `@import`-ed by `index.css`, and lands in its own commit (C1b).
+
+**Drivers.** (1) A consumer can take the token layer without downloading 15 font faces. (2) The font layer changes on a different cadence than the token vocabulary. (3) Separate importability for per-module adoption — **this third reason weakened when Q7 closed on `<link>`**, because every module now takes the same combined sheet; reasons 1 and 2 stand on their own and are sufficient.
+
+**Alternatives rejected.** *`@font-face` in `tokens.css`* (couples the vocabulary to 15 binaries); *inline `@font-face` per module* (13 copies of the same registration).
+
+**Consequences.** C1b is independently revertible, and if it has to defer it defers **past** C4 and C6 rather than blocking them (§4). `fonts-staging/` stays untracked, which is why §9 item 8 quotes `NOTES.md` rather than citing it.
+
+**Follow-ups.** Item 8 (weight trimming).
+
+### ADR-007 — theme selection is a `data-theme` attribute on `<html>`
+
+**Decision.** A theme is selected by stamping `data-theme="<name>"` on the root element; `:root` **is** `html`. C6 stamps `data-theme="obsidian"` on `web/taskmaster/index.html:2` (mechanism (a)), implementing FRD §7 decision 6 (`:482-485`).
+
+**The unstamped default is `dark`, stated here once.** `themes.css`'s first depth-1 block is the compound selector `:root, [data-theme="dark"]`, so canonical **dark** is both the named theme and the default an unstamped page inherits; the other **seven** themes are `[data-theme="…"]` blocks that override it. Three reasons, in the order they decide it: (1) the donor structure — `web/obsidianoid/css/themes.css:1-2` is literally `/* ─── Design Tokens: dark (default) ─── */` followed by `:root, [data-theme="dark"] {`, and Step 1.3's remap preserves that block's *form* while FRD FR-2 (`:190-191`) renames its *palette* to `obsidian`, with canonical `dark`'s values coming from `web/todo/css/todo.css:3-17`; (2) FRD FR-2's roster is 7 dark themes and one light one, so a light default would make the exception the default; (3) Phase-2 adoption (§9 item 2) links `shared.css` onto 12 module pages one at a time, and every one of them renders dark today (taskmaster `#1e1e1e`, obsidianoid `#13131a`, todo's dark-first block) — a dark `:root` is therefore the value that makes an unstamped page's *unadopted* rendering closest to its current one, and A1.10's inertness argument is about selectors, not about which palette the tokens carry.
+
+**Arithmetic and rosters are unchanged by this, and that is checkable.** The block count is **8** either way — the compound `:root, [data-theme="dark"]` is one depth-1 block, not two — so A1.3's 8-string roster (`check-shared-css.mjs` clause 4) and its running total of 8 × 17 = **136** `--color-*` declarations both hold verbatim, and A2.2's five-name obsidianoid roster is untouched. The direction is therefore a prose fact only: v5's gate specification always encoded `dark`, and three prose passages (R5, and this ADR's decision and consequences) said `light`. Those three are corrected, not the mechanism.
+
+**Drivers.** (1) It must work with **zero** JavaScript, before first paint, with no flash of the wrong theme. (2) It must be one attribute per page, so adoption is a one-line HTML edit (item 2). (3) Tokens must cascade to every element including `<body>`'s own background.
+
+**Alternatives rejected.**
+- *A wrapper element with a class (`<div class="theme-obsidian">`).* Tokens declared on a wrapper do not reach `html` or `body`, so the page background stays untokenized — a cascade-origin problem, not a styling preference.
+- *A JS call at boot (`setTheme()`).* Guarantees a flash of the default theme on every load and makes the theme unavailable to CSS before hydration.
+- *A per-module stylesheet build.* 13 builds, 13 artifacts, and no runtime switching — which the sampler requires.
+
+**Consequences.** Without the attribute, taskmaster renders on the canonical **`dark`** defaults `:root` carries — a generic dark palette, not obsidian's violet — and every obsidian claim in Step 1.4 and T7 is unfounded. The failure is quieter than a light-on-dark flip, which is precisely why it needs a gate: A10.7 checks the attribute, and R5 names the failure. `web/shared/ts/theme.ts` exposes `THEMES` and `setTheme`, **both re-exported by the barrel** so a consumer reaches them through `@shared` (B1, A5.2's allowlist), making "add a theme" a two-edit operation (one CSS block, one `THEMES` entry) and giving item 12 something to de-duplicate obsidianoid against.
+
+**Follow-ups.** Item 12.
 
 ---
 
-### ADR-004 — `__TM_BUILD_TIME__` comes from git, not from a pin
+## §11 — RALPLAN-DR
 
-**Decision.** `scripts/build-web.mjs` resolves the value as `process.env.TM_BUILD_TIME ?? git log -1 --format=%cI -- web/taskmaster ?? new Date().toISOString()`. No pinned constant anywhere; `make web-verify` sets no override.
+**Mode: SHORT** — with the pre-mortem (§6.5) and the expanded test plan (§5's nine gate families) present anyway, because this is the final iteration of the consensus loop and both reviewers' remaining blockers were about *missing* verification, not excess.
 
-**Drivers.**
-1. G2 (byte-identity of committed bundles) requires the build to be deterministic.
-2. `web/taskmaster/js/buildinfo.ts` and `Makefile:5-8` exist to make a stale frontend bundle visible; `web/taskmaster/js/main.ts:219` renders the value as "Frontend build" in the hamburger's Server section. That capability must survive.
-3. Whatever mechanism is chosen must not weaken G2 for unrelated future changes.
+**Principles**
 
-**Alternatives considered.**
-- *Pin `TM_BUILD_TIME=1970-01-01T00:00:00Z` in `web-verify` (v1).* Pros: trivially deterministic. Cons: `make web` and `make web-verify` share the `web` prerequisite, so the pinned value is what gets **committed** — taskmaster permanently displays "Frontend build: 1970-01-01T00:00:00Z" and the staleness feature is dead. **Rejected** — this was blocker 3.
-- *Normalized diff: drop taskmaster's bundle from `web-verify`'s literal set and compare content modulo the timestamp line (Architect's option).* Pros: leaves `$(date -u)` semantics untouched. Cons: it permanently downgrades G2 for taskmaster's bundle from byte-identity to fuzzy-match — the one bundle with the most Phase-1 churn — and every future reviewer has to trust the normalizer. **Rejected.**
-- *Drop the field.* Cons: deletes a deliberate capability documented in two places. **Rejected.**
-- *Backend-stamped only (reuse the Go `BUILD_TIME` LDFLAG).* Cons: the field exists precisely because the bundle and the binary are independent artifacts; sourcing both from one stamp defeats its purpose.
+1. **One definition per fact.** A key, artifact, file set, or count is defined in exactly one place. **The operational test before deleting an occurrence:** confirm another occurrence still defines the *same* fact. v4 deleted occurrences that were the only definition of theirs; that is how half the plan vanished without a ledger row.
+2. **A gate is a command that was run.** Anything else carries `[deferred]`, names the boundary where it first runs, and states what was verified in its place. The split is the §5 census — stated there once, by number, and referred to by name everywhere else, this principle included.
+3. **Every pixel that moves is sanctioned in advance.** T7 is the complete set for C6, including two rows asserted to be **zero**. A delta not in T7 is a defect, and a T7 row that does not appear is equally a defect.
+4. **Scope is fixed by the FRD, not by convenience.** FRD `:457` names six Phase-1 deliverables; all six are here. Shrinking the deliverable set was available and was not taken.
+5. **A deviation is ledgered or it is a defect.** §8 has 22 rows; each names why and when it resolves.
 
-**Why chosen.** It is the only option that makes the value simultaneously deterministic *and* meaningful. Because the timestamp is a function of the commit, G2 stays a strict byte-identity check across all eight artifacts with no normalizer and no pin, and the displayed value dates the frontend **source** — which is a better staleness signal than wall-clock build time, since a rebuild with no source change should not look like new frontend code.
+**Decision drivers (top 3)**
 
-**Consequences.** Building from a shallow clone or a tarball with no git history falls through to `new Date()`, which is non-deterministic — acceptable, because G2 is only asserted in a git checkout, and `TM_BUILD_TIME` remains available as an explicit override. A commit that changes nothing under `web/taskmaster/` leaves the value unchanged, which is correct.
+1. **Reversibility over elegance.** Seven commits, each independently revertible, pixels last, with one stated revert-order constraint (C6 before C4).
+2. **Verifiability over completeness.** A gate that cannot run at its own commit boundary is worth less than a smaller gate that can — which is why the sampler's Go half is restored and why the ordering in §4 is derived rather than assumed.
+3. **Inheritance is not regression.** obsidian's 3.99:1 and the five surviving Google Fonts `<link>`s are ledgered as inherited, with owners, rather than fixed inside a foundation phase that has no visual oracle for them.
 
-**Follow-ups.** None.
+**Options weighed for this revision**
 
----
-
-### ADR-005 — Phase 1 ships no DOM test harness
-
-**Decision.** `web/shared/ts/modal.test.ts` tests option normalization, the `textContent`-only escaping path, and the barrel's export shape against a ~20-line hand-rolled element stub defined in the test file. Focus-trap, Escape, focus-return and backdrop-click are verified through `docs/sampler-checklist.md`, per theme. No jsdom, no linkedom, no new devDependency.
-
-**Drivers.**
-1. `npm run typecheck` must stay green. There is **no `@types/node`** in `devDependencies`; adding jsdom requires `@types/jsdom`, which requires `@types/node`, which changes what `tsc --noEmit --strict` sees across the whole program.
-2. The four gates must be green at every commit, so a harness cannot be a half-landed thing.
-3. FR-5's behavioural requirements are the donor's existing, shipping behaviour — Phase 1 preserves it byte-for-byte (`modal.ts:181-209`) rather than newly implementing it.
-
-**Alternatives considered.**
-- *Adopt jsdom + `@types/jsdom` + `@types/node`.* Pros: real focus/keyboard semantics; automated coverage of FR-5's behavioural clauses. Cons: three new devDependencies and a program-wide `tsc` surface change landing inside the same phase as the lift, so a typecheck failure would be ambiguous between the two; and jsdom's focus model diverges from browsers precisely around focus traps, so a green test is weaker evidence than the manual checklist for the thing being tested.
-- *linkedom instead of jsdom.* Pros: much lighter, no `@types/node` chain in practice. Cons: **no layout and no focus management at all**, so it cannot test the focus trap either — it buys the dependency cost without the capability that motivated it. Not weighed in v1; weighed and rejected here.
-- *No tests at all for `modal.ts` in Phase 1.* Cons: the escaping path and the option defaults are pure logic and cheap to cover; leaving them untested wastes the one thing a stub *can* verify well.
-
-**Why chosen.** The behaviour a DOM harness would test is behaviour Phase 1 is preserving verbatim, and the harness that could test it best (jsdom) is least trustworthy exactly there. Spending three dependencies and a `tsc`-surface change on weak evidence, inside the phase that most needs unambiguous gates, is the wrong trade. The stub covers what is actually new (tokenized rendering, barrel shape, option handling); the sampler covers what is actually risky (keyboard and focus, across 8 themes) with a human who can see it.
-
-**Consequences.** Part of FR-5's verification is manual and must be re-run whenever shared CSS or `modal.ts` changes — which is why `docs/sampler-checklist.md` is a committed document rather than a note in this plan. Phase 2, adding components with real interaction logic, should revisit this (follow-up 9).
-
-**Follow-ups.** Follow-up 9.
+| | Option | Verdict |
+|---|---|---|
+| **A** | **Restore the platform half from v3; keep v4's data layer verbatim.** | **Chosen.** Both reviewers independently recommended it. v4's data layer was verified exact (Critic 36/36, Architect 8/8 on the iteration-3 findings), and the 845 → 648 compression is what deleted FR-5, FR-8, the sampler's server half, and the bundle-shape family. Restoring is additive: no verified fact is disturbed. |
+| **B** | Shrink Phase 1's scope to what v4 actually specified, and ledger the dropped deliverables. | **Rejected — not available.** FRD `:457` fixes the six deliverables and the loop's charter treats §7 as settled input. Dropping FR-5 and FR-8 would also strand the gates that depend on them (A5.x, A8.x, A9.x) and leave `shared.css` with no Phase-1 consumer, which is the circularity Critic M-1 identified. |
+| **C** | Re-derive the whole plan from the FRD, discarding both v3 and v4. | **Rejected.** It would discard v4's contrast matrix, donor tables, fonts arithmetic, and the ADR-004 digest — all independently verified this iteration — and reintroduce the risk of new arithmetic errors at the last iteration, with no reviewer left to catch them. |
 
 ---
 
-## 11. RALPLAN-DR summary (short mode, v2)
+## §12 — Self-audit
 
-### Principles
+Run against the finished document before this revision was submitted, as five explicit clauses. The results are part of the change log (see "Changes from v4", §4).
 
-1. **Mechanism over intention.** Every guardrail is a command that fails, not a sentence asking for care. Where v1 had a guardrail that could not fail (A1.4) or could not detect what it claimed (G5), v2 replaced it.
-2. **Only the last commit changes a pixel.** The commit sequence is ordered so that C1–C5 are behaviour-preserving and C6 is a single-file revert.
-3. **Zero regression is proven, not asserted.** Byte-identity of eight committed artifacts (G2), a table-driven mount test across all 14 modules (A8.2), and a goleak-gated closer test (A8.3).
-4. **Fix by construction where possible.** The dispatcher-level mount cannot erase a closer for *any* module, present or future — a stronger property than fixing certmachine.
-5. **Defer honestly.** Deviations from FRD wording (§8) and deferred work (§7, §9) are enumerated with rationale rather than quietly skipped.
+**Re-run after the iteration-5 amendments** (the close-out subsection of the change log lists them). Results: **(a)** pass, two rows re-worded, no row unassigned; **(b)** pass, **57** entries (was 55), 46 distinct / 16 existing / 30 created all unchanged — the arithmetic is in the change log's clause-(b) row; **(c)** pass, the census is still **74 = 8 executed + 66 deferred**, unchanged, because amendment D rewrote A8.5's content instead of adding a bullet and B1 extended A5.2 instead of adding a criterion; **(d)** pass, with three sets added and one exception still stated; **(e)** pass, both greps return 0 over §0–§11 (rc=1) and each string still appears exactly three times in the whole file. Cross-reference sweep re-run over the amended file: **74** criteria defined, every `A*`/`AX*` reference resolves to a definition, **11** guardrails, **22** risks, **6** preconditions, **7** ADRs, no dangling identifier, and every `[deferred → Cn]` label agrees with the commit whose Gates column names it.
 
-### Decision drivers (top 3)
+**(a) Each of the six deliverables derived from FRD `:457` maps to named plan sections.** (§0 shows the derivation from the line's five clauses; no clause is unassigned.) The table has **seven** rows: the six FRD deliverables plus **D7**, the self-hosted fonts folded forward by user decision, which is marked as the addition it is rather than smuggled into the six *(Architect M6's second half — the row count now reads as intended)*.
 
-1. **Zero functionality or visual regression in the 12 non-adopting modules**, with taskmaster's modal the single sanctioned exception.
-2. **All four gates green at every commit boundary** — `npm run build`, `npm run typecheck`, `npm run test:web`, `make test` — with no CI to catch a miss.
-3. **Lowest blast radius per unit of foundation delivered**, because Phase 1 is load-bearing for five later phases.
+| Deliverable | Plan sections that execute it |
+|---|---|
+| Shared CSS foundation (tokens, themes, components, index) | §0 D1; Step 1 (1.0–1.8); §4 C1; A1.x, A2.x — **and its emitted artifact:** the `shared-css` descriptor and `web/shared/dist/shared.css` are Step 5; §4 C4; A6.5 *(Architect M6: the row previously stopped at the authored sources and omitted where the served sheet is produced)* |
+| `/shared/` served on all 13 module hosts, inside auth (FR-8) | §0 D2; Step 4; §4 C3; A8.x; ADR-002 |
+| Descriptor-driven build and test drivers (FR-7) | §0 D3; Steps 1.8 and 3; §4 C1, C2; A7.1–A7.17 *(Critic note 2: A7.8–A7.10, the tsconfig half, were omitted from this row)*; ADR-001 |
+| Reproducible build stamp | §0 D4; Step 3 (rule 4); §4 C2; A7.4, A7.6; ADR-004 |
+| Shared modal lift + all 8 themes as data + the sampler (FR-5, FR-10) | §0 D5; Steps 1.6, 5, 6; §4 C4, C5; A5.1–A5.2, A5.6, A10.x; ADR-003, ADR-005 |
+| Adoption on exactly one surface (FR-5 / FR-10 proof) | §0 D6; Step 7; §4 C6; A5.3–A5.5, A5.7, A9.x, A10.7; T7 |
+| *(+ D7)* Self-hosted fonts, folded forward by user decision | §0 D7; Step 2; §4 C1b; A1.9, A6.x; ADR-006 |
 
-### Viable options on the genuine open micro-decisions
+**(b) Every path in every commit manifest exists in the tree, or is created by an earlier commit.** Checked row by row across §4's seven commits: 57 entries, 46 distinct; **16** exist in the tree today and **30** are created at or before the boundary that names them. Four create-then-modify trails: `components.css` at C1 then modified at C4; `index.css` at C1 then C1b; `scripts/descriptors.mjs` at C1 then C4/C5/C6; `Makefile` (existing) at C1 (the two gate targets), C2 (`web:`/`typecheck:`/`test-web`/`check`), C4 (one line added to `gates`). Two ellipses (`internal/platform/…`) were replaced with the real three-path list; the phantom `cmd/unified-webapp/main.go` was corrected to `cmd/server/main.go` at all 9 sites. Every cited line number was re-read: `Makefile:42` → **`:43`** for the `npm install` line, `main.ts:217/:218` → **`:218/:219`**, FRD `:210` → **`:211`**, FRD decision 6 `:483-485` → **`:482-485`**, obsidianoid's T2 citations re-derived from the file, goleak at **`:1241-1243`** (with `dispatcher_auth_test.go:29-30` flagged stale), `main.go:302` → **`:303`**, `dispatcher_auth_test.go:97-102` → **`:100`**.
 
-*(None of these reopen FRD §7.)*
+**(c) Every gate is a command that was run, or carries `[deferred]` plus substitute evidence.** No criterion is unlabelled. The split is the §5 census; each deferred criterion names the boundary where it first runs and what was verified in its place.
 
-**1. Route wiring — RESOLVED to B2.**
-- **B2, dispatcher-level `WithShared` at `main.go:302`.** Pros: ~4 edits; router-agnostic; cannot erase an `io.Closer`; A8.2 becomes a real test; new modules get `/shared/` free. Cons: deviates from FR-8.1's per-module wording; `/shared/` sits outside each module's own middleware (certmachine's `stripCORS` no longer covers it — acceptable, since the shared tree has no private content and `middleware.Wrap`'s permissive CORS on a public stylesheet is not the exposure `stripCORS` exists to prevent).
-- **B1, per-module `MountShared`/wrap.** Pros: literal FR-8.1; subtree inside each module's middleware. Cons: erases certmachine's closer unless mounted inside `closableHandler`; ~39 edits; special-cases chi and 3 constructor-owned muxes; leaves the `Muxer`-accepts-chi hazard live.
+**(d) Every list, set, and count is defined exactly once.** T1 (17 colour keys), T2 (27 structural tokens), the 136-cell matrix, T5a/b/c, the 8 theme names, the 15 fonts, the 11 tsconfig globs, `knownModules` (13 today, 14 after C5 — one definition, in Step 6, asserted by A10.6), the 5 call sites, the 8 renamed classes, the §5 census, the `.PHONY` roster, and the 7-commit sequence each have one definition. **Three sets added by the iteration-5 amendments, each likewise defined once:** the **barrel allowlist** (6 named values + 4 types) in Step 5's table, read by A5.2 and A5.7 and deliberately *not* restated at A5.4, which asserts the shim's narrower four; the **handler contract** (9 clauses) in Step 4's table, which is also the single place the clause → criterion mapping lives, so A8.1's "nine clauses" and A8.4's six are one statement with a cross-reference rather than two rosters; and `bundle-shape.mjs`'s **input set**, which is not written down as a list at all but *derived* from the `sharedConsumer: true` descriptor field — the strongest form of one-definition, since the gate and the plugin read the same field. **One stated exception:** the artifact count legitimately moves during the sequence (12 → 14 → 15), so §4 states the trajectory while `EXPECTED_ARTIFACT_COUNT` in `scripts/descriptors.mjs` remains the single executable definition, read by every assertion. The `.PHONY` roster's **two-stage growth** (9 → 11 at C1, 11 → 13 at C2) is not a second exception: the roster is stated once, in Step 3, and the two boundaries at which it is asserted are a property of A7.15's label, not a second list.
 
-**2. Build-time determinism — RESOLVED to git-log sourcing.**
-- **git-log `%cI` with env override.** Pros: deterministic *and* meaningful; G2 stays strict byte-identity for all eight artifacts; no pin to forget. Cons: falls back to wall-clock outside a git checkout.
-- **Normalized diff for taskmaster's bundle.** Pros: no change to how the value is produced. Cons: permanently weakens G2 for the most-churned bundle; requires trusting a normalizer.
+**(e) Neither phantom reference survives in the plan body.** Run against the final file over §0–§11 — everything except the change log and this section. The range is taken **by pattern, not by line number**, so re-running it after any edit needs no arithmetic:
 
-**3. taskmaster modal adoption — RESOLVED to the re-export shim.**
-- **Shim.** Pros: C6 is a 2-file diff and a single-file revert; keeps two existing prose comments true; removes a grep false-positive. Cons: a one-line indirection survives Phase 1; 5 specifiers still to rewrite in Phase 3.
-- **Direct rewrite of 5 call sites.** Pros: finished state now; dependency visible at each call site. Cons: 6-file revert on the riskiest commit; strands two comments as stale.
+```sh
+sed -n '/^## §0 —/,/^## §12 —/p' docs/PLAN-ui-unification-phase1.md > /tmp/body.md
+grep -c 'cmd/unified-webapp'   /tmp/body.md   # 0, rc=1
+grep -c 'internal/platform/…'  /tmp/body.md   # 0, rc=1
+```
 
-**4. DOM test harness — RESOLVED to no harness in Phase 1.**
-- **Hand-rolled stub + sampler checklist.** Pros: no new dependency, no `tsc`-surface change inside the lift commit; tests what is new, humans verify what is risky. Cons: FR-5's behavioural clauses are manually verified.
-- **jsdom + `@types/jsdom` + `@types/node`.** Pros: automated keyboard/focus coverage. Cons: three dependencies and a program-wide typecheck surface change landing in the same phase; jsdom's focus model is least faithful exactly at focus traps.
-- **linkedom.** *Invalidated:* no focus management at all, so it cannot test the behaviour that motivates a harness — cost without capability.
-
-**5. tsconfig `include` shape — one option survives.**
-- **Union of today's globs + `web/shared/**/*`.** The literal FR-7.3 form (`web/*/src/**/*`) is **invalidated for Phase 1**, not merely deprioritized: 5 modules keep sources in `js/`, so adopting it silently removes them from `tsc --noEmit`, and no gate in this plan or the repo would detect the loss. It becomes viable only once the entry renames land (Q4, Phase 2). Recorded in §8.
-
-**6. Shared-asset exposure — one option survives.**
-- **First-segment allowlist (`dist`, `public`) inside `SharedHandler`.** The alternative — serve the whole `web/shared/` tree and harden later — is **invalidated** because it makes `web/shared/ts/*.ts` HTTP-reachable from day one and, worse, would let an acceptance criterion canonize `/shared/css/tokens.css` as the smoke URL (as v1's A8.2 did), after which the allowlist is a breaking change rather than a one-line hardening.
-
-### Mode
-
-**SHORT.** No pre-mortem or expanded test-plan section is included. Phase 1 touches no data path, no auth decision, and no external interface; its risk is concentrated in build reproducibility and CSS inertness, both of which are covered by mechanical gates (G1–G8) rather than by scenario analysis.
+Both return zero. Each string does still appear **three** times in the whole file — in its row B1 of the corrections table, in clause (b) above, and in the command block just here — because those passages are the record that the correction happened. Excluding them from the grep is the point of the range, not a way around the check: a reviewer can re-run the same two greps over the whole file and confirm that every hit sits in one of those three passages, none of which is a path a commit manifest or a gate would follow.
