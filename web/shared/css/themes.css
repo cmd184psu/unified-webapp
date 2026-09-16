@@ -1,0 +1,187 @@
+/* themes.css — the 8 × 17 colour matrix (Table T1's 17 keys per theme).
+   Canonical dark is the unstamped default: `:root` carries it (ADR-007), so a
+   page with no data-theme attribute renders dark. Donors of record: T5b
+   (web/todo/css/todo.css) for dark and light, T5c (web/grocery/style.css) for
+   two of light's gaps, T5a (web/obsidianoid/css/themes.css) for obsidian,
+   forest, ocean, ember, rose, and the FRD's captured block (:202-217) for puma.
+   14 cells are authored rather than donated — the 8 --color-primary-fg values
+   (Step 1.4's contrast matrix) and 6 derived cells on dark and light.
+   The only non---color-* declarations permitted here are puma's --font-body /
+   --font-mono overrides and light's --overlay-scrim. */
+
+/* dark — canonical default. Donor: todo :3-17 (12 keys).
+   Authored: --color-surface-3, --color-divider, --color-text-faint,
+   --color-primary-active, --color-primary-fg. */
+:root, [data-theme="dark"] {
+  --color-bg: #0d1117;
+  --color-surface-1: #161b22;
+  --color-surface-2: #21262d;
+  --color-surface-3: #2c3138;
+  --color-border: #30363d;
+  --color-divider: #232930;
+  --color-text: #e6edf3;
+  --color-text-muted: #8b949e;
+  --color-text-faint: #6e7681;
+  --color-primary: #7c3aed;
+  --color-primary-hover: #6d28d9;
+  --color-primary-active: #5b21b6;
+  --color-primary-tint: #2d1f5e;
+  --color-primary-fg: #ffffff;
+  --color-danger: #f85149;
+  --color-success: #3fb950;
+  --color-warning: #d29922;
+}
+
+/* light — donor: todo :19-33 (12 keys); grocery :19, :22 fill divider and
+   text-faint. Authored: --color-surface-3, --color-primary-active,
+   --color-primary-fg. --overlay-scrim is light's own ink at 0.35 alpha (1.5). */
+[data-theme="light"] {
+  --color-bg: #f4f2ee;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #f0ede8;
+  --color-surface-3: #e6e3df;
+  --color-border: #dcd9d5;
+  --color-divider: #ebe8e3;
+  --color-text: #28251d;
+  --color-text-muted: #6b6862;
+  --color-text-faint: #b0ada8;
+  --color-primary: #01696f;
+  --color-primary-hover: #0c4e54;
+  --color-primary-active: #173339;
+  --color-primary-tint: #dff0f0;
+  --color-primary-fg: #ffffff;
+  --color-danger: #b91c1c;
+  --color-success: #2d8a4e;
+  --color-warning: #c9860a;
+  --overlay-scrim: rgba(40, 37, 29, 0.35);
+}
+
+/* obsidian — donor: obsidianoid's canonical `:root, [data-theme="dark"]`
+   block (:2-19), renamed per T5a. Authored: --color-primary-fg. */
+[data-theme="obsidian"] {
+  --color-bg: #13131a;
+  --color-surface-1: #1a1a24;
+  --color-surface-2: #1f1f2e;
+  --color-surface-3: #252535;
+  --color-border: #333348;
+  --color-divider: #2a2a3a;
+  --color-text: #d4d4e8;
+  --color-text-muted: #7878a0;
+  --color-text-faint: #4a4a68;
+  --color-primary: #7c6af7;
+  --color-primary-hover: #9580ff;
+  --color-primary-active: #5a4bcc;
+  --color-primary-tint: #2a2548;
+  --color-primary-fg: #ffffff;
+  --color-danger: #e05c7a;
+  --color-success: #4dbb6e;
+  --color-warning: #f0a04a;
+}
+
+/* forest — donor: obsidianoid :40-57, renamed per T5a. */
+[data-theme="forest"] {
+  --color-bg: #0d1a0f;
+  --color-surface-1: #112214;
+  --color-surface-2: #142918;
+  --color-surface-3: #1a3320;
+  --color-border: #244028;
+  --color-divider: #1d3020;
+  --color-text: #c8e6ca;
+  --color-text-muted: #6a9870;
+  --color-text-faint: #3d6644;
+  --color-primary: #4dbb6e;
+  --color-primary-hover: #6dcc88;
+  --color-primary-active: #37924f;
+  --color-primary-tint: #163d20;
+  --color-primary-fg: #0b0f14;
+  --color-danger: #e05c7a;
+  --color-success: #4dbb6e;
+  --color-warning: #f0a04a;
+}
+
+/* ocean — donor: obsidianoid :78-95, renamed per T5a. */
+[data-theme="ocean"] {
+  --color-bg: #0d1420;
+  --color-surface-1: #101c2c;
+  --color-surface-2: #132236;
+  --color-surface-3: #182a40;
+  --color-border: #213858;
+  --color-divider: #1a2d42;
+  --color-text: #cad8f8;
+  --color-text-muted: #6888c0;
+  --color-text-faint: #3a5080;
+  --color-primary: #5b9cf6;
+  --color-primary-hover: #7ab0ff;
+  --color-primary-active: #3d7dcc;
+  --color-primary-tint: #142040;
+  --color-primary-fg: #0b0f14;
+  --color-danger: #e05c7a;
+  --color-success: #4dbb6e;
+  --color-warning: #f0a04a;
+}
+
+/* ember — donor: obsidianoid :116-133, renamed per T5a. */
+[data-theme="ember"] {
+  --color-bg: #1a1108;
+  --color-surface-1: #231809;
+  --color-surface-2: #2b1e0c;
+  --color-surface-3: #352510;
+  --color-border: #3d2a14;
+  --color-divider: #2e2010;
+  --color-text: #f5deb3;
+  --color-text-muted: #b08060;
+  --color-text-faint: #6e5030;
+  --color-primary: #f0a04a;
+  --color-primary-hover: #ffb86a;
+  --color-primary-active: #c07830;
+  --color-primary-tint: #3d2510;
+  --color-primary-fg: #0b0f14;
+  --color-danger: #e05c7a;
+  --color-success: #4dbb6e;
+  --color-warning: #f0a04a;
+}
+
+/* rose — donor: obsidianoid :154-171, renamed per T5a. */
+[data-theme="rose"] {
+  --color-bg: #1a0d12;
+  --color-surface-1: #22101a;
+  --color-surface-2: #2a1420;
+  --color-surface-3: #331828;
+  --color-border: #3d1a2c;
+  --color-divider: #2e1422;
+  --color-text: #f0c8d0;
+  --color-text-muted: #a06878;
+  --color-text-faint: #6e3848;
+  --color-primary: #e05c7a;
+  --color-primary-hover: #f07090;
+  --color-primary-active: #b83d5a;
+  --color-primary-tint: #3d1428;
+  --color-primary-fg: #0b0f14;
+  --color-danger: #e05c7a;
+  --color-success: #4dbb6e;
+  --color-warning: #f0a04a;
+}
+
+/* puma — donor: FRD :202-217, captured from pumamesh.com. Authored:
+   --color-primary-fg. Brand fonts are a per-theme override (FRD :222-223). */
+[data-theme="puma"] {
+  --color-bg: #081119;
+  --color-surface-1: #0d1823;
+  --color-surface-2: #0e1925;
+  --color-surface-3: #13202e;
+  --color-border: rgba(255, 255, 255, 0.11);
+  --color-divider: rgba(255, 255, 255, 0.2);
+  --color-text: #ecf3f6;
+  --color-text-muted: #9fb2bd;
+  --color-text-faint: #728796;
+  --color-primary: #3fbf9c;
+  --color-primary-hover: #6cd7b4;
+  --color-primary-active: #35a888;
+  --color-primary-tint: rgba(63, 191, 156, 0.12);
+  --color-primary-fg: #0b0f14;
+  --color-danger: #ff8a8a;
+  --color-success: #3fbf9c;
+  --color-warning: #fbbf24;
+  --font-body: "Sora", var(--font-body-fallback);
+  --font-mono: "IBM Plex Mono", var(--font-mono-fallback);
+}

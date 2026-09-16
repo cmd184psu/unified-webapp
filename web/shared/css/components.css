@@ -1,0 +1,101 @@
+/* components.css — the .ui-modal-* rules.
+   The retokenized body of web/taskmaster/js/ui/modal.ts's ensureStyles()
+   (:20-106), whose eight tm-modal-* classes are renamed ui-modal-* in Step 5.
+   Authoring constraints: no colour literal (every colour, shadow, and scrim
+   arrives through a var(), whose literal lives in tokens.css or themes.css);
+   every selector is .ui-* or a state/descendant of one; no forced-priority
+   declarations, so a host page's own rules keep winning (A1.8, R17).
+   Retokenization map: Step 5 item 3. Sanctioned deltas: Table T7. The scrim and
+   the panel shadow are T7's asserted-zero rows — tokens.css carries the donor's
+   own literals for them so the lift reproduces both exactly. */
+
+.ui-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay-scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  font-family: var(--font-body);
+}
+
+.ui-modal-panel {
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  min-width: 20em;
+  max-width: min(32em, calc(100vw - 2em));
+  max-height: calc(100vh - 2em);
+  overflow: auto;
+  box-shadow: var(--shadow-md);
+  padding: 1.25em;
+}
+
+.ui-modal-title {
+  font-size: 1.05em;
+  font-weight: 600;
+  margin: 0 0 0.75em 0;
+}
+
+.ui-modal-message {
+  margin: 0 0 1em 0;
+  white-space: pre-wrap;
+  line-height: 1.4;
+}
+
+.ui-modal-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.5em;
+  margin-bottom: 1em;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  font-size: 1em;
+}
+
+.ui-modal-input:focus-visible {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.ui-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5em;
+}
+
+.ui-modal-btn {
+  padding: 0.45em 1em;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-3);
+  color: var(--color-text);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.9em;
+}
+
+.ui-modal-btn:hover {
+  border-color: var(--color-primary);
+}
+
+.ui-modal-btn:focus-visible {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary-hover);
+}
+
+.ui-modal-btn-primary {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-primary-fg);
+}
+
+.ui-modal-btn-primary:hover {
+  background: var(--color-primary-hover);
+}
