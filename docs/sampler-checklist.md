@@ -26,6 +26,17 @@ each of the four dialogs (`openModal`, `confirmDialog`, `alertDialog`,
 - **Nothing unreadable** — no text or control anywhere in the dialog is
   unreadable against its background in this theme.
 
+Note on the `openModal` row's first two columns (Phase-2 C1). Before C1 the
+`openModal` demo's content was a single `<p>`, so `getFocusable()` in
+`web/shared/ts/modal.ts` returned an empty array for it: Tab and Shift-Tab
+were preventDefaulted and focus was parked on the panel. "Tab cycles+wraps"
+and "Shift-Tab wraps back" were therefore **vacuous** for that one row in all
+8 sections — 8 boolean pairs that could not have been false. C1 gives the demo
+a `Close` button inside a wrapping `<div>`, so from C1 onward both columns are
+meaningful for `openModal` as they already were for the three dialog helpers,
+which have always built real buttons. Any tick in those two cells recorded
+before C1 should be re-taken.
+
 Do not check the boxes below without actually performing the pass in a
 browser for that theme.
 

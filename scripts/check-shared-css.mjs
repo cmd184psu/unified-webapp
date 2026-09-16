@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Linter for web/shared/css/ — the 11 clauses of PLAN-ui-unification-phase1.md
-// §3 Step 1.7, implementing A1.1-A1.11.
+// Linter for web/shared/css/ — the 12 clauses of PLAN-ui-unification-phase1.md
+// §3 Step 1.7 (1-11, A1.1-A1.11) + phase2 §5 Step 1.3's clause 12 (G9).
 //
 // It lints each file INDIVIDUALLY and does not resolve @import targets. Two
 // structural reasons, both load-bearing: at C1 fonts.css does not exist yet,
@@ -33,6 +33,7 @@ const T1 = [
   "--color-surface-1",
   "--color-surface-2",
   "--color-surface-3",
+  "--color-surface-dynamic",
   "--color-border",
   "--color-divider",
   "--color-text",
@@ -95,7 +96,7 @@ const THEME_SELECTORS = [
 // --font-* overrides (FRD :222-223) and light's scrim (Q1). A fourth fails.
 const THEME_ALLOW = ["--font-body", "--font-mono", "--overlay-scrim"];
 
-const EXPECTED_COLOR_DECLARATIONS = THEME_SELECTORS.length * T1.length; // 136
+const EXPECTED_COLOR_DECLARATIONS = THEME_SELECTORS.length * T1.length; // 144
 const EXPECTED_FONT_FACES = 15;
 
 const COLOUR_LITERAL = /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i;
@@ -423,4 +424,63 @@ if (sources.has("fonts.css")) {
   }
 }
 
-process.stdout.write(`check-shared-css: 11 clauses pass over ${present.length} file(s) in ${CSS_DIR}/\n`);
+// --- clause 12 — the fonts-tree file-type allowlist and SHA256SUMS (G9) -----
+//
+// Phase 1 stated G9 as prose: web/shared/public/fonts/ may hold only *.woff2,
+// OFL.txt, and the tracked SHA256SUMS. Clause 10 resolves fonts.css's url()s
+// and forbids an unreferenced woff2; neither half notices a stray .zip, a
+// .ttf, or an unlisted digest. This clause is that check, and unlike clause 10
+// it does not depend on fonts.css existing — the tree is the subject, not the
+// sheet. Both directions of the SHA256SUMS <-> disk correspondence are
+// asserted, per G5, because either one alone passes half of a drift.
+
+{
+  const SUMS = path.posix.join(FONT_DIR, "SHA256SUMS");
+  if (!fs.existsSync(SUMS)) {
+    fail(SUMS, 1, 12, "the fonts tree's SHA256SUMS does not exist");
+  }
+  const sumsText = fs.readFileSync(SUMS, "utf8");
+  if (sumsText.trim() === "") fail(SUMS, 1, 12, "SHA256SUMS is empty");
+
+  // The allowlist, by name. A directory is descended into; every other entry
+  // that is not a woff2, an OFL.txt or the SHA256SUMS itself fails by name.
+  const woff2 = new Set();
+  const walkFonts = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.posix.join(dir, e.name);
+      if (e.isDirectory()) {
+        walkFonts(full);
+        continue;
+      }
+      if (e.name.endsWith(".woff2")) {
+        woff2.add(path.posix.relative(FONT_DIR, full));
+        continue;
+      }
+      if (e.name === "OFL.txt" || e.name === "SHA256SUMS") continue;
+      fail(full, 1, 12, `${e.name} is not in the fonts-tree allowlist {*.woff2, OFL.txt, SHA256SUMS}`);
+    }
+  };
+  if (fs.existsSync(FONT_DIR)) walkFonts(FONT_DIR);
+
+  // Forward: every digest line names a file that exists. A line's path is its
+  // last whitespace-separated field, so sha256sum's two-space output parses
+  // without a regex. Reverse: every woff2 on disk is listed.
+  const listed = new Set();
+  const sumLines = sumsText.split("\n");
+  for (let i = 0; i < sumLines.length; i++) {
+    const line = sumLines[i].trim();
+    if (line === "") continue;
+    const fields = line.split(/\s+/);
+    const rel = fields[fields.length - 1];
+    listed.add(rel);
+    if (!fs.existsSync(path.posix.join(FONT_DIR, rel))) {
+      fail(SUMS, i + 1, 12, `SHA256SUMS lists ${rel}, which is not on disk`);
+    }
+  }
+  const unlisted = [...woff2].filter((f) => !listed.has(f)).sort();
+  if (unlisted.length) {
+    fail(SUMS, 1, 12, `woff2 file(s) absent from SHA256SUMS: ${unlisted.join(", ")}`);
+  }
+}
+
+process.stdout.write(`check-shared-css: 12 clauses pass over ${present.length} file(s) in ${CSS_DIR}/\n`);

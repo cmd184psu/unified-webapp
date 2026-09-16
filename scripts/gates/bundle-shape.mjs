@@ -16,14 +16,17 @@
 //   A9.2  neither `__require(` nor `Dynamic require of` appears
 //   A9.3  taskmaster's bundle contains `var FRONTEND_BUILD_TIME` exactly once
 //
-// The set is EMPTY until C5 (sampler at C5, taskmaster at C6; the `shared`
-// descriptor is the barrel, not a consumer of it). On an empty set this gate
-// passes VACUOUSLY and says so — recorded, never counted as evidence. It is
-// not a stub: the code path that passes on zero inputs is the one that fails
-// on a bad input at C6. Pass --expect-nonempty at a boundary where the set
-// must not be empty, and an empty set becomes a failure.
+// The set is NOT empty and has not been since Phase 1: `sampler`
+// (scripts/descriptors.mjs:77) and `taskmaster` (:123) both declare the flag.
+// The zero-input branch below is therefore unreachable on today's descriptor
+// set, and --expect-nonempty with it. Both are kept — neither is wrong — but
+// neither can fail while any one consumer remains, which is why --require
+// exists: it asserts that each NAMED descriptor is in the inspected set, and
+// fails by name the moment one leaves or was never added. The Makefile recipe
+// passes the list the plan relies on, per G16.
 //
 // Usage: node scripts/gates/bundle-shape.mjs [--expect-nonempty]
+//                                            [--require=<name>,…]
 
 import fs from "node:fs";
 import path from "node:path";
@@ -41,15 +44,40 @@ const failures = [];
 
 const argv = process.argv.slice(2);
 let expectNonEmpty = false;
+const required = [];
 for (const arg of argv) {
   if (arg === "--expect-nonempty") expectNonEmpty = true;
-  else {
+  else if (arg.startsWith("--require=")) {
+    for (const name of arg.slice("--require=".length).split(",")) {
+      const trimmed = name.trim();
+      if (trimmed !== "") required.push(trimmed);
+    }
+  } else {
     process.stderr.write(`bundle-shape: FAIL unknown argument ${arg}\n`);
     process.exit(1);
   }
 }
 
 const inputs = descriptors.filter((d) => d.sharedConsumer === true);
+
+// --require, checked before the zero-input branch below so that an empty set
+// cannot pass vacuously while names were demanded. Per-descriptor and by
+// name: "these n are in the set" fails the moment one leaves, where "the set
+// is non-empty" cannot fail while any one member remains.
+{
+  const missing = [];
+  for (const name of required) {
+    const d = descriptors.find((x) => x.name === name);
+    if (!d) missing.push(`${name}: no descriptor by that name (--require)`);
+    else if (d.sharedConsumer !== true) {
+      missing.push(`${name}: descriptor does not declare sharedConsumer: true (--require)`);
+    }
+  }
+  if (missing.length) {
+    for (const f of missing) process.stderr.write(`bundle-shape: FAIL ${f}\n`);
+    process.exit(1);
+  }
+}
 
 if (inputs.length === 0) {
   if (expectNonEmpty) {

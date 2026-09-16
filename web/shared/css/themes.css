@@ -1,11 +1,11 @@
-/* themes.css — the 8 × 17 colour matrix (Table T1's 17 keys per theme).
+/* themes.css — the 8 × 18 colour matrix (Table T1's 18 keys per theme).
    Canonical dark is the unstamped default: `:root` carries it (ADR-007), so a
    page with no data-theme attribute renders dark. Donors of record: T5b
    (web/todo/css/todo.css) for dark and light, T5c (web/grocery/style.css) for
    two of light's gaps, T5a (web/obsidianoid/css/themes.css) for obsidian,
    forest, ocean, ember, rose, and the FRD's captured block (:202-217) for puma.
-   14 cells are authored rather than donated — the 8 --color-primary-fg values
-   (Step 1.4's contrast matrix) and 6 derived cells on dark and light.
+   17 cells are authored rather than donated — the 8 --color-primary-fg values
+   (Step 1.4), 6 derived on dark and light, and 3 --color-surface-dynamic.
    The only non---color-* declarations permitted here are puma's --font-body /
    --font-mono overrides and light's --overlay-scrim. */
 
@@ -17,6 +17,7 @@
   --color-surface-1: #161b22;
   --color-surface-2: #21262d;
   --color-surface-3: #2c3138;
+  --color-surface-dynamic: #373c43;
   --color-border: #30363d;
   --color-divider: #232930;
   --color-text: #e6edf3;
@@ -40,6 +41,7 @@
   --color-surface-1: #ffffff;
   --color-surface-2: #f0ede8;
   --color-surface-3: #e6e3df;
+  --color-surface-dynamic: #d3d0cc;
   --color-border: #dcd9d5;
   --color-divider: #ebe8e3;
   --color-text: #28251d;
@@ -63,6 +65,7 @@
   --color-surface-1: #1a1a24;
   --color-surface-2: #1f1f2e;
   --color-surface-3: #252535;
+  --color-surface-dynamic: #2e2e42;
   --color-border: #333348;
   --color-divider: #2a2a3a;
   --color-text: #d4d4e8;
@@ -84,6 +87,7 @@
   --color-surface-1: #112214;
   --color-surface-2: #142918;
   --color-surface-3: #1a3320;
+  --color-surface-dynamic: #1f3d26;
   --color-border: #244028;
   --color-divider: #1d3020;
   --color-text: #c8e6ca;
@@ -105,6 +109,7 @@
   --color-surface-1: #101c2c;
   --color-surface-2: #132236;
   --color-surface-3: #182a40;
+  --color-surface-dynamic: #1e3450;
   --color-border: #213858;
   --color-divider: #1a2d42;
   --color-text: #cad8f8;
@@ -126,6 +131,7 @@
   --color-surface-1: #231809;
   --color-surface-2: #2b1e0c;
   --color-surface-3: #352510;
+  --color-surface-dynamic: #402c14;
   --color-border: #3d2a14;
   --color-divider: #2e2010;
   --color-text: #f5deb3;
@@ -147,6 +153,7 @@
   --color-surface-1: #22101a;
   --color-surface-2: #2a1420;
   --color-surface-3: #331828;
+  --color-surface-dynamic: #3d1e30;
   --color-border: #3d1a2c;
   --color-divider: #2e1422;
   --color-text: #f0c8d0;
@@ -169,6 +176,7 @@
   --color-surface-1: #0d1823;
   --color-surface-2: #0e1925;
   --color-surface-3: #13202e;
+  --color-surface-dynamic: #182737;
   --color-border: rgba(255, 255, 255, 0.11);
   --color-divider: rgba(255, 255, 255, 0.2);
   --color-text: #ecf3f6;

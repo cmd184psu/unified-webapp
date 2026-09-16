@@ -8,7 +8,7 @@ import * as shared from "@shared";
 
 const { THEMES, setTheme, openModal, confirmDialog, alertDialog, promptDialog } = shared;
 
-// Table T1 -- the 17 --color-* keys every theme in web/shared/css/themes.css
+// Table T1 -- the 18 --color-* keys every theme in web/shared/css/themes.css
 // declares. Not a second theme list (that would violate FRD :226-228): this
 // is the fixed set of colour *tokens*, not the set of themes -- THEMES above
 // is the one array iterated for that.
@@ -17,6 +17,7 @@ const COLOR_TOKENS = [
   "--color-surface-1",
   "--color-surface-2",
   "--color-surface-3",
+  "--color-surface-dynamic",
   "--color-border",
   "--color-divider",
   "--color-text",
@@ -138,13 +139,29 @@ function buildModalDemos(): void {
     {
       label: "openModal",
       source:
-        'const content = document.createElement("p");\n' +
-        'content.textContent = "Hello from openModal.";\n' +
-        'openModal(content, { title: "openModal" });',
+        'const content = document.createElement("div");\n' +
+        'const p = document.createElement("p");\n' +
+        'p.textContent = "Hello from openModal.";\n' +
+        'content.appendChild(p);\n' +
+        'const close = document.createElement("button");\n' +
+        'close.type = "button";\n' +
+        'close.className = "ui-modal-btn";\n' +
+        'close.textContent = "Close";\n' +
+        'content.appendChild(close);\n' +
+        'const handle = openModal(content, { title: "openModal" });\n' +
+        'close.addEventListener("click", () => handle.close());',
       run: () => {
-        const content = document.createElement("p");
-        content.textContent = "Hello from openModal.";
-        openModal(content, { title: "openModal" });
+        const content = document.createElement("div");
+        const p = document.createElement("p");
+        p.textContent = "Hello from openModal.";
+        content.appendChild(p);
+        const close = document.createElement("button");
+        close.type = "button";
+        close.className = "ui-modal-btn";
+        close.textContent = "Close";
+        content.appendChild(close);
+        const handle = openModal(content, { title: "openModal" });
+        close.addEventListener("click", () => handle.close());
       },
     },
     {

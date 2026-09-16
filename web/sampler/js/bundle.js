@@ -6,6 +6,7 @@ var COLOR_TOKENS = [
   "--color-surface-1",
   "--color-surface-2",
   "--color-surface-3",
+  "--color-surface-dynamic",
   "--color-border",
   "--color-divider",
   "--color-text",
@@ -102,11 +103,19 @@ function buildModalDemos() {
   const demos = [
     {
       label: "openModal",
-      source: 'const content = document.createElement("p");\ncontent.textContent = "Hello from openModal.";\nopenModal(content, { title: "openModal" });',
+      source: 'const content = document.createElement("div");\nconst p = document.createElement("p");\np.textContent = "Hello from openModal.";\ncontent.appendChild(p);\nconst close = document.createElement("button");\nclose.type = "button";\nclose.className = "ui-modal-btn";\nclose.textContent = "Close";\ncontent.appendChild(close);\nconst handle = openModal(content, { title: "openModal" });\nclose.addEventListener("click", () => handle.close());',
       run: () => {
-        const content = document.createElement("p");
-        content.textContent = "Hello from openModal.";
-        openModal(content, { title: "openModal" });
+        const content = document.createElement("div");
+        const p = document.createElement("p");
+        p.textContent = "Hello from openModal.";
+        content.appendChild(p);
+        const close = document.createElement("button");
+        close.type = "button";
+        close.className = "ui-modal-btn";
+        close.textContent = "Close";
+        content.appendChild(close);
+        const handle = openModal(content, { title: "openModal" });
+        close.addEventListener("click", () => handle.close());
       }
     },
     {
