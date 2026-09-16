@@ -1981,7 +1981,7 @@
   }
 
   // web/taskmaster/js/buildinfo.ts
-  var FRONTEND_BUILD_TIME = "2026-09-15T20:09:42Z";
+  var FRONTEND_BUILD_TIME = "51233a1f8b0e";
 
   // web/taskmaster/js/main.ts
   var caps2 = { allow_sudo: false };

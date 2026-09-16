@@ -9,7 +9,7 @@ CONFIG    := ~/.unified-webapp.json
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS    := -X cmd184psu/unified-webapp/internal/taskmaster/coordinator.BuildTime=$(BUILD_TIME)
 
-.PHONY: run build build-rpi test clean clean-local-test-db init-config web typecheck web-verify gates
+.PHONY: run build build-rpi test clean clean-local-test-db init-config web typecheck web-verify gates test-web check
 
 run:
 	go run $(CMD) -config $(CONFIG)
@@ -40,7 +40,7 @@ clean-local-test-db:
 	rm -f local-test/data/taskmaster/taskmaster.db local-test/data/taskmaster/taskmaster.db-wal local-test/data/taskmaster/taskmaster.db-shm
 
 web:
-	@if [ ! -d node_modules ]; then npm install; fi
+	npm ci
 	npm run build
 
 typecheck:
@@ -61,3 +61,10 @@ gates:
 	node scripts/check-shared-css.mjs
 	node scripts/gates/bundle-shape.mjs
 	node scripts/gates/token-overlap.mjs
+
+test-web:
+	npm ci
+	npm run typecheck
+	npm run test:web
+
+check: web-verify test-web gates test
