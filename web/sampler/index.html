@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UI Sampler</title>
+    <link rel="stylesheet" href="/shared/dist/shared.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="sampler-header">
+      <h1 class="sampler-title">UI Sampler</h1>
+      <label class="sampler-theme-picker">
+        Theme
+        <select id="theme-select"></select>
+      </label>
+    </header>
+
+    <main class="sampler-main">
+      <section class="sampler-section" aria-labelledby="swatches-heading">
+        <h2 id="swatches-heading">Colour tokens</h2>
+        <div id="swatch-grid" class="sampler-swatch-grid"></div>
+      </section>
+
+      <section class="sampler-section" aria-labelledby="specimens-heading">
+        <h2 id="specimens-heading">Structural tokens</h2>
+        <div id="specimen-list" class="sampler-specimen-list"></div>
+      </section>
+
+      <section class="sampler-section" aria-labelledby="modals-heading">
+        <h2 id="modals-heading">Modals &amp; dialogs</h2>
+        <div id="modal-demos" class="sampler-modal-demos"></div>
+      </section>
+    </main>
+
+    <script type="module" src="js/bundle.js"></script>
+  </body>
+</html>

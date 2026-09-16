@@ -1,0 +1,150 @@
+/* style.css — sampler layout only. Every colour, shadow, radius, spacing and
+   type-size value below arrives through a var() defined in
+   /shared/dist/shared.css; no colour literal is authored here, so nothing in
+   this file can shadow a token. */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+}
+
+.sampler-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-6);
+  background: var(--color-surface-1);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sampler-title {
+  margin: 0;
+  font-size: var(--text-xl);
+}
+
+.sampler-theme-picker {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.sampler-theme-picker select {
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  font: inherit;
+}
+
+.sampler-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-6);
+  max-width: 72em;
+  margin: 0 auto;
+}
+
+.sampler-section h2 {
+  margin: 0 0 var(--space-4) 0;
+  font-size: var(--text-lg);
+}
+
+.sampler-swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10em, 1fr));
+  gap: var(--space-4);
+}
+
+.sampler-swatch {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.sampler-swatch-chip {
+  height: 3em;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.sampler-swatch-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  word-break: break-all;
+}
+
+.sampler-specimen-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.sampler-specimen {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.sampler-specimen-label {
+  flex: 0 0 14em;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.sampler-specimen-value {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+}
+
+.sampler-modal-demos {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.sampler-modal-demo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.sampler-modal-demo button {
+  align-self: flex-start;
+}
+
+.sampler-modal-source {
+  margin: 0;
+  padding: var(--space-2);
+  background: var(--color-surface-2);
+  color: var(--color-text-muted);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}

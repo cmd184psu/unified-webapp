@@ -75,7 +75,13 @@ A module with no background work returns its mux as-is.
 
 5. **Static assets**, if any, under `web/<module>/` — point your config's `static_dir`
    at it and serve it with `platform/static` (see below). No build-pipeline change is
-   needed unless the frontend itself requires one.
+   needed unless the frontend itself requires one. A new module gets `/shared/` for
+   free from the dispatcher mount (`static.WithShared`, wired once in
+   `buildDispatcher` ahead of every module) — no code of your own is required to link
+   `/shared/dist/shared.css` or import `@shared` from your frontend. A module may also
+   opt into `static.MountShared` inside its own `Build`, if it wants the `/shared/`
+   subtree reachable from inside its own middleware chain rather than only the
+   dispatcher's; `internal/sampler/build.go` is the worked example.
 
 That's the whole list for full security posture on a module with no login. Steps 1–4 are
 required; step 5 only if the module serves its own static frontend.

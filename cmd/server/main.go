@@ -34,6 +34,7 @@ import (
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/platform/middleware"
 	"cmd184psu/unified-webapp/internal/platform/static"
+	"cmd184psu/unified-webapp/internal/sampler"
 	"cmd184psu/unified-webapp/internal/slideshow"
 	"cmd184psu/unified-webapp/internal/smbedit"
 	"cmd184psu/unified-webapp/internal/taskmaster"
@@ -356,7 +357,7 @@ func limitFor(module string, cfg *config.Config) int64 {
 // knownModules is the buildModule universe -- exactly the module names the
 // switch below handles. auth.FromConfig uses it to validate that every
 // module named in auth.modules is one buildDispatcher can actually build.
-var knownModules = []string{"grocery", "todo", "slideshow", "menuserver", "obsidianoid", "multissh", "certmachine", "taskmaster", "admin", "utuber", "smbedit", "issuetracker", "timetracker"}
+var knownModules = []string{"grocery", "todo", "slideshow", "menuserver", "obsidianoid", "multissh", "certmachine", "taskmaster", "admin", "utuber", "smbedit", "issuetracker", "timetracker", "sampler"}
 
 // adminIsRouted reports whether "admin" appears among routing's module
 // values (config.Config.Routing / host_routing). Both main's boot-time
@@ -389,6 +390,8 @@ func buildModule(module string, cfg *config.Config, svc *auth.Service) (http.Han
 		return taskmaster.Build(cfg.Taskmaster)
 	case "timetracker":
 		return timetracker.Build(cfg.Timetracker)
+	case "sampler":
+		return sampler.Build(cfg.Sampler)
 	case "certmachine":
 		return certmachine.Build(cfg.Certmachine)
 	case "utuber":

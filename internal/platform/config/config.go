@@ -31,6 +31,7 @@ type Config struct {
 	Smbedit      SmbeditConfig      `json:"smbedit"`
 	IssueTracker IssueTrackerConfig `json:"issuetracker"`
 	Timetracker  TimetrackerConfig  `json:"timetracker"`
+	Sampler      SamplerConfig      `json:"sampler"`
 
 	// configPath is the absolute path Load read this Config from (empty when
 	// built via DefaultConfig()/WriteDefault without going through Load, or
@@ -275,6 +276,18 @@ type TimetrackerConfig struct {
 	ReportDB string `json:"report_db"`
 }
 
+// SamplerConfig holds configuration specific to the sampler module -- the
+// shared-theme/shared-component demo page (FR-10).
+type SamplerConfig struct {
+	StaticDir string `json:"static_dir"` // e.g. ./web/sampler
+	// SharedStaticDir is the effective shared-asset directory, copied from
+	// Config.Server.SharedStaticDir by applyServerDefaults, mirroring the
+	// SSEMaxSubscribers copy-down pattern. Not read from the config file --
+	// sampler's build.go demonstrates the per-module static.MountShared path
+	// against this value (docs/adding-a-module.md).
+	SharedStaticDir string `json:"-"`
+}
+
 // MusicConfig holds music configuration. Collections are discovered automatically
 // by scanning subdirectories of AudioDir; no explicit list is needed.
 type MusicConfig struct {
@@ -480,6 +493,9 @@ func DefaultConfig() *Config {
 			StaticDir: "./web/timetracker",
 			DataFile:  "./data/timetracker.json",
 		},
+		Sampler: SamplerConfig{
+			StaticDir: "./web/sampler",
+		},
 		Obsidianoid: ObsidianoidConfig{
 			StaticDir:     "./web/obsidianoid",
 			DataDir:       "./data/obsidianoid",
@@ -606,6 +622,9 @@ func Load(path string) (*Config, error) {
 	if err := expandTimetrackerPaths(&cfg.Timetracker); err != nil {
 		return nil, err
 	}
+	if err := expandSamplerPaths(&cfg.Sampler); err != nil {
+		return nil, err
+	}
 	if err := expandObsidianoidPaths(&cfg.Obsidianoid); err != nil {
 		return nil, err
 	}
@@ -672,6 +691,7 @@ func applyServerDefaults(cfg *Config) {
 	if cfg.Server.SharedStaticDir == "" {
 		cfg.Server.SharedStaticDir = "./web/shared"
 	}
+	cfg.Sampler.SharedStaticDir = cfg.Server.SharedStaticDir
 }
 
 func expandMenuserverPaths(m *MenuserverConfig) error {
@@ -696,6 +716,16 @@ func expandTimetrackerPaths(t *TimetrackerConfig) error {
 		return err
 	}
 	if t.ReportDB, err = ExpandPath(t.ReportDB); err != nil {
+		return err
+	}
+	return nil
+}
+
+// expandSamplerPaths expands ~ in the sampler module's StaticDir, mirroring
+// expandTimetrackerPaths.
+func expandSamplerPaths(s *SamplerConfig) error {
+	var err error
+	if s.StaticDir, err = ExpandPath(s.StaticDir); err != nil {
 		return err
 	}
 	return nil

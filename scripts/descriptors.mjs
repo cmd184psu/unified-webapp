@@ -62,6 +62,20 @@ export const descriptors = [
     bundle: true,
     external: ["*.woff2"],
   },
+  // sampler is the first sharedConsumer descriptor: it selects the @shared
+  // onResolve plugin (driver rule 10), triggers the driver's format:"esm"
+  // assertion, and is the first member of bundle-shape.mjs's input set
+  // (A9.1/A9.2, PLAN-ui-unification-phase1.md Step 6).
+  {
+    name: "sampler",
+    entry: ["web/sampler/js/main.ts"],
+    mode: "bundle",
+    out: "web/sampler/js/bundle.js",
+    bundle: true,
+    format: "esm",
+    target: "es2020",
+    sharedConsumer: true,
+  },
   {
     name: "obsidianoid",
     entry: ["web/obsidianoid/js/threads.ts", "web/obsidianoid/js/app.ts"],
@@ -144,4 +158,4 @@ export const descriptors = [
 // failure rather than a silent pass (A7.3). The value moves during the
 // sequence — 12 through C3, 14 after C4, 15 after C5 — and each move is an
 // edit to this one line.
-export const EXPECTED_ARTIFACT_COUNT = 14;
+export const EXPECTED_ARTIFACT_COUNT = 15;

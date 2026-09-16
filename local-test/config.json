@@ -16,7 +16,8 @@
     "taskmaster-test.cmdhome.net":  "taskmaster",
     "smbedit-test.cmdhome.net":     "smbedit",
     "issues-test.cmdhome.net": "issuetracker",
-    "timetracker.test": "timetracker"
+    "timetracker.test": "timetracker",
+    "sampler.test": "sampler"
   },
   "server": {
     "origin_check": "enforce",
@@ -111,6 +112,9 @@
     "static_dir": "./web/timetracker",
     "data_file": "./local-test/data/timetracker.json"
   },
+  "sampler": {
+    "static_dir": "./web/sampler"
+  },
   "auth": {
     "modules": {
       "admin": {
@@ -126,6 +130,9 @@
         "pin_file": ""
       },
       "obsidianoid": {
+        "pin_file": ""
+      },
+      "sampler": {
         "pin_file": ""
       },
       "slideshow": {
