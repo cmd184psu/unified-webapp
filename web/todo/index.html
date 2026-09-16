@@ -17,7 +17,12 @@
   <script src="js/utils.js"></script>
   <script src="js/todo-utils.js?v=17"></script>
   <script src="js/todo.js?v=4"></script>
-  <script src="js/theme.js"></script>
+  <!-- theme-bootstrap:start -->
+  <script>(function(){var k=localStorage.getItem("todo-theme");
+  var t=(k==="dark"||k==="light")?k:matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";
+  document.documentElement.setAttribute("data-theme",t);var i=document.getElementById("theme-icon");if(i)i.className=t==="dark"?"fas fa-moon":"fas fa-sun"})()</script>
+  <!-- theme-bootstrap:end -->
+  <script type="module" src="js/shell.js"></script>
   <script>
     // ── Settings (cooldown etc.) ───────────────────────────────────────────
     function loadSettings() {
@@ -176,7 +181,7 @@
       <div id="titleDiv" class="topbar-title" onclick="openTitleEditor()" title="Edit list title"></div>
     </div>
     <div class="topbar-right">
-      <button class="icon-btn" id="theme-toggle" title="Toggle dark / light mode" onclick="toggleTheme()">
+      <button class="icon-btn" id="theme-toggle" title="Toggle dark / light mode">
         <i class="fas fa-moon" id="theme-icon"></i>
       </button>
       <button class="icon-btn" id="copyLink" title="Copy link to clipboard" onclick="copyLink()">

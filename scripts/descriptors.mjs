@@ -154,6 +154,16 @@ export const descriptors = [
     define: { "process.env.NODE_ENV": '"production"' },
     emitsCss: true,
   },
+  {
+    name: "todo",
+    entry: ["web/todo/js/shell.ts"],
+    mode: "bundle",
+    out: "web/todo/js/shell.js",
+    bundle: true,
+    format: "esm",
+    target: "es2020",
+    sharedConsumer: true,
+  },
 ];
 
 // How many files the descriptors above emit. Defined ONCE, here: the
@@ -161,4 +171,4 @@ export const descriptors = [
 // failure rather than a silent pass (A7.3). The value moves during the
 // sequence — 12 through C3, 14 after C4, 15 after C5 — and each move is an
 // edit to this one line.
-export const EXPECTED_ARTIFACT_COUNT = 15;
+export const EXPECTED_ARTIFACT_COUNT = 16;
