@@ -5,12 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Tasks</title>
   <link rel="shortcut icon" href="images/fvw.png" type="image/x-icon">
+  <link rel="stylesheet" href="/shared/dist/shared.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/fontawsme.css">
   <link rel="stylesheet" href="css/fontawall.css">
-  <link rel="stylesheet" href="css/todo.css?v=19">
+  <link rel="stylesheet" href="css/todo.css?v=20">
 
   <script src="js/jquery.js"></script>
   <script src="js/jquery-ui.js"></script>
@@ -80,14 +81,6 @@
         .then(function(data) { colConfig = data; applyColConfig(); });
     }
 
-    function toggleSidebar() {
-      document.getElementById('sidebar').classList.toggle('sidebar-open');
-      document.getElementById('sidebar-backdrop').classList.toggle('sidebar-open');
-    }
-    function closeSidebar() {
-      document.getElementById('sidebar').classList.remove('sidebar-open');
-      document.getElementById('sidebar-backdrop').classList.remove('sidebar-open');
-    }
 
     // ── Title editor ───────────────────────────────────────────────────────
     // ── New list (index mode) ──────────────────────────────────────────────
@@ -174,7 +167,7 @@
   <!-- ── Top Navigation Bar ─────────────────────────────────────────────── -->
   <nav class="topbar">
     <div class="topbar-left">
-      <button class="icon-btn" id="menu-toggle" title="Menu" onclick="toggleSidebar()">
+      <button class="icon-btn" id="menu-toggle" title="Menu">
         <i class="fas fa-bars"></i>
       </button>
       <span class="topbar-brand" onclick="openTitleEditor()" title="Edit list title">Tasks</span>
@@ -196,65 +189,9 @@
     </div>
   </nav>
 
-  <!-- Sidebar backdrop (click to close) -->
-  <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="closeSidebar()"></div>
 
   <!-- ── Main Layout ────────────────────────────────────────────────────── -->
   <div class="app-layout">
-
-    <!-- Sidebar: slide-in panel -->
-    <aside class="sidebar" id="sidebar">
-
-      <div class="sidebar-section">
-        <label class="field-label" for="subject-list-selector">Subject</label>
-        <select id="subject-list-selector" class="select-input" onchange="changeSubject()"></select>
-      </div>
-
-      <div class="sidebar-section">
-        <label class="field-label" for="item-list-selector">List</label>
-        <select id="item-list-selector" class="select-input" onchange="changeItem()"></select>
-      </div>
-
-      <div class="sidebar-section">
-        <label class="field-label" for="new-subject-list-selector">Move to subject</label>
-        <select id="new-subject-list-selector" class="select-input"></select>
-        <button class="btn btn-outline mt-1" onclick="moveListToNewSubject()">Move List</button>
-      </div>
-
-      <div class="sidebar-divider"></div>
-
-      <div class="sidebar-section option-group">
-        <label class="field-label">Columns</label>
-        <label class="toggle-label">
-          <input type="checkbox" id="col-votes" onchange="setColVisible('votes', this.checked)">
-          <span class="toggle-text">Votes</span>
-        </label>
-        <label class="toggle-label">
-          <input type="checkbox" id="col-period" onchange="setColVisible('period', this.checked)">
-          <span class="toggle-text">Period</span>
-        </label>
-        <label class="toggle-label">
-          <input type="checkbox" id="col-next_due" onchange="setColVisible('next_due', this.checked)">
-          <span class="toggle-text">Next Due Date</span>
-        </label>
-        <label class="toggle-label">
-          <input type="checkbox" id="col-cooldown" onchange="setColVisible('cooldown', this.checked)">
-          <span class="toggle-text">Cooldown</span>
-        </label>
-      </div>
-
-      <div class="sidebar-divider"></div>
-
-      <div class="sidebar-section">
-        <label class="field-label" for="cooldown-input">Vote Cooldown</label>
-        <div class="cooldown-row">
-          <input type="number" id="cooldown-input" class="text-input" min="1" max="120" value="10"
-                 onchange="saveCooldown(this.value)">
-          <span class="cooldown-unit">min</span>
-        </div>
-      </div>
-
-    </aside>
 
     <!-- Main content: table + actions -->
     <main class="content-area">
