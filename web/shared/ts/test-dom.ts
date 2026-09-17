@@ -1,20 +1,6 @@
-// test-dom.ts — the DOM stub the shared unit suites need, added at phase2 C3
-// (docs/PLAN-ui-unification-phase2.md §7 B3.1's precondition, Critic M-11).
-//
-// scripts/test-web.mjs bundles each suite with platform:"node" / format:"cjs"
-// (:52-60) and pipes it to a fresh `node` (:65-69): there is no DOM, no jsdom
-// and no `window` (ADR-005). modal.test.ts hand-rolls the five `document`
-// members modal.ts touches; ThemeManager touches a DISJOINT set — the
-// documentElement's dataset, localStorage, and matchMedia — so B3.1 and B3.4
-// are unwritable without this helper, and each suite is its own process so
-// nothing can be inherited from another suite's stub.
-//
-// Two gate consequences, both deliberate: this file is NOT a barrel export and
-// is not imported by index.ts, so check-shared-barrel.mjs's counts are
-// unaffected (it reads web/shared/ts/index.ts only, :23) and the shared bundle
-// does not grow; and it IS matched by tsconfig.json:15's include globs, so
-// `tsc --noEmit` type-checks it like any other file. modal.test.ts is
-// deliberately not retrofitted onto it in this phase (§11 item 14).
+// Fake DOM for the shared unit suites. Each suite runs in a fresh node
+// process with no jsdom; this stubs documentElement.dataset, localStorage,
+// and matchMedia so ThemeManager tests can run. Not a barrel export.
 
 /** The single MediaQueryList every stubbed matchMedia() call returns. */
 export interface FakeMediaQueryList {

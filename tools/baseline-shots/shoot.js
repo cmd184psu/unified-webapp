@@ -19,6 +19,7 @@ const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
 const { chromium } = require("playwright");
+const INTERACTIONS = require("./interactions");
 
 const REPO = path.resolve(__dirname, "..", "..");
 const PORT = 18080;
@@ -118,6 +119,7 @@ async function main() {
     });
 
     let shots = 0;
+    let sceneFailures = 0;
     for (const { module, host } of targets) {
       const base = `http://${host}:${PORT}`;
       const outDir = path.join(OUT, module);
@@ -167,6 +169,33 @@ async function main() {
         shots++;
         await page.close();
       }
+
+      // Interaction-scripted scenes (drawers open, modals up, ...): see
+      // interactions.js. A failing scene is reported but doesn't abort the
+      // run — the remaining shots are still worth having.
+      for (const scene of INTERACTIONS[module] || []) {
+        const page = await context.newPage();
+        try {
+          if (scene.ls) {
+            await page.addInitScript((entries) => {
+              for (const [k, val] of Object.entries(entries))
+                localStorage.setItem(k, val);
+            }, scene.ls);
+          }
+          await page.goto(`${base}/`, { waitUntil: "load", timeout: 30000 });
+          await page.waitForTimeout(SETTLE_MS);
+          await scene.run(page);
+          await page.waitForTimeout(500);
+          const file = path.join(outDir, `${scene.name}.png`);
+          await page.screenshot({ path: file, fullPage: !!scene.fullPage });
+          console.log(`  ${module}/${scene.name}.png`);
+          shots++;
+        } catch (err) {
+          console.error(`  ${module}/${scene.name} FAILED: ${err.message}`);
+          sceneFailures++;
+        }
+        await page.close();
+      }
       await context.close();
     }
 
@@ -193,6 +222,10 @@ async function main() {
     }
 
     console.log(`\n${shots} screenshots -> ${OUT}`);
+    if (sceneFailures) {
+      console.error(`${sceneFailures} interaction scene(s) FAILED`);
+      process.exitCode = 1;
+    }
   } catch (err) {
     console.error("FAILED:", err.message);
     if (serverLog) console.error("--- server log tail ---\n" + serverLog.slice(-2000));

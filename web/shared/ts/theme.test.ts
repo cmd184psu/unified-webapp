@@ -1,11 +1,8 @@
-// theme.test.ts — Phase-2 C3 coverage (docs/PLAN-ui-unification-phase2.md §5
-// Step 3.4): the resolution order as three cases plus a construction assertion
-// (B3.1 as amended in v5 FINAL), the unknown-stored-name fall-through (B3.2),
-// the storageKey() override (B3.3), the live matchMedia `change` listener
-// (B3.4), themes.list's roster (B3.5), reresolve()'s two halves (B3.10), and
-// the barrel's export shape (BX.2).
+// ThemeManager unit tests: resolution order (storage → server → system →
+// default), unknown-name fallback, storageKey override, live matchMedia
+// listener, theme roster, reresolve(), and barrel export shape.
 //
-// No jsdom, no @types/node (ADR-005). The three globals ThemeManager touches
+// No jsdom, no @types/node. The three globals ThemeManager touches
 // come from ./test-dom's installFakeDom(), which the harness cannot supply and
 // modal.test.ts's five-member stub does not overlap.
 
@@ -21,7 +18,7 @@ function check(name: string, cond: boolean, detail: string): void {
 
 const names: readonly string[] = THEMES;
 
-// A `default` OUTSIDE THEMES. Step 4 is unreachable, so every case below can
+// A `default` OUTSIDE THEMES. The system step always resolves, so every case below can
 // use a sentinel floor: if resolution ever reached it, the stamp would be a
 // string no theme block declares and the failure would be unmistakable.
 const FLOOR = "floor-never-reached";
@@ -30,7 +27,7 @@ const FLOOR = "floor-never-reached";
 // the change listener writes the attribute AT ALL.
 const UNTOUCHED = "untouched-by-the-listener";
 
-// --- B3.1 case 1 — step 1: a validated stored name wins -----------------------
+// --- resolution step 1: a validated stored name wins -------------------------
 
 {
   const dom = installFakeDom();
@@ -44,7 +41,7 @@ const UNTOUCHED = "untouched-by-the-listener";
   );
 }
 
-// --- B3.1 case 2 — step 2: storage empty, serverDefault() answers -------------
+// --- resolution step 2: storage empty, serverDefault() answers ---------------
 
 {
   const dom = installFakeDom();
@@ -57,7 +54,7 @@ const UNTOUCHED = "untouched-by-the-listener";
   );
 }
 
-// --- B3.1 case 3 — step 3: both matchMedia polarities -------------------------
+// --- resolution step 3: both matchMedia polarities ---------------------------
 
 {
   const dom = installFakeDom();
@@ -80,15 +77,12 @@ const UNTOUCHED = "untouched-by-the-listener";
   );
 }
 
-// --- B3.1's construction assertion for step 4 --------------------------------
+// --- construction assertion for the default floor ----------------------------
 //
-// There is no fourth runtime case and there cannot be one: the system step
-// resolves under EVERY matchMedia outcome, so step 4 is unreachable at runtime
-// (§5 Step 3.1, §18 Critic finding 1). `default` is asserted where it actually
-// lives — in ThemeManagerOptions and in the construction — and the resolver is
-// asserted never to reach it. A case that tried to fall past the system step
-// could only do so by deleting matchMedia from the stub, which would assert the
-// behaviour of a browser this repo does not serve.
+// The system step resolves under every matchMedia outcome, so the `default`
+// floor is unreachable at runtime. It is asserted where it actually lives —
+// in ThemeManagerOptions and in the construction — and the resolver is
+// asserted never to reach it.
 
 {
   const dom = installFakeDom();
@@ -117,12 +111,12 @@ const UNTOUCHED = "untouched-by-the-listener";
   }
 }
 
-// --- B3.2 — an unknown stored name falls through, never gets stamped ---------
+// --- an unknown stored name falls through, never gets stamped ---------------
 
 {
   const dom = installFakeDom();
   // `system` is the instructive unknown: it is the resolver's implicit step and
-  // must not become selectable through a hand-written storage entry (§10 row 22).
+  // must not become selectable through a hand-written storage entry.
   dom.storage.set("ui-theme:sampler", "system");
   const themes = new ThemeManager({ module: "sampler", default: FLOOR, serverDefault: () => "ocean" });
   themes.apply();
@@ -156,10 +150,7 @@ const UNTOUCHED = "untouched-by-the-listener";
   );
 }
 
-// --- B3.3 — storageKey() overrides ui-theme:<module> -------------------------
-//
-// Proved with obsidianoid's per-vault template, which is the only client of the
-// override in the phase.
+// --- storageKey() overrides ui-theme:<module> --------------------------------
 
 {
   const dom = installFakeDom();
@@ -208,8 +199,7 @@ const UNTOUCHED = "untouched-by-the-listener";
   );
 }
 
-// --- B3.4 — `system` is the implicit resolution step, and its `change`
-// listener is live ------------------------------------------------------------
+// --- the system resolution step, and its live change listener ---------------
 
 {
   const dom = installFakeDom();
@@ -263,7 +253,7 @@ const UNTOUCHED = "untouched-by-the-listener";
   );
 }
 
-// --- B3.5 — themes.list has 8 entries and equals THEMES' name set ------------
+// --- themes.list has 8 entries and equals THEMES' name set ------------------
 
 {
   installFakeDom();
@@ -281,7 +271,7 @@ const UNTOUCHED = "untouched-by-the-listener";
   );
 }
 
-// --- onChange fires on set() and on nothing else (§5 Step 3.4) ---------------
+// --- onChange fires on set() and on nothing else ----------------------------
 
 {
   const dom = installFakeDom();
@@ -323,8 +313,7 @@ const UNTOUCHED = "untouched-by-the-listener";
   );
 }
 
-// --- B3.10 — reresolve() exists, is public, follows a changed storageKey(),
-// and does not write storage --------------------------------------------------
+// --- reresolve() follows a changed storageKey() without writing storage -----
 
 {
   const dom = installFakeDom();
@@ -573,7 +562,7 @@ function marked(buttons: FakeElement[]): string[] {
   );
 }
 
-// --- BX.2 — the barrel's export shape ---------------------------------------
+// --- barrel export shape ----------------------------------------------------
 
 check("barrel exposes ThemeManager", typeof barrel.ThemeManager === "function", `got ${typeof barrel.ThemeManager}`);
 check("barrel's ThemeManager is this module's class", barrel.ThemeManager === ThemeManager, "the barrel re-exports a different binding");

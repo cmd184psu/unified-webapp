@@ -42,10 +42,21 @@ with a new label (e.g. `node shoot.js post-c6`) and diff the two trees.
 `bash local-test/setup.sh` seeds the data the screenshots show (slideshow
 PNGs, obsidianoid vault, menuserver links).
 
+## Interaction scenes
+
+`interactions.js` holds per-module scripted scenes (drawer open, modal up,
+nav dropdown hovered) that run after each module's plain variant shots, in
+the same authenticated context. Each scene is `{name, ls?, fullPage?, run}`;
+shots land next to the variants as `<module>/<name>.png`. Scenes default to
+viewport (not full-page) capture, since drawers/modals are fixed overlays.
+A failing scene is reported and sets exit code 1 but doesn't abort the run.
+Current coverage: every live menu/drawer implementation (certmachine Tools,
+menuserver dropdown+panel, obsidianoid theme panel, slideshow settings,
+smbedit drawer, taskmaster menu + confirm modal, todo sidebar, utuber
+settings) — selectors documented in docs/INVENTORY-hamburger-menus.md.
+
 ## Known gaps
 
-- Dialogs/modals (e.g. the taskmaster modals C6 changes) only appear on
-  interaction; those need per-module click steps, not yet scripted.
-- Screenshots are full-page loads at one viewport; no pixel-diff step yet
+- Screenshots are at one viewport; no pixel-diff step yet
   (pixelmatch/odiff could be added on top for a mechanical zero-regression
   gate).

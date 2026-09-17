@@ -1,33 +1,18 @@
-// menu.test.ts — Phase-2 C4 coverage (docs/PLAN-ui-unification-phase2.md §5
-// Step 4.4): eager construction and verbatim slot mounting (B4.3), the three
-// net-new a11y features (B4.1), per-open `when()` re-evaluation (B4.4),
-// id-addressed add/remove/update with no-op-on-unknown (B4.5), the
-// textContent-only path (B4.6), destroy()'s listener accounting (B4.7), the
-// single trap predicate (B4.8), and the barrel's export shape (BX.2/BX.3).
+// HamburgerMenu unit tests: eager construction with verbatim slot mounting,
+// a11y wiring (aria-expanded, focus trap, Escape), per-open when()
+// re-evaluation, id-addressed add/remove/update, textContent-only labels,
+// destroy() listener accounting, shared focusable predicate, barrel exports.
 //
-// No jsdom, no @types/node (ADR-005). Two stubs, for two disjoint reasons:
+// No jsdom, no @types/node. Two stubs:
+//   - ./test-dom's installFakeDom() for ThemeManager globals (the
+//     themePicker:true case mounts a real ThemeManager)
+//   - a hand-rolled element stub for the DOM tree, with createElementNS,
+//     getElementById, and a listener ledger to observe destroy()'s cleanup
 //
-//   - ./test-dom's installFakeDom() supplies the three globals ThemeManager
-//     touches (documentElement.dataset, localStorage, matchMedia), because the
-//     `themePicker: true` case mounts a real ThemeManager. It is reused exactly
-//     as landed at C3 and is not extended.
-//   - a hand-rolled element stub, in modal.test.ts's idiom, supplies the
-//     element tree — installFakeDom() deliberately does not, and this suite
-//     needs three things no earlier suite did: createElementNS (the trigger's
-//     glyph), getElementById (B4.3's node identity is stated in exactly those
-//     terms), and an add/remove listener LEDGER, because "removes every
-//     listener it added" is a claim about listeners that must no longer exist,
-//     and there is no other way to observe their absence.
-//
-// installFakeDom() runs FIRST and the element stub is layered over the
-// `document` it installs, carrying the same documentElement object through, so
-// ThemeManager keeps writing the object this suite reads back.
-//
-// There is no browser here; a non-zero exit is the whole report. The three
-// checks that need a real layout engine — the drawer slide, the reduced-motion
-// suppression (B4.9) and the eight distinct swatch fills (B4.2) — are CSS
-// facts, checked by docs/sampler-checklist.md and check-shared-css.mjs clause
-// 7, not here.
+// installFakeDom() runs first; the element stub layers over the document
+// it installs, sharing the same documentElement. Layout-dependent checks
+// (drawer slide, reduced-motion, swatch fills) are CSS facts verified
+// by check-shared-css.mjs, not here.
 
 import { HamburgerMenu } from "./menu";
 import type { MenuItem } from "./menu";
@@ -241,7 +226,7 @@ function labels(menu: HamburgerMenu): string[] {
   return el(menu.drawer).children.map((c) => c.textContent ?? "");
 }
 
-// --- B4.3 — eager construction, and a slot mounted verbatim -----------------
+// --- eager construction, and a slot mounted verbatim ------------------------
 //
 // Every assertion in this block runs with NO open() ever called on the
 // instance. A drawer built lazily on first open fails all five.
@@ -288,7 +273,7 @@ function labels(menu: HamburgerMenu): string[] {
     "the slot host was not reachable by id",
   );
 
-  // …and it is still the same node after a close/open cycle (§5 Step 4.4).
+  // …and it is still the same node after a close/open cycle.
   const before = pick("slot-select");
   menu.open();
   menu.close();
@@ -302,7 +287,7 @@ function labels(menu: HamburgerMenu): string[] {
   menu.destroy();
 }
 
-// --- B4.1 — aria-expanded, aria-controls, Escape, focus, Tab trap -----------
+// --- aria-expanded, aria-controls, Escape, focus, Tab trap -----------------
 
 {
   const fired: string[] = [];
@@ -333,7 +318,7 @@ function labels(menu: HamburgerMenu): string[] {
   check('B4.1: aria-expanded starts "false"', trigger.attrs["aria-expanded"] === "false", `got "${trigger.attrs["aria-expanded"]}"`);
   check('the trigger carries aria-haspopup="true"', trigger.attrs["aria-haspopup"] === "true", JSON.stringify(trigger.attrs));
   check(
-    "aria-controls names the drawer's real id (§5 Step 4.4)",
+    "aria-controls names the drawer's real id",
     drawer.id !== "" && trigger.attrs["aria-controls"] === drawer.id,
     `aria-controls="${trigger.attrs["aria-controls"]}" vs drawer id "${drawer.id}"`,
   );
@@ -416,12 +401,11 @@ function labels(menu: HamburgerMenu): string[] {
   menu.destroy();
 }
 
-// --- B4.8 — the trap predicate has one definition ---------------------------
+// --- the trap predicate has one definition ----------------------------------
 //
-// The criterion itself is a grep over web/shared/ts/ (= 1 hit, focusable.ts).
-// What is assertable here is that the menu's trap and that module's predicate
-// are the same code path: the drawer's focusable set, read back through the
-// shared helper, is exactly the set the trap wrapped around above.
+// The menu's trap and the shared focusable module use the same code path:
+// the drawer's focusable set, read back through the shared helper, is
+// exactly the set the trap wrapped around above.
 
 {
   const menu = new HamburgerMenu({
@@ -482,7 +466,7 @@ function labels(menu: HamburgerMenu): string[] {
   menu.destroy();
 }
 
-// --- B4.6 — every label arrives via textContent -----------------------------
+// --- every label arrives via textContent ------------------------------------
 
 {
   const raw = "<b>evil</b> & <i>x</i>";
@@ -501,7 +485,7 @@ function labels(menu: HamburgerMenu): string[] {
   menu.destroy();
 }
 
-// --- B4.4 — when() is re-evaluated on every open ----------------------------
+// --- when() is re-evaluated on every open -----------------------------------
 
 {
   const state = { visible: false, evaluations: 0 };
@@ -547,7 +531,7 @@ function labels(menu: HamburgerMenu): string[] {
   menu.destroy();
 }
 
-// --- B4.5 — addItem/removeItem/updateItem resolve by id, no-op on unknown ---
+// --- addItem/removeItem/updateItem resolve by id, no-op on unknown ---------
 
 {
   const menu = new HamburgerMenu({
@@ -608,7 +592,7 @@ function labels(menu: HamburgerMenu): string[] {
   menu.destroy();
 }
 
-// --- B4.7 — destroy() removes every listener it added -----------------------
+// --- destroy() removes every listener it added -----------------------------
 //
 // Measured on the ledger, which every add and every remove in this suite's stub
 // passes through. themePicker is deliberately absent from this instance:
@@ -758,7 +742,7 @@ function labels(menu: HamburgerMenu): string[] {
   menu.destroy();
 }
 
-// --- BX.2 / BX.3 — the barrel's export shape --------------------------------
+// --- barrel export shape ----------------------------------------------------
 
 check("the barrel exposes HamburgerMenu", typeof barrel.HamburgerMenu === "function", `got ${typeof barrel.HamburgerMenu}`);
 check("the barrel's HamburgerMenu is this module's class", barrel.HamburgerMenu === HamburgerMenu, "the barrel re-exports a different binding");

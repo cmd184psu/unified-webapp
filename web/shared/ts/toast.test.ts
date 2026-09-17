@@ -1,10 +1,8 @@
-// toast.test.ts — Phase-2 C2 coverage (docs/PLAN-ui-unification-phase2.md §5
-// Step 2.5): the three donor properties B5.1 names, the live region's exact
-// attributes (B5.2), the textContent-only path (B5.3), dismiss() idempotence
-// (B5.4), one stack for N toasts (B5.5), the close button's label and glyph
-// (B5.6), and the barrel's export shape (BX.2).
+// Toast unit tests: donor-compatible API surface, live-region attributes,
+// textContent-only rendering, dismiss idempotence, single stack for N
+// toasts, close-button markup, and barrel export shape.
 //
-// No jsdom, no @types/node (ADR-005) — the same hand-rolled element stub
+// No jsdom, no @types/node — the same hand-rolled element stub
 // idiom as modal.test.ts, plus a setTimeout/clearTimeout recorder, because
 // "error is sticky" is a claim about a timer that must NOT have been created
 // and there is no other way to observe its absence. There is no browser here;
@@ -90,7 +88,7 @@ function stack(): FakeElement {
   return fakeBody.children[0];
 }
 
-// --- the live region: one element, and its exact attributes (B5.2) ----------
+// --- the live region: one element, and its exact attributes ----------------
 
 {
   const before = timers.length;
@@ -105,7 +103,7 @@ function stack(): FakeElement {
   handle.dismiss();
 }
 
-// --- markup in a message is not interpreted (B5.3) --------------------------
+// --- markup in a message is not interpreted ---------------------------------
 
 {
   const raw = "<b>evil</b> & <script>alert(1)</script>";
@@ -119,7 +117,7 @@ function stack(): FakeElement {
   handle.dismiss();
 }
 
-// --- the close button: aria-label and a text-node glyph (B5.6) --------------
+// --- the close button: aria-label and a text-node glyph --------------------
 
 {
   const handle = showToast("closable", "notice");
@@ -132,7 +130,7 @@ function stack(): FakeElement {
   handle.dismiss();
 }
 
-// --- tone defaults, and error's stickiness (B5.1) ---------------------------
+// --- tone defaults, and error's stickiness ---------------------------------
 
 {
   const before = timers.length;
@@ -159,7 +157,7 @@ function stack(): FakeElement {
   handle.dismiss();
 }
 
-// --- exactly one stack element for N toasts (B5.5) --------------------------
+// --- exactly one stack element for N toasts ---------------------------------
 
 {
   const a = showToast("one", "notice");
@@ -173,7 +171,7 @@ function stack(): FakeElement {
   check("dismissing all three leaves the stack in place and empty", fakeBody.children.length === 1 && stack().children.length === 0, `got ${fakeBody.children.length} stack(s), ${stack().children.length} toast(s)`);
 }
 
-// --- dismiss() is idempotent and clears its timer (B5.4) --------------------
+// --- dismiss() is idempotent and clears its timer --------------------------
 
 {
   const before = timers.length;
@@ -201,7 +199,7 @@ function stack(): FakeElement {
   handle.dismiss();
 }
 
-// --- the barrel's export shape (BX.2) --------------------------------------
+// --- barrel export shape ----------------------------------------------------
 
 check("barrel exposes showToast", typeof barrel.showToast === "function", `got ${typeof barrel.showToast}`);
 check("barrel's showToast is this module's showToast", barrel.showToast === showToast, "the barrel re-exports a different binding");
