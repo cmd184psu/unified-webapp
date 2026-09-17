@@ -150,6 +150,18 @@ func (s *Service) Gate(module string, next http.Handler) http.Handler {
 			return
 		}
 
+		// Step 2c: shared static assets — unauthenticated GET on the three
+		// permitted path shapes so a login page can load the shared theme.
+		if r.Method == http.MethodGet {
+			rp := r.URL.Path
+			if rp == "/shared/dist/shared.css" ||
+				rp == "/shared/dist/shared.mjs" ||
+				(strings.HasPrefix(rp, "/shared/public/fonts/") && strings.HasSuffix(rp, ".woff2")) {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+
 		// Step 3: protected := module has a matrix entry, or is "admin".
 		// Admin is always protected when routed, with or without a matrix
 		// entry, evaluated fresh against this request's snapshot.

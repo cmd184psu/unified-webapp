@@ -1390,6 +1390,124 @@ func TestSharedRouteMatrixNeverServesA404(t *testing.T) {
 	}
 }
 
+// TestC8_SharedAssetCarveOut is the Q8(a) gate probe: seven paths tested
+// both without and with a valid session, verifying the auth gate admits
+// exactly the three shared asset path shapes (two exact dist files and the
+// public/fonts/**/*.woff2 glob) for unauthenticated GET requests and blocks
+// everything else (wrong method, wrong extension, wrong subtree).
+func TestC8_SharedAssetCarveOut(t *testing.T) {
+	cfg, _ := allModulesRouteConfig(t)
+
+	// Protect slideshow with a PIN so we have a non-admin protected module.
+	slideshowPIN := "1234"
+	cfg.Auth.Modules = map[string]config.ModuleAuthConfig{
+		"slideshow": {PinFile: modulePinFile(t, slideshowPIN)},
+	}
+	cfg.Auth.LDAP = config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"}
+
+	// Extend the shared fixture with the extra files C8 probes need.
+	sd := cfg.Server.SharedStaticDir
+	if err := os.WriteFile(filepath.Join(sd, "dist", "shared.mjs"), []byte("export default{}"), 0o644); err != nil {
+		t.Fatalf("write shared.mjs: %v", err)
+	}
+	fontDir := filepath.Join(sd, "public", "fonts", "inter")
+	if err := os.MkdirAll(fontDir, 0o755); err != nil {
+		t.Fatalf("mkdir fonts/inter: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(fontDir, "InterVariable.woff2"), []byte("woff2-stub"), 0o644); err != nil {
+		t.Fatalf("write InterVariable.woff2: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(fontDir, "OFL.txt"), []byte("OFL license"), 0o644); err != nil {
+		t.Fatalf("write OFL.txt: %v", err)
+	}
+	// ts/ subtree for the reject probe — create a file there.
+	tsDir := filepath.Join(sd, "ts")
+	if err := os.MkdirAll(tsDir, 0o755); err != nil {
+		t.Fatalf("mkdir ts: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tsDir, "theme.ts"), []byte("// ts"), 0o644); err != nil {
+		t.Fatalf("write theme.ts: %v", err)
+	}
+
+	svc, err := auth.FromConfig(cfg.Auth, knownModules, adminIsRouted(cfg.Routing))
+	if err != nil {
+		t.Fatalf("auth.FromConfig: %v", err)
+	}
+	srv := newGateServer(t, cfg, svc)
+	defer srv.Close()
+
+	host := "slideshow.example"
+
+	// Obtain a valid session cookie for the with-session half.
+	loginRes := doHost(t, srv, http.MethodPost, host, "/api/auth/login",
+		fmt.Sprintf(`{"method":"pin","pin":"%s"}`, slideshowPIN))
+	loginBody, _ := io.ReadAll(loginRes.Body)
+	loginRes.Body.Close()
+	if loginRes.StatusCode != http.StatusOK {
+		t.Fatalf("slideshow PIN login: status=%d body=%q", loginRes.StatusCode, loginBody)
+	}
+	cookie, ok := firstSetCookie(loginRes)
+	if !ok {
+		t.Fatal("slideshow PIN login: expected Set-Cookie")
+	}
+
+	type probe struct {
+		name            string
+		method          string
+		path            string
+		wantNoSession   int
+		wantWithSession int
+		// Optional content-type prefix check (no-session side only, since
+		// the carve-out passes to next which serves the file).
+		wantCT string
+	}
+
+	probes := []probe{
+		{name: "css-exact", method: http.MethodGet, path: "/shared/dist/shared.css",
+			wantNoSession: 200, wantWithSession: 200, wantCT: "text/css"},
+		{name: "woff2-glob", method: http.MethodGet, path: "/shared/public/fonts/inter/InterVariable.woff2",
+			wantNoSession: 200, wantWithSession: 200},
+		{name: "mjs-exact", method: http.MethodGet, path: "/shared/dist/shared.mjs",
+			wantNoSession: 200, wantWithSession: 200, wantCT: "text/javascript"},
+		{name: "ts-reject", method: http.MethodGet, path: "/shared/ts/theme.ts",
+			wantNoSession: 401, wantWithSession: 404},
+		{name: "post-css", method: http.MethodPost, path: "/shared/dist/shared.css",
+			wantNoSession: 401, wantWithSession: 405},
+		{name: "post-mjs", method: http.MethodPost, path: "/shared/dist/shared.mjs",
+			wantNoSession: 401, wantWithSession: 405},
+		{name: "ofl-reject", method: http.MethodGet, path: "/shared/public/fonts/inter/OFL.txt",
+			wantNoSession: 401, wantWithSession: 200},
+	}
+
+	for _, pr := range probes {
+		t.Run(pr.name+"/no-session", func(t *testing.T) {
+			res := doHostWithCookie(t, srv, pr.method, host, pr.path, nil)
+			body, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != pr.wantNoSession {
+				t.Fatalf("%s %s (no session): status=%d, want %d (body %q)",
+					pr.method, pr.path, res.StatusCode, pr.wantNoSession, body)
+			}
+			if pr.wantCT != "" && res.StatusCode == 200 {
+				ct := res.Header.Get("Content-Type")
+				if !strings.HasPrefix(ct, pr.wantCT) {
+					t.Fatalf("Content-Type = %q, want prefix %q", ct, pr.wantCT)
+				}
+			}
+		})
+
+		t.Run(pr.name+"/with-session", func(t *testing.T) {
+			res := doHostWithCookie(t, srv, pr.method, host, pr.path, cookie)
+			body, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != pr.wantWithSession {
+				t.Fatalf("%s %s (with session): status=%d, want %d (body %q)",
+					pr.method, pr.path, res.StatusCode, pr.wantWithSession, body)
+			}
+		})
+	}
+}
+
 // TestCertmachineRouteHasNonEmptyClosers is the A8.3 companion: a
 // certmachine-routed dispatcher's closers slice is non-empty, the direct
 // regression guard for iteration-2's blocker 1 (static.WithShared sits
