@@ -110,9 +110,10 @@ export const descriptors = [
     mode: "bundle",
     out: "web/certmachine/js/bundle.js",
     bundle: true,
-    format: "iife",
+    format: "esm",
     target: "es2020",
     emitsCss: true,
+    sharedConsumer: true,
   },
   {
     name: "taskmaster",

@@ -13,7 +13,7 @@ import type { AppConfig, Cert } from "./types";
 import { fetchCertDetail, renewCert, deleteCert } from "./api";
 import { badgeFor, BADGE_LABEL } from "./status";
 import { clampedNoticeText } from "./generate";
-import { showToast } from "./toast";
+import { showToast } from "@shared";
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,

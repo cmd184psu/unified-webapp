@@ -6,7 +6,7 @@ import type { SortKey, SortDir } from "./listmodel";
 import { openCertDetail } from "./detail";
 import { openGenerateForm } from "./generate";
 import { openImportWizard } from "./wizard";
-import { showToast } from "./toast";
+import { showToast } from "@shared";
 import type { AppConfig, Cert } from "./types";
 
 function el<K extends keyof HTMLElementTagNameMap>(

@@ -7,17 +7,6 @@
  * badges are the one thing this screen exists to get right.
  */
 :root {
-  --bg: #0b0f1a;
-  --panel: #121826;
-  --panel-2: #17202f;
-  --border: #232d3f;
-  --text: #c7cedb;
-  --muted: #808a9c;
-  --accent: #5aa9ff;
-  --accent-hover: #3f8ae0;
-  --green: #22c55e;
-  --amber: #f5a623;
-  --red: #ef5f5f;
   --purple: #b073f0;
 }
 
@@ -32,8 +21,8 @@ body {
 }
 
 body {
-  background: var(--bg);
-  color: var(--text);
+  background: var(--color-bg);
+  color: var(--color-text);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     sans-serif;
   font-size: 14px;
@@ -52,8 +41,8 @@ body {
 /* ---------- Header ---------- */
 .cert-header {
   padding: 20px 24px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--panel);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-1);
 }
 
 .cert-title {
@@ -65,7 +54,7 @@ body {
 
 .cert-subtitle {
   margin: 6px 0 0;
-  color: var(--muted);
+  color: var(--color-text-muted);
   font-size: 13px;
 }
 
@@ -94,7 +83,7 @@ body {
 
 .cert-empty {
   margin: 24px 0;
-  color: var(--muted);
+  color: var(--color-text-muted);
   font-size: 13px;
   text-align: center;
 }
@@ -102,17 +91,17 @@ body {
 .cert-error {
   margin: 0;
   padding: 12px 14px;
-  border: 1px solid var(--red);
+  border: 1px solid var(--color-danger);
   border-radius: 8px;
   background: rgba(239, 95, 95, 0.1);
-  color: var(--red);
+  color: var(--color-danger);
   font-size: 13px;
 }
 
 /* ---------- Cert row ---------- */
 .cert-row {
-  background: var(--panel);
-  border: 1px solid var(--border);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border);
   border-radius: 10px;
   padding: 14px 16px;
   display: flex;
@@ -161,22 +150,22 @@ body {
 
 .cert-badge[data-kind="valid"] {
   background: rgba(34, 197, 94, 0.16);
-  color: var(--green);
+  color: var(--color-success);
 }
 
 .cert-badge[data-kind="expiring-soon"] {
   background: rgba(245, 166, 35, 0.18);
-  color: var(--amber);
+  color: var(--color-warning);
 }
 
 .cert-badge[data-kind="expired"] {
   background: rgba(239, 95, 95, 0.14);
-  color: var(--red);
+  color: var(--color-danger);
 }
 
 .cert-badge[data-kind="archived"] {
-  background: var(--border);
-  color: var(--muted);
+  background: var(--color-border);
+  color: var(--color-text-muted);
 }
 
 .cert-badge[data-kind="quarantined"] {
@@ -190,12 +179,12 @@ body {
   align-items: center;
   gap: 14px;
   flex-wrap: wrap;
-  color: var(--muted);
+  color: var(--color-text-muted);
   font-size: 12px;
 }
 
 .cert-meta-imported {
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border);
   border-radius: 4px;
   padding: 1px 6px;
   cursor: default;
@@ -215,7 +204,7 @@ body {
 
 .cert-row-note[data-tone="warn"] {
   background: rgba(245, 166, 35, 0.12);
-  color: var(--amber);
+  color: var(--color-warning);
 }
 
 /* ---------- Inline row actions ---------- */
@@ -228,19 +217,19 @@ body {
 .cert-action {
   display: inline-flex;
   align-items: center;
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   padding: 6px 12px;
   font-size: 12px;
   font-family: ui-monospace, Menlo, Consolas, monospace;
-  color: var(--text);
+  color: var(--color-text);
   text-decoration: none;
-  background: var(--panel-2);
+  background: var(--color-surface-2);
 }
 
 .cert-action:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
 }
 
 /* A download the server would refuse for this row (a quarantined cert's
@@ -254,25 +243,25 @@ body {
 }
 
 .cert-action-disabled:hover {
-  border-color: var(--border);
-  color: var(--text);
+  border-color: var(--color-border);
+  color: var(--color-text);
 }
 
 /* ---------- Collapse toggle for expired/archived ---------- */
 .cert-toggle {
   align-self: flex-start;
   background: none;
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
-  color: var(--muted);
+  color: var(--color-text-muted);
   padding: 8px 14px;
   font-size: 12px;
   cursor: pointer;
 }
 
 .cert-toggle:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
 }
 
 .cert-list-deemphasized {
@@ -286,8 +275,8 @@ body {
 }
 
 .cert-ca-panel {
-  background: var(--panel);
-  border: 1px solid var(--border);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border);
   border-radius: 10px;
   padding: 16px 18px;
   display: flex;
@@ -303,12 +292,12 @@ body {
 
 .cert-ca-note {
   margin: 0;
-  color: var(--muted);
+  color: var(--color-text-muted);
   font-size: 13px;
 }
 
 .cert-ca-note-warn {
-  color: var(--amber);
+  color: var(--color-warning);
 }
 
 .cert-ca-actions {
@@ -327,7 +316,7 @@ body {
 }
 
 .cert-detail-key {
-  color: var(--muted);
+  color: var(--color-text-muted);
 }
 
 .cert-detail-value {
@@ -340,7 +329,7 @@ body {
 .cert-trust-output {
   margin: 10px 0 0;
   padding: 10px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   background: var(--surface-alt, rgba(127, 127, 127, 0.08));
   font-family: ui-monospace, Menlo, Consolas, monospace;
@@ -364,26 +353,26 @@ body {
 .cert-search {
   flex: 1 1 220px;
   min-width: 160px;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   padding: 8px 12px;
-  color: var(--text);
+  color: var(--color-text);
   font-size: 13px;
 }
 
 .cert-search:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--color-primary);
 }
 
 .cert-sort,
 .cert-sort-dir {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   padding: 8px 10px;
-  color: var(--text);
+  color: var(--color-text);
   font-size: 13px;
 }
 
@@ -392,8 +381,8 @@ body {
 }
 
 .cert-sort-dir:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
 }
 
 .cert-group-toggle {
@@ -401,7 +390,7 @@ body {
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: var(--muted);
+  color: var(--color-text-muted);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -418,12 +407,12 @@ body {
 .cert-tools-summary {
   list-style: none;
   cursor: pointer;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   padding: 8px 12px;
   font-size: 13px;
-  color: var(--text);
+  color: var(--color-text);
 }
 
 .cert-tools-summary::-webkit-details-marker {
@@ -431,8 +420,8 @@ body {
 }
 
 .cert-tools-summary:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
 }
 
 .cert-tools-menu {
@@ -441,8 +430,8 @@ body {
   top: calc(100% + 6px);
   z-index: 20;
   min-width: 220px;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 6px;
   display: flex;
@@ -460,18 +449,18 @@ body {
   border-radius: 6px;
   padding: 8px 10px;
   font-size: 13px;
-  color: var(--text);
+  color: var(--color-text);
   text-decoration: none;
   cursor: pointer;
   font-family: inherit;
 }
 
 .cert-tools-item:hover {
-  background: var(--border);
+  background: var(--color-border);
 }
 
 .cert-tools-disabled {
-  color: var(--muted);
+  color: var(--color-text-muted);
   cursor: default;
   margin: 0;
 }
@@ -489,29 +478,29 @@ body {
   padding: 8px 14px;
   font-size: 13px;
   cursor: pointer;
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-  color: var(--text);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-2);
+  color: var(--color-text);
   text-decoration: none;
   font-family: inherit;
 }
 
 .cert-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
 }
 
 .cert-btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #0b0f1a;
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-bg);
   font-weight: 600;
 }
 
 .cert-btn-primary:hover {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
-  color: #0b0f1a;
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+  color: var(--color-bg);
 }
 
 .cert-btn-secondary {
@@ -519,13 +508,13 @@ body {
 }
 
 .cert-btn-danger {
-  border-color: var(--red);
-  color: var(--red);
+  border-color: var(--color-danger);
+  color: var(--color-danger);
 }
 
 .cert-btn-danger:hover {
   background: rgba(239, 95, 95, 0.12);
-  color: var(--red);
+  color: var(--color-danger);
 }
 
 .cert-btn:disabled,
@@ -535,8 +524,8 @@ body {
 }
 
 .cert-action-btn {
-  border: 1px solid var(--border);
-  background: var(--panel-2);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-2);
   cursor: pointer;
   font-family: ui-monospace, Menlo, Consolas, monospace;
 }
@@ -553,19 +542,19 @@ body {
   text-align: left;
   background: none;
   border: none;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--color-border);
   padding: 6px 2px 8px;
   margin-bottom: 10px;
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: var(--muted);
+  color: var(--color-text-muted);
   cursor: pointer;
   font-family: inherit;
 }
 
 .cert-group-heading:hover {
-  color: var(--accent);
+  color: var(--color-primary);
 }
 
 .cert-group-heading::before {
@@ -598,8 +587,8 @@ body {
 }
 
 .cert-modal {
-  background: var(--panel);
-  border: 1px solid var(--border);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   width: 100%;
   max-width: 560px;
@@ -613,7 +602,7 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 16px 18px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .cert-modal-title {
@@ -625,7 +614,7 @@ body {
 .cert-modal-close {
   background: none;
   border: none;
-  color: var(--muted);
+  color: var(--color-text-muted);
   font-size: 20px;
   line-height: 1;
   cursor: pointer;
@@ -633,7 +622,7 @@ body {
 }
 
 .cert-modal-close:hover {
-  color: var(--text);
+  color: var(--color-text);
 }
 
 .cert-modal-body {
@@ -649,26 +638,26 @@ body {
   justify-content: flex-end;
   gap: 8px;
   padding: 14px 18px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--color-border);
 }
 
 .cert-modal-note {
   margin: 0;
-  color: var(--muted);
+  color: var(--color-text-muted);
   font-size: 13px;
 }
 
 .cert-modal-note-warn {
-  color: var(--amber);
+  color: var(--color-warning);
 }
 
 .cert-modal-error {
   margin: 0;
   padding: 10px 12px;
-  border: 1px solid var(--red);
+  border: 1px solid var(--color-danger);
   border-radius: 8px;
   background: rgba(239, 95, 95, 0.1);
-  color: var(--red);
+  color: var(--color-danger);
   font-size: 13px;
 }
 
@@ -687,33 +676,33 @@ body {
 
 .cert-field-label {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .cert-field-input {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   padding: 8px 10px;
-  color: var(--text);
+  color: var(--color-text);
   font-size: 14px;
   font-family: ui-monospace, Menlo, Consolas, monospace;
 }
 
 .cert-field-input:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--color-primary);
 }
 
 .cert-field-error {
   margin: 0;
   padding: 8px 10px;
-  border: 1px solid var(--red);
+  border: 1px solid var(--color-danger);
   border-radius: 6px;
   background: rgba(239, 95, 95, 0.1);
-  color: var(--red);
+  color: var(--color-danger);
   font-size: 12px;
 }
 
@@ -734,10 +723,10 @@ body {
 }
 
 .cert-san-remove {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
-  color: var(--muted);
+  color: var(--color-text-muted);
   width: 32px;
   cursor: pointer;
   font-size: 16px;
@@ -745,23 +734,23 @@ body {
 }
 
 .cert-san-remove:hover {
-  border-color: var(--red);
-  color: var(--red);
+  border-color: var(--color-danger);
+  color: var(--color-danger);
 }
 
 .cert-san-add {
   align-self: flex-start;
   background: none;
-  border: 1px dashed var(--border);
+  border: 1px dashed var(--color-border);
   border-radius: 6px;
   padding: 6px 12px;
-  color: var(--accent);
+  color: var(--color-primary);
   font-size: 12px;
   cursor: pointer;
 }
 
 .cert-san-add:hover {
-  border-color: var(--accent);
+  border-color: var(--color-primary);
 }
 
 /* ---------- Detail modal ---------- */
@@ -778,7 +767,7 @@ body {
 
 .cert-detail-sans-heading {
   margin: 0 0 4px;
-  color: var(--muted);
+  color: var(--color-text-muted);
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -786,7 +775,7 @@ body {
 
 .cert-detail-sans-empty {
   margin: 0;
-  color: var(--muted);
+  color: var(--color-text-muted);
 }
 
 .cert-detail-sans-list {
@@ -802,7 +791,7 @@ body {
 }
 
 .cert-delete-confirm {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--color-border);
   padding-top: 12px;
 }
 
@@ -811,14 +800,14 @@ body {
   flex-direction: column;
   gap: 6px;
   text-transform: none;
-  color: var(--text);
+  color: var(--color-text);
   font-size: 13px;
 }
 
 /* ---------- Import wizard ---------- */
 .cert-wizard-step {
   margin: 0;
-  color: var(--muted);
+  color: var(--color-text-muted);
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -845,8 +834,8 @@ body {
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   padding: 8px 10px;
   font-size: 12px;
@@ -862,15 +851,15 @@ body {
   text-transform: uppercase;
   font-size: 11px;
   letter-spacing: 0.04em;
-  color: var(--muted);
+  color: var(--color-text-muted);
 }
 
 .cert-wizard-item[data-status="importable"] .cert-wizard-item-status {
-  color: var(--green);
+  color: var(--color-success);
 }
 
 .cert-wizard-item[data-status="expired"] .cert-wizard-item-status {
-  color: var(--amber);
+  color: var(--color-warning);
 }
 
 .cert-wizard-item[data-status="quarantined"] .cert-wizard-item-status {
@@ -878,29 +867,29 @@ body {
 }
 
 .cert-wizard-item[data-status="skipped"] .cert-wizard-item-status {
-  color: var(--muted);
+  color: var(--color-text-muted);
 }
 
 .cert-wizard-item-reason {
   flex-basis: 100%;
   margin: 0;
-  color: var(--muted);
+  color: var(--color-text-muted);
 }
 
 .cert-wizard-item-empty {
-  color: var(--muted);
+  color: var(--color-text-muted);
   font-size: 13px;
   list-style: none;
 }
 
 .cert-wizard-stray {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--color-border);
   padding-top: 10px;
 }
 
 .cert-wizard-stray-heading {
   margin: 0 0 6px;
-  color: var(--amber);
+  color: var(--color-warning);
   font-size: 12px;
 }
 
@@ -909,7 +898,7 @@ body {
   padding-left: 18px;
   font-family: ui-monospace, Menlo, Consolas, monospace;
   font-size: 12px;
-  color: var(--muted);
+  color: var(--color-text-muted);
 }
 
 /* ---------- Toasts ---------- */
@@ -928,23 +917,23 @@ body {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 10px 12px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
 
 .cert-toast[data-tone="success"] {
-  border-color: var(--green);
+  border-color: var(--color-success);
 }
 
 .cert-toast[data-tone="error"] {
-  border-color: var(--red);
+  border-color: var(--color-danger);
 }
 
 .cert-toast[data-tone="notice"] {
-  border-color: var(--amber);
+  border-color: var(--color-warning);
 }
 
 .cert-toast-text {
@@ -956,7 +945,7 @@ body {
 .cert-toast-close {
   background: none;
   border: none;
-  color: var(--muted);
+  color: var(--color-text-muted);
   font-size: 16px;
   line-height: 1;
   cursor: pointer;
@@ -964,7 +953,7 @@ body {
 }
 
 .cert-toast-close:hover {
-  color: var(--text);
+  color: var(--color-text);
 }
 
 /* ---------- Narrow viewports ---------- */

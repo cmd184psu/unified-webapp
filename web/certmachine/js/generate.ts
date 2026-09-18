@@ -13,7 +13,7 @@
 
 import { generateCert } from "./api";
 import type { CertMutationResponse } from "./types";
-import { showToast } from "./toast";
+import { showToast } from "@shared";
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,

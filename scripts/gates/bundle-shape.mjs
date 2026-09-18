@@ -113,8 +113,8 @@ for (const d of inputs) {
     const text = fs.readFileSync(artifact, "utf8");
     inspected++;
 
-    // A9.1 — positive.
-    if (!TOP_LEVEL_IMPORT.test(text)) {
+    // A9.1 — positive (JS bundles only; CSS artifacts cannot contain imports).
+    if (!artifact.endsWith(".css") && !TOP_LEVEL_IMPORT.test(text)) {
       failures.push(`${d.name}: ${artifact} has no top-level import from "${BARREL}" (A9.1)`);
     }
 
