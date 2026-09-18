@@ -485,11 +485,9 @@ const themes = new ThemeManager({
   storageKey: () => `obsidianoid-theme-${state.activeVault}`,
   serverDefault: () => state.vaults[state.activeVault]?.theme,
 });
-// The trigger is the topbar button this module already ships, adopted in place
-// so it keeps its glyph and its position and gains only the a11y wiring. It
-// lives OUTSIDE #topbar-actions, which app.css hides entirely in threads mode,
-// so the picker becomes reachable from that view for the first time. The
-// picker is the drawer's only content, so there are no other items.
+// The trigger is the topbar button adopted in place (keeps its glyph, gains
+// a11y wiring). It is a direct child of #topbar, outside #topbar-actions,
+// so it stays visible when thread mode hides #topbar-actions (D-5).
 new HamburgerMenu({
   title: 'Settings',
   items: [],
