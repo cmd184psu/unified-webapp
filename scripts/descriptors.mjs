@@ -176,6 +176,17 @@ export const descriptors = [
     target: "es2020",
     sharedConsumer: true,
   },
+  {
+    name: "timetracker",
+    entry: ["web/timetracker/js/main.ts"],
+    mode: "bundle",
+    out: "web/timetracker/js/bundle.js",
+    bundle: true,
+    format: "esm",
+    target: "es2020",
+    emitsCss: true,
+    sharedConsumer: true,
+  },
 ];
 
 // How many files the descriptors above emit. Defined ONCE, here: the
@@ -183,4 +194,4 @@ export const descriptors = [
 // failure rather than a silent pass (A7.3). The value moves during the
 // sequence — 12 through C3, 14 after C4, 15 after C5 — and each move is an
 // edit to this one line.
-export const EXPECTED_ARTIFACT_COUNT = 17;
+export const EXPECTED_ARTIFACT_COUNT = 18;

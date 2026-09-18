@@ -12,6 +12,6 @@
       "@shared/*": ["./web/shared/ts/*"]
     }
   },
-  "include": ["web/obsidianoid/js/*.ts", "web/slideshow/js/*.ts", "web/multissh/js/*.ts", "web/certmachine/js/*.ts", "web/taskmaster/js/**/*.ts", "web/smbedit/src/**/*.ts", "web/smbedit/src/**/*.tsx", "web/issuetracker/src/**/*.ts", "web/issuetracker/src/**/*.tsx", "web/shared/**/*.ts", "web/sampler/js/*.ts", "web/todo/js/*.ts", "web/admin/js/**/*.ts"],
+  "include": ["web/obsidianoid/js/*.ts", "web/slideshow/js/*.ts", "web/multissh/js/*.ts", "web/certmachine/js/*.ts", "web/taskmaster/js/**/*.ts", "web/smbedit/src/**/*.ts", "web/smbedit/src/**/*.tsx", "web/issuetracker/src/**/*.ts", "web/issuetracker/src/**/*.tsx", "web/shared/**/*.ts", "web/sampler/js/*.ts", "web/todo/js/*.ts", "web/admin/js/**/*.ts", "web/timetracker/js/**/*.ts"],
   "exclude": ["web/shared/dist"]
 }

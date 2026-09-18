@@ -1,6 +1,25 @@
-import TimeSelector from './TimeSelector.js';  // Changed to default import
+import { ThemeManager, HamburgerMenu } from '@shared';
+import type { MenuItem } from '@shared';
+import TimeSelector from './time-selector.js';
+import './main.css';
+
+declare const marked: { parse(s: string): string };
+
+const SVG_EDIT = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>';
+const SVG_DOWNLOAD = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+const SVG_COPY = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+
+const themes = new ThemeManager({ module: 'timetracker', default: 'dark' });
+themes.apply();
+
+function buildHamburger(): void {
+  const items: MenuItem[] = [];
+  new HamburgerMenu({ title: 'TimeTracker', items, themePicker: true, themes });
+}
 
 document.addEventListener('DOMContentLoaded', function() {
+    buildHamburger();
+
     const container = document.createElement('div');
     container.className = 'container';
 
@@ -21,8 +40,8 @@ document.addEventListener('DOMContentLoaded', function() {
     content.appendChild(rightPanel);
 
     const timeSelectorContainer = document.createElement('div');
-    timeSelectorContainer.className = 'time-selector-container hidden';  // Start hidden
-    timeSelectorContainer.id = 'timeSelectorContainer';  // Keep ID for selector, but use class for styling
+    timeSelectorContainer.className = 'time-selector-container hidden';
+    timeSelectorContainer.id = 'timeSelectorContainer';
     content.appendChild(timeSelectorContainer);
 
     document.body.appendChild(container);
@@ -61,9 +80,6 @@ document.addEventListener('DOMContentLoaded', function() {
     addButton.style.cursor = 'pointer';
     leftPanel.appendChild(addButton);
 
-    // Adding a customer asks for the name first: the server rejects blank
-    // names, and creating an empty record up front (the reference behavior)
-    // left an unnamed row in the list that then had to be edited into shape.
     const addModal = document.createElement('div');
     addModal.className = 'modal hidden';
     addModal.innerHTML = `
@@ -78,14 +94,14 @@ document.addEventListener('DOMContentLoaded', function() {
     `;
 
     addButton.onclick = function() {
-        const nameInput = addModal.querySelector('#newCustomerNameInput');
+        const nameInput = addModal.querySelector('#newCustomerNameInput') as HTMLInputElement;
         nameInput.value = '';
         addModal.classList.remove('hidden');
         nameInput.focus();
     };
 
     function submitNewCustomer() {
-        const nameInput = addModal.querySelector('#newCustomerNameInput');
+        const nameInput = addModal.querySelector('#newCustomerNameInput') as HTMLInputElement;
         const name = nameInput.value.trim();
         if (!name) {
             nameInput.focus();
@@ -93,8 +109,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         const requestData = {
-            // The server appends regardless of index for newCustomer; any
-            // value other than -1 (the author path) works.
             index: 0,
             field: 'newCustomer',
             value: {
@@ -123,7 +137,6 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .then(updatedData => {
             console.log('Customer added:', updatedData);
-            // Jump straight to the new customer's form after the reload.
             sessionStorage.setItem('tt-select-customer', name);
             location.reload();
         })
@@ -132,12 +145,12 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    addModal.querySelector('#confirmAddBtn').onclick = submitNewCustomer;
-    addModal.querySelector('#cancelAddBtn').onclick = function() {
+    (addModal.querySelector('#confirmAddBtn') as HTMLElement).onclick = submitNewCustomer;
+    (addModal.querySelector('#cancelAddBtn') as HTMLElement).onclick = function() {
         addModal.classList.add('hidden');
     };
-    addModal.querySelector('#newCustomerNameInput').addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') submitNewCustomer();
+    (addModal.querySelector('#newCustomerNameInput') as HTMLElement).addEventListener('keydown', function(e) {
+        if ((e as KeyboardEvent).key === 'Enter') submitNewCustomer();
     });
 
     document.body.appendChild(addModal);
@@ -145,7 +158,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     document.body.appendChild(footer);
 
-    function showMessage(message) {
+    function showMessage(message: string) {
         messageBar.textContent = message;
         messageBar.classList.remove('hidden');
         setTimeout(() => {
@@ -153,7 +166,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 10000);
     }
 
-    let tooltips = {};
+    let tooltips: Record<string, string> = {};
 
     fetch('/tooltips.json')
         .then(response => response.json())
@@ -164,33 +177,48 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function initializeTooltips() {
         document.querySelectorAll('[data-tooltip]').forEach(element => {
-            const tooltipText = tooltips[element.getAttribute('data-tooltip')];
+            const tooltipText = tooltips[element.getAttribute('data-tooltip')!];
             if (tooltipText) {
                 element.setAttribute('title', tooltipText);
             }
         });
     }
 
-    // Initialize TimeSelector once, outside of showCustomerDetails
-    let timeSelector = null;
-    
+    let timeSelector: TimeSelector | null = null;
+
+    interface CustomerData {
+        customerName: string;
+        slackChannel: string;
+        slackChannelId: string;
+        workLoadType: string;
+        cmsUrl: string;
+        supportBucket: string;
+        jira: string;
+    }
+
+    interface AppData {
+        projectName: string;
+        author: string;
+        customers: CustomerData[];
+    }
+
     fetch('/data')
         .then(response => response.json())
-        .then(data => {
+        .then((data: AppData) => {
             header.innerHTML = `
                 <h1>${data.projectName}</h1>
                 <div class="form-group">
                     <label data-tooltip="author">Author:</label>
                     <input type="text" id="authorInput" value="${data.author}" readonly data-tooltip="author">
-                    <i class="fas fa-edit edit-btn" data-target="author"></i>
+                    <span class="edit-btn" data-target="author">${SVG_EDIT}</span>
                     <button class="submit-btn hidden" data-target="author">Submit</button>
                     <button id="exportBtn" class="export-btn" data-tooltip="exportData">
-                        <i class="fas fa-download"></i>
+                        ${SVG_DOWNLOAD}
                     </button>
                 </div>
             `;
 
-            document.getElementById('exportBtn').addEventListener('click', function() {
+            document.getElementById('exportBtn')!.addEventListener('click', function() {
                 window.location.href = '/export-csv';
             });
 
@@ -211,19 +239,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 customerList.appendChild(li);
             });
 
-            // Hooks the active customer view installs so the shared time
-            // selector and page-level events can reach its report state:
-            // refreshReport re-renders the preview, notifyTimeChanged queues
-            // an auto-save, flushActiveReport saves pending edits immediately.
-            let refreshReport = null;
-            let notifyTimeChanged = null;
-            let flushActiveReport = null;
+            let refreshReport: (() => void) | null = null;
+            let notifyTimeChanged: (() => void) | null = null;
+            let flushActiveReport: (() => Promise<void>) | null = null;
 
             window.addEventListener('beforeunload', () => {
                 if (flushActiveReport) flushActiveReport();
             });
 
-            // Initialize TimeSelector once after data is loaded
             if (!timeSelector) {
                 timeSelector = new TimeSelector('timeSelectorContainer', {
                     onChange: () => {
@@ -231,25 +254,21 @@ document.addEventListener('DOMContentLoaded', function() {
                         if (notifyTimeChanged) notifyTimeChanged();
                     }
                 });
-                window.timeSelector = timeSelector;
+                (window as unknown as Record<string, unknown>).timeSelector = timeSelector;
             }
 
-            // After a reload triggered by add-customer or rename, jump
-            // straight to that customer's form.
             const pendingSelect = sessionStorage.getItem('tt-select-customer');
             if (pendingSelect) {
                 sessionStorage.removeItem('tt-select-customer');
                 const idx = data.customers.findIndex(c => c.customerName === pendingSelect);
                 if (idx !== -1) {
-                    const item = customerList.children[idx];
+                    const item = customerList.children[idx] as HTMLElement;
                     item.click();
                     item.scrollIntoView({ block: 'nearest' });
                 }
             }
 
-            function showCustomerDetails(customer, index) {
-                // Save the outgoing customer's pending report edits, then
-                // detach the hooks so nothing fires mid-rebuild.
+            function showCustomerDetails(customer: CustomerData, index: number) {
                 if (flushActiveReport) flushActiveReport();
                 refreshReport = null;
                 notifyTimeChanged = null;
@@ -263,13 +282,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     <div class="form-group">
                         <label data-tooltip="customerName">Customer Name:</label>
                         <input type="text" id="customerNameInput" value="${customer.customerName}" readonly data-tooltip="customerName">
-                        <i class="fas fa-edit edit-btn" data-target="customerName"></i>
+                        <span class="edit-btn" data-target="customerName">${SVG_EDIT}</span>
                         <button class="submit-btn hidden" data-target="customerName" data-index="${index}">Submit</button>
                     </div>
                     <div class="form-group">
                         <label data-tooltip="slackChannel">Slack Channel:</label>
                         <a href="slack://channel?team=T12DX4MJR&id=${customer.slackChannelId}" id="slackChannel" data-tooltip="slackChannel">${customer.slackChannel}</a>
-                        <i class="fas fa-edit edit-btn" data-target="slackChannel"></i>
+                        <span class="edit-btn" data-target="slackChannel">${SVG_EDIT}</span>
                         <input type="text" id="slackChannelInput" class="hidden" value="${customer.slackChannel}" data-tooltip="slackChannel">
                         <button class="submit-btn hidden" data-target="slackChannel" data-index="${index}">Submit</button>
                     </div>
@@ -284,20 +303,20 @@ document.addEventListener('DOMContentLoaded', function() {
                     <div class="form-group">
                         <label data-tooltip="cmsUrl">CMS URL:</label>
                         <a href="${customer.cmsUrl}" id="cmsUrl" data-tooltip="cmsUrl">${customer.cmsUrl}</a>
-                        <i class="fas fa-edit edit-btn" data-target="cmsUrl"></i>
+                        <span class="edit-btn" data-target="cmsUrl">${SVG_EDIT}</span>
                         <input type="text" id="cmsUrlInput" class="hidden" value="${customer.cmsUrl}" data-tooltip="cmsUrl">
                         <button class="submit-btn hidden" data-target="cmsUrl" data-index="${index}">Submit</button>
                     </div>
                     <div class="form-group">
                         <label data-tooltip="supportBucket">Support Bucket:</label>
                         <input type="text" id="supportBucketInput" value="${customer.supportBucket}" readonly data-tooltip="supportBucket">
-                        <i class="fas fa-edit edit-btn" data-target="supportBucket"></i>
+                        <span class="edit-btn" data-target="supportBucket">${SVG_EDIT}</span>
                         <button class="submit-btn hidden" data-target="supportBucket" data-index="${index}">Submit</button>
                     </div>
                     <div class="form-group">
                         <label data-tooltip="jira">JIRA #:</label>
                         <a href="https://cloudian.atlassian.net/browse/PS-${customer.jira}" id="jiraUrl" data-tooltip="jira">${customer.jira}</a>
-                        <i class="fas fa-edit edit-btn" data-target="jira"></i>
+                        <span class="edit-btn" data-target="jira">${SVG_EDIT}</span>
                         <input type="text" id="jiraInput" class="hidden" value="${customer.jira}" data-tooltip="jira">
                         <button class="submit-btn hidden" data-target="jira" data-index="${index}">Submit</button>
                     </div>
@@ -316,28 +335,25 @@ document.addEventListener('DOMContentLoaded', function() {
                         <div class="report-preview">
                             <label>Processed Report:</label>
                             <div id="processedReport"></div>
-                            <button id="copyReportBtn" data-tooltip="copyReportBtn"><i class="fas fa-copy"></i></button>
+                            <button id="copyReportBtn" data-tooltip="copyReportBtn">${SVG_COPY}</button>
                         </div>
                     </div>
                 `;
 
                 rightPanel.appendChild(deleteButton);
 
-                const reportInput = document.getElementById('reportInput');
-                const processedReport = document.getElementById('processedReport');
-                const copyReportBtn = document.getElementById('copyReportBtn');
-                const reportDate = document.getElementById('reportDate');
-                const prevReportBtn = document.getElementById('prevReportBtn');
-                const nextReportBtn = document.getElementById('nextReportBtn');
-                const todayReportBtn = document.getElementById('todayReportBtn');
+                const reportInput = document.getElementById('reportInput') as HTMLTextAreaElement;
+                const processedReport = document.getElementById('processedReport')!;
+                const copyReportBtn = document.getElementById('copyReportBtn')!;
+                const reportDate = document.getElementById('reportDate') as HTMLInputElement;
+                const prevReportBtn = document.getElementById('prevReportBtn') as HTMLButtonElement;
+                const nextReportBtn = document.getElementById('nextReportBtn') as HTMLButtonElement;
+                const todayReportBtn = document.getElementById('todayReportBtn')!;
 
-                // Reports persist server-side per (customer, date). Edits
-                // auto-save after a short pause; the arrows rewind through
-                // the dates that actually have a stored report.
                 let currentDate = localToday();
                 let prevDate = '';
                 let nextDate = '';
-                let saveTimer = null;
+                let saveTimer: ReturnType<typeof setTimeout> | null = null;
                 let dirty = false;
                 let applyingRemote = false;
 
@@ -346,7 +362,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
                 }
 
-                function updateNavState(state) {
+                function updateNavState(state: { prevDate?: string; nextDate?: string }) {
                     prevDate = state.prevDate || '';
                     nextDate = state.nextDate || '';
                     prevReportBtn.disabled = !prevDate;
@@ -356,25 +372,24 @@ document.addEventListener('DOMContentLoaded', function() {
                 function scheduleSave() {
                     if (applyingRemote) return;
                     dirty = true;
-                    clearTimeout(saveTimer);
+                    if (saveTimer) clearTimeout(saveTimer);
                     saveTimer = setTimeout(saveReportNow, 600);
                 }
 
-                function saveReportNow() {
-                    clearTimeout(saveTimer);
+                function saveReportNow(): Promise<void> {
+                    if (saveTimer) clearTimeout(saveTimer);
                     saveTimer = null;
                     if (!dirty) return Promise.resolve();
                     dirty = false;
                     return fetch(`/report`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        // keepalive lets the flush on page unload complete
                         keepalive: true,
                         body: JSON.stringify({
                             customerName: customer.customerName,
                             date: currentDate,
                             body: reportInput.value,
-                            timeBlocks: timeSelector.getSelectedTimeBlocks()
+                            timeBlocks: timeSelector!.getSelectedTimeBlocks()
                         })
                     })
                     .then(response => {
@@ -385,14 +400,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     })
                     .then(state => updateNavState(state))
                     .catch(error => {
-                        dirty = true;  // retry on the next edit or flush
+                        dirty = true;
                         console.error('Error saving report:', error);
                     });
                 }
 
-                function loadReport(date) {
-                    // Flush pending edits for the current date before the
-                    // view swings to another one.
+                function loadReport(date: string) {
                     saveReportNow()
                         .then(() => fetch(`/report?customer=${encodeURIComponent(customer.customerName)}&date=${encodeURIComponent(date)}`))
                         .then(response => {
@@ -406,7 +419,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             currentDate = state.date;
                             reportDate.value = state.date;
                             reportInput.value = state.body || '';
-                            timeSelector.setSelection(state.timeBlocks || []);
+                            timeSelector!.setSelection(state.timeBlocks || []);
                             updateNavState(state);
                             processReport();
                             applyingRemote = false;
@@ -434,21 +447,21 @@ document.addEventListener('DOMContentLoaded', function() {
                 loadReport(currentDate);
 
                 document.querySelectorAll('.edit-btn').forEach(btn => {
-                    btn.addEventListener('click', function() {
-                        const target = this.getAttribute('data-target');
-                        const input = document.getElementById(`${target}Input`);
+                    btn.addEventListener('click', function(this: HTMLElement) {
+                        const target = this.getAttribute('data-target')!;
+                        const input = document.getElementById(`${target}Input`) as HTMLInputElement;
                         input.removeAttribute('readonly');
                         input.classList.remove('hidden');
-                        document.querySelector(`button[data-target="${target}"]`).classList.remove('hidden');
+                        document.querySelector(`button[data-target="${target}"]`)!.classList.remove('hidden');
                     });
                 });
 
                 document.querySelectorAll('.submit-btn').forEach(btn => {
-                    btn.addEventListener('click', function() {
-                        const target = this.getAttribute('data-target');
-                        const input = document.getElementById(`${target}Input`);
+                    btn.addEventListener('click', function(this: HTMLElement) {
+                        const target = this.getAttribute('data-target')!;
+                        const input = document.getElementById(`${target}Input`) as HTMLInputElement;
                         const link = document.getElementById(target);
-                        const index = parseInt(this.getAttribute('data-index'), 10);
+                        const index = parseInt(this.getAttribute('data-index')!, 10);
                         const updatedValue = input.value;
 
                         const requestData = {
@@ -459,6 +472,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                         console.log('Sending request data:', requestData);
 
+                        const self = this;
                         const sendUpdate = () => fetch(`/update`, {
                             method: 'POST',
                             headers: {
@@ -472,56 +486,47 @@ document.addEventListener('DOMContentLoaded', function() {
                             }
                             return response.json();
                         })
-                        .then(updatedCustomer => {
-                            console.log('Received updated customer:', updatedCustomer);
+                        .then(_updatedCustomer => {
+                            console.log('Received updated customer:', _updatedCustomer);
                             console.log('Target:', target);
                             if (target === 'jira') {
                                 console.log("Updating JIRA link");
                                 const existingLink = document.getElementById('jiraUrl');
                                 if (existingLink) existingLink.remove();
-                                
+
                                 const jiraLink = document.createElement('a');
                                 jiraLink.id = 'jiraUrl';
-                                // The /update response is the full Data envelope, not a
-                                // customer, so render the value that was just submitted.
                                 jiraLink.href = `https://cloudian.atlassian.net/browse/PS-${input.value}`;
                                 jiraLink.textContent = input.value;
                                 jiraLink.setAttribute('data-tooltip', 'jira');
-                                
-                                const parentDiv = input.parentNode;
-                                const label = parentDiv.querySelector('label');
+
+                                const parentDiv = input.parentNode as HTMLElement;
+                                const label = parentDiv.querySelector('label')!;
                                 parentDiv.insertBefore(jiraLink, label.nextSibling);
-                                
+
                                 input.classList.add('hidden');
                             } else if (target === 'customerName') {
-                                // Renaming can move every customer's sorted
-                                // position, so reload to resync the list and
-                                // all data-index attributes — then jump back
-                                // to this customer under its new name.
                                 sessionStorage.setItem('tt-select-customer', input.value.trim());
                                 location.reload();
                             } else if (target === 'supportBucket') {
-                                input.setAttribute('readonly', true);
+                                input.setAttribute('readonly', 'true');
                                 input.classList.remove('hidden');
                             } else {
                                 if (link) {
                                     link.textContent = input.value;
                                     if (target === 'cmsUrl') {
-                                        link.href = input.value;
+                                        (link as HTMLAnchorElement).href = input.value;
                                     }
                                     input.classList.add('hidden');
                                 }
                             }
-                            this.classList.add('hidden');
+                            self.classList.add('hidden');
                         })
                         .catch(error => {
                             console.error('Error updating customer:', error);
                         });
 
                         if (target === 'customerName' && flushActiveReport) {
-                            // Save pending report edits under the old name
-                            // first so the server-side rename migrates them
-                            // along with the rest of the report history.
                             flushActiveReport().then(sendUpdate);
                         } else {
                             sendUpdate();
@@ -529,8 +534,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     });
                 });
 
-                document.getElementById('workLoadTypeSelect').addEventListener('change', function() {
-                    const index = parseInt(this.getAttribute('data-index'), 10);
+                document.getElementById('workLoadTypeSelect')!.addEventListener('change', function(this: HTMLSelectElement) {
+                    const index = parseInt(this.getAttribute('data-index')!, 10);
                     const updatedValue = this.value;
 
                     const requestData = {
@@ -571,10 +576,10 @@ document.addEventListener('DOMContentLoaded', function() {
                         day: 'numeric',
                         year: 'numeric'
                     });
-                    const totalTime = document.getElementById('totalTimeInput')?.value || '0h 0m';
-                    
+                    const totalTime = (document.getElementById('totalTimeInput') as HTMLInputElement)?.value || '0h 0m';
+
                     const reportContent = report.trim() ? marked.parse(report.trim()) : '<p></p>';
-                    
+
                     const processed = `
                         <div style="text-align: center; font-weight: bold; text-decoration: underline;">Date: ${formattedDate}</div>
                         <div>Customer: ${customer.customerName}</div>
@@ -583,7 +588,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         <div>Time related to update ${formattedDate}</div>
                         <div>Hours worked: ${totalTime}</div>
                     `;
-                    
+
                     if (processedReport) {
                         processedReport.innerHTML = processed;
                     }
@@ -597,8 +602,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         day: 'numeric',
                         year: 'numeric'
                     });
-                    const totalTime = document.getElementById('totalTimeInput')?.value || '0h 0m';
-                    
+                    const totalTime = (document.getElementById('totalTimeInput') as HTMLInputElement)?.value || '0h 0m';
+
                     const markdownReport = `### Date: ${formattedDate}
 
 Customer: ${customer.customerName}
@@ -618,48 +623,20 @@ Hours worked: ${totalTime}`;
                     showMessage('Report copied.');
                 }
 
-                function updateCustomerData(index, field, value) {
-                    const requestData = {
-                        index: index,
-                        field: field,
-                        value: value
-                    };
-
-                    fetch(`/update`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify(requestData)
-                    })
-                    .then(response => {
-                        if (!response.ok) {
-                            return response.text().then(text => { throw new Error(text) });
-                        }
-                        return response.json();
-                    })
-                    .then(updatedCustomer => {
-                        console.log('Updated customer data:', updatedCustomer);
-                    })
-                    .catch(error => {
-                        console.error('Error updating customer data:', error);
-                    });
-                }
-
                 deleteButton.onclick = function() {
                     modal.classList.remove('hidden');
                 };
 
-                document.getElementById('confirmDeleteBtn').onclick = function() {
+                document.getElementById('confirmDeleteBtn')!.onclick = function() {
                     deleteCustomer(index);
                     modal.classList.add('hidden');
                 };
 
-                document.getElementById('cancelDeleteBtn').onclick = function() {
+                document.getElementById('cancelDeleteBtn')!.onclick = function() {
                     modal.classList.add('hidden');
                 };
 
-                function deleteCustomer(index) {
+                function deleteCustomer(index: number) {
                     const requestData = {
                         index: index
                     };
@@ -690,15 +667,15 @@ Hours worked: ${totalTime}`;
                 initializeTooltips();
             }
 
-            document.querySelector('.edit-btn[data-target="author"]').addEventListener('click', function() {
-                const input = document.getElementById('authorInput');
+            document.querySelector('.edit-btn[data-target="author"]')!.addEventListener('click', function(this: HTMLElement) {
+                const input = document.getElementById('authorInput') as HTMLInputElement;
                 input.removeAttribute('readonly');
                 input.classList.remove('hidden');
-                document.querySelector('button[data-target="author"]').classList.remove('hidden');
+                document.querySelector('button[data-target="author"]')!.classList.remove('hidden');
             });
 
-            document.querySelector('button[data-target="author"]').addEventListener('click', function() {
-                const input = document.getElementById('authorInput');
+            document.querySelector('button[data-target="author"]')!.addEventListener('click', function(this: HTMLElement) {
+                const input = document.getElementById('authorInput') as HTMLInputElement;
                 const updatedValue = input.value;
 
                 const requestData = {
@@ -709,6 +686,7 @@ Hours worked: ${totalTime}`;
 
                 console.log('Sending request data:', requestData);
 
+                const self = this;
                 fetch(`/update`, {
                     method: 'POST',
                     headers: {
@@ -722,11 +700,11 @@ Hours worked: ${totalTime}`;
                     }
                     return response.json();
                 })
-                .then(updatedData => {
-                    console.log('Received updated data:', updatedData);
-                    input.setAttribute('readonly', true);
+                .then(_updatedData => {
+                    console.log('Received updated data:', _updatedData);
+                    input.setAttribute('readonly', 'true');
                     input.classList.remove('hidden');
-                    this.classList.add('hidden');
+                    self.classList.add('hidden');
                     showMessage('Author updated');
                 })
                 .catch(error => {

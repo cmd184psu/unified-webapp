@@ -1,41 +1,55 @@
-// TimeSelector.js
-export default class TimeSelector {
-  /**
-   * container: element or selector string (e.g. 'timeSelectorContainer' or '#timeSelectorContainer')
-   * options: { onChange: fn }
-   */
-  constructor(container, options = {}) {
-    this._rawContainer = container; // keep original param
-    this.onChange = options.onChange || null;
-    this.selectedBlocks = [];
-    this.isDragging = false;
+import './time-selector.css';
 
-    // If user passed an Element directly, use it and init immediately.
+interface TimeSelectorOptions {
+  onChange?: (info: { count: number; totalMinutes: number; slots: TimeSlot[] }) => void;
+}
+
+interface TimeSlot {
+  hour: number;
+  quarter: number;
+}
+
+const SVG_COPY = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+
+export default class TimeSelector {
+  private _rawContainer: string | Element;
+  private onChange: TimeSelectorOptions['onChange'];
+  private selectedBlocks: HTMLElement[] = [];
+  private isDragging = false;
+  private selector?: string;
+  private container?: Element;
+  private table?: HTMLElement;
+  private timeBlocks: HTMLElement[] = [];
+  private totalTimeInput?: HTMLInputElement;
+  private clearBtn?: HTMLElement;
+  private copyBtn?: HTMLElement;
+  private _domReadyHandler?: () => void;
+
+  constructor(container: string | Element, options: TimeSelectorOptions = {}) {
+    this._rawContainer = container;
+    this.onChange = options.onChange || undefined;
+
     if (container instanceof Element) {
       this.container = container;
       this._init();
       return;
     }
 
-    // If user passed an id without '#', normalize to an id selector
     if (typeof container === 'string') {
-      // Accept 'timeSelectorContainer' or '#timeSelectorContainer'
       this.selector = container.startsWith('#') ? container : `#${container}`;
-      this.container = document.querySelector(this.selector);
+      this.container = document.querySelector(this.selector) ?? undefined;
 
       if (this.container) {
         this._init();
         return;
       }
 
-      // If container isn't present yet, wait for DOM ready and try init then.
       this._domReadyHandler = () => {
-        this.container = document.querySelector(this.selector);
+        this.container = document.querySelector(this.selector!) ?? undefined;
         if (this.container) {
           this._init();
-          document.removeEventListener('DOMContentLoaded', this._domReadyHandler);
+          document.removeEventListener('DOMContentLoaded', this._domReadyHandler!);
         } else {
-          // still not found — log helpful error
           console.error(`TimeSelector: container ${this.selector} not found after DOMContentLoaded.`);
         }
       };
@@ -43,33 +57,30 @@ export default class TimeSelector {
       return;
     }
 
-    // Invalid container param
     console.error('TimeSelector: invalid container (must be DOM element or selector string).');
   }
 
-  // Public: call init manually if you constructed early and want to control timing.
-  initManual() {
+  initManual(): void {
     if (!this.container && typeof this.selector === 'string') {
-      this.container = document.querySelector(this.selector);
+      this.container = document.querySelector(this.selector) ?? undefined;
     }
     if (this.container) this._init();
     else console.error('TimeSelector: initManual failed — container not found.');
   }
 
-  _init() {
+  private _init(): void {
     if (!this.container) {
       console.error('TimeSelector: container not set in _init().');
       return;
     }
     this._render();
     this._attachEvents();
-    // initial total update
     this._updateTotalTime();
   }
 
-  _render() {
+  private _render(): void {
     const html = this._generateTimeTable();
-    this.container.innerHTML = `
+    this.container!.innerHTML = `
       <table id="timeSelectorTable" class="time-selector-table" aria-label="time selector">
         ${html}
       </table>
@@ -80,25 +91,23 @@ export default class TimeSelector {
       <div class="time-buttons">
         <button type="button" id="clearTimeSelectionBtn">Clear</button>
         <button type="button" id="copyTimeSelectionBtn" title="Copy total time">
-          <i class="fas fa-copy" aria-hidden="true"></i>
+          ${SVG_COPY}
         </button>
       </div>
     `;
 
-    this.table = this.container.querySelector('#timeSelectorTable');
-    this.timeBlocks = Array.from(this.container.querySelectorAll('.time-block'));
-    this.totalTimeInput = this.container.querySelector('#totalTimeInput');
-    this.clearBtn = this.container.querySelector('#clearTimeSelectionBtn');
-    this.copyBtn = this.container.querySelector('#copyTimeSelectionBtn');
+    this.table = this.container!.querySelector('#timeSelectorTable') as HTMLElement;
+    this.timeBlocks = Array.from(this.container!.querySelectorAll('.time-block'));
+    this.totalTimeInput = this.container!.querySelector('#totalTimeInput') as HTMLInputElement;
+    this.clearBtn = this.container!.querySelector('#clearTimeSelectionBtn') as HTMLElement;
+    this.copyBtn = this.container!.querySelector('#copyTimeSelectionBtn') as HTMLElement;
   }
 
-  _generateTimeTable() {
-    // Build from 8:00 to 22:45 as in your original (4 quarters per hour)
+  private _generateTimeTable(): string {
     let html = '';
     for (let hour = 8; hour <= 22; hour++) {
       const displayHour = hour > 12 ? hour - 12 : hour;
       const ampm = hour >= 12 ? 'PM' : 'AM';
-      // create 4 rows per hour, put the hour label in first row with rowspan=4
       for (let quarter = 0; quarter < 4; quarter++) {
         html += '<tr>';
         if (quarter === 0) {
@@ -111,12 +120,10 @@ export default class TimeSelector {
     return html;
   }
 
-  _attachEvents() {
+  private _attachEvents(): void {
     this.timeBlocks.forEach(block => {
-      // mouse
       block.addEventListener('mousedown', e => this._startSelection(e, block));
-      block.addEventListener('mouseenter', e => this._dragSelection(e, block));
-      // keyboard accessibility: space/enter to toggle
+      block.addEventListener('mouseenter', _e => this._dragSelection(block));
       block.addEventListener('keydown', e => {
         if (e.key === ' ' || e.key === 'Enter') {
           e.preventDefault();
@@ -130,23 +137,20 @@ export default class TimeSelector {
     this.clearBtn?.addEventListener('click', () => this.clearSelection());
     this.copyBtn?.addEventListener('click', () => this.copySelection());
 
-    // global mouseup to end dragging if user releases outside table —
-    // routed through _endSelection so onChange still fires for that drag
     document.addEventListener('mouseup', () => {
       if (this.isDragging) this._endSelection();
     });
   }
 
-  _startSelection(event, block) {
+  private _startSelection(event: MouseEvent, block: HTMLElement): void {
     event.preventDefault();
     this.isDragging = true;
     this._toggleBlock(block);
     this._notifyChange();
   }
 
-  _dragSelection(event, block) {
+  private _dragSelection(block: HTMLElement): void {
     if (this.isDragging) {
-      // Only toggle when entering if not already selected (so dragging selects many)
       if (!block.classList.contains('selected')) {
         block.classList.add('selected');
         this.selectedBlocks.push(block);
@@ -156,13 +160,13 @@ export default class TimeSelector {
     }
   }
 
-  _endSelection() {
+  private _endSelection(): void {
     this.isDragging = false;
     this._updateTotalTime();
     this._notifyChange();
   }
 
-  _toggleBlock(block) {
+  private _toggleBlock(block: HTMLElement): void {
     const idx = this.selectedBlocks.indexOf(block);
     if (idx === -1) {
       block.classList.add('selected');
@@ -176,7 +180,7 @@ export default class TimeSelector {
     this._updateTotalTime();
   }
 
-  _updateTotalTime() {
+  private _updateTotalTime(): void {
     const totalMinutes = this.selectedBlocks.length * 15;
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
@@ -184,7 +188,7 @@ export default class TimeSelector {
     if (this.totalTimeInput) this.totalTimeInput.value = text;
   }
 
-  _notifyChange() {
+  private _notifyChange(): void {
     if (typeof this.onChange === 'function') {
       const slots = this.getSelectedTimeBlocks();
       this.onChange({
@@ -195,18 +199,15 @@ export default class TimeSelector {
     }
   }
 
-  // Replace the current selection with the given {hour, quarter} slots.
-  // Silent by default so restoring a saved report doesn't re-trigger the
-  // auto-save/refresh hooks that user interaction fires.
-  setSelection(slots, notify = false) {
+  setSelection(slots: TimeSlot[], notify = false): void {
     this.selectedBlocks.forEach(b => {
       b.classList.remove('selected');
       b.setAttribute('aria-pressed', 'false');
     });
     this.selectedBlocks = [];
     (slots || []).forEach(({ hour, quarter }) => {
-      const block = this.container.querySelector(
-        `.time-block[data-hour="${hour}"][data-quarter="${quarter}"]`);
+      const block = this.container!.querySelector(
+        `.time-block[data-hour="${hour}"][data-quarter="${quarter}"]`) as HTMLElement | null;
       if (block) {
         block.classList.add('selected');
         block.setAttribute('aria-pressed', 'true');
@@ -217,7 +218,7 @@ export default class TimeSelector {
     if (notify) this._notifyChange();
   }
 
-  clearSelection() {
+  clearSelection(): void {
     this.selectedBlocks.forEach(b => {
       b.classList.remove('selected');
       b.setAttribute('aria-pressed', 'false');
@@ -227,7 +228,7 @@ export default class TimeSelector {
     this._notifyChange();
   }
 
-  copySelection() {
+  copySelection(): void {
     const text = this.totalTimeInput?.value || '';
     if (navigator.clipboard && text) {
       navigator.clipboard.writeText(text).catch(err => {
@@ -236,10 +237,10 @@ export default class TimeSelector {
     }
   }
 
-  getSelectedTimeBlocks() {
+  getSelectedTimeBlocks(): TimeSlot[] {
     return this.selectedBlocks.map(b => ({
-      hour: parseInt(b.dataset.hour, 10),
-      quarter: parseInt(b.dataset.quarter, 10)
+      hour: parseInt(b.dataset.hour!, 10),
+      quarter: parseInt(b.dataset.quarter!, 10)
     }));
   }
 }
