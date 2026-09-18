@@ -11,6 +11,23 @@ import type { HostConfig, ServerControl, SessionStatus } from "./types";
 
 const encoder = new TextEncoder();
 
+export function resolveXtermTheme(): Record<string, string> {
+  const s = getComputedStyle(document.documentElement);
+  return {
+    background: s.getPropertyValue("--color-bg").trim(),
+    foreground: s.getPropertyValue("--color-text").trim(),
+    cursor: s.getPropertyValue("--color-primary").trim(),
+    selectionBackground: s.getPropertyValue("--color-primary-tint").trim(),
+  };
+}
+
+const sessions: TerminalSession[] = [];
+
+export function reThemeAll(): void {
+  const t = resolveXtermTheme();
+  for (const s of sessions) s.applyTheme(t);
+}
+
 export class TerminalSession {
   private readonly term: Terminal;
   private readonly fit: FitAddon;
@@ -30,12 +47,13 @@ export class TerminalSession {
       fontFamily:
         'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace',
       fontSize: 13,
-      theme: { background: "#0b0f17" },
+      theme: resolveXtermTheme(),
     });
     this.fit = new FitAddon();
     this.term.loadAddon(this.fit);
     this.term.open(container);
     this.safeFit();
+    sessions.push(this);
 
     // Local typing in this panel goes straight to its own connection.
     this.term.onData((data) => {
@@ -153,6 +171,10 @@ export class TerminalSession {
         }),
       );
     }
+  }
+
+  applyTheme(t: Record<string, string>): void {
+    this.term.options.theme = t;
   }
 
   private sendBytes(data: string): void {
