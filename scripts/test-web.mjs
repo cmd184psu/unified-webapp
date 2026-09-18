@@ -47,7 +47,7 @@ const suites = [
   { name: "shared-toast", entry: "web/shared/ts/toast.test.ts", runner: "esbuild-cjs" },
   { name: "shared-theme", entry: "web/shared/ts/theme.test.ts", runner: "esbuild-cjs" },
   { name: "shared-menu", entry: "web/shared/ts/menu.test.ts", runner: "esbuild-cjs" },
-  { name: "grocery", entry: "web/grocery/app.test.js", runner: "node-test" },
+  { name: "grocery", entry: "web/grocery/js/main.test.ts", runner: "node-test" },
 ];
 
 async function runEsbuildCjs(suite) {

@@ -1,29 +1,6 @@
-/* Art direction: grocery utility tool → clean, functional, warm-neutral
-   Typography: DM Sans — approachable, legible at small sizes
-   Density: compact phone-first */
+/* Module-specific tokens only — shared.css provides colors, spacing,
+   typography, radius, and shadow tokens via the theme system. */
 :root {
-  --font-body: 'DM Sans', system-ui, sans-serif;
-  --text-xs:   clamp(0.72rem, 0.68rem + 0.2vw, 0.8rem);
-  --text-sm:   clamp(0.8rem,  0.78rem + 0.2vw, 0.875rem);
-  --text-base: clamp(0.9rem,  0.88rem + 0.2vw, 1rem);
-  --text-lg:   clamp(1rem,    0.95rem + 0.35vw, 1.1rem);
-
-  --space-1: 0.25rem; --space-2: 0.5rem;  --space-3: 0.75rem;
-  --space-4: 1rem;    --space-5: 1.25rem; --space-6: 1.5rem;
-  --space-8: 2rem;
-
-  --color-bg:            #f4f2ee;
-  --color-surface:       #ffffff;
-  --color-surface-off:   #f0ede8;
-  --color-border:        #dcd9d5;
-  --color-divider:       #ebe8e3;
-  --color-text:          #28251d;
-  --color-text-muted:    #6b6862;
-  --color-text-faint:    #b0ada8;
-  --color-primary:       #01696f;
-  --color-primary-hov:   #0c4e54;
-  --color-primary-lite:  #dff0f0;
-  --color-danger:        #b91c1c;
   --color-danger-hov:    #991b1b;
   --color-danger-lite:   #fee2e2;
   --color-warning-lite:  #fef9c3;
@@ -36,13 +13,7 @@
   --check-bg:    #fff3cd; --check-txt:    #7a5400;
   --notneed-bg:  #f8d7da; --notneed-txt:  #7a1c22;
 
-  --radius-sm:   0.35rem;
-  --radius-md:   0.5rem;
-  --radius-lg:   0.75rem;
   --radius-xl:   1rem;
-  --radius-full: 9999px;
-  --shadow-sm:   0 1px 3px rgb(0 0 0 / 0.07);
-  --shadow-md:   0 3px 10px rgb(0 0 0 / 0.09);
   --shadow-lg:   0 8px 32px rgb(0 0 0 / 0.18);
   --t:           160ms cubic-bezier(0.16, 1, 0.3, 1);
 
@@ -84,7 +55,7 @@ input, select { font: inherit; color: inherit; }
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 var(--space-3);
   height: var(--header-h);
-  background: var(--color-surface);
+  background: var(--color-surface-1);
   border-bottom: 1px solid var(--color-border);
   box-shadow: var(--shadow-sm);
   gap: var(--space-2);
@@ -98,7 +69,7 @@ input, select { font: inherit; color: inherit; }
   height: 22px;
   border-radius: var(--radius-full);
   overflow: hidden;
-  background: var(--color-surface-off);
+  background: var(--color-surface-2);
   min-width: 60px;
   /* inner gap between segments via outline trick */
   gap: 1px;
@@ -276,7 +247,7 @@ input, select { font: inherit; color: inherit; }
   height: 22px;
   border-radius: var(--radius-full);
   overflow: hidden;
-  background: var(--color-surface-off);
+  background: var(--color-surface-2);
   min-width: 60px;
   /* inner gap between segments via outline trick */
   gap: 1px;
@@ -314,7 +285,7 @@ input, select { font: inherit; color: inherit; }
   height: 22px;
   border-radius: var(--radius-full);
   overflow: hidden;
-  background: var(--color-surface-off);
+  background: var(--color-surface-2);
   min-width: 60px;
   /* inner gap between segments via outline trick */
   gap: 1px;
@@ -352,7 +323,7 @@ input, select { font: inherit; color: inherit; }
   height: 22px;
   border-radius: var(--radius-full);
   overflow: hidden;
-  background: var(--color-surface-off);
+  background: var(--color-surface-2);
   min-width: 60px;
   /* inner gap between segments via outline trick */
   gap: 1px;
@@ -390,7 +361,7 @@ input, select { font: inherit; color: inherit; }
   height: 22px;
   border-radius: var(--radius-full);
   overflow: hidden;
-  background: var(--color-surface-off);
+  background: var(--color-surface-2);
   min-width: 60px;
   /* inner gap between segments via outline trick */
   gap: 1px;
@@ -438,7 +409,7 @@ h1 { font-size: var(--text-lg); font-weight: 600; color: var(--color-primary); w
   -webkit-tap-highlight-color: transparent;
   flex-shrink: 0;
 }
-.header-icon-btn:hover  { background: var(--color-surface-off); color: var(--color-text); }
+.header-icon-btn:hover  { background: var(--color-surface-2); color: var(--color-text); }
 .header-icon-btn:active { background: var(--color-border); }
 .header-icon-btn svg { width: 18px; height: 18px; pointer-events: none; }
 
@@ -467,7 +438,7 @@ h1 { font-size: var(--text-lg); font-weight: 600; color: var(--color-primary); w
 .sync-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
 .toggle-track {
   position: relative; width: 38px; height: 22px;
-  background: var(--color-surface-off);
+  background: var(--color-surface-2);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-full);
   transition: background var(--t), border-color var(--t);
@@ -479,7 +450,7 @@ h1 { font-size: var(--text-lg); font-weight: 600; color: var(--color-primary); w
 .toggle-thumb {
   position: absolute; top: 2px; left: 2px;
   width: 16px; height: 16px;
-  background: #fff; border-radius: var(--radius-full);
+  background: var(--color-surface-1); border-radius: var(--radius-full);
   box-shadow: var(--shadow-sm);
   transition: transform var(--t);
 }
@@ -509,7 +480,7 @@ main {
 .group-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: var(--space-2) var(--space-3);
-  background: var(--color-surface-off);
+  background: var(--color-surface-2);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   cursor: pointer; user-select: none;
@@ -541,7 +512,7 @@ main {
 
 /* Drag-target highlight on entire section */
 .group-section.drag-target > .group-header {
-  background: var(--color-primary-lite);
+  background: var(--color-primary-tint);
   border-color: var(--color-primary);
 }
 .group-section.drag-target > .group-header .group-title { color: var(--color-primary); }
@@ -560,7 +531,7 @@ main {
 .group-header--nogroup:active { background: #ede9fe; }
 
 .group-body {
-  background: var(--color-surface);
+  background: var(--color-surface-1);
   border: 1px solid var(--color-border);
   border-top: none;
   border-radius: 0 0 var(--radius-lg) var(--radius-lg);
@@ -582,7 +553,7 @@ main {
   padding: var(--space-2) var(--space-1) var(--space-2) 0;
   border-bottom: 1px solid var(--color-divider);
   min-height: 48px;
-  background: var(--color-surface);
+  background: var(--color-surface-1);
   transition: background var(--t), opacity var(--t);
   position: relative;
 }
@@ -612,7 +583,7 @@ main {
   width: 20px; height: 20px; min-width: 20px;
   border: 2px solid var(--color-border);
   border-radius: var(--radius-sm);
-  background: var(--color-surface);
+  background: var(--color-surface-1);
   cursor: pointer; position: relative;
   transition: background var(--t), border-color var(--t);
 }
@@ -676,7 +647,7 @@ main {
 }
 .move-btn:hover, .move-btn:active {
   color: var(--color-primary);
-  background: var(--color-surface-off);
+  background: var(--color-surface-2);
 }
 .move-btn svg { width: 16px; height: 16px; pointer-events: none; }
 
@@ -695,13 +666,13 @@ main {
   padding: var(--space-3); border: none;
   border-bottom: 1px solid var(--color-divider);
   min-height: 44px;
-  background: var(--color-surface);
+  background: var(--color-surface-1);
   font-size: var(--text-sm); color: var(--color-text); font-family: inherit;
   -webkit-tap-highlight-color: transparent;
 }
 .move-modal-item:last-child { border-bottom: none; }
 .move-modal-item:hover, .move-modal-item:active {
-  background: var(--color-surface-off);
+  background: var(--color-surface-2);
 }
 .move-modal-empty {
   padding: var(--space-4);
@@ -728,7 +699,7 @@ main {
 /* ── Add footer ──────────────────────────────────────────────── */
 .add-footer {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 20;
-  background: var(--color-surface);
+  background: var(--color-surface-1);
   border-top: 1px solid var(--color-border);
   box-shadow: 0 -2px 12px rgb(0 0 0 / 0.06);
   padding: var(--space-2) var(--space-3);
@@ -742,7 +713,7 @@ main {
   padding: 0 var(--space-2);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  background: var(--color-surface-off);
+  background: var(--color-surface-2);
   font-size: var(--text-sm); color: var(--color-text-muted);
   height: 40px; max-width: 108px; flex-shrink: 0;
 }
@@ -751,7 +722,7 @@ main {
   flex: 1; padding: 0 var(--space-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  background: var(--color-surface);
+  background: var(--color-surface-1);
   font-size: var(--text-base); height: 40px;
   transition: border-color var(--t), box-shadow var(--t);
 }
@@ -762,12 +733,12 @@ main {
 .add-form button {
   width: 40px; height: 40px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  background: var(--color-primary); color: #fff;
+  background: var(--color-primary); color: var(--color-primary-fg);
   border-radius: var(--radius-md); box-shadow: var(--shadow-sm);
   transition: background var(--t), transform var(--t);
 }
-.add-form button:hover  { background: var(--color-primary-hov); }
-.add-form button:active { background: var(--color-primary-hov); transform: scale(0.96); }
+.add-form button:hover  { background: var(--color-primary-hover); }
+.add-form button:active { background: var(--color-primary-hover); transform: scale(0.96); }
 .add-form button svg    { width: 20px; height: 20px; pointer-events: none; }
 
 /* ── Shared button styles ───────────────────────────────────────── */
@@ -781,18 +752,18 @@ main {
 }
 .btn-sm { height: 34px; padding: 0 var(--space-3); font-size: var(--text-xs); }
 .btn-primary {
-  background: var(--color-primary); color: #fff;
+  background: var(--color-primary); color: var(--color-primary-fg);
 }
-.btn-primary:hover  { background: var(--color-primary-hov); }
-.btn-primary:active { background: var(--color-primary-hov); transform: scale(0.97); }
+.btn-primary:hover  { background: var(--color-primary-hover); }
+.btn-primary:active { background: var(--color-primary-hover); transform: scale(0.97); }
 .btn-ghost {
   background: transparent; color: var(--color-text-muted);
   border: 1px solid var(--color-border);
 }
-.btn-ghost:hover  { background: var(--color-surface-off); color: var(--color-text); }
+.btn-ghost:hover  { background: var(--color-surface-2); color: var(--color-text); }
 .btn-ghost:active { background: var(--color-border); }
 .btn-danger {
-  background: var(--color-danger); color: #fff;
+  background: var(--color-danger); color: var(--color-primary-fg);
 }
 .btn-danger:hover  { background: var(--color-danger-hov); }
 .btn-danger:active { background: var(--color-danger-hov); transform: scale(0.97); }
@@ -810,7 +781,7 @@ main {
 @keyframes fade-in  { from { opacity: 0; } to { opacity: 1; } }
 
 .modal {
-  background: var(--color-surface);
+  background: var(--color-surface-1);
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg);
   padding: var(--space-6);
@@ -869,7 +840,7 @@ main {
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--color-divider);
   min-height: 44px;
-  background: var(--color-surface);
+  background: var(--color-surface-1);
 }
 .groups-modal-item:last-child { border-bottom: none; }
 .groups-modal-name {
@@ -902,7 +873,7 @@ main {
   height: 36px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  background: var(--color-surface);
+  background: var(--color-surface-1);
   font-size: var(--text-sm);
   transition: border-color var(--t), box-shadow var(--t);
 }
@@ -929,7 +900,7 @@ main {
 }
 .groups-modal-handle:hover {
   color: var(--color-text-muted);
-  background: var(--color-surface-offset);
+  background: var(--color-surface-2);
 }
 .groups-modal-handle:active { cursor: grabbing; }
 .groups-modal-handle svg { pointer-events: none; }
@@ -957,7 +928,7 @@ main {
 }
 .groups-modal-handle:hover {
   color: var(--color-text-muted);
-  background: var(--color-surface-offset);
+  background: var(--color-surface-2);
 }
 .groups-modal-handle:active { cursor: grabbing; }
 .groups-modal-handle svg { pointer-events: none; }
@@ -985,7 +956,7 @@ main {
 }
 .groups-modal-handle:hover {
   color: var(--color-text-muted);
-  background: var(--color-surface-offset);
+  background: var(--color-surface-2);
 }
 .groups-modal-handle:active { cursor: grabbing; }
 .groups-modal-handle svg { pointer-events: none; }
@@ -1013,7 +984,7 @@ main {
 }
 .groups-modal-handle:hover {
   color: var(--color-text-muted);
-  background: var(--color-surface-offset);
+  background: var(--color-surface-2);
 }
 .groups-modal-handle:active { cursor: grabbing; }
 .groups-modal-handle svg { pointer-events: none; }
@@ -1041,7 +1012,7 @@ main {
 }
 .groups-modal-handle:hover {
   color: var(--color-text-muted);
-  background: var(--color-surface-offset);
+  background: var(--color-surface-2);
 }
 .groups-modal-handle:active { cursor: grabbing; }
 .groups-modal-handle svg { pointer-events: none; }
@@ -1080,8 +1051,8 @@ main {
   text-overflow: ellipsis;
   max-width: 18ch;
 }
-.title-btn:hover  { background: var(--color-primary-lite); color: var(--color-primary); }
-.title-btn:active { background: var(--color-primary); color: #fff; }
+.title-btn:hover  { background: var(--color-primary-tint); color: var(--color-primary); }
+.title-btn:active { background: var(--color-primary); color: var(--color-primary-fg); }
 
 /* ── Title modal form ───────────────────────────────────────────── */
 .title-modal-form {
@@ -1100,14 +1071,14 @@ main {
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  background: var(--color-surface);
+  background: var(--color-surface-1);
   font-size: var(--text-base);
   transition: border-color var(--t), box-shadow var(--t);
 }
 .title-modal-input:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px var(--color-primary-lite);
+  box-shadow: 0 0 0 3px var(--color-primary-tint);
 }
 .title-modal-input.input-error {
   border-color: var(--color-danger);
@@ -1158,10 +1129,10 @@ main {
   -webkit-tap-highlight-color: transparent;
   white-space: nowrap;
 }
-.tab-btn:hover  { background: var(--color-surface-off); color: var(--color-text); }
+.tab-btn:hover  { background: var(--color-surface-2); color: var(--color-text); }
 .tab-btn:active { background: var(--color-border); }
 .tab-btn.active {
-  background: var(--color-primary-lite);
+  background: var(--color-primary-tint);
   color: var(--color-primary);
 }
 
@@ -1180,7 +1151,7 @@ main {
   display: flex; align-items: center; justify-content: space-between;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  background: var(--color-surface-off);
+  background: var(--color-surface-2);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   cursor: pointer; user-select: none;
@@ -1214,14 +1185,14 @@ main {
 /* Enabled recipes are accented, following the .group-header--nogroup
    precedent of tinting the header rather than the whole section. */
 .recipe-card--enabled > .recipe-header {
-  background: var(--color-primary-lite);
+  background: var(--color-primary-tint);
   border-color: var(--color-primary);
 }
 .recipe-card--enabled > .recipe-header .recipe-title { color: var(--color-primary); }
 .recipe-card--enabled > .recipe-body { border-color: var(--color-primary); }
 
 .recipe-body {
-  background: var(--color-surface);
+  background: var(--color-surface-1);
   border: 1px solid var(--color-border);
   border-top: none;
   border-radius: 0 0 var(--radius-lg) var(--radius-lg);
@@ -1241,7 +1212,7 @@ main {
 .recipe-switch-input { position: absolute; opacity: 0; width: 0; height: 0; }
 .recipe-switch-track {
   position: relative; width: 38px; height: 22px;
-  background: var(--color-surface-off);
+  background: var(--color-surface-2);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-full);
   transition: background var(--t), border-color var(--t);
@@ -1253,7 +1224,7 @@ main {
 .recipe-switch-thumb {
   position: absolute; top: 2px; left: 2px;
   width: 16px; height: 16px;
-  background: #fff; border-radius: var(--radius-full);
+  background: var(--color-surface-1); border-radius: var(--radius-full);
   box-shadow: var(--shadow-sm);
   transition: transform var(--t);
 }
@@ -1306,7 +1277,7 @@ main {
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--color-divider);
   min-height: 44px;
-  background: var(--color-surface);
+  background: var(--color-surface-1);
 }
 .recipe-ingredient-row:last-child { border-bottom: none; }
 .recipe-ingredient-name {
@@ -1337,7 +1308,7 @@ main {
   display: flex; gap: var(--space-2); align-items: center;
   padding: var(--space-2) var(--space-3);
   border-top: 1px solid var(--color-divider);
-  background: var(--color-surface-off);
+  background: var(--color-surface-2);
 }
 .recipe-ingredient-input {
   flex: 1; padding: 0 var(--space-3);
@@ -1346,7 +1317,7 @@ main {
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
   font-family: var(--font-body);
-  background: var(--color-surface);
+  background: var(--color-surface-1);
   color: var(--color-text);
   min-width: 0;
 }
@@ -1366,7 +1337,7 @@ main {
   transition: color var(--t), background var(--t);
   -webkit-tap-highlight-color: transparent;
 }
-.recipe-move-btn:hover  { color: var(--color-text); background: var(--color-surface-off); }
+.recipe-move-btn:hover  { color: var(--color-text); background: var(--color-surface-2); }
 .recipe-move-btn:disabled { opacity: 0.3; cursor: default; }
 
 /* ── Add-recipe row ──────────────────────────────────────────── */
@@ -1381,7 +1352,7 @@ main {
   border-radius: var(--radius-md);
   font-size: var(--text-base);
   font-family: var(--font-body);
-  background: var(--color-surface);
+  background: var(--color-surface-1);
   color: var(--color-text);
   min-width: 0;
 }
@@ -1391,14 +1362,14 @@ main {
   display: flex; align-items: center; justify-content: center;
   height: 40px; padding: 0 var(--space-4);
   border-radius: var(--radius-md);
-  background: var(--color-primary); color: #fff;
+  background: var(--color-primary); color: var(--color-primary-fg);
   border: 0; cursor: pointer; flex-shrink: 0;
   font-size: var(--text-sm); font-weight: 600;
   font-family: var(--font-body);
   transition: background var(--t);
   -webkit-tap-highlight-color: transparent;
 }
-.recipe-add-btn:hover { background: var(--color-primary-hov); }
+.recipe-add-btn:hover { background: var(--color-primary-hover); }
 .recipe-add-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
 /* Recipe-owned SVGs are sized by a class rather than by a descendant
