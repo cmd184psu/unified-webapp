@@ -1,8 +1,8 @@
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #16181d;
-  color: #e6e6e6;
+  font-family: var(--font-body, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  background: var(--color-bg);
+  color: var(--color-text);
 }
 
 .topbar {
@@ -10,7 +10,7 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 1rem 1.5rem;
-  border-bottom: 1px solid #2a2d34;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .topbar h1 {
@@ -44,13 +44,13 @@ main {
 }
 
 .hint {
-  color: #9a9fac;
+  color: var(--color-text-muted);
   font-size: 0.85rem;
   margin: 0.25rem 0 0.75rem;
 }
 
 .error {
-  color: #ff6b6b;
+  color: var(--color-danger);
   font-size: 0.85rem;
   min-height: 1.1em;
   margin: 0.5rem 0 0;
@@ -58,25 +58,25 @@ main {
 
 .status {
   font-size: 0.85rem;
-  color: #9a9fac;
+  color: var(--color-text-muted);
 }
 
 .status-good {
-  color: #4caf50;
+  color: var(--color-success);
 }
 
 .status-bad {
-  color: #ff6b6b;
+  color: var(--color-danger);
 }
 
 .warn {
-  color: #f0ad4e;
+  color: var(--color-warning);
 }
 
 .panel {
-  background: #1c1f26;
-  border: 1px solid #2a2d34;
-  border-radius: 8px;
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 8px);
   padding: 1.25rem 1.5rem;
   min-width: 0;
 }
@@ -89,7 +89,7 @@ main {
 .panel h3 {
   margin: 1rem 0 0.5rem;
   font-size: 0.95rem;
-  color: #c9ccd4;
+  color: var(--color-text-faint);
 }
 
 .panel-actions {
@@ -103,29 +103,29 @@ input, button, select {
   font-size: 0.95rem;
   padding: 0.4rem 0.6rem;
   border-radius: 6px;
-  border: 1px solid #3a3e48;
-  background: #12141a;
-  color: #e6e6e6;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-2);
+  color: var(--color-text);
 }
 
 input:focus, button:focus, select:focus {
-  outline: 2px solid #4a90d9;
+  outline: 2px solid var(--color-primary);
   outline-offset: 1px;
 }
 
 button {
   cursor: pointer;
-  background: #2a2d34;
+  background: var(--color-surface-1);
 }
 
 button:hover {
-  background: #343841;
+  background: var(--color-surface-2);
 }
 
 .btn-link {
   background: none;
   border: none;
-  color: #9a9fac;
+  color: var(--color-text-muted);
   cursor: pointer;
   text-decoration: underline;
   padding: 0.25rem 0;
@@ -133,7 +133,7 @@ button:hover {
 
 .btn-remove {
   margin-left: auto;
-  color: #ff6b6b;
+  color: var(--color-danger);
 }
 
 .inline-form {
@@ -160,7 +160,7 @@ button:disabled {
 }
 
 button:disabled:hover {
-  background: #2a2d34;
+  background: var(--color-surface-1);
 }
 
 .icon-btn {
@@ -173,8 +173,8 @@ button:disabled:hover {
 }
 
 .icon-btn:hover {
-  background: #343841;
-  color: #e6e8ee;
+  background: var(--color-surface-2);
+  color: var(--color-text);
 }
 
 .icon-btn svg {
@@ -195,7 +195,7 @@ button:disabled:hover {
   flex-direction: column;
   gap: 0.25rem;
   font-size: 0.85rem;
-  color: #c9ccd4;
+  color: var(--color-text-faint);
 }
 
 .settings-form .checkbox-label {
@@ -215,7 +215,7 @@ button:disabled:hover {
   align-items: center;
   gap: 0.75rem;
   padding: 0.4rem 0;
-  border-bottom: 1px solid #24272e;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .named-list li:last-child {
@@ -223,7 +223,7 @@ button:disabled:hover {
 }
 
 .named-list-empty {
-  color: #9a9fac;
+  color: var(--color-text-muted);
   font-size: 0.85rem;
 }
 
@@ -232,7 +232,7 @@ button:disabled:hover {
 }
 
 .named-list-value {
-  color: #9a9fac;
+  color: var(--color-text-muted);
   font-size: 0.85rem;
 }
 
@@ -247,7 +247,7 @@ table.matrix {
 }
 
 table.matrix th, table.matrix td {
-  border: 1px solid #2a2d34;
+  border: 1px solid var(--color-border);
   padding: 0.4rem 0.6rem;
   text-align: center;
 }
@@ -275,9 +275,9 @@ table.matrix td {
 }
 
 .modal-content {
-  background: #1c1f26;
-  border: 1px solid #2a2d34;
-  border-radius: 8px;
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 8px);
   padding: 1.5rem;
   max-width: 90vw;
   width: 420px;
@@ -296,8 +296,8 @@ table.matrix td {
 
 .key-display code {
   flex: 1;
-  background: #12141a;
-  border: 1px solid #3a3e48;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   padding: 0.5rem;
   overflow-wrap: anywhere;
