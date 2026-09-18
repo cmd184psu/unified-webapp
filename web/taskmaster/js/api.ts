@@ -7,7 +7,7 @@
 // alertDialog per the global "no native dialogs" policy (FRD §8a). A 401
 // reloads the page so the platform auth gate can re-challenge.
 
-import { alertDialog } from './ui/modal.js';
+import { alertDialog } from '@shared';
 
 // ─── Model shapes (mirror internal/taskmaster/models/models.go) ────────────
 

@@ -10,7 +10,8 @@
 // function (owner code policy — short, named, readable, testable).
 
 import { api } from "./api.js";
-import { openModal, ModalHandle } from "./ui/modal.js";
+import { openModal } from "@shared";
+import type { ModalHandle } from "@shared";
 
 const STYLE_ATTR = "data-tm-output-modal-styles";
 

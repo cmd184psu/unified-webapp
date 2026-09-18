@@ -13,7 +13,8 @@
 import { api, BrakeState, Capabilities } from './api.js';
 import { LiveController } from './ui/live.js';
 import { createToggleHandle } from './ui/toggle.js';
-import { confirmDialog } from './ui/modal.js';
+import { confirmDialog, ThemeManager, HamburgerMenu } from '@shared';
+import type { MenuItem } from '@shared';
 import { mountBoard } from './board.js';
 import { mountMetrics } from './metrics.js';
 import { mountTaskView } from './taskview.js';
@@ -26,11 +27,6 @@ const live = new LiveController();
 
 const LIVE_INTERVALS_SEC = [5, 10, 30, 60];
 
-// --- Icons (inline SVG, trusted static markup) ---
-const ICON_MENU =
-  '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>';
-const ICON_LOGOUT =
-  '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>';
 const ICON_BRAKE =
   '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="7" y1="7" x2="17" y2="17"/></svg>';
 
@@ -53,13 +49,6 @@ function currentTaskName(): string | null {
     }
   }
   return null;
-}
-
-function closeMenu(): void {
-  const panel = document.getElementById('nav-menu-panel');
-  const btn = document.getElementById('nav-menu-btn');
-  if (panel) panel.hidden = true;
-  if (btn) btn.setAttribute('aria-expanded', 'false');
 }
 
 async function refreshStatusLine(): Promise<void> {
@@ -109,21 +98,7 @@ function buildNav(): void {
 
   nav.appendChild(buildLiveControl());
   nav.appendChild(buildBrakeControl());
-
-  if (authEnabled) {
-    const btnLogout = document.createElement('button');
-    btnLogout.className = 'nav-icon-btn';
-    btnLogout.title = 'Log out';
-    btnLogout.setAttribute('aria-label', 'Log out');
-    btnLogout.innerHTML = ICON_LOGOUT;
-    btnLogout.addEventListener('click', async () => {
-      await api.logout();
-      window.location.reload();
-    });
-    nav.appendChild(btnLogout);
-  }
-
-  nav.appendChild(buildMenu());
+  nav.appendChild(hamburger?.trigger ?? document.createElement('span'));
 }
 
 // ─── Live/pause (top nav, left of hand brake) ─────────────────────────────
@@ -150,110 +125,113 @@ function buildLiveControl(): HTMLElement {
   return wrap;
 }
 
-function buildMenu(): HTMLElement {
-  const wrap = document.createElement('div');
-  wrap.className = 'nav-menu';
-  wrap.id = 'nav-menu';
+const themes = new ThemeManager({ module: 'taskmaster', default: 'obsidian' });
+themes.apply();
 
-  const btn = document.createElement('button');
-  btn.id = 'nav-menu-btn';
-  btn.className = 'nav-icon-btn';
-  btn.title = 'Menu';
-  btn.setAttribute('aria-label', 'Menu');
-  btn.setAttribute('aria-haspopup', 'true');
-  btn.setAttribute('aria-expanded', 'false');
-  btn.innerHTML = ICON_MENU;
+let hamburger: HamburgerMenu | null = null;
 
-  const panel = document.createElement('div');
-  panel.id = 'nav-menu-panel';
-  panel.className = 'nav-menu-panel';
-  panel.hidden = true;
+function buildHamburger(): void {
+  hamburger?.destroy();
 
-  // Section 1: page links, shown in the menu only on narrow screens.
-  const navSection = document.createElement('div');
-  navSection.className = 'menu-section menu-nav';
-  const page = currentPage();
-  NAV_LINKS.forEach(({ label, hash }) => {
-    const a = document.createElement('a');
-    a.className = 'menu-item' + (hash === '#' + page ? ' active' : '');
-    a.textContent = label;
-    a.href = hash;
-    a.addEventListener('click', closeMenu);
-    navSection.appendChild(a);
-  });
-  panel.appendChild(navSection);
-
-  // Section 2: fallback poll interval (the live/pause toggle itself now
-  // lives in the top nav, left of the hand brake).
-  const liveSection = document.createElement('div');
-  liveSection.className = 'menu-section';
-  liveSection.innerHTML = '<div class="menu-heading">Live updates</div>';
-
-  const intervalRow = document.createElement('div');
-  intervalRow.className = 'menu-row';
-  const intervalLabel = document.createElement('span');
-  intervalLabel.textContent = 'Fallback poll interval';
-  const intervalSelect = document.createElement('select');
-  LIVE_INTERVALS_SEC.forEach((s) => {
-    const opt = document.createElement('option');
-    opt.value = String(s * 1000);
-    opt.textContent = s + 's';
-    if (s * 1000 === live.getInterval()) opt.selected = true;
-    intervalSelect.appendChild(opt);
-  });
-  intervalSelect.addEventListener('change', () => {
-    live.setInterval(parseInt(intervalSelect.value, 10));
-  });
-  intervalRow.append(intervalLabel, intervalSelect);
-
-  liveSection.append(intervalRow);
-  panel.appendChild(liveSection);
-
-  // Section 3: server + capabilities.
-  const stSection = document.createElement('div');
-  stSection.className = 'menu-section';
-  stSection.innerHTML =
-    '<div class="menu-heading">Server</div>' +
-    '<div class="menu-row"><span>Status</span><span id="st-status" class="st-value st-muted">…</span></div>' +
-    '<div class="menu-row"><span>Backend build</span><span id="st-backend-build" class="st-value st-muted">…</span></div>' +
-    '<div class="menu-row"><span>Frontend build</span><span class="st-value">' + FRONTEND_BUILD_TIME + '</span></div>';
-
-  const sudoRow = document.createElement('div');
-  sudoRow.className = 'menu-row';
-  const sudoLabel = document.createElement('span');
-  sudoLabel.textContent = 'Allow sudo';
-  const sudoToggle = createToggleHandle({
-    checked: caps.allow_sudo,
-    onChange: (desired) => {
-      sudoToggle.setDisabled(true);
-      void api
-        .setCapabilities(desired)
-        .then((updated) => {
-          caps = updated;
-        })
-        .catch(() => {
-          caps.allow_sudo = !desired; // revert optimistic assumption on failure
-        })
-        .finally(() => {
-          sudoToggle.setChecked(caps.allow_sudo);
-          sudoToggle.setDisabled(false);
+  const items: MenuItem[] = [
+    { section: 'Navigation' },
+    ...NAV_LINKS.map(({ label, hash }) => ({
+      id: `nav-${label.toLowerCase()}`,
+      label,
+      href: hash,
+    })),
+    { separator: true as const },
+    { section: 'Live updates' },
+    {
+      id: 'live-toggle',
+      render: (host: HTMLElement) => {
+        const row = document.createElement('div');
+        row.className = 'menu-row';
+        const label = document.createElement('span');
+        label.textContent = 'Live';
+        const toggle = createToggleHandle({
+          checked: live.isEnabled(),
+          onChange: (v) => live.setEnabled(v),
         });
+        row.append(label, toggle.el);
+        host.append(row);
+      },
     },
-  });
-  sudoRow.append(sudoLabel, sudoToggle.el);
-  stSection.appendChild(sudoRow);
-  panel.appendChild(stSection);
+    {
+      id: 'fallback-interval',
+      render: (host: HTMLElement) => {
+        const row = document.createElement('div');
+        row.className = 'menu-row';
+        const label = document.createElement('span');
+        label.textContent = 'Fallback poll interval';
+        const select = document.createElement('select');
+        LIVE_INTERVALS_SEC.forEach((s) => {
+          const opt = document.createElement('option');
+          opt.value = String(s * 1000);
+          opt.textContent = s + 's';
+          if (s * 1000 === live.getInterval()) opt.selected = true;
+          select.appendChild(opt);
+        });
+        select.addEventListener('change', () => {
+          live.setInterval(parseInt(select.value, 10));
+        });
+        row.append(label, select);
+        host.append(row);
+      },
+    },
+    { separator: true as const },
+    { section: 'Server' },
+    {
+      id: 'server-status',
+      render: (host: HTMLElement) => {
+        host.innerHTML =
+          '<div class="menu-row"><span>Status</span><span id="st-status" class="st-value st-muted">…</span></div>' +
+          '<div class="menu-row"><span>Backend build</span><span id="st-backend-build" class="st-value st-muted">…</span></div>' +
+          '<div class="menu-row"><span>Frontend build</span><span class="st-value">' + FRONTEND_BUILD_TIME + '</span></div>';
+      },
+    },
+    {
+      id: 'allow-sudo',
+      render: (host: HTMLElement) => {
+        const row = document.createElement('div');
+        row.className = 'menu-row';
+        const label = document.createElement('span');
+        label.textContent = 'Allow sudo';
+        const sudoToggle = createToggleHandle({
+          checked: caps.allow_sudo,
+          onChange: (desired) => {
+            sudoToggle.setDisabled(true);
+            void api
+              .setCapabilities(desired)
+              .then((updated) => { caps = updated; })
+              .catch(() => { caps.allow_sudo = !desired; })
+              .finally(() => {
+                sudoToggle.setChecked(caps.allow_sudo);
+                sudoToggle.setDisabled(false);
+              });
+          },
+        });
+        row.append(label, sudoToggle.el);
+        host.append(row);
+      },
+      when: () => authEnabled,
+    },
+    { separator: true as const },
+    {
+      id: 'logout',
+      label: 'Log out',
+      onSelect: () => { void api.logout().then(() => window.location.reload()); },
+      when: () => authEnabled,
+    },
+  ];
 
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const open = panel.hidden;
-    panel.hidden = !open;
-    btn.setAttribute('aria-expanded', String(open));
-    if (open) void refreshStatusLine();
+  hamburger = new HamburgerMenu({
+    title: 'taskmaster',
+    items,
+    themePicker: true,
+    themes,
+    onOpen: () => void refreshStatusLine(),
   });
-
-  wrap.append(btn, panel);
-  return wrap;
 }
 
 // ─── Hand brake (FRD §5): prominent, always-visible, never buried ─────────
@@ -322,14 +300,6 @@ async function toggleBrake(): Promise<void> {
   refreshBrakeUI();
 }
 
-document.addEventListener('click', (e) => {
-  const menu = document.getElementById('nav-menu');
-  if (menu && !menu.contains(e.target as Node)) closeMenu();
-});
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeMenu();
-});
-
 let unmountCurrentPage: (() => void) | null = null;
 
 function renderPage(): void {
@@ -391,6 +361,7 @@ async function bootstrap(): Promise<void> {
       refreshBrakeUI();
     }
   });
+  buildHamburger();
   window.addEventListener('hashchange', route);
   route();
 }

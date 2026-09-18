@@ -1,7 +1,5 @@
-// web/taskmaster/js/ui/modal.ts
-import { openModal, confirmDialog, alertDialog, promptDialog } from "/shared/dist/shared.mjs";
-
 // web/taskmaster/js/api.ts
+import { alertDialog } from "/shared/dist/shared.mjs";
 async function apiFetch(path, options = {}) {
   const headers = { "Content-Type": "application/json" };
   const existingHeaders = options.headers;
@@ -450,7 +448,14 @@ function createToggleHandle(opts) {
   };
 }
 
+// web/taskmaster/js/main.ts
+import { confirmDialog as confirmDialog2, ThemeManager, HamburgerMenu } from "/shared/dist/shared.mjs";
+
+// web/taskmaster/js/board.ts
+import { openModal as openModal3, confirmDialog, alertDialog as alertDialog3 } from "/shared/dist/shared.mjs";
+
 // web/taskmaster/js/designer.ts
+import { openModal, alertDialog as alertDialog2 } from "/shared/dist/shared.mjs";
 function shQuote(s) {
   if (s === "") return "''";
   if (/^[A-Za-z0-9_\-./:=@%,]+$/.test(s)) return s;
@@ -669,7 +674,7 @@ async function openTaskDesigner(lanes, preselectLane, caps3) {
       void (async () => {
         const f = currentForm();
         if (!f.name || !f.command || !f.lane) {
-          await alertDialog("Name, command, and lane are all required.");
+          await alertDialog2("Name, command, and lane are all required.");
           return;
         }
         try {
@@ -684,6 +689,7 @@ async function openTaskDesigner(lanes, preselectLane, caps3) {
 }
 
 // web/taskmaster/js/outputmodal.ts
+import { openModal as openModal2 } from "/shared/dist/shared.mjs";
 var STYLE_ATTR2 = "data-tm-output-modal-styles";
 function ensureStyles2() {
   if (document.head.querySelector("style[" + STYLE_ATTR2 + "]")) return;
@@ -719,7 +725,7 @@ function openOutputModal(execId, title) {
   box.textContent = "";
   const source = api.openExecutionOutput(execId);
   wireOutputSource(source, box);
-  const handle = openModal(box, { title, onClose: makeCloseSource(source) });
+  const handle = openModal2(box, { title, onClose: makeCloseSource(source) });
   handle.panel.classList.add("output-modal-panel");
   return handle;
 }
@@ -1397,14 +1403,14 @@ async function openAddLaneModal() {
   createBtn.textContent = "Create lane";
   actions.append(cancelBtn, createBtn);
   content.append(nameGroup, widthGroup, actions);
-  const handle = openModal(content, { title: "New lane" });
+  const handle = openModal3(content, { title: "New lane" });
   cancelBtn.addEventListener("click", () => handle.close());
   createBtn.addEventListener("click", () => {
     void (async () => {
       const name = nameInput.value.trim();
       const width = parseInt(widthInput.value, 10) || 1;
       if (!name) {
-        await alertDialog("Lane name is required.");
+        await alertDialog3("Lane name is required.");
         return;
       }
       try {
@@ -1743,7 +1749,7 @@ function mountTaskView(container, live2, caps3, taskName) {
 }
 
 // web/taskmaster/js/buildinfo.ts
-var FRONTEND_BUILD_TIME = "315b276792e5";
+var FRONTEND_BUILD_TIME = "f83767b78ca6";
 
 // web/taskmaster/js/main.ts
 var caps2 = { allow_sudo: false };
@@ -1751,8 +1757,6 @@ var authEnabled = false;
 var brake = { engaged: false };
 var live = new LiveController();
 var LIVE_INTERVALS_SEC = [5, 10, 30, 60];
-var ICON_MENU = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>';
-var ICON_LOGOUT = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>';
 var ICON_BRAKE = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="7" y1="7" x2="17" y2="17"/></svg>';
 var NAV_LINKS = [{ label: "Metrics", hash: "#metrics" }];
 function currentPage() {
@@ -1770,12 +1774,6 @@ function currentTaskName() {
     }
   }
   return null;
-}
-function closeMenu() {
-  const panel = document.getElementById("nav-menu-panel");
-  const btn = document.getElementById("nav-menu-btn");
-  if (panel) panel.hidden = true;
-  if (btn) btn.setAttribute("aria-expanded", "false");
 }
 async function refreshStatusLine() {
   const statusEl = document.getElementById("st-status");
@@ -1819,19 +1817,7 @@ function buildNav() {
   nav.appendChild(spacer);
   nav.appendChild(buildLiveControl());
   nav.appendChild(buildBrakeControl());
-  if (authEnabled) {
-    const btnLogout = document.createElement("button");
-    btnLogout.className = "nav-icon-btn";
-    btnLogout.title = "Log out";
-    btnLogout.setAttribute("aria-label", "Log out");
-    btnLogout.innerHTML = ICON_LOGOUT;
-    btnLogout.addEventListener("click", async () => {
-      await api.logout();
-      window.location.reload();
-    });
-    nav.appendChild(btnLogout);
-  }
-  nav.appendChild(buildMenu());
+  nav.appendChild(hamburger?.trigger ?? document.createElement("span"));
 }
 function liveToggleTitle(enabled) {
   return enabled ? "Live updates on \u2014 click to pause" : "Live updates paused \u2014 click to resume";
@@ -1853,88 +1839,108 @@ function buildLiveControl() {
   wrap.append(label, toggle.el);
   return wrap;
 }
-function buildMenu() {
-  const wrap = document.createElement("div");
-  wrap.className = "nav-menu";
-  wrap.id = "nav-menu";
-  const btn = document.createElement("button");
-  btn.id = "nav-menu-btn";
-  btn.className = "nav-icon-btn";
-  btn.title = "Menu";
-  btn.setAttribute("aria-label", "Menu");
-  btn.setAttribute("aria-haspopup", "true");
-  btn.setAttribute("aria-expanded", "false");
-  btn.innerHTML = ICON_MENU;
-  const panel = document.createElement("div");
-  panel.id = "nav-menu-panel";
-  panel.className = "nav-menu-panel";
-  panel.hidden = true;
-  const navSection = document.createElement("div");
-  navSection.className = "menu-section menu-nav";
-  const page = currentPage();
-  NAV_LINKS.forEach(({ label, hash }) => {
-    const a = document.createElement("a");
-    a.className = "menu-item" + (hash === "#" + page ? " active" : "");
-    a.textContent = label;
-    a.href = hash;
-    a.addEventListener("click", closeMenu);
-    navSection.appendChild(a);
-  });
-  panel.appendChild(navSection);
-  const liveSection = document.createElement("div");
-  liveSection.className = "menu-section";
-  liveSection.innerHTML = '<div class="menu-heading">Live updates</div>';
-  const intervalRow = document.createElement("div");
-  intervalRow.className = "menu-row";
-  const intervalLabel = document.createElement("span");
-  intervalLabel.textContent = "Fallback poll interval";
-  const intervalSelect = document.createElement("select");
-  LIVE_INTERVALS_SEC.forEach((s) => {
-    const opt = document.createElement("option");
-    opt.value = String(s * 1e3);
-    opt.textContent = s + "s";
-    if (s * 1e3 === live.getInterval()) opt.selected = true;
-    intervalSelect.appendChild(opt);
-  });
-  intervalSelect.addEventListener("change", () => {
-    live.setInterval(parseInt(intervalSelect.value, 10));
-  });
-  intervalRow.append(intervalLabel, intervalSelect);
-  liveSection.append(intervalRow);
-  panel.appendChild(liveSection);
-  const stSection = document.createElement("div");
-  stSection.className = "menu-section";
-  stSection.innerHTML = '<div class="menu-heading">Server</div><div class="menu-row"><span>Status</span><span id="st-status" class="st-value st-muted">\u2026</span></div><div class="menu-row"><span>Backend build</span><span id="st-backend-build" class="st-value st-muted">\u2026</span></div><div class="menu-row"><span>Frontend build</span><span class="st-value">' + FRONTEND_BUILD_TIME + "</span></div>";
-  const sudoRow = document.createElement("div");
-  sudoRow.className = "menu-row";
-  const sudoLabel = document.createElement("span");
-  sudoLabel.textContent = "Allow sudo";
-  const sudoToggle = createToggleHandle({
-    checked: caps2.allow_sudo,
-    onChange: (desired) => {
-      sudoToggle.setDisabled(true);
-      void api.setCapabilities(desired).then((updated) => {
-        caps2 = updated;
-      }).catch(() => {
-        caps2.allow_sudo = !desired;
-      }).finally(() => {
-        sudoToggle.setChecked(caps2.allow_sudo);
-        sudoToggle.setDisabled(false);
-      });
+var themes = new ThemeManager({ module: "taskmaster", default: "obsidian" });
+themes.apply();
+var hamburger = null;
+function buildHamburger() {
+  hamburger?.destroy();
+  const items = [
+    { section: "Navigation" },
+    ...NAV_LINKS.map(({ label, hash }) => ({
+      id: `nav-${label.toLowerCase()}`,
+      label,
+      href: hash
+    })),
+    { separator: true },
+    { section: "Live updates" },
+    {
+      id: "live-toggle",
+      render: (host) => {
+        const row = document.createElement("div");
+        row.className = "menu-row";
+        const label = document.createElement("span");
+        label.textContent = "Live";
+        const toggle = createToggleHandle({
+          checked: live.isEnabled(),
+          onChange: (v) => live.setEnabled(v)
+        });
+        row.append(label, toggle.el);
+        host.append(row);
+      }
+    },
+    {
+      id: "fallback-interval",
+      render: (host) => {
+        const row = document.createElement("div");
+        row.className = "menu-row";
+        const label = document.createElement("span");
+        label.textContent = "Fallback poll interval";
+        const select = document.createElement("select");
+        LIVE_INTERVALS_SEC.forEach((s) => {
+          const opt = document.createElement("option");
+          opt.value = String(s * 1e3);
+          opt.textContent = s + "s";
+          if (s * 1e3 === live.getInterval()) opt.selected = true;
+          select.appendChild(opt);
+        });
+        select.addEventListener("change", () => {
+          live.setInterval(parseInt(select.value, 10));
+        });
+        row.append(label, select);
+        host.append(row);
+      }
+    },
+    { separator: true },
+    { section: "Server" },
+    {
+      id: "server-status",
+      render: (host) => {
+        host.innerHTML = '<div class="menu-row"><span>Status</span><span id="st-status" class="st-value st-muted">\u2026</span></div><div class="menu-row"><span>Backend build</span><span id="st-backend-build" class="st-value st-muted">\u2026</span></div><div class="menu-row"><span>Frontend build</span><span class="st-value">' + FRONTEND_BUILD_TIME + "</span></div>";
+      }
+    },
+    {
+      id: "allow-sudo",
+      render: (host) => {
+        const row = document.createElement("div");
+        row.className = "menu-row";
+        const label = document.createElement("span");
+        label.textContent = "Allow sudo";
+        const sudoToggle = createToggleHandle({
+          checked: caps2.allow_sudo,
+          onChange: (desired) => {
+            sudoToggle.setDisabled(true);
+            void api.setCapabilities(desired).then((updated) => {
+              caps2 = updated;
+            }).catch(() => {
+              caps2.allow_sudo = !desired;
+            }).finally(() => {
+              sudoToggle.setChecked(caps2.allow_sudo);
+              sudoToggle.setDisabled(false);
+            });
+          }
+        });
+        row.append(label, sudoToggle.el);
+        host.append(row);
+      },
+      when: () => authEnabled
+    },
+    { separator: true },
+    {
+      id: "logout",
+      label: "Log out",
+      onSelect: () => {
+        void api.logout().then(() => window.location.reload());
+      },
+      when: () => authEnabled
     }
+  ];
+  hamburger = new HamburgerMenu({
+    title: "taskmaster",
+    items,
+    themePicker: true,
+    themes,
+    onOpen: () => void refreshStatusLine()
   });
-  sudoRow.append(sudoLabel, sudoToggle.el);
-  stSection.appendChild(sudoRow);
-  panel.appendChild(stSection);
-  btn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const open = panel.hidden;
-    panel.hidden = !open;
-    btn.setAttribute("aria-expanded", String(open));
-    if (open) void refreshStatusLine();
-  });
-  wrap.append(btn, panel);
-  return wrap;
 }
 function buildBrakeControl() {
   const btn = document.createElement("button");
@@ -1983,7 +1989,7 @@ async function toggleBrake() {
     refreshBrakeUI();
     return;
   }
-  const ok = await confirmDialog(
+  const ok = await confirmDialog2(
     "Engage the hand brake? This pauses every lane and force-kills every running task (sudo children may survive). Everything stays paused until you release it.",
     { title: "Engage hand brake", confirmLabel: "Engage" }
   );
@@ -1995,13 +2001,6 @@ async function toggleBrake() {
   }
   refreshBrakeUI();
 }
-document.addEventListener("click", (e) => {
-  const menu = document.getElementById("nav-menu");
-  if (menu && !menu.contains(e.target)) closeMenu();
-});
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeMenu();
-});
 var unmountCurrentPage = null;
 function renderPage() {
   const container = document.getElementById("app");
@@ -2057,6 +2056,7 @@ async function bootstrap() {
       refreshBrakeUI();
     }
   });
+  buildHamburger();
   window.addEventListener("hashchange", route);
   route();
 }

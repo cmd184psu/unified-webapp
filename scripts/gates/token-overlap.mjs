@@ -3,12 +3,11 @@
 //
 // Computes the intersection of the custom-property NAMES declared in
 // web/shared/css/*.css and in web/taskmaster/style.css, and passes iff that
-// intersection is exactly {--font-mono}.
+// intersection is empty (no local redefinitions of shared tokens).
 //
-// Both sheets declare their properties on :root at specificity (0,1,0), so
-// source order decides every overlap. shared.css is linked first, therefore
-// taskmaster's --font-mono wins at all five of its consumers — analysed in
-// Step 7 and harmless. If the set ever grows, this gate fails and the new
+// Phase 3 C1 retired taskmaster's local token vocabulary; the only remaining
+// local token (--status-blue) has no shared equivalent, so the expected
+// overlap is now empty. If the set ever grows, this gate fails and the new
 // overlap must be analysed before landing.
 //
 // The mechanism is `comm -12` over two sorted -u name lists; it lives in a
@@ -24,7 +23,7 @@ process.chdir(path.resolve(import.meta.dirname, "..", ".."));
 
 const SHARED_CSS_DIR = "web/shared/css";
 const TASKMASTER_CSS = "web/taskmaster/style.css";
-const EXPECTED = ["--font-mono"];
+const EXPECTED = [];
 
 function fail(message) {
   process.stderr.write(`token-overlap: FAIL ${message}\n`);

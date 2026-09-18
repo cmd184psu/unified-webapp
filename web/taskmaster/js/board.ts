@@ -24,7 +24,7 @@
 
 import { api, Capabilities, Lane, LaneStatus, Task, TaskExecution } from './api.js';
 import { LiveController, BoardEvent, patchList } from './ui/live.js';
-import { openModal, confirmDialog, alertDialog } from './ui/modal.js';
+import { openModal, confirmDialog, alertDialog } from '@shared';
 import { openTaskDesigner } from './designer.js';
 import { openOutputModal } from './outputmodal.js';
 import { fmtElapsed, renderStatusBadge } from './status.js';

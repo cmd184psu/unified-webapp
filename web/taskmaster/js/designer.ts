@@ -20,7 +20,7 @@
 // only dialog used for validation errors is ui/modal.ts's alertDialog.
 
 import { api, Capabilities, LaneStatus } from './api.js';
-import { openModal, alertDialog } from './ui/modal.js';
+import { openModal, alertDialog } from '@shared';
 import { createToggleHandle } from './ui/toggle.js';
 
 /** Shell-quotes a single argument the way a POSIX sh would need it quoted. */
