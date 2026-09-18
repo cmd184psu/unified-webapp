@@ -1,40 +1,31 @@
-// menu.ts — the one hamburger every module gets (FRD :262-293, ADR-009,
-// phase2 §5 Step 4.1). The class owns the chrome; modules own the contents
-// through hooks.
+// menu.ts — the one hamburger every module gets. The class owns the chrome;
+// modules own the contents through hooks.
 //
 // Chrome is modelled on todo's slide-in drawer, structurally: trigger →
-// backdrop → left-edge drawer sliding on `transform`. The three a11y
-// features are NET-NEW, not ported — §4.4 records that none of the six
-// current implementations in the repo has `aria-expanded`, Escape handling or
-// a focus trap. The trap's element predicate is NOT re-declared here: it is
-// imported from ./focusable.js, which is modal.ts's own predicate moved to a
-// shared private module (B4.8, §10 ledger row 8).
+// backdrop → left-edge drawer sliding on `transform`. Three a11y features
+// are provided: `aria-expanded`, Escape handling, and a focus trap. The
+// trap's element predicate is imported from ./focusable.js.
 //
 // Three properties worth stating because they are load-bearing elsewhere:
 //
 //   1. CONSTRUCTION IS EAGER. The trigger, the backdrop, the drawer and every
 //      item — `render` slots included — are built and attached to the live
-//      document in the constructor, and open() only animates. todo's nine
-//      migrated controls keep their inline `onchange` attributes and are
-//      found by `id` from js/todo.js, so loadColConfig() must resolve them
-//      whether or not the drawer has ever been opened (§5 Step 6.2). B4.3
-//      asserts node identity BEFORE any open(), which is what makes this
-//      structural rather than a convention.
-//   2. `when()` IS RE-EVALUATED ON EVERY OPEN (B4.4), never cached at
+//      document in the constructor, and open() only animates. Controls keep
+//      their inline `onchange` attributes and are found by `id`, so they must
+//      resolve whether or not the drawer has ever been opened.
+//   2. `when()` IS RE-EVALUATED ON EVERY OPEN, never cached at
 //      construction, so a guarded item appears and disappears with no
 //      addItem/removeItem churn. Each item's element is built once and kept:
 //      sync() attaches and detaches the SAME node, so a slot's mounted DOM
 //      survives any number of close/open cycles.
 //   3. NO MARKUP STRING IS ASSIGNED ANYWHERE IN THIS FILE. Every element
 //      comes from createElement/createElementNS and every label is a text
-//      node (B4.6), which is also why the trigger's glyph is an assembled
-//      inline SVG rather than a pasted icon-font fragment. FR-6 is out of
-//      Phase-2 scope, so the glyph is private to this module instead of
-//      coming from a shared icon set (§10 ledger row 4).
+//      node, which is also why the trigger's glyph is an assembled
+//      inline SVG rather than a pasted icon-font fragment.
 //
 // No colour, size or motion value reaches this file either: the eight .ui-menu-*
 // classes in web/shared/css/components.css carry all of it, including the
-// reduced-motion suppression (B4.9) — so a module that wants a different
+// reduced-motion suppression — so a module that wants a different
 // drawer width restyles one class rather than passing an option.
 
 import type { ThemeManager } from "./theme.js";
@@ -44,11 +35,7 @@ import { getFocusable } from "./focusable.js";
 interface MenuActionItem {
   id: string;
   label: string;
-  /**
-   * An opaque icon name, surfaced to CSS as `data-icon` and nothing more.
-   * FR-6 (the shared icon set) is not a Phase-2 deliverable, so this module
-   * stores the name rather than resolving it to a glyph.
-   */
+  /** An opaque icon name, surfaced to CSS as `data-icon` and nothing more. */
   icon?: string;
   onSelect: () => void;
   when?: () => boolean;
@@ -75,10 +62,10 @@ interface MenuSectionItem {
 }
 
 /**
- * An arbitrary-DOM slot — the kind that guarantees zero functionality loss
- * (FRD :289-293). `render` is called ONCE, during construction, with a host
- * element already attached to the document, and is never called again: the
- * nodes a module mounts are its own and this module does not rebuild them.
+ * An arbitrary-DOM slot — the kind that guarantees zero functionality loss.
+ * `render` is called ONCE, during construction, with a host element already
+ * attached to the document, and is never called again: the nodes a module
+ * mounts are its own and this module does not rebuild them.
  */
 interface MenuRenderItem {
   id: string;
@@ -106,7 +93,7 @@ export interface HamburgerMenuOptions {
   /**
    * Adopt an existing button as the trigger instead of creating one, so a
    * module that already ships a hamburger keeps its glyph and its position
-   * and gains only the a11y wiring (obsidianoid's `#btn-hamburger`, §7 B4.2).
+   * and gains only the a11y wiring.
    * An adopted trigger is left in place by destroy(); a created one is not.
    */
   mountTrigger?: HTMLElement;
@@ -145,7 +132,6 @@ function barsGlyph(): SVGElement {
   svg.setAttribute("width", "1em");
   svg.setAttribute("height", "1em");
   svg.setAttribute("fill", "currentColor");
-  // Decorative: the accessible name is the trigger's own aria-label.
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("focusable", "false");
   for (const y of [64, 224, 384]) {
@@ -199,8 +185,6 @@ export class HamburgerMenu {
     this.drawer.setAttribute("role", "dialog");
     this.drawer.setAttribute("aria-modal", "true");
     this.drawer.setAttribute("aria-label", options.title ?? "Menu");
-    // The fallback focus target when a drawer holds nothing focusable, exactly
-    // as modal.ts:50 does for its panel.
     this.drawer.tabIndex = -1;
 
     this.backdrop = document.createElement("div");
@@ -220,9 +204,6 @@ export class HamburgerMenu {
     this.trigger.setAttribute("aria-controls", drawerId);
     this.trigger.setAttribute("aria-haspopup", "true");
 
-    // Attach before the items are built, so a `render` slot's host is already
-    // in the live document when the module's render() runs and the nodes it
-    // mounts are reachable by document.getElementById immediately (B4.3).
     document.body.append(this.backdrop);
     document.body.append(this.drawer);
 
@@ -231,16 +212,11 @@ export class HamburgerMenu {
 
     this.bind(this.trigger, "click", () => this.toggle());
     this.bind(this.backdrop, "mousedown", () => this.close());
-    // One document-level listener for the instance's whole life, guarded on
-    // `opened`, rather than one added per open and removed per close: it makes
-    // destroy()'s accounting exact (B4.7) and it cannot leak a trap behind a
-    // drawer that was closed by some other path. Capture phase, as modal.ts:116.
     this.bind(document, "keydown", (e) => this.onKeydown(e as KeyboardEvent), true);
 
     this.sync();
   }
 
-  /** Opens the drawer, re-evaluating every `when()` first (B4.4). */
   open(): void {
     if (this.opened || this.destroyed) return;
     this.opened = true;
@@ -251,7 +227,6 @@ export class HamburgerMenu {
     this.options.onOpen?.();
   }
 
-  /** Closes the drawer and returns focus to the trigger (B4.1). */
   close(): void {
     if (!this.opened) return;
     this.opened = false;
@@ -265,13 +240,11 @@ export class HamburgerMenu {
     else this.open();
   }
 
-  /** Appends an item. Visible from the next sync, which this call performs. */
   addItem(item: MenuItem): void {
     this.records.push(this.buildRecord(item));
     this.sync();
   }
 
-  /** Removes the item with this `id`. A no-op on an unknown id (B4.5). */
   removeItem(id: string): void {
     const index = this.records.findIndex((record) => itemId(record.item) === id);
     if (index < 0) return;
@@ -280,11 +253,6 @@ export class HamburgerMenu {
     record.el.remove();
   }
 
-  /**
-   * Merges `patch` into the item with this `id`. A no-op on an unknown id
-   * (B4.5). The element is updated in place and never rebuilt, so a `render`
-   * slot patched here keeps the nodes its module mounted.
-   */
   updateItem(id: string, patch: Partial<MenuItem>): void {
     const record = this.records.find((r) => itemId(r.item) === id);
     if (!record) return;
@@ -297,8 +265,6 @@ export class HamburgerMenu {
    * Removes every listener this instance added and detaches its chrome. An
    * adopted `mountTrigger` is left in the page with the three attributes this
    * class set removed; a trigger this class created is detached with the rest.
-   * Listeners a module added inside its own `render` slot are its own and are
-   * deliberately not touched.
    */
   destroy(): void {
     if (this.destroyed) return;
@@ -326,7 +292,6 @@ export class HamburgerMenu {
     this.bindings.push({ target, type, fn, capture });
   }
 
-  /** Drops the bindings whose target is `el`, used when an item is removed. */
   private unbindWithin(el: EventTarget): void {
     for (let i = this.bindings.length - 1; i >= 0; i--) {
       const binding = this.bindings[i];
@@ -355,9 +320,6 @@ export class HamburgerMenu {
       const el = document.createElement("div");
       el.className = "ui-menu-slot";
       el.id = item.id;
-      // Attached FIRST, then handed over: the module's render() gets a host
-      // that is already part of the document, which is what lets a control it
-      // mounts be found by id with no open() in between (B4.3).
       this.drawer.append(el);
       item.render(el);
       return { item, el };
@@ -383,7 +345,6 @@ export class HamburgerMenu {
     return { item, el };
   }
 
-  /** Re-states an item's label-ish properties after updateItem(). */
   private refresh(record: ItemRecord): void {
     const item = record.item;
     if (isSeparator(item) || isRender(item)) return;
@@ -408,8 +369,6 @@ export class HamburgerMenu {
     label.className = "ui-menu-label";
     label.textContent = "Theme";
     section.append(label);
-    // The picker has ONE definition, ThemeManager.renderPicker (§5 Step 3.2):
-    // this class mounts it and knows nothing about swatches or palettes.
     themes.renderPicker(section);
     return section;
   }
@@ -430,14 +389,12 @@ export class HamburgerMenu {
     if (this.picker) this.drawer.append(this.picker);
   }
 
-  /** The only place open/closed state reaches the DOM. */
   private paint(): void {
     this.drawer.className = this.opened ? "ui-menu-drawer is-open" : "ui-menu-drawer";
     this.backdrop.className = this.opened ? "ui-menu-backdrop is-open" : "ui-menu-backdrop";
     this.trigger.setAttribute("aria-expanded", this.opened ? "true" : "false");
   }
 
-  /** Escape closes; Tab is trapped. The predicate is ./focusable.js's (B4.8). */
   private onKeydown(e: KeyboardEvent): void {
     if (!this.opened) return;
     if (e.key === "Escape") {

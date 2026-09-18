@@ -220,23 +220,16 @@ function setTheme(name) {
 }
 var ThemeManager = class {
   constructor(options) {
-    /**
-     * The roster pickers enumerate (FRD :256). Deliberately the same set as
-     * THEMES and nothing more (B3.5): `system` is the resolver's implicit third
-     * step, not an offerable name — it is absent here, absent from THEMES, and
-     * rejected on read-back from storage (§10 ledger row 22).
-     */
+    /** The roster pickers enumerate. Deliberately the same set as THEMES and
+     * nothing more: `system` is the resolver's implicit step, not an offerable
+     * name — absent here, absent from THEMES, and rejected on read-back. */
     this.list = THEMES;
     /**
      * One row set per picker this instance has rendered, because one instance
-     * may render SEVERAL (the sampler's page section and its drawer; a module's
-     * drawer alone) and they are three views of one state. Kept on the instance
-     * because the active mark has to follow every theme change, including the
-     * ones made from outside a picker — set() from another picker, reresolve()
-     * once serverDefault() becomes answerable, and the system `change` listener
-     * (C5's browser leg: an eagerly built obsidianoid drawer marked the swatch
-     * resolution reached at RENDER time and then never moved it, so the mark sat
-     * on the wrong swatch, which is worse than no mark at all).
+     * may render several and they are views of one state. Kept on the instance
+     * because the active mark has to follow every theme change, including ones
+     * made from outside a picker — set() from another picker, reresolve() once
+     * serverDefault() becomes answerable, and the system `change` listener.
      */
     this.pickers = [];
     this.options = options;
@@ -252,13 +245,12 @@ var ThemeManager = class {
     this.stamp(this.resolve());
   }
   /**
-   * Re-runs the resolution order against the closures' CURRENT values and
-   * applies the result, without writing storage (ADR-008's v2 amendment,
-   * B3.10). Same operation as apply(): the separate name is the entry point
-   * obsidianoid's fetchVaults/switchVault call when the per-vault storage key
-   * changes under a live instance, and delegating keeps resolution in one
-   * place. Not writing is the load-bearing half — a writing reresolve() would
-   * overwrite the destination vault's saved choice with the source vault's.
+   * Re-runs the resolution order against the closures' current values and
+   * applies the result, without writing storage. The separate name is the
+   * entry point obsidianoid's fetchVaults/switchVault call when the per-vault
+   * storage key changes under a live instance. Not writing is the load-bearing
+   * half — a writing reresolve() would overwrite the destination vault's saved
+   * choice with the source vault's.
    */
   reresolve() {
     this.apply();
@@ -270,17 +262,15 @@ var ThemeManager = class {
     this.options.onChange?.(name);
   }
   /**
-   * The one place a theme becomes the applied theme: apply() (and therefore
-   * reresolve() and the system `change` listener) and set() both route through
-   * here, so a change made anywhere re-marks every rendered picker. setTheme
-   * stays the single definition of the DOM write; this adds the mark beside
-   * it, and nothing else.
+   * The one place a theme becomes the applied theme: apply() and set() both
+   * route through here, so a change made anywhere re-marks every rendered
+   * picker. setTheme stays the single definition of the DOM write; this adds
+   * the mark beside it, and nothing else.
    */
   stamp(name) {
     setTheme(name);
     this.mark(name);
   }
-  /** Moves the active mark to `name`'s swatch in every rendered picker. */
   mark(name) {
     for (const rows of this.pickers) {
       for (const row of rows) {
@@ -289,15 +279,11 @@ var ThemeManager = class {
     }
   }
   /**
-   * Renders the shared swatch picker into `host` — the widget HamburgerMenu
-   * mounts at C4, so it has one definition and lives here beside the
-   * resolution it drives. Every node is built through createElement and every
-   * label is a text node — no markup string is assigned anywhere in this file
-   * (B3.6), unlike the donor at obsidianoid's `app.ts:438`. No colour value
-   * reaches this file either: each swatch carries `data-theme`, and themes.css
-   * keys every palette on a BARE attribute selector, so a swatch sets its OWN
-   * --color-primary and eight swatches render eight fills in one open picker
-   * (ADR-015, B4.2).
+   * Renders the shared swatch picker into `host`. Every node is built through
+   * createElement and every label is a text node — no markup string is assigned
+   * anywhere in this file. No colour value reaches this file either: each
+   * swatch carries `data-theme`, and themes.css keys every palette on a bare
+   * attribute selector.
    */
   renderPicker(host) {
     const picker = document.createElement("div");
@@ -319,7 +305,6 @@ var ThemeManager = class {
     this.pickers.push(rows);
     this.mark(this.resolve());
   }
-  /** The storage key in force right now — `ui-theme:<module>` unless overridden. */
   storageKey() {
     const override = this.options.storageKey;
     return override ? override() : `ui-theme:${this.options.module}`;
@@ -327,25 +312,21 @@ var ThemeManager = class {
   /**
    * Step 1. Every value read from storage is validated against THEMES before
    * use, so an unknown stored string falls through to the next step rather
-   * than stamping a nonexistent theme (B3.2).
+   * than stamping a nonexistent theme.
    */
   storedTheme() {
     const raw = localStorage.getItem(this.storageKey());
     if (raw === null) return void 0;
     return THEMES.includes(raw) ? raw : void 0;
   }
-  /**
-   * Step 3. `matches` → dark; everything else, `no-preference` included,
-   * → light (§15 row 9). This step therefore ALWAYS resolves.
-   */
+  /** Step 3. `matches` → dark; everything else → light. Always resolves. */
   systemTheme() {
     return this.media.matches ? "dark" : "light";
   }
   /**
-   * The resolution order, FRD :245-247: localStorage → serverDefault() →
-   * system → default. Step 3 always answers, which makes the trailing
-   * `?? this.options.default` the typed-config floor §5 Step 3.1 declares it
-   * to be — present, in order, and unreachable at runtime.
+   * Resolution order: localStorage → serverDefault() → system → default.
+   * Step 3 always answers, which makes the trailing `?? this.options.default`
+   * a typed-config floor — present, in order, and unreachable at runtime.
    */
   resolve() {
     const stored = this.storedTheme();
@@ -476,7 +457,6 @@ var HamburgerMenu = class {
     this.bind(document, "keydown", (e) => this.onKeydown(e), true);
     this.sync();
   }
-  /** Opens the drawer, re-evaluating every `when()` first (B4.4). */
   open() {
     if (this.opened || this.destroyed) return;
     this.opened = true;
@@ -486,7 +466,6 @@ var HamburgerMenu = class {
     (focusable[0] ?? this.drawer).focus();
     this.options.onOpen?.();
   }
-  /** Closes the drawer and returns focus to the trigger (B4.1). */
   close() {
     if (!this.opened) return;
     this.opened = false;
@@ -498,12 +477,10 @@ var HamburgerMenu = class {
     if (this.opened) this.close();
     else this.open();
   }
-  /** Appends an item. Visible from the next sync, which this call performs. */
   addItem(item) {
     this.records.push(this.buildRecord(item));
     this.sync();
   }
-  /** Removes the item with this `id`. A no-op on an unknown id (B4.5). */
   removeItem(id) {
     const index = this.records.findIndex((record2) => itemId(record2.item) === id);
     if (index < 0) return;
@@ -511,11 +488,6 @@ var HamburgerMenu = class {
     this.unbindWithin(record.el);
     record.el.remove();
   }
-  /**
-   * Merges `patch` into the item with this `id`. A no-op on an unknown id
-   * (B4.5). The element is updated in place and never rebuilt, so a `render`
-   * slot patched here keeps the nodes its module mounted.
-   */
   updateItem(id, patch) {
     const record = this.records.find((r) => itemId(r.item) === id);
     if (!record) return;
@@ -527,8 +499,6 @@ var HamburgerMenu = class {
    * Removes every listener this instance added and detaches its chrome. An
    * adopted `mountTrigger` is left in the page with the three attributes this
    * class set removed; a trigger this class created is detached with the rest.
-   * Listeners a module added inside its own `render` slot are its own and are
-   * deliberately not touched.
    */
   destroy() {
     if (this.destroyed) return;
@@ -553,7 +523,6 @@ var HamburgerMenu = class {
     target.addEventListener(type, fn, capture);
     this.bindings.push({ target, type, fn, capture });
   }
-  /** Drops the bindings whose target is `el`, used when an item is removed. */
   unbindWithin(el) {
     for (let i = this.bindings.length - 1; i >= 0; i--) {
       const binding = this.bindings[i];
@@ -601,7 +570,6 @@ var HamburgerMenu = class {
     });
     return { item, el };
   }
-  /** Re-states an item's label-ish properties after updateItem(). */
   refresh(record) {
     const item = record.item;
     if (isSeparator(item) || isRender(item)) return;
@@ -643,13 +611,11 @@ var HamburgerMenu = class {
     }
     if (this.picker) this.drawer.append(this.picker);
   }
-  /** The only place open/closed state reaches the DOM. */
   paint() {
     this.drawer.className = this.opened ? "ui-menu-drawer is-open" : "ui-menu-drawer";
     this.backdrop.className = this.opened ? "ui-menu-backdrop is-open" : "ui-menu-backdrop";
     this.trigger.setAttribute("aria-expanded", this.opened ? "true" : "false");
   }
-  /** Escape closes; Tab is trapped. The predicate is ./focusable.js's (B4.8). */
   onKeydown(e) {
     if (!this.opened) return;
     if (e.key === "Escape") {

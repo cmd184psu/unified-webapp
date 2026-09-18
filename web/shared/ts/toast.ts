@@ -1,20 +1,11 @@
-// toast.ts — non-blocking action feedback, lifted from
-// web/certmachine/js/toast.ts (ADR-010) with its surface unchanged.
+// toast.ts — non-blocking action feedback. Every mutating action reports its
+// outcome, success or the server's own error text, through showToast — never
+// alert(), confirm() or prompt().
 //
-// It is the replacement for `alert('CA ready')`-style reporting: every
-// mutating action reports its outcome, success or the server's own error
-// text, through showToast — never alert(), confirm() or prompt() (BX.7 is
-// the grep that keeps it that way).
-//
-// Three mechanical changes from the donor, and no others (§5 Step 2.1):
-//   - the class names are cert-toast* → ui-toast*, because every selector in
-//     web/shared/css/components.css must match /^\.ui-/ (check-shared-css.mjs
-//     clause 7);
-//   - the dismiss button's × glyph stays a text node via textContent, and
-//     keeps its aria-label="Dismiss";
-//   - no colour literal lives here — the tone reaches CSS as a `data-tone`
-//     attribute and components.css selects on it, so the palette stays in
-//     themes.css where clause 5 counts it.
+// Class names are ui-toast* (matching the web/shared/css/components.css
+// convention). No colour literal lives here — the tone reaches CSS as a
+// `data-tone` attribute and components.css selects on it, so the palette
+// stays in themes.css.
 
 export type ToastTone = "success" | "error" | "notice";
 
@@ -33,9 +24,6 @@ const DEFAULT_DURATION_MS: Record<ToastTone, number> = {
 
 let stack: HTMLElement | null = null;
 
-// One live region for N toasts, created lazily and reused. Re-created only if
-// something removed it from the document, so a page that clears document.body
-// does not end up with a detached stack that never shows anything again.
 function ensureStack(): HTMLElement {
   if (stack && document.body.contains(stack)) return stack;
   stack = document.createElement("div");

@@ -566,4 +566,4 @@ function marked(buttons: FakeElement[]): string[] {
 
 check("barrel exposes ThemeManager", typeof barrel.ThemeManager === "function", `got ${typeof barrel.ThemeManager}`);
 check("barrel's ThemeManager is this module's class", barrel.ThemeManager === ThemeManager, "the barrel re-exports a different binding");
-check("barrel still exposes THEMES and setTheme beside it (ADR-008)", barrel.THEMES === THEMES && typeof barrel.setTheme === "function", "the primitive was displaced");
+check("barrel still exposes THEMES and setTheme beside it", barrel.THEMES === THEMES && typeof barrel.setTheme === "function", "the primitive was displaced");

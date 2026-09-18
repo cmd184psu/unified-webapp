@@ -1,11 +1,10 @@
 // modal.ts — a dependency-free in-page lightbox/modal primitive, plus
 // confirm/alert/prompt replacements for the native dialogs.
 //
-// Global UI policy (see taskmaster-ui-FRD.md §8a): never use
-// alert()/confirm()/prompt() — all errors, confirmations, and prompts use
-// styled in-page modals instead. Built self-contained so it can be lifted
-// wholesale into a future shared UI layer (§8b) — no imports from any
-// taskmaster app code.
+// Global UI policy: never use alert()/confirm()/prompt() — all errors,
+// confirmations, and prompts use styled in-page modals instead. Built
+// self-contained so it can be lifted into any shared UI layer — no imports
+// from any app code.
 //
 // Usage:
 //   if (await confirmDialog("Delete this task?")) { ... }
@@ -14,11 +13,8 @@
 //   const handle = openModal(myContentEl, { title: "Details" });
 //   handle.close();
 //
-// One import, added at phase2 C4: the focus trap's element predicate moved to
-// ./focusable.ts so menu.ts's trap can reuse it instead of declaring a second
-// copy (§5 Step 4.1, §10 ledger row 8, B4.8). Nothing else changed here — the
-// public surface, the call order and the trap's behaviour are identical, which
-// is what modal.test.ts still proves.
+// The focus trap's element predicate lives in ./focusable.ts so menu.ts's
+// trap can reuse it instead of declaring a second copy.
 
 import { getFocusable } from "./focusable.js";
 

@@ -1,11 +1,9 @@
-// modal.test.ts — Phase-1 coverage (docs/PLAN-ui-unification-phase1.md §3
-// Step 5): option normalization/defaults, the textContent-only escaping
+// modal.test.ts — option normalization/defaults, the textContent-only escaping
 // path, and the barrel's export shape.
 //
-// No jsdom, no @types/node (ADR-005) — just enough of a hand-rolled element
-// stub for modal.ts's DOM calls to run under `npm run test:web`'s
-// esbuild-cjs/node18 pipeline. There is no browser here; a non-zero exit is
-// the whole report.
+// No jsdom — just enough of a hand-rolled element stub for modal.ts's DOM
+// calls to run under `npm run test:web`'s esbuild-cjs/node18 pipeline.
+// There is no browser here; a non-zero exit is the whole report.
 
 import { openModal, confirmDialog, alertDialog, promptDialog } from "./modal";
 import * as barrel from "./index";
