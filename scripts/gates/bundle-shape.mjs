@@ -119,10 +119,20 @@ for (const d of inputs) {
     }
 
     // A9.2 — negative, both markers.
-    for (const marker of ["__require(", "Dynamic require of"]) {
-      if (text.includes(marker)) {
-        failures.push(`${d.name}: ${artifact} contains "${marker}" — format downgraded to iife (A9.2)`);
+    // "__require(" must exclude the CJS shim definition that esbuild emits
+    // when bundling React (CJS) into ESM. The definition is always
+    // `function __require()` — actual invocations use `= __require(` or
+    // `(__require(`. Count occurrences: the definition contributes exactly 1;
+    // any call adds more.
+    {
+      const reqCount = (text.match(/__require\(/g) || []).length;
+      const defCount = (text.match(/function __require\(\)/g) || []).length;
+      if (reqCount > defCount) {
+        failures.push(`${d.name}: ${artifact} contains "__require(" calls (${reqCount} total, ${defCount} definitions) — format downgraded to iife (A9.2)`);
       }
+    }
+    if (text.includes("Dynamic require of")) {
+      failures.push(`${d.name}: ${artifact} contains "Dynamic require of" — format downgraded to iife (A9.2)`);
     }
 
     // A9.3 — the define was applied, and applied once.

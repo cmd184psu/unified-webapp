@@ -64,7 +64,7 @@ export function PreviewPage({ globals, shares, shareOwner }: Props) {
       </div>
 
       {error && (
-        <div className="card" style={{ borderColor: 'var(--red)' }}>
+        <div className="card" style={{ borderColor: 'var(--color-danger)' }}>
           <span className="text-red">{error}</span>
         </div>
       )}

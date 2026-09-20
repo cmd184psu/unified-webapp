@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { AppConfig } from './api'
-import { useTheme, ThemeMode } from './theme'
+import { confirmDialog } from '@shared'
 
 interface Props {
   config: AppConfig
@@ -10,14 +10,7 @@ interface Props {
 }
 
 export function SettingsPage({ config, onChange, importing, onImport }: Props) {
-  const { mode, setMode } = useTheme()
   const [importPath, setImportPath] = useState(config.smb_conf_path)
-
-  const themes: { label: string; value: ThemeMode; icon: string }[] = [
-    { label: 'Light', value: 'light', icon: '☀️' },
-    { label: 'Dark', value: 'dark', icon: '🌑' },
-    { label: 'System', value: 'system', icon: '💻' },
-  ]
 
   return (
     <div>
@@ -25,29 +18,6 @@ export function SettingsPage({ config, onChange, importing, onImport }: Props) {
         <div className="page-title">Settings</div>
         <div className="page-subtitle">
           Server configuration and appearance. Saved to <code>state.json</code>.
-        </div>
-      </div>
-
-      {/* ── Appearance ────────────────────────────────────────────────── */}
-      <div className="card">
-        <div className="card-title">🎨 Appearance</div>
-
-        <div className="field">
-          <label className="field-label">Theme</label>
-          <div className="theme-switcher">
-            {themes.map(t => (
-              <button
-                key={t.value}
-                className={`theme-btn${mode === t.value ? ' active' : ''}`}
-                onClick={() => {
-                  setMode(t.value)
-                  onChange({ theme: t.value })
-                }}
-              >
-                {t.icon} {t.label}
-              </button>
-            ))}
-          </div>
         </div>
       </div>
 
@@ -99,8 +69,8 @@ export function SettingsPage({ config, onChange, importing, onImport }: Props) {
           className="btn btn-primary"
           style={{ width: '100%', padding: '10px 14px', fontSize: 12 }}
           disabled={importing || !importPath.trim()}
-          onClick={() => {
-            if (window.confirm(
+          onClick={async () => {
+            if (await confirmDialog(
               `Import ${importPath}? This will replace the Globals and Shares currently shown in the editor.`
             )) {
               onImport(importPath.trim())

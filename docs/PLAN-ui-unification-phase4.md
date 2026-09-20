@@ -1,6 +1,6 @@
 # Phase 4 — React bindings + smbedit / issuetracker / slideshow / utuber migration
 
-**Status:** `pending approval`
+**Status:** `approved` (consensus: Architect APPROVE + Critic APPROVE, iteration 3, 2026-09-20)
 **Branch:** `ui-upgrade`
 **Predecessor:** Phase 3 (C1-C8, commits `73936e7..31935dd`)
 
@@ -200,7 +200,7 @@ utuber has NO descriptor — needs one created.
 5. **FontAwesome removal** — delete web/slideshow/webfonts/ directory and all FA CSS files: css/fontawesome.min.css, css/fontawsme.css (FA 4.6.3), css/fontawall.css (FA 5.7.0). Update any HTML/CSS referencing FA icons.
 6. **DO NOT add HamburgerMenu** — slideshow has its own settings panel that controls slideshow-specific settings (mode, interval, shuffle, debug). HamburgerMenu would be redundant.
 
-**Touches:** web/slideshow/css/app.css, js/app.ts, index.html, webfonts/ (delete), css/fontawesome.min.css (delete)
+**Touches:** web/slideshow/css/app.css, js/app.ts, index.html, webfonts/ (delete), css/fontawesome.min.css (delete), css/fontawsme.css (delete), css/fontawall.css (delete)
 
 ### 4.4 C4: utuber — file split + ESM + sharedConsumer + token migration + CDN removal
 
