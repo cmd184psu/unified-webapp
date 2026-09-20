@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { confirmDialog } from "@shared";
 import { api } from "../api";
 import { useData } from "../DataContext";
 import { IssueModal } from "../components/IssueModal";
@@ -83,7 +84,7 @@ export function IssueDetailPage() {
         <button
           className="btn danger"
           onClick={async () => {
-            if (confirm("Delete this issue?")) {
+            if (await confirmDialog("Delete this issue?")) {
               await api.deleteIssue(issue.id);
               nav("/issues");
             }
@@ -102,7 +103,7 @@ export function IssueDetailPage() {
           {issue.description ? (
             <div className="detail-desc">{issue.description}</div>
           ) : (
-            <div className="detail-desc" style={{ color: "var(--text-faint)" }}>
+            <div className="detail-desc" style={{ color: "var(--color-text-faint)" }}>
               No description.
             </div>
           )}
@@ -180,7 +181,7 @@ export function IssueDetailPage() {
             <div className="side-field">
               <label>Story</label>
               <span
-                style={{ color: "var(--accent)", cursor: "pointer" }}
+                style={{ color: "var(--color-primary)", cursor: "pointer" }}
                 onClick={() => nav(`/stories/${issue.storyId}`)}
               >
                 Open story →
@@ -232,7 +233,7 @@ function RelationsEditor({
   return (
     <div>
       {issue.relations.length === 0 && (
-        <div style={{ color: "var(--text-faint)", padding: "6px 0" }}>
+        <div style={{ color: "var(--color-text-faint)", padding: "6px 0" }}>
           No related issues.
         </div>
       )}
@@ -240,7 +241,7 @@ function RelationsEditor({
         <div className="relation-row" key={r.id}>
           <span className="rtype">{RELATION_LABELS[r.type] ?? r.type}</span>
           <span
-            style={{ color: "var(--text-faint)", cursor: "pointer" }}
+            style={{ color: "var(--color-text-faint)", cursor: "pointer" }}
             onClick={() => nav(`/issue/${r.identifier}`)}
           >
             {r.identifier}

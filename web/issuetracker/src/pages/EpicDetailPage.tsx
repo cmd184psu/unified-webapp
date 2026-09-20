@@ -31,7 +31,7 @@ export function EpicDetailPage() {
         </button>
       </div>
       <div className="content">
-        <div style={{ padding: "16px 18px", color: "var(--text-dim)" }}>
+        <div style={{ padding: "16px 18px", color: "var(--color-text-muted)" }}>
           <span className="detail-ident">{STATE_LABELS[epic.state]}</span>
           {epic.description && (
             <div className="detail-desc" style={{ marginTop: 10 }}>

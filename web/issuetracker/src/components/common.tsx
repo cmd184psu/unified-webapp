@@ -28,7 +28,7 @@ export function StateBadge({ state }: { state: State }) {
   return (
     <span className="state" style={{ color: STATE_COLORS[state] }}>
       <span className="ring" />
-      <span style={{ color: "var(--text-dim)" }}>{STATE_LABELS[state]}</span>
+      <span style={{ color: "var(--color-text-muted)" }}>{STATE_LABELS[state]}</span>
     </span>
   );
 }
@@ -38,7 +38,7 @@ export function Avatar({ user }: { user: User | null }) {
     return (
       <span
         className="avatar"
-        style={{ background: "transparent", border: "1px dashed var(--border-strong)" }}
+        style={{ background: "transparent", border: "1px dashed var(--color-border)" }}
         title="Unassigned"
       />
     );

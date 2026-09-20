@@ -21,7 +21,7 @@ export function StoriesPage() {
     <>
       <div className="topbar">
         <h1>Stories</h1>
-        <span style={{ color: "var(--text-faint)" }}>{stories.length}</span>
+        <span style={{ color: "var(--color-text-faint)" }}>{stories.length}</span>
         <div className="spacer" />
         <button className="btn primary" onClick={() => setCreating(true)}>
           + New story

@@ -1,29 +1,8 @@
 /* web/issuetracker/src/styles.css */
 :root {
-  --bg: #0e0e10;
-  --bg-elevated: #161618;
-  --bg-hover: #1c1c1f;
-  --bg-input: #1a1a1d;
-  --border: #25252a;
-  --border-strong: #34343a;
-  --text: #e6e6e8;
-  --text-dim: #9a9aa3;
-  --text-faint: #6a6a73;
-  --accent: #5e6ad2;
-  --accent-hover: #6e79d6;
-  --radius: 6px;
   --sidebar-w: 232px;
-  font-family:
-    "Inter",
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    Roboto,
-    Helvetica,
-    Arial,
-    sans-serif;
+  font-family: var(--font-body);
   font-size: 13px;
-  color-scheme: dark;
 }
 * {
   box-sizing: border-box;
@@ -35,8 +14,8 @@ body,
   margin: 0;
 }
 body {
-  background: var(--bg);
-  color: var(--text);
+  background: var(--color-bg);
+  color: var(--color-text);
   -webkit-font-smoothing: antialiased;
 }
 a {
@@ -53,17 +32,17 @@ textarea,
 select {
   font-family: inherit;
   font-size: inherit;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  color: var(--text);
-  border-radius: var(--radius);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  border-radius: var(--radius-md);
   padding: 7px 9px;
   outline: none;
 }
 input:focus,
 textarea:focus,
 select:focus {
-  border-color: var(--accent);
+  border-color: var(--color-primary);
 }
 .app {
   display: flex;
@@ -74,7 +53,7 @@ select:focus {
   width: var(--sidebar-w);
   flex-shrink: 0;
   background: #0a0a0c;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
   padding: 14px 10px;
@@ -95,14 +74,14 @@ select:focus {
   background:
     linear-gradient(
       135deg,
-      var(--accent),
+      var(--color-primary),
       #8b5cf6);
 }
 .nav-section {
   text-transform: uppercase;
   font-size: 10.5px;
   letter-spacing: 0.06em;
-  color: var(--text-faint);
+  color: var(--color-text-faint);
   padding: 14px 8px 4px;
 }
 .nav-item {
@@ -110,18 +89,18 @@ select:focus {
   align-items: center;
   gap: 9px;
   padding: 6px 8px;
-  border-radius: var(--radius);
-  color: var(--text-dim);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
   cursor: pointer;
   user-select: none;
 }
 .nav-item:hover {
-  background: var(--bg-hover);
-  color: var(--text);
+  background: var(--color-surface-2);
+  color: var(--color-text);
 }
 .nav-item.active {
-  background: var(--bg-hover);
-  color: var(--text);
+  background: var(--color-surface-2);
+  color: var(--color-text);
 }
 .nav-item .icon {
   width: 16px;
@@ -130,7 +109,7 @@ select:focus {
 }
 .nav-item .count {
   margin-left: auto;
-  color: var(--text-faint);
+  color: var(--color-text-faint);
   font-size: 11px;
 }
 .main {
@@ -142,7 +121,7 @@ select:focus {
 .topbar {
   height: 48px;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--color-border);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -161,35 +140,35 @@ select:focus {
   overflow: auto;
 }
 .btn {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  color: var(--text);
-  border-radius: var(--radius);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  border-radius: var(--radius-md);
   padding: 6px 11px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
 .btn:hover {
-  background: var(--bg-hover);
-  border-color: var(--border-strong);
+  background: var(--color-surface-2);
+  border-color: var(--color-border);
 }
 .btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--color-primary);
+  border-color: var(--color-primary);
   color: white;
 }
 .btn.primary:hover {
-  background: var(--accent-hover);
+  background: var(--color-primary-hover);
 }
 .btn.ghost {
   background: transparent;
   border-color: transparent;
-  color: var(--text-dim);
+  color: var(--color-text-muted);
 }
 .btn.ghost:hover {
-  background: var(--bg-hover);
-  color: var(--text);
+  background: var(--color-surface-2);
+  color: var(--color-text);
 }
 .btn.danger:hover {
   color: #eb5757;
@@ -200,7 +179,7 @@ select:focus {
   align-items: center;
   gap: 8px;
   padding: 10px 18px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--color-border);
   flex-wrap: wrap;
 }
 .filterbar select,
@@ -230,7 +209,7 @@ select:focus {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--text-dim);
+  color: var(--color-text-muted);
   white-space: nowrap;
 }
 .state .ring {
@@ -241,7 +220,7 @@ select:focus {
   flex-shrink: 0;
 }
 .prio {
-  color: var(--text-faint);
+  color: var(--color-text-faint);
   font-size: 11px;
 }
 .issue-group-header {
@@ -249,30 +228,30 @@ select:focus {
   align-items: center;
   gap: 8px;
   padding: 8px 18px;
-  background: var(--bg);
+  background: var(--color-bg);
   position: sticky;
   top: 0;
   z-index: 1;
   font-weight: 500;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-dim);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-muted);
 }
 .issue-group-header .gcount {
-  color: var(--text-faint);
+  color: var(--color-text-faint);
 }
 .issue-row {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 9px 18px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--color-border);
   cursor: pointer;
 }
 .issue-row:hover {
-  background: var(--bg-hover);
+  background: var(--color-surface-2);
 }
 .issue-row .ident {
-  color: var(--text-faint);
+  color: var(--color-text-faint);
   width: 64px;
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
@@ -308,7 +287,7 @@ select:focus {
 .empty {
   padding: 60px 18px;
   text-align: center;
-  color: var(--text-faint);
+  color: var(--color-text-faint);
 }
 .board {
   display: flex;
@@ -319,8 +298,8 @@ select:focus {
   align-items: flex-start;
 }
 .board-col {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   width: 280px;
   flex-shrink: 0;
@@ -329,8 +308,8 @@ select:focus {
   flex-direction: column;
 }
 .board-col.drop {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary);
 }
 .board-col-header {
   display: flex;
@@ -338,11 +317,11 @@ select:focus {
   gap: 8px;
   padding: 10px 12px;
   font-weight: 500;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--color-border);
 }
 .board-col-header .gcount {
   margin-left: auto;
-  color: var(--text-faint);
+  color: var(--color-text-faint);
 }
 .board-col-body {
   padding: 8px;
@@ -352,9 +331,9 @@ select:focus {
   overflow-y: auto;
 }
 .card {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -362,7 +341,7 @@ select:focus {
   cursor: grab;
 }
 .card:hover {
-  border-color: var(--border-strong);
+  border-color: var(--color-border);
 }
 .card.dragging {
   opacity: 0.4;
@@ -371,7 +350,7 @@ select:focus {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--text-faint);
+  color: var(--color-text-faint);
   font-size: 11px;
 }
 .card .card-title {
@@ -400,7 +379,7 @@ select:focus {
 .detail-side {
   width: 280px;
   flex-shrink: 0;
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--color-border);
   padding: 20px;
   overflow: auto;
 }
@@ -410,11 +389,11 @@ select:focus {
   font-weight: 600;
 }
 .detail-ident {
-  color: var(--text-faint);
+  color: var(--color-text-faint);
   font-variant-numeric: tabular-nums;
 }
 .detail-desc {
-  color: var(--text);
+  color: var(--color-text);
   line-height: 1.6;
   white-space: pre-wrap;
   margin-top: 8px;
@@ -424,7 +403,7 @@ select:focus {
 }
 .side-field label {
   display: block;
-  color: var(--text-faint);
+  color: var(--color-text-faint);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -444,10 +423,10 @@ select:focus {
   align-items: center;
   gap: 8px;
   padding: 6px 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--color-border);
 }
 .relation-row .rtype {
-  color: var(--text-faint);
+  color: var(--color-text-faint);
   font-size: 11px;
   width: 78px;
 }
@@ -456,11 +435,11 @@ select:focus {
   align-items: center;
   gap: 12px;
   padding: 12px 18px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--color-border);
   cursor: pointer;
 }
 .folder-row:hover {
-  background: var(--bg-hover);
+  background: var(--color-surface-2);
 }
 .folder-row .ficon {
   font-size: 16px;
@@ -470,7 +449,7 @@ select:focus {
   min-width: 0;
 }
 .folder-row .fsub {
-  color: var(--text-faint);
+  color: var(--color-text-faint);
   font-size: 11px;
 }
 .modal-backdrop {
@@ -483,8 +462,8 @@ select:focus {
   z-index: 50;
 }
 .modal {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-strong);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border);
   border-radius: 10px;
   width: 560px;
   max-width: calc(100vw - 40px);
@@ -500,7 +479,7 @@ select:focus {
 }
 .modal .field label {
   display: block;
-  color: var(--text-dim);
+  color: var(--color-text-muted);
   margin-bottom: 5px;
   font-size: 12px;
 }
@@ -520,8 +499,8 @@ select:focus {
   bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-strong);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border);
   padding: 10px 16px;
   border-radius: 8px;
   z-index: 100;
@@ -536,7 +515,7 @@ select:focus {
 }
 .loading {
   padding: 40px;
-  color: var(--text-faint);
+  color: var(--color-text-faint);
 }
 .login-page {
   min-height: 100vh;
@@ -548,14 +527,14 @@ select:focus {
       1200px 600px at 50% -10%,
       rgba(94, 106, 210, 0.18),
       transparent),
-    var(--bg);
+    var(--color-bg);
   padding: 24px;
 }
 .login-card {
   width: 100%;
   max-width: 380px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   padding: 28px 26px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
@@ -569,7 +548,7 @@ select:focus {
   margin-bottom: 6px;
 }
 .login-subtitle {
-  color: var(--text-dim);
+  color: var(--color-text-muted);
   font-size: 13px;
   margin: 0 0 20px;
 }
@@ -583,7 +562,7 @@ select:focus {
   flex-direction: column;
   gap: 6px;
   font-size: 12px;
-  color: var(--text-dim);
+  color: var(--color-text-muted);
 }
 .login-input {
   width: 100%;
@@ -596,14 +575,14 @@ select:focus {
 .login-divider {
   margin-top: 18px;
   padding-top: 18px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 .login-hint {
   font-size: 11.5px;
-  color: var(--text-faint);
+  color: var(--color-text-faint);
   margin: 0;
   text-align: center;
 }
@@ -618,8 +597,8 @@ select:focus {
   justify-content: space-between;
   gap: 12px;
   padding: 8px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-1);
 }
 .account-ident {
   display: flex;
@@ -632,8 +611,8 @@ select:focus {
 }
 .account-via {
   font-size: 11px;
-  color: var(--text-faint);
-  border: 1px solid var(--border);
+  color: var(--color-text-faint);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   padding: 1px 6px;
   text-transform: uppercase;
@@ -645,7 +624,7 @@ select:focus {
 }
 .account-status {
   font-size: 12px;
-  color: var(--text-dim);
+  color: var(--color-text-muted);
 }
 input.readonly {
   opacity: 0.7;
