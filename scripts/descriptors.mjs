@@ -199,6 +199,17 @@ export const descriptors = [
     target: "es2020",
     sharedConsumer: true,
   },
+  {
+    name: "utuber",
+    entry: ["web/utuber/js/main.ts"],
+    mode: "bundle",
+    out: "web/utuber/js/bundle.js",
+    bundle: true,
+    format: "esm",
+    target: "es2020",
+    sharedConsumer: true,
+    emitsCss: false,
+  },
 ];
 
 // How many files the descriptors above emit. Defined ONCE, here: the
@@ -206,4 +217,4 @@ export const descriptors = [
 // failure rather than a silent pass (A7.3). The value moves during the
 // sequence — 12 through C3, 14 after C4, 15 after C5 — and each move is an
 // edit to this one line.
-export const EXPECTED_ARTIFACT_COUNT = 20;
+export const EXPECTED_ARTIFACT_COUNT = 21;

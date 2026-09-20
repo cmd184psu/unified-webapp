@@ -1,0 +1,253 @@
+// web/utuber/js/main.ts
+import { ThemeManager, HamburgerMenu } from "/shared/dist/shared.mjs";
+var themes = new ThemeManager({ module: "utuber", default: "dark" });
+themes.apply();
+var hamburger = new HamburgerMenu({
+  title: "uTuber",
+  items: [],
+  themePicker: true,
+  themes
+});
+document.body.prepend(hamburger.trigger);
+var currentMode = "video";
+var pendingFormData = null;
+function setMode(mode) {
+  currentMode = mode;
+  document.getElementById("mode-input").value = mode;
+  document.querySelectorAll(".mode-tab").forEach((t) => {
+    t.classList.toggle("active", t.dataset.mode === mode);
+  });
+  const btn = document.getElementById("submit-btn");
+  btn.className = mode === "audio" ? "btn btn-audio" : "btn btn-video";
+}
+function hideDupBanner() {
+  const b = document.getElementById("dup-banner");
+  b.style.display = "none";
+  b.innerHTML = "";
+  pendingFormData = null;
+}
+function showDupBanner(data, formData) {
+  pendingFormData = formData;
+  const b = document.getElementById("dup-banner");
+  const fname = data.output_file || "(unknown)";
+  b.innerHTML = `
+    <div>
+      <strong>Already downloaded.</strong>
+      "${esc(data.show_name)}" was previously saved as
+      <a href="/downloads/${encodeURIComponent(fname)}">${esc(fname)}</a>.
+    </div>
+    <div class="dup-actions">
+      <button class="dup-btn" id="dup-force-btn">Download again anyway</button>
+      <button class="dup-btn dismiss" id="dup-dismiss-btn">Dismiss</button>
+    </div>`;
+  b.style.display = "block";
+  document.getElementById("dup-force-btn").addEventListener("click", forceEnqueue);
+  document.getElementById("dup-dismiss-btn").addEventListener("click", hideDupBanner);
+}
+async function forceEnqueue() {
+  if (!pendingFormData) return;
+  pendingFormData.set("force", "1");
+  await submitForm(pendingFormData);
+  hideDupBanner();
+}
+function showErrToast(msg) {
+  const t = document.getElementById("err-toast");
+  t.textContent = msg;
+  t.style.display = "block";
+}
+function hideErrToast() {
+  const t = document.getElementById("err-toast");
+  t.style.display = "none";
+  t.textContent = "";
+}
+async function submitForm(formData) {
+  hideErrToast();
+  let res;
+  try {
+    res = await fetch("/enqueue", { method: "POST", body: formData });
+  } catch (err) {
+    showErrToast("Could not reach server: " + err.message);
+    return;
+  }
+  if (res.status === 409) {
+    const data = await res.json();
+    showDupBanner(data, formData);
+    return;
+  }
+  if (res.status === 204) {
+    document.querySelector('input[name="url"]').value = "";
+    hideDupBanner();
+    refreshJobs();
+    return;
+  }
+  const body = await res.text().catch(() => "");
+  showErrToast(`Server error ${res.status}${body ? ": " + body.trim() : ""}`);
+}
+document.getElementById("enqueue-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  hideDupBanner();
+  await submitForm(new FormData(e.target));
+});
+async function refreshJobs() {
+  const res = await fetch("/jobs.json");
+  const jobs = await res.json();
+  const list = document.getElementById("jobs-list");
+  const countEl = document.getElementById("jobs-count");
+  if (!jobs || jobs.length === 0) {
+    list.innerHTML = '<div class="empty-state">No jobs yet \u2014 add one above.</div>';
+    countEl.textContent = "";
+    return;
+  }
+  countEl.textContent = jobs.length + (jobs.length === 1 ? " job" : " jobs");
+  list.innerHTML = jobs.map((j) => jobRow(j)).join("");
+}
+function jobRow(j) {
+  const epLabel = `S${String(j.Season).padStart(2, "0")}E${String(j.Episode).padStart(2, "0")}`;
+  const mode = j.Mode || "video";
+  const { barClass, pct, label } = parseProgress(j.Progress, j.Status);
+  const statusClass = "status-" + (j.Status || "queued");
+  const isAudio = mode === "audio";
+  const dlLink = j.Status === "completed" ? `<div class="dl-actions">
+        <a class="download-link ${isAudio ? "audio-dl" : ""}" href="/downloads/${encodeURIComponent(j.OutputFile)}" target="_blank" rel="noopener">
+          <svg width="12" height="12" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M6 4l10 6-10 6V4z"/>
+          </svg>
+          Play
+        </a>
+        <a class="download-link ${isAudio ? "audio-dl" : ""}" href="/downloads/${encodeURIComponent(j.OutputFile)}" download>
+          <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10 3v10M5 13l5 5 5-5"/><line x1="3" y1="19" x2="17" y2="19"/>
+          </svg>
+          Download
+        </a>
+      </div>` : "";
+  const errLine = j.Error ? `<div class="job-error" title="${esc(j.Error)}">\u26A0 ${esc(j.Error)}</div>` : "";
+  return `
+    <div class="job-item">
+      <div class="job-meta">
+        <div class="job-name">${esc(j.ShowName)} \u2014 ${esc(j.EpisodeTitle)}</div>
+        <div class="job-sub">
+          <span>${epLabel}</span>
+          <span class="mode-badge ${mode}">${mode}</span>
+        </div>
+        ${errLine}
+      </div>
+      <div class="job-right">
+        <span class="status-pill ${statusClass}">${j.Status}</span>
+        ${barClass ? `
+        <div class="progress-wrap">
+          <div class="progress-bar ${barClass}" style="width:${pct}%"></div>
+        </div>
+        <span class="progress-label">${label}</span>
+        ` : ""}
+        ${dlLink}
+      </div>
+    </div>`;
+}
+function parseProgress(p, status) {
+  if (status === "completed") return { barClass: "done", pct: 100, label: "" };
+  if (!p) return { barClass: "", pct: 0, label: "" };
+  if (p.startsWith("download")) {
+    const pct = parseFloat(p.split(" ")[1]) || 0;
+    return { barClass: "dl", pct, label: `Downloading ${pct.toFixed(0)}%` };
+  }
+  if (p.startsWith("convert") || p === "converting") {
+    const pct = parseFloat(p.split(" ")[1]) || 0;
+    return { barClass: "conv", pct: pct || 50, label: "Converting\u2026" };
+  }
+  if (p === "done") return { barClass: "done", pct: 100, label: "" };
+  return { barClass: "", pct: 0, label: p };
+}
+function esc(s) {
+  return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function runYtdlpUpdate() {
+  const btn = document.getElementById("update-btn");
+  const status = document.getElementById("update-status");
+  const log = document.getElementById("update-log");
+  btn.disabled = true;
+  btn.textContent = "Updating\u2026";
+  status.textContent = "";
+  log.textContent = "";
+  log.style.display = "block";
+  const es = new EventSource("/ytdlp-update");
+  es.onmessage = (e) => {
+    if (e.data === "__done__") {
+      es.close();
+      btn.disabled = false;
+      btn.textContent = "Update yt-dlp";
+      status.textContent = "Done.";
+      return;
+    }
+    if (e.data.startsWith("ERROR:")) {
+      log.textContent += e.data + "\n";
+      es.close();
+      btn.disabled = false;
+      btn.textContent = "Update yt-dlp";
+      status.style.color = "var(--color-danger)";
+      status.textContent = "Update failed.";
+      return;
+    }
+    log.textContent += e.data + "\n";
+    log.scrollTop = log.scrollHeight;
+  };
+  es.onerror = () => {
+    es.close();
+    btn.disabled = false;
+    btn.textContent = "Update yt-dlp";
+    status.style.color = "var(--color-danger)";
+    status.textContent = "Connection error.";
+  };
+}
+function toggleSettings() {
+  const panel = document.getElementById("settings-panel");
+  const btn = document.getElementById("settings-btn");
+  const open = panel.hidden;
+  panel.hidden = !open;
+  btn.setAttribute("aria-expanded", String(open));
+  if (open) loadSettings();
+}
+async function loadSettings() {
+  const status = document.getElementById("settings-status");
+  try {
+    const res = await fetch("/settings.json");
+    const data = await res.json();
+    document.getElementById("python-bin").value = data.python_bin || "";
+    status.textContent = "";
+  } catch {
+    status.style.color = "var(--color-danger)";
+    status.textContent = "Connection error.";
+  }
+}
+async function saveSettings() {
+  const status = document.getElementById("settings-status");
+  const input = document.getElementById("python-bin");
+  try {
+    const res = await fetch("/settings.json", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ python_bin: input.value })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      input.value = data.python_bin || "";
+      status.style.color = "var(--color-success)";
+      status.textContent = "Saved.";
+    } else {
+      status.style.color = "var(--color-danger)";
+      status.textContent = await res.text();
+    }
+  } catch {
+    status.style.color = "var(--color-danger)";
+    status.textContent = "Connection error.";
+  }
+}
+document.querySelectorAll(".mode-tab").forEach((tab) => {
+  tab.addEventListener("click", () => setMode(tab.dataset.mode));
+});
+document.getElementById("settings-btn").addEventListener("click", toggleSettings);
+document.getElementById("update-btn").addEventListener("click", runYtdlpUpdate);
+document.getElementById("settings-save").addEventListener("click", saveSettings);
+setInterval(refreshJobs, 2e3);
+refreshJobs();
+loadSettings();
