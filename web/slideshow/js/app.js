@@ -1,4 +1,5 @@
 "use strict";
+import { ThemeManager } from "/shared/dist/shared.mjs";
 export {};
 class PanScan {
   // incremented on every activate(); guards stale load events
@@ -208,6 +209,15 @@ const audioEl = document.getElementById("audio-player");
 const debugDisplayEl = document.getElementById("debug-display");
 const serverStampEl = document.getElementById("server-stamp");
 const chkDebug = document.getElementById("chk-debug");
+const themes = new ThemeManager({
+  module: "slideshow",
+  default: "dark",
+  onChange: (name) => {
+    selTheme.value = name;
+    control("set-theme", name);
+  }
+});
+themes.apply();
 const panScan = new PanScan(img);
 const debugTimer = new DebugTimer(debugDisplayEl);
 let currentState = null;
@@ -231,7 +241,7 @@ function connectSSE() {
 function applyState(state) {
   const prev = currentState;
   currentState = state;
-  document.documentElement.dataset["theme"] = state.theme;
+  themes.set(state.theme);
   display.dataset["controlsPos"] = state.controls_position || "bottom";
   const imageChanged = !prev || prev.image_path !== state.image_path;
   const modeChanged = !prev || prev.mode !== state.mode;
@@ -352,7 +362,7 @@ btnCloseSettings.addEventListener("click", closeSettings);
 settingsScrim.addEventListener("click", closeSettings);
 chkDebug.addEventListener("change", () => debugTimer.show(chkDebug.checked));
 selMode.addEventListener("change", () => control("set-mode", selMode.value));
-selTheme.addEventListener("change", () => control("set-theme", selTheme.value));
+selTheme.addEventListener("change", () => themes.set(selTheme.value));
 chkShuffle.addEventListener("change", () => control("set-shuffle", chkShuffle.checked));
 selControlsPos.addEventListener("change", () => control("set-controls-position", selControlsPos.value));
 inpInterval.addEventListener("change", () => {

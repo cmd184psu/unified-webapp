@@ -1,3 +1,5 @@
+import { ThemeManager } from '/shared/dist/shared.mjs';
+
 export {};
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -273,6 +275,17 @@ const debugDisplayEl = document.getElementById("debug-display")    as HTMLSpanEl
 const serverStampEl  = document.getElementById("server-stamp")     as HTMLDivElement;
 const chkDebug       = document.getElementById("chk-debug")        as HTMLInputElement;
 
+// ── Theme ────────────────────────────────────────────────────────────────────
+const themes = new ThemeManager({
+  module: 'slideshow',
+  default: 'dark',
+  onChange: (name: string) => {
+    selTheme.value = name;
+    control('set-theme', name);
+  },
+});
+themes.apply();
+
 // ── Module state ──────────────────────────────────────────────────────────────
 const panScan   = new PanScan(img);
 const debugTimer = new DebugTimer(debugDisplayEl);
@@ -296,7 +309,7 @@ function applyState(state: SlideshowState): void {
   const prev = currentState;
   currentState = state;
 
-  document.documentElement.dataset["theme"] = state.theme;
+  themes.set(state.theme);
   display.dataset["controlsPos"] = state.controls_position || "bottom";
 
   const imageChanged    = !prev || prev.image_path       !== state.image_path;
@@ -443,7 +456,7 @@ settingsScrim.addEventListener("click",    closeSettings);
 chkDebug.addEventListener("change", () => debugTimer.show(chkDebug.checked));
 
 selMode.addEventListener("change",        () => control("set-mode",              selMode.value));
-selTheme.addEventListener("change",       () => control("set-theme",             selTheme.value));
+selTheme.addEventListener("change",       () => themes.set(selTheme.value));
 chkShuffle.addEventListener("change",     () => control("set-shuffle",           chkShuffle.checked));
 selControlsPos.addEventListener("change", () => control("set-controls-position", selControlsPos.value));
 inpInterval.addEventListener("change", () => {

@@ -4,6 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>Slideshow</title>
+  <script>
+    try { const t = localStorage.getItem('ui-theme:slideshow'); if (t) document.documentElement.dataset.theme = t; } catch {}
+  </script>
+  <link rel="stylesheet" href="/shared/dist/shared.css" />
   <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
@@ -85,8 +89,14 @@
       <label>
         Theme
         <select id="sel-theme">
-          <option value="dark">Dark</option>
-          <option value="light">Light</option>
+          <option value="dark">dark</option>
+          <option value="light">light</option>
+          <option value="obsidian">obsidian</option>
+          <option value="forest">forest</option>
+          <option value="ocean">ocean</option>
+          <option value="ember">ember</option>
+          <option value="rose">rose</option>
+          <option value="puma">puma</option>
         </select>
       </label>
 

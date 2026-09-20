@@ -2,34 +2,24 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:          #111;
-  --fg:          #eee;
   --overlay-bg:  rgba(0, 0, 0, 0.45);
   --btn-bg:      rgba(255, 255, 255, 0.14);
   --btn-border:  rgba(255, 255, 255, 0.28);
   --btn-hover:   rgba(255, 255, 255, 0.28);
-  --panel-bg:    rgba(18, 18, 18, 0.88);
-  --panel-border: rgba(255,255,255,0.1);
-  --label-fg:    rgba(255,255,255,0.55);
 }
 
 [data-theme="light"] {
-  --bg:          #f5f5f5;
-  --fg:          #111;
   --overlay-bg:  rgba(255, 255, 255, 0.45);
   --btn-bg:      rgba(0, 0, 0, 0.12);
   --btn-border:  rgba(0, 0, 0, 0.20);
   --btn-hover:   rgba(0, 0, 0, 0.22);
-  --panel-bg:    rgba(240, 240, 240, 0.92);
-  --panel-border: rgba(0,0,0,0.12);
-  --label-fg:    rgba(0,0,0,0.50);
 }
 
 html, body {
   width: 100%;
   height: 100%;
-  background: var(--bg);
-  color: var(--fg);
+  background: var(--color-bg);
+  color: var(--color-text);
   font-family: system-ui, sans-serif;
   overflow: hidden;
 }
@@ -52,7 +42,7 @@ html, body {
   width: 100%;
   height: 100%;
   object-fit: contain; /* always show the full image — no cropping */
-  background: var(--bg);
+  background: var(--color-bg);
 }
 
 /* ── Slideshow mode animations ────────────────────────────────────────────── */
@@ -171,7 +161,7 @@ html, body {
 button {
   background: var(--btn-bg);
   border: 1px solid var(--btn-border);
-  color: var(--fg);
+  color: var(--color-text);
   border-radius: 6px;
   padding: 0.4rem 0.7rem;
   font-size: 1rem;
@@ -232,14 +222,14 @@ button:active { opacity: 0.7; }
   right: 0;
   bottom: 0;
   width: 300px;
-  background: var(--panel-bg);
+  background: var(--color-surface-1);
   backdrop-filter: blur(10px);
-  border-left: 1px solid var(--panel-border);
+  border-left: 1px solid var(--color-border);
   padding: 1.5rem 1.2rem;
   display: flex;
   flex-direction: column;
   gap: 1.1rem;
-  color: var(--fg);
+  color: var(--color-text);
   z-index: 30;   /* above scrim */
   overflow-y: auto;
 }
@@ -270,21 +260,21 @@ button:active { opacity: 0.7; }
   flex-direction: column;
   gap: 0.3rem;
   font-size: 0.85rem;
-  color: var(--label-fg);
+  color: var(--color-text-muted);
 }
 
 #settings-panel label.checkbox-label {
   flex-direction: row;
   align-items: center;
   gap: 0.5rem;
-  color: var(--fg);
+  color: var(--color-text);
 }
 
 #settings-panel select,
 #settings-panel input[type="number"] {
   background: var(--btn-bg);
   border: 1px solid var(--btn-border);
-  color: var(--fg);
+  color: var(--color-text);
   border-radius: 5px;
   padding: 0.35rem 0.5rem;
   font-size: 0.9rem;
@@ -292,7 +282,7 @@ button:active { opacity: 0.7; }
 
 .panel-divider {
   border: none;
-  border-top: 1px solid var(--panel-border);
+  border-top: 1px solid var(--color-border);
   margin: 0.2rem 0;
 }
 
