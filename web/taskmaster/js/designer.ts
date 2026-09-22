@@ -20,7 +20,7 @@
 // only dialog used for validation errors is ui/modal.ts's alertDialog.
 
 import { api, Capabilities, LaneStatus } from './api.js';
-import { openModal, alertDialog } from '@shared';
+import { openModal, alertDialog, showToast } from '@shared';
 import { createToggleHandle } from './ui/toggle.js';
 
 /** Shell-quotes a single argument the way a POSIX sh would need it quoted. */
@@ -107,10 +107,12 @@ function buildExportPanel(title: string, render: () => string): { el: HTMLElemen
     void navigator.clipboard.writeText(pre.textContent ?? '').then(
       () => {
         copyBtn.textContent = 'Copied';
+        showToast('Copied!', 'success');
         setTimeout(() => (copyBtn.textContent = 'Copy'), 1200);
       },
       () => {
         copyBtn.textContent = 'Copy failed';
+        showToast('Copy failed', 'error');
         setTimeout(() => (copyBtn.textContent = 'Copy'), 1200);
       }
     );

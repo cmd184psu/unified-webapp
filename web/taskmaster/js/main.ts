@@ -134,13 +134,6 @@ function buildHamburger(): void {
   hamburger?.destroy();
 
   const items: MenuItem[] = [
-    { section: 'Navigation' },
-    ...NAV_LINKS.map(({ label, hash }) => ({
-      id: `nav-${label.toLowerCase()}`,
-      label,
-      href: hash,
-    })),
-    { separator: true as const },
     { section: 'Live updates' },
     {
       id: 'live-toggle',
@@ -230,6 +223,7 @@ function buildHamburger(): void {
     items,
     themePicker: true,
     themes,
+    side: 'right',
     onOpen: () => void refreshStatusLine(),
   });
 }

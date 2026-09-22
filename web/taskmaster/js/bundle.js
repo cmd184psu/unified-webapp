@@ -455,7 +455,7 @@ import { confirmDialog as confirmDialog2, ThemeManager, HamburgerMenu } from "/s
 import { openModal as openModal3, confirmDialog, alertDialog as alertDialog3 } from "/shared/dist/shared.mjs";
 
 // web/taskmaster/js/designer.ts
-import { openModal, alertDialog as alertDialog2 } from "/shared/dist/shared.mjs";
+import { openModal, alertDialog as alertDialog2, showToast } from "/shared/dist/shared.mjs";
 function shQuote(s) {
   if (s === "") return "''";
   if (/^[A-Za-z0-9_\-./:=@%,]+$/.test(s)) return s;
@@ -518,10 +518,12 @@ function buildExportPanel(title, render3) {
     void navigator.clipboard.writeText(pre.textContent ?? "").then(
       () => {
         copyBtn.textContent = "Copied";
+        showToast("Copied!", "success");
         setTimeout(() => copyBtn.textContent = "Copy", 1200);
       },
       () => {
         copyBtn.textContent = "Copy failed";
+        showToast("Copy failed", "error");
         setTimeout(() => copyBtn.textContent = "Copy", 1200);
       }
     );
@@ -824,6 +826,7 @@ var countdownTimer;
 var loadSeq = 0;
 var caps = { allow_sudo: false };
 var laneFilter;
+var brakeEngaged = false;
 function openTaskRoute(taskName) {
   window.location.hash = "#task/" + encodeURIComponent(taskName);
 }
@@ -844,6 +847,11 @@ function mountBoard(container, live2, capabilities, options = {}) {
   boardEl = document.createElement("div");
   boardEl.className = "board-lanes" + (laneFilter ? " board-lanes-single" : "");
   container.appendChild(boardEl);
+  void api.getBrake().then((b) => {
+    brakeEngaged = b.engaged;
+    render();
+  }).catch(() => {
+  });
   void refreshAll();
   unsubscribeEvent = live2.onEvent((ev) => void handleBoardEvent(ev));
   countdownTimer = window.setInterval(() => render(), 1e3);
@@ -858,7 +866,9 @@ function mountBoard(container, live2, capabilities, options = {}) {
   };
 }
 async function handleBoardEvent(ev) {
-  void ev;
+  if (ev.type === "brake" && typeof ev.engaged === "boolean") {
+    brakeEngaged = ev.engaged;
+  }
   await refreshAll();
 }
 async function refreshAll() {
@@ -1270,7 +1280,7 @@ function updateTaskRow(row, task, pending) {
     } else if (pending) {
       status.textContent = "queued";
     } else if (task.repeat) {
-      status.textContent = cooldownLabel(task);
+      status.textContent = brakeEngaged ? "ready" : cooldownLabel(task);
     } else {
       status.textContent = "ready";
     }
@@ -1749,7 +1759,7 @@ function mountTaskView(container, live2, caps3, taskName) {
 }
 
 // web/taskmaster/js/buildinfo.ts
-var FRONTEND_BUILD_TIME = "8e9396743cf9";
+var FRONTEND_BUILD_TIME = "509e9dba3cf7";
 
 // web/taskmaster/js/main.ts
 var caps2 = { allow_sudo: false };
@@ -1845,13 +1855,6 @@ var hamburger = null;
 function buildHamburger() {
   hamburger?.destroy();
   const items = [
-    { section: "Navigation" },
-    ...NAV_LINKS.map(({ label, hash }) => ({
-      id: `nav-${label.toLowerCase()}`,
-      label,
-      href: hash
-    })),
-    { separator: true },
     { section: "Live updates" },
     {
       id: "live-toggle",
@@ -1939,6 +1942,7 @@ function buildHamburger() {
     items,
     themePicker: true,
     themes,
+    side: "right",
     onOpen: () => void refreshStatusLine()
   });
 }

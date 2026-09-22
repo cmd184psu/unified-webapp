@@ -50,6 +50,13 @@ let countdownTimer: number | undefined;
 let loadSeq = 0;
 let caps: Capabilities = { allow_sudo: false };
 let laneFilter: string | undefined;
+// Hand brake state (FRD §5): while engaged, no "again in X" countdown
+// should be visible anywhere — showing one would imply a task might still
+// fire on its own, which the hand brake explicitly prevents. Tracked here
+// (rather than threaded through mountBoard's signature) since board.ts
+// already subscribes to the same live board-events feed that carries brake
+// changes.
+let brakeEngaged = false;
 
 function openTaskRoute(taskName: string): void {
   window.location.hash = '#task/' + encodeURIComponent(taskName);
@@ -81,6 +88,8 @@ export function mountBoard(
   boardEl.className = 'board-lanes' + (laneFilter ? ' board-lanes-single' : '');
   container.appendChild(boardEl);
 
+  void api.getBrake().then((b) => { brakeEngaged = b.engaged; render(); }).catch(() => {});
+
   void refreshAll();
 
   unsubscribeEvent = live.onEvent((ev) => void handleBoardEvent(ev));
@@ -104,7 +113,9 @@ async function handleBoardEvent(ev: BoardEvent): Promise<void> {
   // (Coalescing per-lane refetches is a nice-to-have; a full snapshot
   // refetch keeps this slice simple while patchList still guarantees no
   // full-DOM repaint / no jitter.)
-  void ev;
+  if (ev.type === 'brake' && typeof ev.engaged === 'boolean') {
+    brakeEngaged = ev.engaged;
+  }
   await refreshAll();
 }
 
@@ -616,7 +627,10 @@ function updateTaskRow(row: HTMLElement, task: Task, pending: TaskExecution | nu
     } else if (pending) {
       status.textContent = 'queued';
     } else if (task.repeat) {
-      status.textContent = cooldownLabel(task);
+      // No "again in X" countdown while the hand brake is engaged — it
+      // would imply the task might still fire on its own, which the brake
+      // explicitly prevents.
+      status.textContent = brakeEngaged ? 'ready' : cooldownLabel(task);
     } else {
       status.textContent = 'ready';
     }
