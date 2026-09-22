@@ -163,11 +163,13 @@ function renderMatrix() {
         `.matrix-setpin-btn[data-module="${CSS.escape(mod)}"]`
       );
       if (setBtn) setBtn.disabled = !box.checked;
+      autoSaveMatrix();
     });
   });
   container.querySelectorAll("select.matrix-pinfile").forEach((select) => {
     select.addEventListener("change", () => {
       matrix[select.dataset.module].pinFile = select.value;
+      autoSaveMatrix();
     });
   });
   container.querySelectorAll(".matrix-setpin-btn").forEach((btn) => {
@@ -229,7 +231,7 @@ async function matrixSetPinSubmit(mod) {
     }, 3e3);
   }
 }
-document.getElementById("matrix-save").addEventListener("click", async () => {
+async function saveMatrix() {
   const errorEl = document.getElementById("matrix-error");
   const statusEl2 = document.getElementById("matrix-status");
   errorEl.textContent = "";
@@ -253,7 +255,13 @@ document.getElementById("matrix-save").addEventListener("click", async () => {
   setTimeout(() => {
     statusEl2.textContent = "";
   }, 3e3);
+}
+document.getElementById("matrix-save").addEventListener("click", async () => {
+  await saveMatrix();
 });
+var autoSaveMatrix = debounce(() => {
+  void saveMatrix();
+}, 500);
 function renderKeys() {
   const list = document.getElementById("keys-list");
   list.innerHTML = "";

@@ -269,11 +269,13 @@ function renderMatrix(): void {
         `.matrix-setpin-btn[data-module="${CSS.escape(mod)}"]`,
       );
       if (setBtn) setBtn.disabled = !box.checked;
+      autoSaveMatrix();
     });
   });
   container.querySelectorAll<HTMLSelectElement>("select.matrix-pinfile").forEach((select) => {
     select.addEventListener("change", () => {
       matrix[select.dataset.module!].pinFile = select.value;
+      autoSaveMatrix();
     });
   });
   container.querySelectorAll<HTMLButtonElement>(".matrix-setpin-btn").forEach((btn) => {
@@ -341,7 +343,7 @@ async function matrixSetPinSubmit(mod: string): Promise<void> {
   }
 }
 
-document.getElementById("matrix-save")!.addEventListener("click", async () => {
+async function saveMatrix(): Promise<void> {
   const errorEl = document.getElementById("matrix-error")!;
   const statusEl2 = document.getElementById("matrix-status")!;
   errorEl.textContent = "";
@@ -365,7 +367,15 @@ document.getElementById("matrix-save")!.addEventListener("click", async () => {
   setTimeout(() => {
     statusEl2.textContent = "";
   }, 3000);
+}
+
+document.getElementById("matrix-save")!.addEventListener("click", async () => {
+  await saveMatrix();
 });
+
+const autoSaveMatrix = debounce(() => {
+  void saveMatrix();
+}, 500);
 
 // ── API keys ────────────────────────────────────────────────────
 
