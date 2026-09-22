@@ -139,7 +139,7 @@ function addPage(el: HTMLElement, json: Submenu): void {
     content += `<tr><td>Notes: </td><td><p>${json.notes}</p></td></tr>`;
   }
   if (json.gdoc != null) {
-    content += `<tr><td>G-Doc: </td><td><p>${json.notes}</p></td></tr>`;
+    content += `<tr><td>G-Doc: </td><td><p>${json.gdoc}</p></td></tr>`;
   }
   content += "</table></div>";
   if (SHOWALLPAGES) {
