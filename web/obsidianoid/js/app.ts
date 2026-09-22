@@ -1,4 +1,4 @@
-import { HamburgerMenu, ThemeManager, showToast } from "@shared";
+import { HamburgerMenu, ThemeManager, showToast, confirmDialog } from "@shared";
 
 interface VaultInfo { name: string; theme: string; }
 interface TreeNode { name: string; path?: string; is_dir?: boolean; children?: TreeNode[]; }
@@ -136,7 +136,7 @@ function syncActiveHighlight() {
 /* ─── Load note ─── */
 async function loadNote(path: string) {
   if (state.isDirty) {
-    if (!confirm('You have unsaved changes. Discard and open new note?')) return;
+    if (!await confirmDialog('You have unsaved changes. Discard and open new note?')) return;
   }
   try {
     const res = await fetch(`/api/note?${vaultParam()}&path=${encodeURIComponent(path)}`);

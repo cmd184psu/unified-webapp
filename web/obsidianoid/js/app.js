@@ -1,5 +1,5 @@
 // web/obsidianoid/js/app.ts
-import { HamburgerMenu, ThemeManager, showToast } from "/shared/dist/shared.mjs";
+import { HamburgerMenu, ThemeManager, showToast, confirmDialog } from "/shared/dist/shared.mjs";
 var state = {
   currentPath: null,
   isPreviewMode: false,
@@ -121,7 +121,7 @@ function syncActiveHighlight() {
 }
 async function loadNote(path) {
   if (state.isDirty) {
-    if (!confirm("You have unsaved changes. Discard and open new note?")) return;
+    if (!await confirmDialog("You have unsaved changes. Discard and open new note?")) return;
   }
   try {
     const res = await fetch(`/api/note?${vaultParam()}&path=${encodeURIComponent(path)}`);

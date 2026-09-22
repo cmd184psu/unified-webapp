@@ -1,5 +1,6 @@
 // web/todo/js/shell.ts
-import { ThemeManager, HamburgerMenu } from "/shared/dist/shared.mjs";
+import { ThemeManager, HamburgerMenu, showToast } from "/shared/dist/shared.mjs";
+window.showToast = showToast;
 var themes = new ThemeManager({
   module: "todo",
   default: "dark",

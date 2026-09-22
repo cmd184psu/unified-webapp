@@ -38,7 +38,7 @@ function saveSide(side) {
         data: JSON.stringify(body),
         error: function (err) {
             console.log(JSON.stringify(err, null, 3));
-            alert('Failed to save ' + side + ' list.');
+            showToast('Failed to save ' + side + ' list.', 'error');
         }
     });
 }

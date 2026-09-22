@@ -3,7 +3,9 @@
 // Owns the ThemeManager instance and the topbar toggle listener.
 // The hamburger drawer guard lives here; C6b fills its body.
 
-import { ThemeManager, HamburgerMenu, type ThemeManagerOptions, type MenuItem } from "@shared";
+import { ThemeManager, HamburgerMenu, showToast, type ThemeManagerOptions, type MenuItem } from "@shared";
+
+(window as any).showToast = showToast;
 
 // Storage key "todo-theme" preserves existing user preferences from the
 // migrated theme.js.  The default key would be "ui-theme:todo"; overriding
