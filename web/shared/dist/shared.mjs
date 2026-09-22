@@ -399,6 +399,24 @@ function isLink(item) {
 function itemId(item) {
   return "id" in item ? item.id : void 0;
 }
+function closeGlyph() {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "1em");
+  svg.setAttribute("height", "1em");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  for (const d of ["M6 6L18 18", "M6 18L18 6"]) {
+    const line = document.createElementNS(SVG_NS, "path");
+    line.setAttribute("d", d);
+    line.setAttribute("stroke", "currentColor");
+    line.setAttribute("stroke-width", "2");
+    line.setAttribute("fill", "none");
+    svg.append(line);
+  }
+  return svg;
+}
 function barsGlyph() {
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", "0 0 448 512");
@@ -424,6 +442,8 @@ var HamburgerMenu = class {
     this.bindings = [];
     this.opened = false;
     this.destroyed = false;
+    /** The resolved edge for `side: "auto"`; null until the first open(). */
+    this.resolvedSide = null;
     this.options = options;
     const drawerId = `ui-menu-drawer-${++instanceCount}`;
     this.drawer = document.createElement("aside");
@@ -433,6 +453,29 @@ var HamburgerMenu = class {
     this.drawer.setAttribute("aria-modal", "true");
     this.drawer.setAttribute("aria-label", options.title ?? "Menu");
     this.drawer.tabIndex = -1;
+    if (options.side === "left" || options.side === "right") {
+      this.resolvedSide = options.side;
+      this.drawer.dataset.side = options.side;
+    } else if (options.side === "auto") {
+      this.resolvedSide = null;
+    } else {
+      this.resolvedSide = "left";
+    }
+    const header = document.createElement("div");
+    header.className = "ui-menu-header";
+    const closeButton = document.createElement("button");
+    closeButton.type = "button";
+    closeButton.className = "ui-menu-close";
+    closeButton.setAttribute("aria-label", "Close menu");
+    closeButton.append(closeGlyph());
+    header.append(closeButton);
+    if (options.title !== void 0) {
+      const titleEl = document.createElement("span");
+      titleEl.className = "ui-menu-title";
+      titleEl.textContent = options.title;
+      header.append(titleEl);
+    }
+    this.drawer.append(header);
     this.backdrop = document.createElement("div");
     this.backdrop.className = "ui-menu-backdrop";
     if (options.mountTrigger) {
@@ -455,10 +498,17 @@ var HamburgerMenu = class {
     this.bind(this.trigger, "click", () => this.toggle());
     this.bind(this.backdrop, "mousedown", () => this.close());
     this.bind(document, "keydown", (e) => this.onKeydown(e), true);
+    this.bind(closeButton, "click", () => this.close());
     this.sync();
   }
   open() {
     if (this.opened || this.destroyed) return;
+    if (this.options.side === "auto" && this.resolvedSide === null) {
+      const rect = this.trigger.getBoundingClientRect();
+      const center = rect.left + rect.width / 2;
+      this.resolvedSide = center > window.innerWidth / 2 ? "right" : "left";
+      this.drawer.dataset.side = this.resolvedSide;
+    }
     this.opened = true;
     this.sync();
     this.paint();

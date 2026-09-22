@@ -97,6 +97,12 @@ export interface HamburgerMenuOptions {
    * An adopted trigger is left in place by destroy(); a created one is not.
    */
   mountTrigger?: HTMLElement;
+  /**
+   * Which edge the drawer slides from. "auto" defers the choice to the first
+   * open(), where it is resolved against the trigger's position on screen
+   * and then cached. Left unset, the drawer uses CSS's left-edge default.
+   */
+  side?: "left" | "right" | "auto";
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -123,6 +129,26 @@ function isLink(item: MenuItem): item is MenuLinkItem {
 /** Separators and section headings are unaddressable by design — no id. */
 function itemId(item: MenuItem): string | undefined {
   return "id" in item ? item.id : undefined;
+}
+
+/** The close (X) glyph, assembled node by node. */
+function closeGlyph(): SVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "1em");
+  svg.setAttribute("height", "1em");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  for (const d of ["M6 6L18 18", "M6 18L18 6"]) {
+    const line = document.createElementNS(SVG_NS, "path");
+    line.setAttribute("d", d);
+    line.setAttribute("stroke", "currentColor");
+    line.setAttribute("stroke-width", "2");
+    line.setAttribute("fill", "none");
+    svg.append(line);
+  }
+  return svg;
 }
 
 /** The three-bar glyph, assembled node by node. */
@@ -174,6 +200,8 @@ export class HamburgerMenu {
   private readonly picker: HTMLElement | null;
   private opened = false;
   private destroyed = false;
+  /** The resolved edge for `side: "auto"`; null until the first open(). */
+  private resolvedSide: "left" | "right" | null = null;
 
   constructor(options: HamburgerMenuOptions) {
     this.options = options;
@@ -186,6 +214,31 @@ export class HamburgerMenu {
     this.drawer.setAttribute("aria-modal", "true");
     this.drawer.setAttribute("aria-label", options.title ?? "Menu");
     this.drawer.tabIndex = -1;
+
+    if (options.side === "left" || options.side === "right") {
+      this.resolvedSide = options.side;
+      this.drawer.dataset.side = options.side;
+    } else if (options.side === "auto") {
+      this.resolvedSide = null;
+    } else {
+      this.resolvedSide = "left";
+    }
+
+    const header = document.createElement("div");
+    header.className = "ui-menu-header";
+    const closeButton = document.createElement("button");
+    closeButton.type = "button";
+    closeButton.className = "ui-menu-close";
+    closeButton.setAttribute("aria-label", "Close menu");
+    closeButton.append(closeGlyph());
+    header.append(closeButton);
+    if (options.title !== undefined) {
+      const titleEl = document.createElement("span");
+      titleEl.className = "ui-menu-title";
+      titleEl.textContent = options.title;
+      header.append(titleEl);
+    }
+    this.drawer.append(header);
 
     this.backdrop = document.createElement("div");
     this.backdrop.className = "ui-menu-backdrop";
@@ -213,12 +266,19 @@ export class HamburgerMenu {
     this.bind(this.trigger, "click", () => this.toggle());
     this.bind(this.backdrop, "mousedown", () => this.close());
     this.bind(document, "keydown", (e) => this.onKeydown(e as KeyboardEvent), true);
+    this.bind(closeButton, "click", () => this.close());
 
     this.sync();
   }
 
   open(): void {
     if (this.opened || this.destroyed) return;
+    if (this.options.side === "auto" && this.resolvedSide === null) {
+      const rect = this.trigger.getBoundingClientRect();
+      const center = rect.left + rect.width / 2;
+      this.resolvedSide = center > window.innerWidth / 2 ? "right" : "left";
+      this.drawer.dataset.side = this.resolvedSide;
+    }
     this.opened = true;
     this.sync();
     this.paint();

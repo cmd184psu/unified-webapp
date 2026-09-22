@@ -66,9 +66,18 @@ class FakeElement {
   children: FakeElement[] = [];
   listeners: Record<string, Array<(e: unknown) => void>> = {};
   parent: FakeElement | null = null;
+  _rectLeft: number | undefined;
+  _rectRight: number | undefined;
 
   constructor(tagName: string) {
     this.tagName = tagName;
+  }
+
+  /** Only side:"auto" ever calls this — a hand-set stand-in for real layout. */
+  getBoundingClientRect(): { left: number; right: number; width: number } {
+    const left = this._rectLeft ?? 0;
+    const right = this._rectRight ?? 100;
+    return { left, right, width: right - left };
   }
 
   /** A string argument is a TEXT node — ThemeManager.renderPicker passes one. */
@@ -181,6 +190,14 @@ Object.defineProperty(globalThis, "document", {
   configurable: true,
 });
 
+// Only side:"auto" ever reads this — mutable so that one test can move it.
+const fakeWindow = { innerWidth: 800 };
+Object.defineProperty(globalThis, "window", {
+  value: fakeWindow,
+  writable: true,
+  configurable: true,
+});
+
 function check(name: string, cond: boolean, detail: string): void {
   if (!cond) throw new Error(`${name}: ${detail}`);
   console.log(`ok - ${name}`);
@@ -216,14 +233,24 @@ function press(key: string, shiftKey = false): void {
   }
 }
 
-/** The drawer's visible children, as class names — sync()'s observable result. */
-function classes(menu: HamburgerMenu): string[] {
-  return el(menu.drawer).children.map((c) => c.className);
+/**
+ * The drawer's children with the always-present .ui-menu-header excluded —
+ * that header is chrome C0 adds, not a registered item, and sync() never
+ * touches it. Recomputed fresh on every call, never cached, since children
+ * mutate in place under addItem/removeItem/updateItem.
+ */
+function itemChildren(menu: HamburgerMenu): FakeElement[] {
+  return el(menu.drawer).children.filter((c) => c.className !== "ui-menu-header");
 }
 
-/** The drawer's visible children, as text — what the order assertions read. */
+/** The drawer's visible items, as class names — sync()'s observable result. */
+function classes(menu: HamburgerMenu): string[] {
+  return itemChildren(menu).map((c) => c.className);
+}
+
+/** The drawer's visible items, as text — what the order assertions read. */
 function labels(menu: HamburgerMenu): string[] {
-  return el(menu.drawer).children.map((c) => c.textContent ?? "");
+  return itemChildren(menu).map((c) => c.textContent ?? "");
 }
 
 // --- eager construction, and a slot mounted verbatim ------------------------
@@ -339,23 +366,25 @@ function labels(menu: HamburgerMenu): string[] {
   check('B4.1: aria-expanded flips to "true" on open', trigger.attrs["aria-expanded"] === "true", `got "${trigger.attrs["aria-expanded"]}"`);
   check("the drawer gains .is-open", drawer.className === "ui-menu-drawer is-open", `got "${drawer.className}"`);
   check("the backdrop gains .is-open", el(menu.backdrop).className === "ui-menu-backdrop is-open", `got "${el(menu.backdrop).className}"`);
+  // C0: the header's close button is now the first focusable descendant, so
+  // it — not the first registered item — is what the trap wraps around.
+  const focusableEls = getFocusable(drawer as unknown as HTMLElement).map(el);
   check(
     "B4.1: focus moves to the first focusable item in the drawer on open",
-    fakeDocument.activeElement === drawer.children[0],
+    fakeDocument.activeElement === focusableEls[0],
     `activeElement is "${fakeDocument.activeElement?.className ?? "null"}"`,
   );
   check("onOpen fired exactly once", fired.filter((f) => f === "open").length === 1, JSON.stringify(fired));
 
   // The trap: forward from the last wraps to the first, back from the first
   // wraps to the last, and both wraps preventDefault.
-  const items = drawer.children;
-  const last = items[items.length - 1];
+  const last = focusableEls[focusableEls.length - 1];
   last.focus();
   const before = prevented;
   press("Tab");
   check(
     "B4.1: Tab from the last focusable item wraps to the first",
-    fakeDocument.activeElement === items[0] && prevented === before + 1,
+    fakeDocument.activeElement === focusableEls[0] && prevented === before + 1,
     `activeElement "${fakeDocument.activeElement?.textContent ?? "null"}", prevented ${prevented - before}`,
   );
   press("Tab", true);
@@ -384,7 +413,7 @@ function labels(menu: HamburgerMenu): string[] {
 
   // An action item runs its handler and closes the drawer.
   menu.open();
-  fire(drawer.children[1], "click");
+  fire(itemChildren(menu)[1], "click");
   check("an action item's onSelect fires on click", fired.includes("two"), JSON.stringify(fired));
   check("an action item closes the drawer after selecting", drawer.className === "ui-menu-drawer", `got "${drawer.className}"`);
 
@@ -418,13 +447,15 @@ function labels(menu: HamburgerMenu): string[] {
   });
   const focusable = getFocusable(menu.drawer);
   check(
-    "B4.8: the shared predicate sees the action and the link, and skips the separator and the heading",
-    focusable.length === 2,
+    "B4.8: the shared predicate sees the header's close button, the action and the link, and skips the separator and the heading",
+    focusable.length === 3,
     `got ${focusable.length} of ${JSON.stringify(classes(menu))}`,
   );
   check(
     "B4.8: and it returns them in document order",
-    el(focusable[0]).className === "ui-menu-item" && el(focusable[1]).className === "ui-menu-link",
+    el(focusable[0]).className === "ui-menu-close" &&
+      el(focusable[1]).className === "ui-menu-item" &&
+      el(focusable[2]).className === "ui-menu-link",
     JSON.stringify(focusable.map((f) => el(f).className)),
   );
   menu.destroy();
@@ -450,7 +481,7 @@ function labels(menu: HamburgerMenu): string[] {
     JSON.stringify(classes(menu)),
   );
 
-  const children = el(menu.drawer).children;
+  const children = itemChildren(menu);
   check('an action item is a <button type="button">', children[0].tagName === "button" && children[0].type === "button", `got "${children[0].tagName}"`);
   check("an icon name reaches CSS as data-icon and goes nowhere else", children[1].dataset.icon === "download", JSON.stringify(children[1].dataset));
   check("a link item is an <a> carrying its href", children[2].tagName === "a" && children[2].href === "/docs", `got "${children[2].tagName}" href "${children[2].href}"`);
@@ -477,7 +508,7 @@ function labels(menu: HamburgerMenu): string[] {
       { section: raw },
     ],
   });
-  const children = el(menu.drawer).children;
+  const children = itemChildren(menu);
   check("B4.6: an action's label goes through textContent verbatim, unparsed", children[0].textContent === raw, `got "${children[0].textContent}"`);
   check("B4.6: a link's label goes through textContent verbatim, unparsed", children[1].textContent === raw, `got "${children[1].textContent}"`);
   check("B4.6: a section heading's text goes through textContent verbatim, unparsed", children[2].textContent === raw, `got "${children[2].textContent}"`);
@@ -541,7 +572,6 @@ function labels(menu: HamburgerMenu): string[] {
       { id: "patch", label: "Before", href: "/before" },
     ],
   });
-  const children = el(menu.drawer).children;
 
   const extra: MenuItem = { id: "added", label: "Added", onSelect: () => {} };
   menu.addItem(extra);
@@ -553,8 +583,8 @@ function labels(menu: HamburgerMenu): string[] {
   menu.updateItem("patch", { label: "After", href: "/after" });
   check(
     "B4.5: updateItem resolves by id and patches in place, keeping its position",
-    labels(menu).join("|") === "Keep|After|Added" && children[1].href === "/after",
-    `${JSON.stringify(labels(menu))} href "${children[1].href}"`,
+    labels(menu).join("|") === "Keep|After|Added" && itemChildren(menu)[1].href === "/after",
+    `${JSON.stringify(labels(menu))} href "${itemChildren(menu)[1].href}"`,
   );
 
   const settled = labels(menu).join("|");
@@ -568,7 +598,7 @@ function labels(menu: HamburgerMenu): string[] {
   menu.removeItem("undefined");
   check(
     "B4.5: an id-less item cannot be addressed away by accident",
-    children.length === 4 && children[3].className === "ui-menu-separator",
+    itemChildren(menu).length === 4 && itemChildren(menu)[3].className === "ui-menu-separator",
     JSON.stringify(classes(menu)),
   );
 
@@ -616,20 +646,20 @@ function labels(menu: HamburgerMenu): string[] {
 
   const added = liveCount() - baseline;
   check(
-    "B4.7: construction adds exactly 6 listeners — trigger click, backdrop mousedown, document keydown, one click per action item — and none for the separator, the heading, the link or the slot",
-    added === 6,
+    "B4.7: construction adds exactly 7 listeners — trigger click, backdrop mousedown, document keydown, header close-button click, one click per action item — and none for the separator, the heading, the link or the slot",
+    added === 7,
     `got ${added}`,
   );
 
   menu.open();
   menu.close();
   menu.open();
-  check("B4.7: open/close cycles add and remove nothing", liveCount() - baseline === 6, `got ${liveCount() - baseline}`);
+  check("B4.7: open/close cycles add and remove nothing", liveCount() - baseline === 7, `got ${liveCount() - baseline}`);
 
   menu.addItem({ id: "a4", label: "Four", onSelect: () => {} });
-  check("B4.7: addItem's action item registers one more", liveCount() - baseline === 7, `got ${liveCount() - baseline}`);
+  check("B4.7: addItem's action item registers one more", liveCount() - baseline === 8, `got ${liveCount() - baseline}`);
   menu.removeItem("a4");
-  check("B4.7: removeItem takes that one back off", liveCount() - baseline === 6, `got ${liveCount() - baseline}`);
+  check("B4.7: removeItem takes that one back off", liveCount() - baseline === 7, `got ${liveCount() - baseline}`);
 
   menu.destroy();
   check("B4.7: destroy() leaves zero of its listeners live", liveCount() === baseline, `${liveCount() - baseline} listener(s) survived destroy()`);
@@ -659,8 +689,10 @@ function labels(menu: HamburgerMenu): string[] {
   fire(el(host), "click");
   check("an adopted trigger opens the drawer", el(menu.drawer).className === "ui-menu-drawer is-open", `got "${el(menu.drawer).className}"`);
   check(
-    "an empty drawer falls back to focusing the drawer itself, as modal.ts does for its panel",
-    fakeDocument.activeElement === el(menu.drawer),
+    // C0: the header's close button is always present, so an item-less drawer
+    // is never focusable-empty — focus lands there, not on the drawer itself.
+    "with no items, focus lands on the header's close button rather than falling back to the drawer",
+    fakeDocument.activeElement === el(getFocusable(menu.drawer)[0]),
     "focus went somewhere else",
   );
   menu.close();
@@ -738,6 +770,108 @@ function labels(menu: HamburgerMenu): string[] {
     "themePicker without a ThemeManager mounts no section rather than throwing",
     classes(menu).join(" ") === "ui-menu-item",
     JSON.stringify(classes(menu)),
+  );
+  menu.destroy();
+}
+
+// --- C0: side option — explicit "right" --------------------------------------
+
+{
+  const menu = new HamburgerMenu({
+    title: "Right",
+    side: "right",
+    items: [{ id: "a", label: "A", onSelect: () => {} }],
+  });
+  check(
+    "C0: side:'right' stamps data-side on the drawer at construction",
+    el(menu.drawer).dataset.side === "right",
+    JSON.stringify(el(menu.drawer).dataset),
+  );
+  menu.destroy();
+}
+
+// --- C0: side option — "auto", resolved against the trigger on first open ---
+
+{
+  const menu = new HamburgerMenu({
+    title: "Auto",
+    side: "auto",
+    items: [{ id: "a", label: "A", onSelect: () => {} }],
+  });
+
+  check(
+    "C0: side:'auto' sets no data-side before the first open",
+    el(menu.drawer).dataset.side === undefined,
+    JSON.stringify(el(menu.drawer).dataset),
+  );
+
+  // Put the trigger on the right half of an 800px-wide viewport.
+  el(menu.trigger)._rectLeft = 600;
+  el(menu.trigger)._rectRight = 700;
+  fakeWindow.innerWidth = 800;
+
+  menu.open();
+  check(
+    "C0: side:'auto' resolves to 'right' when the trigger sits on the right half",
+    el(menu.drawer).dataset.side === "right",
+    JSON.stringify(el(menu.drawer).dataset),
+  );
+
+  // Move the trigger's rect after resolution — the cached choice must stick.
+  menu.close();
+  el(menu.trigger)._rectLeft = 0;
+  el(menu.trigger)._rectRight = 50;
+  menu.open();
+  check(
+    "C0: side:'auto' caches its resolution — a later open does not re-query",
+    el(menu.drawer).dataset.side === "right",
+    JSON.stringify(el(menu.drawer).dataset),
+  );
+
+  menu.close();
+  menu.destroy();
+}
+
+// --- C0: close button and title, in a header before any items ---------------
+
+{
+  const menu = new HamburgerMenu({
+    title: "Settings",
+    items: [{ id: "a", label: "A", onSelect: () => {} }],
+  });
+
+  const header = el(menu.drawer).children[0];
+  check("C0: the drawer's first child is the .ui-menu-header", header.className === "ui-menu-header", JSON.stringify(el(menu.drawer).children.map((c) => c.className)));
+
+  const closeButton = header.children[0];
+  const titleEl = header.children[1];
+  check(
+    "C0: the header's first child is the .ui-menu-close button",
+    closeButton.tagName === "button" && closeButton.className === "ui-menu-close",
+    `got tag "${closeButton.tagName}" class "${closeButton.className}"`,
+  );
+  check(
+    "C0: the header carries a .ui-menu-title span with the title text",
+    titleEl.className === "ui-menu-title" && titleEl.textContent === "Settings",
+    `got class "${titleEl.className}" text "${titleEl.textContent}"`,
+  );
+
+  menu.open();
+  check("C0: the drawer is open before the close button is clicked", el(menu.drawer).className === "ui-menu-drawer is-open", `got "${el(menu.drawer).className}"`);
+  fire(closeButton, "click");
+  check("C0: clicking the close button closes the drawer", el(menu.drawer).className === "ui-menu-drawer", `got "${el(menu.drawer).className}"`);
+
+  menu.destroy();
+}
+
+// --- C0: default side sets no data-side attribute ----------------------------
+
+{
+  const menu = new HamburgerMenu({ items: [{ id: "a", label: "A", onSelect: () => {} }] });
+  check(
+    "C0: with no side option, the drawer carries no data-side attribute — left is CSS's positional default",
+    el(menu.drawer).dataset.side === undefined,
+    JSON.stringify(el(menu.drawer).dataset),
   );
   menu.destroy();
 }
