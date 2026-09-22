@@ -59,7 +59,7 @@ web-verify:
 
 gates:
 	node scripts/check-shared-css.mjs
-	node scripts/gates/bundle-shape.mjs --require=sampler,taskmaster,obsidianoid,todo,certmachine,multissh,admin,timetracker,grocery,smbedit,issuetracker,utuber
+	node scripts/gates/bundle-shape.mjs --require=sampler,taskmaster,obsidianoid,todo,certmachine,multissh,admin,timetracker,grocery,smbedit,issuetracker,utuber,menuserver
 	node scripts/gates/token-overlap.mjs
 	node scripts/check-shared-barrel.mjs
 

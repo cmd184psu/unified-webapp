@@ -1,0 +1,49 @@
+.pageClass h2 {
+  color: var(--color-text);
+  margin: 0.5em 0;
+}
+
+.pageClass table {
+  border-collapse: separate;
+  border-spacing: 15px 20px;
+}
+
+.pageClass td {
+  color: var(--color-text-muted);
+  vertical-align: top;
+}
+
+.pageClass a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.pageClass a:hover {
+  text-decoration: underline;
+}
+
+.pageClass button {
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm, 4px);
+  padding: 4px 12px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.pageClass button:hover {
+  background: var(--color-surface-3);
+}
+
+.pageClass input[type="text"] {
+  background: var(--color-surface-1);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  padding: 4px 8px;
+  font: inherit;
+}
+
+#lowerSection {
+  padding: 0 16px;
+}
