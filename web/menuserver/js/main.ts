@@ -42,6 +42,13 @@ let SHOWALLPAGES = false;
 
 async function fetchJSON<T>(url: string): Promise<T> {
   const res = await fetch(url);
+  if (!res.ok) {
+    if (res.status === 401) {
+      window.location.reload();
+      return new Promise<T>(() => {});
+    }
+    throw new Error(`Request to ${url} failed: ${res.status}`);
+  }
   return res.json() as Promise<T>;
 }
 
@@ -208,6 +215,7 @@ async function startMenuserver(): Promise<void> {
 
   new HamburgerMenu({
     title: "Menuserver",
+    mountTrigger: document.getElementById("menu-trigger")!,
     items: menuItems,
     themePicker: true,
     themes,

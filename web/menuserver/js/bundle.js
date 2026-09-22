@@ -7,6 +7,14 @@ var topMenus = [];
 var SHOWALLPAGES = false;
 async function fetchJSON(url) {
   const res = await fetch(url);
+  if (!res.ok) {
+    if (res.status === 401) {
+      window.location.reload();
+      return new Promise(() => {
+      });
+    }
+    throw new Error(`Request to ${url} failed: ${res.status}`);
+  }
   return res.json();
 }
 function titleCase(str) {
@@ -145,6 +153,7 @@ async function startMenuserver() {
   }
   new HamburgerMenu({
     title: "Menuserver",
+    mountTrigger: document.getElementById("menu-trigger"),
     items: menuItems,
     themePicker: true,
     themes
