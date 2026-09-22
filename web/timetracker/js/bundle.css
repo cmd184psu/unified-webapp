@@ -62,7 +62,7 @@
 }
 .header {
   text-align: center;
-  margin-bottom: 20px;
+  margin-bottom: var(--space-5);
 }
 .content {
   display: flex;
@@ -70,7 +70,7 @@
 }
 .left-panel,
 .right-panel {
-  padding: 20px;
+  padding: var(--space-5);
 }
 .left-panel {
   width: 30%;
@@ -80,10 +80,10 @@
 }
 .time-selector-container {
   width: 20%;
-  padding: 20px;
+  padding: var(--space-5);
 }
 .form-group {
-  margin-bottom: 15px;
+  margin-bottom: var(--space-4);
 }
 .hidden {
   display: none;
@@ -97,7 +97,7 @@
 .time-selector-table td {
   border: 1px solid var(--color-border);
   text-align: center;
-  padding: 5px;
+  padding: var(--space-1);
 }
 .time-block {
   cursor: pointer;
@@ -109,8 +109,8 @@
 }
 .customer-item {
   background-color: var(--color-surface-2);
-  margin-bottom: 5px;
-  padding: 10px;
+  margin-bottom: var(--space-1);
+  padding: var(--space-2);
   border-radius: var(--radius-md);
 }
 .customer-item.selected {
@@ -118,14 +118,14 @@
 }
 .time-buttons {
   display: flex;
-  gap: 10px;
+  gap: var(--space-2);
 }
 #clearTimeSelectionBtn,
 #copyTimeSelectionBtn {
-  margin-top: 10px;
-  padding: 5px 10px;
+  margin-top: var(--space-2);
+  padding: var(--space-1) var(--space-2);
   background-color: var(--color-danger);
-  color: white;
+  color: var(--color-on-danger, white);
   border: none;
   border-radius: var(--radius-md);
   cursor: pointer;
@@ -135,21 +135,21 @@
 }
 #clearTimeSelectionBtn:hover,
 #copyTimeSelectionBtn:hover {
-  background-color: var(--color-danger-hover, #d32f2f);
+  background-color: var(--color-danger-hover);
 }
 #copyReportBtn {
   background-color: var(--color-danger);
-  color: white;
+  color: var(--color-on-danger, white);
   border: none;
   border-radius: var(--radius-md);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 5px 10px;
+  padding: var(--space-1) var(--space-2);
 }
 #copyReportBtn:hover {
-  background-color: var(--color-danger-hover, #d32f2f);
+  background-color: var(--color-danger-hover);
 }
 .report-container {
   display: flex;
@@ -167,7 +167,7 @@
   width: 100%;
   height: 331px;
   border: 1px solid var(--color-border);
-  padding: 10px;
+  padding: var(--space-2);
   overflow-y: auto;
 }
 .footer {
@@ -177,7 +177,7 @@
   text-align: center;
   background-color: var(--color-surface-2);
   color: var(--color-text);
-  padding: 10px 0;
+  padding: var(--space-2) 0;
 }
 .message-bar {
   display: none;
@@ -190,9 +190,9 @@
 }
 .delete-btn {
   min-width: 250px;
-  color: white;
+  color: var(--color-on-danger, white);
   background-color: var(--color-danger);
-  padding: 10px 20px;
+  padding: var(--space-2) var(--space-5);
   border: none;
   cursor: pointer;
 }
@@ -209,24 +209,24 @@
 }
 .modal-content {
   background-color: var(--color-surface-1);
-  padding: 20px;
+  padding: var(--space-5);
   border-radius: var(--radius-md);
   text-align: center;
 }
 .modal-content button {
-  margin: 10px;
-  padding: 10px 20px;
-  font-size: 16px;
+  margin: var(--space-2);
+  padding: var(--space-2) var(--space-5);
+  font-size: var(--text-base);
   cursor: pointer;
 }
 .date-selector {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 8px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 .date-selector button {
-  padding: 4px 10px;
+  padding: var(--space-1) var(--space-2);
   cursor: pointer;
 }
 .date-selector button:disabled {
