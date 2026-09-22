@@ -1,63 +1,229 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign in</title>
+<link rel="stylesheet" href="/shared/dist/shared.css">
+<script>
+(function(){var t=localStorage.getItem('ui-theme:login');if(t)document.documentElement.dataset.theme=t})()
+</script>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 320px; margin: 4rem auto; padding: 0 1rem; color: #222; }
-  h1 { font-size: 1.25rem; }
-  form { display: none; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem; }
-  form.visible { display: flex; }
-  input, button { font-size: 1rem; padding: 0.4rem; }
-  button { cursor: pointer; }
+  /*
+   * Real token names come from /shared/dist/shared.css (--color-bg, --color-surface-1,
+   * --space-1..8, etc). Every use below goes through var(--shared-token, fallback) so the
+   * page still renders sanely if the stylesheet fails to load (carve-out miss, offline, etc).
+   */
+  * { box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-6, 24px) var(--space-4, 16px);
+    font-family: var(--font-body, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif);
+    background: var(--color-bg, #14161a);
+    color: var(--color-text, #e8e9ec);
+  }
+
+  .login-card {
+    width: 100%;
+    max-width: 380px;
+    background: var(--color-surface-1, #1d2025);
+    border: 1px solid var(--color-border, #33383f);
+    border-radius: var(--radius-lg, 14px);
+    padding: var(--space-8, 32px) var(--space-6, 24px);
+    box-shadow: var(--shadow-md, 0 8px 30px rgba(0, 0, 0, 0.25));
+  }
+
+  h1 {
+    margin: 0 0 var(--space-6, 24px);
+    font-size: var(--text-xl, 1.6rem);
+    text-align: center;
+    font-weight: 600;
+  }
+
+  #error {
+    color: var(--color-danger, #e5484d);
+    min-height: 1.2em;
+    font-size: var(--text-sm, 0.85rem);
+    text-align: center;
+    margin-bottom: var(--space-2, 8px);
+  }
+
+  form {
+    display: none;
+    flex-direction: column;
+    gap: var(--space-2, 8px);
+  }
+
+  form.visible {
+    display: flex;
+  }
+
+  #pin-form.visible {
+    gap: var(--space-4, 16px);
+  }
+
+  label {
+    font-size: var(--text-sm, 0.85rem);
+    color: var(--color-text-muted, #9298a3);
+  }
+
+  input {
+    font-size: var(--text-base, 1rem);
+    padding: 0.6rem 0.7rem;
+    background: var(--color-surface-2, #262a30);
+    border: 1px solid var(--color-border, #33383f);
+    border-radius: var(--radius-sm, 4px);
+    color: var(--color-text, #e8e9ec);
+    width: 100%;
+  }
+
+  input:focus {
+    outline: none;
+    border-color: var(--color-primary, #5b8def);
+  }
+
+  #pin-input {
+    font-size: var(--text-xl, 1.6rem);
+    letter-spacing: 0.3em;
+    text-align: center;
+    padding: 0.7rem;
+  }
+
+  button {
+    cursor: pointer;
+    font-size: var(--text-base, 1rem);
+    font-family: inherit;
+  }
+
+  .btn-primary {
+    background: var(--color-primary, #5b8def);
+    color: var(--color-primary-fg, #ffffff);
+    border: none;
+    border-radius: var(--radius-md, 8px);
+    padding: 0.7rem;
+    font-weight: 600;
+  }
+
+  .btn-primary:hover {
+    background: var(--color-primary-hover, var(--color-primary, #5b8def));
+    filter: brightness(1.08);
+  }
+
+  .btn-primary:active {
+    background: var(--color-primary-active, var(--color-primary, #5b8def));
+  }
+
+  .btn-outline {
+    background: transparent;
+    color: var(--color-primary, #5b8def);
+    border: 1px solid var(--color-primary, #5b8def);
+    border-radius: var(--radius-md, 8px);
+    padding: 0.6rem;
+    font-weight: 500;
+  }
+
+  .btn-outline:hover {
+    background: var(--color-primary-tint, rgba(91, 141, 239, 0.12));
+  }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--color-text-muted, #9298a3);
+    border: 1px solid var(--color-border, #33383f);
+    border-radius: var(--radius-md, 8px);
+    padding: 0.6rem;
+    display: none;
+  }
+
+  .btn-ghost:hover {
+    color: var(--color-text, #e8e9ec);
+    border-color: var(--color-text-muted, #9298a3);
+  }
+
   .secret-row { position: relative; display: flex; }
   .secret-row input { flex: 1; min-width: 0; padding-right: 2.4rem; }
   .reveal {
     position: absolute; right: 0; top: 0; bottom: 0; width: 2.4rem;
     display: flex; align-items: center; justify-content: center;
-    background: none; border: none; padding: 0; color: #777;
+    background: none; border: none; padding: 0; color: var(--color-text-muted, #9298a3);
   }
-  .reveal:hover, .reveal:focus-visible { color: #222; }
+  .reveal:hover, .reveal:focus-visible { color: var(--color-text, #e8e9ec); }
   .reveal svg { width: 1.15rem; height: 1.15rem; }
   .reveal .eye-closed { display: none; }
   .reveal.showing .eye-open { display: none; }
   .reveal.showing .eye-closed { display: block; }
-  #passkey-btn { display: none; }
-  #error { color: #b00020; min-height: 1.2em; }
+
+  .divider {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2, 8px);
+    margin: var(--space-6, 24px) 0;
+    color: var(--color-text-muted, #9298a3);
+    font-size: var(--text-sm, 0.85rem);
+  }
+  .divider::before, .divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--color-border, #33383f);
+  }
+
+  #ldap-section {
+    padding-top: var(--space-1, 4px);
+  }
+
+  #passkey-btn {
+    width: 100%;
+    margin-top: var(--space-6, 24px);
+  }
 </style>
 </head>
 <body>
-<h1>Sign in</h1>
-<div id="error"></div>
+<div class="login-card">
+  <h1>Sign in</h1>
+  <div id="error"></div>
 
-<form id="pin-form">
-  <label for="pin-input">PIN</label>
-  <div class="secret-row">
-    <input id="pin-input" type="password" inputmode="numeric" autocomplete="off" required>
-    <button type="button" class="reveal" data-target="pin-input" aria-label="Show PIN">
-      <svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
-      <svg class="eye-closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 7 11 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-    </button>
+  <form id="pin-form">
+    <label for="pin-input">PIN</label>
+    <div class="secret-row">
+      <input id="pin-input" type="password" inputmode="numeric" autocomplete="off" required>
+      <button type="button" class="reveal" data-target="pin-input" aria-label="Show PIN">
+        <svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+        <svg class="eye-closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 7 11 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+      </button>
+    </div>
+    <button type="submit" class="btn-primary">Sign in with PIN</button>
+  </form>
+
+  <div class="divider">or</div>
+
+  <div id="ldap-section">
+    <form id="ldap-form">
+      <label for="ldap-username">Username</label>
+      <input id="ldap-username" type="text" autocomplete="username" required>
+      <label for="ldap-password">Password</label>
+      <div class="secret-row">
+        <input id="ldap-password" type="password" autocomplete="current-password" required>
+        <button type="button" class="reveal" data-target="ldap-password" aria-label="Show password">
+          <svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+          <svg class="eye-closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 7 11 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+        </button>
+      </div>
+      <button type="submit" class="btn-outline">Sign in</button>
+    </form>
   </div>
-  <button type="submit">Sign in with PIN</button>
-</form>
 
-<form id="ldap-form">
-  <label for="ldap-username">Username</label>
-  <input id="ldap-username" type="text" autocomplete="username" required>
-  <label for="ldap-password">Password</label>
-  <div class="secret-row">
-    <input id="ldap-password" type="password" autocomplete="current-password" required>
-    <button type="button" class="reveal" data-target="ldap-password" aria-label="Show password">
-      <svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
-      <svg class="eye-closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 7 11 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-    </button>
-  </div>
-  <button type="submit">Sign in</button>
-</form>
-
-<button id="passkey-btn" type="button">Sign in with passkey</button>
+  <button id="passkey-btn" type="button" class="btn-ghost">Sign in with passkey</button>
+</div>
 
 <script>
 (function () {
@@ -210,6 +376,10 @@
 
     if (hasPin) pinForm.classList.add("visible");
     if (hasLdap) ldapForm.classList.add("visible");
+    if (!hasPin || !hasLdap) {
+      var divider = document.querySelector(".divider");
+      if (divider) divider.style.display = "none";
+    }
     if (hasPasskey && window.PublicKeyCredential && navigator.credentials) {
       passkeyBtn.style.display = "block";
     }
