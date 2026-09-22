@@ -14,10 +14,32 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     sans-serif;
   font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow-x: hidden;
 }
 
 #ssh-app {
-  height: 100vh;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ---------- App header (hamburger + title) ---------- */
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4, 16px);
+  padding: var(--space-3, 12px) var(--space-4, 16px);
+  background: var(--color-surface-1);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: var(--text-lg, 18px);
+  font-weight: 600;
 }
 
 /* ---------- App shell: host rail (left) + right pane ---------- */
@@ -25,6 +47,7 @@ body {
   display: flex;
   flex-direction: row;
   height: 100%;
+  min-width: 0;
 }
 
 .host-rail {
@@ -83,10 +106,40 @@ body {
   margin-bottom: 12px;
 }
 
+.host-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.host-card-collapse {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 4px;
+  flex-shrink: 0;
+}
+
+.host-card-collapse:hover {
+  color: var(--color-text);
+}
+
 .host-card-title {
-  margin: 0 0 10px;
+  margin: 0;
   font-size: 14px;
   color: var(--color-primary);
+}
+
+.host-card.collapsed .host-card-header {
+  margin-bottom: 0;
+}
+
+.host-card.collapsed .host-card-body {
+  display: none;
 }
 
 .host-copy-ssh {
@@ -442,12 +495,18 @@ body {
 .term-body {
   flex: 1;
   min-height: 0;
-  padding: 6px 8px;
   background: var(--color-bg);
 }
 
+/* Padding lives on .xterm itself, not on .term-body: FitAddon's
+   proposeDimensions() only subtracts the padding of terminal.element (this
+   node), not of its parent. Padding on the parent instead was invisible to
+   the row calculation, so FitAddon over-counted rows by the padding's share
+   of a row and the bottom (current-input) line was clipped by
+   .term-panel's overflow: hidden. */
 .term-body .xterm {
   height: 100%;
+  padding: 6px 8px;
 }
 
 /* ---------- Modal (key picker, dir picker, file picker) ---------- */

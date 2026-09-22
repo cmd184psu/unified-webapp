@@ -138,23 +138,40 @@ export function mountHostRail(root: HTMLElement, hostCount: number): HostStore {
   for (let i = 0; i < hostCount; i++) {
     const h = hosts[i] as HostConfig;
     const card = el("div", "host-card");
+    const cardHeader = el("div", "host-card-header");
+    const collapseBtn = el("button", "host-card-collapse");
+    collapseBtn.type = "button";
+    collapseBtn.textContent = "▾";
+    collapseBtn.title = "Collapse this host";
+    collapseBtn.setAttribute("aria-expanded", "true");
     const cardTitle = el("h3", "host-card-title");
     cardTitle.textContent = `Host ${i + 1}`;
-    card.append(cardTitle);
+    cardHeader.append(collapseBtn, cardTitle);
+    card.append(cardHeader);
 
-    const ipInput = labeledInput(card, "IP / hostname", "e.g. 10.0.0.5");
+    const cardBody = el("div", "host-card-body");
+    card.append(cardBody);
+
+    collapseBtn.addEventListener("click", () => {
+      const collapsed = card.classList.toggle("collapsed");
+      collapseBtn.textContent = collapsed ? "▸" : "▾";
+      collapseBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      collapseBtn.title = collapsed ? "Expand this host" : "Collapse this host";
+    });
+
+    const ipInput = labeledInput(cardBody, "IP / hostname", "e.g. 10.0.0.5");
     ipInput.addEventListener("input", () => {
       h.ip = ipInput.value.trim();
       scheduleSave();
     });
 
-    const userInput = labeledInput(card, "User", "e.g. root");
+    const userInput = labeledInput(cardBody, "User", "e.g. root");
     userInput.addEventListener("input", () => {
       h.user = userInput.value.trim();
       scheduleSave();
     });
 
-    const portInput = labeledInput(card, "Port", "22");
+    const portInput = labeledInput(cardBody, "Port", "22");
     portInput.value = "22";
     portInput.addEventListener("input", () => {
       const v = parseInt(portInput.value, 10);
@@ -182,7 +199,7 @@ export function mountHostRail(root: HTMLElement, hostCount: number): HostStore {
     const keyRadio = authRadio("key", "SSH key");
     const passwordRadio = authRadio("password", "Password");
     authRow.append(authLabel, authChoices);
-    card.append(authRow);
+    cardBody.append(authRow);
 
     const keyRow = el("div", "field");
     const keyLabel = el("label", "field-label");
@@ -201,7 +218,7 @@ export function mountHostRail(root: HTMLElement, hostCount: number): HostStore {
       });
     });
     keyRow.append(keyLabel, keyInput);
-    card.append(keyRow);
+    cardBody.append(keyRow);
 
     // The password lives here and in the frames sent to the bridge and to
     // /api/broadcast. It is never put in the object sent to PUT /api/hosts
@@ -220,7 +237,7 @@ export function mountHostRail(root: HTMLElement, hostCount: number): HostStore {
       notify();
     });
     pwRow.append(pwLabel, pwInput);
-    card.append(pwRow);
+    cardBody.append(pwRow);
 
     const dirRow = el("div", "field");
     const dirLabel = el("label", "field-label");
@@ -258,7 +275,7 @@ export function mountHostRail(root: HTMLElement, hostCount: number): HostStore {
       scheduleSave();
     });
     dirRow.append(dirLabel, dirInput);
-    card.append(dirRow);
+    cardBody.append(dirRow);
 
     const copyHint = el("p", "copy-hint");
     copyHint.textContent =
@@ -312,7 +329,7 @@ export function mountHostRail(root: HTMLElement, hostCount: number): HostStore {
         }, 2000);
       });
     });
-    card.append(copyBtn, copyHint);
+    cardBody.append(copyBtn, copyHint);
 
     inputRefs.push({
       ip: ipInput,

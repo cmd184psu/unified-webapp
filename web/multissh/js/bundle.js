@@ -406,20 +406,35 @@ function mountHostRail(root, hostCount) {
   for (let i = 0; i < hostCount; i++) {
     const h2 = hosts[i];
     const card = el3("div", "host-card");
+    const cardHeader = el3("div", "host-card-header");
+    const collapseBtn = el3("button", "host-card-collapse");
+    collapseBtn.type = "button";
+    collapseBtn.textContent = "\u25BE";
+    collapseBtn.title = "Collapse this host";
+    collapseBtn.setAttribute("aria-expanded", "true");
     const cardTitle = el3("h3", "host-card-title");
     cardTitle.textContent = `Host ${i + 1}`;
-    card.append(cardTitle);
-    const ipInput = labeledInput(card, "IP / hostname", "e.g. 10.0.0.5");
+    cardHeader.append(collapseBtn, cardTitle);
+    card.append(cardHeader);
+    const cardBody = el3("div", "host-card-body");
+    card.append(cardBody);
+    collapseBtn.addEventListener("click", () => {
+      const collapsed = card.classList.toggle("collapsed");
+      collapseBtn.textContent = collapsed ? "\u25B8" : "\u25BE";
+      collapseBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      collapseBtn.title = collapsed ? "Expand this host" : "Collapse this host";
+    });
+    const ipInput = labeledInput(cardBody, "IP / hostname", "e.g. 10.0.0.5");
     ipInput.addEventListener("input", () => {
       h2.ip = ipInput.value.trim();
       scheduleSave();
     });
-    const userInput = labeledInput(card, "User", "e.g. root");
+    const userInput = labeledInput(cardBody, "User", "e.g. root");
     userInput.addEventListener("input", () => {
       h2.user = userInput.value.trim();
       scheduleSave();
     });
-    const portInput = labeledInput(card, "Port", "22");
+    const portInput = labeledInput(cardBody, "Port", "22");
     portInput.value = "22";
     portInput.addEventListener("input", () => {
       const v2 = parseInt(portInput.value, 10);
@@ -446,7 +461,7 @@ function mountHostRail(root, hostCount) {
     const keyRadio = authRadio("key", "SSH key");
     const passwordRadio = authRadio("password", "Password");
     authRow.append(authLabel, authChoices);
-    card.append(authRow);
+    cardBody.append(authRow);
     const keyRow = el3("div", "field");
     const keyLabel = el3("label", "field-label");
     keyLabel.textContent = "SSH key";
@@ -464,7 +479,7 @@ function mountHostRail(root, hostCount) {
       });
     });
     keyRow.append(keyLabel, keyInput);
-    card.append(keyRow);
+    cardBody.append(keyRow);
     const pwRow = el3("div", "field password-field");
     const pwLabel = el3("label", "field-label");
     pwLabel.textContent = "Password (memory only)";
@@ -477,7 +492,7 @@ function mountHostRail(root, hostCount) {
       notify();
     });
     pwRow.append(pwLabel, pwInput);
-    card.append(pwRow);
+    cardBody.append(pwRow);
     const dirRow = el3("div", "field");
     const dirLabel = el3("label", "field-label");
     dirLabel.textContent = "Remote directory";
@@ -511,7 +526,7 @@ function mountHostRail(root, hostCount) {
       scheduleSave();
     });
     dirRow.append(dirLabel, dirInput);
-    card.append(dirRow);
+    cardBody.append(dirRow);
     const copyHint = el3("p", "copy-hint");
     copyHint.textContent = "The command has no password in it \u2014 ssh will prompt for it.";
     const applyAuthMethod = () => {
@@ -557,7 +572,7 @@ function mountHostRail(root, hostCount) {
         }, 2e3);
       });
     });
-    card.append(copyBtn, copyHint);
+    cardBody.append(copyBtn, copyHint);
     inputRefs.push({
       ip: ipInput,
       user: userInput,
@@ -10610,25 +10625,33 @@ var themes = new ThemeManager({
   }
 });
 themes.apply();
-function buildHamburger() {
+function buildHamburger(root) {
   const items = [];
-  const hamburger = new HamburgerMenu({
+  const trigger = document.createElement("button");
+  trigger.className = "ui-menu-trigger";
+  trigger.type = "button";
+  trigger.setAttribute("aria-label", "Menu");
+  trigger.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="2.5" width="14" height="2" rx="0.5"/><rect x="1" y="7" width="14" height="2" rx="0.5"/><rect x="1" y="11.5" width="14" height="2" rx="0.5"/></svg>';
+  const header = document.createElement("header");
+  header.className = "app-header";
+  const title = document.createElement("h1");
+  title.textContent = "MultiSSH";
+  header.append(trigger, title);
+  root.before(header);
+  new HamburgerMenu({
     title: "MultiSSH",
     items,
     themePicker: true,
-    themes
+    themes,
+    mountTrigger: trigger
   });
-  const app = document.getElementById("ssh-app");
-  if (app) {
-    app.prepend(hamburger.trigger);
-  }
 }
 async function bootstrap() {
   const root = document.getElementById("ssh-app");
   if (!root) {
     throw new Error("missing #ssh-app root element");
   }
-  buildHamburger();
+  buildHamburger(root);
   const cfg = await fetchConfig();
   mountTabs(root, cfg.maxSessions);
 }
