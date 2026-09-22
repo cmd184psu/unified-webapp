@@ -1,5 +1,16 @@
-import { ThemeManager, HamburgerMenu } from "@shared";
+import { ThemeManager, HamburgerMenu, showToast } from "@shared";
 import type { MenuItem } from "@shared";
+
+function debounce<Args extends unknown[]>(
+  fn: (...args: Args) => void,
+  ms: number,
+): (...args: Args) => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return (...args: Args) => {
+    if (timer !== null) clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
+  };
+}
 
 const themes = new ThemeManager({ module: "admin", default: "dark" });
 themes.apply();
@@ -222,11 +233,11 @@ function renderMatrix(): void {
       `<td><input type="checkbox" class="matrix-protected" data-module="${esc(mod)}"${entry.protected ? " checked" : ""}></td>` +
       `<td>` +
       `<select class="matrix-pinfile" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>${pinFileOptions(entry.pinFile)}</select> ` +
-      `<button type="button" class="matrix-setpin-btn" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>Set PIN&hellip;</button>` +
+      `<button type="button" class="btn btn-outline btn-sm matrix-setpin-btn" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>Set PIN&hellip;</button>` +
       `<div class="matrix-setpin-form inline-form hidden" data-module="${esc(mod)}">` +
       `<input type="password" class="matrix-pin-input" placeholder="new PIN" autocomplete="off">` +
-      `<button type="button" class="matrix-pin-save" data-module="${esc(mod)}">Save</button>` +
-      `<button type="button" class="matrix-pin-cancel" data-module="${esc(mod)}">Cancel</button>` +
+      `<button type="button" class="btn btn-primary btn-sm matrix-pin-save" data-module="${esc(mod)}">Save</button>` +
+      `<button type="button" class="btn btn-ghost btn-sm matrix-pin-cancel" data-module="${esc(mod)}">Cancel</button>` +
       `</div>` +
       `<span class="matrix-pin-status status" data-module="${esc(mod)}"></span>` +
       `<p class="matrix-pin-error error" data-module="${esc(mod)}"></p>` +
@@ -371,7 +382,7 @@ function renderKeys(): void {
     li.innerHTML =
       `<span class="named-list-name">${esc(k.name)}</span>` +
       `<span class="named-list-value">(set)</span>` +
-      `<button type="button" class="btn-remove" data-name="${esc(k.name)}">Revoke</button>`;
+      `<button type="button" class="btn btn-danger btn-sm btn-remove" data-name="${esc(k.name)}">Revoke</button>`;
     list.appendChild(li);
   });
   list.querySelectorAll<HTMLButtonElement>(".btn-remove").forEach((btn) => {
@@ -432,17 +443,46 @@ function closeKeyModal(): void {
 
 document.getElementById("key-modal-copy")!.addEventListener("click", () => {
   const value = keyModalValue.textContent!;
+
+  const fallbackCopy = (): boolean => {
+    const range = document.createRange();
+    range.selectNodeContents(keyModalValue);
+    const selection = window.getSelection();
+    if (!selection) return false;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch {
+      ok = false;
+    }
+    selection.removeAllRanges();
+    return ok;
+  };
+
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard
       .writeText(value)
       .then(() => {
         keyModalCopied.textContent = "Copied.";
+        showToast("Copied!", "success");
       })
       .catch(() => {
-        keyModalCopied.textContent = "Copy failed -- select and copy manually.";
+        if (fallbackCopy()) {
+          keyModalCopied.textContent = "Copied.";
+          showToast("Copied!", "success");
+        } else {
+          keyModalCopied.textContent = "Copy failed -- select and copy manually.";
+          showToast("Failed to copy.", "error");
+        }
       });
+  } else if (fallbackCopy()) {
+    keyModalCopied.textContent = "Copied.";
+    showToast("Copied!", "success");
   } else {
     keyModalCopied.textContent = "Copy not supported -- select and copy manually.";
+    showToast("Copy not supported -- select and copy manually.", "error");
   }
 });
 document.getElementById("key-modal-close")!.addEventListener("click", closeKeyModal);
@@ -474,8 +514,7 @@ function renderLdap(): void {
   (document.getElementById("ldap-insecure-tls") as HTMLInputElement).checked = !!(l.insecure_tls as boolean);
 }
 
-document.getElementById("ldap-form")!.addEventListener("submit", async (e) => {
-  e.preventDefault();
+async function saveLdap(): Promise<void> {
   const errorEl = document.getElementById("ldap-error")!;
   const statusEl2 = document.getElementById("ldap-status")!;
   errorEl.textContent = "";
@@ -522,6 +561,20 @@ document.getElementById("ldap-form")!.addEventListener("submit", async (e) => {
     statusEl2.textContent = "";
     statusEl2.className = "status";
   }, 3000);
+}
+
+document.getElementById("ldap-form")!.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  await saveLdap();
+});
+
+const autoSaveLdap = debounce(() => {
+  void saveLdap();
+}, 500);
+
+document.querySelectorAll<HTMLElement>("#ldap-form input").forEach((el) => {
+  const eventName = el instanceof HTMLInputElement && el.type === "checkbox" ? "change" : "input";
+  el.addEventListener(eventName, autoSaveLdap);
 });
 
 document.getElementById("ldap-test-form")!.addEventListener("submit", async (e) => {
@@ -562,8 +615,7 @@ function renderSession(): void {
     !!authConfig!.cookie_secure;
 }
 
-document.getElementById("session-form")!.addEventListener("submit", async (e) => {
-  e.preventDefault();
+async function saveSession(): Promise<void> {
   const statusEl2 = document.getElementById("session-status")!;
   statusEl2.textContent = "";
   statusEl2.className = "status";
@@ -591,6 +643,24 @@ document.getElementById("session-form")!.addEventListener("submit", async (e) =>
   authConfig!.cookie_secure = res.data!.cookie_secure;
   statusEl2.textContent = "Saved.";
   statusEl2.className = "status status-good";
+  setTimeout(() => {
+    statusEl2.textContent = "";
+    statusEl2.className = "status";
+  }, 3000);
+}
+
+document.getElementById("session-form")!.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  await saveSession();
+});
+
+const autoSaveSession = debounce(() => {
+  void saveSession();
+}, 500);
+
+document.querySelectorAll<HTMLElement>("#session-form input").forEach((el) => {
+  const eventName = el instanceof HTMLInputElement && el.type === "checkbox" ? "change" : "input";
+  el.addEventListener(eventName, autoSaveSession);
 });
 
 // ── Passkeys ────────────────────────────────────────────────────
@@ -615,7 +685,7 @@ function renderPasskeys(): void {
     li.innerHTML =
       `<span class="named-list-name">${esc(name)}</span>` +
       `<span class="named-list-value">${esc(created ? "added " + created : "")}${lastUsed ? esc(", last used " + lastUsed) : ""}</span>` +
-      `<button type="button" class="btn-remove" data-id="${esc(p.id)}">Delete</button>`;
+      `<button type="button" class="btn btn-danger btn-sm btn-remove" data-id="${esc(p.id)}">Delete</button>`;
     list.appendChild(li);
   });
   list.querySelectorAll<HTMLButtonElement>(".btn-remove").forEach((btn) => {
@@ -692,10 +762,14 @@ if (!passkeySupported) {
   const btn = form.querySelector("button")!;
   btn.disabled = true;
   const why =
-    "Disabled: this page is served over plain HTTP. Browsers only " +
-    "allow passkeys (WebAuthn) over HTTPS or on localhost.";
+    "Passkey registration is disabled: this page is served over plain HTTP. " +
+    "Browsers only allow passkeys (WebAuthn) over HTTPS or on localhost. " +
+    "Serve the admin module over HTTPS (or access it as localhost) to enable this.";
   btn.title = why;
   form.title = why;
+  const note = document.getElementById("passkey-https-note")!;
+  note.textContent = why;
+  note.classList.remove("hidden");
 }
 
 document.getElementById("passkey-form")!.addEventListener("submit", async (e) => {
@@ -751,11 +825,12 @@ function renderOperatorPin(): void {
   const el = document.getElementById("operator-pin-status")!;
   const adminPin = authConfig!.admin_pin || {};
   if (adminPin.defined_by === "config") {
-    el.textContent = "Defined by config.";
+    el.textContent = "Operator PIN: Configured (via inline config).";
   } else if (adminPin.defined_by === "file") {
-    el.textContent = "Defined by file (" + adminPin.path + ").";
+    el.textContent = "Operator PIN: Configured (via " + adminPin.path + ").";
   } else {
-    el.textContent = "Not configured.";
+    el.textContent =
+      "Operator PIN: Not set — the admin module has its own PIN, separate from module PINs.";
   }
   document.getElementById("operator-pin-file-select")!.innerHTML = pinFileOptions(
     currentAdminPinFilePath(),

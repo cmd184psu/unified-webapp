@@ -1,5 +1,12 @@
 // web/admin/js/main.ts
-import { ThemeManager, HamburgerMenu } from "/shared/dist/shared.mjs";
+import { ThemeManager, HamburgerMenu, showToast } from "/shared/dist/shared.mjs";
+function debounce(fn, ms) {
+  let timer = null;
+  return (...args) => {
+    if (timer !== null) clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
+  };
+}
 var themes = new ThemeManager({ module: "admin", default: "dark" });
 themes.apply();
 var statusEl = document.getElementById("status");
@@ -135,7 +142,7 @@ function renderMatrix() {
   modules.forEach((mod) => {
     const entry = matrix[mod];
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${esc(mod)}</td><td><input type="checkbox" class="matrix-protected" data-module="${esc(mod)}"${entry.protected ? " checked" : ""}></td><td><select class="matrix-pinfile" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>${pinFileOptions(entry.pinFile)}</select> <button type="button" class="matrix-setpin-btn" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>Set PIN&hellip;</button><div class="matrix-setpin-form inline-form hidden" data-module="${esc(mod)}"><input type="password" class="matrix-pin-input" placeholder="new PIN" autocomplete="off"><button type="button" class="matrix-pin-save" data-module="${esc(mod)}">Save</button><button type="button" class="matrix-pin-cancel" data-module="${esc(mod)}">Cancel</button></div><span class="matrix-pin-status status" data-module="${esc(mod)}"></span><p class="matrix-pin-error error" data-module="${esc(mod)}"></p></td>`;
+    tr.innerHTML = `<td>${esc(mod)}</td><td><input type="checkbox" class="matrix-protected" data-module="${esc(mod)}"${entry.protected ? " checked" : ""}></td><td><select class="matrix-pinfile" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>${pinFileOptions(entry.pinFile)}</select> <button type="button" class="btn btn-outline btn-sm matrix-setpin-btn" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>Set PIN&hellip;</button><div class="matrix-setpin-form inline-form hidden" data-module="${esc(mod)}"><input type="password" class="matrix-pin-input" placeholder="new PIN" autocomplete="off"><button type="button" class="btn btn-primary btn-sm matrix-pin-save" data-module="${esc(mod)}">Save</button><button type="button" class="btn btn-ghost btn-sm matrix-pin-cancel" data-module="${esc(mod)}">Cancel</button></div><span class="matrix-pin-status status" data-module="${esc(mod)}"></span><p class="matrix-pin-error error" data-module="${esc(mod)}"></p></td>`;
     tbody.appendChild(tr);
   });
   const adminTr = document.createElement("tr");
@@ -257,7 +264,7 @@ function renderKeys() {
   }
   keys.forEach((k) => {
     const li = document.createElement("li");
-    li.innerHTML = `<span class="named-list-name">${esc(k.name)}</span><span class="named-list-value">(set)</span><button type="button" class="btn-remove" data-name="${esc(k.name)}">Revoke</button>`;
+    li.innerHTML = `<span class="named-list-name">${esc(k.name)}</span><span class="named-list-value">(set)</span><button type="button" class="btn btn-danger btn-sm btn-remove" data-name="${esc(k.name)}">Revoke</button>`;
     list.appendChild(li);
   });
   list.querySelectorAll(".btn-remove").forEach((btn) => {
@@ -310,14 +317,41 @@ function closeKeyModal() {
 }
 document.getElementById("key-modal-copy").addEventListener("click", () => {
   const value = keyModalValue.textContent;
+  const fallbackCopy = () => {
+    const range = document.createRange();
+    range.selectNodeContents(keyModalValue);
+    const selection = window.getSelection();
+    if (!selection) return false;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch {
+      ok = false;
+    }
+    selection.removeAllRanges();
+    return ok;
+  };
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(value).then(() => {
       keyModalCopied.textContent = "Copied.";
+      showToast("Copied!", "success");
     }).catch(() => {
-      keyModalCopied.textContent = "Copy failed -- select and copy manually.";
+      if (fallbackCopy()) {
+        keyModalCopied.textContent = "Copied.";
+        showToast("Copied!", "success");
+      } else {
+        keyModalCopied.textContent = "Copy failed -- select and copy manually.";
+        showToast("Failed to copy.", "error");
+      }
     });
+  } else if (fallbackCopy()) {
+    keyModalCopied.textContent = "Copied.";
+    showToast("Copied!", "success");
   } else {
     keyModalCopied.textContent = "Copy not supported -- select and copy manually.";
+    showToast("Copy not supported -- select and copy manually.", "error");
   }
 });
 document.getElementById("key-modal-close").addEventListener("click", closeKeyModal);
@@ -340,8 +374,7 @@ function renderLdap() {
   document.getElementById("ldap-start-tls").checked = !!l.start_tls;
   document.getElementById("ldap-insecure-tls").checked = !!l.insecure_tls;
 }
-document.getElementById("ldap-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
+async function saveLdap() {
   const errorEl = document.getElementById("ldap-error");
   const statusEl2 = document.getElementById("ldap-status");
   errorEl.textContent = "";
@@ -380,6 +413,17 @@ document.getElementById("ldap-form").addEventListener("submit", async (e) => {
     statusEl2.textContent = "";
     statusEl2.className = "status";
   }, 3e3);
+}
+document.getElementById("ldap-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  await saveLdap();
+});
+var autoSaveLdap = debounce(() => {
+  void saveLdap();
+}, 500);
+document.querySelectorAll("#ldap-form input").forEach((el) => {
+  const eventName = el instanceof HTMLInputElement && el.type === "checkbox" ? "change" : "input";
+  el.addEventListener(eventName, autoSaveLdap);
 });
 document.getElementById("ldap-test-form").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -413,8 +457,7 @@ function renderSession() {
   document.getElementById("session-cookie-domain").value = authConfig.cookie_domain || "";
   document.getElementById("session-cookie-secure").checked = !!authConfig.cookie_secure;
 }
-document.getElementById("session-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
+async function saveSession() {
   const statusEl2 = document.getElementById("session-status");
   statusEl2.textContent = "";
   statusEl2.className = "status";
@@ -437,6 +480,21 @@ document.getElementById("session-form").addEventListener("submit", async (e) => 
   authConfig.cookie_secure = res.data.cookie_secure;
   statusEl2.textContent = "Saved.";
   statusEl2.className = "status status-good";
+  setTimeout(() => {
+    statusEl2.textContent = "";
+    statusEl2.className = "status";
+  }, 3e3);
+}
+document.getElementById("session-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  await saveSession();
+});
+var autoSaveSession = debounce(() => {
+  void saveSession();
+}, 500);
+document.querySelectorAll("#session-form input").forEach((el) => {
+  const eventName = el instanceof HTMLInputElement && el.type === "checkbox" ? "change" : "input";
+  el.addEventListener(eventName, autoSaveSession);
 });
 function formatTimestamp(sec) {
   if (!sec) return "";
@@ -454,7 +512,7 @@ function renderPasskeys() {
     const name = p.friendlyName || "(unnamed)";
     const created = formatTimestamp(p.createdAt);
     const lastUsed = formatTimestamp(p.lastUsedAt);
-    li.innerHTML = `<span class="named-list-name">${esc(name)}</span><span class="named-list-value">${esc(created ? "added " + created : "")}${lastUsed ? esc(", last used " + lastUsed) : ""}</span><button type="button" class="btn-remove" data-id="${esc(p.id)}">Delete</button>`;
+    li.innerHTML = `<span class="named-list-name">${esc(name)}</span><span class="named-list-value">${esc(created ? "added " + created : "")}${lastUsed ? esc(", last used " + lastUsed) : ""}</span><button type="button" class="btn btn-danger btn-sm btn-remove" data-id="${esc(p.id)}">Delete</button>`;
     list.appendChild(li);
   });
   list.querySelectorAll(".btn-remove").forEach((btn) => {
@@ -521,9 +579,12 @@ if (!passkeySupported) {
   const form = document.getElementById("passkey-form");
   const btn = form.querySelector("button");
   btn.disabled = true;
-  const why = "Disabled: this page is served over plain HTTP. Browsers only allow passkeys (WebAuthn) over HTTPS or on localhost.";
+  const why = "Passkey registration is disabled: this page is served over plain HTTP. Browsers only allow passkeys (WebAuthn) over HTTPS or on localhost. Serve the admin module over HTTPS (or access it as localhost) to enable this.";
   btn.title = why;
   form.title = why;
+  const note = document.getElementById("passkey-https-note");
+  note.textContent = why;
+  note.classList.remove("hidden");
 }
 document.getElementById("passkey-form").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -572,11 +633,11 @@ function renderOperatorPin() {
   const el = document.getElementById("operator-pin-status");
   const adminPin = authConfig.admin_pin || {};
   if (adminPin.defined_by === "config") {
-    el.textContent = "Defined by config.";
+    el.textContent = "Operator PIN: Configured (via inline config).";
   } else if (adminPin.defined_by === "file") {
-    el.textContent = "Defined by file (" + adminPin.path + ").";
+    el.textContent = "Operator PIN: Configured (via " + adminPin.path + ").";
   } else {
-    el.textContent = "Not configured.";
+    el.textContent = "Operator PIN: Not set \u2014 the admin module has its own PIN, separate from module PINs.";
   }
   document.getElementById("operator-pin-file-select").innerHTML = pinFileOptions(
     currentAdminPinFilePath()
