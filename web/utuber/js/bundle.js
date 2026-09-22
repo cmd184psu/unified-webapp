@@ -4,11 +4,65 @@ var themes = new ThemeManager({ module: "utuber", default: "dark" });
 themes.apply();
 var hamburger = new HamburgerMenu({
   title: "uTuber",
-  items: [],
+  items: [
+    { section: "Settings" },
+    {
+      id: "python-setting",
+      render(host) {
+        const field = document.createElement("div");
+        field.className = "field";
+        const label = document.createElement("label");
+        label.htmlFor = "python-bin";
+        label.textContent = "Python interpreter";
+        const input = document.createElement("input");
+        input.type = "text";
+        input.id = "python-bin";
+        input.placeholder = "python3.12";
+        input.autocomplete = "off";
+        input.spellcheck = false;
+        const hint = document.createElement("span");
+        hint.className = "optional-hint";
+        hint.textContent = 'Used by "Update yt-dlp". Blank resets to the server default.';
+        field.append(label, input, hint);
+        const submitRow = document.createElement("div");
+        submitRow.className = "submit-row";
+        const saveBtn = document.createElement("button");
+        saveBtn.className = "btn btn-ghost btn-sm";
+        saveBtn.textContent = "Save";
+        saveBtn.addEventListener("click", saveSettings);
+        const status = document.createElement("span");
+        status.id = "settings-status";
+        status.style.fontSize = "0.75rem";
+        status.style.color = "var(--color-text-faint)";
+        submitRow.append(saveBtn, status);
+        host.append(field, submitRow);
+        loadSettings();
+      }
+    },
+    { separator: true },
+    {
+      id: "ytdlp-update",
+      render(host) {
+        const btn = document.createElement("button");
+        btn.className = "btn btn-ghost btn-sm";
+        btn.id = "update-btn";
+        btn.textContent = "Update yt-dlp";
+        btn.addEventListener("click", runYtdlpUpdate);
+        const status = document.createElement("span");
+        status.id = "update-status";
+        status.style.fontSize = "0.75rem";
+        status.style.color = "var(--color-text-faint)";
+        const log = document.createElement("div");
+        log.id = "update-log";
+        log.className = "update-log";
+        host.append(btn, status, log);
+      }
+    }
+  ],
   themePicker: true,
-  themes
+  themes,
+  mountTrigger: document.getElementById("settings-btn")
 });
-document.body.prepend(hamburger.trigger);
 var currentMode = "video";
 var pendingFormData = null;
 function setMode(mode) {
@@ -199,14 +253,6 @@ function runYtdlpUpdate() {
     status.textContent = "Connection error.";
   };
 }
-function toggleSettings() {
-  const panel = document.getElementById("settings-panel");
-  const btn = document.getElementById("settings-btn");
-  const open = panel.hidden;
-  panel.hidden = !open;
-  btn.setAttribute("aria-expanded", String(open));
-  if (open) loadSettings();
-}
 async function loadSettings() {
   const status = document.getElementById("settings-status");
   try {
@@ -245,9 +291,5 @@ async function saveSettings() {
 document.querySelectorAll(".mode-tab").forEach((tab) => {
   tab.addEventListener("click", () => setMode(tab.dataset.mode));
 });
-document.getElementById("settings-btn").addEventListener("click", toggleSettings);
-document.getElementById("update-btn").addEventListener("click", runYtdlpUpdate);
-document.getElementById("settings-save").addEventListener("click", saveSettings);
 setInterval(refreshJobs, 2e3);
 refreshJobs();
-loadSettings();
