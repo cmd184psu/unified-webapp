@@ -493,6 +493,7 @@ new HamburgerMenu({
   items: [],
   themePicker: true,
   themes,
+  side: 'right',
   mountTrigger: btnHamburger,
 });
 btnAutoSave.classList.add('active');
