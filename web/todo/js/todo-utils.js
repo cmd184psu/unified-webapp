@@ -257,7 +257,7 @@ function renderRow(i) {
     if (arrayOfContent[i].skip || $("#roEnable").is(":checked")) {
         ctrl += trophy;
     } else {
-        ctrl += '<span class="ctrl-icon" onclick="onHoldFlip('+i+')"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zM4.5 6h2v5h-2V6zm5 0h2v5h-2V6z"/></svg></span>';
+        ctrl += '<span class="ctrl-icon" onclick="onHoldFlip('+i+')"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="3.5" y1="3.5" x2="12.5" y2="12.5" stroke="currentColor" stroke-width="1.5"/></svg></span>';
         ctrl += '<span class="ctrl-icon" onclick="inProgressFlip('+i+')"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2l10 6-10 6V2z"/></svg></span>';
         ctrl += '<span class="ctrl-icon" onclick="editFlip('+i+')"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M12.1 1.3l2.6 2.6-9.7 9.7H2.4V11L12.1 1.3z"/></svg></span>';
         ctrl += trophy;

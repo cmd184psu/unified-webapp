@@ -153,31 +153,9 @@ function initDrawer(): void {
           host.append(label, row);
         },
       },
-      { separator: true as const },
-      { section: "Theme" },
-      {
-        id: "drawer-theme",
-        render(host) {
-          const picker = document.createElement("div");
-          picker.className = "ui-theme-picker";
-          const cur = document.documentElement.getAttribute("data-theme") || "dark";
-          for (const name of ["dark", "light"] as const) {
-            const button = document.createElement("button");
-            button.type = "button";
-            button.className = name === cur
-              ? "ui-theme-btn is-active"
-              : "ui-theme-btn";
-            const swatch = document.createElement("span");
-            swatch.className = "ui-theme-swatch";
-            swatch.dataset.theme = name;
-            button.append(swatch, name);
-            button.addEventListener("click", () => themes.set(name));
-            picker.append(button);
-          }
-          host.append(picker);
-        },
-      },
     ],
+    themePicker: true,
+    themes,
   });
 }
 
