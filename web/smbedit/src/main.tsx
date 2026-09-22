@@ -14,14 +14,20 @@ export const themes = new ThemeManager({
 })
 themes.apply()
 
-const hamburger = new HamburgerMenu({
-  title: 'SMBEdit',
-  items: [],
-  themePicker: true,
-  themes,
-})
+let hamburger: HamburgerMenu | null = null
 
-document.body.prepend(hamburger.trigger)
+export function initHamburger(): void {
+  if (hamburger) return
+  const trigger = document.getElementById('hamburger-trigger')
+  if (!trigger) return
+  hamburger = new HamburgerMenu({
+    title: 'SMBEdit',
+    items: [],
+    themePicker: true,
+    themes,
+    mountTrigger: trigger,
+  })
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { api, GlobalEntry, Share } from './api'
 
 interface Props {
@@ -47,6 +47,8 @@ export function PreviewPage({ globals, shares, shareOwner }: Props) {
       .finally(() => setLoading(false))
   }, [globals, shares, shareOwner])
 
+  useEffect(() => { load() }, [load])
+
   return (
     <div>
       <div className="page-header">
@@ -57,9 +59,6 @@ export function PreviewPage({ globals, shares, shareOwner }: Props) {
               Rendered smb.conf based on current settings — not yet written to disk.
             </div>
           </div>
-          <button className="btn btn-primary" onClick={load} disabled={loading}>
-            {loading ? '⟳ Rendering…' : '👁 Render preview'}
-          </button>
         </div>
       </div>
 
@@ -79,7 +78,7 @@ export function PreviewPage({ globals, shares, shareOwner }: Props) {
       {content === null && !error && (
         <div className="empty-state">
           <div className="empty-state-icon">📄</div>
-          <div className="empty-state-text">Click "Render preview" to see the generated smb.conf</div>
+          <div className="empty-state-text">{loading ? 'Rendering preview…' : 'No preview available'}</div>
         </div>
       )}
     </div>

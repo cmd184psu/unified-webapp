@@ -7790,14 +7790,14 @@ function PreviewPage({ globals, shares, shareOwner }) {
     setError("");
     api.preview({ globals, shares, share_owner: shareOwner }).then(setContent).catch((e) => setError(String(e))).finally(() => setLoading(false));
   }, [globals, shares, shareOwner]);
+  (0, import_react5.useEffect)(() => {
+    load();
+  }, [load]);
   return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "page-header", children: /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "row-between", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "page-title", children: "Preview" }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "page-subtitle", children: "Rendered smb.conf based on current settings \u2014 not yet written to disk." })
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("button", { className: "btn btn-primary", onClick: load, disabled: loading, children: loading ? "\u27F3 Rendering\u2026" : "\u{1F441} Render preview" })
-    ] }) }),
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "page-header", children: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "row-between", children: /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "page-title", children: "Preview" }),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "page-subtitle", children: "Rendered smb.conf based on current settings \u2014 not yet written to disk." })
+    ] }) }) }),
     error && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "card", style: { borderColor: "var(--color-danger)" }, children: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "text-red", children: error }) }),
     content !== null && !error && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
       "pre",
@@ -7808,7 +7808,7 @@ function PreviewPage({ globals, shares, shareOwner }) {
     ),
     content === null && !error && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "empty-state", children: [
       /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "empty-state-icon", children: "\u{1F4C4}" }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "empty-state-text", children: 'Click "Render preview" to see the generated smb.conf' })
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "empty-state-text", children: loading ? "Rendering preview\u2026" : "No preview available" })
     ] })
   ] });
 }
@@ -7884,7 +7884,8 @@ function LogsPage() {
 var import_jsx_runtime7 = __toESM(require_jsx_runtime());
 var NAV = [
   { id: "shares", label: "Shares", icon: "\u{1F5C2}" },
-  { id: "globals", label: "Globals", icon: "\u2699\uFE0F" },
+  { id: "globals", label: "Globals", icon: "\u{1F4CB}" },
+  { id: "settings", label: "Settings", icon: "\u2699\uFE0F" },
   { id: "preview", label: "Preview", icon: "\u{1F4C4}" },
   { id: "logs", label: "Logs", icon: "\u{1F4DC}" }
 ];
@@ -7900,7 +7901,6 @@ function warnAutoDisabled(before, after) {
 function App() {
   const [config, setConfig] = (0, import_react7.useState)(null);
   const [page, setPage] = (0, import_react7.useState)("shares");
-  const [settingsOpen, setSettingsOpen] = (0, import_react7.useState)(false);
   const [dirty, setDirty] = (0, import_react7.useState)(false);
   const [saving, setSaving] = (0, import_react7.useState)(false);
   const [restarting, setRestarting] = (0, import_react7.useState)(false);
@@ -7913,6 +7913,9 @@ function App() {
       setVersion(ver.version);
     }).catch((e) => showToast(`Failed to load config: ${String(e)}`, "error"));
   }, []);
+  (0, import_react7.useEffect)(() => {
+    if (config) initHamburger();
+  }, [config]);
   const patchConfig = (0, import_react7.useCallback)((patch) => {
     setConfig((c) => c ? { ...c, ...patch } : c);
     setDirty(true);
@@ -8024,10 +8027,10 @@ function App() {
       /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
         "button",
         {
+          id: "hamburger-trigger",
           className: "hamburger-btn",
-          onClick: () => setSettingsOpen(true),
-          title: "Settings",
-          "aria-label": "Open settings",
+          title: "Menu",
+          "aria-label": "Open menu",
           children: "\u2630"
         }
       )
@@ -8061,6 +8064,7 @@ function App() {
     /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("main", { className: "main-content", children: [
       page === "shares" && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(SharesPage, { shares: config.shares, onChange: patchShares }),
       page === "globals" && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(GlobalsPage, { globals: config.globals, onChange: patchGlobals }),
+      page === "settings" && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(SettingsPage, { config, onChange: patchConfig, importing, onImport: importConf }),
       page === "preview" && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(PreviewPage, { globals: config.globals, shares: config.shares, shareOwner: config.share_owner }),
       page === "logs" && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(LogsPage, {}),
       restartOutput && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "card mt-16", style: { borderColor: restartOutput.success ? "var(--color-success)" : "var(--color-danger)" }, children: [
@@ -8091,28 +8095,6 @@ function App() {
           children: restarting ? "\u27F3 Restarting\u2026" : "\u{1F680} Save & Restart Samba"
         }
       )
-    ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
-      "div",
-      {
-        className: `settings-backdrop${settingsOpen ? " open" : ""}`,
-        onClick: () => setSettingsOpen(false)
-      }
-    ),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: `settings-drawer${settingsOpen ? " open" : ""}`, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "settings-drawer-header", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "settings-drawer-title", children: "\u{1F527} Settings" }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
-          "button",
-          {
-            className: "btn-icon",
-            onClick: () => setSettingsOpen(false),
-            "aria-label": "Close settings",
-            children: "\u2715"
-          }
-        )
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "settings-drawer-body", children: /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(SettingsPage, { config, onChange: patchConfig, importing, onImport: importConf }) })
     ] })
   ] });
 }
@@ -8132,17 +8114,24 @@ var themes = new ThemeManager({
   }
 });
 themes.apply();
-var hamburger = new HamburgerMenu({
-  title: "SMBEdit",
-  items: [],
-  themePicker: true,
-  themes
-});
-document.body.prepend(hamburger.trigger);
+var hamburger = null;
+function initHamburger() {
+  if (hamburger) return;
+  const trigger = document.getElementById("hamburger-trigger");
+  if (!trigger) return;
+  hamburger = new HamburgerMenu({
+    title: "SMBEdit",
+    items: [],
+    themePicker: true,
+    themes,
+    mountTrigger: trigger
+  });
+}
 (0, import_client.createRoot)(document.getElementById("root")).render(
   /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(import_react8.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(App, {}) })
 );
 export {
+  initHamburger,
   setPersistTheme,
   themes
 };

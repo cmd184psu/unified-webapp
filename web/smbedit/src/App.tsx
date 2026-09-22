@@ -6,14 +6,15 @@ import { GlobalsPage } from './GlobalsPage'
 import { SettingsPage } from './SettingsPage'
 import { PreviewPage } from './PreviewPage'
 import { LogsPage } from './LogsPage'
-import { setPersistTheme } from './main'
+import { setPersistTheme, initHamburger } from './main'
 import './styles.css'
 
-type Page = 'shares' | 'globals' | 'preview' | 'logs'
+type Page = 'shares' | 'globals' | 'settings' | 'preview' | 'logs'
 
 const NAV: { id: Page; label: string; icon: string }[] = [
   { id: 'shares',   label: 'Shares',   icon: '🗂' },
-  { id: 'globals',  label: 'Globals',  icon: '⚙️' },
+  { id: 'globals',  label: 'Globals',  icon: '📋' },
+  { id: 'settings', label: 'Settings', icon: '⚙️' },
   { id: 'preview',  label: 'Preview',  icon: '📄' },
   { id: 'logs',     label: 'Logs',     icon: '📜' },
 ]
@@ -33,7 +34,6 @@ function warnAutoDisabled(before: Share[], after: Share[]) {
 export default function App() {
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [page, setPage] = useState<Page>('shares')
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [restarting, setRestarting] = useState(false)
@@ -50,6 +50,13 @@ export default function App() {
       })
       .catch(e => showToast(`Failed to load config: ${String(e)}`, 'error'))
   }, [])
+
+  // ── Mount the shared hamburger onto the topbar trigger button ───────────────
+  // Deferred until `config` is loaded, since the trigger button only exists
+  // in the DOM once the topbar (gated on `config`) renders.
+  useEffect(() => {
+    if (config) initHamburger()
+  }, [config])
 
   // ── Wire ThemeManager persistence into React ────────────────────────────────
   const patchConfig = useCallback((patch: Partial<AppConfig>) => {
@@ -173,10 +180,10 @@ export default function App() {
         </span>
         {version && <span className="text-muted" style={{ fontSize: 10 }}>v{version}</span>}
         <button
+          id="hamburger-trigger"
           className="hamburger-btn"
-          onClick={() => setSettingsOpen(true)}
-          title="Settings"
-          aria-label="Open settings"
+          title="Menu"
+          aria-label="Open menu"
         >
           ☰
         </button>
@@ -212,6 +219,7 @@ export default function App() {
       <main className="main-content">
         {page === 'shares'   && <SharesPage shares={config.shares} onChange={patchShares} />}
         {page === 'globals'  && <GlobalsPage globals={config.globals} onChange={patchGlobals} />}
+        {page === 'settings' && <SettingsPage config={config} onChange={patchConfig} importing={importing} onImport={importConf} />}
         {page === 'preview'  && <PreviewPage globals={config.globals} shares={config.shares} shareOwner={config.share_owner} />}
         {page === 'logs'     && <LogsPage />}
 
@@ -250,27 +258,6 @@ export default function App() {
           {restarting ? '⟳ Restarting…' : '🚀 Save & Restart Samba'}
         </button>
       </footer>
-
-      {/* ── Settings drawer ────────────────────────────────────────── */}
-      <div
-        className={`settings-backdrop${settingsOpen ? ' open' : ''}`}
-        onClick={() => setSettingsOpen(false)}
-      />
-      <div className={`settings-drawer${settingsOpen ? ' open' : ''}`}>
-        <div className="settings-drawer-header">
-          <span className="settings-drawer-title">🔧 Settings</span>
-          <button
-            className="btn-icon"
-            onClick={() => setSettingsOpen(false)}
-            aria-label="Close settings"
-          >
-            ✕
-          </button>
-        </div>
-        <div className="settings-drawer-body">
-          <SettingsPage config={config} onChange={patchConfig} importing={importing} onImport={importConf} />
-        </div>
-      </div>
     </div>
   )
 }
