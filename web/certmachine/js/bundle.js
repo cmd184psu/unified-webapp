@@ -1341,20 +1341,20 @@ var hamburger = new HamburgerMenu({
   title: "CertMachine",
   items: [],
   themePicker: true,
-  themes
+  themes,
+  side: "right"
 });
 async function bootstrap() {
   const root = document.getElementById("cert-app");
   if (!root) {
     throw new Error("missing #cert-app root element");
   }
-  const nav = document.createElement("div");
-  nav.id = "nav";
-  nav.style.display = "flex";
-  nav.style.justifyContent = "flex-end";
-  nav.style.padding = "8px 16px";
-  nav.appendChild(hamburger.trigger);
-  root.before(nav);
+  const header = document.createElement("header");
+  header.className = "app-header";
+  const title = document.createElement("h1");
+  title.textContent = "CertMachine";
+  header.append(title, hamburger.trigger);
+  root.before(header);
   await mountCertApp(root);
 }
 void bootstrap();
