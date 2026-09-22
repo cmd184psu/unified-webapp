@@ -245,21 +245,21 @@ function renderRow(i) {
 
     var trophy = '';
     if (arrayOfContent[i].winner) {
-        trophy = '<span class="ctrl-icon"><i class="fas fa-trophy"></i></span>';
+        trophy = '<span class="ctrl-icon"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2h8v1h3v2c0 1.5-1.2 2.5-2.5 2.8C12 9.5 10.5 10.5 9 11v1h2v2H5v-2h2v-1C5.5 10.5 4 9.5 3.5 7.8 2.2 7.5 1 6.5 1 5V3h3V2z"/></svg></span>';
         arrayOfContent[i].expires = d.getTime() + COOLDOWN_TIME;
     }
 
     // Control panel — flex div, no nested table
     var ctrl = '<div class="ctrl-panel">';
     if (!$("#roEnable").is(":checked")) {
-        ctrl += '<span class="ctrl-icon ctrl-delete" onclick="deleteit('+i+')"><i class="fa fa-trash"></i></span>';
+        ctrl += '<span class="ctrl-icon ctrl-delete" onclick="deleteit('+i+')"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 1h5l.5.5V3h4v1h-1.5l-1 10.5-.5.5h-8l-.5-.5L2.5 4H1V3h4V1.5l.5-.5zM6 3h4V2H6v1z"/></svg></span>';
     }
     if (arrayOfContent[i].skip || $("#roEnable").is(":checked")) {
         ctrl += trophy;
     } else {
-        ctrl += '<span class="ctrl-icon" onclick="onHoldFlip('+i+')"><i class="fas fa-hand-paper"></i></span>';
-        ctrl += '<span class="ctrl-icon" onclick="inProgressFlip('+i+')"><i class="fas fa-play"></i></span>';
-        ctrl += '<span class="ctrl-icon" onclick="editFlip('+i+')"><i class="fas fa-edit"></i></span>';
+        ctrl += '<span class="ctrl-icon" onclick="onHoldFlip('+i+')"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zM4.5 6h2v5h-2V6zm5 0h2v5h-2V6z"/></svg></span>';
+        ctrl += '<span class="ctrl-icon" onclick="inProgressFlip('+i+')"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2l10 6-10 6V2z"/></svg></span>';
+        ctrl += '<span class="ctrl-icon" onclick="editFlip('+i+')"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M12.1 1.3l2.6 2.6-9.7 9.7H2.4V11L12.1 1.3z"/></svg></span>';
         ctrl += trophy;
     }
     ctrl += '</div>';
@@ -298,13 +298,13 @@ function renderRow(i) {
         var dueDate = new Date(arrayOfContent[i].nextDue);
         row += '<td>'+arrayOfContent[i].period+'</td>';
         row += '<td><div class="date-cell">'+formatedDate(dueDate)+
-               '<span class="ctrl-icon" onclick="resetDueDate('+i+')"><i class="fas fa-sync-alt"></i></span></div></td>';
+               '<span class="ctrl-icon" onclick="resetDueDate('+i+')"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 8a6 6 0 0 1 10.5-4M14 8a6 6 0 0 1-10.5 4"/><path d="M12.5 1v3h-3M3.5 15v-3h3"/></svg></span></div></td>';
     }
 
     // Cooldown
     var coolDown = (arrayOfContent[i].expires == undefined || (arrayOfContent[i].expires - d.getTime() <= 0)) ? 'Ready' : 'Cool down';
     row += '<td><div class="date-cell">'+coolDown+
-           '<span class="ctrl-icon" onclick="resetCoolDown('+i+')"><i class="fas fa-sync-alt"></i></span></div></td>';
+           '<span class="ctrl-icon" onclick="resetCoolDown('+i+')"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 8a6 6 0 0 1 10.5-4M14 8a6 6 0 0 1-10.5 4"/><path d="M12.5 1v3h-3M3.5 15v-3h3"/></svg></span></div></td>';
 
     return trbit + row;
 }
@@ -953,7 +953,7 @@ function renderItem(i,content) {
     if(arrayOfContent[i].json!=undefined) {
         content+=prepend+arrayOfContent[i].name+append+" "+
         "<a href=\"javascript:SaveAndLoad('"+arrayOfContent[i].json+"')\">"+
-        "<i class=\"fas fa-external-link-alt\"></i>"+
+        "<svg width=\"14\" height=\"14\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\"><path d=\"M12 8.5v4a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 2 12.5v-7A1.5 1.5 0 0 1 3.5 4H8\"/><path d=\"M10 2h4v4\"/><path d=\"M7 9L14 2\"/></svg>"+
         "</a>";
     } else {
         content+=prepend+embedURL(arrayOfContent[i].name)+append;

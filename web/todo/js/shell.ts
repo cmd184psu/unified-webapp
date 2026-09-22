@@ -15,7 +15,9 @@ const themes = new ThemeManager({
   onChange: (name) => {
     const icon = document.getElementById("theme-icon");
     if (icon) {
-      icon.className = name === "dark" ? "fas fa-moon" : "fas fa-sun";
+      icon.innerHTML = name === "dark"
+        ? '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8.5 2a5.5 5.5 0 1 0 4.38 8.83A7 7 0 0 1 5.17 3.12 5.5 5.5 0 0 0 8.5 2z"/></svg>'
+        : '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="3"/><path d="M8 0v2m0 12v2m8-8h-2M2 8H0m13.66-5.66L12.24 3.76M3.76 12.24l-1.42 1.42m11.32 0l-1.42-1.42M3.76 3.76L2.34 2.34"/></svg>';
     }
     const dp = document.getElementById("drawer-theme");
     if (dp) {
