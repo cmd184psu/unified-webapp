@@ -286,6 +286,14 @@ const themes = new ThemeManager({
 });
 themes.apply();
 
+// Populate the theme select with every theme ThemeManager knows about.
+for (const name of themes.list) {
+  const opt = document.createElement("option");
+  opt.value = name;
+  opt.textContent = name.charAt(0).toUpperCase() + name.slice(1);
+  selTheme.append(opt);
+}
+
 // ── Module state ──────────────────────────────────────────────────────────────
 const panScan   = new PanScan(img);
 const debugTimer = new DebugTimer(debugDisplayEl);
