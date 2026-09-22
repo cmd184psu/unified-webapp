@@ -1,6 +1,6 @@
-/* style.css — sampler layout only. Every colour, shadow, radius, spacing and
+/* style.css — sampler layout only. Every color, shadow, radius, spacing and
    type-size value below arrives through a var() defined in
-   /shared/dist/shared.css; no colour literal is authored here, so nothing in
+   /shared/dist/shared.css; no color literal is authored here, so nothing in
    this file can shadow a token. */
 
 * {

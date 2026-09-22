@@ -38,7 +38,7 @@ const themes = new ThemeManager({
 
 // Table T1 -- the 18 --color-* keys every theme in web/shared/css/themes.css
 // declares. Not a second theme list (that would violate FRD :226-228): this
-// is the fixed set of colour *tokens*, not the set of themes -- THEMES above
+// is the fixed set of color *tokens*, not the set of themes -- THEMES above
 // is the one array iterated for that.
 const COLOR_TOKENS = [
   "--color-bg",
@@ -343,7 +343,7 @@ function buildMenu(): void {
           void alertDialog("Opened from the drawer.");
         },
       },
-      { id: "menu-tokens", label: "Jump to colour tokens", href: "#swatches-heading" },
+      { id: "menu-tokens", label: "Jump to color tokens", href: "#swatches-heading" },
       { separator: true },
       { section: "Density" },
       {

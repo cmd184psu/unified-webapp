@@ -234,7 +234,7 @@ function buildMenu() {
           void alertDialog("Opened from the drawer.");
         }
       },
-      { id: "menu-tokens", label: "Jump to colour tokens", href: "#swatches-heading" },
+      { id: "menu-tokens", label: "Jump to color tokens", href: "#swatches-heading" },
       { separator: true },
       { section: "Density" },
       {
