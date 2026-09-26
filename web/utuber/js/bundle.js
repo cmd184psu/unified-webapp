@@ -61,7 +61,9 @@ var hamburger = new HamburgerMenu({
   ],
   themePicker: true,
   themes,
-  mountTrigger: document.getElementById("settings-btn")
+  mountTrigger: document.getElementById("settings-btn"),
+  // The trigger sits at the right end of the topbar; the drawer opens beside it.
+  side: "right"
 });
 var currentMode = "video";
 var pendingFormData = null;

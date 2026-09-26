@@ -1,10 +1,12 @@
-import { showToast } from "@shared";
+import { showToast, promptDialog } from "@shared";
 
 /* ─── Threads View ─── */
 
 interface Thread {
   content: string;
   disabled: boolean;
+  /** Display title, kept app-side; empty shows the default THREAD_NN label. */
+  title: string;
 }
 
 interface ThreadsViewAPI {
@@ -89,7 +91,8 @@ window.ThreadsView = (function (): ThreadsViewAPI {
     const thread = threads[index];
     const isEditing = editingIndex === index;
     const isDisabled = thread.disabled;
-    const label = `THREAD_${String(index + 1).padStart(2, '0')}`;
+    const defaultLabel = `THREAD_${String(index + 1).padStart(2, '0')}`;
+    const title = (thread.title ?? '').trim();
 
     const editButtons = isEditing
       ? `<button class="card-btn btn-save" data-action="save" data-index="${index}">Save</button>
@@ -104,7 +107,10 @@ window.ThreadsView = (function (): ThreadsViewAPI {
     return `
       <div class="thread-card${isDisabled ? ' disabled' : ''}" data-card="${index}">
         <div class="card-header">
-          <span class="card-label">${label}</span>
+          <span class="card-label${title ? ' card-label-titled' : ''}" title="${escapeHtml(title || defaultLabel)}">${escapeHtml(title || defaultLabel)}</span>
+          <button class="card-title-edit" data-action="rename" data-index="${index}" title="Rename thread" aria-label="Rename ${escapeHtml(title || defaultLabel)}">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+          </button>
           <div class="card-header-spacer"></div>
           ${editButtons}
           <div class="toggle-wrap">
@@ -187,6 +193,11 @@ window.ThreadsView = (function (): ThreadsViewAPI {
       return;
     }
 
+    if (action === 'rename') {
+      void renameThread(index);
+      return;
+    }
+
     if (action === 'cancel') {
       editingIndex = null;
       draftContent = '';
@@ -207,6 +218,28 @@ window.ThreadsView = (function (): ThreadsViewAPI {
     renderApp();
     saveThreads(threads)
       .then(() => showToast(threads[index].disabled ? 'Thread disabled' : 'Thread enabled'))
+      .catch(() => showToast('Save failed', 'error'));
+  }
+
+  /* ─── Rename ─── */
+  // The title lives in app state, not in the vault: the thread's file keeps
+  // its fixed name. Clearing the title restores the default THREAD_NN label.
+  async function renameThread(index: number): Promise<void> {
+    const current = threads[index].title ?? '';
+    const next = await promptDialog('Thread title (leave empty for the default):', {
+      title: 'Rename thread',
+      defaultValue: current,
+      placeholder: `THREAD_${String(index + 1).padStart(2, '0')}`,
+      confirmLabel: 'Save',
+    });
+    if (next === null || next.trim() === current.trim()) return;
+    // Keep any content being edited in another card; the re-render below
+    // rebuilds its textarea from draftContent.
+    captureDraft();
+    threads[index].title = next.trim();
+    renderApp();
+    saveThreads(threads)
+      .then(() => showToast(next.trim() ? 'Thread renamed' : 'Thread title cleared'))
       .catch(() => showToast('Save failed', 'error'));
   }
 

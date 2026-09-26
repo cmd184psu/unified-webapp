@@ -23,7 +23,8 @@ func WriteThreads(vaultPath, folder string, threads []Thread) error {
 	return writeThreads(vaultPath, folder, threads)
 }
 
-// readThreads reads all thread files from the vault and merges disabled state.
+// readThreads reads all thread files from the vault and merges each slot's
+// app-side state (disabled flag and title).
 func readThreads(vaultPath, folder string, count int, states []ThreadState) ([]Thread, error) {
 	result := make([]Thread, count)
 	for i := 0; i < count; i++ {
@@ -32,19 +33,21 @@ func readThreads(vaultPath, folder string, count int, states []ThreadState) ([]T
 		if err != nil && !os.IsNotExist(err) {
 			return nil, fmt.Errorf("thread %d: %w", i+1, err)
 		}
-		disabled := false
+		var st ThreadState
 		if i < len(states) {
-			disabled = states[i].Disabled
+			st = states[i]
 		}
 		result[i] = Thread{
 			Content:  string(data),
-			Disabled: disabled,
+			Disabled: st.Disabled,
+			Title:    st.Title,
 		}
 	}
 	return result, nil
 }
 
-// writeThreads writes thread content to vault files. Disabled state is not stored in files.
+// writeThreads writes thread content to vault files. Disabled state and titles
+// are not stored in files, so the file names never change.
 func writeThreads(vaultPath, folder string, threads []Thread) error {
 	dir := filepath.Join(vaultPath, folder)
 	if err := os.MkdirAll(dir, 0o750); err != nil {

@@ -65,7 +65,16 @@
           <div class="vault-select">
             <select id="vault-selector" aria-label="Switch vault"></select>
           </div>
-          <input id="search-input" type="search" placeholder="Filter notes…" aria-label="Filter notes" />
+          <div class="sidebar-tools">
+            <input id="search-input" type="search" placeholder="Search notes…" aria-label="Search note names and contents" />
+            <select id="sort-selector" aria-label="Sort notes" title="Sort notes">
+              <option value="name">Name</option>
+              <option value="recent">Recent</option>
+            </select>
+            <button id="btn-new-folder" type="button" title="New folder" aria-label="New folder">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+            </button>
+          </div>
         </div>
         <div id="file-tree" role="tree" aria-label="Vault file tree">
           <div class="tree-loading skeleton-text"></div>

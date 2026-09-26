@@ -1,7 +1,11 @@
-import { HamburgerMenu, ThemeManager, showToast, confirmDialog } from "@shared";
+import { HamburgerMenu, ThemeManager, showToast, confirmDialog, promptDialog } from "@shared";
 
 interface VaultInfo { name: string; theme: string; }
-interface TreeNode { name: string; path?: string; is_dir?: boolean; children?: TreeNode[]; }
+interface TreeNode { name: string; path?: string; is_dir?: boolean; mtime?: number; children?: TreeNode[]; }
+type SortMode = 'name' | 'recent';
+const SORT_KEY = 'obsidianoid-sort';
+const LOCK_KEY = 'obsidianoid-tree-locked';
+const OVERWRITE_KEY = 'obsidianoid-allow-overwrite';
 declare const ThreadsView: { init(): void; activate(): Promise<void>; flush(): Promise<void>; };
 /* ─── State ─── */
 const state = {
@@ -10,6 +14,15 @@ const state = {
   isDirty: false,
   treeData: null as TreeNode | null,
   filterText: '',
+  /** Paths matching the current search (name or content); null when not searching. */
+  searchPaths: null as Set<string> | null,
+  sortMode: 'name' as SortMode,
+  /** Read-only tree: no moving, renaming or deleting (editing notes still works). */
+  treeLocked: false,
+  /** The configured thread folder; it can't be renamed (thread mode relies on it). */
+  threadsFolder: 'Threads',
+  /** Replace a same-named note on move/rename, after an "are you sure?". */
+  allowOverwrite: false,
   mode: 'notes',
   activeVault: 0,
   vaults: [] as VaultInfo[],
@@ -31,6 +44,8 @@ const btnSave        = document.getElementById('btn-save') as HTMLButtonElement;
 const btnNewNote     = document.getElementById('btn-new-note') as HTMLButtonElement;
 const noteTitle      = document.getElementById('note-title')!;
 const searchInput    = document.getElementById('search-input') as HTMLInputElement;
+const sortSelector   = document.getElementById('sort-selector') as HTMLSelectElement;
+const btnNewFolder   = document.getElementById('btn-new-folder') as HTMLButtonElement;
 const sidebar        = document.getElementById('sidebar') as HTMLElement;
 const resizeHandle   = document.getElementById('resize-handle')!;
 const newNoteDialog  = document.getElementById('new-note-dialog') as HTMLDialogElement;
@@ -50,16 +65,42 @@ function fileIcon() {
 function chevronIcon() {
   return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>`;
 }
+function editIcon() {
+  return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>`;
+}
+function gripIcon() {
+  return `<svg viewBox="0 0 14 14" fill="currentColor" width="12" height="12" aria-hidden="true">` +
+    `<circle cx="4" cy="3" r="1.2"/><circle cx="10" cy="3" r="1.2"/>` +
+    `<circle cx="4" cy="7" r="1.2"/><circle cx="10" cy="7" r="1.2"/>` +
+    `<circle cx="4" cy="11" r="1.2"/><circle cx="10" cy="11" r="1.2"/></svg>`;
+}
+function trashIcon() {
+  return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>`;
+}
 function folderIcon() {
   return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
 }
 
 /* ─── File tree rendering ─── */
+// While searching, a note shows only if the server's grep matched it (name or
+// content); until that answer arrives, the name alone is matched so the tree
+// responds as you type. A folder shows if anything inside it does.
 function matchesFilter(node: TreeNode, filter: string): boolean {
   if (!filter) return true;
-  const f = filter.toLowerCase();
-  if (!node.is_dir) return node.name.toLowerCase().includes(f);
-  return (node.children || []).some(c => matchesFilter(c, filter));
+  if (node.is_dir) return (node.children || []).some(c => matchesFilter(c, filter));
+  if (state.searchPaths) return state.searchPaths.has(node.path!);
+  return node.name.toLowerCase().includes(filter.toLowerCase());
+}
+
+// Name: folders first, then A–Z. Recent: newest first (a folder counts as
+// its newest note), so recently edited notes and their folders rise to the top.
+function sortNodes(nodes: TreeNode[]): TreeNode[] {
+  const byName = (a: TreeNode, b: TreeNode) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
+  return [...nodes].sort((a, b) => {
+    if (state.sortMode === 'recent') return (b.mtime ?? 0) - (a.mtime ?? 0) || byName(a, b);
+    if (!!a.is_dir !== !!b.is_dir) return a.is_dir ? -1 : 1;
+    return byName(a, b);
+  });
 }
 
 function renderNode(node: TreeNode, depth = 0): HTMLElement | null {
@@ -70,12 +111,30 @@ function renderNode(node: TreeNode, depth = 0): HTMLElement | null {
     const label = document.createElement('div');
     label.className = 'tree-dir-label';
     label.style.paddingLeft = `calc(var(--space-3) + ${depth * 14}px)`;
-    label.innerHTML = `${chevronIcon()}${folderIcon()}<span>${node.name}</span>`;
+    const isEmpty = (node.children || []).length === 0;
+    const folderPath = node.path ?? '';
+    const holdsThreads = folderPath === state.threadsFolder || state.threadsFolder.startsWith(folderPath + '/');
+    const tools = state.treeLocked ? '' :
+      `<span class="tree-dir-tools">` +
+      (holdsThreads ? '' : `<button type="button" class="tree-note-edit tree-dir-rename" title="Rename folder" aria-label="Rename folder ${node.name}">${editIcon()}</button>`) +
+      (isEmpty ? `<button type="button" class="tree-note-edit tree-note-delete tree-dir-delete" title="Delete empty folder" aria-label="Delete folder ${node.name}">${trashIcon()}</button>` : '') +
+      `</span>`;
+    label.innerHTML = `${chevronIcon()}${folderIcon()}<span>${node.name}</span>` + tools;
     label.setAttribute('role', 'treeitem');
     label.setAttribute('aria-expanded', 'true');
+    label.dataset.folder = node.path ?? '';
 
     const children = document.createElement('div');
     children.className = 'tree-dir-children';
+
+    label.querySelector<HTMLButtonElement>('.tree-dir-delete')?.addEventListener('click', e => {
+      e.stopPropagation();
+      void deleteFolder(node);
+    });
+    label.querySelector<HTMLButtonElement>('.tree-dir-rename')?.addEventListener('click', e => {
+      e.stopPropagation();
+      void renameFolder(node);
+    });
 
     label.addEventListener('click', () => {
       const collapsed = children.classList.toggle('collapsed');
@@ -84,7 +143,7 @@ function renderNode(node: TreeNode, depth = 0): HTMLElement | null {
     });
 
     wrapper.appendChild(label);
-    (node.children || []).forEach(child => {
+    sortNodes(node.children || []).forEach(child => {
       const el = renderNode(child, depth + 1);
       if (el) children.appendChild(el);
     });
@@ -94,13 +153,28 @@ function renderNode(node: TreeNode, depth = 0): HTMLElement | null {
     const item = document.createElement('div');
     item.className = 'tree-note' + (node.path === state.currentPath ? ' active' : '');
     item.style.paddingLeft = `calc(var(--space-3) + ${depth * 14}px)`;
-    item.innerHTML = `${fileIcon()}<span title="${node.path}">${node.name}</span>`;
+    // A locked tree shows no grip, rename or delete controls.
+    item.innerHTML = (state.treeLocked ? '' : `<span class="tree-grip" title="Drag to move into a folder">${gripIcon()}</span>`) +
+      `${fileIcon()}<span class="tree-note-name" title="${node.path}">${node.name}</span>` +
+      (state.treeLocked ? '' :
+        `<button type="button" class="tree-note-edit" title="Rename note" aria-label="Rename ${node.name}">${editIcon()}</button>` +
+        `<button type="button" class="tree-note-edit tree-note-delete" title="Delete note" aria-label="Delete ${node.name}">${trashIcon()}</button>`);
     item.setAttribute('role', 'treeitem');
     item.setAttribute('tabindex', '0');
     item.dataset.path = node.path!;
 
     const open = () => loadNote(node.path!);
     item.addEventListener('click', open);
+    item.querySelector<HTMLButtonElement>('.tree-note-edit:not(.tree-note-delete)')?.addEventListener('click', e => {
+      e.stopPropagation();
+      void renameNote(node);
+    });
+    item.querySelector<HTMLButtonElement>('.tree-note-delete')?.addEventListener('click', e => {
+      e.stopPropagation();
+      void deleteNote(node);
+    });
+    const grip = item.querySelector<HTMLElement>('.tree-grip');
+    if (grip) attachNoteDrag(grip, item, node);
     item.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }});
     return item;
   }
@@ -109,7 +183,7 @@ function renderNode(node: TreeNode, depth = 0): HTMLElement | null {
 function renderTree() {
   if (!state.treeData) return;
   fileTree.innerHTML = '';
-  (state.treeData.children || []).forEach(child => {
+  sortNodes(state.treeData.children || []).forEach(child => {
     const el = renderNode(child, 0);
     if (el) fileTree.appendChild(el);
   });
@@ -251,6 +325,8 @@ async function saveNote() {
     state.isDirty = false;
     btnSave.disabled = true;
     showToast('✓ Saved', 'success');
+    // A save changes this note's modified time, so "Recent" order moves.
+    if (state.sortMode === 'recent') void fetchTree();
   } catch (e) {
     showToast('Network error saving note', 'error');
   }
@@ -346,11 +422,367 @@ document.addEventListener('mouseup', () => {
   document.body.style.userSelect = '';
 });
 
-/* ─── Search filter ─── */
+/* ─── Search (grep) filter ─── */
+// Typing filters by name at once; 250ms after the last keystroke the server
+// greps names and contents, and the tree narrows to exactly those notes.
+// Clearing the box shows everything again.
+let searchTimer: ReturnType<typeof setTimeout> | undefined;
+let searchSeq = 0;
+
+async function runSearch() {
+  const q = state.filterText;
+  const seq = ++searchSeq;
+  if (!q) { state.searchPaths = null; renderTree(); return; }
+  try {
+    const res = await fetch(`/api/search?${vaultParam()}&q=${encodeURIComponent(q)}`);
+    if (!res.ok) return;
+    const { paths } = await res.json() as { paths: string[] };
+    if (seq !== searchSeq) return; // a newer search superseded this one
+    state.searchPaths = new Set(paths);
+    renderTree();
+  } catch (e) { /* keep the name-only filter on network errors */ }
+}
+
 searchInput.addEventListener('input', () => {
   state.filterText = searchInput.value.trim();
+  state.searchPaths = null;
+  renderTree();
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => void runSearch(), 250);
+});
+
+/* ─── Sort ─── */
+try {
+  const saved = localStorage.getItem(SORT_KEY);
+  if (saved === 'name' || saved === 'recent') state.sortMode = saved;
+} catch (e) { /* storage unavailable: keep the default */ }
+sortSelector.value = state.sortMode;
+sortSelector.addEventListener('change', () => {
+  state.sortMode = sortSelector.value === 'recent' ? 'recent' : 'name';
+  try { localStorage.setItem(SORT_KEY, state.sortMode); } catch (e) { /* ignore */ }
   renderTree();
 });
+
+/* ─── Drag to move (grocery/todo-style grip, pointer-driven) ─── */
+// Order inside a folder comes from the Name/Recent sort, so a drag only
+// changes which folder a note lives in. Drop on a folder to move into it, on
+// a note to move beside it (into its folder), or on empty tree space to move
+// to the vault root. The target folder highlights while dragging.
+function folderOf(path: string): string {
+  const i = path.lastIndexOf('/');
+  return i < 0 ? '' : path.slice(0, i);
+}
+
+function dropTargetAt(x: number, y: number): { folder: string; el: HTMLElement } | null {
+  const hit = document.elementFromPoint(x, y) as HTMLElement | null;
+  if (!hit || !fileTree.contains(hit)) return null;
+  const dir = hit.closest<HTMLElement>('.tree-dir-label');
+  if (dir) return { folder: dir.dataset.folder ?? '', el: dir };
+  const note = hit.closest<HTMLElement>('.tree-note');
+  if (note) {
+    const folder = folderOf(note.dataset.path ?? '');
+    const label = folder
+      ? fileTree.querySelector<HTMLElement>(`.tree-dir-label[data-folder="${CSS.escape(folder)}"]`)
+      : null;
+    return { folder, el: label ?? fileTree };
+  }
+  return { folder: '', el: fileTree };
+}
+
+function clearDropMarks() {
+  fileTree.classList.remove('drop-target');
+  fileTree.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target'));
+}
+
+function attachNoteDrag(grip: HTMLElement, item: HTMLElement, node: TreeNode) {
+  grip.addEventListener('click', e => e.stopPropagation());
+  grip.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    grip.setPointerCapture(e.pointerId);
+    item.classList.add('dragging');
+    let target: { folder: string; el: HTMLElement } | null = null;
+
+    const onMove = (ev: PointerEvent) => {
+      clearDropMarks();
+      target = dropTargetAt(ev.clientX, ev.clientY);
+      if (target && target.folder !== folderOf(node.path!)) target.el.classList.add('drop-target');
+    };
+    const onEnd = () => {
+      grip.removeEventListener('pointermove', onMove);
+      grip.removeEventListener('pointerup', onEnd);
+      grip.removeEventListener('pointercancel', onEnd);
+      item.classList.remove('dragging');
+      clearDropMarks();
+      if (target && target.folder !== folderOf(node.path!)) void moveNote(node, target.folder);
+    };
+    grip.addEventListener('pointermove', onMove);
+    grip.addEventListener('pointerup', onEnd);
+    grip.addEventListener('pointercancel', onEnd);
+  });
+}
+
+/** Whether the loaded tree already has a note at path. */
+function noteInTree(path: string, node: TreeNode | null = state.treeData): boolean {
+  if (!node) return false;
+  if (!node.is_dir) return node.path === path;
+  return (node.children || []).some(c => noteInTree(path, c));
+}
+
+/**
+ * POSTs a move/rename. A clash is spotted in the loaded tree before anything
+ * is sent, so the expected case never produces a 409: with "Allow overwrites"
+ * on it asks first and sends the overwrite straight away; with it off it
+ * answers 409 locally for the caller to report. (A 409 can
+ * still happen if another tab changed the vault since the tree loaded; the
+ * same question is asked then.) Returns null if the user declined.
+ */
+async function postWithOverwrite(url: string, body: Record<string, unknown>, targetPath: string): Promise<Response | null> {
+  const send = (overwrite: boolean) => fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...body, overwrite }),
+  });
+  if (noteInTree(targetPath)) {
+    // Known clash: ask (overwrites allowed) or refuse locally (not allowed),
+    // without sending a request the server would reject.
+    if (!state.allowOverwrite) return new Response(null, { status: 409 });
+    return (await confirmOverwrite(targetPath)) ? send(true) : null;
+  }
+  const res = await send(false);
+  if (res.status !== 409 || !state.allowOverwrite) return res;
+  return (await confirmOverwrite(targetPath)) ? send(true) : null;
+}
+
+function confirmOverwrite(targetPath: string): Promise<boolean> {
+  const dirtyTarget = targetPath === state.currentPath && state.isDirty;
+  return confirmDialog(
+    `"${targetPath}" already exists. Overwrite it? The existing note will be replaced` +
+      (dirtyTarget ? ', including your unsaved changes to it' : '') + '.',
+    { title: 'Overwrite note', confirmLabel: 'Overwrite' },
+  );
+}
+
+/** After an overwrite, an open note that was the replaced one shows its new content. */
+function afterOverwrite(targetPath: string) {
+  if (state.currentPath === targetPath) {
+    state.isDirty = false;
+    btnSave.disabled = true;
+    void reloadCurrentNote();
+  }
+}
+
+/** Refuses a structural change while the tree is locked; true when allowed. */
+function treeUnlocked(): boolean {
+  if (state.treeLocked) showToast('The file tree is locked. Unlock it in Settings to change it.', 'notice');
+  return !state.treeLocked;
+}
+
+async function moveNote(node: TreeNode, folder: string) {
+  if (!treeUnlocked()) return;
+  const path = node.path!;
+  if (path === state.currentPath && state.isDirty) {
+    showToast('Save your changes before moving this note.', 'notice');
+    return;
+  }
+  const baseName = path.slice(path.lastIndexOf('/') + 1);
+  const targetPath = folder ? `${folder}/${baseName}` : baseName;
+  try {
+    const res = await postWithOverwrite(`/api/note/move?${vaultParam()}`, { path, folder }, targetPath);
+    if (!res) return;
+    if (!res.ok) {
+      showToast(res.status === 409
+        ? 'That folder already has a note with this name. (Turn on "Allow overwrites" in Settings to replace it.)'
+        : 'Move failed.', 'error');
+      return;
+    }
+    afterOverwrite(targetPath);
+    const { path: newPath, thread_reset: threadReset } = await res.json() as { path: string; thread_reset?: boolean };
+    if (state.currentPath === path) {
+      state.currentPath = newPath;
+      noteTitle.textContent = newPath;
+    }
+    const where = folder || 'the vault root';
+    showToast(threadReset
+      ? `Moved ${node.name} to ${where}. It's a regular note now; its thread slot starts over as an empty thread.`
+      : `Moved ${node.name} to ${where}`, 'success');
+    await fetchTree();
+    if (state.filterText) void runSearch();
+  } catch (e) {
+    showToast('Network error moving note', 'error');
+  }
+}
+
+/* ─── New folder ─── */
+btnNewFolder.addEventListener('click', async () => {
+  const name = await promptDialog('Folder name (use / for nested folders, e.g. Projects/2026):', {
+    title: 'New folder',
+    confirmLabel: 'Create',
+  });
+  if (name === null || !name.trim()) return;
+  try {
+    const res = await fetch(`/api/folder?${vaultParam()}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: name.trim() }),
+    });
+    if (!res.ok) {
+      const msg = res.status === 409 ? 'That folder already exists.'
+        : res.status === 400 ? 'That folder name isn\'t allowed (names can\'t start with a dot).'
+        : 'Could not create the folder.';
+      showToast(msg, 'error');
+      return;
+    }
+    showToast(`Created folder ${name.trim()}`, 'success');
+    await fetchTree();
+  } catch (e) {
+    showToast('Network error creating folder', 'error');
+  }
+});
+
+/* ─── Rename folder ─── */
+async function renameFolder(node: TreeNode) {
+  if (!treeUnlocked()) return;
+  const path = node.path ?? '';
+  if (!path) return;
+  const name = await promptDialog('New name for this folder:', {
+    title: 'Rename folder',
+    defaultValue: node.name,
+    confirmLabel: 'Rename',
+  });
+  if (name === null || !name.trim() || name.trim() === node.name) return;
+  try {
+    const res = await fetch(`/api/folder/rename?${vaultParam()}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, name: name.trim() }),
+    });
+    if (!res.ok) {
+      const msg = res.status === 409 ? 'Something here already has that name.'
+        : res.status === 403 ? 'The thread folder can\'t be renamed; thread mode depends on it.'
+        : res.status === 400 ? 'That name isn\'t allowed (no slashes, and it can\'t start with a dot).'
+        : 'Rename failed.';
+      showToast(msg, 'error');
+      return;
+    }
+    const { path: newPath } = await res.json() as { path: string };
+    // The open note moves with its folder.
+    if (state.currentPath && state.currentPath.startsWith(path + '/')) {
+      state.currentPath = newPath + state.currentPath.slice(path.length);
+      noteTitle.textContent = state.currentPath;
+    }
+    showToast(`Renamed folder to ${name.trim()}`, 'success');
+    await fetchTree();
+    if (state.filterText) void runSearch();
+  } catch (e) {
+    showToast('Network error renaming folder', 'error');
+  }
+}
+
+/* ─── Delete empty folder ─── */
+// The trash icon only appears on folders with nothing in them; the server
+// double-checks, and refuses a folder that still holds hidden files.
+async function deleteFolder(node: TreeNode) {
+  if (!treeUnlocked()) return;
+  const path = node.path ?? '';
+  if (!path) return;
+  const ok = await confirmDialog(`Delete the empty folder "${path}"?`, { title: 'Delete folder', confirmLabel: 'Delete' });
+  if (!ok) return;
+  try {
+    const res = await fetch(`/api/folder?${vaultParam()}&path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      showToast(res.status === 409
+        ? 'That folder isn\'t empty (it may contain hidden files).'
+        : 'Could not delete the folder.', 'error');
+      await fetchTree();
+      return;
+    }
+    showToast(`Deleted folder ${path}`, 'success');
+    await fetchTree();
+  } catch (e) {
+    showToast('Network error deleting folder', 'error');
+  }
+}
+
+/* ─── Delete ─── */
+async function deleteNote(node: TreeNode) {
+  if (!treeUnlocked()) return;
+  const path = node.path!;
+  const isOpen = path === state.currentPath;
+  const ok = await confirmDialog(
+    `Delete "${node.name}"? This removes ${path} from the vault` +
+      (isOpen && state.isDirty ? ', including your unsaved changes' : '') + '.',
+    { title: 'Delete note', confirmLabel: 'Delete' },
+  );
+  if (!ok) return;
+  try {
+    const res = await fetch(`/api/note?${vaultParam()}&path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+    if (!res.ok) { showToast('Delete failed', 'error'); return; }
+    const { thread_reset: threadReset } = await res.json() as { thread_reset?: boolean };
+    if (state.currentPath === path) {
+      // The open note is gone: return to the empty state.
+      clearTimeout(autoSaveTimer);
+      state.currentPath = null;
+      state.isDirty = false;
+      noteTitle.textContent = '';
+      editorPane.value = '';
+      btnToggle.disabled = true;
+      btnSave.disabled = true;
+      setEditorMode();
+    }
+    showToast(threadReset
+      ? `Deleted ${node.name}. Its thread slot starts over as an empty thread.`
+      : `Deleted ${node.name}`, 'success');
+    await fetchTree();
+    if (state.filterText) void runSearch();
+  } catch (e) {
+    showToast('Network error deleting note', 'error');
+  }
+}
+
+/* ─── Rename ─── */
+async function renameNote(node: TreeNode) {
+  if (!treeUnlocked()) return;
+  const path = node.path!;
+  if (path === state.currentPath && state.isDirty) {
+    showToast('Save your changes before renaming this note.', 'notice');
+    return;
+  }
+  const name = await promptDialog('New name for this note:', {
+    title: 'Rename note',
+    defaultValue: node.name,
+    confirmLabel: 'Rename',
+  });
+  if (name === null || name.trim() === '' || name.trim() === node.name) return;
+  const dir = folderOf(path);
+  const newFile = name.trim().replace(/\.md$/, '') + '.md';
+  const targetPath = dir ? `${dir}/${newFile}` : newFile;
+  try {
+    const res = await postWithOverwrite(`/api/note/rename?${vaultParam()}`, { path, name: name.trim() }, targetPath);
+    if (!res) return;
+    if (!res.ok) {
+      const msg = res.status === 409 ? 'A note with that name already exists. (Turn on "Allow overwrites" in Settings to replace it.)'
+        : res.status === 400 ? 'That name isn\'t allowed (no slashes, and it can\'t start with a dot).'
+        : 'Rename failed.';
+      showToast(msg, 'error');
+      return;
+    }
+    if (targetPath !== path) afterOverwrite(targetPath);
+    const { path: newPath, thread_reset: threadReset } = await res.json() as { path: string; thread_reset?: boolean };
+    if (state.currentPath === path) {
+      state.currentPath = newPath;
+      noteTitle.textContent = newPath;
+    }
+    showToast(threadReset
+      ? `Renamed to ${name.trim()}. It's a regular note now; its thread slot starts over as an empty thread.`
+      : `Renamed to ${name.trim()}`, 'success');
+    await fetchTree();
+    if (state.filterText) void runSearch();
+  } catch (e) {
+    showToast('Network error renaming note', 'error');
+  }
+}
 
 /* ─── Git sync ─── */
 async function checkGitAvailable() {
@@ -393,7 +825,13 @@ gitSyncForm.addEventListener('submit', async (e) => {
 
 /* ─── Mode switching ─── */
 function setMode(mode: string) {
-  if (state.mode === 'threads' && mode !== 'threads') ThreadsView.flush();
+  if (state.mode === 'threads' && mode !== 'threads') {
+    // Leaving Threads view: once any pending thread edit is saved, reload the
+    // tree so thread files written or recreated there show up in Notes view.
+    void ThreadsView.flush().catch(() => undefined).finally(() => {
+      void fetchTree().then(() => { if (state.filterText) void runSearch(); });
+    });
+  }
   state.mode = mode;
   document.getElementById('app')!.dataset.mode = mode;
   document.getElementById('btn-mode-notes')!.classList.toggle('active', mode === 'notes');
@@ -431,8 +869,12 @@ if (!localStorage.getItem(MIGRATED)) {
 
 async function fetchConfig() {
   try {
-    const d = await (await fetch('/api/config')).json() as { autosave: boolean };
+    const d = await (await fetch('/api/config')).json() as {
+      autosave: boolean; threads_folder?: string; thread_count?: number; max_threads?: number;
+    };
     state.autoSave = d.autosave !== false;
+    if (typeof d.threads_folder === 'string') state.threadsFolder = d.threads_folder;
+    if (d.thread_count && d.max_threads) fillThreadCount(d.thread_count, d.max_threads);
     btnAutoSave.classList.toggle('active', state.autoSave);
   } catch (e) { /* keep default */ }
 }
@@ -473,7 +915,8 @@ function switchVault(idx: number) {
   themes.reresolve();
   reconnectEvents();
   checkGitAvailable();
-  fetchTree();
+  state.searchPaths = null;
+  fetchTree().then(() => { if (state.filterText) void runSearch(); });
 }
 
 vaultSelector.addEventListener('change', () => switchVault(parseInt(vaultSelector.value)));
@@ -488,14 +931,109 @@ const themes = new ThemeManager({
 // The trigger is the topbar button adopted in place (keeps its glyph, gains
 // a11y wiring). It is a direct child of #topbar, outside #topbar-actions,
 // so it stays visible when thread mode hides #topbar-actions (D-5).
+// Tree lock: a per-browser setting. Locked, the tree can be browsed, searched
+// and sorted, and notes still edited, but nothing can be moved, renamed or deleted.
+try { state.treeLocked = localStorage.getItem(LOCK_KEY) === '1'; } catch (e) { /* keep unlocked */ }
+try { state.allowOverwrite = localStorage.getItem(OVERWRITE_KEY) === '1'; } catch (e) { /* keep off */ }
+
+/** A shared-toggle row for the Settings drawer. */
+function settingToggle(text: string, hint: string, checked: boolean, onChange: (on: boolean) => void): HTMLLabelElement {
+  const label = document.createElement('label');
+  label.className = 'ui-toggle';
+  label.title = hint;
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.checked = checked;
+  const track = document.createElement('span');
+  track.className = 'ui-toggle-track';
+  label.append(input, track, text);
+  input.addEventListener('change', () => onChange(input.checked));
+  return label;
+}
+
+// Thread count: filled in once /api/config answers (the drawer is built first).
+const threadCountSelect = document.createElement('select');
+threadCountSelect.className = 'settings-select';
+threadCountSelect.setAttribute('aria-label', 'Number of threads');
+function fillThreadCount(count: number, max: number) {
+  threadCountSelect.innerHTML = '';
+  for (let n = 1; n <= max; n++) {
+    const opt = document.createElement('option');
+    opt.value = String(n);
+    opt.textContent = String(n);
+    threadCountSelect.append(opt);
+  }
+  threadCountSelect.value = String(count);
+}
+threadCountSelect.addEventListener('change', async () => {
+  const count = parseInt(threadCountSelect.value, 10);
+  try {
+    if (state.mode === 'threads') await ThreadsView.flush();
+    const res = await fetch('/api/threads/count', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ count }),
+    });
+    if (!res.ok) { showToast('Could not change the number of threads', 'error'); return; }
+    showToast(`Threads: ${count}`, 'success');
+    if (state.mode === 'threads') void ThreadsView.activate();
+  } catch (e) {
+    showToast('Network error changing the number of threads', 'error');
+  }
+});
+
 new HamburgerMenu({
   title: 'Settings',
-  items: [],
+  items: [
+    { section: 'File tree' },
+    {
+      id: 'tree-lock',
+      render: (host: HTMLElement) => {
+        host.append(settingToggle(
+          'Lock file tree',
+          'Prevent moving, renaming and deleting in the file tree. Notes can still be edited.',
+          state.treeLocked,
+          on => {
+            state.treeLocked = on;
+            try { localStorage.setItem(LOCK_KEY, on ? '1' : '0'); } catch (e) { /* ignore */ }
+            document.getElementById('sidebar')!.classList.toggle('tree-locked', on);
+            renderTree();
+            showToast(on ? 'File tree locked' : 'File tree unlocked', 'notice');
+          },
+        ));
+      },
+    },
+    {
+      id: 'allow-overwrite',
+      render: (host: HTMLElement) => {
+        host.append(settingToggle(
+          'Allow overwrites',
+          'When moving or renaming a note onto an existing note, ask and then replace it instead of refusing.',
+          state.allowOverwrite,
+          on => {
+            state.allowOverwrite = on;
+            try { localStorage.setItem(OVERWRITE_KEY, on ? '1' : '0'); } catch (e) { /* ignore */ }
+          },
+        ));
+      },
+    },
+    { section: 'Threads' },
+    {
+      id: 'thread-count',
+      render: (host: HTMLElement) => {
+        const row = document.createElement('label');
+        row.className = 'settings-row';
+        row.append('Number of threads', threadCountSelect);
+        host.append(row);
+      },
+    },
+  ],
   themePicker: true,
   themes,
   side: 'right',
   mountTrigger: btnHamburger,
 });
+document.getElementById('sidebar')!.classList.toggle('tree-locked', state.treeLocked);
 btnAutoSave.classList.add('active');
 ThreadsView.init();
 reconnectEvents();

@@ -127,7 +127,22 @@ input, textarea { font: inherit; color: inherit; }
   letter-spacing: 0.08em;
   color: var(--color-text-faint);
 }
+.sidebar-tools {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+#sort-selector {
+  flex-shrink: 0;
+  background: var(--color-surface-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--color-text);
+}
 #search-input {
+  min-width: 0;
   background: var(--color-surface-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -193,6 +208,82 @@ input, textarea { font: inherit; color: inherit; }
 }
 .tree-note svg { flex-shrink: 0; opacity: 0.5; }
 .tree-note.active svg { opacity: 1; }
+/* Drag grip (same six-dot grip as grocery/todo) and drop feedback. */
+.tree-grip {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--color-text-faint);
+  cursor: grab;
+  touch-action: none;
+  margin-left: calc(-1 * var(--space-1));
+}
+.tree-grip:active { cursor: grabbing; color: var(--color-text-muted); }
+.tree-grip svg { opacity: 1; pointer-events: none; }
+.tree-note.dragging { opacity: 0.4; }
+.tree-dir-label.drop-target {
+  background: var(--color-primary-tint);
+  color: var(--color-primary);
+  outline: 1px dashed var(--color-primary);
+  outline-offset: -1px;
+}
+#file-tree.drop-target {
+  outline: 2px dashed var(--color-primary);
+  outline-offset: -4px;
+}
+#btn-new-folder {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: var(--space-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-3);
+  color: var(--color-text-muted);
+}
+#btn-new-folder:hover { color: var(--color-text); border-color: var(--color-primary); }
+/* Settings drawer rows: label on the left, control on the right, one line. */
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  white-space: nowrap;
+}
+.settings-select {
+  flex: 0 0 auto;
+  width: auto;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-text);
+}
+.tree-note-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Rename pencil: shown on hover, keyboard focus, and on the open note. */
+.tree-note-edit {
+  flex-shrink: 0;
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  opacity: 0;
+}
+.tree-note:hover .tree-note-edit,
+.tree-note:focus-within .tree-note-edit,
+.tree-note.active .tree-note-edit { opacity: 1; }
+.tree-note-edit:hover { background: var(--color-surface-dynamic); color: var(--color-text); }
+.tree-note-delete:hover { color: var(--color-danger); }
+/* Folder rename/delete tools: pushed to the right, shown on hover or focus. */
+.tree-dir-tools { margin-left: auto; display: inline-flex; gap: 2px; }
+.tree-dir-label:hover .tree-note-edit,
+.tree-dir-label:focus-within .tree-note-edit { opacity: 1; }
+/* A locked tree can't be dragged into, so the grip cursor goes too. */
+#sidebar.tree-locked .tree-note { cursor: pointer; }
+.tree-note-edit:focus-visible { opacity: 1; outline: 2px solid var(--color-primary); outline-offset: 1px; }
 
 /* skeleton */
 .skeleton-text {
@@ -491,6 +582,25 @@ dialog input[type="text"]:focus { border-color: var(--color-primary); outline: n
   font-family: var(--font-mono);
   white-space: nowrap;
 }
+/* A user-given title reads as a title, not a slot code. */
+.card-label-titled {
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  letter-spacing: normal;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.card-title-edit {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-faint);
+}
+.card-title-edit:hover { background: var(--color-surface-3); color: var(--color-text); }
+.card-title-edit:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; }
 .card-header-spacer { flex: 1; }
 
 .card-btn {
