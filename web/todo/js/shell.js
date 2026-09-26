@@ -94,15 +94,17 @@ function initDrawer() {
           ];
           for (const col of cols) {
             const wrapper = document.createElement("label");
-            wrapper.className = "toggle-label";
+            wrapper.className = "ui-toggle toggle-label";
             const input = document.createElement("input");
             input.type = "checkbox";
             input.id = col.id;
             input.setAttribute("onchange", `setColVisible('${col.field}', this.checked)`);
+            const track = document.createElement("span");
+            track.className = "ui-toggle-track";
             const span = document.createElement("span");
             span.className = "toggle-text";
             span.textContent = col.label;
-            wrapper.append(input, span);
+            wrapper.append(input, track, span);
             host.append(wrapper);
           }
         }

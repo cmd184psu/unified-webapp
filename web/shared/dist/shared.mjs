@@ -277,7 +277,7 @@ var ThemeManager = class {
   /**
    * Renders the shared theme picker into `host`. Every node is built through
    * createElement and every label is a text node — no markup string is assigned
-   * anywhere in this file. No colour value reaches this file either: each
+   * anywhere in this file. No color value reaches this file either: each
    * swatch carries `data-theme`, and themes.css keys every palette on a bare
    * attribute selector.
    *
@@ -715,12 +715,38 @@ var HamburgerMenu = class {
     }
   }
 };
+
+// web/shared/ts/clipboard.ts
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.append(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
 export {
   HamburgerMenu,
   THEMES,
   ThemeManager,
   alertDialog,
   confirmDialog,
+  copyText,
   openModal,
   promptDialog,
   setTheme,

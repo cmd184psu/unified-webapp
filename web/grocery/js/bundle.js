@@ -920,11 +920,11 @@ function renderRecipesTab() {
     const header = document.createElement("div");
     header.className = "recipe-header" + (isOpen ? " open" : "");
     header.innerHTML = `
-      <label class="recipe-switch" title="${r.enabled ? "Disable" : "Enable"} ${rname}">
+      <label class="ui-toggle recipe-switch" title="${r.enabled ? "Disable" : "Enable"} ${rname}">
         <input type="checkbox" class="recipe-switch-input"
                data-recipe-id="${rid}"${r.enabled ? " checked" : ""}
                aria-label="Enable ${rname}">
-        <span class="recipe-switch-track"><span class="recipe-switch-thumb"></span></span>
+        <span class="ui-toggle-track"></span>
       </label>
       <span class="recipe-title" data-recipe-id="${rid}" title="Rename">${rname}</span>
       <span class="recipe-meta">

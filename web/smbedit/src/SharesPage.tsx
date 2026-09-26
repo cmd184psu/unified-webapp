@@ -26,9 +26,9 @@ function emptyShare(): Share {
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <label className="toggle">
+    <label className="ui-toggle">
       <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} />
-      <span className="toggle-track" />
+      <span className="ui-toggle-track" />
     </label>
   )
 }

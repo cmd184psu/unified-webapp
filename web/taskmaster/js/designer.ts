@@ -20,7 +20,7 @@
 // only dialog used for validation errors is ui/modal.ts's alertDialog.
 
 import { api, Capabilities, LaneStatus } from './api.js';
-import { openModal, alertDialog, showToast } from '@shared';
+import { openModal, alertDialog, showToast, copyText } from '@shared';
 import { createToggleHandle } from './ui/toggle.js';
 
 /** Shell-quotes a single argument the way a POSIX sh would need it quoted. */
@@ -77,6 +77,13 @@ function buildCurlExport(f: DesignerFormState): string {
   );
 }
 
+const SVG_COPY =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">' +
+  '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+const SVG_CHECK =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">' +
+  '<polyline points="20 6 9 17 4 12"/></svg>';
+
 /** Builds a collapsible export panel (collapsed by default) with a copy button. */
 function buildExportPanel(title: string, render: () => string): { el: HTMLElement; refresh: () => void } {
   const wrap = document.createElement('div');
@@ -102,20 +109,18 @@ function buildExportPanel(title: string, render: () => string): { el: HTMLElemen
   const copyBtn = document.createElement('button');
   copyBtn.type = 'button';
   copyBtn.className = 'btn btn-secondary btn-sm export-panel-copy';
-  copyBtn.textContent = 'Copy';
+  copyBtn.title = 'Copy';
+  copyBtn.setAttribute('aria-label', `Copy ${title}`);
+  copyBtn.innerHTML = SVG_COPY;
   copyBtn.addEventListener('click', () => {
-    void navigator.clipboard.writeText(pre.textContent ?? '').then(
-      () => {
-        copyBtn.textContent = 'Copied';
-        showToast('Copied!', 'success');
-        setTimeout(() => (copyBtn.textContent = 'Copy'), 1200);
-      },
-      () => {
-        copyBtn.textContent = 'Copy failed';
-        showToast('Copy failed', 'error');
-        setTimeout(() => (copyBtn.textContent = 'Copy'), 1200);
+    void copyText(pre.textContent ?? '').then((ok) => {
+      showToast(ok ? 'Copied!' : 'Copy failed', ok ? 'success' : 'error');
+      // A brief check mark confirms the copy on the button itself.
+      if (ok) {
+        copyBtn.innerHTML = SVG_CHECK;
+        setTimeout(() => (copyBtn.innerHTML = SVG_COPY), 1200);
       }
-    );
+    });
   });
 
   body.append(pre, copyBtn);

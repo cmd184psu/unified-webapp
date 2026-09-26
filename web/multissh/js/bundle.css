@@ -425,12 +425,9 @@ body {
   background: var(--color-text-muted);
 }
 .pause-toggle {
-  display: flex;
-  align-items: center;
   gap: 5px;
   font-size: 12px;
   color: var(--color-text-muted);
-  cursor: pointer;
 }
 .btn {
   border: 1px solid var(--color-border);

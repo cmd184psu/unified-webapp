@@ -10246,12 +10246,13 @@ function buildPanel(index, initialConfig, container, control) {
   const statusText = el5("span", "status-text");
   statusText.textContent = "disconnected";
   const spacer = el5("span", "term-spacer");
-  const pauseLabel = el5("label", "pause-toggle");
+  const pauseLabel = el5("label", "ui-toggle pause-toggle");
   const pause = el5("input");
   pause.type = "checkbox";
+  const pauseTrack = el5("span", "ui-toggle-track");
   const pauseText = el5("span");
   pauseText.textContent = "Pause";
-  pauseLabel.append(pause, pauseText);
+  pauseLabel.append(pause, pauseTrack, pauseText);
   const interruptBtn = el5("button", "btn btn-interrupt");
   interruptBtn.type = "button";
   interruptBtn.textContent = "Ctrl-C";

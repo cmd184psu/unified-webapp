@@ -1,4 +1,4 @@
-/* themes.css — the 8 × 18 colour matrix (Table T1's 18 keys per theme).
+/* themes.css — the 8 × 18 color matrix (Table T1's 18 keys per theme).
    Canonical dark is the unstamped default: `:root` carries it (ADR-007), so a
    page with no data-theme attribute renders dark. Donors of record: T5b
    (web/todo/css/todo.css) for dark and light, T5c (web/grocery/style.css) for

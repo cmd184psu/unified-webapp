@@ -280,12 +280,13 @@ function buildPanel(
 
   const spacer = el("span", "term-spacer");
 
-  const pauseLabel = el("label", "pause-toggle");
+  const pauseLabel = el("label", "ui-toggle pause-toggle");
   const pause = el("input");
   pause.type = "checkbox";
+  const pauseTrack = el("span", "ui-toggle-track");
   const pauseText = el("span");
   pauseText.textContent = "Pause";
-  pauseLabel.append(pause, pauseText);
+  pauseLabel.append(pause, pauseTrack, pauseText);
 
   const interruptBtn = el("button", "btn btn-interrupt");
   interruptBtn.type = "button";

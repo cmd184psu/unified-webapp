@@ -1289,7 +1289,7 @@ async function mountCertApp(root) {
       dirBtn.textContent = dirLabel();
       renderList();
     });
-    const groupToggle = el5("label", "cert-group-toggle");
+    const groupToggle = el5("label", "ui-toggle cert-group-toggle");
     const groupCheckbox = el5("input");
     groupCheckbox.type = "checkbox";
     groupCheckbox.checked = groupByDomain;
@@ -1297,7 +1297,7 @@ async function mountCertApp(root) {
       groupByDomain = groupCheckbox.checked;
       renderList();
     });
-    groupToggle.append(groupCheckbox, document.createTextNode(" Group by domain"));
+    groupToggle.append(groupCheckbox, el5("span", "ui-toggle-track"), document.createTextNode("Group by domain"));
     const newBtn = el5("button", "cert-btn cert-btn-primary");
     newBtn.type = "button";
     newBtn.textContent = "New certificate";

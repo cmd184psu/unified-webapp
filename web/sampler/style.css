@@ -148,3 +148,41 @@ body {
   white-space: pre-wrap;
   overflow-x: auto;
 }
+
+/* ── Toggles and picker variants ─────────────────────────────────────── */
+.sampler-variant-caption {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.sampler-picker-variants {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-4);
+  max-width: 640px;
+}
+
+.sampler-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+/* Mirrors admin's settings form: field labels stack caption over input,
+   toggles are excluded and keep the shared side-by-side layout. */
+.sampler-stacked-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  max-width: 260px;
+}
+
+.sampler-stacked-form label:not(.ui-toggle) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}

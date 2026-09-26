@@ -267,6 +267,54 @@ function buildRanSection(): { wrap: HTMLElement; list: HTMLElement } {
   return { wrap, list };
 }
 
+/**
+ * Stopping a lane lets its current run finish by default. When something is
+ * running, ask whether to cancel it too; dismissing the dialog keeps the
+ * default. The lane is paused first so nothing new starts, then the running
+ * executions are canceled.
+ */
+async function toggleLanePause(btn: HTMLButtonElement, lane: LaneStatus): Promise<void> {
+  if (lane.paused) {
+    btn.disabled = true;
+    await api.resumeLane(lane.name).catch(() => undefined);
+    btn.disabled = false;
+    void refreshAll();
+    return;
+  }
+
+  const laneTaskNames = new Set(tasksByLane(lane.name).map((t) => t.name));
+  const running = state.executions.filter(
+    (e) => e.status === 'running' && !!e.task_name && laneTaskNames.has(e.task_name),
+  );
+  let cancelToo = false;
+  if (running.length > 0) {
+    const names = running.map((e) => e.task_name).join(', ');
+    cancelToo = await confirmDialog(
+      running.length === 1
+        ? `"${names}" is still running in this lane. Let it finish, or cancel it now?`
+        : `${running.length} tasks are still running in this lane (${names}). Let them finish, or cancel them now?`,
+      {
+        title: `Stop lane "${lane.name}"`,
+        confirmLabel: running.length === 1 ? 'Cancel it too' : 'Cancel them too',
+        cancelLabel: running.length === 1 ? 'Let it finish' : 'Let them finish',
+      },
+    );
+  }
+
+  btn.disabled = true;
+  try {
+    await api.pauseLane(lane.name);
+    if (cancelToo) {
+      await Promise.all(running.map((e) => api.cancelExecution(e.id).catch(() => undefined)));
+    }
+  } catch {
+    // refreshAll() below shows the lane's actual state either way.
+  } finally {
+    btn.disabled = false;
+    void refreshAll();
+  }
+}
+
 function updateLaneEl(el: HTMLElement, lane: LaneStatus): void {
   el.setAttribute('data-lane', lane.name);
   el.classList.toggle('lane-paused', lane.paused);
@@ -279,16 +327,9 @@ function updateLaneEl(el: HTMLElement, lane: LaneStatus): void {
   const pauseBtn = el.querySelector<HTMLButtonElement>('.lane-pause-btn');
   if (pauseBtn) {
     pauseBtn.textContent = lane.paused ? '▶' : '⏹';
-    pauseBtn.title = lane.paused ? 'Resume lane' : 'Stop lane (finish current run, start nothing new)';
+    pauseBtn.title = lane.paused ? 'Resume lane' : 'Stop lane (start nothing new; asks about a running task)';
     pauseBtn.setAttribute('aria-label', pauseBtn.title);
-    pauseBtn.onclick = () => {
-      pauseBtn.disabled = true;
-      const req = lane.paused ? api.resumeLane(lane.name) : api.pauseLane(lane.name);
-      void req.finally(() => {
-        pauseBtn.disabled = false;
-        void refreshAll();
-      });
-    };
+    pauseBtn.onclick = () => void toggleLanePause(pauseBtn, lane);
   }
   const pauseLabel = el.querySelector<HTMLElement>('.lane-pause-label');
   if (pauseLabel) pauseLabel.style.display = lane.paused ? '' : 'none';

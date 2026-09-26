@@ -737,7 +737,7 @@ function labels(menu: HamburgerMenu): string[] {
   const picker = section.children[1];
   check("the picker offers one button per theme", picker.children.length === themes.list.length, `got ${picker.children.length} for ${themes.list.length} theme(s)`);
   check(
-    "no colour value reaches the menu — each swatch carries only its data-theme",
+    "no color value reaches the menu — each swatch carries only its data-theme",
     picker.children.every((b) => b.children[0].className === "ui-theme-swatch" && b.children[0].dataset.theme !== undefined),
     "a swatch was built some other way",
   );

@@ -61,12 +61,14 @@
         <label>Timeout (seconds)
           <input id="ldap-timeout" type="number" min="0" step="1">
         </label>
-        <label class="checkbox-label">
+        <label class="ui-toggle">
           <input id="ldap-start-tls" type="checkbox">
+          <span class="ui-toggle-track"></span>
           Start TLS
         </label>
-        <label class="checkbox-label">
+        <label class="ui-toggle">
           <input id="ldap-insecure-tls" type="checkbox">
+          <span class="ui-toggle-track"></span>
           Insecure TLS
         </label>
         <button type="submit" class="btn btn-primary">Save</button>
@@ -92,8 +94,9 @@
           <input id="session-cookie-domain" type="text" autocomplete="off"
             title="Sets the Domain attribute on the session cookie. Leave blank for the current hostname. Use a leading dot (e.g., .example.com) to share sessions across subdomains.">
         </label>
-        <label class="checkbox-label">
+        <label class="ui-toggle">
           <input id="session-cookie-secure" type="checkbox">
+          <span class="ui-toggle-track"></span>
           Cookie secure
         </label>
         <button type="submit" class="btn btn-primary">Save</button>

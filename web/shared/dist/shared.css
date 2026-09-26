@@ -476,6 +476,58 @@
   background: var(--color-primary-tint);
   color: var(--color-primary);
 }
+.ui-toggle {
+  display: inline-flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  user-select: none;
+  vertical-align: middle;
+}
+.ui-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+.ui-toggle-track {
+  position: relative;
+  flex-shrink: 0;
+  width: 34px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--color-text-faint);
+  transition: background 0.2s;
+}
+.ui-toggle-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-primary-fg);
+  transition: transform 0.2s;
+}
+.ui-toggle input:checked + .ui-toggle-track {
+  background: var(--color-primary);
+}
+.ui-toggle input:checked + .ui-toggle-track::after {
+  transform: translateX(16px);
+}
+.ui-toggle input:focus-visible + .ui-toggle-track {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.ui-toggle input:disabled + .ui-toggle-track {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 .ui-theme-select {
   width: 100%;
   padding: var(--space-2) var(--space-3);
@@ -680,3 +732,11 @@
 }
 
 /* web/shared/css/index.css */
+:root,
+input,
+textarea,
+pre,
+code,
+[contenteditable] {
+  font-variant-ligatures: none;
+}

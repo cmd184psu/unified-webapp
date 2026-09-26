@@ -328,123 +328,34 @@ function patchList(container, items, opts) {
 }
 
 // web/taskmaster/js/ui/toggle.ts
-var STYLE_ATTR = "data-tm-ui-toggle-styles";
-function ensureStyles() {
-  if (document.head.querySelector(`style[${STYLE_ATTR}]`)) return;
-  const style = document.createElement("style");
-  style.setAttribute(STYLE_ATTR, "");
-  style.textContent = `
-.tm-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5em;
-  cursor: pointer;
-  font-family: var(--font-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
-  color: var(--text-normal, #dcddde);
-  user-select: none;
-}
-.tm-toggle[data-disabled="true"] {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-.tm-toggle-track {
-  position: relative;
-  flex: 0 0 auto;
-  width: 2.25em;
-  height: 1.25em;
-  border-radius: 999px;
-  background: var(--bg-modifier-border, #3a3a3a);
-  transition: background-color 0.15s ease;
-  box-sizing: border-box;
-  border: 1px solid transparent;
-}
-.tm-toggle-track:focus-visible {
-  outline: none;
-  border-color: var(--interactive-accent, #7f6df2);
-  box-shadow: 0 0 0 2px var(--interactive-accent-hover, #9d8fff);
-}
-.tm-toggle[data-checked="true"] .tm-toggle-track {
-  background: var(--interactive-accent, #7f6df2);
-}
-.tm-toggle-thumb {
-  position: absolute;
-  top: 0.1em;
-  left: 0.1em;
-  width: 1.05em;
-  height: 1.05em;
-  border-radius: 50%;
-  background: #fff;
-  transition: transform 0.15s ease;
-}
-.tm-toggle[data-checked="true"] .tm-toggle-thumb {
-  transform: translateX(1em);
-}
-.tm-toggle-label {
-  font-size: 0.9em;
-  line-height: 1;
-}
-`;
-  document.head.appendChild(style);
-}
 function createToggleHandle(opts) {
-  ensureStyles();
-  let checked = !!opts.checked;
-  let disabled = !!opts.disabled;
-  const wrapper = document.createElement("span");
-  wrapper.className = "tm-toggle";
+  const wrapper = document.createElement("label");
+  wrapper.className = "ui-toggle";
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.setAttribute("role", "switch");
+  input.checked = !!opts.checked;
+  input.disabled = !!opts.disabled;
+  if (opts.label) input.setAttribute("aria-label", opts.label);
   const track = document.createElement("span");
-  track.className = "tm-toggle-track";
-  track.setAttribute("role", "switch");
-  track.tabIndex = disabled ? -1 : 0;
-  const thumb = document.createElement("span");
-  thumb.className = "tm-toggle-thumb";
-  track.appendChild(thumb);
-  wrapper.appendChild(track);
-  let labelEl = null;
+  track.className = "ui-toggle-track";
+  wrapper.append(input, track);
   if (opts.label) {
-    labelEl = document.createElement("span");
-    labelEl.className = "tm-toggle-label";
+    const labelEl = document.createElement("span");
+    labelEl.className = "ui-toggle-label";
     labelEl.textContent = opts.label;
     wrapper.appendChild(labelEl);
   }
-  function render3() {
-    wrapper.setAttribute("data-checked", String(checked));
-    wrapper.setAttribute("data-disabled", String(disabled));
-    track.setAttribute("aria-checked", String(checked));
-    track.setAttribute("aria-disabled", String(disabled));
-    track.tabIndex = disabled ? -1 : 0;
-    if (opts.label) {
-      track.setAttribute("aria-label", opts.label);
-    }
-  }
-  function toggle() {
-    if (disabled) return;
-    checked = !checked;
-    render3();
-    opts.onChange(checked);
-  }
-  track.addEventListener("click", toggle);
-  if (labelEl) {
-    labelEl.addEventListener("click", toggle);
-  }
-  track.addEventListener("keydown", (e) => {
-    if (e.key === " " || e.key === "Enter") {
-      e.preventDefault();
-      toggle();
-    }
-  });
-  render3();
+  input.addEventListener("change", () => opts.onChange(input.checked));
   return {
     el: wrapper,
     setChecked: (v) => {
-      checked = v;
-      render3();
+      input.checked = v;
     },
     setDisabled: (v) => {
-      disabled = v;
-      render3();
+      input.disabled = v;
     },
-    getChecked: () => checked
+    getChecked: () => input.checked
   };
 }
 
@@ -455,7 +366,7 @@ import { confirmDialog as confirmDialog2, ThemeManager, HamburgerMenu } from "/s
 import { openModal as openModal3, confirmDialog, alertDialog as alertDialog3 } from "/shared/dist/shared.mjs";
 
 // web/taskmaster/js/designer.ts
-import { openModal, alertDialog as alertDialog2, showToast } from "/shared/dist/shared.mjs";
+import { openModal, alertDialog as alertDialog2, showToast, copyText } from "/shared/dist/shared.mjs";
 function shQuote(s) {
   if (s === "") return "''";
   if (/^[A-Za-z0-9_\-./:=@%,]+$/.test(s)) return s;
@@ -493,6 +404,8 @@ function buildCurlExport(f) {
   -H "Authorization: Bearer $API_KEY" \\
   -d '${body.replace(/'/g, `'\\''`)}'`;
 }
+var SVG_COPY = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+var SVG_CHECK = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
 function buildExportPanel(title, render3) {
   const wrap = document.createElement("div");
   wrap.className = "export-panel";
@@ -513,20 +426,17 @@ function buildExportPanel(title, render3) {
   const copyBtn = document.createElement("button");
   copyBtn.type = "button";
   copyBtn.className = "btn btn-secondary btn-sm export-panel-copy";
-  copyBtn.textContent = "Copy";
+  copyBtn.title = "Copy";
+  copyBtn.setAttribute("aria-label", `Copy ${title}`);
+  copyBtn.innerHTML = SVG_COPY;
   copyBtn.addEventListener("click", () => {
-    void navigator.clipboard.writeText(pre.textContent ?? "").then(
-      () => {
-        copyBtn.textContent = "Copied";
-        showToast("Copied!", "success");
-        setTimeout(() => copyBtn.textContent = "Copy", 1200);
-      },
-      () => {
-        copyBtn.textContent = "Copy failed";
-        showToast("Copy failed", "error");
-        setTimeout(() => copyBtn.textContent = "Copy", 1200);
+    void copyText(pre.textContent ?? "").then((ok) => {
+      showToast(ok ? "Copied!" : "Copy failed", ok ? "success" : "error");
+      if (ok) {
+        copyBtn.innerHTML = SVG_CHECK;
+        setTimeout(() => copyBtn.innerHTML = SVG_COPY, 1200);
       }
-    );
+    });
   });
   body.append(pre, copyBtn);
   wrap.append(header, body);
@@ -692,11 +602,11 @@ async function openTaskDesigner(lanes, preselectLane, caps3) {
 
 // web/taskmaster/js/outputmodal.ts
 import { openModal as openModal2 } from "/shared/dist/shared.mjs";
-var STYLE_ATTR2 = "data-tm-output-modal-styles";
-function ensureStyles2() {
-  if (document.head.querySelector("style[" + STYLE_ATTR2 + "]")) return;
+var STYLE_ATTR = "data-tm-output-modal-styles";
+function ensureStyles() {
+  if (document.head.querySelector("style[" + STYLE_ATTR + "]")) return;
   const style = document.createElement("style");
-  style.setAttribute(STYLE_ATTR2, "");
+  style.setAttribute(STYLE_ATTR, "");
   style.textContent = ".output-modal-panel { max-width: min(90vw, 900px); width: 90vw; }\n.output-modal-box { height: 70vh; max-height: 70vh; overflow: auto; margin: 0; white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono, monospace); font-size: 13px; }\n";
   document.head.appendChild(style);
 }
@@ -721,7 +631,7 @@ function markDoneIfEmpty(box) {
   if (box.textContent === "") box.textContent = "(no output captured for this run)";
 }
 function openOutputModal(execId, title) {
-  ensureStyles2();
+  ensureStyles();
   const box = document.createElement("pre");
   box.className = "output-modal-box";
   box.textContent = "";
@@ -993,6 +903,42 @@ function buildRanSection() {
   wrap.append(summary, list);
   return { wrap, list };
 }
+async function toggleLanePause(btn, lane) {
+  if (lane.paused) {
+    btn.disabled = true;
+    await api.resumeLane(lane.name).catch(() => void 0);
+    btn.disabled = false;
+    void refreshAll();
+    return;
+  }
+  const laneTaskNames = new Set(tasksByLane(lane.name).map((t) => t.name));
+  const running = state.executions.filter(
+    (e) => e.status === "running" && !!e.task_name && laneTaskNames.has(e.task_name)
+  );
+  let cancelToo = false;
+  if (running.length > 0) {
+    const names = running.map((e) => e.task_name).join(", ");
+    cancelToo = await confirmDialog(
+      running.length === 1 ? `"${names}" is still running in this lane. Let it finish, or cancel it now?` : `${running.length} tasks are still running in this lane (${names}). Let them finish, or cancel them now?`,
+      {
+        title: `Stop lane "${lane.name}"`,
+        confirmLabel: running.length === 1 ? "Cancel it too" : "Cancel them too",
+        cancelLabel: running.length === 1 ? "Let it finish" : "Let them finish"
+      }
+    );
+  }
+  btn.disabled = true;
+  try {
+    await api.pauseLane(lane.name);
+    if (cancelToo) {
+      await Promise.all(running.map((e) => api.cancelExecution(e.id).catch(() => void 0)));
+    }
+  } catch {
+  } finally {
+    btn.disabled = false;
+    void refreshAll();
+  }
+}
 function updateLaneEl(el, lane) {
   el.setAttribute("data-lane", lane.name);
   el.classList.toggle("lane-paused", lane.paused);
@@ -1003,16 +949,9 @@ function updateLaneEl(el, lane) {
   const pauseBtn = el.querySelector(".lane-pause-btn");
   if (pauseBtn) {
     pauseBtn.textContent = lane.paused ? "\u25B6" : "\u23F9";
-    pauseBtn.title = lane.paused ? "Resume lane" : "Stop lane (finish current run, start nothing new)";
+    pauseBtn.title = lane.paused ? "Resume lane" : "Stop lane (start nothing new; asks about a running task)";
     pauseBtn.setAttribute("aria-label", pauseBtn.title);
-    pauseBtn.onclick = () => {
-      pauseBtn.disabled = true;
-      const req = lane.paused ? api.resumeLane(lane.name) : api.pauseLane(lane.name);
-      void req.finally(() => {
-        pauseBtn.disabled = false;
-        void refreshAll();
-      });
-    };
+    pauseBtn.onclick = () => void toggleLanePause(pauseBtn, lane);
   }
   const pauseLabel = el.querySelector(".lane-pause-label");
   if (pauseLabel) pauseLabel.style.display = lane.paused ? "" : "none";
@@ -1759,7 +1698,7 @@ function mountTaskView(container, live2, caps3, taskName) {
 }
 
 // web/taskmaster/js/buildinfo.ts
-var FRONTEND_BUILD_TIME = "5a00fac59866";
+var FRONTEND_BUILD_TIME = "9af1f92a1088";
 
 // web/taskmaster/js/main.ts
 var caps2 = { allow_sudo: false };
@@ -1827,7 +1766,21 @@ function buildNav() {
   nav.appendChild(spacer);
   nav.appendChild(buildLiveControl());
   nav.appendChild(buildBrakeControl());
+  if (authEnabled) nav.appendChild(buildSignOut());
   nav.appendChild(hamburger?.trigger ?? document.createElement("span"));
+}
+var SVG_SIGN_OUT = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>';
+function buildSignOut() {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "ui-menu-trigger nav-signout";
+  btn.title = "Sign out";
+  btn.setAttribute("aria-label", "Sign out");
+  btn.innerHTML = SVG_SIGN_OUT;
+  btn.addEventListener("click", () => {
+    void api.logout().then(() => window.location.reload());
+  });
+  return btn;
 }
 function liveToggleTitle(enabled) {
   return enabled ? "Live updates on \u2014 click to pause" : "Live updates paused \u2014 click to resume";
@@ -1877,7 +1830,8 @@ function buildHamburger() {
         const row = document.createElement("div");
         row.className = "menu-row";
         const label = document.createElement("span");
-        label.textContent = "Fallback poll interval";
+        label.textContent = "Poll interval";
+        row.title = "Fallback poll interval, used when live updates are unavailable";
         const select = document.createElement("select");
         LIVE_INTERVALS_SEC.forEach((s) => {
           const opt = document.createElement("option");
@@ -1924,15 +1878,6 @@ function buildHamburger() {
         });
         row.append(label, sudoToggle.el);
         host.append(row);
-      },
-      when: () => authEnabled
-    },
-    { separator: true },
-    {
-      id: "logout",
-      label: "Log out",
-      onSelect: () => {
-        void api.logout().then(() => window.location.reload());
       },
       when: () => authEnabled
     }

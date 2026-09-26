@@ -12,4 +12,5 @@ export type { ThemeManagerOptions } from "./theme.js";
 export { showToast } from "./toast.js";
 export type { ToastTone, ToastHandle } from "./toast.js";
 export { HamburgerMenu } from "./menu.js";
+export { copyText } from "./clipboard.js";
 export type { HamburgerMenuOptions, MenuItem } from "./menu.js";

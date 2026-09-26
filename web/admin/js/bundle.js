@@ -142,7 +142,7 @@ function renderMatrix() {
   modules.forEach((mod) => {
     const entry = matrix[mod];
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${esc(mod)}</td><td><input type="checkbox" class="matrix-protected" data-module="${esc(mod)}"${entry.protected ? " checked" : ""}></td><td><select class="matrix-pinfile" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>${pinFileOptions(entry.pinFile)}</select> <button type="button" class="btn btn-outline btn-sm matrix-setpin-btn" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>Set PIN&hellip;</button><div class="matrix-setpin-form inline-form hidden" data-module="${esc(mod)}"><input type="password" class="matrix-pin-input" placeholder="new PIN" autocomplete="off"><button type="button" class="btn btn-primary btn-sm matrix-pin-save" data-module="${esc(mod)}">Save</button><button type="button" class="btn btn-ghost btn-sm matrix-pin-cancel" data-module="${esc(mod)}">Cancel</button></div><span class="matrix-pin-status status" data-module="${esc(mod)}"></span><p class="matrix-pin-error error" data-module="${esc(mod)}"></p></td>`;
+    tr.innerHTML = `<td>${esc(mod)}</td><td><label class="ui-toggle" title="Protected"><input type="checkbox" class="matrix-protected" data-module="${esc(mod)}" aria-label="Protect ${esc(mod)}"${entry.protected ? " checked" : ""}><span class="ui-toggle-track"></span></label></td><td><select class="matrix-pinfile" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>${pinFileOptions(entry.pinFile)}</select> <button type="button" class="btn btn-outline btn-sm matrix-setpin-btn" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>Set PIN&hellip;</button><div class="matrix-setpin-form inline-form hidden" data-module="${esc(mod)}"><input type="password" class="matrix-pin-input" placeholder="new PIN" autocomplete="off"><button type="button" class="btn btn-primary btn-sm matrix-pin-save" data-module="${esc(mod)}">Save</button><button type="button" class="btn btn-ghost btn-sm matrix-pin-cancel" data-module="${esc(mod)}">Cancel</button></div><span class="matrix-pin-status status" data-module="${esc(mod)}"></span><p class="matrix-pin-error error" data-module="${esc(mod)}"></p></td>`;
     tbody.appendChild(tr);
   });
   const adminTr = document.createElement("tr");
@@ -617,11 +617,11 @@ document.getElementById("passkey-form").addEventListener("submit", async (e) => 
       publicKey: creationOptions(ceremony.options)
     });
   } catch {
-    errorEl.textContent = "Passkey registration cancelled.";
+    errorEl.textContent = "Passkey registration canceled.";
     return;
   }
   if (!credential) {
-    errorEl.textContent = "Passkey registration cancelled.";
+    errorEl.textContent = "Passkey registration canceled.";
     return;
   }
   const finishRes = await api("POST", "/api/auth/passkey/register/finish", {
@@ -732,26 +732,35 @@ document.getElementById("operator-pin-form").addEventListener("submit", async (e
   }, 3e3);
 });
 function buildHamburger() {
-  const items = [
-    {
-      id: "logout",
-      label: "Sign out",
-      onSelect: async () => {
-        await api("POST", "/api/auth/logout");
-        location.reload();
-      }
-    }
-  ];
+  const items = [];
   return new HamburgerMenu({
     title: "Admin",
     items,
     themePicker: true,
-    themes
+    themes,
+    side: "right"
   });
 }
 var hamburger = buildHamburger();
+var SVG_SIGN_OUT = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>';
+function buildSignOut() {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "ui-menu-trigger topbar-signout";
+  btn.title = "Sign out";
+  btn.setAttribute("aria-label", "Sign out");
+  btn.innerHTML = SVG_SIGN_OUT;
+  btn.addEventListener("click", async () => {
+    await api("POST", "/api/auth/logout");
+    location.reload();
+  });
+  return btn;
+}
 var topbar = document.querySelector(".topbar");
 var logoutBtn = document.getElementById("logout-btn");
 if (logoutBtn) logoutBtn.remove();
-topbar.appendChild(hamburger.trigger);
+var topbarActions = document.createElement("div");
+topbarActions.className = "topbar-actions";
+topbarActions.append(buildSignOut(), hamburger.trigger);
+topbar.appendChild(topbarActions);
 loadAll();

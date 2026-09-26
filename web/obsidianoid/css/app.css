@@ -627,42 +627,6 @@ dialog input[type="text"]:focus { border-color: var(--color-primary); outline: n
   width: 2.5ch;
   text-align: right;
 }
-.toggle {
-  position: relative;
-  display: inline-block;
-  width: 36px;
-  height: 20px;
-  flex-shrink: 0;
-  cursor: pointer;
-}
-.toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
-.toggle-track {
-  position: absolute;
-  inset: 0;
-  background: var(--color-surface-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  transition: background var(--transition), border-color var(--transition);
-}
-.toggle input:checked + .toggle-track {
-  background: var(--color-primary-tint);
-  border-color: var(--color-primary-active);
-}
-.toggle-thumb {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 14px;
-  height: 14px;
-  background: var(--color-text-faint);
-  border-radius: var(--radius-full);
-  transition: transform var(--transition), background var(--transition);
-  pointer-events: none;
-}
-.toggle input:checked ~ .toggle-thumb {
-  transform: translateX(16px);
-  background: var(--color-primary);
-}
 
 /* ─── Threads loading / error states ─── */
 .threads-loading, .threads-error {
@@ -723,7 +687,7 @@ dialog input[type="text"]:focus { border-color: var(--color-primary); outline: n
    itself it would clip away the control's own fill and its label text along
    with everything else. The wrapper's ::after is the smallest box whose entire
    painted area IS the glyph, so masking it costs nothing. The mask image
-   carries no colour of its own, which is the point: the colour now comes from
+   carries no color of its own, which is the point: the color now comes from
    the `color` declaration below, so the glyph follows the theme's muted-text
    token instead of the one frozen literal it used to hard-code. */
 .vault-select {

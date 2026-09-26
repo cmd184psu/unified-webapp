@@ -230,7 +230,9 @@ function renderMatrix(): void {
     const tr = document.createElement("tr");
     tr.innerHTML =
       `<td>${esc(mod)}</td>` +
-      `<td><input type="checkbox" class="matrix-protected" data-module="${esc(mod)}"${entry.protected ? " checked" : ""}></td>` +
+      `<td><label class="ui-toggle" title="Protected">` +
+      `<input type="checkbox" class="matrix-protected" data-module="${esc(mod)}" aria-label="Protect ${esc(mod)}"${entry.protected ? " checked" : ""}>` +
+      `<span class="ui-toggle-track"></span></label></td>` +
       `<td>` +
       `<select class="matrix-pinfile" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>${pinFileOptions(entry.pinFile)}</select> ` +
       `<button type="button" class="btn btn-outline btn-sm matrix-setpin-btn" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>Set PIN&hellip;</button>` +
@@ -807,11 +809,11 @@ document.getElementById("passkey-form")!.addEventListener("submit", async (e) =>
       publicKey: creationOptions(ceremony.options) as unknown as PublicKeyCredentialCreationOptions,
     });
   } catch {
-    errorEl.textContent = "Passkey registration cancelled.";
+    errorEl.textContent = "Passkey registration canceled.";
     return;
   }
   if (!credential) {
-    errorEl.textContent = "Passkey registration cancelled.";
+    errorEl.textContent = "Passkey registration canceled.";
     return;
   }
 
@@ -935,30 +937,43 @@ document.getElementById("operator-pin-form")!.addEventListener("submit", async (
 // ── Hamburger ───────────────────────────────────────────────────
 
 function buildHamburger(): HamburgerMenu {
-  const items: MenuItem[] = [
-    {
-      id: "logout",
-      label: "Sign out",
-      onSelect: async () => {
-        await api("POST", "/api/auth/logout");
-        location.reload();
-      },
-    },
-  ];
+  const items: MenuItem[] = [];
   return new HamburgerMenu({
     title: "Admin",
     items,
     themePicker: true,
     themes,
+    side: "right",
   });
 }
 
 const hamburger = buildHamburger();
 
-// Replace topbar content with just the hamburger trigger
+// Sign-out is a door-and-arrow icon beside the hamburger, not a menu entry.
+const SVG_SIGN_OUT =
+  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>';
+
+function buildSignOut(): HTMLButtonElement {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "ui-menu-trigger topbar-signout";
+  btn.title = "Sign out";
+  btn.setAttribute("aria-label", "Sign out");
+  btn.innerHTML = SVG_SIGN_OUT;
+  btn.addEventListener("click", async () => {
+    await api("POST", "/api/auth/logout");
+    location.reload();
+  });
+  return btn;
+}
+
 const topbar = document.querySelector<HTMLElement>(".topbar")!;
 const logoutBtn = document.getElementById("logout-btn");
 if (logoutBtn) logoutBtn.remove();
-topbar.appendChild(hamburger.trigger);
+const topbarActions = document.createElement("div");
+topbarActions.className = "topbar-actions";
+topbarActions.append(buildSignOut(), hamburger.trigger);
+topbar.appendChild(topbarActions);
 
 loadAll();

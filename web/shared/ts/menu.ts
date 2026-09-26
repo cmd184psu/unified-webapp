@@ -23,7 +23,7 @@
 //      node, which is also why the trigger's glyph is an assembled
 //      inline SVG rather than a pasted icon-font fragment.
 //
-// No colour, size or motion value reaches this file either: the eight .ui-menu-*
+// No color, size or motion value reaches this file either: the eight .ui-menu-*
 // classes in web/shared/css/components.css carry all of it, including the
 // reduced-motion suppression — so a module that wants a different
 // drawer width restyles one class rather than passing an option.

@@ -1,8 +1,26 @@
 /* index.css — the shared sheet's entry point. Import order is cascade order:
-   structural tokens, then the per-theme colour matrix, then the rules that
+   structural tokens, then the per-theme color matrix, then the rules that
    consume them. C1b prepends the fonts sheet ahead of these three. */
 
 @import "fonts.css";
 @import "tokens.css";
 @import "themes.css";
 @import "components.css";
+
+/* Coding-font ligatures (JetBrains Mono merges "&&", "##", "=>" and friends
+   into single glyphs) render as blank gaps in form fields, so characters seem
+   to vanish while typing. Text is shown exactly as typed, character by
+   character, in every module.
+
+   Set on :root as well as on the fields themselves: modules commonly reset
+   form controls with `font: inherit`, and the font shorthand also resets
+   font-variant-ligatures. With the root set, that reset inherits "none"
+   instead of re-enabling ligatures, so no module CSS can undo this. */
+:root,
+input,
+textarea,
+pre,
+code,
+[contenteditable] {
+  font-variant-ligatures: none;
+}

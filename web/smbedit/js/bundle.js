@@ -7414,9 +7414,9 @@ function emptyShare() {
   };
 }
 function Toggle({ checked, onChange }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("label", { className: "toggle", children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("label", { className: "ui-toggle", children: [
     /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("input", { type: "checkbox", checked, onChange: (e) => onChange(e.target.checked) }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "toggle-track" })
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "ui-toggle-track" })
   ] });
 }
 function ShareEditor({

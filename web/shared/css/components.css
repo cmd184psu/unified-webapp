@@ -1,7 +1,7 @@
 /* components.css — the .ui-modal-* and .ui-toast-* rules.
    The retokenized body of web/taskmaster/js/ui/modal.ts's ensureStyles()
    (:20-106), whose eight tm-modal-* classes are renamed ui-modal-* in Step 5.
-   Authoring constraints: no colour literal (every colour, shadow, and scrim
+   Authoring constraints: no color literal (every color, shadow, and scrim
    arrives through a var(), whose literal lives in tokens.css or themes.css);
    every selector is .ui-* or a state/descendant of one; no forced-priority
    declarations, so a host page's own rules keep winning (A1.8, R17).
@@ -105,8 +105,8 @@
    8px gap, 8px radius and 10px/12px padding arrive as --space-* and
    --radius-md, its box-shadow as --shadow-md, and its 13px text as --text-sm.
    The three tone borders are the donor's green/red/amber, read off the
-   `data-tone` attribute showToast() sets so no colour reaches the TypeScript.
-   Same authoring constraints as above: no colour literal, every selector
+   `data-tone` attribute showToast() sets so no color reaches the TypeScript.
+   Same authoring constraints as above: no color literal, every selector
    .ui-*, no forced-priority declarations. */
 
 .ui-toast-stack {
@@ -190,10 +190,10 @@
    Decision 4): every themes.css block is keyed on a BARE attribute selector,
    so the data-theme ThemeManager.renderPicker() stamps on each swatch sets
    that swatch's OWN --color-primary and eight swatches render eight distinct
-   fills in one open picker (B4.2). One selector, not eight, and no colour
-   literal — clause 7's selector rule (:310-316) and colour-literal rule
+   fills in one open picker (B4.2). One selector, not eight, and no color
+   literal — clause 7's selector rule (:310-316) and color-literal rule
    (:304-308) both hold, and no inline style.background is written at all.
-   Declared consequence: a theme block sets every colour token on the stamped
+   Declared consequence: a theme block sets every color token on the stamped
    element, so the swatch's own border follows the PREVIEWED theme's
    --color-border — a deliberate micro-preview, and what makes the border
    legible on light and dark swatches alike (ledger row 15 / D-15). */
@@ -236,6 +236,80 @@
   color: var(--color-primary);
 }
 
+/* ── Toggle switch ───────────────────────────────────────────────────────
+   The one on/off control for every module (checkboxes are kept only for
+   picking items from a list). CSS only, so plain-TS, React and jQuery modules
+   share it unchanged:
+
+     <label class="ui-toggle">
+       <input type="checkbox">
+       <span class="ui-toggle-track"></span>
+       <span class="ui-toggle-label">Optional text</span>
+     </label>
+
+   The input stays a real checkbox, so `change`/`click` handlers and
+   `.checked` behave exactly as before. */
+.ui-toggle {
+  display: inline-flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  user-select: none;
+  vertical-align: middle;
+}
+
+.ui-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+
+.ui-toggle-track {
+  position: relative;
+  flex-shrink: 0;
+  width: 34px;
+  height: 18px;
+  border-radius: 9px;
+  /* Off: a mid-tone, so the white knob stands out on light themes too. */
+  background: var(--color-text-faint);
+  transition: background 0.2s;
+}
+
+.ui-toggle-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-primary-fg);
+  transition: transform 0.2s;
+}
+
+.ui-toggle input:checked + .ui-toggle-track {
+  background: var(--color-primary);
+}
+
+.ui-toggle input:checked + .ui-toggle-track::after {
+  transform: translateX(16px);
+}
+
+.ui-toggle input:focus-visible + .ui-toggle-track {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.ui-toggle input:disabled + .ui-toggle-track {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* The compact picker, used when the theme shares the drawer with other
    settings (ThemeManager.renderPicker's "select" mode). */
 .ui-theme-select {
@@ -272,10 +346,10 @@
    already carried by themes.css — so the drawer's backdrop and the modal
    overlay above darken the page by exactly the same amount.
 
-   menu.ts holds no colour, size or motion value at all: everything visual
+   menu.ts holds no color, size or motion value at all: everything visual
    lives here, which is why a module that needs a wider drawer restyles one
    class instead of gaining an option. Same authoring constraints as the
-   groups above: every colour through a var(), every selector .ui-*, no
+   groups above: every color through a var(), every selector .ui-*, no
    forced-priority declarations.
 
    Two properties the TypeScript depends on, stated where they are

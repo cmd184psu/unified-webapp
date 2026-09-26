@@ -311,7 +311,6 @@ a { color: var(--accent); }
   color: var(--text-muted);
   user-select: none;
 }
-.toggle-label input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; }
 .toggle-label:hover { color: var(--text); }
 
 
@@ -369,7 +368,6 @@ a { color: var(--accent); }
   transition: background 120ms ease, color 120ms ease;
 }
 .toolbar-toggle:hover { background: var(--surface-raised); color: var(--text); }
-.toolbar-toggle input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; margin: 0; }
 
 /* ── Item table ───────────────────────────────────────────────────────────── */
 

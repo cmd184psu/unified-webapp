@@ -120,7 +120,7 @@ export class ThemeManager {
   /**
    * Renders the shared theme picker into `host`. Every node is built through
    * createElement and every label is a text node — no markup string is assigned
-   * anywhere in this file. No colour value reaches this file either: each
+   * anywhere in this file. No color value reaches this file either: each
    * swatch carries `data-theme`, and themes.css keys every palette on a bare
    * attribute selector.
    *

@@ -60,10 +60,9 @@ window.ThreadsView = /* @__PURE__ */ (function() {
           ${editButtons}
           <div class="toggle-wrap">
             <span class="toggle-label">${isDisabled ? "OFF" : "ON"}</span>
-            <label class="toggle">
+            <label class="ui-toggle">
               <input type="checkbox"${!isDisabled ? " checked" : ""} data-action="toggle" data-index="${index}" />
-              <span class="toggle-track"></span>
-              <span class="toggle-thumb"></span>
+              <span class="ui-toggle-track"></span>
             </label>
           </div>
         </div>

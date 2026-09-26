@@ -120,7 +120,13 @@ body {
   font-size: 14px;
   color: var(--color-text);
 }
+/* The label keeps its one line; the control beside it takes what's left. */
+.menu-row > span:first-child {
+  white-space: nowrap;
+}
 .menu-row select {
+  flex: 0 0 auto;
+  width: auto;
   background: var(--color-surface-2);
   color: var(--color-text);
   border: 1px solid var(--color-border);

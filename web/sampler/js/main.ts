@@ -113,8 +113,107 @@ function buildThemeSelect(): void {
 // requires for this component.
 function buildThemePicker(): void {
   const host = document.getElementById("theme-picker");
-  if (!host) return;
-  themes.renderPicker(host);
+  if (host) themes.renderPicker(host);
+  // The compact mode HamburgerMenu picks when its drawer holds other items.
+  const selectHost = document.getElementById("theme-picker-select");
+  if (selectHost) themes.renderPicker(selectHost, "select");
+}
+
+// The Toggles section: the shared .ui-toggle in every state a module uses it
+// in, each beside the markup that produces it. The last row reproduces admin's
+// settings form (labels stacked over inputs) to show a toggle's label staying
+// on the toggle's line even inside a narrow, column-stacked form.
+function buildToggle(text: string, opts: { checked?: boolean; disabled?: boolean } = {}): HTMLLabelElement {
+  const label = document.createElement("label");
+  label.className = "ui-toggle";
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.checked = opts.checked ?? false;
+  input.disabled = opts.disabled ?? false;
+  if (!text) input.setAttribute("aria-label", "Unlabelled toggle");
+  const track = document.createElement("span");
+  track.className = "ui-toggle-track";
+  label.append(input, track);
+  if (text) label.append(text);
+  return label;
+}
+
+function buildToggleDemos(): void {
+  const container = document.getElementById("toggle-demos");
+  if (!container) return;
+
+  const markup = (text: string, attrs = ""): string =>
+    `<label class="ui-toggle">\n  <input type="checkbox"${attrs}>\n  <span class="ui-toggle-track"></span>${text ? `\n  ${text}` : ""}\n</label>`;
+
+  const demos: Array<{ title: string; build: () => HTMLElement; source: string }> = [
+    {
+      title: "off / on (click to flip)",
+      build: () => {
+        const row = document.createElement("div");
+        row.className = "sampler-toggle-row";
+        const off = buildToggle("Off");
+        const on = buildToggle("On", { checked: true });
+        for (const t of [off, on]) {
+          const input = t.querySelector("input")!;
+          input.addEventListener("change", () => {
+            t.lastChild!.textContent = input.checked ? "On" : "Off";
+          });
+        }
+        row.append(off, on);
+        return row;
+      },
+      source: markup("On", " checked"),
+    },
+    {
+      title: "disabled",
+      build: () => {
+        const row = document.createElement("div");
+        row.className = "sampler-toggle-row";
+        row.append(buildToggle("Disabled, off", { disabled: true }), buildToggle("Disabled, on", { checked: true, disabled: true }));
+        return row;
+      },
+      source: markup("Disabled", " disabled"),
+    },
+    {
+      title: "no visible label",
+      build: () => buildToggle(""),
+      source: markup("", ' aria-label="What it switches"'),
+    },
+    {
+      title: "in a stacked settings form (label stays beside the toggle)",
+      build: () => {
+        const form = document.createElement("div");
+        form.className = "sampler-stacked-form";
+        const field = document.createElement("label");
+        field.append("Cookie domain");
+        const text = document.createElement("input");
+        text.type = "text";
+        text.placeholder = ".example.com";
+        field.append(text);
+        form.append(
+          field,
+          buildToggle("Start TLS"),
+          buildToggle("Cookie secure", { checked: true }),
+          buildToggle("A longer label wraps onto a second line but stays beside its toggle"),
+        );
+        return form;
+      },
+      source: ".form label:not(.ui-toggle) { flex-direction: column; }",
+    },
+  ];
+
+  for (const demo of demos) {
+    const row = document.createElement("div");
+    row.className = "sampler-modal-demo";
+    const caption = document.createElement("p");
+    caption.className = "sampler-variant-caption";
+    caption.textContent = demo.title;
+    const pre = document.createElement("pre");
+    pre.className = "sampler-modal-source";
+    pre.textContent = demo.source;
+    row.append(caption, demo.build(), pre);
+    container.appendChild(row);
+  }
 }
 
 function buildSwatches(): void {
@@ -442,4 +541,5 @@ buildSwatches();
 buildSpecimens();
 buildModalDemos();
 buildToastDemos();
+buildToggleDemos();
 buildMenu();

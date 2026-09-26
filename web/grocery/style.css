@@ -430,31 +430,10 @@ h1 { font-size: var(--text-lg); font-weight: 600; color: var(--color-primary); w
 
 /* ── Sync toggle ────────────────────────────────────────────── */
 .sync-toggle {
-  display: flex; align-items: center; gap: var(--space-1);
-  cursor: pointer; user-select: none;
+  gap: var(--space-1);
   margin-left: var(--space-1);
 }
 .sync-label { font-size: var(--text-xs); color: var(--color-text-muted); font-weight: 500; }
-.sync-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
-.toggle-track {
-  position: relative; width: 38px; height: 22px;
-  background: var(--color-surface-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  transition: background var(--t), border-color var(--t);
-}
-.sync-toggle input:checked + .toggle-track {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-}
-.toggle-thumb {
-  position: absolute; top: 2px; left: 2px;
-  width: 16px; height: 16px;
-  background: var(--color-surface-1); border-radius: var(--radius-full);
-  box-shadow: var(--shadow-sm);
-  transition: transform var(--t);
-}
-.sync-toggle input:checked + .toggle-track .toggle-thumb { transform: translateX(16px); }
 
 /* ── Offline banner ──────────────────────────────────────────── */
 .offline-banner {
@@ -1201,43 +1180,17 @@ main {
 .recipe-body.collapsed { display: none; }
 
 /* ── Enable/disable switch ───────────────────────────────────────
-   The .sync-toggle track/thumb pattern, duplicated under recipe-owned
-   class names so the two switches can diverge without either editing
-   the other.                                                        */
+   The shared .ui-toggle; this only keeps it from shrinking in the
+   recipe header.                                                    */
 .recipe-switch {
-  display: flex; align-items: center;
-  cursor: pointer; user-select: none;
   flex-shrink: 0;
 }
-.recipe-switch-input { position: absolute; opacity: 0; width: 0; height: 0; }
-.recipe-switch-track {
-  position: relative; width: 38px; height: 22px;
-  background: var(--color-surface-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  transition: background var(--t), border-color var(--t);
-}
-.recipe-switch-input:checked + .recipe-switch-track {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-}
-.recipe-switch-thumb {
-  position: absolute; top: 2px; left: 2px;
-  width: 16px; height: 16px;
-  background: var(--color-surface-1); border-radius: var(--radius-full);
-  box-shadow: var(--shadow-sm);
-  transition: transform var(--t);
-}
-.recipe-switch-input:checked + .recipe-switch-track .recipe-switch-thumb {
-  transform: translateX(16px);
-}
-.recipe-switch-input:disabled + .recipe-switch-track { opacity: 0.45; cursor: not-allowed; }
 
 /* ── Recipe suffix on grocery rows ───────────────────────────────
    .recipe-chip and .item-recipe-suffix land on the SAME <button>, so
    these two rules are read together on one node. Order is load-bearing:
    the chip resets the UA button defaults to `inherit`, and the suffix
-   must then win the colour. Equal specificity, so source order decides
+   must then win the color. Equal specificity, so source order decides
    — chip first, suffix second.                                       */
 .recipe-chip {
   background: none;

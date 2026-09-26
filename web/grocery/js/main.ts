@@ -41,7 +41,7 @@ let pendingOps = [];
 let localSeq = 0;
 function newLocalId() { return 'local-' + (++localSeq) + '-' + Date.now(); }
 // Card collapse state, deliberately NOT persisted — collapsedGroups is not
-// persisted either, and persisting one but not the other is new behaviour
+// persisted either, and persisting one but not the other is new behavior
 // behind no acceptance criterion.
 let collapsedRecipes = {};
 const TAB_KEY        = 'grocery.activeTab';
@@ -346,7 +346,7 @@ async function api(method, path, body) {
 }
 
 // loadConfigData is the fetch and the field assignments only. loadConfig keeps
-// its exact current behaviour so no existing call site changes.
+// its exact current behavior so no existing call site changes.
 async function loadConfigData() {
   const cfg = await api('GET', '/api/config').catch(() => null);
   groups              = cfg?.groups                || [];
@@ -1285,11 +1285,11 @@ function renderRecipesTab() {
     const header = document.createElement('div');
     header.className = 'recipe-header' + (isOpen ? ' open' : '');
     header.innerHTML = `
-      <label class="recipe-switch" title="${r.enabled ? 'Disable' : 'Enable'} ${rname}">
+      <label class="ui-toggle recipe-switch" title="${r.enabled ? 'Disable' : 'Enable'} ${rname}">
         <input type="checkbox" class="recipe-switch-input"
                data-recipe-id="${rid}"${r.enabled ? ' checked' : ''}
                aria-label="Enable ${rname}">
-        <span class="recipe-switch-track"><span class="recipe-switch-thumb"></span></span>
+        <span class="ui-toggle-track"></span>
       </label>
       <span class="recipe-title" data-recipe-id="${rid}" title="Rename">${rname}</span>
       <span class="recipe-meta">

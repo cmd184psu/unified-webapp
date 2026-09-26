@@ -24,7 +24,7 @@
 
     <main class="sampler-main">
       <section class="sampler-section" aria-labelledby="swatches-heading">
-        <h2 id="swatches-heading">Colour tokens</h2>
+        <h2 id="swatches-heading">Color tokens</h2>
         <div id="swatch-grid" class="sampler-swatch-grid"></div>
       </section>
 
@@ -43,9 +43,23 @@
         <div id="toast-demos" class="sampler-modal-demos"></div>
       </section>
 
+      <section class="sampler-section" aria-labelledby="toggles-heading">
+        <h2 id="toggles-heading">Toggles</h2>
+        <div id="toggle-demos" class="sampler-modal-demos"></div>
+      </section>
+
       <section class="sampler-section" aria-labelledby="theme-picker-heading">
         <h2 id="theme-picker-heading">Theme picker</h2>
-        <div id="theme-picker"></div>
+        <div class="sampler-picker-variants">
+          <div>
+            <p class="sampler-variant-caption">List — the picker alone in a drawer</p>
+            <div id="theme-picker"></div>
+          </div>
+          <div>
+            <p class="sampler-variant-caption">Dropdown — the picker sharing a drawer with other settings</p>
+            <div id="theme-picker-select"></div>
+          </div>
+        </div>
       </section>
 
       <section class="sampler-section" aria-labelledby="menu-heading">

@@ -295,42 +295,6 @@ select.input {
   color: var(--color-text-muted);
   margin-top: 1px;
 }
-.toggle {
-  position: relative;
-  width: 34px;
-  height: 18px;
-  flex-shrink: 0;
-}
-.toggle input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-.toggle-track {
-  position: absolute;
-  inset: 0;
-  background: var(--color-border);
-  border-radius: 9px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-.toggle input:checked + .toggle-track {
-  background: var(--color-primary);
-}
-.toggle-track::after {
-  content: "";
-  position: absolute;
-  left: 2px;
-  top: 2px;
-  width: 14px;
-  height: 14px;
-  background: #fff;
-  border-radius: 50%;
-  transition: transform 0.2s;
-}
-.toggle input:checked + .toggle-track::after {
-  transform: translateX(16px);
-}
 .share-list {
   display: flex;
   flex-direction: column;

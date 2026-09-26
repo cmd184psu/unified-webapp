@@ -1053,7 +1053,7 @@ describe('nextRecipeOrder — matches AddRecipe, not recipes.length', () => {
 });
 
 describe('the create/rename paths actually consult recipeNameTaken', () => {
-  // Behavioural coverage above proves the rule; these pin that the rule is
+  // Behavioral coverage above proves the rule; these pin that the rule is
   // WIRED IN. A correct helper nothing calls is the displayName failure mode.
   it('createRecipe refuses blanks and duplicates before pushing', () => {
     assert.match(APP_N, /if \(!name \|\| recipeNameTaken\(recipes, name\)\) return false;/);

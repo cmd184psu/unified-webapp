@@ -3,7 +3,8 @@
 // §3 Step 5).
 //
 // Asserts that web/shared/ts/index.ts's exported-name set EQUALS the
-// allowlist below: 9 named values + 9 types — Phase 2's end state (§5
+// allowlist below: 10 named values + 9 types — Phase 2's end state plus
+// copyText (the shared clipboard helper, added post-Phase 5) (§5
 // Step 2.4 added showToast, ToastTone and ToastHandle; §5 Step 3.3 added
 // ThemeManager and ThemeManagerOptions; §5 Step 4.3 added HamburgerMenu,
 // HamburgerMenuOptions and MenuItem, each in the same commit as the barrel
@@ -31,7 +32,7 @@ process.chdir(path.resolve(import.meta.dirname, ".."));
 
 const BARREL = "web/shared/ts/index.ts";
 
-const ALLOWED_VALUES = ["openModal", "confirmDialog", "alertDialog", "promptDialog", "THEMES", "setTheme", "ThemeManager", "showToast", "HamburgerMenu"];
+const ALLOWED_VALUES = ["openModal", "confirmDialog", "alertDialog", "promptDialog", "THEMES", "setTheme", "ThemeManager", "showToast", "HamburgerMenu", "copyText"];
 const ALLOWED_TYPES = ["ModalOptions", "ModalHandle", "DialogOptions", "PromptOptions", "ThemeManagerOptions", "ToastTone", "ToastHandle", "HamburgerMenuOptions", "MenuItem"];
 
 function fail(message) {

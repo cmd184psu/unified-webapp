@@ -145,9 +145,6 @@
       "obsidianoid": {
         "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
       },
-      "sampler": {
-        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
-      },
       "slideshow": {
         "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
       },
@@ -173,7 +170,7 @@
     "cookie_secure": false,
     "cookie_domain": "",
     "session": {
-      "ttl_hours": 720,
+      "ttl_hours": 1,
       "refresh_after_fraction": 0.5
     },
     "ldap": {
@@ -193,6 +190,14 @@
       {
         "name": "local-test",
         "hash": "sha256:c7fa7e4500e52a9c89f647736a72b39aaed9bcf4c3b2327c2b228adb9c7c10c3"
+      },
+      {
+        "name": "asdfaf",
+        "hash": "sha256:d6d631ce648ceb69a5633855a08cfe06f584b0890b24283efb49d74a38487630"
+      },
+      {
+        "name": "asfafafasfa",
+        "hash": "sha256:e5d4c6a3b954229334941f624fc7f424bb75d60fddeef6b900b8e46b61794fc8"
       }
     ],
     "passkey": {

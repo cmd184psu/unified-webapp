@@ -328,7 +328,7 @@ export async function mountCertApp(root: HTMLElement): Promise<void> {
       renderList();
     });
 
-    const groupToggle = el("label", "cert-group-toggle");
+    const groupToggle = el("label", "ui-toggle cert-group-toggle");
     const groupCheckbox = el("input");
     groupCheckbox.type = "checkbox";
     groupCheckbox.checked = groupByDomain;
@@ -336,7 +336,7 @@ export async function mountCertApp(root: HTMLElement): Promise<void> {
       groupByDomain = groupCheckbox.checked;
       renderList();
     });
-    groupToggle.append(groupCheckbox, document.createTextNode(" Group by domain"));
+    groupToggle.append(groupCheckbox, el("span", "ui-toggle-track"), document.createTextNode("Group by domain"));
 
     const newBtn = el("button", "cert-btn cert-btn-primary");
     newBtn.type = "button";

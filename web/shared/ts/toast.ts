@@ -3,7 +3,7 @@
 // alert(), confirm() or prompt().
 //
 // Class names are ui-toast* (matching the web/shared/css/components.css
-// convention). No colour literal lives here — the tone reaches CSS as a
+// convention). No color literal lives here — the tone reaches CSS as a
 // `data-tone` attribute and components.css selects on it, so the palette
 // stays in themes.css.
 
