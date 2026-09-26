@@ -1,13 +1,12 @@
 package sshproxy
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"net"
-	"os"
-	"strings"
 	"time"
+
+	"cmd184psu/unified-webapp/internal/platform/sshclient"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -29,30 +28,13 @@ type ConnectParams struct {
 	Rows     int
 }
 
-// ErrCredential reports a ConnectParams carrying neither or both credentials.
-var ErrCredential = errors.New("sshproxy: exactly one of key or password is required")
-
 // AuthMethods resolves the exactly-one-of credential into SSH auth methods.
-// Both dial paths (terminal and SFTP) go through it, so the rule cannot drift
-// between them.
+// Both dial paths (terminal and SFTP) go through it, and it delegates to the
+// shared sshclient rule, so the rule can't drift between modules either.
 func (p ConnectParams) AuthMethods() ([]ssh.AuthMethod, error) {
-	hasKey := strings.TrimSpace(p.KeyPath) != ""
-	hasPassword := !p.Password.IsZero()
-	if hasKey == hasPassword {
-		return nil, ErrCredential
-	}
-	if hasPassword {
-		return []ssh.AuthMethod{ssh.Password(p.Password.Reveal())}, nil
-	}
-	keyBytes, err := os.ReadFile(p.KeyPath)
-	if err != nil {
-		return nil, fmt.Errorf("sshproxy: read key: %w", err)
-	}
-	signer, err := ssh.ParsePrivateKey(keyBytes)
-	if err != nil {
-		return nil, fmt.Errorf("sshproxy: parse key (encrypted keys are not supported): %w", err)
-	}
-	return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil
+	return sshclient.Credentials{
+		Host: p.Host, Port: p.Port, User: p.User, KeyPath: p.KeyPath, Password: p.Password,
+	}.AuthMethods()
 }
 
 // Conn is one live remote shell. Output yields the merged PTY stdout/stderr.

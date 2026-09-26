@@ -68,6 +68,12 @@ type IssueResult struct {
 // first, then InitCA (a no-op at that point, since ImportCA will already
 // have stored the CA), is the only supported order.
 func (s *Store) InitCA(ctx context.Context, legacyImportDir string) error {
+	return s.InitNamedCA(ctx, legacyImportDir, DefaultCAName)
+}
+
+// InitNamedCA is InitCA with the root CA's name (its Common Name) chosen by
+// the caller; name must already be normalized with NormalizeCAName.
+func (s *Store) InitNamedCA(ctx context.Context, legacyImportDir, name string) error {
 	switch _, err := s.GetCA(ctx); {
 	case err == nil:
 		return ErrCAExists
@@ -84,7 +90,7 @@ func (s *Store) InitCA(ctx context.Context, legacyImportDir string) error {
 			ErrImportPending, legacyImportDir, legacyRootCertFilename, caReplacementRemedy)
 	}
 
-	certPEM, keyPEM, err := GenerateCA()
+	certPEM, keyPEM, err := GenerateNamedCA(name)
 	if err != nil {
 		return err
 	}

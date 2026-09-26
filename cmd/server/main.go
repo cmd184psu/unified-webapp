@@ -33,6 +33,7 @@ import (
 	"cmd184psu/unified-webapp/internal/platform/auth"
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/platform/middleware"
+	"cmd184psu/unified-webapp/internal/platform/sshclient"
 	"cmd184psu/unified-webapp/internal/platform/static"
 	"cmd184psu/unified-webapp/internal/sampler"
 	"cmd184psu/unified-webapp/internal/slideshow"
@@ -393,7 +394,13 @@ func buildModule(module string, cfg *config.Config, svc *auth.Service) (http.Han
 	case "sampler":
 		return sampler.Build(cfg.Sampler)
 	case "certmachine":
-		return certmachine.Build(cfg.Certmachine)
+		// Remote CA trust shares multissh's SSH settings: one key folder and
+		// one host-key policy for every SSH connection the app makes.
+		return certmachine.Build(cfg.Certmachine, sshclient.Settings{
+			SSHDir:         cfg.Multissh.SSHDir,
+			KnownHostsPath: cfg.Multissh.KnownHostsPath,
+			StrictHostKey:  cfg.Multissh.StrictHostKey,
+		})
 	case "utuber":
 		return utuber.Build(cfg.Utuber)
 	case "admin":

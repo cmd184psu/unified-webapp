@@ -58,6 +58,10 @@ export interface AppConfig {
   trustDeviceAvailable: boolean;
   /** The detected platform ("darwin" / "rhel" / "debian"). Absent unless `trustDeviceAvailable` is true. */
   trustPlatform?: string;
+  /** True when the CA can be trusted on another machine over SSH. */
+  trustRemoteAvailable: boolean;
+  /** Why remote trust is unavailable, when it is. */
+  trustRemoteReason?: string;
 }
 
 /**

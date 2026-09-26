@@ -1,14 +1,16 @@
-package sshproxy
+package sshclient
 
 import (
 	"encoding/json"
 	"errors"
 )
 
-// secretMask is what a Secret renders as through every formatting and
+// SecretMask is what a Secret renders as through every formatting and
 // serialization path. It is deliberately not the empty string: a redacted
 // value should be visibly redacted in a log line, not silently missing.
-const secretMask = "***"
+const SecretMask = "***"
+
+const secretMask = SecretMask
 
 // Secret holds an SSH password for the life of a session or broadcast job and
 // nothing longer (FR-N4). The value is unexported and reachable only through
@@ -18,7 +20,7 @@ const secretMask = "***"
 //
 // Secret is a struct, not a string alias, so `omitempty` is inert on it. That
 // is intentional: a Secret field must never be placed on a type that is written
-// to disk (see hostConfig in the multissh package), and the absence of a
+// to disk (e.g. multissh's persisted hostConfig), and the absence of a
 // suppression mechanism makes that a design constraint rather than an option.
 type Secret struct {
 	v string

@@ -35,6 +35,9 @@ const (
 	TrustPlatformDarwin     TrustPlatform = "darwin"
 	TrustPlatformRHELFamily TrustPlatform = "rhel"
 	TrustPlatformDebian     TrustPlatform = "debian"
+	// TrustPlatformWindows is only ever detected on a remote machine (the
+	// server itself never runs on Windows).
+	TrustPlatformWindows TrustPlatform = "windows"
 )
 
 // ErrTrustPlatformUnsupported means this host is not one of the three
@@ -71,7 +74,13 @@ func detectLinuxTrustPlatform() (TrustPlatform, error) {
 	if err != nil {
 		return "", fmt.Errorf("%w: reading /etc/os-release: %v", ErrTrustPlatformUnsupported, err)
 	}
-	fields := parseOSRelease(string(data))
+	return classifyOSRelease(string(data))
+}
+
+// classifyOSRelease maps /etc/os-release contents (from this host or a remote
+// one) to the Linux family whose trust procedure applies.
+func classifyOSRelease(osRelease string) (TrustPlatform, error) {
+	fields := parseOSRelease(osRelease)
 	ids := append([]string{fields["ID"]}, strings.Fields(fields["ID_LIKE"])...)
 	for _, id := range ids {
 		switch id {
@@ -82,6 +91,40 @@ func detectLinuxTrustPlatform() (TrustPlatform, error) {
 		}
 	}
 	return "", fmt.Errorf("%w: unrecognized /etc/os-release ID %q", ErrTrustPlatformUnsupported, fields["ID"])
+}
+
+// trustCommands is the one table of "add this root CA to the system trust
+// store" steps for the Unix-like platforms, used for this host
+// (InstallTrust) and for remote machines (InstallTrustRemote). certPath is
+// where the CA's PEM file already is; with sudo, each step runs through
+// `sudo -n` (never prompting).
+func trustCommands(platform TrustPlatform, certPath, anchor string, sudo bool) ([][]string, error) {
+	var cmds [][]string
+	switch platform {
+	case TrustPlatformDarwin:
+		cmds = [][]string{
+			{"security", "add-trusted-cert", "-d", "-r", "trustRoot",
+				"-k", "/Library/Keychains/System.keychain", certPath},
+		}
+	case TrustPlatformRHELFamily:
+		cmds = [][]string{
+			{"cp", certPath, "/etc/pki/ca-trust/source/anchors/" + anchor + ".pem"},
+			{"update-ca-trust", "extract"},
+		}
+	case TrustPlatformDebian:
+		cmds = [][]string{
+			{"cp", certPath, "/usr/local/share/ca-certificates/" + anchor + ".crt"},
+			{"update-ca-certificates"},
+		}
+	default:
+		return nil, ErrTrustPlatformUnsupported
+	}
+	if sudo {
+		for i, c := range cmds {
+			cmds[i] = append([]string{"sudo", "-n"}, c...)
+		}
+	}
+	return cmds, nil
 }
 
 // parseOSRelease parses the shell-variable-assignment lines /etc/os-release
@@ -109,12 +152,13 @@ func parseOSRelease(s string) map[string]string {
 // forever either.
 const trustCommandTimeout = 30 * time.Second
 
-// trustDestFilename is the name InstallTrust gives the CA certificate under
-// the two Linux anchor directories. Fixed rather than derived from the CA's
-// subject: there is exactly one root CA per certmachine instance (FR-6), so
-// a stable name lets a second click cleanly overwrite the first rather than
-// accumulating a new anchor file per attempt.
-const trustDestFilename = "certmachine-rootCA"
+// trustAnchorName is the name the CA gets in a Linux anchor directory:
+// "certmachine-" plus the CA's file stem. Stable for a given CA, so trusting
+// it again overwrites rather than accumulates, and distinct per CA, so two
+// certmachine CAs trusted on one machine don't overwrite each other.
+func trustAnchorName(caCommonName string) string {
+	return "certmachine-" + CAFileStem(caCommonName)
+}
 
 // InstallTrust writes rootPEM to a private temp file and runs the detected
 // platform's native "trust this root CA system-wide" procedure against it.
@@ -122,7 +166,7 @@ const trustDestFilename = "certmachine-rootCA"
 // regardless of outcome -- including on error -- so a sudo permission
 // refusal or a missing update-ca-trust binary is visible to whoever clicked
 // the button rather than only in the server log.
-func InstallTrust(ctx context.Context, rootPEM []byte) (output string, err error) {
+func InstallTrust(ctx context.Context, rootPEM []byte, anchor string) (output string, err error) {
 	platform, err := DetectTrustPlatform()
 	if err != nil {
 		return "", err
@@ -142,27 +186,9 @@ func InstallTrust(ctx context.Context, rootPEM []byte) (output string, err error
 		return "", fmt.Errorf("certmachine: writing temp cert for trust install: %w", err)
 	}
 
-	var cmds [][]string
-	switch platform {
-	case TrustPlatformDarwin:
-		cmds = [][]string{
-			{"sudo", "-n", "security", "add-trusted-cert", "-d", "-r", "trustRoot",
-				"-k", "/Library/Keychains/System.keychain", tmpPath},
-		}
-	case TrustPlatformRHELFamily:
-		dest := "/etc/pki/ca-trust/source/anchors/" + trustDestFilename + ".pem"
-		cmds = [][]string{
-			{"sudo", "-n", "cp", tmpPath, dest},
-			{"sudo", "-n", "update-ca-trust", "extract"},
-		}
-	case TrustPlatformDebian:
-		dest := "/usr/local/share/ca-certificates/" + trustDestFilename + ".crt"
-		cmds = [][]string{
-			{"sudo", "-n", "cp", tmpPath, dest},
-			{"sudo", "-n", "update-ca-certificates"},
-		}
-	default:
-		return "", ErrTrustPlatformUnsupported
+	cmds, err := trustCommands(platform, tmpPath, anchor, true)
+	if err != nil {
+		return "", err
 	}
 
 	var out bytes.Buffer

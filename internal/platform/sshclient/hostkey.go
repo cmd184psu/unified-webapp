@@ -1,4 +1,4 @@
-package sshproxy
+package sshclient
 
 import (
 	"fmt"
@@ -7,8 +7,9 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
-// HostKeyCallback returns the SSH host-key verification strategy for both the
-// terminal dialer and the SFTP transferrer.
+// HostKeyCallback returns the SSH host-key verification strategy shared by
+// every SSH connection the app makes (multissh's terminals and SFTP,
+// certmachine's remote CA trust).
 //
 // When secure is false it returns ssh.InsecureIgnoreHostKey(): the default for
 // the trusted lab networks this tool targets, where VMs are frequently rebuilt
@@ -23,7 +24,7 @@ func HostKeyCallback(secure bool, knownHostsPath string) (ssh.HostKeyCallback, e
 	}
 	cb, err := knownhosts.New(knownHostsPath)
 	if err != nil {
-		return nil, fmt.Errorf("sshproxy: secure mode requires a readable known_hosts at %q: %w", knownHostsPath, err)
+		return nil, fmt.Errorf("sshclient: secure mode requires a readable known_hosts at %q: %w", knownHostsPath, err)
 	}
 	return cb, nil
 }

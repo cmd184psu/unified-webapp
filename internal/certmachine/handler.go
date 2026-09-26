@@ -22,9 +22,11 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"cmd184psu/unified-webapp/internal/platform/response"
+	"cmd184psu/unified-webapp/internal/platform/sshclient"
 )
 
 // mountRoutes registers every /api/ route plus its 405 fallthrough (for
@@ -38,6 +40,8 @@ func (s *Server) mountRoutes() {
 	s.mux.HandleFunc("POST /api/ca/init", s.handleCAInit)
 	s.mux.HandleFunc("GET /api/ca/root.crt", s.handleCARootGet)
 	s.mux.HandleFunc("POST /api/ca/trust", s.handleCATrust)
+	s.mux.HandleFunc("POST /api/ca/trust/remote", s.handleCATrustRemote)
+	s.mux.HandleFunc("GET /api/ssh/keys", s.handleSSHKeys)
 
 	s.mux.HandleFunc("GET /api/certs", s.handleCertsGet)
 	s.mux.HandleFunc("POST /api/certs", s.handleCertsPost)
@@ -55,6 +59,7 @@ func (s *Server) mountRoutes() {
 	// registrations by TestAllowHeadersMatchRegisteredRoutes.
 	s.mux.HandleFunc("/api/ca/init", methodNotAllowed("POST"))
 	s.mux.HandleFunc("/api/ca/trust", methodNotAllowed("POST"))
+	s.mux.HandleFunc("/api/ca/trust/remote", methodNotAllowed("POST"))
 	s.mux.HandleFunc("/api/certs", methodNotAllowed("GET, POST"))
 	s.mux.HandleFunc("/api/certs/{id}", methodNotAllowed("GET, DELETE"))
 	s.mux.HandleFunc("/api/certs/{id}/renew", methodNotAllowed("POST"))
@@ -213,6 +218,9 @@ type configResponse struct {
 	LegacyImportReason    string `json:"legacyImportReason"`
 	TrustDeviceAvailable  bool   `json:"trustDeviceAvailable"`
 	TrustPlatform         string `json:"trustPlatform,omitempty"`
+	// TrustRemoteAvailable: the CA can be trusted on another machine over SSH.
+	TrustRemoteAvailable bool   `json:"trustRemoteAvailable"`
+	TrustRemoteReason    string `json:"trustRemoteReason,omitempty"`
 }
 
 func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
@@ -240,6 +248,8 @@ func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
 		LegacyImportReason:    s.legacyImportReason,
 		TrustDeviceAvailable:  s.opts.TrustDeviceEnabled && trustPlatform != "",
 		TrustPlatform:         trustPlatform,
+		TrustRemoteAvailable:  s.opts.SSH != nil,
+		TrustRemoteReason:     s.opts.SSHReason,
 	})
 }
 
@@ -281,9 +291,25 @@ func (s *Server) handleCAGet(w http.ResponseWriter, r *http.Request) {
 	response.WriteJSON(w, http.StatusOK, caResponseFrom(ca))
 }
 
+// handleCAInit creates the root CA. An optional JSON body {"name": "..."}
+// sets its name (Common Name); without one it's DefaultCAName.
 func (s *Server) handleCAInit(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	if err := s.db.InitCA(ctx, s.opts.LegacyImportDir); err != nil {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			response.WriteError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+	name, err := NormalizeCAName(req.Name)
+	if err != nil {
+		response.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.db.InitNamedCA(ctx, s.opts.LegacyImportDir, name); err != nil {
 		writeStoreError(w, err)
 		return
 	}
@@ -301,7 +327,7 @@ func (s *Server) handleCARootGet(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	writeDownload(w, "rootCA.crt", pemContentType, []byte(ca.CertPEM))
+	writeDownload(w, CAFileName(ca.Subject), pemContentType, []byte(ca.CertPEM))
 }
 
 // trustResponse is POST /api/ca/trust's body, on both success and failure:
@@ -331,7 +357,7 @@ func (s *Server) handleCATrust(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	platform, platErr := DetectTrustPlatform()
-	output, err := InstallTrust(r.Context(), []byte(ca.CertPEM))
+	output, err := InstallTrust(r.Context(), []byte(ca.CertPEM), trustAnchorName(ca.Subject))
 	if err != nil {
 		if platErr != nil {
 			log.Printf("certmachine: device trust install unsupported: %v", err)
@@ -349,6 +375,92 @@ func (s *Server) handleCATrust(w http.ResponseWriter, r *http.Request) {
 		Platform: string(platform),
 		Output:   output,
 	})
+}
+
+// trustRemoteRequest is POST /api/ca/trust/remote's body. Key is a file name
+// picked from the server's SSH key folder (never a path); exactly one of Key
+// and Password is used.
+type trustRemoteRequest struct {
+	Host     string           `json:"host"`
+	Port     int              `json:"port"`
+	User     string           `json:"user"`
+	Key      string           `json:"key"`
+	Password sshclient.Secret `json:"password"`
+}
+
+// handleCATrustRemote installs the root CA into another machine's trust store
+// over SSH (see remotetrust.go). Every attempt is logged with its target and
+// outcome, never its credential.
+func (s *Server) handleCATrustRemote(w http.ResponseWriter, r *http.Request) {
+	if s.opts.SSH == nil {
+		response.WriteJSON(w, http.StatusConflict, trustResponse{Error: "remote trust is unavailable: " + s.opts.SSHReason})
+		return
+	}
+	var req trustRemoteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.WriteJSON(w, http.StatusBadRequest, trustResponse{Error: "invalid request body"})
+		return
+	}
+	defer req.Password.Zero()
+	req.Host = strings.TrimSpace(req.Host)
+	req.User = strings.TrimSpace(req.User)
+	if req.Host == "" || req.User == "" {
+		response.WriteJSON(w, http.StatusBadRequest, trustResponse{Error: "host and user are required"})
+		return
+	}
+	creds := sshclient.Credentials{Host: req.Host, Port: req.Port, User: req.User, Password: req.Password}
+	if strings.TrimSpace(req.Key) != "" {
+		keyPath, err := sshclient.ResolveKeyPath(s.opts.SSH.SSHDir, req.Key)
+		if err != nil {
+			response.WriteJSON(w, http.StatusBadRequest, trustResponse{Error: "unknown SSH key"})
+			return
+		}
+		creds.KeyPath = keyPath
+	}
+	if _, err := creds.AuthMethods(); errors.Is(err, sshclient.ErrCredential) {
+		response.WriteJSON(w, http.StatusBadRequest, trustResponse{Error: "choose an SSH key or enter a password (not both)"})
+		return
+	}
+
+	ca, err := s.db.GetCA(r.Context())
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	platform, output, err := InstallTrustRemote(r.Context(), creds, s.opts.SSH.HostKeyCallback, []byte(ca.CertPEM), trustAnchorName(ca.Subject))
+	target := fmt.Sprintf("%s@%s", req.User, creds.Addr())
+	switch {
+	case err == nil:
+		log.Printf("certmachine: remote trust %s platform=%s outcome=ok", target, platform)
+		response.WriteJSON(w, http.StatusOK, trustResponse{Platform: string(platform), Output: output})
+	case errors.Is(err, ErrTrustPlatformUnsupported):
+		log.Printf("certmachine: remote trust %s outcome=unsupported: %v", target, err)
+		response.WriteJSON(w, http.StatusUnprocessableEntity, trustResponse{
+			Output: output,
+			Error:  "not a supported operating system (macOS, Windows, Rocky/RHEL, Ubuntu/Debian); nothing was installed. " + err.Error(),
+		})
+	case output == "" && platform == "":
+		// Nothing ran: the SSH connection itself failed.
+		log.Printf("certmachine: remote trust %s outcome=connect-failed: %v", target, err)
+		response.WriteJSON(w, http.StatusBadGateway, trustResponse{Error: err.Error()})
+	default:
+		log.Printf("certmachine: remote trust %s platform=%s outcome=failed: %v", target, platform, err)
+		response.WriteJSON(w, http.StatusConflict, trustResponse{Platform: string(platform), Output: output, Error: err.Error()})
+	}
+}
+
+// handleSSHKeys lists the server's SSH key folder for the remote-trust
+// dialog's key picker (names only; paths never leave the server).
+func (s *Server) handleSSHKeys(w http.ResponseWriter, r *http.Request) {
+	if s.opts.SSH == nil {
+		response.WriteJSON(w, http.StatusOK, map[string]any{"keys": []sshclient.KeyFile{}})
+		return
+	}
+	keys, err := sshclient.ListKeys(s.opts.SSH.SSHDir)
+	if err != nil {
+		keys = []sshclient.KeyFile{}
+	}
+	response.WriteJSON(w, http.StatusOK, map[string]any{"keys": keys})
 }
 
 func (s *Server) handleCertsGet(w http.ResponseWriter, r *http.Request) {
@@ -538,7 +650,7 @@ func (s *Server) handleCertBundleGet(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	data, err := BundleTGZ(*c, []byte(ca.CertPEM))
+	data, err := BundleTGZ(*c, []byte(ca.CertPEM), CAFileName(ca.Subject))
 	if err != nil {
 		writeStoreError(w, err)
 		return

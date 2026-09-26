@@ -169,6 +169,7 @@ func TestAllowHeadersMatchRegisteredRoutes(t *testing.T) {
 	}{
 		{"/api/ca/init", "POST"},
 		{"/api/ca/trust", "POST"},
+		{"/api/ca/trust/remote", "POST"},
 		{"/api/certs", "GET, POST"},
 		{"/api/certs/1", "GET, DELETE"},
 		{"/api/certs/1/renew", "POST"},
@@ -359,7 +360,7 @@ func TestCAInitAndGetRoundTrip(t *testing.T) {
 		t.Fatalf("GET /api/ca/root.crt = %d, want 200", root.StatusCode)
 	}
 	cd := root.Header.Get("Content-Disposition")
-	if !strings.Contains(cd, `filename="rootCA.crt"`) {
+	if !strings.Contains(cd, `filename="CertMachine-Root-CA.crt"`) {
 		t.Errorf("root.crt Content-Disposition = %q", cd)
 	}
 }
@@ -935,5 +936,31 @@ func TestInternalErrorBodyNeverLeaksDetail(t *testing.T) {
 		if strings.Contains(lower, leak) {
 			t.Errorf("500 body leaked internal detail %q: %v", leak, body)
 		}
+	}
+}
+
+func TestCAInitWithName(t *testing.T) {
+	_, httpSrv := newHandlerTestHTTPServer(t)
+	if res := doJSON(t, http.MethodPost, httpSrv.URL+"/api/ca/init", `{"name":"bad\u0007name"}`); res.StatusCode != http.StatusBadRequest {
+		t.Errorf("control character in name: %d, want 400", res.StatusCode)
+	}
+	res := doJSON(t, http.MethodPost, httpSrv.URL+"/api/ca/init", `{"name":"Home Lab CA 2026"}`)
+	res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("init with name: %d", res.StatusCode)
+	}
+	root := doJSON(t, http.MethodGet, httpSrv.URL+"/api/ca/root.crt", "")
+	defer root.Body.Close()
+	if cd := root.Header.Get("Content-Disposition"); !strings.Contains(cd, `filename="Home-Lab-CA-2026.crt"`) {
+		t.Errorf("download should be named after the CA: %q", cd)
+	}
+	ca := doJSON(t, http.MethodGet, httpSrv.URL+"/api/ca", "")
+	defer ca.Body.Close()
+	var body struct {
+		Subject string `json:"subject"`
+	}
+	_ = json.NewDecoder(ca.Body).Decode(&body)
+	if body.Subject != "Home Lab CA 2026" {
+		t.Errorf("CA subject = %q", body.Subject)
 	}
 }

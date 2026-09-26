@@ -531,3 +531,36 @@ func equalStrings(a, b []string) bool {
 	}
 	return true
 }
+
+func TestCANaming(t *testing.T) {
+	for in, want := range map[string]string{
+		"CertMachine Root CA": "CertMachine-Root-CA",
+		"Home Lab CA 2026":    "Home-Lab-CA-2026",
+		"  lab/ca:v2  ":       "lab-ca-v2",
+		"Café Root":           "Caf-Root",
+		"///":                 "rootCA",
+	} {
+		if got := CAFileStem(in); got != want {
+			t.Errorf("CAFileStem(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := CAFileName("Home Lab CA 2026"); got != "Home-Lab-CA-2026.crt" {
+		t.Errorf("CAFileName = %q", got)
+	}
+	if n, err := NormalizeCAName("  "); err != nil || n != DefaultCAName {
+		t.Errorf("blank name should default: %q %v", n, err)
+	}
+	for _, bad := range []string{strings.Repeat("x", 65), "bad\nname"} {
+		if _, err := NormalizeCAName(bad); !errors.Is(err, ErrInvalidCAName) {
+			t.Errorf("%q: err %v, want ErrInvalidCAName", bad, err)
+		}
+	}
+	certPEM, _, err := GenerateNamedCA("Home Lab CA 2026")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := ParseCert(certPEM)
+	if err != nil || cert.Subject.CommonName != "Home Lab CA 2026" {
+		t.Errorf("generated CA's CN: %v, %v", cert, err)
+	}
+}

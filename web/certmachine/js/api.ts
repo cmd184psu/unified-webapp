@@ -15,6 +15,7 @@ const FALLBACK_CONFIG: AppConfig = {
   legacyImportDir: "",
   legacyImportReason: "",
   trustDeviceAvailable: false,
+  trustRemoteAvailable: false,
 };
 
 /**
@@ -154,8 +155,13 @@ export async function fetchCA(): Promise<CAStatus> {
 }
 
 /** Initialize a new root CA. Rejects with the server's message (e.g. `ErrImportPending`) on failure. */
-export async function initCA(): Promise<CAStatus> {
-  const res = await fetch("/api/ca/init", { method: "POST" });
+/** Create the root CA, optionally named (its Common Name; blank = the default). */
+export async function initCA(name = ""): Promise<CAStatus> {
+  const res = await fetch("/api/ca/init", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
   if (!res.ok) {
     throw new Error(await errorMessage(res, "failed to initialize the certificate authority"));
   }
@@ -251,6 +257,51 @@ export class TrustFailedError extends Error {
  * 409 otherwise, surfaced here the same way any other disabled-feature
  * refusal is. Rejects with `TrustFailedError` on failure.
  */
+/** Inputs for POST /api/ca/trust/remote: a key name OR a password, not both. */
+export interface RemoteTrustRequest {
+  host: string;
+  port: number;
+  user: string;
+  key?: string;
+  password?: string;
+}
+
+/**
+ * Trust the root CA on another machine over SSH. The server detects the OS
+ * and installs only on macOS, Windows, Rocky/RHEL or Ubuntu/Debian; anything
+ * else installs nothing. Rejects with `TrustFailedError` (carrying the
+ * commands' output, when any ran) on failure.
+ */
+export async function trustRemote(req: RemoteTrustRequest): Promise<TrustResult> {
+  const res = await fetch("/api/ca/trust/remote", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  let body: TrustResult & { error?: string } = {};
+  try {
+    body = (await res.json()) as TrustResult & { error?: string };
+  } catch {
+    /* non-JSON error body */
+  }
+  if (!res.ok) {
+    throw new TrustFailedError(body.error ?? `remote trust failed: ${res.status}`, body.output ?? "");
+  }
+  return body;
+}
+
+/** GET /api/ssh/keys: the server's SSH key folder, names only. */
+export async function fetchSSHKeys(): Promise<Array<{ name: string; isDir: boolean }>> {
+  try {
+    const res = await fetch("/api/ssh/keys");
+    if (!res.ok) return [];
+    const body = (await res.json()) as { keys?: Array<{ name: string; isDir: boolean }> };
+    return body.keys ?? [];
+  } catch {
+    return []; // unreachable server: the picker just shows "No keys found"
+  }
+}
+
 export async function trustDevice(): Promise<TrustResult> {
   const res = await fetch("/api/ca/trust", { method: "POST" });
   let body: TrustResult & { error?: string } = {};

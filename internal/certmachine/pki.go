@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Legacy root CA filenames inside legacy_import_dir
@@ -317,7 +318,68 @@ func encodeKeyPEM(key *rsa.PrivateKey) []byte {
 // "CertMachine Root CA", and a random 128-bit serial -- not legacy's
 // big.NewInt(1) (reference/certmachine/main.go:79); this only affects roots
 // this code creates, never an imported one.
-func GenerateCA() (certPEM, keyPEM []byte, err error) {
+// DefaultCAName is the root CA's Common Name when none is given.
+const DefaultCAName = "CertMachine Root CA"
+
+// maxCANameLen caps a CA name (its Common Name), in runes.
+const maxCANameLen = 64
+
+// ErrInvalidCAName means a proposed CA name is empty, too long, or contains
+// control characters.
+var ErrInvalidCAName = errors.New("certmachine: the CA name must be 1-64 printable characters")
+
+// NormalizeCAName trims name and checks it's usable as a Common Name; empty
+// means DefaultCAName.
+func NormalizeCAName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return DefaultCAName, nil
+	}
+	if utf8.RuneCountInString(name) > maxCANameLen {
+		return "", ErrInvalidCAName
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return "", ErrInvalidCAName
+		}
+	}
+	return name, nil
+}
+
+// CAFileStem turns a CA's Common Name into a safe file-name stem, so a CA
+// is recognizable by name wherever its file lands (the root download, each
+// certificate bundle, a machine's trust store) and different CAs don't
+// overwrite each other: "Home Lab CA 2026" becomes "Home-Lab-CA-2026".
+// Anything outside letters, digits, '.', '_' and '-' becomes '-'.
+func CAFileStem(commonName string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.TrimSpace(commonName) {
+		ok := r < utf8.RuneSelf && (unicode.IsLetter(r) || unicode.IsDigit(r) || r == '.' || r == '_' || r == '-')
+		if ok {
+			b.WriteRune(r)
+			dash = false
+		} else if !dash && b.Len() > 0 {
+			b.WriteByte('-')
+			dash = true
+		}
+	}
+	stem := strings.Trim(b.String(), "-.")
+	if stem == "" {
+		return "rootCA"
+	}
+	return stem
+}
+
+// CAFileName is the root CA's download / bundle file name: "<stem>.crt".
+func CAFileName(commonName string) string { return CAFileStem(commonName) + ".crt" }
+
+// GenerateCA creates a root CA named DefaultCAName.
+func GenerateCA() (certPEM, keyPEM []byte, err error) { return GenerateNamedCA(DefaultCAName) }
+
+// GenerateNamedCA creates a root CA whose Common Name is name (already
+// normalized with NormalizeCAName).
+func GenerateNamedCA(name string) (certPEM, keyPEM []byte, err error) {
 	key, err := rsa.GenerateKey(rand.Reader, 4096)
 	if err != nil {
 		return nil, nil, fmt.Errorf("certmachine: generate ca key: %w", err)
@@ -334,7 +396,7 @@ func GenerateCA() (certPEM, keyPEM []byte, err error) {
 	now := time.Now().UTC()
 	tpl := &x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: "CertMachine Root CA"},
+		Subject:               pkix.Name{CommonName: name},
 		NotBefore:             now,
 		NotAfter:              now.AddDate(10, 0, 0),
 		IsCA:                  true,

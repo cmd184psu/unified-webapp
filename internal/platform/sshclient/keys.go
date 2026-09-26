@@ -1,7 +1,4 @@
-// Package sshproxy bridges browser terminals to remote hosts: it lists the
-// server user's SSH key files for the frontend picker, and proxies an SSH PTY
-// session over a WebSocket. It is pure Go (golang.org/x/crypto/ssh, no CGO).
-package sshproxy
+package sshclient
 
 import (
 	"fmt"
@@ -24,7 +21,7 @@ type KeyFile struct {
 func DefaultSSHDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("sshproxy: resolve home dir: %w", err)
+		return "", fmt.Errorf("sshclient: resolve home dir: %w", err)
 	}
 	return filepath.Join(home, ".ssh"), nil
 }
@@ -37,7 +34,7 @@ func DefaultSSHDir() (string, error) {
 func ListKeys(dir string) ([]KeyFile, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("sshproxy: read ssh dir: %w", err)
+		return nil, fmt.Errorf("sshclient: read ssh dir: %w", err)
 	}
 	keys := make([]KeyFile, 0, len(entries))
 	for _, e := range entries {
@@ -58,27 +55,27 @@ func ListKeys(dir string) ([]KeyFile, error) {
 func ResolveKeyPath(dir, name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return "", fmt.Errorf("sshproxy: empty key name")
+		return "", fmt.Errorf("sshclient: empty key name")
 	}
 	// A legitimate selection is a single base name. Reject anything that
 	// carries directory structure or traversal up front.
 	if name != filepath.Base(name) || strings.ContainsRune(name, '/') || strings.ContainsRune(name, filepath.Separator) {
-		return "", fmt.Errorf("sshproxy: invalid key name %q", name)
+		return "", fmt.Errorf("sshclient: invalid key name %q", name)
 	}
 	full := filepath.Join(dir, name)
 
 	// Defense in depth: confirm the cleaned path is still rooted at dir.
 	rel, err := filepath.Rel(dir, full)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || strings.ContainsRune(rel, filepath.Separator) {
-		return "", fmt.Errorf("sshproxy: key name %q escapes ssh dir", name)
+		return "", fmt.Errorf("sshclient: key name %q escapes ssh dir", name)
 	}
 
 	info, err := os.Stat(full)
 	if err != nil {
-		return "", fmt.Errorf("sshproxy: key %q: %w", name, err)
+		return "", fmt.Errorf("sshclient: key %q: %w", name, err)
 	}
 	if !info.Mode().IsRegular() {
-		return "", fmt.Errorf("sshproxy: key %q is not a regular file", name)
+		return "", fmt.Errorf("sshclient: key %q is not a regular file", name)
 	}
 	return full, nil
 }

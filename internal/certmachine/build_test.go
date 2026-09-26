@@ -1,6 +1,7 @@
 package certmachine
 
 import (
+	"cmd184psu/unified-webapp/internal/platform/sshclient"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -68,7 +69,7 @@ func TestBuildRejectsUnusableStaticDir(t *testing.T) {
 	cfg := buildConfig(t)
 	cfg.StaticDir = filepath.Join(t.TempDir(), "does-not-exist")
 
-	if _, err := Build(cfg); err == nil {
+	if _, err := Build(cfg, sshclient.Settings{SSHDir: t.TempDir()}); err == nil {
 		t.Fatal("expected Build to fail on a missing static_dir")
 	} else if !strings.Contains(err.Error(), "static_dir") {
 		t.Fatalf("error should name static_dir, got: %v", err)
@@ -86,7 +87,7 @@ func TestBuildRejectsUnwritableDBDir(t *testing.T) {
 	}
 	cfg.DBPath = filepath.Join(blocker, "sub", "certmachine.db")
 
-	if _, err := Build(cfg); err == nil {
+	if _, err := Build(cfg, sshclient.Settings{SSHDir: t.TempDir()}); err == nil {
 		t.Fatal("expected Build to fail when the db directory cannot be created")
 	}
 }
