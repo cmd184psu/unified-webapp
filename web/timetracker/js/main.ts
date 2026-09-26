@@ -9,12 +9,16 @@ const SVG_EDIT = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" st
 const SVG_DOWNLOAD = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
 const SVG_COPY = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 
+const APP_VERSION = '2.0.0';
+
 const themes = new ThemeManager({ module: 'timetracker', default: 'dark' });
 themes.apply();
 
 function buildHamburger(): void {
   const items: MenuItem[] = [];
-  new HamburgerMenu({ title: 'TimeTracker', items, themePicker: true, themes });
+  const menu = new HamburgerMenu({ title: 'TimeTracker', items, themePicker: true, themes, side: 'right' });
+  menu.trigger.classList.add('app-menu-trigger');
+  document.body.append(menu.trigger);
 }
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -55,7 +59,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const deleteButton = document.createElement('button');
     deleteButton.textContent = 'Delete Customer';
     deleteButton.className = 'delete-btn';
-    deleteButton.style.backgroundColor = 'red';
 
     const modal = document.createElement('div');
     modal.className = 'modal hidden';
@@ -72,12 +75,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const addButton = document.createElement('button');
     addButton.textContent = 'Add Customer';
     addButton.className = 'add-btn';
-    addButton.style.backgroundColor = 'darkgreen';
-    addButton.style.color = 'white';
-    addButton.style.minWidth = '250px';
-    addButton.style.padding = '10px 20px';
-    addButton.style.border = 'none';
-    addButton.style.cursor = 'pointer';
     leftPanel.appendChild(addButton);
 
     const addModal = document.createElement('div');
@@ -206,7 +203,8 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(response => response.json())
         .then((data: AppData) => {
             header.innerHTML = `
-                <h1>${data.projectName}</h1>
+                <h1>Time Tracker</h1>
+                <h2>Version: ${APP_VERSION}</h2>
                 <div class="form-group">
                     <label data-tooltip="author">Author:</label>
                     <input type="text" id="authorInput" value="${data.author}" readonly data-tooltip="author">
@@ -289,7 +287,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         <label data-tooltip="slackChannel">Slack Channel:</label>
                         <a href="slack://channel?team=T12DX4MJR&id=${customer.slackChannelId}" id="slackChannel" data-tooltip="slackChannel">${customer.slackChannel}</a>
                         <span class="edit-btn" data-target="slackChannel">${SVG_EDIT}</span>
-                        <input type="text" id="slackChannelInput" class="hidden" value="${customer.slackChannel}" data-tooltip="slackChannel">
+                        <input type="text" id="slackChannelInput" class="hidden" value="${customer.slackChannel}" placeholder="Channel name" data-tooltip="slackChannel">
+                        <input type="text" id="slackChannelIdInput" class="hidden" value="${customer.slackChannelId}" placeholder="Channel ID" data-tooltip="slackChannel">
                         <button class="submit-btn hidden" data-target="slackChannel" data-index="${index}">Submit</button>
                     </div>
                     <div class="form-group">
@@ -452,6 +451,9 @@ document.addEventListener('DOMContentLoaded', function() {
                         const input = document.getElementById(`${target}Input`) as HTMLInputElement;
                         input.removeAttribute('readonly');
                         input.classList.remove('hidden');
+                        if (target === 'slackChannel') {
+                            document.getElementById('slackChannelIdInput')!.classList.remove('hidden');
+                        }
                         document.querySelector(`button[data-target="${target}"]`)!.classList.remove('hidden');
                     });
                 });
@@ -464,28 +466,29 @@ document.addEventListener('DOMContentLoaded', function() {
                         const index = parseInt(this.getAttribute('data-index')!, 10);
                         const updatedValue = input.value;
 
-                        const requestData = {
-                            index: index,
-                            field: target,
-                            value: updatedValue
+                        const postField = (field: string, value: string) => {
+                            const requestData = { index, field, value };
+                            console.log('Sending request data:', requestData);
+                            return fetch(`/update`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify(requestData)
+                            })
+                            .then(response => {
+                                if (!response.ok) {
+                                    return response.text().then(text => { throw new Error(text) });
+                                }
+                                return response.json();
+                            });
                         };
 
-                        console.log('Sending request data:', requestData);
+                        const idInput = document.getElementById('slackChannelIdInput') as HTMLInputElement;
 
                         const self = this;
-                        const sendUpdate = () => fetch(`/update`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify(requestData)
-                        })
-                        .then(response => {
-                            if (!response.ok) {
-                                return response.text().then(text => { throw new Error(text) });
-                            }
-                            return response.json();
-                        })
+                        const sendUpdate = () => postField(target, updatedValue)
+                        .then(data => target === 'slackChannel' ? postField('slackChannelId', idInput.value) : data)
                         .then(_updatedCustomer => {
                             console.log('Received updated customer:', _updatedCustomer);
                             console.log('Target:', target);
@@ -516,6 +519,10 @@ document.addEventListener('DOMContentLoaded', function() {
                                     link.textContent = input.value;
                                     if (target === 'cmsUrl') {
                                         (link as HTMLAnchorElement).href = input.value;
+                                    }
+                                    if (target === 'slackChannel') {
+                                        (link as HTMLAnchorElement).href = `slack://channel?team=T12DX4MJR&id=${idInput.value}`;
+                                        idInput.classList.add('hidden');
                                     }
                                     input.classList.add('hidden');
                                 }

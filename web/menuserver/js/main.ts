@@ -1,5 +1,4 @@
 import { ThemeManager, HamburgerMenu, showToast } from "@shared";
-import type { MenuItem } from "@shared";
 
 const themes = new ThemeManager({ module: "menuserver", default: "dark" });
 themes.apply();
@@ -167,16 +166,68 @@ function showPage(id: string): void {
   if (target) target.hidden = false;
 }
 
+function closeAllDropdowns(): void {
+  document.querySelectorAll<HTMLElement>(".topnav-item.open").forEach((d) => {
+    d.classList.remove("open");
+  });
+}
+
+function buildDropdown(group: TopMenu): HTMLElement {
+  const item = document.createElement("div");
+  item.className = "topnav-item";
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "topnav-btn";
+  const caret = document.createElement("span");
+  caret.className = "topnav-caret";
+  caret.textContent = "▼";
+  btn.append(group.subject, caret);
+
+  const dropdown = document.createElement("div");
+  dropdown.className = "topnav-dropdown";
+
+  for (const sub of group.submenus) {
+    if (sub.url != null) {
+      const a = document.createElement("a");
+      a.href = sub.url;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.textContent = sub.title;
+      dropdown.append(a);
+    } else {
+      const subBtn = document.createElement("button");
+      subBtn.type = "button";
+      subBtn.textContent = sub.title;
+      subBtn.addEventListener("click", () => {
+        showPage(sub.id);
+        closeAllDropdowns();
+      });
+      dropdown.append(subBtn);
+    }
+  }
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const wasOpen = item.classList.contains("open");
+    closeAllDropdowns();
+    if (!wasOpen) item.classList.add("open");
+  });
+
+  item.append(btn, dropdown);
+  return item;
+}
+
 async function startMenuserver(): Promise<void> {
   config = await fetchJSON<MenuConfig>("config/");
   SHOWALLPAGES = config.showAllPages ?? false;
   topMenus = await fetchJSON<TopMenu[]>("items");
 
   const lowerSection = document.getElementById("lowerSection");
-  if (!lowerSection) return;
+  const nav = document.getElementById("topnav");
+  if (!lowerSection || !nav) return;
 
   const renderedPageSet = new Set<string>();
-  const menuItems: MenuItem[] = [];
   let haveSplash = false;
 
   for (const group of topMenus) {
@@ -196,29 +247,32 @@ async function startMenuserver(): Promise<void> {
     }
 
     if (group.subject !== "Splash") {
-      menuItems.push({ section: group.subject });
-      for (const sub of group.submenus) {
-        if (sub.url != null) {
-          menuItems.push({ id: sub.id, label: sub.title, href: sub.url });
-        } else {
-          menuItems.push({
-            id: sub.id,
-            label: sub.title,
-            onSelect: () => showPage(sub.id),
-          });
-        }
-      }
+      nav.append(buildDropdown(group));
     } else {
       haveSplash = true;
     }
   }
 
+  const settingsTrigger = document.createElement("button");
+  settingsTrigger.className = "topnav-btn topnav-settings";
+  settingsTrigger.type = "button";
+  settingsTrigger.setAttribute("aria-label", "Menu");
+  settingsTrigger.textContent = "☰";
+  nav.append(settingsTrigger);
+
   new HamburgerMenu({
-    title: "Menuserver",
-    mountTrigger: document.getElementById("menu-trigger")!,
-    items: menuItems,
+    title: "Settings",
+    mountTrigger: settingsTrigger,
+    side: "right",
+    items: [],
     themePicker: true,
     themes,
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!(e.target as HTMLElement).closest(".topnav-item")) {
+      closeAllDropdowns();
+    }
   });
 
   if (haveSplash) showPage("splash");

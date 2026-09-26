@@ -286,7 +286,6 @@ const themes = new ThemeManager({
 });
 themes.apply();
 
-// Populate the theme select with every theme ThemeManager knows about.
 for (const name of themes.list) {
   const opt = document.createElement("option");
   opt.value = name;

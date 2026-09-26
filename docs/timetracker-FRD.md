@@ -95,10 +95,10 @@ files. In unified-webapp, mutable state never lives in `web/`:
 | POST | `/import-csv` | Multipart field `file`. Skips header row, **replaces** the entire customer list, returns full `Data`. Accepts 8-column rows; 9-column rows from a legacy pshelper export are also accepted, with the `SupportTunnel` column (index 6) dropped. |
 | GET | `/` (everything else) | `platform/static` file server over `web/timetracker/` with SPA fallback. |
 
-The `/update` field switch covers: `customerName`, `slackChannel`, `insightUrl`,
-`workLoadType`, `sfdcUrl`, `cumulusBucket`, `jira`, plus `author` via `index == -1`
-(`supportTunnel` removed, FR-F6). `slackChannelId` is intentionally **not**
-updatable via `/update` (reference behavior; CSV import is its only write path).
+The `/update` field switch covers: `customerName`, `slackChannel`, `slackChannelId`,
+`insightUrl`, `workLoadType`, `sfdcUrl`, `cumulusBucket`, `jira`, plus `author` via
+`index == -1` (`supportTunnel` removed, FR-F6). `slackChannelId` became updatable
+so the Slack channel's name and ID can both be edited in the UI.
 
 ### 3.3 Required fixes (deviations from reference, each justified)
 

@@ -116,6 +116,7 @@ async function fetchHosts() {
 }
 function persistedFields(h2) {
   return {
+    name: h2.name,
     ip: h2.ip,
     port: h2.port,
     user: h2.user,
@@ -320,6 +321,7 @@ function renderDirList(list, note, entries, currentPath, navigate) {
 }
 
 // web/multissh/js/hosts.ts
+import { confirmDialog } from "/shared/dist/shared.mjs";
 function el3(tag, className) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -327,6 +329,7 @@ function el3(tag, className) {
 }
 function makeDefault() {
   return {
+    name: "",
     ip: "",
     port: 22,
     user: "",
@@ -335,6 +338,9 @@ function makeDefault() {
     authMethod: "key",
     password: ""
   };
+}
+function hostDisplayName(h2, index) {
+  return h2.name.trim() || `Host ${index + 1}`;
 }
 function hostHasCredential(h2) {
   return h2.authMethod === "password" ? h2.password !== "" : h2.key !== "";
@@ -380,15 +386,20 @@ function labeledInput(parent, label, placeholder) {
   parent.append(row);
   return input;
 }
-function mountHostRail(root, hostCount) {
+var GRIP_SVG = '<svg viewBox="0 0 14 14" fill="currentColor" width="14" height="14"><circle cx="4" cy="3" r="1.2"/><circle cx="10" cy="3" r="1.2"/><circle cx="4" cy="7" r="1.2"/><circle cx="10" cy="7" r="1.2"/><circle cx="4" cy="11" r="1.2"/><circle cx="10" cy="11" r="1.2"/></svg>';
+function mountHostRail(root, maxHosts) {
   root.classList.add("host-rail");
-  root.dataset.hostCount = String(hostCount);
   const titleEl = el3("h1", "rail-title");
   titleEl.textContent = "Hosts";
   const subEl = el3("p", "rail-subtitle");
-  subEl.textContent = `Configure up to ${hostCount} host${hostCount === 1 ? "" : "s"} shared across both tabs.`;
-  root.append(titleEl, subEl);
-  const hosts = Array.from({ length: hostCount }, makeDefault);
+  subEl.textContent = `Up to ${maxHosts} host${maxHosts === 1 ? "" : "s"}, shared across both tabs. Drag the grip to reorder.`;
+  const list = el3("div", "host-list");
+  const addBtn = el3("button", "btn host-add");
+  addBtn.type = "button";
+  addBtn.textContent = "+ Add host";
+  root.append(titleEl, subEl, list, addBtn);
+  const hosts = [];
+  let openHost = null;
   const listeners = [];
   const notify = () => {
     for (const cb of listeners) cb(hosts);
@@ -402,40 +413,125 @@ function mountHostRail(root, hostCount) {
       notify();
     }, 400);
   };
-  const inputRefs = [];
-  for (let i = 0; i < hostCount; i++) {
-    const h2 = hosts[i];
+  const commitStructure = () => {
+    if (saveTimer !== null) clearTimeout(saveTimer);
+    saveTimer = null;
+    render();
+    void saveHosts(hosts).catch(() => void 0);
+    notify();
+  };
+  const cardHost = /* @__PURE__ */ new WeakMap();
+  const moveHost = (h2, target, after) => {
+    const from = hosts.indexOf(h2);
+    let to = hosts.indexOf(target) + (after ? 1 : 0);
+    if (from < 0 || to < 0) return;
+    if (from < to) to--;
+    if (from === to) return;
+    hosts.splice(from, 1);
+    hosts.splice(to, 0, h2);
+    commitStructure();
+  };
+  const clearDropMarks = () => {
+    list.querySelectorAll(".drop-above, .drop-below").forEach((c) => {
+      c.classList.remove("drop-above", "drop-below");
+    });
+  };
+  const attachDrag = (grip, card, h2) => {
+    grip.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      grip.setPointerCapture(e.pointerId);
+      card.classList.add("is-dragging");
+      let drop = null;
+      const onMove = (ev) => {
+        clearDropMarks();
+        drop = null;
+        const hit = document.elementFromPoint(ev.clientX, ev.clientY);
+        const over = hit?.closest(".host-card");
+        if (!over || over === card || !list.contains(over)) return;
+        const target = cardHost.get(over);
+        if (!target) return;
+        const r = over.getBoundingClientRect();
+        const after = ev.clientY >= r.top + r.height / 2;
+        over.classList.add(after ? "drop-below" : "drop-above");
+        drop = { target, after };
+      };
+      const onEnd = () => {
+        grip.removeEventListener("pointermove", onMove);
+        grip.removeEventListener("pointerup", onEnd);
+        grip.removeEventListener("pointercancel", onEnd);
+        card.classList.remove("is-dragging");
+        clearDropMarks();
+        if (drop) moveHost(h2, drop.target, drop.after);
+      };
+      grip.addEventListener("pointermove", onMove);
+      grip.addEventListener("pointerup", onEnd);
+      grip.addEventListener("pointercancel", onEnd);
+    });
+  };
+  const buildCard = (h2, i) => {
     const card = el3("div", "host-card");
+    cardHost.set(card, h2);
     const cardHeader = el3("div", "host-card-header");
+    const grip = el3("span", "drag-handle");
+    grip.title = "Drag to reorder";
+    grip.innerHTML = GRIP_SVG;
     const collapseBtn = el3("button", "host-card-collapse");
     collapseBtn.type = "button";
-    collapseBtn.textContent = "\u25BE";
-    collapseBtn.title = "Collapse this host";
-    collapseBtn.setAttribute("aria-expanded", "true");
     const cardTitle = el3("h3", "host-card-title");
-    cardTitle.textContent = `Host ${i + 1}`;
-    cardHeader.append(collapseBtn, cardTitle);
+    cardTitle.textContent = hostDisplayName(h2, i);
+    const removeBtn = el3("button", "host-card-remove");
+    removeBtn.type = "button";
+    removeBtn.textContent = "\u2715";
+    removeBtn.title = "Remove this host";
+    removeBtn.disabled = hosts.length <= 1;
+    cardHeader.append(grip, collapseBtn, cardTitle, removeBtn);
     card.append(cardHeader);
+    attachDrag(grip, card, h2);
     const cardBody = el3("div", "host-card-body");
     card.append(cardBody);
+    const collapsed = openHost !== h2;
+    card.classList.toggle("collapsed", collapsed);
+    collapseBtn.textContent = collapsed ? "\u25B8" : "\u25BE";
+    collapseBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    collapseBtn.title = collapsed ? "Expand this host" : "Collapse this host";
     collapseBtn.addEventListener("click", () => {
-      const collapsed = card.classList.toggle("collapsed");
-      collapseBtn.textContent = collapsed ? "\u25B8" : "\u25BE";
-      collapseBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
-      collapseBtn.title = collapsed ? "Expand this host" : "Collapse this host";
+      openHost = openHost === h2 ? null : h2;
+      render();
+    });
+    removeBtn.addEventListener("click", () => {
+      void confirmDialog(
+        `Remove ${hostDisplayName(h2, hosts.indexOf(h2))}? Its terminal will be disconnected and closed.`,
+        { title: "Remove host", confirmLabel: "Remove" }
+      ).then((ok) => {
+        const at2 = hosts.indexOf(h2);
+        if (!ok || at2 < 0 || hosts.length <= 1) return;
+        hosts.splice(at2, 1);
+        if (openHost === h2) openHost = null;
+        commitStructure();
+      });
+    });
+    const nameInput = labeledInput(cardBody, "Name", `Host ${i + 1}`);
+    nameInput.value = h2.name;
+    nameInput.addEventListener("input", () => {
+      h2.name = nameInput.value;
+      cardTitle.textContent = hostDisplayName(h2, i);
+      scheduleSave();
     });
     const ipInput = labeledInput(cardBody, "IP / hostname", "e.g. 10.0.0.5");
+    ipInput.value = h2.ip;
     ipInput.addEventListener("input", () => {
       h2.ip = ipInput.value.trim();
       scheduleSave();
     });
     const userInput = labeledInput(cardBody, "User", "e.g. root");
+    userInput.value = h2.user;
     userInput.addEventListener("input", () => {
       h2.user = userInput.value.trim();
       scheduleSave();
     });
     const portInput = labeledInput(cardBody, "Port", "22");
-    portInput.value = "22";
+    portInput.value = String(h2.port);
     portInput.addEventListener("input", () => {
       const v2 = parseInt(portInput.value, 10);
       h2.port = isNaN(v2) ? 22 : v2;
@@ -469,6 +565,7 @@ function mountHostRail(root, hostCount) {
     keyInput.type = "text";
     keyInput.readOnly = true;
     keyInput.placeholder = "Click to select from ~/.ssh\u2026";
+    keyInput.value = h2.key;
     keyInput.addEventListener("click", () => {
       void openKeyPicker().then((name) => {
         if (name) {
@@ -487,6 +584,7 @@ function mountHostRail(root, hostCount) {
     pwInput.type = "password";
     pwInput.autocomplete = "off";
     pwInput.placeholder = "Not saved; cleared on reload";
+    pwInput.value = h2.password;
     pwInput.addEventListener("input", () => {
       h2.password = pwInput.value;
       notify();
@@ -500,7 +598,7 @@ function mountHostRail(root, hostCount) {
     dirInput.type = "text";
     dirInput.readOnly = true;
     dirInput.placeholder = "/tmp";
-    dirInput.value = "/tmp";
+    dirInput.value = h2.remoteDir;
     dirInput.addEventListener("click", () => {
       if (h2.authMethod === "password") return;
       if (!h2.ip || !h2.user || !h2.key) {
@@ -573,33 +671,37 @@ function mountHostRail(root, hostCount) {
       });
     });
     cardBody.append(copyBtn, copyHint);
-    inputRefs.push({
-      ip: ipInput,
-      user: userInput,
-      port: portInput,
-      key: keyInput,
-      remoteDir: dirInput
-    });
-    root.append(card);
+    return card;
+  };
+  function render() {
+    list.replaceChildren(...hosts.map((h2, i) => buildCard(h2, i)));
+    addBtn.disabled = hosts.length >= maxHosts;
+    addBtn.title = addBtn.disabled ? `The server allows at most ${maxHosts} hosts` : "Add another host";
   }
-  fetchHosts().then((loaded) => {
-    for (let i = 0; i < Math.min(loaded.length, hostCount); i++) {
-      const src = loaded[i];
-      const h2 = hosts[i];
-      const refs = inputRefs[i];
+  addBtn.addEventListener("click", () => {
+    if (hosts.length >= maxHosts) return;
+    const h2 = makeDefault();
+    hosts.push(h2);
+    openHost = h2;
+    commitStructure();
+  });
+  const hydrate = (loaded) => {
+    for (const src of loaded.slice(0, maxHosts)) {
+      const h2 = makeDefault();
+      h2.name = src.name ?? "";
       h2.ip = src.ip ?? "";
       h2.user = src.user ?? "";
       h2.port = src.port ?? 22;
       h2.key = src.key ?? "";
       h2.remoteDir = src.remoteDir ?? "/tmp";
-      refs.ip.value = h2.ip;
-      refs.user.value = h2.user;
-      refs.port.value = String(h2.port);
-      refs.key.value = h2.key;
-      refs.remoteDir.value = h2.remoteDir;
+      hosts.push(h2);
     }
-    for (const cb of listeners) cb(hosts);
-  }).catch(() => void 0);
+    if (hosts.length === 0) hosts.push(makeDefault());
+    openHost = hosts[0] ?? null;
+    render();
+    notify();
+  };
+  fetchHosts().then(hydrate).catch(() => hydrate([]));
   return {
     getHosts: () => hosts,
     onChange: (cb) => {
@@ -9782,6 +9884,16 @@ var TerminalSession = class {
     this.term.loadAddon(this.fit);
     this.term.open(container);
     this.safeFit();
+    let pending = false;
+    this.resizeObserver = new ResizeObserver(() => {
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(() => {
+        pending = false;
+        this.resize();
+      });
+    });
+    this.resizeObserver.observe(container);
     sessions.push(this);
     this.term.onData((data) => {
       if (this.statusValue === "connected") {
@@ -9872,6 +9984,21 @@ var TerminalSession = class {
       this.term.focus();
     }
   }
+  /** Close the connection and release the terminal; the session is unusable after. */
+  dispose() {
+    this.onStatus = () => {
+    };
+    if (this.ws) {
+      this.ws.onmessage = null;
+      this.ws.onerror = null;
+      this.ws.onclose = null;
+    }
+    this.disconnect();
+    this.resizeObserver.disconnect();
+    const i = sessions.indexOf(this);
+    if (i >= 0) sessions.splice(i, 1);
+    this.term.dispose();
+  }
   /** Re-fit the terminal to its container and inform the remote PTY. */
   resize() {
     this.safeFit();
@@ -9934,48 +10061,44 @@ function el5(tag, className) {
   if (className) node.className = className;
   return node;
 }
-function emptyHost() {
-  return {
-    ip: "",
-    port: 22,
-    user: "",
-    key: "",
-    remoteDir: "/tmp",
-    authMethod: "key",
-    password: ""
-  };
-}
 function mountSSHApp(root, store, maxSessions) {
   root.innerHTML = "";
   root.classList.add("ssh-app");
   const terminals = el5("section", "ssh-terminals");
   const master = buildMasterBar();
   const grid = el5("div", "term-grid");
-  grid.dataset.panelCount = String(maxSessions);
   terminals.append(master.bar, grid);
-  const hosts = store.getHosts();
-  const panels = [];
-  for (let i = 0; i < maxSessions; i++) {
-    const cfg = hosts[i] ?? emptyHost();
-    const panel = buildPanel(i, cfg, grid);
-    panels.push(panel);
-  }
-  store.onChange((updated) => {
-    for (let i = 0; i < maxSessions; i++) {
-      panels[i]?.updateConfig(updated[i] ?? emptyHost());
+  const panels = /* @__PURE__ */ new Map();
+  const sync = (hosts) => {
+    const live = new Set(hosts);
+    for (const [host, panel] of panels) {
+      if (live.has(host)) continue;
+      panel.session.dispose();
+      panel.el.remove();
+      panels.delete(host);
     }
-  });
+    hosts.forEach((host, i) => {
+      let panel = panels.get(host);
+      if (!panel) {
+        panel = buildPanel(i, host, grid);
+        panels.set(host, panel);
+      } else {
+        panel.updateConfig(host, i);
+      }
+      grid.append(panel.el);
+    });
+    grid.dataset.panelCount = String(hosts.length);
+  };
+  sync(store.getHosts());
+  store.onChange(sync);
   master.onSend = (text) => {
-    for (const p of panels) {
+    for (const p of panels.values()) {
       p.session.broadcast(text);
     }
   };
   root.append(terminals);
   requestAnimationFrame(() => {
-    for (const p of panels) p.session.resize();
-  });
-  window.addEventListener("resize", () => {
-    for (const p of panels) p.session.resize();
+    for (const p of panels.values()) p.session.resize();
   });
 }
 var KEY_SEQUENCES = {
@@ -10079,7 +10202,6 @@ function parseKeyword(text) {
 }
 function buildPanel(index, initialConfig, container) {
   let config = { ...initialConfig };
-  const hostLabel = `Host ${index + 1}`;
   const panelEl = el5("div", "term-panel");
   const header = el5("div", "term-header");
   const collapseBtn = el5("button", "term-collapse");
@@ -10089,7 +10211,7 @@ function buildPanel(index, initialConfig, container) {
   collapseBtn.setAttribute("aria-expanded", "true");
   const dot = el5("span", "status-dot");
   const titleEl = el5("span", "term-title");
-  titleEl.textContent = hostLabel;
+  titleEl.textContent = hostDisplayName(config, index);
   const statusText = el5("span", "status-text");
   statusText.textContent = "disconnected";
   const spacer = el5("span", "term-spacer");
@@ -10165,8 +10287,10 @@ function buildPanel(index, initialConfig, container) {
   disconnectBtn.addEventListener("click", () => session.disconnect());
   interruptBtn.addEventListener("click", () => session.interrupt());
   return {
-    updateConfig(updated) {
+    el: panelEl,
+    updateConfig(updated, i) {
       config = { ...updated };
+      titleEl.textContent = hostDisplayName(config, i);
     },
     session
   };
@@ -10351,7 +10475,7 @@ function mountUploadApp(root, store) {
   jobProgress.style.display = "none";
   stageB.append(jobProgress);
   scroll.append(stageB);
-  const checked = [];
+  const checked = /* @__PURE__ */ new WeakMap();
   const renderHostChecks = () => {
     hostChecksEl.innerHTML = "";
     const hosts = store.getHosts();
@@ -10365,12 +10489,12 @@ function mountUploadApp(root, store) {
       const cb = el7("input");
       cb.type = "checkbox";
       cb.disabled = !selectable;
-      cb.checked = selectable && (checked[i] ?? false);
+      cb.checked = selectable && (checked.get(h2) ?? false);
       cb.addEventListener("change", () => {
-        checked[i] = cb.checked;
+        checked.set(h2, cb.checked);
       });
       const text = el7("span", "host-check-label");
-      text.textContent = h2.ip ? `Host ${i + 1} \u2014 ${h2.ip}` : `Host ${i + 1} (not configured)`;
+      text.textContent = h2.ip ? `${hostDisplayName(h2, i)} \u2014 ${h2.ip}` : `${hostDisplayName(h2, i)} (not configured)`;
       row.append(cb, text);
       hostChecksEl.append(row);
     }
@@ -10474,9 +10598,8 @@ function mountUploadApp(root, store) {
     const hosts = store.getHosts();
     const activeTargets = [];
     for (let i = 0; i < hosts.length; i++) {
-      if (!checked[i]) continue;
       const h2 = hosts[i];
-      if (!h2 || !h2.ip || !h2.user || !hostHasCredential(h2)) continue;
+      if (!h2 || !checked.get(h2) || !h2.ip || !h2.user || !hostHasCredential(h2)) continue;
       const usesPassword = h2.authMethod === "password";
       activeTargets.push({
         host: h2.ip,

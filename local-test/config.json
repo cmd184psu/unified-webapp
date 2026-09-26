@@ -3,25 +3,26 @@
   "tls_cert": "",
   "tls_key": "",
   "host_routing": {
-    "localhost":         "grocery",
-    "grocery.test":     "grocery",
-    "todo.test":        "todo",
-    "slideshow.test":   "slideshow",
-    "menu.test":        "menuserver",
-    "menuserver.test":  "menuserver",
-    "obsidianoid.test": "obsidianoid",
-    "multissh.test":    "multissh",
-    "certmachine-test.cmdhome.net": "certmachine",
-    "admin.test":       "admin",
-    "taskmaster-test.cmdhome.net":  "taskmaster",
-    "smbedit-test.cmdhome.net":     "smbedit",
-    "issues-test.cmdhome.net": "issuetracker",
-    "timetracker.test": "timetracker",
-    "sampler.test": "sampler"
+    "localhost":            "grocery",
+    "grocery.test":         "grocery",
+    "todo.test":            "todo",
+    "slideshow.test":       "slideshow",
+    "menuserver.test":      "menuserver",
+    "obsidianoid.test":     "obsidianoid",
+    "multissh.test":        "multissh",
+    "certmachine.test":     "certmachine",
+    "admin.test":           "admin",
+    "taskmaster.test":      "taskmaster",
+    "smbedit.test":         "smbedit",
+    "issuetracker.test":    "issuetracker",
+    "timetracker.test":     "timetracker",
+    "sampler.test":         "sampler",
+    "utuber.test":          "utuber"
   },
   "server": {
     "origin_check": "enforce",
-    "sse_max_subscribers": 64
+    "sse_max_subscribers": 64,
+    "shared_static_dir": "./web/shared"
   },
   "grocery": {
     "static_dir": "./web/grocery",
@@ -112,6 +113,12 @@
     "static_dir": "./web/timetracker",
     "data_file": "./local-test/data/timetracker.json"
   },
+  "utuber": {
+    "static_dir": "./web/utuber",
+    "download_dir": "./local-test/data/utuber/downloads",
+    "workers": 1,
+    "python_bin": "python3.12"
+  },
   "sampler": {
     "static_dir": "./web/sampler"
   },
@@ -121,25 +128,43 @@
         "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/admin.pin"
       },
       "certmachine": {
-        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/certmachine.pin"
+        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
+      },
+      "grocery": {
+        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
+      },
+      "issuetracker": {
+        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
       },
       "menuserver": {
-        "pin_file": ""
+        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
       },
       "multissh": {
-        "pin_file": ""
+        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
       },
       "obsidianoid": {
-        "pin_file": ""
+        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
       },
       "sampler": {
-        "pin_file": ""
+        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
       },
       "slideshow": {
-        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/slideshow.pin"
+        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
+      },
+      "smbedit": {
+        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
+      },
+      "taskmaster": {
+        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
+      },
+      "timetracker": {
+        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
       },
       "todo": {
-        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/todo.pin"
+        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
+      },
+      "utuber": {
+        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
       }
     },
     "admin_pin": "",

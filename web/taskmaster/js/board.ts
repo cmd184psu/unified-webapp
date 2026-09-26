@@ -50,12 +50,6 @@ let countdownTimer: number | undefined;
 let loadSeq = 0;
 let caps: Capabilities = { allow_sudo: false };
 let laneFilter: string | undefined;
-// Hand brake state (FRD §5): while engaged, no "again in X" countdown
-// should be visible anywhere — showing one would imply a task might still
-// fire on its own, which the hand brake explicitly prevents. Tracked here
-// (rather than threaded through mountBoard's signature) since board.ts
-// already subscribes to the same live board-events feed that carries brake
-// changes.
 let brakeEngaged = false;
 
 function openTaskRoute(taskName: string): void {

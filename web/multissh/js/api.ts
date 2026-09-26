@@ -162,6 +162,7 @@ export async function fetchHosts(): Promise<PersistedHost[]> {
  */
 function persistedFields(h: HostConfig): PersistedHost {
   return {
+    name: h.name,
     ip: h.ip,
     port: h.port,
     user: h.user,

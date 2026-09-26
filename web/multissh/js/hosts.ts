@@ -1,6 +1,7 @@
 import { openKeyPicker } from "./keypicker";
 import { openDirPicker } from "./dirpicker";
 import { fetchHosts, saveHosts } from "./api";
+import { confirmDialog } from "@shared";
 import type { AuthMethod, HostConfig, PersistedHost } from "./types";
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -14,6 +15,7 @@ function el<K extends keyof HTMLElementTagNameMap>(
 
 function makeDefault(): HostConfig {
   return {
+    name: "",
     ip: "",
     port: 22,
     user: "",
@@ -22,6 +24,11 @@ function makeDefault(): HostConfig {
     authMethod: "key",
     password: "",
   };
+}
+
+/** The label shown on a host's rail card and terminal panel. */
+export function hostDisplayName(h: { name: string }, index: number): string {
+  return h.name.trim() || `Host ${index + 1}`;
 }
 
 /** True when the host has the one credential its auth method calls for. */
@@ -90,27 +97,41 @@ function labeledInput(
 export interface HostStore {
   /** Returns the live array of host configs (mutated in place on edits). */
   getHosts(): HostConfig[];
-  /** Register a callback invoked after hydration and after each debounced save. */
+  /**
+   * Register a callback invoked after hydration, after each debounced save,
+   * and after every add, remove or reorder (the array's order is the rail's).
+   */
   onChange(cb: (hosts: HostConfig[]) => void): void;
 }
+
+const GRIP_SVG =
+  '<svg viewBox="0 0 14 14" fill="currentColor" width="14" height="14">' +
+  '<circle cx="4" cy="3" r="1.2"/><circle cx="10" cy="3" r="1.2"/>' +
+  '<circle cx="4" cy="7" r="1.2"/><circle cx="10" cy="7" r="1.2"/>' +
+  '<circle cx="4" cy="11" r="1.2"/><circle cx="10" cy="11" r="1.2"/></svg>';
 
 /**
  * Mount the persistent host-config rail into root; returns the shared store.
  *
- * `hostCount` is the server-reported `maxSessions` (GET /api/config), so the
- * rail renders exactly as many cards as the server will accept on PUT.
+ * `maxHosts` is the server-reported `maxSessions` (GET /api/config): hosts can
+ * be added up to it, since that is the most the server accepts on PUT.
  */
-export function mountHostRail(root: HTMLElement, hostCount: number): HostStore {
+export function mountHostRail(root: HTMLElement, maxHosts: number): HostStore {
   root.classList.add("host-rail");
-  root.dataset.hostCount = String(hostCount);
 
   const titleEl = el("h1", "rail-title");
   titleEl.textContent = "Hosts";
   const subEl = el("p", "rail-subtitle");
-  subEl.textContent = `Configure up to ${hostCount} host${hostCount === 1 ? "" : "s"} shared across both tabs.`;
-  root.append(titleEl, subEl);
+  subEl.textContent = `Up to ${maxHosts} host${maxHosts === 1 ? "" : "s"}, shared across both tabs. Drag the grip to reorder.`;
+  const list = el("div", "host-list");
+  const addBtn = el("button", "btn host-add");
+  addBtn.type = "button";
+  addBtn.textContent = "+ Add host";
+  root.append(titleEl, subEl, list, addBtn);
 
-  const hosts: HostConfig[] = Array.from({ length: hostCount }, makeDefault);
+  const hosts: HostConfig[] = [];
+  /** The one expanded card (accordion); null when all are collapsed. */
+  let openHost: HostConfig | null = null;
   const listeners: Array<(hosts: HostConfig[]) => void> = [];
 
   const notify = (): void => {
@@ -127,52 +148,142 @@ export function mountHostRail(root: HTMLElement, hostCount: number): HostStore {
     }, 400);
   };
 
-  const inputRefs: {
-    ip: HTMLInputElement;
-    user: HTMLInputElement;
-    port: HTMLInputElement;
-    key: HTMLInputElement;
-    remoteDir: HTMLInputElement;
-  }[] = [];
+  /** Save now and tell the panels: used for add, remove and reorder. */
+  const commitStructure = (): void => {
+    if (saveTimer !== null) clearTimeout(saveTimer);
+    saveTimer = null;
+    render();
+    void saveHosts(hosts).catch(() => undefined);
+    notify();
+  };
 
-  for (let i = 0; i < hostCount; i++) {
-    const h = hosts[i] as HostConfig;
+  const cardHost = new WeakMap<HTMLElement, HostConfig>();
+
+  /** Move `h` before or after `target`, keeping the rail a single column. */
+  const moveHost = (h: HostConfig, target: HostConfig, after: boolean): void => {
+    const from = hosts.indexOf(h);
+    let to = hosts.indexOf(target) + (after ? 1 : 0);
+    if (from < 0 || to < 0) return;
+    if (from < to) to--;
+    if (from === to) return;
+    hosts.splice(from, 1);
+    hosts.splice(to, 0, h);
+    commitStructure();
+  };
+
+  const clearDropMarks = (): void => {
+    list.querySelectorAll(".drop-above, .drop-below").forEach((c) => {
+      c.classList.remove("drop-above", "drop-below");
+    });
+  };
+
+  /** Pointer drag from the grip only; a line shows where the card will land. */
+  const attachDrag = (grip: HTMLElement, card: HTMLElement, h: HostConfig): void => {
+    grip.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      grip.setPointerCapture(e.pointerId);
+      card.classList.add("is-dragging");
+      let drop: { target: HostConfig; after: boolean } | null = null;
+
+      const onMove = (ev: PointerEvent): void => {
+        clearDropMarks();
+        drop = null;
+        const hit = document.elementFromPoint(ev.clientX, ev.clientY);
+        const over = hit?.closest<HTMLElement>(".host-card");
+        if (!over || over === card || !list.contains(over)) return;
+        const target = cardHost.get(over);
+        if (!target) return;
+        const r = over.getBoundingClientRect();
+        const after = ev.clientY >= r.top + r.height / 2;
+        over.classList.add(after ? "drop-below" : "drop-above");
+        drop = { target, after };
+      };
+      const onEnd = (): void => {
+        grip.removeEventListener("pointermove", onMove);
+        grip.removeEventListener("pointerup", onEnd);
+        grip.removeEventListener("pointercancel", onEnd);
+        card.classList.remove("is-dragging");
+        clearDropMarks();
+        if (drop) moveHost(h, drop.target, drop.after);
+      };
+      grip.addEventListener("pointermove", onMove);
+      grip.addEventListener("pointerup", onEnd);
+      grip.addEventListener("pointercancel", onEnd);
+    });
+  };
+
+  const buildCard = (h: HostConfig, i: number): HTMLElement => {
     const card = el("div", "host-card");
+    cardHost.set(card, h);
     const cardHeader = el("div", "host-card-header");
+    const grip = el("span", "drag-handle");
+    grip.title = "Drag to reorder";
+    grip.innerHTML = GRIP_SVG;
     const collapseBtn = el("button", "host-card-collapse");
     collapseBtn.type = "button";
-    collapseBtn.textContent = "▾";
-    collapseBtn.title = "Collapse this host";
-    collapseBtn.setAttribute("aria-expanded", "true");
     const cardTitle = el("h3", "host-card-title");
-    cardTitle.textContent = `Host ${i + 1}`;
-    cardHeader.append(collapseBtn, cardTitle);
+    cardTitle.textContent = hostDisplayName(h, i);
+    const removeBtn = el("button", "host-card-remove");
+    removeBtn.type = "button";
+    removeBtn.textContent = "\u2715";
+    removeBtn.title = "Remove this host";
+    removeBtn.disabled = hosts.length <= 1;
+    cardHeader.append(grip, collapseBtn, cardTitle, removeBtn);
     card.append(cardHeader);
+    attachDrag(grip, card, h);
 
     const cardBody = el("div", "host-card-body");
     card.append(cardBody);
 
+    const collapsed = openHost !== h;
+    card.classList.toggle("collapsed", collapsed);
+    collapseBtn.textContent = collapsed ? "\u25b8" : "\u25be";
+    collapseBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    collapseBtn.title = collapsed ? "Expand this host" : "Collapse this host";
+    // Accordion: opening one card closes whichever was open.
     collapseBtn.addEventListener("click", () => {
-      const collapsed = card.classList.toggle("collapsed");
-      collapseBtn.textContent = collapsed ? "▸" : "▾";
-      collapseBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
-      collapseBtn.title = collapsed ? "Expand this host" : "Collapse this host";
+      openHost = openHost === h ? null : h;
+      render();
+    });
+
+    removeBtn.addEventListener("click", () => {
+      void confirmDialog(
+        `Remove ${hostDisplayName(h, hosts.indexOf(h))}? Its terminal will be disconnected and closed.`,
+        { title: "Remove host", confirmLabel: "Remove" },
+      ).then((ok) => {
+        const at = hosts.indexOf(h);
+        if (!ok || at < 0 || hosts.length <= 1) return;
+        hosts.splice(at, 1);
+        if (openHost === h) openHost = null;
+        commitStructure();
+      });
+    });
+
+    const nameInput = labeledInput(cardBody, "Name", `Host ${i + 1}`);
+    nameInput.value = h.name;
+    nameInput.addEventListener("input", () => {
+      h.name = nameInput.value;
+      cardTitle.textContent = hostDisplayName(h, i);
+      scheduleSave();
     });
 
     const ipInput = labeledInput(cardBody, "IP / hostname", "e.g. 10.0.0.5");
+    ipInput.value = h.ip;
     ipInput.addEventListener("input", () => {
       h.ip = ipInput.value.trim();
       scheduleSave();
     });
 
     const userInput = labeledInput(cardBody, "User", "e.g. root");
+    userInput.value = h.user;
     userInput.addEventListener("input", () => {
       h.user = userInput.value.trim();
       scheduleSave();
     });
 
     const portInput = labeledInput(cardBody, "Port", "22");
-    portInput.value = "22";
+    portInput.value = String(h.port);
     portInput.addEventListener("input", () => {
       const v = parseInt(portInput.value, 10);
       h.port = isNaN(v) ? 22 : v;
@@ -208,6 +319,7 @@ export function mountHostRail(root: HTMLElement, hostCount: number): HostStore {
     keyInput.type = "text";
     keyInput.readOnly = true;
     keyInput.placeholder = "Click to select from ~/.ssh\u2026";
+    keyInput.value = h.key;
     keyInput.addEventListener("click", () => {
       void openKeyPicker().then((name) => {
         if (name) {
@@ -230,6 +342,7 @@ export function mountHostRail(root: HTMLElement, hostCount: number): HostStore {
     pwInput.type = "password";
     pwInput.autocomplete = "off";
     pwInput.placeholder = "Not saved; cleared on reload";
+    pwInput.value = h.password;
     pwInput.addEventListener("input", () => {
       h.password = pwInput.value;
       // Notify without saving: the panels need the new credential, and there
@@ -246,7 +359,7 @@ export function mountHostRail(root: HTMLElement, hostCount: number): HostStore {
     dirInput.type = "text";
     dirInput.readOnly = true;
     dirInput.placeholder = "/tmp";
-    dirInput.value = "/tmp";
+    dirInput.value = h.remoteDir;
     dirInput.addEventListener("click", () => {
       // Remote browsing goes through /api/sftp/listdir, which authenticates
       // with a key only -- a password host types its path instead (the input
@@ -331,37 +444,45 @@ export function mountHostRail(root: HTMLElement, hostCount: number): HostStore {
     });
     cardBody.append(copyBtn, copyHint);
 
-    inputRefs.push({
-      ip: ipInput,
-      user: userInput,
-      port: portInput,
-      key: keyInput,
-      remoteDir: dirInput,
-    });
+    return card;
+  };
 
-    root.append(card);
+  function render(): void {
+    list.replaceChildren(...hosts.map((h, i) => buildCard(h, i)));
+    addBtn.disabled = hosts.length >= maxHosts;
+    addBtn.title = addBtn.disabled
+      ? `The server allows at most ${maxHosts} hosts`
+      : "Add another host";
   }
 
+  addBtn.addEventListener("click", () => {
+    if (hosts.length >= maxHosts) return;
+    const h = makeDefault();
+    hosts.push(h);
+    openHost = h;
+    commitStructure();
+  });
+
+  const hydrate = (loaded: PersistedHost[]): void => {
+    for (const src of loaded.slice(0, maxHosts)) {
+      const h = makeDefault();
+      h.name = src.name ?? "";
+      h.ip = src.ip ?? "";
+      h.user = src.user ?? "";
+      h.port = src.port ?? 22;
+      h.key = src.key ?? "";
+      h.remoteDir = src.remoteDir ?? "/tmp";
+      hosts.push(h);
+    }
+    if (hosts.length === 0) hosts.push(makeDefault());
+    openHost = hosts[0] ?? null;
+    render();
+    notify();
+  };
+
   fetchHosts()
-    .then((loaded) => {
-      for (let i = 0; i < Math.min(loaded.length, hostCount); i++) {
-        const src = loaded[i] as PersistedHost;
-        const h = hosts[i] as HostConfig;
-        const refs = inputRefs[i] as (typeof inputRefs)[0];
-        h.ip = src.ip ?? "";
-        h.user = src.user ?? "";
-        h.port = src.port ?? 22;
-        h.key = src.key ?? "";
-        h.remoteDir = src.remoteDir ?? "/tmp";
-        refs.ip.value = h.ip;
-        refs.user.value = h.user;
-        refs.port.value = String(h.port);
-        refs.key.value = h.key;
-        refs.remoteDir.value = h.remoteDir;
-      }
-      for (const cb of listeners) cb(hosts);
-    })
-    .catch(() => undefined);
+    .then(hydrate)
+    .catch(() => hydrate([]));
 
   return {
     getHosts: () => hosts,

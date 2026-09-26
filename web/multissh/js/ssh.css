@@ -51,32 +51,30 @@ body {
 }
 
 .host-rail {
-  width: 280px;
+  width: 300px;
   flex-shrink: 0;
   background: var(--color-surface-1);
   border-right: 1px solid var(--color-border);
   overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
   padding: 16px;
-  /* Cards flow into as many columns as the rail's width allows; at the default
-     280px that is exactly one, so a three-host rail looks as it always has. */
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  align-content: start;
-  column-gap: 12px;
 }
 
-.rail-title,
-.rail-subtitle {
-  grid-column: 1 / -1;
+/* One column always: the accordion keeps the list short, and a single column
+   is what keeps drag-to-reorder a plain up/down move. */
+.host-list {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
-/* Five or more hosts is a long scroll in one column: widen the rail so the
-   auto-fill above gives two, keeping every card reachable without scrolling. */
-.host-rail[data-host-count="5"],
-.host-rail[data-host-count="6"],
-.host-rail[data-host-count="7"],
-.host-rail[data-host-count="8"] {
-  width: min(40vw, 520px);
+.host-add {
+  width: 100%;
+}
+
+.host-add:disabled {
+  cursor: not-allowed;
 }
 
 .rail-title {
@@ -99,11 +97,76 @@ body {
 
 /* ---------- Host cards (in rail) ---------- */
 .host-card {
+  position: relative;
   background: var(--color-surface-2);
   border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 12px;
   margin-bottom: 12px;
+}
+
+.host-card.is-dragging {
+  opacity: 0.4;
+}
+
+.host-card.drop-above::before,
+.host-card.drop-below::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 2px;
+  background: var(--color-primary);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.host-card.drop-above::before {
+  top: -7px;
+}
+
+.host-card.drop-below::after {
+  bottom: -7px;
+}
+
+.drag-handle {
+  display: flex;
+  align-items: center;
+  color: var(--color-text-faint, var(--color-text-muted));
+  cursor: grab;
+  touch-action: none;
+  flex-shrink: 0;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+  color: var(--color-text-muted);
+}
+
+.drag-handle svg {
+  display: block;
+  pointer-events: none;
+}
+
+.host-card-remove {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 4px;
+  flex-shrink: 0;
+}
+
+.host-card-remove:hover:not(:disabled) {
+  color: var(--color-danger);
+}
+
+.host-card-remove:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 .host-card-header {
@@ -130,6 +193,10 @@ body {
 
 .host-card-title {
   margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 14px;
   color: var(--color-primary);
 }
@@ -1051,8 +1118,7 @@ body {
     flex-direction: column;
   }
 
-  .host-rail,
-  .host-rail[data-host-count] {
+  .host-rail {
     width: auto;
     max-height: 45vh;
     border-right: none;

@@ -1,6 +1,6 @@
 import { TerminalSession } from "./terminal";
 import type { HostConfig, SessionStatus } from "./types";
-import { hostHasCredential } from "./hosts";
+import { hostHasCredential, hostDisplayName } from "./hosts";
 import type { HostStore } from "./hosts";
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -12,24 +12,13 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-function emptyHost(): HostConfig {
-  return {
-    ip: "",
-    port: 22,
-    user: "",
-    key: "",
-    remoteDir: "/tmp",
-    authMethod: "key",
-    password: "",
-  };
-}
-
 interface Panel {
-  updateConfig(config: HostConfig): void;
+  el: HTMLElement;
+  updateConfig(config: HostConfig, index: number): void;
   session: TerminalSession;
 }
 
-/** Mount the SSH console tab: master broadcast bar + `maxSessions` terminal panels. */
+/** Mount the SSH console tab: master broadcast bar + one terminal panel per host. */
 export function mountSSHApp(
   root: HTMLElement,
   store: HostStore,
@@ -41,26 +30,39 @@ export function mountSSHApp(
   const terminals = el("section", "ssh-terminals");
   const master = buildMasterBar();
   const grid = el("div", "term-grid");
-  grid.dataset.panelCount = String(maxSessions);
   terminals.append(master.bar, grid);
 
-  const hosts = store.getHosts();
-  const panels: Panel[] = [];
+  // One panel per host object, so adding, removing or reordering hosts in the
+  // rail keeps every surviving panel's connection and scrollback.
+  const panels = new Map<HostConfig, Panel>();
 
-  for (let i = 0; i < maxSessions; i++) {
-    const cfg: HostConfig = hosts[i] ?? emptyHost();
-    const panel = buildPanel(i, cfg, grid);
-    panels.push(panel);
-  }
-
-  store.onChange((updated) => {
-    for (let i = 0; i < maxSessions; i++) {
-      panels[i]?.updateConfig(updated[i] ?? emptyHost());
+  const sync = (hosts: HostConfig[]): void => {
+    const live = new Set(hosts);
+    for (const [host, panel] of panels) {
+      if (live.has(host)) continue;
+      panel.session.dispose();
+      panel.el.remove();
+      panels.delete(host);
     }
-  });
+    hosts.forEach((host, i) => {
+      let panel = panels.get(host);
+      if (!panel) {
+        panel = buildPanel(i, host, grid);
+        panels.set(host, panel);
+      } else {
+        panel.updateConfig(host, i);
+      }
+      // append() moves an existing node, so this also applies the rail order.
+      grid.append(panel.el);
+    });
+    grid.dataset.panelCount = String(hosts.length);
+  };
+
+  sync(store.getHosts());
+  store.onChange(sync);
 
   master.onSend = (text: string) => {
-    for (const p of panels) {
+    for (const p of panels.values()) {
       p.session.broadcast(text);
     }
   };
@@ -68,10 +70,7 @@ export function mountSSHApp(
   root.append(terminals);
 
   requestAnimationFrame(() => {
-    for (const p of panels) p.session.resize();
-  });
-  window.addEventListener("resize", () => {
-    for (const p of panels) p.session.resize();
+    for (const p of panels.values()) p.session.resize();
   });
 }
 
@@ -208,7 +207,6 @@ function buildPanel(
   container: HTMLElement,
 ): Panel {
   let config: HostConfig = { ...initialConfig };
-  const hostLabel = `Host ${index + 1}`;
 
   const panelEl = el("div", "term-panel");
   const header = el("div", "term-header");
@@ -221,7 +219,7 @@ function buildPanel(
 
   const dot = el("span", "status-dot");
   const titleEl = el("span", "term-title");
-  titleEl.textContent = hostLabel;
+  titleEl.textContent = hostDisplayName(config, index);
   const statusText = el("span", "status-text");
   statusText.textContent = "disconnected";
 
@@ -262,6 +260,7 @@ function buildPanel(
 
   const body = el("div", "term-body");
   panelEl.append(header, body);
+  // Attach before the terminal opens so xterm measures a laid-out element.
   container.append(panelEl);
 
   const session = new TerminalSession(body);
@@ -317,8 +316,10 @@ function buildPanel(
   interruptBtn.addEventListener("click", () => session.interrupt());
 
   return {
-    updateConfig(updated: HostConfig): void {
+    el: panelEl,
+    updateConfig(updated: HostConfig, i: number): void {
       config = { ...updated };
+      titleEl.textContent = hostDisplayName(config, i);
     },
     session,
   };

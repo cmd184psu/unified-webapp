@@ -10,6 +10,7 @@ const SECRET = "hunter2-do-not-leak";
 
 function host(over: Partial<HostConfig>): HostConfig {
   return {
+    name: "",
     ip: "10.0.0.5",
     port: 22,
     user: "ops",

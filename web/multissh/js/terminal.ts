@@ -33,6 +33,7 @@ export class TerminalSession {
   private readonly fit: FitAddon;
   private ws: WebSocket | null = null;
   private statusValue: SessionStatus = "disconnected";
+  private readonly resizeObserver: ResizeObserver;
 
   /** When true, this panel ignores master-field broadcasts. */
   paused = false;
@@ -53,6 +54,19 @@ export class TerminalSession {
     this.term.loadAddon(this.fit);
     this.term.open(container);
     this.safeFit();
+    // Refit whenever the panel's box changes -- a sibling panel expanding or
+    // collapsing, the rail resizing, or a late font load -- so the row count
+    // never overshoots the viewport and clips the bottom (input) line.
+    let pending = false;
+    this.resizeObserver = new ResizeObserver(() => {
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(() => {
+        pending = false;
+        this.resize();
+      });
+    });
+    this.resizeObserver.observe(container);
     sessions.push(this);
 
     // Local typing in this panel goes straight to its own connection.
@@ -157,6 +171,21 @@ export class TerminalSession {
       this.sendBytes("\x03");
       this.term.focus();
     }
+  }
+
+  /** Close the connection and release the terminal; the session is unusable after. */
+  dispose(): void {
+    this.onStatus = () => {};
+    if (this.ws) {
+      this.ws.onmessage = null;
+      this.ws.onerror = null;
+      this.ws.onclose = null;
+    }
+    this.disconnect();
+    this.resizeObserver.disconnect();
+    const i = sessions.indexOf(this);
+    if (i >= 0) sessions.splice(i, 1);
+    this.term.dispose();
   }
 
   /** Re-fit the terminal to its container and inform the remote PTY. */

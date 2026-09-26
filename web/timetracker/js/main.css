@@ -1,3 +1,22 @@
+body {
+    font-family: var(--font-body);
+    background: var(--color-bg);
+    color: var(--color-text);
+}
+
+input,
+select,
+textarea {
+    background: var(--color-surface-1);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    font: inherit;
+}
+
+a {
+    color: var(--color-primary);
+}
+
 .container {
     display: flex;
     flex-direction: column;
@@ -36,7 +55,13 @@
 }
 
 .hidden {
-    display: none;
+    display: none !important;
+}
+
+.app-menu-trigger {
+    position: absolute;
+    top: var(--space-2);
+    right: var(--space-2);
 }
 
 .time-selector-table {
@@ -77,7 +102,7 @@
     gap: var(--space-2);
 }
 
-#clearTimeSelectionBtn, #copyTimeSelectionBtn {
+#clearTimeSelectionBtn {
     margin-top: var(--space-2);
     padding: var(--space-1) var(--space-2);
     background-color: var(--color-danger);
@@ -90,8 +115,8 @@
     justify-content: center;
 }
 
-#clearTimeSelectionBtn:hover, #copyTimeSelectionBtn:hover {
-    background-color: var(--color-danger-hover);
+#clearTimeSelectionBtn:hover {
+    filter: brightness(0.85);
 }
 
 #copyReportBtn {
@@ -107,7 +132,7 @@
 }
 
 #copyReportBtn:hover {
-    background-color: var(--color-danger-hover);
+    filter: brightness(0.85);
 }
 
 .report-container {
@@ -154,13 +179,35 @@
     display: block;
 }
 
-.delete-btn {
+.delete-btn,
+.add-btn {
     min-width: 250px;
-    color: var(--color-on-danger, white);
-    background-color: var(--color-danger);
+    color: #fff;
     padding: var(--space-2) var(--space-5);
     border: none;
     cursor: pointer;
+}
+
+.delete-btn {
+    background-color: var(--color-danger);
+}
+
+.add-btn {
+    background-color: var(--color-success);
+}
+
+.delete-btn:hover,
+.add-btn:hover {
+    filter: brightness(1.1);
+}
+
+/* Light theme keeps the original button colors. */
+[data-theme="light"] .delete-btn {
+    background-color: red;
+}
+
+[data-theme="light"] .add-btn {
+    background-color: darkgreen;
 }
 
 .modal {
@@ -216,4 +263,98 @@
 
 .edit-btn:hover {
     color: var(--color-primary-hover);
+}
+
+/* Light theme reproduces the original pshelper look exactly. */
+[data-theme="light"] body {
+    font-family: "Times New Roman", Times, serif;
+    background: #fff;
+    color: #000;
+}
+
+[data-theme="light"] input,
+[data-theme="light"] select,
+[data-theme="light"] textarea,
+[data-theme="light"] a {
+    all: revert;
+}
+
+[data-theme="light"] .edit-btn,
+[data-theme="light"] .edit-btn:hover {
+    color: #000;
+}
+
+[data-theme="light"] .customer-item {
+    background-color: lightgray;
+    margin-bottom: 5px;
+    padding: 10px;
+    border-radius: 5px;
+}
+
+[data-theme="light"] .customer-item.selected {
+    background-color: lightgreen;
+}
+
+[data-theme="light"] #clearTimeSelectionBtn,
+[data-theme="light"] #copyReportBtn {
+    background-color: #f44336;
+    border-radius: 5px;
+    padding: 5px 10px;
+    filter: none;
+}
+
+[data-theme="light"] #clearTimeSelectionBtn:hover,
+[data-theme="light"] #copyReportBtn:hover {
+    background-color: #d32f2f;
+}
+
+[data-theme="light"] #processedReport {
+    border-color: #ccc;
+    padding: 10px;
+}
+
+[data-theme="light"] .footer {
+    background-color: #333;
+    color: #fff;
+    padding: 10px 0;
+}
+
+[data-theme="light"] .delete-btn,
+[data-theme="light"] .add-btn {
+    padding: 10px 20px;
+    filter: none;
+}
+
+[data-theme="light"] .modal-content {
+    background-color: #fff;
+    border-radius: 5px;
+    padding: 20px;
+}
+
+[data-theme="light"] .modal-content button {
+    margin: 10px;
+    padding: 10px 20px;
+    font-size: 16px;
+}
+
+[data-theme="light"] .time-selector-table th,
+[data-theme="light"] .time-selector-table td {
+    border-color: #000;
+}
+
+[data-theme="light"] .time-block {
+    background-color: #fff;
+}
+
+[data-theme="light"] .time-block:hover {
+    background-color: #f0f0f0;
+}
+
+[data-theme="light"] .time-block.selected {
+    background-color: lightblue;
+}
+
+[data-theme="light"] #totalTimeInput {
+    border: 1px solid #ccc;
+    background-color: #f9f9f9;
 }

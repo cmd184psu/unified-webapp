@@ -9,7 +9,6 @@ interface TimeSlot {
   quarter: number;
 }
 
-const SVG_COPY = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 
 export default class TimeSelector {
   private _rawContainer: string | Element;
@@ -22,7 +21,6 @@ export default class TimeSelector {
   private timeBlocks: HTMLElement[] = [];
   private totalTimeInput?: HTMLInputElement;
   private clearBtn?: HTMLElement;
-  private copyBtn?: HTMLElement;
   private _domReadyHandler?: () => void;
 
   constructor(container: string | Element, options: TimeSelectorOptions = {}) {
@@ -90,9 +88,6 @@ export default class TimeSelector {
       </div>
       <div class="time-buttons">
         <button type="button" id="clearTimeSelectionBtn">Clear</button>
-        <button type="button" id="copyTimeSelectionBtn" title="Copy total time">
-          ${SVG_COPY}
-        </button>
       </div>
     `;
 
@@ -100,7 +95,6 @@ export default class TimeSelector {
     this.timeBlocks = Array.from(this.container!.querySelectorAll('.time-block'));
     this.totalTimeInput = this.container!.querySelector('#totalTimeInput') as HTMLInputElement;
     this.clearBtn = this.container!.querySelector('#clearTimeSelectionBtn') as HTMLElement;
-    this.copyBtn = this.container!.querySelector('#copyTimeSelectionBtn') as HTMLElement;
   }
 
   private _generateTimeTable(): string {
@@ -135,7 +129,6 @@ export default class TimeSelector {
     });
 
     this.clearBtn?.addEventListener('click', () => this.clearSelection());
-    this.copyBtn?.addEventListener('click', () => this.copySelection());
 
     document.addEventListener('mouseup', () => {
       if (this.isDragging) this._endSelection();
@@ -226,15 +219,6 @@ export default class TimeSelector {
     this.selectedBlocks = [];
     this._updateTotalTime();
     this._notifyChange();
-  }
-
-  copySelection(): void {
-    const text = this.totalTimeInput?.value || '';
-    if (navigator.clipboard && text) {
-      navigator.clipboard.writeText(text).catch(err => {
-        console.warn('TimeSelector: copy failed', err);
-      });
-    }
   }
 
   getSelectedTimeBlocks(): TimeSlot[] {

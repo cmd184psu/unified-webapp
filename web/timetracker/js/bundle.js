@@ -2,7 +2,6 @@
 import { ThemeManager, HamburgerMenu } from "/shared/dist/shared.mjs";
 
 // web/timetracker/js/time-selector.ts
-var SVG_COPY = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 var TimeSelector = class {
   constructor(container, options = {}) {
     this.selectedBlocks = [];
@@ -64,16 +63,12 @@ var TimeSelector = class {
       </div>
       <div class="time-buttons">
         <button type="button" id="clearTimeSelectionBtn">Clear</button>
-        <button type="button" id="copyTimeSelectionBtn" title="Copy total time">
-          ${SVG_COPY}
-        </button>
       </div>
     `;
     this.table = this.container.querySelector("#timeSelectorTable");
     this.timeBlocks = Array.from(this.container.querySelectorAll(".time-block"));
     this.totalTimeInput = this.container.querySelector("#totalTimeInput");
     this.clearBtn = this.container.querySelector("#clearTimeSelectionBtn");
-    this.copyBtn = this.container.querySelector("#copyTimeSelectionBtn");
   }
   _generateTimeTable() {
     let html = "";
@@ -105,7 +100,6 @@ var TimeSelector = class {
       block.addEventListener("mouseup", () => this._endSelection());
     });
     this.clearBtn?.addEventListener("click", () => this.clearSelection());
-    this.copyBtn?.addEventListener("click", () => this.copySelection());
     document.addEventListener("mouseup", () => {
       if (this.isDragging) this._endSelection();
     });
@@ -189,14 +183,6 @@ var TimeSelector = class {
     this._updateTotalTime();
     this._notifyChange();
   }
-  copySelection() {
-    const text = this.totalTimeInput?.value || "";
-    if (navigator.clipboard && text) {
-      navigator.clipboard.writeText(text).catch((err) => {
-        console.warn("TimeSelector: copy failed", err);
-      });
-    }
-  }
   getSelectedTimeBlocks() {
     return this.selectedBlocks.map((b) => ({
       hour: parseInt(b.dataset.hour, 10),
@@ -208,12 +194,15 @@ var TimeSelector = class {
 // web/timetracker/js/main.ts
 var SVG_EDIT = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>';
 var SVG_DOWNLOAD = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
-var SVG_COPY2 = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+var SVG_COPY = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+var APP_VERSION = "2.0.0";
 var themes = new ThemeManager({ module: "timetracker", default: "dark" });
 themes.apply();
 function buildHamburger() {
   const items = [];
-  new HamburgerMenu({ title: "TimeTracker", items, themePicker: true, themes });
+  const menu = new HamburgerMenu({ title: "TimeTracker", items, themePicker: true, themes, side: "right" });
+  menu.trigger.classList.add("app-menu-trigger");
+  document.body.append(menu.trigger);
 }
 document.addEventListener("DOMContentLoaded", function() {
   buildHamburger();
@@ -244,7 +233,6 @@ document.addEventListener("DOMContentLoaded", function() {
   const deleteButton = document.createElement("button");
   deleteButton.textContent = "Delete Customer";
   deleteButton.className = "delete-btn";
-  deleteButton.style.backgroundColor = "red";
   const modal = document.createElement("div");
   modal.className = "modal hidden";
   modal.innerHTML = `
@@ -259,12 +247,6 @@ document.addEventListener("DOMContentLoaded", function() {
   const addButton = document.createElement("button");
   addButton.textContent = "Add Customer";
   addButton.className = "add-btn";
-  addButton.style.backgroundColor = "darkgreen";
-  addButton.style.color = "white";
-  addButton.style.minWidth = "250px";
-  addButton.style.padding = "10px 20px";
-  addButton.style.border = "none";
-  addButton.style.cursor = "pointer";
   leftPanel.appendChild(addButton);
   const addModal = document.createElement("div");
   addModal.className = "modal hidden";
@@ -358,7 +340,8 @@ document.addEventListener("DOMContentLoaded", function() {
   let timeSelector = null;
   fetch("/data").then((response) => response.json()).then((data) => {
     header.innerHTML = `
-                <h1>${data.projectName}</h1>
+                <h1>Time Tracker</h1>
+                <h2>Version: ${APP_VERSION}</h2>
                 <div class="form-group">
                     <label data-tooltip="author">Author:</label>
                     <input type="text" id="authorInput" value="${data.author}" readonly data-tooltip="author">
@@ -432,7 +415,8 @@ document.addEventListener("DOMContentLoaded", function() {
                         <label data-tooltip="slackChannel">Slack Channel:</label>
                         <a href="slack://channel?team=T12DX4MJR&id=${customer.slackChannelId}" id="slackChannel" data-tooltip="slackChannel">${customer.slackChannel}</a>
                         <span class="edit-btn" data-target="slackChannel">${SVG_EDIT}</span>
-                        <input type="text" id="slackChannelInput" class="hidden" value="${customer.slackChannel}" data-tooltip="slackChannel">
+                        <input type="text" id="slackChannelInput" class="hidden" value="${customer.slackChannel}" placeholder="Channel name" data-tooltip="slackChannel">
+                        <input type="text" id="slackChannelIdInput" class="hidden" value="${customer.slackChannelId}" placeholder="Channel ID" data-tooltip="slackChannel">
                         <button class="submit-btn hidden" data-target="slackChannel" data-index="${index}">Submit</button>
                     </div>
                     <div class="form-group">
@@ -478,7 +462,7 @@ document.addEventListener("DOMContentLoaded", function() {
                         <div class="report-preview">
                             <label>Processed Report:</label>
                             <div id="processedReport"></div>
-                            <button id="copyReportBtn" data-tooltip="copyReportBtn">${SVG_COPY2}</button>
+                            <button id="copyReportBtn" data-tooltip="copyReportBtn">${SVG_COPY}</button>
                         </div>
                     </div>
                 `;
@@ -585,6 +569,9 @@ document.addEventListener("DOMContentLoaded", function() {
           const input = document.getElementById(`${target}Input`);
           input.removeAttribute("readonly");
           input.classList.remove("hidden");
+          if (target === "slackChannel") {
+            document.getElementById("slackChannelIdInput").classList.remove("hidden");
+          }
           document.querySelector(`button[data-target="${target}"]`).classList.remove("hidden");
         });
       });
@@ -595,27 +582,27 @@ document.addEventListener("DOMContentLoaded", function() {
           const link = document.getElementById(target);
           const index2 = parseInt(this.getAttribute("data-index"), 10);
           const updatedValue = input.value;
-          const requestData = {
-            index: index2,
-            field: target,
-            value: updatedValue
+          const postField = (field, value) => {
+            const requestData = { index: index2, field, value };
+            console.log("Sending request data:", requestData);
+            return fetch(`/update`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify(requestData)
+            }).then((response) => {
+              if (!response.ok) {
+                return response.text().then((text) => {
+                  throw new Error(text);
+                });
+              }
+              return response.json();
+            });
           };
-          console.log("Sending request data:", requestData);
+          const idInput = document.getElementById("slackChannelIdInput");
           const self = this;
-          const sendUpdate = () => fetch(`/update`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify(requestData)
-          }).then((response) => {
-            if (!response.ok) {
-              return response.text().then((text) => {
-                throw new Error(text);
-              });
-            }
-            return response.json();
-          }).then((_updatedCustomer) => {
+          const sendUpdate = () => postField(target, updatedValue).then((data2) => target === "slackChannel" ? postField("slackChannelId", idInput.value) : data2).then((_updatedCustomer) => {
             console.log("Received updated customer:", _updatedCustomer);
             console.log("Target:", target);
             if (target === "jira") {
@@ -642,6 +629,10 @@ document.addEventListener("DOMContentLoaded", function() {
                 link.textContent = input.value;
                 if (target === "cmsUrl") {
                   link.href = input.value;
+                }
+                if (target === "slackChannel") {
+                  link.href = `slack://channel?team=T12DX4MJR&id=${idInput.value}`;
+                  idInput.classList.add("hidden");
                 }
                 input.classList.add("hidden");
               }

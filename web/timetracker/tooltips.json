@@ -8,6 +8,5 @@
     "jira": "The JIRA ticket number for the customer",
     "reportInput": "The input area for the report",
     "copyReportBtn": "Copy the processed report",
-    "clearTimeSelectionBtn": "Clear the selected time blocks",
-    "copyTimeSelectionBtn": "Copy the total time spent"
+    "clearTimeSelectionBtn": "Clear the selected time blocks"
 }
