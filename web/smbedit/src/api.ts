@@ -93,4 +93,8 @@ export const api = {
   saveAndRestart: () => request<SaveRestartResponse>('POST', '/api/save-and-restart'),
 
   version: () => request<{ version: string }>('GET', '/api/version'),
+
+  /** A Linux user's home directory — outside the picker's /opt root. */
+  home: (user: string) =>
+    request<{ user: string; path: string }>('GET', `/api/home?user=${encodeURIComponent(user)}`),
 }

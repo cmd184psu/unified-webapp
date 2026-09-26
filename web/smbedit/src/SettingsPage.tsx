@@ -13,14 +13,7 @@ export function SettingsPage({ config, onChange, importing, onImport }: Props) {
   const [importPath, setImportPath] = useState(config.smb_conf_path)
 
   return (
-    <div>
-      <div className="page-header">
-        <div className="page-title">Settings</div>
-        <div className="page-subtitle">
-          Server configuration and appearance. Saved to <code>state.json</code>.
-        </div>
-      </div>
-
+    <div className="drawer-settings">
       {/* ── Server ───────────────────────────────────────────────────── */}
       <div className="card">
         <div className="card-title">⚙️ Server</div>

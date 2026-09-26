@@ -2,7 +2,7 @@
 import { ThemeManager, HamburgerMenu } from "/shared/dist/shared.mjs";
 
 // web/multissh/js/api.ts
-var DEFAULT_MAX_SESSIONS = 3;
+var DEFAULT_MAX_SESSIONS = 10;
 var sessionExpiredHandled = false;
 function checkAuth(status) {
   if (status !== 401) return;
@@ -391,13 +391,11 @@ function mountHostRail(root, maxHosts) {
   root.classList.add("host-rail");
   const titleEl = el3("h1", "rail-title");
   titleEl.textContent = "Hosts";
-  const subEl = el3("p", "rail-subtitle");
-  subEl.textContent = `Up to ${maxHosts} host${maxHosts === 1 ? "" : "s"}, shared across both tabs. Drag the grip to reorder.`;
   const list = el3("div", "host-list");
   const addBtn = el3("button", "btn host-add");
   addBtn.type = "button";
   addBtn.textContent = "+ Add host";
-  root.append(titleEl, subEl, list, addBtn);
+  root.append(titleEl, list, addBtn);
   const hosts = [];
   let openHost = null;
   const listeners = [];
@@ -10061,6 +10059,7 @@ function el5(tag, className) {
   if (className) node.className = className;
   return node;
 }
+var MAX_OPEN_PANELS = 4;
 function mountSSHApp(root, store, maxSessions) {
   root.innerHTML = "";
   root.classList.add("ssh-app");
@@ -10069,6 +10068,37 @@ function mountSSHApp(root, store, maxSessions) {
   const grid = el5("div", "term-grid");
   terminals.append(master.bar, grid);
   const panels = /* @__PURE__ */ new Map();
+  let clock = 0;
+  const openPanels = () => [...panels.values()].filter((p) => !p.collapsed);
+  const layout = () => {
+    const open = openPanels().length;
+    grid.classList.toggle("two-up", open >= 3);
+    grid.dataset.openCount = String(open);
+  };
+  const expand = (panel) => {
+    const others = openPanels().filter((p) => p !== panel);
+    if (others.length >= MAX_OPEN_PANELS) {
+      let victim = others[0];
+      for (const p of others) if (p.touched < victim.touched) victim = p;
+      victim.setCollapsed(true);
+    }
+    panel.setCollapsed(false);
+    panel.touched = ++clock;
+    layout();
+  };
+  const control = {
+    toggle(panel) {
+      if (panel.collapsed) {
+        expand(panel);
+      } else {
+        panel.setCollapsed(true);
+        layout();
+      }
+    },
+    touch(panel) {
+      panel.touched = ++clock;
+    }
+  };
   const sync = (hosts) => {
     const live = new Set(hosts);
     for (const [host, panel] of panels) {
@@ -10080,14 +10110,15 @@ function mountSSHApp(root, store, maxSessions) {
     hosts.forEach((host, i) => {
       let panel = panels.get(host);
       if (!panel) {
-        panel = buildPanel(i, host, grid);
+        panel = buildPanel(i, host, grid, control);
+        if (openPanels().length >= MAX_OPEN_PANELS) panel.setCollapsed(true);
         panels.set(host, panel);
       } else {
         panel.updateConfig(host, i);
       }
       grid.append(panel.el);
     });
-    grid.dataset.panelCount = String(hosts.length);
+    layout();
   };
   sync(store.getHosts());
   store.onChange(sync);
@@ -10200,7 +10231,7 @@ function parseKeyword(text) {
   if (!trimmed.toLowerCase().startsWith("key:")) return null;
   return trimmed.slice(4).trim().toLowerCase();
 }
-function buildPanel(index, initialConfig, container) {
+function buildPanel(index, initialConfig, container, control) {
   let config = { ...initialConfig };
   const panelEl = el5("div", "term-panel");
   const header = el5("div", "term-header");
@@ -10257,15 +10288,15 @@ function buildPanel(index, initialConfig, container) {
   };
   session.onStatus = setStatus;
   setStatus("disconnected");
-  collapseBtn.addEventListener("click", () => {
-    const collapsed = panelEl.classList.toggle("is-collapsed");
+  const setCollapsed = (collapsed) => {
+    panelEl.classList.toggle("is-collapsed", collapsed);
     collapseBtn.textContent = collapsed ? "\u25B8" : "\u25BE";
     collapseBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
     collapseBtn.title = collapsed ? "Expand this terminal" : "Collapse this terminal (the session stays connected)";
     if (!collapsed) {
       requestAnimationFrame(() => session.resize());
     }
-  });
+  };
   pause.addEventListener("change", () => {
     session.paused = pause.checked;
     panelEl.classList.toggle("is-paused", pause.checked);
@@ -10282,18 +10313,28 @@ function buildPanel(index, initialConfig, container) {
       );
       return;
     }
+    control.touch(api);
     session.connect(config);
   });
   disconnectBtn.addEventListener("click", () => session.disconnect());
   interruptBtn.addEventListener("click", () => session.interrupt());
-  return {
+  const api = {
     el: panelEl,
     updateConfig(updated, i) {
       config = { ...updated };
       titleEl.textContent = hostDisplayName(config, i);
     },
-    session
+    session,
+    get collapsed() {
+      return panelEl.classList.contains("is-collapsed");
+    },
+    setCollapsed,
+    touched: 0
   };
+  collapseBtn.addEventListener("click", () => control.toggle(api));
+  body.addEventListener("pointerdown", () => control.touch(api));
+  body.addEventListener("focusin", () => control.touch(api));
+  return api;
 }
 
 // web/multissh/js/filepicker.ts

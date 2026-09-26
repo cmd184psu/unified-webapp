@@ -272,20 +272,39 @@ var ThemeManager = class {
     this.mark(name);
   }
   mark(name) {
-    for (const rows of this.pickers) {
-      for (const row of rows) {
-        row.button.className = row.name === name ? "ui-theme-btn is-active" : "ui-theme-btn";
-      }
-    }
+    for (const marker of this.pickers) marker(name);
   }
   /**
-   * Renders the shared swatch picker into `host`. Every node is built through
+   * Renders the shared theme picker into `host`. Every node is built through
    * createElement and every label is a text node — no markup string is assigned
    * anywhere in this file. No colour value reaches this file either: each
    * swatch carries `data-theme`, and themes.css keys every palette on a bare
    * attribute selector.
+   *
+   * `mode` is a hint from the caller about the space it has: "list" (the
+   * default) is one swatch button per theme, for a picker that stands alone;
+   * "select" is a compact dropdown, for a picker sharing its space with other
+   * settings. HamburgerMenu chooses it from what else the drawer holds.
    */
-  renderPicker(host) {
+  renderPicker(host, mode = "list") {
+    if (mode === "select") {
+      const select = document.createElement("select");
+      select.className = "ui-theme-select";
+      select.setAttribute("aria-label", "Theme");
+      for (const name of this.list) {
+        const option = document.createElement("option");
+        option.value = name;
+        option.append(name);
+        select.append(option);
+      }
+      select.addEventListener("change", () => this.set(select.value));
+      host.append(select);
+      this.pickers.push((name) => {
+        select.value = name;
+      });
+      this.mark(this.resolve());
+      return;
+    }
     const picker = document.createElement("div");
     picker.className = "ui-theme-picker";
     const rows = [];
@@ -302,7 +321,11 @@ var ThemeManager = class {
       picker.append(button);
     }
     host.append(picker);
-    this.pickers.push(rows);
+    this.pickers.push((name) => {
+      for (const row of rows) {
+        row.button.className = row.name === name ? "ui-theme-btn is-active" : "ui-theme-btn";
+      }
+    });
     this.mark(this.resolve());
   }
   storageKey() {
@@ -643,7 +666,8 @@ var HamburgerMenu = class {
     label.className = "ui-menu-label";
     label.textContent = "Theme";
     section.append(label);
-    themes.renderPicker(section);
+    const shared = this.options.items.some((item) => !isSeparator(item) && !isSection(item));
+    themes.renderPicker(section, shared ? "select" : "list");
     return section;
   }
   /**

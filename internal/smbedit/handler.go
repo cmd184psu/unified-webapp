@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"path"
 	"path/filepath"
 	"runtime/debug"
@@ -67,6 +68,7 @@ func newServer(opts serverOptions) *server {
 	s.mux.HandleFunc("GET /api/globals", s.handleGetGlobals)
 	s.mux.HandleFunc("PUT /api/globals", s.handlePutGlobals)
 	s.mux.HandleFunc("GET /api/folders", s.handleGetFolders)
+	s.mux.HandleFunc("GET /api/home", s.handleGetHome)
 	s.mux.HandleFunc("POST /api/import", s.handleImportConf)
 	s.mux.HandleFunc("POST /api/save-and-restart", s.handleSaveAndRestart)
 	s.mux.HandleFunc("GET /api/preview", s.handlePreview)
@@ -247,6 +249,34 @@ func (s *server) handlePutGlobals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOK(w, st.Globals)
+}
+
+// ── Home directory lookup ────────────────────────────────────────────────────
+
+// lookupUser is the account-lookup seam; tests swap it so they do not depend
+// on the accounts of the machine running them.
+var lookupUser = user.Lookup
+
+// handleGetHome resolves a Linux user's home directory for the "home" share
+// shortcut. Home directories sit outside the folder picker's root (/opt by
+// default), so the picker cannot reach them; this is the one way the UI can
+// learn such a path.
+func (s *server) handleGetHome(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.URL.Query().Get("user"))
+	if name == "" {
+		jsonErr(w, "user is required", http.StatusBadRequest)
+		return
+	}
+	u, err := lookupUser(name)
+	if err != nil {
+		jsonErr(w, "unknown user: "+name, http.StatusNotFound)
+		return
+	}
+	if u.HomeDir == "" {
+		jsonErr(w, "user "+name+" has no home directory", http.StatusNotFound)
+		return
+	}
+	jsonOK(w, map[string]string{"user": u.Username, "path": u.HomeDir})
 }
 
 // ── Folder picker ─────────────────────────────────────────────────────────────

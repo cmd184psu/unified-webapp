@@ -238,6 +238,7 @@ All under the smbedit hostname. Same shapes as standalone smbed, minus
 | `GET /api/shares` / `PUT /api/shares` | Read / replace the share list (missing paths auto-disable, ops-logged) |
 | `GET /api/globals` / `PUT /api/globals` | Read / replace the [global] entries |
 | `GET /api/folders` | Folder-picker listing of `picker_root` |
+| `GET /api/home?user=<name>` | A Linux user's home directory, for the Shares page's **🏠 Share home** button (home directories sit outside `picker_root`) |
 | `POST /api/import` | Parse an smb.conf into staged globals/shares — does not persist |
 | `GET /api/preview` | The rendered smb.conf (from saved state) as text/plain |
 | `POST /api/preview` | Render a posted draft (globals/shares/share_owner) as text/plain — reflects unsaved editor edits; does not persist |

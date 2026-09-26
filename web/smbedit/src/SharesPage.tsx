@@ -1,11 +1,16 @@
 import { useState } from 'react'
-import { Share } from './api'
+import { showToast } from '@shared'
+import { api, Share } from './api'
 import { FolderPicker } from './FolderPicker'
 
 interface Props {
   shares: Share[]
   onChange: (shares: Share[]) => void
+  /** The Linux user all shares belong to; its home dir backs the "home" share. */
+  shareOwner: string
 }
+
+const HOME_SHARE = 'home'
 
 function emptyShare(): Share {
   return {
@@ -142,8 +147,41 @@ function ShareEditor({
   )
 }
 
-export function SharesPage({ shares, onChange }: Props) {
+export function SharesPage({ shares, onChange, shareOwner }: Props) {
   const [pickerIdx, setPickerIdx] = useState<number | null>(null)
+  const [findingHome, setFindingHome] = useState(false)
+
+  // The share owner's home directory lives outside /opt, where the folder
+  // picker cannot go, so the server resolves it. An existing "home" share is
+  // re-pointed rather than duplicated, keeping its other settings.
+  const shareHome = async () => {
+    const owner = shareOwner.trim()
+    if (!owner) {
+      showToast('Set the share owner first.', 'notice')
+      return
+    }
+    setFindingHome(true)
+    try {
+      const { path } = await api.home(owner)
+      const at = shares.findIndex(s => s.name === HOME_SHARE)
+      if (at >= 0) {
+        update(at, { ...shares[at], path })
+        showToast(`Share "${HOME_SHARE}" now points at ${path}. Save to apply.`, 'success')
+      } else {
+        onChange([...shares, {
+          ...emptyShare(),
+          name: HOME_SHARE,
+          path,
+          comment: `${owner}'s home directory`,
+        }])
+        showToast(`Added share "${HOME_SHARE}" for ${path}. Save to apply.`, 'success')
+      }
+    } catch {
+      showToast(`Couldn't find a home directory for user "${owner}".`, 'error')
+    } finally {
+      setFindingHome(false)
+    }
+  }
 
   const update = (i: number, s: Share) => {
     const next = [...shares]
@@ -169,7 +207,17 @@ export function SharesPage({ shares, onChange }: Props) {
               Editable list of Samba share definitions. All shares are owned by the configured user.
             </div>
           </div>
-          <button className="btn btn-primary" onClick={add}>+ Add share</button>
+          <div className="row">
+            <button
+              className="btn btn-ghost"
+              onClick={shareHome}
+              disabled={findingHome}
+              title={`Share ${shareOwner || 'the share owner'}'s home directory as "${HOME_SHARE}"`}
+            >
+              {findingHome ? '⟳ Finding home…' : '🏠 Share home'}
+            </button>
+            <button className="btn btn-primary" onClick={add}>+ Add share</button>
+          </div>
         </div>
       </div>
 

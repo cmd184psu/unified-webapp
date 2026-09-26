@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { api, AppConfig, Share, GlobalEntry } from './api'
 import { showToast, confirmDialog } from '@shared'
 import { SharesPage } from './SharesPage'
@@ -9,12 +10,11 @@ import { LogsPage } from './LogsPage'
 import { setPersistTheme, initHamburger } from './main'
 import './styles.css'
 
-type Page = 'shares' | 'globals' | 'settings' | 'preview' | 'logs'
+type Page = 'shares' | 'globals' | 'preview' | 'logs'
 
 const NAV: { id: Page; label: string; icon: string }[] = [
   { id: 'shares',   label: 'Shares',   icon: '🗂' },
   { id: 'globals',  label: 'Globals',  icon: '📋' },
-  { id: 'settings', label: 'Settings', icon: '⚙️' },
   { id: 'preview',  label: 'Preview',  icon: '📄' },
   { id: 'logs',     label: 'Logs',     icon: '📜' },
 ]
@@ -40,6 +40,7 @@ export default function App() {
   const [importing, setImporting] = useState(false)
   const [restartOutput, setRestartOutput] = useState<{ success: boolean; output: string } | null>(null)
   const [version, setVersion] = useState('')
+  const [settingsHost, setSettingsHost] = useState<HTMLElement | null>(null)
 
   // ── Load initial config ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -55,7 +56,7 @@ export default function App() {
   // Deferred until `config` is loaded, since the trigger button only exists
   // in the DOM once the topbar (gated on `config`) renders.
   useEffect(() => {
-    if (config) initHamburger()
+    if (config) setSettingsHost(initHamburger())
   }, [config])
 
   // ── Wire ThemeManager persistence into React ────────────────────────────────
@@ -217,9 +218,8 @@ export default function App() {
 
       {/* ── Main ───────────────────────────────────────────────────── */}
       <main className="main-content">
-        {page === 'shares'   && <SharesPage shares={config.shares} onChange={patchShares} />}
+        {page === 'shares'   && <SharesPage shares={config.shares} onChange={patchShares} shareOwner={config.share_owner} />}
         {page === 'globals'  && <GlobalsPage globals={config.globals} onChange={patchGlobals} />}
-        {page === 'settings' && <SettingsPage config={config} onChange={patchConfig} importing={importing} onImport={importConf} />}
         {page === 'preview'  && <PreviewPage globals={config.globals} shares={config.shares} shareOwner={config.share_owner} />}
         {page === 'logs'     && <LogsPage />}
 
@@ -235,6 +235,12 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* ── Settings, rendered inside the hamburger drawer ───────────── */}
+      {settingsHost && createPortal(
+        <SettingsPage config={config} onChange={patchConfig} importing={importing} onImport={importConf} />,
+        settingsHost,
+      )}
 
       {/* ── Action bar (persistent footer) ────────────────────────── */}
       <footer className="action-bar">

@@ -701,3 +701,14 @@ select.input {
 .log-line { color: var(--color-text-muted); }
 .log-time { color: var(--color-text-faint); margin-right: 6px; }
 .text-muted { color: var(--color-text-muted); }
+
+/* ── Settings inside the hamburger drawer ─────────────────────────────── */
+/* The drawer is narrower than the main pane, so the cards tighten up. */
+.drawer-settings .card {
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.drawer-settings .page-subtitle {
+  font-size: 11px;
+}

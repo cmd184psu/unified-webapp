@@ -15,18 +15,26 @@ export const themes = new ThemeManager({
 themes.apply()
 
 let hamburger: HamburgerMenu | null = null
+let settingsHost: HTMLElement | null = null
 
-export function initHamburger(): void {
-  if (hamburger) return
+/**
+ * Mounts the shared hamburger on the topbar trigger and returns the drawer
+ * slot the settings form is portalled into. Idempotent, so StrictMode's
+ * doubled effect gets the same slot back.
+ */
+export function initHamburger(): HTMLElement | null {
+  if (hamburger) return settingsHost
   const trigger = document.getElementById('hamburger-trigger')
-  if (!trigger) return
+  if (!trigger) return null
   hamburger = new HamburgerMenu({
-    title: 'SMBEdit',
-    items: [],
+    title: 'Settings',
+    items: [{ id: 'settings', render: host => { settingsHost = host } }],
     themePicker: true,
     themes,
     mountTrigger: trigger,
+    side: 'right',
   })
+  return settingsHost
 }
 
 createRoot(document.getElementById('root')!).render(

@@ -7280,6 +7280,7 @@ import { ThemeManager, HamburgerMenu } from "/shared/dist/shared.mjs";
 
 // web/smbedit/src/App.tsx
 var import_react7 = __toESM(require_react());
+var import_react_dom = __toESM(require_react_dom());
 
 // web/smbedit/src/api.ts
 async function request(method, path, body) {
@@ -7315,14 +7316,17 @@ var api = {
     return res.text();
   },
   saveAndRestart: () => request("POST", "/api/save-and-restart"),
-  version: () => request("GET", "/api/version")
+  version: () => request("GET", "/api/version"),
+  /** A Linux user's home directory — outside the picker's /opt root. */
+  home: (user) => request("GET", `/api/home?user=${encodeURIComponent(user)}`)
 };
 
 // web/smbedit/src/App.tsx
-import { showToast } from "/shared/dist/shared.mjs";
+import { showToast as showToast2 } from "/shared/dist/shared.mjs";
 
 // web/smbedit/src/SharesPage.tsx
 var import_react2 = __toESM(require_react());
+import { showToast } from "/shared/dist/shared.mjs";
 
 // web/smbedit/src/FolderPicker.tsx
 var import_react = __toESM(require_react());
@@ -7397,6 +7401,7 @@ function FolderPicker({ onSelect, onClose }) {
 
 // web/smbedit/src/SharesPage.tsx
 var import_jsx_runtime2 = __toESM(require_jsx_runtime());
+var HOME_SHARE = "home";
 function emptyShare() {
   return {
     name: "",
@@ -7509,8 +7514,37 @@ function ShareEditor({
     ] })
   ] });
 }
-function SharesPage({ shares, onChange }) {
+function SharesPage({ shares, onChange, shareOwner }) {
   const [pickerIdx, setPickerIdx] = (0, import_react2.useState)(null);
+  const [findingHome, setFindingHome] = (0, import_react2.useState)(false);
+  const shareHome = async () => {
+    const owner = shareOwner.trim();
+    if (!owner) {
+      showToast("Set the share owner first.", "notice");
+      return;
+    }
+    setFindingHome(true);
+    try {
+      const { path } = await api.home(owner);
+      const at = shares.findIndex((s) => s.name === HOME_SHARE);
+      if (at >= 0) {
+        update(at, { ...shares[at], path });
+        showToast(`Share "${HOME_SHARE}" now points at ${path}. Save to apply.`, "success");
+      } else {
+        onChange([...shares, {
+          ...emptyShare(),
+          name: HOME_SHARE,
+          path,
+          comment: `${owner}'s home directory`
+        }]);
+        showToast(`Added share "${HOME_SHARE}" for ${path}. Save to apply.`, "success");
+      }
+    } catch {
+      showToast(`Couldn't find a home directory for user "${owner}".`, "error");
+    } finally {
+      setFindingHome(false);
+    }
+  };
   const update = (i, s) => {
     const next = [...shares];
     next[i] = s;
@@ -7528,7 +7562,19 @@ function SharesPage({ shares, onChange }) {
         /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "page-title", children: "Shares" }),
         /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "page-subtitle", children: "Editable list of Samba share definitions. All shares are owned by the configured user." })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: "btn btn-primary", onClick: add, children: "+ Add share" })
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+          "button",
+          {
+            className: "btn btn-ghost",
+            onClick: shareHome,
+            disabled: findingHome,
+            title: `Share ${shareOwner || "the share owner"}'s home directory as "${HOME_SHARE}"`,
+            children: findingHome ? "\u27F3 Finding home\u2026" : "\u{1F3E0} Share home"
+          }
+        ),
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: "btn btn-primary", onClick: add, children: "+ Add share" })
+      ] })
     ] }) }),
     shares.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "empty-state", children: [
       /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "empty-state-icon", children: "\u{1F5C2}" }),
@@ -7657,15 +7703,7 @@ var import_jsx_runtime4 = __toESM(require_jsx_runtime());
 import { confirmDialog } from "/shared/dist/shared.mjs";
 function SettingsPage({ config, onChange, importing, onImport }) {
   const [importPath, setImportPath] = (0, import_react4.useState)(config.smb_conf_path);
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "page-header", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "page-title", children: "Settings" }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "page-subtitle", children: [
-        "Server configuration and appearance. Saved to ",
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("code", { children: "state.json" }),
-        "."
-      ] })
-    ] }),
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "drawer-settings", children: [
     /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "card", children: [
       /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "card-title", children: "\u2699\uFE0F Server" }),
       /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "field", children: [
@@ -7885,14 +7923,13 @@ var import_jsx_runtime7 = __toESM(require_jsx_runtime());
 var NAV = [
   { id: "shares", label: "Shares", icon: "\u{1F5C2}" },
   { id: "globals", label: "Globals", icon: "\u{1F4CB}" },
-  { id: "settings", label: "Settings", icon: "\u2699\uFE0F" },
   { id: "preview", label: "Preview", icon: "\u{1F4C4}" },
   { id: "logs", label: "Logs", icon: "\u{1F4DC}" }
 ];
 function warnAutoDisabled(before, after) {
   const names = after.filter((s, i) => before[i]?.enabled && !s.enabled).map((s) => s.name || "(unnamed)");
   if (names.length > 0) {
-    showToast(
+    showToast2(
       `Share(s) auto-disabled \u2014 path no longer exists for: ${names.join(", ")}`,
       "notice"
     );
@@ -7907,14 +7944,15 @@ function App() {
   const [importing, setImporting] = (0, import_react7.useState)(false);
   const [restartOutput, setRestartOutput] = (0, import_react7.useState)(null);
   const [version, setVersion] = (0, import_react7.useState)("");
+  const [settingsHost2, setSettingsHost] = (0, import_react7.useState)(null);
   (0, import_react7.useEffect)(() => {
     Promise.all([api.getConfig(), api.version()]).then(([cfg, ver]) => {
       setConfig(cfg);
       setVersion(ver.version);
-    }).catch((e) => showToast(`Failed to load config: ${String(e)}`, "error"));
+    }).catch((e) => showToast2(`Failed to load config: ${String(e)}`, "error"));
   }, []);
   (0, import_react7.useEffect)(() => {
-    if (config) initHamburger();
+    if (config) setSettingsHost(initHamburger());
   }, [config]);
   const patchConfig = (0, import_react7.useCallback)((patch) => {
     setConfig((c) => c ? { ...c, ...patch } : c);
@@ -7947,9 +7985,9 @@ function App() {
       warnAutoDisabled(config.shares, savedShares);
       setConfig((c) => c ? { ...c, shares: savedShares } : c);
       setDirty(false);
-      showToast("Configuration written to state.json", "success");
+      showToast2("Configuration written to state.json", "success");
     } catch (e) {
-      showToast(`Save failed: ${String(e)}`, "error");
+      showToast2(`Save failed: ${String(e)}`, "error");
     } finally {
       setSaving(false);
     }
@@ -7966,12 +8004,12 @@ function App() {
         ...result.share_owner ? { share_owner: result.share_owner } : {}
       } : c);
       setDirty(true);
-      showToast(
+      showToast2(
         `Imported ${result.shares.length} share(s) and ${result.globals.length} global(s) from ${path}. Review, then click Save to persist.`,
         "success"
       );
     } catch (e) {
-      showToast(`Import failed: ${String(e)}`, "error");
+      showToast2(`Import failed: ${String(e)}`, "error");
     } finally {
       setImporting(false);
     }
@@ -7996,12 +8034,12 @@ function App() {
       const result = await api.saveAndRestart();
       setRestartOutput(result.restart);
       if (result.restart.success) {
-        showToast(`Saved & restarted \u2014 smb.conf written to ${result.path}`, "success");
+        showToast2(`Saved & restarted \u2014 smb.conf written to ${result.path}`, "success");
       } else {
-        showToast(`Samba restart failed: ${result.restart.output || "Unknown error"}`, "notice");
+        showToast2(`Samba restart failed: ${result.restart.output || "Unknown error"}`, "notice");
       }
     } catch (e) {
-      showToast(`Save & restart failed: ${String(e)}`, "error");
+      showToast2(`Save & restart failed: ${String(e)}`, "error");
     } finally {
       setRestarting(false);
     }
@@ -8062,9 +8100,8 @@ function App() {
       ) })
     ] }),
     /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("main", { className: "main-content", children: [
-      page === "shares" && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(SharesPage, { shares: config.shares, onChange: patchShares }),
+      page === "shares" && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(SharesPage, { shares: config.shares, onChange: patchShares, shareOwner: config.share_owner }),
       page === "globals" && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(GlobalsPage, { globals: config.globals, onChange: patchGlobals }),
-      page === "settings" && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(SettingsPage, { config, onChange: patchConfig, importing, onImport: importConf }),
       page === "preview" && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(PreviewPage, { globals: config.globals, shares: config.shares, shareOwner: config.share_owner }),
       page === "logs" && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(LogsPage, {}),
       restartOutput && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "card mt-16", style: { borderColor: restartOutput.success ? "var(--color-success)" : "var(--color-danger)" }, children: [
@@ -8075,6 +8112,10 @@ function App() {
         /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "restart-output", children: restartOutput.output || "(no output)" })
       ] })
     ] }),
+    settingsHost2 && (0, import_react_dom.createPortal)(
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(SettingsPage, { config, onChange: patchConfig, importing, onImport: importConf }),
+      settingsHost2
+    ),
     /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("footer", { className: "action-bar", children: [
       /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "action-bar-hint", children: dirty ? "\u26A0\uFE0F You have unsaved changes." : "\u2713 All changes saved to state.json." }),
       /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
@@ -8115,17 +8156,22 @@ var themes = new ThemeManager({
 });
 themes.apply();
 var hamburger = null;
+var settingsHost = null;
 function initHamburger() {
-  if (hamburger) return;
+  if (hamburger) return settingsHost;
   const trigger = document.getElementById("hamburger-trigger");
-  if (!trigger) return;
+  if (!trigger) return null;
   hamburger = new HamburgerMenu({
-    title: "SMBEdit",
-    items: [],
+    title: "Settings",
+    items: [{ id: "settings", render: (host) => {
+      settingsHost = host;
+    } }],
     themePicker: true,
     themes,
-    mountTrigger: trigger
+    mountTrigger: trigger,
+    side: "right"
   });
+  return settingsHost;
 }
 (0, import_client.createRoot)(document.getElementById("root")).render(
   /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(import_react8.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(App, {}) })

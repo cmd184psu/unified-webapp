@@ -121,13 +121,11 @@ export function mountHostRail(root: HTMLElement, maxHosts: number): HostStore {
 
   const titleEl = el("h1", "rail-title");
   titleEl.textContent = "Hosts";
-  const subEl = el("p", "rail-subtitle");
-  subEl.textContent = `Up to ${maxHosts} host${maxHosts === 1 ? "" : "s"}, shared across both tabs. Drag the grip to reorder.`;
   const list = el("div", "host-list");
   const addBtn = el("button", "btn host-add");
   addBtn.type = "button";
   addBtn.textContent = "+ Add host";
-  root.append(titleEl, subEl, list, addBtn);
+  root.append(titleEl, list, addBtn);
 
   const hosts: HostConfig[] = [];
   /** The one expanded card (accordion); null when all are collapsed. */

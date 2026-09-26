@@ -429,7 +429,10 @@ export class HamburgerMenu {
     label.className = "ui-menu-label";
     label.textContent = "Theme";
     section.append(label);
-    themes.renderPicker(section);
+    // Alone in the drawer the full swatch list reads well; sharing the drawer
+    // with other entries, it would crowd them, so it collapses to a dropdown.
+    const shared = this.options.items.some((item) => !isSeparator(item) && !isSection(item));
+    themes.renderPicker(section, shared ? "select" : "list");
     return section;
   }
 

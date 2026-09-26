@@ -73,7 +73,7 @@
     "upload_dir": "./local-test/data/multissh/uploads",
     "hosts_path": "./local-test/data/multissh/hosts.json",
     "browse_root": "",
-    "max_sessions": 3,
+    "max_sessions": 10,
     "max_upload_bytes": 8589934592,
     "strict_host_key": false,
     "known_hosts_path": ""

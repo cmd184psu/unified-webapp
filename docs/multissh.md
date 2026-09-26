@@ -132,12 +132,18 @@ A persistent **host rail** on the left, and a **tabbed pane** on the right with
 two tabs: **SSH Console** and **Upload to Host**. Host configuration is shared
 between both tabs, and switching tabs never tears down a live session.
 
-The number of host cards and terminal panels is `max_sessions` (default 3,
-maximum 16). The page asks the server for it at load time via
+Hosts are added with **+ Add host**, removed with the ✕ on a card, and
+reordered by dragging the grip on a card's header; the terminal panels follow
+the rail's order. The most hosts allowed is `max_sessions` (default 10,
+maximum 10). The page asks the server for it at load time via
 `GET /api/config` — it is not baked into the bundle, so changing
-`max_sessions` and restarting is enough. Above four hosts the rail widens and
-lays the cards out in two columns so they stay reachable without scrolling;
-below 900px viewport width it moves above the tabs instead.
+`max_sessions` and restarting is enough. The rail is a single column with one
+card expanded at a time; below 900px viewport width it moves above the tabs.
+
+At most four terminal panels are expanded at once. Expanding another collapses
+the expanded panel used least recently (or, if none has been used yet, the
+first expanded one). With three or more panels expanded they are laid out two
+across.
 
 ---
 

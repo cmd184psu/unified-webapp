@@ -408,8 +408,8 @@ type SmbeditConfig struct {
 // Multissh session-count bounds. MaxSessions is validated in exactly one place
 // (Load); Build trusts the resolved value and performs no re-validation.
 const (
-	DefaultMaxSessions = 3
-	MaxMaxSessions     = 16
+	DefaultMaxSessions = 10
+	MaxMaxSessions     = 10
 )
 
 // TaskmasterLane seeds one lane into the taskmaster DB at startup.

@@ -58,6 +58,7 @@ class FakeElement {
   id = "";
   type = "";
   href = "";
+  value = "";
   disabled = false;
   tabIndex = 0;
   textContent: string | null = "";
@@ -712,9 +713,10 @@ function labels(menu: HamburgerMenu): string[] {
 
 {
   const themes = new ThemeManager({ module: "menu-suite", default: "dark" });
+  // The picker alone in the drawer: the full swatch list.
   const menu = new HamburgerMenu({
     title: "Picker",
-    items: [{ id: "a", label: "A", onSelect: () => {} }],
+    items: [],
     themePicker: true,
     themes,
   });
@@ -761,6 +763,70 @@ function labels(menu: HamburgerMenu): string[] {
   );
 
   menu.close();
+  menu.destroy();
+}
+
+// --- themePicker sharing the drawer: the compact dropdown -------------------
+
+{
+  const themes = new ThemeManager({ module: "menu-suite-select", default: "dark" });
+  const menu = new HamburgerMenu({
+    title: "Picker",
+    items: [{ id: "a", label: "A", onSelect: () => {} }],
+    themePicker: true,
+    themes,
+  });
+
+  const children = el(menu.drawer).children;
+  const section = children[children.length - 1];
+  const select = section.children[1];
+  check(
+    "a picker sharing the drawer with other items renders as a .ui-theme-select dropdown",
+    select.tagName === "select" && select.className === "ui-theme-select",
+    `got <${select.tagName} class="${select.className}">`,
+  );
+  check(
+    "the dropdown offers one option per theme",
+    select.children.length === themes.list.length && select.children.every((o, i) => o.tagName === "option" && o.value === themes.list[i]),
+    JSON.stringify(select.children.map((o) => o.value)),
+  );
+
+  select.value = themes.list[2];
+  fire(select, "change");
+  check(
+    "choosing an option stamps data-theme through the shared ThemeManager",
+    dom.documentElement.dataset.theme === themes.list[2],
+    `got "${dom.documentElement.dataset.theme}" for "${themes.list[2]}"`,
+  );
+  check(
+    "and it persists under the module's own storage key",
+    dom.storage.get("ui-theme:menu-suite-select") === themes.list[2],
+    `storage holds ${JSON.stringify([...dom.storage.entries()])}`,
+  );
+
+  themes.set(themes.list[5]);
+  check(
+    "a theme set from elsewhere moves the dropdown's selection with it",
+    select.value === themes.list[5],
+    `got "${select.value}" for "${themes.list[5]}"`,
+  );
+  menu.destroy();
+}
+
+{
+  const themes = new ThemeManager({ module: "menu-suite-headings", default: "dark" });
+  const menu = new HamburgerMenu({
+    items: [{ section: "Only a heading" }, { separator: true }],
+    themePicker: true,
+    themes,
+  });
+  const children = el(menu.drawer).children;
+  const section = children[children.length - 1];
+  check(
+    "headings and separators alone don't count as sharing the drawer — the list stays",
+    section.children[1].className === "ui-theme-picker",
+    JSON.stringify(section.children.map((c) => c.className)),
+  );
   menu.destroy();
 }
 

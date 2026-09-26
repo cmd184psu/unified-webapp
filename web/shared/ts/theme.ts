@@ -45,7 +45,8 @@ export interface ThemeManagerOptions {
 }
 
 /** One rendered picker's buttons, each paired with the theme it selects. */
-type SwatchRows = ReadonlyArray<{ readonly name: string; readonly button: HTMLButtonElement }>;
+/** Moves one rendered picker's active mark (or selected option) to `name`. */
+type PickerMarker = (name: string) => void;
 
 export class ThemeManager {
   /** The roster pickers enumerate. Deliberately the same set as THEMES and
@@ -63,7 +64,7 @@ export class ThemeManager {
    * made from outside a picker — set() from another picker, reresolve() once
    * serverDefault() becomes answerable, and the system `change` listener.
    */
-  private readonly pickers: SwatchRows[] = [];
+  private readonly pickers: PickerMarker[] = [];
 
   constructor(options: ThemeManagerOptions) {
     this.options = options;
@@ -113,21 +114,41 @@ export class ThemeManager {
   }
 
   private mark(name: string): void {
-    for (const rows of this.pickers) {
-      for (const row of rows) {
-        row.button.className = row.name === name ? "ui-theme-btn is-active" : "ui-theme-btn";
-      }
-    }
+    for (const marker of this.pickers) marker(name);
   }
 
   /**
-   * Renders the shared swatch picker into `host`. Every node is built through
+   * Renders the shared theme picker into `host`. Every node is built through
    * createElement and every label is a text node — no markup string is assigned
    * anywhere in this file. No colour value reaches this file either: each
    * swatch carries `data-theme`, and themes.css keys every palette on a bare
    * attribute selector.
+   *
+   * `mode` is a hint from the caller about the space it has: "list" (the
+   * default) is one swatch button per theme, for a picker that stands alone;
+   * "select" is a compact dropdown, for a picker sharing its space with other
+   * settings. HamburgerMenu chooses it from what else the drawer holds.
    */
-  renderPicker(host: HTMLElement): void {
+  renderPicker(host: HTMLElement, mode: "list" | "select" = "list"): void {
+    if (mode === "select") {
+      const select = document.createElement("select");
+      select.className = "ui-theme-select";
+      select.setAttribute("aria-label", "Theme");
+      for (const name of this.list) {
+        const option = document.createElement("option");
+        option.value = name;
+        option.append(name);
+        select.append(option);
+      }
+      select.addEventListener("change", () => this.set(select.value));
+      host.append(select);
+      this.pickers.push((name) => {
+        select.value = name;
+      });
+      this.mark(this.resolve());
+      return;
+    }
+
     const picker = document.createElement("div");
     picker.className = "ui-theme-picker";
 
@@ -150,7 +171,11 @@ export class ThemeManager {
     }
 
     host.append(picker);
-    this.pickers.push(rows);
+    this.pickers.push((name) => {
+      for (const row of rows) {
+        row.button.className = row.name === name ? "ui-theme-btn is-active" : "ui-theme-btn";
+      }
+    });
     this.mark(this.resolve());
   }
 

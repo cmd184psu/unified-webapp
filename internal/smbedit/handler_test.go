@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -66,7 +67,7 @@ func TestAllRoutesReachable(t *testing.T) {
 	srv := newTestServer(t)
 	swapRunCommand(t, func(name string, args ...string) (string, error) { return "", nil })
 
-	// The normative 13-registration table. Reachable means the request hit a
+	// The normative 14-registration table. Reachable means the request hit a
 	// handler: any status except the mux's own 404/405.
 	routes := []struct{ method, path string }{
 		{http.MethodGet, "/api/config"},
@@ -76,6 +77,7 @@ func TestAllRoutesReachable(t *testing.T) {
 		{http.MethodGet, "/api/globals"},
 		{http.MethodPut, "/api/globals"},
 		{http.MethodGet, "/api/folders"},
+		{http.MethodGet, "/api/home"},
 		{http.MethodPost, "/api/import"},
 		{http.MethodPost, "/api/save-and-restart"},
 		{http.MethodGet, "/api/preview"},
@@ -83,8 +85,8 @@ func TestAllRoutesReachable(t *testing.T) {
 		{http.MethodGet, "/api/logs/samba/stream"},
 		{http.MethodGet, "/api/version"},
 	}
-	if len(routes) != 13 {
-		t.Fatalf("route table has %d entries, want 13", len(routes))
+	if len(routes) != 14 {
+		t.Fatalf("route table has %d entries, want 14", len(routes))
 	}
 
 	for _, rt := range routes {
@@ -257,5 +259,46 @@ func TestHandlerChain_PreservesFlusher(t *testing.T) {
 	}
 	if !isUnwrapped {
 		t.Error("ResponseWriter through Handler() does not forward Unwrap()")
+	}
+}
+
+func TestGetHomeResolvesUserHomeDir(t *testing.T) {
+	srv := newTestServer(t)
+	orig := lookupUser
+	lookupUser = func(name string) (*user.User, error) {
+		switch name {
+		case "alice":
+			return &user.User{Username: "alice", HomeDir: "/home/alice"}, nil
+		case "nohome":
+			return &user.User{Username: "nohome"}, nil
+		}
+		return nil, user.UnknownUserError(name)
+	}
+	t.Cleanup(func() { lookupUser = orig })
+
+	rr := doJSON(t, srv, http.MethodGet, "/api/home?user=alice", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("alice: status %d, body %s", rr.Code, rr.Body.String())
+	}
+	var got map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["path"] != "/home/alice" || got["user"] != "alice" {
+		t.Errorf("alice: got %v", got)
+	}
+
+	for _, tc := range []struct {
+		target string
+		want   int
+	}{
+		{"/api/home", http.StatusBadRequest},
+		{"/api/home?user=%20", http.StatusBadRequest},
+		{"/api/home?user=bob", http.StatusNotFound},
+		{"/api/home?user=nohome", http.StatusNotFound},
+	} {
+		if rr := doJSON(t, srv, http.MethodGet, tc.target, nil); rr.Code != tc.want {
+			t.Errorf("%s: status %d, want %d", tc.target, rr.Code, tc.want)
+		}
 	}
 }

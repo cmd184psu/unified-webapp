@@ -10,7 +10,7 @@ import type {
 } from "./types";
 
 /** The panel count used when the server cannot be asked. */
-const DEFAULT_MAX_SESSIONS = 3;
+const DEFAULT_MAX_SESSIONS = 10;
 
 /** Guards against triggering more than one reload when several calls 401 at once. */
 let sessionExpiredHandled = false;
@@ -30,8 +30,8 @@ function checkAuth(status: number): void {
  * Fetch the server's runtime configuration.
  *
  * Never rejects: a failed request or a non-numeric `maxSessions` falls back to
- * DEFAULT_MAX_SESSIONS and logs, so a transient boot failure renders three
- * panels rather than NaN of them.
+ * DEFAULT_MAX_SESSIONS and logs, so a transient boot failure still allows the
+ * default host count rather than NaN of them.
  */
 export async function fetchConfig(): Promise<AppConfig> {
   try {
