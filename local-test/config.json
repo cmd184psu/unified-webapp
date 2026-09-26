@@ -50,7 +50,10 @@
     "static_dir": "./web/slideshow",
     "image_dir": "./local-test/data/slideshow",
     "prefix": "slides",
-    "default_subject": ""
+    "default_subject": "",
+    "music": {
+      "audio_dir": "./local-test/data/slideshow-audio"
+    }
   },
   "menuserver": {
     "static_dir": "./web/menuserver",
