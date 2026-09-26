@@ -10564,9 +10564,11 @@ var hamburger = new HamburgerMenu({
   title: "IssueTracker",
   items: [],
   themePicker: true,
-  themes
+  themes,
+  side: "right"
 });
-document.body.prepend(hamburger.trigger);
+hamburger.trigger.classList.add("app-menu-trigger");
+document.body.append(hamburger.trigger);
 import_client.default.createRoot(document.getElementById("root")).render(
   /* @__PURE__ */ (0, import_jsx_runtime17.jsx)(import_react13.default.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime17.jsx)(BrowserRouter, { children: /* @__PURE__ */ (0, import_jsx_runtime17.jsx)(DataProvider, { children: /* @__PURE__ */ (0, import_jsx_runtime17.jsx)(App, {}) }) }) })
 );

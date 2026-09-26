@@ -17,9 +17,13 @@ const hamburger = new HamburgerMenu({
   items: [],
   themePicker: true,
   themes,
+  side: "right",
 });
 
-document.body.prepend(hamburger.trigger);
+// Pinned to the window's top-right corner (see .app-menu-trigger), at the end
+// of each page's top bar, instead of in a strip of its own above the app.
+hamburger.trigger.classList.add("app-menu-trigger");
+document.body.append(hamburger.trigger);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

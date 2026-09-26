@@ -60,7 +60,7 @@ select:focus {
 .sidebar {
   width: var(--sidebar-w);
   flex-shrink: 0;
-  background: #0a0a0c;
+  background: var(--color-surface-1);
   border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
@@ -134,7 +134,18 @@ select:focus {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 18px;
+  /* The right end leaves room for the ☰ pinned in the window's corner. */
+  padding: 0 60px 0 18px;
+}
+
+/* The shared ☰ trigger, pinned top-right so it sits at the right end of
+   every page's top bar (each page draws its own), with the drawer opening
+   beside it. */
+.app-menu-trigger {
+  position: fixed;
+  top: 6px;
+  right: 12px;
+  z-index: 50;
 }
 .topbar h1 {
   font-size: 14px;
@@ -183,8 +194,8 @@ select:focus {
   color: var(--color-text);
 }
 .btn.danger:hover {
-  color: #eb5757;
-  border-color: #eb5757;
+  color: var(--color-danger);
+  border-color: var(--color-danger);
 }
 
 /* ---------- filter bar ---------- */
@@ -626,7 +637,7 @@ select:focus {
 }
 .login-error {
   margin-top: 14px;
-  color: #eb5757;
+  color: var(--color-danger);
   font-size: 12.5px;
 }
 
