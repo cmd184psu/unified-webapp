@@ -323,6 +323,12 @@
   cursor: pointer;
 }
 
+/* In the drawer, line the dropdown up with the indented rows above it. */
+.ui-menu-section .ui-theme-select {
+  width: calc(100% - 2 * var(--space-3));
+  margin: 0 var(--space-3);
+}
+
 .ui-theme-select:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;

@@ -1,6 +1,16 @@
 package jobs
 
-import "sync"
+import (
+	"errors"
+	"sync"
+)
+
+var (
+	// ErrNotFound: no job has that ID.
+	ErrNotFound = errors.New("job not found")
+	// ErrRunning: the job is being processed and can't be removed.
+	ErrRunning = errors.New("job is running")
+)
 
 type Queue struct {
 	ch    chan *Job
@@ -52,6 +62,31 @@ func (q *Queue) Update(id string, fn func(*Job)) bool {
 	}
 	fn(j)
 	return true
+}
+
+// Remove deletes a job that isn't running: a queued one never starts (the
+// worker that later receives it from the channel finds it gone and skips it),
+// and a finished one leaves the list. A running job is refused with
+// ErrRunning, since stopping it mid-download needs proper cancellation. Its
+// downloaded file, if any, is not touched.
+func (q *Queue) Remove(id string) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	j, ok := q.jobs[id]
+	if !ok {
+		return ErrNotFound
+	}
+	if j.Status == Running {
+		return ErrRunning
+	}
+	delete(q.jobs, id)
+	for i, o := range q.order {
+		if o == j {
+			q.order = append(q.order[:i:i], q.order[i+1:]...)
+			break
+		}
+	}
+	return nil
 }
 
 // Get returns a value snapshot of the job with the given ID.

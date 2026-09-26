@@ -25,6 +25,7 @@
   </div>
 
   <!-- ── Submit card ── -->
+  <main class="app-main">
   <div class="card" id="submit-card">
     <div class="mode-tabs">
       <button class="mode-tab active" data-mode="video">
@@ -56,26 +57,24 @@
           <label>Show / Artist <span class="optional-hint">(auto-filled if blank)</span></label>
           <input name="show" placeholder="Leave blank to use YouTube uploader">
         </div>
-        <div class="form-row">
-          <div class="field">
-            <label>Episode / Track Title <span class="optional-hint">(auto-filled if blank)</span></label>
-            <input name="title" placeholder="Leave blank to use YouTube title">
-          </div>
-          <div class="field">
-            <label>Season</label>
-            <input name="season" type="number" placeholder="1" value="1" required>
-          </div>
+        <div class="field">
+          <label>Episode / Track Title <span class="optional-hint">(auto-filled if blank)</span></label>
+          <input name="title" placeholder="Leave blank to use YouTube title">
         </div>
-        <div class="form-row">
-          <div class="field">
-            <label>Episode</label>
-            <input name="episode" type="number" placeholder="1" value="1" required>
+        <!-- Season and episode are small numbers: two narrow fields on one
+             line, with the submit button at the end. 0 (or blank) leaves
+             that part out of the file name. -->
+        <div class="form-row-compact">
+          <div class="field field-num">
+            <label for="season-input">Season</label>
+            <input id="season-input" name="season" type="number" min="0" max="99" placeholder="0" value="1" title="0 or blank: no season in the file name">
           </div>
-          <div class="field" style="justify-content:flex-end">
-            <label>&nbsp;</label>
-            <div class="submit-row">
-              <button type="submit" class="btn btn-video" id="submit-btn">Add to Queue</button>
-            </div>
+          <div class="field field-num">
+            <label for="episode-input">Episode</label>
+            <input id="episode-input" name="episode" type="number" min="0" max="99" placeholder="0" value="1" title="0 or blank: no episode in the file name">
+          </div>
+          <div class="submit-row">
+            <button type="submit" class="btn btn-video" id="submit-btn">Add to Queue</button>
           </div>
         </div>
       </div>
@@ -92,6 +91,8 @@
       <div class="empty-state">No jobs yet — add one above.</div>
     </div>
   </div>
+
+  </main>
 
   <script type="module" src="js/bundle.js"></script>
 </body>

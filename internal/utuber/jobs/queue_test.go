@@ -35,3 +35,30 @@ func TestAllReturnsCopy(t *testing.T) {
 	}
 	_ = b
 }
+
+func TestQueueRemove(t *testing.T) {
+	q := New(10)
+	for _, id := range []string{"a", "b", "c"} {
+		q.Enqueue(&Job{ID: id, Status: Queued})
+		<-q.ch
+	}
+	q.Update("b", func(j *Job) { j.Status = Running })
+	q.Update("c", func(j *Job) { j.Status = Completed })
+
+	if err := q.Remove("a"); err != nil {
+		t.Fatalf("remove queued: %v", err)
+	}
+	if err := q.Remove("b"); err != ErrRunning {
+		t.Errorf("remove running: got %v, want ErrRunning", err)
+	}
+	if err := q.Remove("c"); err != nil {
+		t.Errorf("remove completed: %v", err)
+	}
+	if err := q.Remove("zzz"); err != ErrNotFound {
+		t.Errorf("remove unknown: got %v, want ErrNotFound", err)
+	}
+	all := q.All()
+	if len(all) != 1 || all[0].ID != "b" {
+		t.Errorf("only the running job should remain, got %+v", all)
+	}
+}

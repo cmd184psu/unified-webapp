@@ -50,6 +50,7 @@ func buildWithExecutor(cfg config.UtuberConfig, exec media.Executor) (http.Handl
 	mux := http.NewServeMux()
 	mux.HandleFunc("/enqueue", handleEnqueue(queue, hist))
 	mux.HandleFunc("/jobs.json", handleJobs(queue))
+	mux.HandleFunc("/jobs/delete", handleJobDelete(queue))
 	mux.HandleFunc("/ytdlp-update", handleYtdlpUpdate(exec, settings))
 	mux.HandleFunc("/settings.json", handleSettings(settings))
 	mux.Handle(

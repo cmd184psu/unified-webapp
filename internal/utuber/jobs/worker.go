@@ -22,12 +22,13 @@ func StartWorkers(ctx context.Context, q *Queue, p Processor, n int) {
 					// the only permitted direct access; every other field is
 					// reached through the queue's lock.
 					id := job.ID
-					q.Update(id, func(j *Job) { j.Status = Running })
-					// Enqueue registers the job under the lock before the
-					// channel send, so Get cannot miss. The guard is
-					// belt-and-braces against a future removal API: it
-					// prevents ever handing Process a zero-value Job whose
-					// empty URL would produce a baffling yt-dlp error.
+					// A job removed while queued is gone from the queue, so
+					// the Update reports false and the job is skipped. Running
+					// is set under the same lock Remove takes, so a job can't
+					// be removed after it starts.
+					if !q.Update(id, func(j *Job) { j.Status = Running }) {
+						continue
+					}
 					snap, ok := q.Get(id)
 					if !ok {
 						continue

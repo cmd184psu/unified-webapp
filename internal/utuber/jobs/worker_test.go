@@ -129,3 +129,41 @@ func waitForStatus(t *testing.T, q *Queue, id string, want Status) Job {
 	t.Fatalf("job %s: never reached status %s (last seen %s)", id, want, last)
 	return Job{}
 }
+
+// A job removed while still queued must never reach the processor.
+func TestWorkerSkipsRemovedJob(t *testing.T) {
+	q := New(10)
+	q.Enqueue(&Job{ID: "gone", URL: "u1", Status: Queued})
+	q.Enqueue(&Job{ID: "kept", URL: "u2", Status: Queued})
+	if err := q.Remove("gone"); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	rec := &recordingProcessor{wg: &wg}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	StartWorkers(ctx, q, rec, 1)
+	wg.Wait()
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if len(rec.seen) != 1 || rec.seen[0] != "kept" {
+		t.Errorf("processor saw %v, want only [kept]", rec.seen)
+	}
+}
+
+type recordingProcessor struct {
+	wg   *sync.WaitGroup
+	mu   sync.Mutex
+	seen []string
+}
+
+func (r *recordingProcessor) Process(ctx context.Context, j Job, q *Queue) error {
+	r.mu.Lock()
+	r.seen = append(r.seen, j.ID)
+	r.mu.Unlock()
+	r.wg.Done()
+	return nil
+}

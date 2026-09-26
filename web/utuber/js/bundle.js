@@ -1,5 +1,5 @@
 // web/utuber/js/main.ts
-import { ThemeManager, HamburgerMenu } from "/shared/dist/shared.mjs";
+import { ThemeManager, HamburgerMenu, confirmDialog, showToast } from "/shared/dist/shared.mjs";
 var themes = new ThemeManager({ module: "utuber", default: "dark" });
 themes.apply();
 var hamburger = new HamburgerMenu({
@@ -158,7 +158,7 @@ async function refreshJobs() {
   list.innerHTML = jobs.map((j) => jobRow(j)).join("");
 }
 function jobRow(j) {
-  const epLabel = `S${String(j.Season).padStart(2, "0")}E${String(j.Episode).padStart(2, "0")}`;
+  const epLabel = (j.Season > 0 ? `S${String(j.Season).padStart(2, "0")}` : "") + (j.Episode > 0 ? `E${String(j.Episode).padStart(2, "0")}` : "");
   const mode = j.Mode || "video";
   const { barClass, pct, label } = parseProgress(j.Progress, j.Status);
   const statusClass = "status-" + (j.Status || "queued");
@@ -183,13 +183,18 @@ function jobRow(j) {
       <div class="job-meta">
         <div class="job-name">${esc(j.ShowName)} \u2014 ${esc(j.EpisodeTitle)}</div>
         <div class="job-sub">
-          <span>${epLabel}</span>
+          ${epLabel ? `<span>${epLabel}</span>` : ""}
           <span class="mode-badge ${mode}">${mode}</span>
         </div>
         ${errLine}
       </div>
       <div class="job-right">
-        <span class="status-pill ${statusClass}">${j.Status}</span>
+        <div class="job-status-row">
+          <span class="status-pill ${statusClass}">${j.Status}</span>
+          ${j.Status === "running" ? "" : `<button type="button" class="job-delete" data-job-id="${esc(j.ID)}" data-job-status="${esc(j.Status)}" data-job-name="${esc(j.ShowName)} \u2014 ${esc(j.EpisodeTitle)}" title="${j.Status === "queued" ? "Remove from queue" : "Remove from list"}" aria-label="${j.Status === "queued" ? "Remove from queue" : "Remove from list"}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+          </button>`}
+        </div>
         ${barClass ? `
         <div class="progress-wrap">
           <div class="progress-bar ${barClass}" style="width:${pct}%"></div>
@@ -292,6 +297,24 @@ async function saveSettings() {
 }
 document.querySelectorAll(".mode-tab").forEach((tab) => {
   tab.addEventListener("click", () => setMode(tab.dataset.mode));
+});
+document.getElementById("jobs-list").addEventListener("click", async (e) => {
+  const btn = e.target.closest(".job-delete");
+  if (!btn) return;
+  const id = btn.dataset.jobId;
+  const queued = btn.dataset.jobStatus === "queued";
+  const ok = await confirmDialog(
+    queued ? `Remove "${btn.dataset.jobName}" from the queue? It won't be downloaded.` : `Remove "${btn.dataset.jobName}" from the list? Any downloaded file is kept.`,
+    { title: queued ? "Remove queued download" : "Remove from list", confirmLabel: "Remove" }
+  );
+  if (!ok) return;
+  const res = await fetch(`/jobs/delete?id=${encodeURIComponent(id)}`, { method: "POST" });
+  if (res.status === 409) {
+    showToast("That download has already started and can't be removed.", "notice");
+  } else if (!res.ok && res.status !== 404) {
+    showToast("Could not remove it.", "error");
+  }
+  void refreshJobs();
 });
 setInterval(refreshJobs, 2e3);
 refreshJobs();

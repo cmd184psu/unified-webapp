@@ -624,3 +624,47 @@ func (e *downloadThenErrorExec) Run(_ context.Context, _ string, args []string, 
 	simulateDownload(args)
 	return nil
 }
+
+func TestJobDelete(t *testing.T) {
+	q := jobs.New(10)
+	q.Enqueue(&jobs.Job{ID: "queued1", Status: jobs.Queued})
+	q.Enqueue(&jobs.Job{ID: "running1", Status: jobs.Queued})
+	q.Update("running1", func(j *jobs.Job) { j.Status = jobs.Running })
+	h := handleJobDelete(q)
+
+	do := func(method, id string) int {
+		rr := httptest.NewRecorder()
+		h(rr, httptest.NewRequest(method, "/jobs/delete?id="+id, nil))
+		return rr.Code
+	}
+	if code := do(http.MethodPost, "queued1"); code != http.StatusNoContent {
+		t.Errorf("delete queued: %d, want 204", code)
+	}
+	if code := do(http.MethodPost, "running1"); code != http.StatusConflict {
+		t.Errorf("delete running: %d, want 409", code)
+	}
+	if code := do(http.MethodPost, "missing"); code != http.StatusNotFound {
+		t.Errorf("delete missing: %d, want 404", code)
+	}
+	if code := do(http.MethodGet, "queued1"); code != http.StatusMethodNotAllowed {
+		t.Errorf("GET: %d, want 405", code)
+	}
+}
+
+func TestOutputNameOmitsZeroSeasonEpisode(t *testing.T) {
+	cases := []struct {
+		season, episode int
+		want            string
+	}{
+		{1, 2, "Show - S01E02 - Title.mp4"},
+		{3, 0, "Show - S03 - Title.mp4"},
+		{0, 7, "Show - E07 - Title.mp4"},
+		{0, 0, "Show - Title.mp4"},
+		{-1, -4, "Show - Title.mp4"},
+	}
+	for _, c := range cases {
+		if got := outputName("Show", c.season, c.episode, "Title", "mp4"); got != c.want {
+			t.Errorf("S%d E%d: got %q, want %q", c.season, c.episode, got, c.want)
+		}
+	}
+}

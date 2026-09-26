@@ -16,20 +16,38 @@ body {
   background: var(--color-bg);
   color: var(--color-text);
   min-height: 100dvh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 2rem 1rem 4rem;
 }
 
-/* ── Topbar ── */
+/* ── Topbar: spans the window, ☰ in the real top-right corner ── */
 .topbar {
   width: 100%;
-  max-width: 680px;
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  margin-bottom: 2.5rem;
+  padding: 0.75rem 1.5rem;
+  background: var(--color-surface-1);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* ── Layout ──
+   Laptop first: the form on the left, the queue filling the rest. Below
+   900px it falls back to the single centered column a phone wants. */
+.app-main {
+  display: grid;
+  grid-template-columns: minmax(420px, 640px) minmax(0, 1fr);
+  align-items: start;
+  gap: 1.5rem;
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 1.5rem 1.5rem 4rem;
+}
+@media (max-width: 900px) {
+  .app-main {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 680px;
+    padding: 1.25rem 1rem 4rem;
+  }
 }
 .topbar-logo {
   display: flex;
@@ -62,14 +80,14 @@ body {
 /* ── Card ── */
 .card {
   width: 100%;
-  max-width: 680px;
+  min-width: 0;
   background: var(--color-surface-1);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow);
   overflow: hidden;
 }
-.card + .card { margin-top: 1.25rem; }
+
 
 /* ── Mode tabs ── */
 .mode-tabs {
@@ -144,6 +162,13 @@ body {
 }
 .field input::placeholder { color: var(--color-text-faint); }
 
+.form-row-compact {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+.field-num input { width: 5rem; }
+.form-row-compact .submit-row { margin-left: auto; }
 .submit-row { display: flex; justify-content: flex-end; }
 .btn {
   padding: 0.6rem 1.4rem;
@@ -229,6 +254,23 @@ body {
   gap: 0.4rem;
   min-width: 160px;
 }
+
+.job-status-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.job-delete {
+  display: inline-flex;
+  padding: 3px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-faint);
+  cursor: pointer;
+}
+.job-delete:hover { color: var(--color-danger); background: var(--color-surface-2); }
+.job-delete:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; }
 
 .status-pill {
   font-size: 0.7rem;

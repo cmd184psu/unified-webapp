@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -66,13 +67,7 @@ func (p processor) Process(ctx context.Context, job jobs.Job, q *jobs.Queue) err
 	}
 
 	if job.Mode == "audio" {
-		out := fmt.Sprintf(
-			"%s - S%02dE%02d - %s.mp3",
-			safe(job.ShowName),
-			job.Season,
-			job.Episode,
-			safe(job.EpisodeTitle),
-		)
+		out := outputName(job.ShowName, job.Season, job.Episode, job.EpisodeTitle, "mp3")
 		outPath := p.cfg.DownloadDir + "/" + out
 
 		q.Update(job.ID, func(j *jobs.Job) { j.Progress = "converting" })
@@ -88,13 +83,7 @@ func (p processor) Process(ctx context.Context, job jobs.Job, q *jobs.Queue) err
 		// Keep the yt-dlp .mp4 as-is (Apple-compatible H.264/AAC in an mp4
 		// container); only give it the Plex-friendly name. No transcode, and
 		// no .m4v rename — the extension stays .mp4.
-		out := fmt.Sprintf(
-			"%s - S%02dE%02d - %s.mp4",
-			safe(job.ShowName),
-			job.Season,
-			job.Episode,
-			safe(job.EpisodeTitle),
-		)
+		out := outputName(job.ShowName, job.Season, job.Episode, job.EpisodeTitle, "mp4")
 		if err := os.Rename(src, p.cfg.DownloadDir+"/"+out); err != nil {
 			return err
 		}
@@ -186,10 +175,50 @@ func handleYtdlpUpdate(exec media.Executor, s *settingsStore) http.HandlerFunc {
 	}
 }
 
+// handleJobDelete removes a queued or finished job: POST /jobs/delete?id=…
+// A running job is refused with 409; its downloaded file is never touched.
+func handleJobDelete(q *jobs.Queue) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		switch err := q.Remove(r.URL.Query().Get("id")); {
+		case err == nil:
+			w.WriteHeader(http.StatusNoContent)
+		case errors.Is(err, jobs.ErrRunning):
+			http.Error(w, "that job is running and can't be removed", http.StatusConflict)
+		default:
+			http.Error(w, "job not found", http.StatusNotFound)
+		}
+	}
+}
+
 func handleJobs(q *jobs.Queue) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode(q.All())
 	}
+}
+
+// outputName builds the Plex-style file name. A season or episode of 0 (or
+// less) is left out rather than written as "S00"/"E00":
+//
+//	Show - S01E02 - Title.mp4   both set
+//	Show - S01 - Title.mp4      season only
+//	Show - E02 - Title.mp4      episode only
+//	Show - Title.mp4            neither
+func outputName(show string, season, episode int, title, ext string) string {
+	var tag string
+	if season > 0 {
+		tag += fmt.Sprintf("S%02d", season)
+	}
+	if episode > 0 {
+		tag += fmt.Sprintf("E%02d", episode)
+	}
+	if tag == "" {
+		return fmt.Sprintf("%s - %s.%s", safe(show), safe(title), ext)
+	}
+	return fmt.Sprintf("%s - %s - %s.%s", safe(show), tag, safe(title), ext)
 }
 
 func randID() string {
