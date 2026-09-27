@@ -77,7 +77,16 @@ type AuthConfig struct {
 // non-empty, offers a per-module door-code PIN alongside LDAP/passkey.
 type ModuleAuthConfig struct {
 	PinFile string `json:"pin_file"`
+	// IdleMinutes signs a session out of this module after that long
+	// without real use (0 = the default, 60). See MaxIdleMinutes.
+	IdleMinutes int `json:"idle_minutes,omitempty"`
 }
+
+// DefaultIdleMinutes and MaxIdleMinutes bound auth.modules.<m>.idle_minutes.
+const (
+	DefaultIdleMinutes = 60
+	MaxIdleMinutes     = 7 * 24 * 60
+)
 
 // legacyModuleAuthError is returned when a module's auth.modules entry is a
 // legacy JSON array (the old accepted-methods list) rather than an object.
@@ -170,8 +179,13 @@ func (a *AuthConfig) UnmarshalJSON(data []byte) error {
 
 // SessionConfig controls session lifetime and sliding-refresh behavior.
 type SessionConfig struct {
-	TTLHours             int     `json:"ttl_hours"`              // default 720 (30d) applied downstream, 0 = default
-	RefreshAfterFraction float64 `json:"refresh_after_fraction"` // default 0.5, 0 = default
+	// TTLHours is the maximum session length: sign in again after this long
+	// even while active (default 720 = 30d, 0 = default). Idle sign-out is
+	// per module (ModuleAuthConfig.IdleMinutes).
+	TTLHours int `json:"ttl_hours"`
+	// RefreshAfterFraction is no longer used (sessions renew on real use,
+	// per module); kept so existing configs still load.
+	RefreshAfterFraction float64 `json:"refresh_after_fraction,omitempty"`
 }
 
 // NamedHash pairs an operator-facing name with a stored credential hash.

@@ -10567,8 +10567,10 @@ var hamburger = new HamburgerMenu({
   themes,
   side: "right"
 });
-hamburger.trigger.classList.add("app-menu-trigger");
-document.body.append(hamburger.trigger);
+var menuCorner = document.createElement("div");
+menuCorner.className = "app-menu-corner";
+menuCorner.append(hamburger.trigger);
+document.body.append(menuCorner);
 import_client.default.createRoot(document.getElementById("root")).render(
   /* @__PURE__ */ (0, import_jsx_runtime17.jsx)(import_react13.default.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime17.jsx)(BrowserRouter, { children: /* @__PURE__ */ (0, import_jsx_runtime17.jsx)(DataProvider, { children: /* @__PURE__ */ (0, import_jsx_runtime17.jsx)(App, {}) }) }) })
 );

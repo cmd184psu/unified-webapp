@@ -102,10 +102,13 @@ a {
 .hidden {
   display: none !important;
 }
-.app-menu-trigger {
+.app-menu-corner {
   position: absolute;
   top: var(--space-2);
   right: var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
 }
 .time-selector-table {
   width: 100%;

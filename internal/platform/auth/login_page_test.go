@@ -177,3 +177,28 @@ func TestLoginPageAdminEmptyMatrixShowsPINForm(t *testing.T) {
 		t.Fatalf("admin empty-matrix mode body = %q, want it to contain admin_pin", rec.Body.String())
 	}
 }
+
+// TestLoginPageNamesItsModule: the page says which module it guards (its
+// display name), looks up that module's theme, and escapes what it fills in.
+func TestLoginPageNamesItsModule(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	svc := newGateService(t, now, &Policy{Modules: map[string]ModulePolicy{"timetracker": {}}})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept", "text/html")
+	svc.Gate("timetracker", echoHandler()).ServeHTTP(rec, req)
+	body := rec.Body.String()
+	for _, want := range []string{"<h1>Time Tracker</h1>", `var m = "timetracker"`, `data-module="timetracker"`} {
+		if !contains(body, want) {
+			t.Errorf("login page missing %q", want)
+		}
+	}
+	if contains(body, "__UW_") {
+		t.Error("login page has an unfilled placeholder")
+	}
+
+	odd := string(renderLoginPage(`x"><script>`))
+	if contains(odd, `x"><script>`) {
+		t.Error("an unknown module name must be HTML-escaped")
+	}
+}

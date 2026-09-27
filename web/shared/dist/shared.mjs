@@ -257,9 +257,18 @@ var ThemeManager = class {
   }
   /** Writes storage, applies, and fires onChange. */
   set(name) {
+    this.adopt(name);
+    this.options.onChange?.(name);
+  }
+  /**
+   * Writes storage and applies, WITHOUT firing onChange: for a theme that
+   * arrives from elsewhere (slideshow's server state). Using set() there
+   * would echo the theme back to its source, which answers with the same
+   * state again -- an endless loop.
+   */
+  adopt(name) {
     localStorage.setItem(this.storageKey(), name);
     this.stamp(name);
-    this.options.onChange?.(name);
   }
   /**
    * The one place a theme becomes the applied theme: apply() and set() both
@@ -404,8 +413,147 @@ function showToast(message, tone = "notice", durationMs = DEFAULT_DURATION_MS[to
   return { dismiss };
 }
 
-// web/shared/ts/menu.ts
+// web/shared/ts/session.ts
 var SVG_NS = "http://www.w3.org/2000/svg";
+function doorGlyph() {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "1em");
+  svg.setAttribute("height", "1em");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  const door = document.createElementNS(SVG_NS, "path");
+  door.setAttribute("d", "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4");
+  const head = document.createElementNS(SVG_NS, "polyline");
+  head.setAttribute("points", "16 17 21 12 16 7");
+  const shaft = document.createElementNS(SVG_NS, "line");
+  shaft.setAttribute("x1", "21");
+  shaft.setAttribute("y1", "12");
+  shaft.setAttribute("x2", "9");
+  shaft.setAttribute("y2", "12");
+  svg.append(door, head, shaft);
+  return svg;
+}
+function buildSignOutButton() {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "ui-menu-trigger ui-signout";
+  btn.title = "Sign out";
+  btn.setAttribute("aria-label", "Sign out");
+  btn.append(doorGlyph());
+  btn.addEventListener("click", () => {
+    btn.disabled = true;
+    void fetch("/api/auth/logout", { method: "POST" }).catch(() => void 0).then(() => window.location.reload());
+  });
+  return btn;
+}
+async function sessionState(method) {
+  if (typeof fetch !== "function") return { kind: "unknown" };
+  const url = method === "GET" ? "/api/auth/session" : "/api/auth/activity";
+  try {
+    const res = await fetch(url, { method, headers: { Accept: "application/json" } });
+    if (res.status === 401) return { kind: "signed-out" };
+    if (!res.ok) return { kind: "unknown" };
+    const body = await res.json();
+    if (!Array.isArray(body.methods)) return { kind: "unknown" };
+    return { kind: "signed-in", idleSeconds: typeof body.idleSeconds === "number" ? body.idleSeconds : 0 };
+  } catch {
+    return { kind: "unknown" };
+  }
+}
+var REPORT_EVERY_MS = 6e4;
+var RECHECK_CAP_MS = 5 * 6e4;
+var ACTIVITY_EVENTS = ["pointerdown", "keydown", "wheel", "touchstart"];
+function watchIdle(initialIdleSeconds) {
+  let stopped = false;
+  let timer;
+  let lastReport = Date.now();
+  let pendingUse = false;
+  const signedOut = () => {
+    if (stopped) return;
+    stop();
+    window.location.reload();
+  };
+  const schedule = (idleSeconds) => {
+    if (stopped) return;
+    clearTimeout(timer);
+    const due = Math.min(Math.max(idleSeconds * 1e3 + 1e3, 5e3), RECHECK_CAP_MS);
+    timer = setTimeout(() => void check(), due);
+  };
+  const apply = (state) => {
+    if (state.kind === "signed-out") signedOut();
+    else if (state.kind === "signed-in") schedule(state.idleSeconds);
+    else schedule(60);
+  };
+  const check = async () => {
+    const report = pendingUse;
+    pendingUse = false;
+    if (report) lastReport = Date.now();
+    apply(await sessionState(report ? "POST" : "GET"));
+  };
+  const onUse = () => {
+    if (Date.now() - lastReport >= REPORT_EVERY_MS) {
+      lastReport = Date.now();
+      pendingUse = false;
+      void sessionState("POST").then(apply);
+    } else {
+      pendingUse = true;
+    }
+  };
+  const onVisible = () => {
+    if (document.visibilityState === "visible") void check();
+  };
+  for (const type of ACTIVITY_EVENTS) window.addEventListener(type, onUse, { capture: true, passive: true });
+  document.addEventListener("visibilitychange", onVisible);
+  schedule(initialIdleSeconds);
+  function stop() {
+    stopped = true;
+    clearTimeout(timer);
+    for (const type of ACTIVITY_EVENTS) window.removeEventListener(type, onUse, { capture: true });
+    document.removeEventListener("visibilitychange", onVisible);
+  }
+  return stop;
+}
+function mountSignOut(trigger) {
+  let cancelled = false;
+  let group = null;
+  let observer = null;
+  const place = () => {
+    if (cancelled || !trigger.isConnected) return false;
+    group = document.createElement("span");
+    group.className = "ui-menu-actions";
+    trigger.before(group);
+    group.append(buildSignOutButton(), trigger);
+    return true;
+  };
+  let stopWatching = null;
+  void sessionState("GET").then((state) => {
+    if (state.kind !== "signed-in" || cancelled) return;
+    stopWatching = watchIdle(state.idleSeconds);
+    if (place() || typeof MutationObserver !== "function") return;
+    observer = new MutationObserver(() => {
+      if (place()) observer?.disconnect();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
+  return () => {
+    cancelled = true;
+    observer?.disconnect();
+    stopWatching?.();
+    if (group) {
+      group.before(trigger);
+      group.remove();
+    }
+  };
+}
+
+// web/shared/ts/menu.ts
+var SVG_NS2 = "http://www.w3.org/2000/svg";
 var instanceCount = 0;
 function isSeparator(item) {
   return "separator" in item;
@@ -423,7 +571,7 @@ function itemId(item) {
   return "id" in item ? item.id : void 0;
 }
 function closeGlyph() {
-  const svg = document.createElementNS(SVG_NS, "svg");
+  const svg = document.createElementNS(SVG_NS2, "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("width", "1em");
   svg.setAttribute("height", "1em");
@@ -431,7 +579,7 @@ function closeGlyph() {
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("focusable", "false");
   for (const d of ["M6 6L18 18", "M6 18L18 6"]) {
-    const line = document.createElementNS(SVG_NS, "path");
+    const line = document.createElementNS(SVG_NS2, "path");
     line.setAttribute("d", d);
     line.setAttribute("stroke", "currentColor");
     line.setAttribute("stroke-width", "2");
@@ -441,7 +589,7 @@ function closeGlyph() {
   return svg;
 }
 function barsGlyph() {
-  const svg = document.createElementNS(SVG_NS, "svg");
+  const svg = document.createElementNS(SVG_NS2, "svg");
   svg.setAttribute("viewBox", "0 0 448 512");
   svg.setAttribute("width", "1em");
   svg.setAttribute("height", "1em");
@@ -449,7 +597,7 @@ function barsGlyph() {
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("focusable", "false");
   for (const y of [64, 224, 384]) {
-    const bar = document.createElementNS(SVG_NS, "rect");
+    const bar = document.createElementNS(SVG_NS2, "rect");
     bar.setAttribute("x", "0");
     bar.setAttribute("y", String(y));
     bar.setAttribute("width", "448");
@@ -461,6 +609,8 @@ function barsGlyph() {
 }
 var HamburgerMenu = class {
   constructor(options) {
+    /** Removes the sign-out button (or cancels its pending mount). */
+    this.unmountSignOut = null;
     this.records = [];
     this.bindings = [];
     this.opened = false;
@@ -518,6 +668,7 @@ var HamburgerMenu = class {
     document.body.append(this.drawer);
     for (const item of options.items) this.records.push(this.buildRecord(item));
     this.picker = this.buildPicker();
+    if (options.signOut !== false) this.unmountSignOut = mountSignOut(this.trigger);
     this.bind(this.trigger, "click", () => this.toggle());
     this.bind(this.backdrop, "mousedown", () => this.close());
     this.bind(document, "keydown", (e) => this.onKeydown(e), true);
@@ -583,6 +734,7 @@ var HamburgerMenu = class {
     this.bindings.length = 0;
     this.drawer.remove();
     this.backdrop.remove();
+    this.unmountSignOut?.();
     if (this.options.mountTrigger) {
       this.trigger.removeAttribute("aria-expanded");
       this.trigger.removeAttribute("aria-controls");

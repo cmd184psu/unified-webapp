@@ -134,35 +134,12 @@ func TestParseTokenRejectsAlgRS256(t *testing.T) {
 	}
 }
 
-func TestNeedsRefresh(t *testing.T) {
-	ttl := 100 * time.Hour
-	iat := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	claims := &sessionClaims{}
-	claims.IssuedAt = jwt.NewNumericDate(iat)
-
-	notYet := iat.Add(time.Duration(0.49 * float64(ttl)))
-	if needsRefresh(claims, ttl, 0.5, notYet) {
-		t.Errorf("needsRefresh at 0.49*ttl = true, want false")
-	}
-
-	yes := iat.Add(time.Duration(0.51 * float64(ttl)))
-	if !needsRefresh(claims, ttl, 0.5, yes) {
-		t.Errorf("needsRefresh at 0.51*ttl = false, want true")
-	}
-}
-
-func TestSessionTTLAndRefreshFractionDefaults(t *testing.T) {
+func TestSessionTTLDefault(t *testing.T) {
 	if got := sessionTTL(config.SessionConfig{}); got != defaultSessionTTL {
 		t.Errorf("sessionTTL(zero) = %v, want %v", got, defaultSessionTTL)
 	}
 	if got := sessionTTL(config.SessionConfig{TTLHours: 24}); got != 24*time.Hour {
 		t.Errorf("sessionTTL(24) = %v, want 24h", got)
-	}
-	if got := refreshFraction(config.SessionConfig{}); got != defaultRefreshFraction {
-		t.Errorf("refreshFraction(zero) = %v, want %v", got, defaultRefreshFraction)
-	}
-	if got := refreshFraction(config.SessionConfig{RefreshAfterFraction: 0.75}); got != 0.75 {
-		t.Errorf("refreshFraction(0.75) = %v, want 0.75", got)
 	}
 }
 
@@ -233,8 +210,10 @@ func TestGrantsAllowTotality(t *testing.T) {
 		{"admin with no grants", &sessionClaims{Grants: nil}, "admin", false},
 		{"module with ldap identity grant", &sessionClaims{Grants: []string{"ldap"}}, "todo", true},
 		{"module with passkey identity grant", &sessionClaims{Grants: []string{"passkey"}}, "todo", true},
-		{"module with its own pin grant", &sessionClaims{Grants: []string{"pin:todo"}}, "todo", true},
-		{"module with a different module's pin grant", &sessionClaims{Grants: []string{"pin:slideshow"}}, "todo", false},
+		{"module with its own pin grant", &sessionClaims{Grants: []string{"pin:todo:0123abcd"}}, "todo", true},
+		{"module with a pre-fingerprint pin grant denies", &sessionClaims{Grants: []string{"pin:todo"}}, "todo", false},
+		{"module with an empty fingerprint denies", &sessionClaims{Grants: []string{"pin:todo:"}}, "todo", false},
+		{"module with a different module's pin grant", &sessionClaims{Grants: []string{"pin:slideshow:0123abcd"}}, "todo", false},
 		{"module with admin_pin grant does not satisfy a module", &sessionClaims{Grants: []string{"admin_pin"}}, "todo", false},
 		{"module with legacy bare \"pin\" grant denies", &sessionClaims{Grants: []string{"pin"}}, "todo", false},
 		{"module with legacy bare \"key\" grant denies", &sessionClaims{Grants: []string{"key"}}, "todo", false},

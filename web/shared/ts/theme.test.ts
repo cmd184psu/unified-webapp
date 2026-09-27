@@ -271,7 +271,7 @@ const UNTOUCHED = "untouched-by-the-listener";
   );
 }
 
-// --- onChange fires on set() and on nothing else ----------------------------
+// --- onChange fires on set() and on nothing else (not apply/reresolve/adopt) ----------------------------
 
 {
   const dom = installFakeDom();
@@ -290,6 +290,11 @@ const UNTOUCHED = "untouched-by-the-listener";
     `got ${JSON.stringify(fired)}`,
   );
   check("set() applies the chosen theme", dom.documentElement.dataset.theme === "rose", `got "${dom.documentElement.dataset.theme}"`);
+
+  themes.adopt("forest");
+  check("adopt() applies the theme", dom.documentElement.dataset.theme === "forest", `got "${dom.documentElement.dataset.theme}"`);
+  check("adopt() saves the theme", dom.storage.get("ui-theme:sampler") === "forest", `stored "${dom.storage.get("ui-theme:sampler")}"`);
+  check("adopt() does not fire onChange (no echo back to the source)", fired.length === 1, `got ${JSON.stringify(fired)}`);
 }
 
 // --- apply() is idempotent and writes no storage -----------------------------

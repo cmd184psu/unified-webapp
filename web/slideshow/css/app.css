@@ -371,3 +371,11 @@ kbd {
 
 /* ── Utility ──────────────────────────────────────────────────────────────── */
 [hidden] { display: none !important; }
+
+/* The shared sign-out icon sits just left of ☰, dressed like the other
+   top-bar buttons. */
+#top-bar .ui-signout {
+  padding: 0.3rem 0.6rem;
+  background: var(--btn-bg);
+  border-color: var(--btn-border);
+}

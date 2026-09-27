@@ -53,7 +53,9 @@ func setCookieValue(rec *httptest.ResponseRecorder) (string, bool) {
 }
 
 // methodsOf converts a decoded JSON "methods" field (a []any of strings)
-// into a []string for easy comparison.
+// into a []string for easy comparison. A door-code grant's PIN fingerprint
+// ("pin:<module>:<fp>") is dropped, so tests compare against pinGrant(module);
+// session_scope_test.go covers the fingerprints themselves.
 func methodsOf(t *testing.T, body map[string]any) []string {
 	t.Helper()
 	raw, ok := body["methods"].([]any)
@@ -65,6 +67,11 @@ func methodsOf(t *testing.T, body map[string]any) []string {
 		s, ok := m.(string)
 		if !ok {
 			t.Fatalf("methods[%d] = %#v, want string", i, m)
+		}
+		if strings.HasPrefix(s, pinMethod+":") {
+			if parts := strings.SplitN(s, ":", 3); len(parts) == 3 {
+				s = parts[0] + ":" + parts[1]
+			}
 		}
 		out[i] = s
 	}
@@ -204,10 +211,9 @@ func TestHandleLoginPinSuccessThenLDAPAccumulates(t *testing.T) {
 	conn := scriptedUserConn("uid=carol,ou=people,dc=example,dc=com", []string{"users"}, nil)
 	pinPath := writePinFile(t, "4242")
 	p := &Policy{
-		Modules:         map[string]ModulePolicy{"multissh": {PinFile: pinPath}},
-		LDAP:            config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
-		SessionTTL:      time.Hour,
-		RefreshFraction: 0.5,
+		Modules:    map[string]ModulePolicy{"multissh": {PinFile: pinPath}},
+		LDAP:       config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
+		SessionTTL: time.Hour,
 	}
 	svc := newGateService(t, now, p)
 	svc.ldapDialer = func(ctx context.Context, opts ldapDialOptions) (ldapConn, error) { return conn, nil }
@@ -251,10 +257,9 @@ func TestHandleLoginLDAPFakeDialer(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	conn := scriptedUserConn("uid=dana,ou=people,dc=example,dc=com", []string{"users"}, nil)
 	p := &Policy{
-		Modules:         map[string]ModulePolicy{"multissh": {}},
-		LDAP:            config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
-		SessionTTL:      time.Hour,
-		RefreshFraction: 0.5,
+		Modules:    map[string]ModulePolicy{"multissh": {}},
+		LDAP:       config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
+		SessionTTL: time.Hour,
 	}
 	svc := newGateService(t, now, p)
 	svc.ldapDialer = func(ctx context.Context, opts ldapDialOptions) (ldapConn, error) { return conn, nil }
@@ -292,10 +297,9 @@ func TestCrossModuleAccumulationPINThenLDAP(t *testing.T) {
 	conn := scriptedUserConn("uid=carol,ou=people,dc=example,dc=com", []string{"users"}, nil)
 	pinPath := writePinFile(t, "4242")
 	p := &Policy{
-		Modules:         map[string]ModulePolicy{"slideshow": {PinFile: pinPath}, "multissh": {}},
-		LDAP:            config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
-		SessionTTL:      time.Hour,
-		RefreshFraction: 0.5,
+		Modules:    map[string]ModulePolicy{"slideshow": {PinFile: pinPath}, "multissh": {}},
+		LDAP:       config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
+		SessionTTL: time.Hour,
 	}
 	svc := newGateService(t, now, p)
 	svc.ldapDialer = func(ctx context.Context, opts ldapDialOptions) (ldapConn, error) { return conn, nil }
@@ -368,10 +372,9 @@ func TestCrossModuleAccumulationPINThenLDAP(t *testing.T) {
 func TestHandleLoginAdminOperatorPIN(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	p := &Policy{
-		Modules:         map[string]ModulePolicy{},
-		AdminPIN:        hashFor(t, "9999"),
-		SessionTTL:      time.Hour,
-		RefreshFraction: 0.5,
+		Modules:    map[string]ModulePolicy{},
+		AdminPIN:   hashFor(t, "9999"),
+		SessionTTL: time.Hour,
 	}
 	svc := newGateService(t, now, p)
 
@@ -399,9 +402,8 @@ func TestHandleLoginModulePinFileSuccessAndFailure(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	pinPath := writePinFile(t, "7777")
 	p := &Policy{
-		Modules:         map[string]ModulePolicy{"todo": {PinFile: pinPath}},
-		SessionTTL:      time.Hour,
-		RefreshFraction: 0.5,
+		Modules:    map[string]ModulePolicy{"todo": {PinFile: pinPath}},
+		SessionTTL: time.Hour,
 	}
 	svc := newGateService(t, now, p)
 
@@ -445,9 +447,8 @@ func TestHandleLoginPinFileConfigErrorIsLoud500NotThrottled(t *testing.T) {
 		t.Fatalf("write pin file: %v", err)
 	}
 	p := &Policy{
-		Modules:         map[string]ModulePolicy{"todo": {PinFile: path}},
-		SessionTTL:      time.Hour,
-		RefreshFraction: 0.5,
+		Modules:    map[string]ModulePolicy{"todo": {PinFile: path}},
+		SessionTTL: time.Hour,
 	}
 	svc := newGateService(t, now, p)
 
@@ -495,9 +496,8 @@ func TestHandleLoginThrottle(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	pinPath := writePinFile(t, "1234")
 	p := &Policy{
-		Modules:         map[string]ModulePolicy{"grocery": {PinFile: pinPath}},
-		SessionTTL:      time.Hour,
-		RefreshFraction: 0.5,
+		Modules:    map[string]ModulePolicy{"grocery": {PinFile: pinPath}},
+		SessionTTL: time.Hour,
 	}
 	svc := newGateService(t, now, p)
 
@@ -530,7 +530,8 @@ func TestHandleLoginThrottle(t *testing.T) {
 
 func TestHandleLogoutClearsCookie(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	p := &Policy{Modules: map[string]ModulePolicy{"grocery": {PinFile: "/tmp/does-not-matter"}}}
+	pinFile := writePinFile(t, "1234")
+	p := &Policy{Modules: map[string]ModulePolicy{"grocery": {PinFile: pinFile}}, SessionTTL: time.Hour}
 	svc := newGateService(t, now, p)
 
 	tok, err := issueToken(gateTestKey(), "alice", []string{pinGrant("grocery")}, time.Hour, now)
@@ -569,7 +570,8 @@ func TestHandleLogoutClearsCookie(t *testing.T) {
 
 func TestHandleSessionWithAndWithoutCookie(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	p := &Policy{Modules: map[string]ModulePolicy{"grocery": {PinFile: "/tmp/does-not-matter"}}}
+	pinFile := writePinFile(t, "1234")
+	p := &Policy{Modules: map[string]ModulePolicy{"grocery": {PinFile: pinFile}}, SessionTTL: time.Hour}
 	svc := newGateService(t, now, p)
 
 	t.Run("without cookie -> 401", func(t *testing.T) {
@@ -583,7 +585,7 @@ func TestHandleSessionWithAndWithoutCookie(t *testing.T) {
 	})
 
 	t.Run("with valid cookie -> 200 identity/methods", func(t *testing.T) {
-		tok, err := issueToken(gateTestKey(), "alice", []string{pinGrant("grocery")}, time.Hour, now)
+		tok, err := issueToken(gateTestKey(), "alice", []string{pinGrantFP("grocery", pinFingerprint(gateTestKey(), "1234"))}, time.Hour, now)
 		if err != nil {
 			t.Fatalf("issueToken: %v", err)
 		}
@@ -609,10 +611,9 @@ func TestAuthEventLog(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	pinPath := writePinFile(t, "1234")
 	p := &Policy{
-		Modules:         map[string]ModulePolicy{"grocery": {PinFile: pinPath}, "multissh": {}},
-		LDAP:            config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
-		SessionTTL:      time.Hour,
-		RefreshFraction: 0.5,
+		Modules:    map[string]ModulePolicy{"grocery": {PinFile: pinPath}, "multissh": {}},
+		LDAP:       config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
+		SessionTTL: time.Hour,
 	}
 	svc := newGateService(t, now, p)
 
@@ -715,10 +716,9 @@ func TestHandleLoginAdminPINFileBothEmptyMatrixEncodings(t *testing.T) {
 				t.Fatalf("write pin file: %v", err)
 			}
 			p := &Policy{
-				Modules:         modules,
-				AdminPINFile:    path,
-				SessionTTL:      time.Hour,
-				RefreshFraction: 0.5,
+				Modules:      modules,
+				AdminPINFile: path,
+				SessionTTL:   time.Hour,
 			}
 			svc := newGateService(t, now, p)
 
@@ -826,10 +826,9 @@ func TestHandleLoginAdminPINFileEditTakesEffectWithoutSwap(t *testing.T) {
 		t.Fatalf("write pin file: %v", err)
 	}
 	p := &Policy{
-		Modules:         map[string]ModulePolicy{},
-		AdminPINFile:    path,
-		SessionTTL:      time.Hour,
-		RefreshFraction: 0.5,
+		Modules:      map[string]ModulePolicy{},
+		AdminPINFile: path,
+		SessionTTL:   time.Hour,
 	}
 	svc := newGateService(t, now, p)
 
@@ -876,10 +875,9 @@ func TestHandleLoginAdminPINFileEditTakesEffectWithoutSwap(t *testing.T) {
 func TestHandleLoginThrottleAppliesToAdminPIN(t *testing.T) {
 	clk := newFakeClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	p := &Policy{
-		Modules:         map[string]ModulePolicy{},
-		AdminPIN:        hashFor(t, "9999"),
-		SessionTTL:      time.Hour,
-		RefreshFraction: 0.5,
+		Modules:    map[string]ModulePolicy{},
+		AdminPIN:   hashFor(t, "9999"),
+		SessionTTL: time.Hour,
 	}
 	svc := &Service{
 		key:      gateTestKey(),
@@ -959,9 +957,8 @@ func TestAuthEventLogPasskeyManagementDeniedWithoutLDAP(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	pinPath := writePinFile(t, "1234")
 	p := &Policy{
-		Modules:         map[string]ModulePolicy{"grocery": {PinFile: pinPath}},
-		SessionTTL:      time.Hour,
-		RefreshFraction: 0.5,
+		Modules:    map[string]ModulePolicy{"grocery": {PinFile: pinPath}},
+		SessionTTL: time.Hour,
 	}
 	svc := newGateService(t, now, p)
 

@@ -149,7 +149,7 @@
         "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
       },
       "slideshow": {
-        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
+        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/slideshow.pin"
       },
       "smbedit": {
         "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
@@ -173,8 +173,7 @@
     "cookie_secure": false,
     "cookie_domain": "",
     "session": {
-      "ttl_hours": 1,
-      "refresh_after_fraction": 0.5
+      "ttl_hours": 720
     },
     "ldap": {
       "url": "ldap://127.0.0.1:3893",

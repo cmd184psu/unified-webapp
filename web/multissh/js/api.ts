@@ -278,11 +278,6 @@ export async function loginLDAP(username: string, password: string): Promise<Aut
   return authJSON<AuthSession>(res);
 }
 
-/** Sign out and clear the session cookie. */
-export async function logout(): Promise<void> {
-  await fetch("/api/auth/logout", { method: "POST" });
-}
-
 /** List the current user's enrolled passkeys. */
 export async function listPasskeys(): Promise<AuthPasskey[]> {
   const res = await fetch("/api/auth/passkeys");

@@ -23,6 +23,8 @@ interface ApiResponse<T = Record<string, unknown>> {
 
 interface AuthModule {
   pin_file?: string;
+  /** Idle sign-out in minutes; absent/0 = the server default (60). */
+  idle_minutes?: number;
 }
 
 interface AdminPin {
@@ -56,7 +58,12 @@ interface PinFile {
 interface MatrixEntry {
   protected: boolean;
   pinFile: string;
+  /** Idle sign-out in minutes; 0 = the default (DEFAULT_IDLE_MINUTES). */
+  idle: number;
 }
+
+const DEFAULT_IDLE_MINUTES = 60;
+const MAX_IDLE_MINUTES = 7 * 24 * 60;
 
 const statusEl = document.getElementById("status")!;
 const panels = [
@@ -144,7 +151,9 @@ function buildModulesPayload(adminOverride?: AuthModule): Record<string, AuthMod
   Object.keys(matrix).forEach((m) => {
     if (!matrix[m].protected) return;
     const pinFile = matrix[m].pinFile.trim();
-    toSave[m] = pinFile ? { pin_file: pinFile } : {};
+    const entry: AuthModule = pinFile ? { pin_file: pinFile } : {};
+    if (matrix[m].idle > 0) entry.idle_minutes = matrix[m].idle;
+    toSave[m] = entry;
   });
   if (adminOverride !== undefined) {
     toSave.admin = adminOverride;
@@ -180,12 +189,12 @@ async function loadAll(): Promise<void> {
   matrix = {};
   (authConfig!.known_modules || []).forEach((m) => {
     if (m === "admin") return;
-    matrix[m] = { protected: false, pinFile: "" };
+    matrix[m] = { protected: false, pinFile: "", idle: 0 };
   });
   Object.keys(authConfig!.modules || {}).forEach((m) => {
     if (m === "admin") return;
     const entry = (authConfig!.modules || {})[m] || {};
-    matrix[m] = { protected: true, pinFile: entry.pin_file || "" };
+    matrix[m] = { protected: true, pinFile: entry.pin_file || "", idle: entry.idle_minutes || 0 };
   });
   passkeys = (passkeysRes.ok && passkeysRes.data && passkeysRes.data.passkeys) || [];
 
@@ -221,7 +230,10 @@ function renderMatrix(): void {
   table.className = "matrix";
 
   const thead = document.createElement("thead");
-  thead.innerHTML = "<tr><th>Module</th><th>Protected</th><th>Pin file</th></tr>";
+  thead.innerHTML =
+    '<tr><th>Module</th><th>Protected</th><th title="Sign out after this many minutes without use (clicks, typing, page loads, saves). Blank = ' +
+    DEFAULT_IDLE_MINUTES +
+    '.">Idle sign-out (min)</th><th>Pin file</th></tr>';
   table.appendChild(thead);
 
   const tbody = document.createElement("tbody");
@@ -233,6 +245,8 @@ function renderMatrix(): void {
       `<td><label class="ui-toggle" title="Protected">` +
       `<input type="checkbox" class="matrix-protected" data-module="${esc(mod)}" aria-label="Protect ${esc(mod)}"${entry.protected ? " checked" : ""}>` +
       `<span class="ui-toggle-track"></span></label></td>` +
+      `<td><input type="number" class="matrix-idle" data-module="${esc(mod)}" min="1" max="${MAX_IDLE_MINUTES}" step="1" ` +
+      `placeholder="${DEFAULT_IDLE_MINUTES}" value="${entry.idle > 0 ? entry.idle : ""}" aria-label="Idle sign-out for ${esc(mod)}, in minutes"${entry.protected ? "" : " disabled"}></td>` +
       `<td>` +
       `<select class="matrix-pinfile" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>${pinFileOptions(entry.pinFile)}</select> ` +
       `<button type="button" class="btn btn-outline btn-sm matrix-setpin-btn" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>Set PIN&hellip;</button>` +
@@ -251,6 +265,7 @@ function renderMatrix(): void {
   adminTr.innerHTML =
     `<td>admin</td>` +
     `<td class="hint">n/a</td>` +
+    `<td class="hint">${(authConfig!.modules?.admin?.idle_minutes || DEFAULT_IDLE_MINUTES)}</td>` +
     `<td class="hint">${esc(adminSourceDisplay())}</td>`;
   tbody.appendChild(adminTr);
 
@@ -267,10 +282,24 @@ function renderMatrix(): void {
         `select.matrix-pinfile[data-module="${CSS.escape(mod)}"]`,
       );
       if (select) select.disabled = !box.checked;
+      const idle = container.querySelector<HTMLInputElement>(
+        `input.matrix-idle[data-module="${CSS.escape(mod)}"]`,
+      );
+      if (idle) idle.disabled = !box.checked;
       const setBtn = container.querySelector<HTMLButtonElement>(
         `.matrix-setpin-btn[data-module="${CSS.escape(mod)}"]`,
       );
       if (setBtn) setBtn.disabled = !box.checked;
+      autoSaveMatrix();
+    });
+  });
+  container.querySelectorAll<HTMLInputElement>("input.matrix-idle").forEach((input) => {
+    input.addEventListener("change", () => {
+      const n = Math.round(Number(input.value));
+      // Blank or out of range: back to the default.
+      const idle = input.value.trim() === "" || !(n >= 1 && n <= MAX_IDLE_MINUTES) ? 0 : n;
+      input.value = idle > 0 ? String(idle) : "";
+      matrix[input.dataset.module!].idle = idle;
       autoSaveMatrix();
     });
   });
@@ -363,6 +392,7 @@ async function saveMatrix(): Promise<void> {
   authConfig!.modules = (res.data && res.data.modules) || toSave;
   Object.keys(matrix).forEach((m) => {
     matrix[m].pinFile = (authConfig!.modules![m] && authConfig!.modules![m].pin_file) || "";
+    matrix[m].idle = (authConfig!.modules![m] && authConfig!.modules![m].idle_minutes) || 0;
   });
   renderMatrix();
   statusEl2.textContent = "Saved.";
@@ -869,6 +899,7 @@ document.getElementById("operator-pin-change-file")!.addEventListener("click", a
   authConfig!.modules = (res.data && res.data.modules) || toSave;
   Object.keys(matrix).forEach((m) => {
     matrix[m].pinFile = (authConfig!.modules![m] && authConfig!.modules![m].pin_file) || "";
+    matrix[m].idle = (authConfig!.modules![m] && authConfig!.modules![m].idle_minutes) || 0;
   });
   renderMatrix();
   renderOperatorPin();
@@ -923,6 +954,7 @@ document.getElementById("operator-pin-form")!.addEventListener("submit", async (
   authConfig!.modules = (modRes.data && modRes.data.modules) || toSave;
   Object.keys(matrix).forEach((m) => {
     matrix[m].pinFile = (authConfig!.modules![m] && authConfig!.modules![m].pin_file) || "";
+    matrix[m].idle = (authConfig!.modules![m] && authConfig!.modules![m].idle_minutes) || 0;
   });
   await loadPinFiles();
   renderMatrix();
@@ -949,31 +981,13 @@ function buildHamburger(): HamburgerMenu {
 
 const hamburger = buildHamburger();
 
-// Sign-out is a door-and-arrow icon beside the hamburger, not a menu entry.
-const SVG_SIGN_OUT =
-  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-  '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>';
-
-function buildSignOut(): HTMLButtonElement {
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "ui-menu-trigger topbar-signout";
-  btn.title = "Sign out";
-  btn.setAttribute("aria-label", "Sign out");
-  btn.innerHTML = SVG_SIGN_OUT;
-  btn.addEventListener("click", async () => {
-    await api("POST", "/api/auth/logout");
-    location.reload();
-  });
-  return btn;
-}
-
 const topbar = document.querySelector<HTMLElement>(".topbar")!;
 const logoutBtn = document.getElementById("logout-btn");
 if (logoutBtn) logoutBtn.remove();
 const topbarActions = document.createElement("div");
 topbarActions.className = "topbar-actions";
-topbarActions.append(buildSignOut(), hamburger.trigger);
+// The shared sign-out icon (HamburgerMenu) lands just before the trigger.
+topbarActions.append(hamburger.trigger);
 topbar.appendChild(topbarActions);
 
 loadAll();

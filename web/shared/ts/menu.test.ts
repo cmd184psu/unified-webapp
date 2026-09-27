@@ -96,6 +96,19 @@ class FakeElement {
     }
   }
 
+  /** Attached to some parent — enough for mountSignOut's "is it mounted yet". */
+  get isConnected(): boolean {
+    return this.parent !== null;
+  }
+
+  /** Inserts node just before this one, as session.ts places its button. */
+  before(node: FakeElement): void {
+    if (!this.parent) return;
+    node.remove();
+    node.parent = this.parent;
+    this.parent.children.splice(this.parent.children.indexOf(this), 0, node);
+  }
+
   remove(): void {
     if (!this.parent) return;
     const i = this.parent.children.indexOf(this);
@@ -963,3 +976,57 @@ check(
   !Object.keys(barrel).includes("getFocusable"),
   `the barrel exports ${JSON.stringify(Object.keys(barrel))}`,
 );
+
+// --- sign-out: shown before the trigger only when there is a session ---------
+
+async function signOutCase(sessionStatus: number, body: unknown): Promise<FakeElement[]> {
+  const g = globalThis as unknown as { fetch?: unknown; window: Record<string, unknown> };
+  const saved = g.fetch;
+  const requests: string[] = [];
+  g.fetch = async (url: string) => {
+    requests.push(url);
+    return { ok: sessionStatus === 200, status: sessionStatus, json: async () => body };
+  };
+  // session.ts listens on window for real use (clicks, typing, ...).
+  const windowListeners = new Set<string>();
+  g.window.addEventListener = (type: string) => windowListeners.add(type);
+  g.window.removeEventListener = (type: string) => windowListeners.delete(type);
+  try {
+    const bar = new FakeElement("div");
+    const trigger = new FakeElement("button");
+    bar.append(trigger);
+    const menu = new HamburgerMenu({ items: [], mountTrigger: trigger as unknown as HTMLElement });
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    const children = bar.children.length === 1 && bar.children[0] !== trigger ? [...bar.children[0].children] : [...bar.children];
+    const watching = windowListeners.has("pointerdown") && windowListeners.has("keydown");
+    check(
+      "sign-out: the idle watch listens for real use exactly when there is a session",
+      watching === (children.length === 2),
+      `listening=${watching} with ${children.length} children`,
+    );
+    check("sign-out: only the session check was requested up front", requests.join() === "/api/auth/session", `got ${requests.join()}`);
+    menu.destroy();
+    check("sign-out: destroy() stops the idle watch", windowListeners.size === 0, `still listening for ${[...windowListeners].join()}`);
+    check(
+      "sign-out: destroy() removes the button and restores the trigger",
+      bar.children.length === 1 && bar.children[0] === trigger,
+      `left ${bar.children.length} children`,
+    );
+    return children;
+  } finally {
+    g.fetch = saved;
+  }
+}
+
+void (async () => {
+  const withSession = await signOutCase(200, { identity: "", methods: ["pin:todo:ab"], idleSeconds: 3600 });
+  check(
+    "sign-out: with a session, the icon and the trigger share one group, icon first",
+    withSession.length === 2 && withSession[0].className === "ui-menu-trigger ui-signout" && withSession[0].attrs["aria-label"] === "Sign out" && withSession[1].tagName === "button",
+    `bar children ${JSON.stringify(withSession.map((c) => c.className))}`,
+  );
+  const noSession = await signOutCase(401, { error: "unauthorized" });
+  check("sign-out: without a session, nothing is added", noSession.length === 1, `got ${noSession.length} children`);
+  const spaFallback = await signOutCase(200, "<html>");
+  check("sign-out: a non-session 200 (an open module's page) adds nothing", spaFallback.length === 1, `got ${spaFallback.length} children`);
+})();

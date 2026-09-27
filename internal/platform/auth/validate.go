@@ -59,6 +59,12 @@ func ValidatePolicy(a config.AuthConfig, knownModules []string, adminRouted bool
 	}
 
 	for _, mod := range modNames {
+		if idle := a.Modules[mod].IdleMinutes; idle < 0 || idle > config.MaxIdleMinutes {
+			return fmt.Errorf("auth.modules.%s.idle_minutes: must be 0 (default %d) to %d", mod, config.DefaultIdleMinutes, config.MaxIdleMinutes)
+		}
+	}
+
+	for _, mod := range modNames {
 		pinFile := a.Modules[mod].PinFile
 		if pinFile == "" {
 			continue

@@ -47,9 +47,6 @@ var api = {
   authMode() {
     return apiFetch("/api/auth/mode");
   },
-  logout() {
-    return fetch("/api/auth/logout", { method: "POST" });
-  },
   // ─── Lanes ────────────────────────────────────────────────────────────
   listLanes() {
     return apiFetch("/api/lanes");
@@ -1698,7 +1695,7 @@ function mountTaskView(container, live2, caps3, taskName) {
 }
 
 // web/taskmaster/js/buildinfo.ts
-var FRONTEND_BUILD_TIME = "9af1f92a1088";
+var FRONTEND_BUILD_TIME = "1f3dc162a9c5";
 
 // web/taskmaster/js/main.ts
 var caps2 = { allow_sudo: false };
@@ -1766,21 +1763,7 @@ function buildNav() {
   nav.appendChild(spacer);
   nav.appendChild(buildLiveControl());
   nav.appendChild(buildBrakeControl());
-  if (authEnabled) nav.appendChild(buildSignOut());
   nav.appendChild(hamburger?.trigger ?? document.createElement("span"));
-}
-var SVG_SIGN_OUT = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>';
-function buildSignOut() {
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "ui-menu-trigger nav-signout";
-  btn.title = "Sign out";
-  btn.setAttribute("aria-label", "Sign out");
-  btn.innerHTML = SVG_SIGN_OUT;
-  btn.addEventListener("click", () => {
-    void api.logout().then(() => window.location.reload());
-  });
-  return btn;
 }
 function liveToggleTitle(enabled) {
   return enabled ? "Live updates on \u2014 click to pause" : "Live updates paused \u2014 click to resume";

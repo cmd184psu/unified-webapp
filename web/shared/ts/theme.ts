@@ -97,9 +97,19 @@ export class ThemeManager {
 
   /** Writes storage, applies, and fires onChange. */
   set(name: string): void {
+    this.adopt(name);
+    this.options.onChange?.(name);
+  }
+
+  /**
+   * Writes storage and applies, WITHOUT firing onChange: for a theme that
+   * arrives from elsewhere (slideshow's server state). Using set() there
+   * would echo the theme back to its source, which answers with the same
+   * state again -- an endless loop.
+   */
+  adopt(name: string): void {
     localStorage.setItem(this.storageKey(), name);
     this.stamp(name);
-    this.options.onChange?.(name);
   }
 
   /**

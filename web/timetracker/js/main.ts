@@ -17,8 +17,11 @@ themes.apply();
 function buildHamburger(): void {
   const items: MenuItem[] = [];
   const menu = new HamburgerMenu({ title: 'TimeTracker', items, themePicker: true, themes, side: 'right' });
-  menu.trigger.classList.add('app-menu-trigger');
-  document.body.append(menu.trigger);
+  // The corner also holds the shared sign-out icon, placed before the trigger.
+  const corner = document.createElement('div');
+  corner.className = 'app-menu-corner';
+  corner.append(menu.trigger);
+  document.body.append(corner);
 }
 
 document.addEventListener('DOMContentLoaded', function() {

@@ -141,11 +141,14 @@ select:focus {
 /* The shared ☰ trigger, pinned top-right so it sits at the right end of
    every page's top bar (each page draws its own), with the drawer opening
    beside it. */
-.app-menu-trigger {
+.app-menu-corner {
   position: fixed;
   top: 6px;
   right: 12px;
   z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 .topbar h1 {
   font-size: 14px;

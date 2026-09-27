@@ -127,7 +127,7 @@
       "slideshow": { "pin_file": "/etc/unified-webapp/slideshow.pin" },
       "menuserver": { "pin_file": "/etc/unified-webapp/menuserver.pin" },
       "obsidianoid": {},
-      "multissh": {},
+      "multissh": { "idle_minutes": 15 },
       "certmachine": { "pin_file": "/etc/unified-webapp/certmachine.pin" },
       "issuetracker": {},
       "admin": {},
@@ -138,8 +138,7 @@
     "cookie_secure": true,
     "cookie_domain": ".cmdhome.net",
     "session": {
-      "ttl_hours": 720,
-      "refresh_after_fraction": 0.5
+      "ttl_hours": 720
     },
     "ldap": {
       "url": "ldaps://ldap.cmdhome.net:636",

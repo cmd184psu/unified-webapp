@@ -28,6 +28,7 @@
 // reduced-motion suppression — so a module that wants a different
 // drawer width restyles one class rather than passing an option.
 
+import { mountSignOut } from "./session.js";
 import type { ThemeManager } from "./theme.js";
 import { getFocusable } from "./focusable.js";
 
@@ -103,6 +104,12 @@ export interface HamburgerMenuOptions {
    * and then cached. Left unset, the drawer uses CSS's left-edge default.
    */
   side?: "left" | "right" | "auto";
+  /**
+   * Shows the shared sign-out icon just before the trigger whenever this
+   * module has a session, along with idle sign-out (see session.ts). On by default; an open module
+   * never has a session, so it never shows there.
+   */
+  signOut?: boolean;
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -187,6 +194,8 @@ interface Binding {
 }
 
 export class HamburgerMenu {
+  /** Removes the sign-out button (or cancels its pending mount). */
+  private unmountSignOut: (() => void) | null = null;
   /** The button that opens the drawer — created here unless adopted. */
   readonly trigger: HTMLElement;
   /** The scrim behind the drawer. Attached in the constructor. */
@@ -263,6 +272,8 @@ export class HamburgerMenu {
     for (const item of options.items) this.records.push(this.buildRecord(item));
     this.picker = this.buildPicker();
 
+    if (options.signOut !== false) this.unmountSignOut = mountSignOut(this.trigger);
+
     this.bind(this.trigger, "click", () => this.toggle());
     this.bind(this.backdrop, "mousedown", () => this.close());
     this.bind(document, "keydown", (e) => this.onKeydown(e as KeyboardEvent), true);
@@ -336,6 +347,7 @@ export class HamburgerMenu {
     this.bindings.length = 0;
     this.drawer.remove();
     this.backdrop.remove();
+    this.unmountSignOut?.();
     if (this.options.mountTrigger) {
       this.trigger.removeAttribute("aria-expanded");
       this.trigger.removeAttribute("aria-controls");

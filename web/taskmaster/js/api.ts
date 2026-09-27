@@ -141,10 +141,6 @@ export const api = {
     return apiFetch<AuthMode>('/api/auth/mode');
   },
 
-  logout() {
-    return fetch('/api/auth/logout', { method: 'POST' });
-  },
-
   // ─── Lanes ────────────────────────────────────────────────────────────
   listLanes() {
     return apiFetch<LaneStatus[]>('/api/lanes');

@@ -370,15 +370,14 @@ func TestGatePinGrantScopedToItsModule(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	p := &Policy{
 		Modules: map[string]ModulePolicy{
-			"todo":        {PinFile: "/tmp/todo-pin"},
-			"obsidianoid": {PinFile: "/tmp/obsidianoid-pin"},
+			"todo":        {PinFile: writePinFile(t, "1111")},
+			"obsidianoid": {PinFile: writePinFile(t, "2222")},
 		},
-		LDAP:            config.LDAPConfig{URL: "ldap://fake"},
-		SessionTTL:      time.Hour,
-		RefreshFraction: 0.5,
+		LDAP:       config.LDAPConfig{URL: "ldap://fake"},
+		SessionTTL: time.Hour,
 	}
 	svc := newGateService(t, now, p)
-	tok := sessionCookieToken(t, "", []string{pinGrant("todo")}, time.Hour, now)
+	tok := sessionCookieToken(t, "", []string{pinGrantFP("todo", pinFingerprint(gateTestKey(), "1111"))}, time.Hour, now)
 
 	t.Run("denied on obsidianoid", func(t *testing.T) {
 		rec := httptest.NewRecorder()
@@ -413,9 +412,8 @@ func TestGateLDAPGrantReachesEveryProtectedNonAdminModule(t *testing.T) {
 			"obsidianoid": {},
 			"multissh":    {},
 		},
-		LDAP:            config.LDAPConfig{URL: "ldap://fake"},
-		SessionTTL:      time.Hour,
-		RefreshFraction: 0.5,
+		LDAP:       config.LDAPConfig{URL: "ldap://fake"},
+		SessionTTL: time.Hour,
 	}
 	svc := newGateService(t, now, p)
 	tok := sessionCookieToken(t, "alice", []string{"ldap"}, time.Hour, now)
@@ -441,10 +439,9 @@ func TestGateLDAPGrantReachesEveryProtectedNonAdminModule(t *testing.T) {
 func TestGateLegacyClaimsTokenIsDenied(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	p := &Policy{
-		Modules:         map[string]ModulePolicy{"grocery": {}},
-		LDAP:            config.LDAPConfig{URL: "ldap://fake"},
-		SessionTTL:      time.Hour,
-		RefreshFraction: 0.5,
+		Modules:    map[string]ModulePolicy{"grocery": {}},
+		LDAP:       config.LDAPConfig{URL: "ldap://fake"},
+		SessionTTL: time.Hour,
 	}
 	svc := newGateService(t, now, p)
 
@@ -564,45 +561,46 @@ func TestGateAPIKeyNeverAuthorizesAdmin(t *testing.T) {
 	}
 }
 
-// --- Sliding refresh ---
+// --- Renewal on real use only ---
 
-func TestGateSlidingRefresh(t *testing.T) {
+func TestGateRenewsOnlyOnUserActivity(t *testing.T) {
 	issuedAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	ttl := time.Hour
 	p := &Policy{
-		Modules:         map[string]ModulePolicy{"grocery": {PinFile: "/tmp/does-not-matter"}},
-		LDAP:            config.LDAPConfig{URL: "ldap://fake"},
-		SessionTTL:      ttl,
-		RefreshFraction: 0.5,
+		Modules:    map[string]ModulePolicy{"grocery": {}},
+		LDAP:       config.LDAPConfig{URL: "ldap://fake"},
+		SessionTTL: 720 * time.Hour,
+	}
+	tok := sessionCookieToken(t, "alice", []string{"ldap"}, time.Hour, issuedAt)
+
+	send := func(at time.Duration, method, path, accept string) *httptest.ResponseRecorder {
+		t.Helper()
+		svc := newGateService(t, issuedAt.Add(at), p)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(method, path, nil)
+		if accept != "" {
+			req.Header.Set("Accept", accept)
+		}
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
+		svc.Gate("grocery", echoHandler()).ServeHTTP(rec, req)
+		mustReached(t, rec)
+		return rec
 	}
 
-	tok := sessionCookieToken(t, "alice", []string{"ldap"}, ttl, issuedAt)
-
-	t.Run("stale token gets a refreshed Set-Cookie", func(t *testing.T) {
-		now := issuedAt.Add(45 * time.Minute) // > 50% of ttl
-		svc := newGateService(t, now, p)
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/api/items", nil)
-		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
-		svc.Gate("grocery", echoHandler()).ServeHTTP(rec, req)
-		mustReached(t, rec)
-		if rec.Header().Get("Set-Cookie") == "" {
-			t.Fatal("expected Set-Cookie for a stale session, got none")
-		}
-	})
-
-	t.Run("fresh token gets no Set-Cookie", func(t *testing.T) {
-		now := issuedAt.Add(5 * time.Minute) // < 50% of ttl
-		svc := newGateService(t, now, p)
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/api/items", nil)
-		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
-		svc.Gate("grocery", echoHandler()).ServeHTTP(rec, req)
-		mustReached(t, rec)
-		if rec.Header().Get("Set-Cookie") != "" {
-			t.Fatalf("expected no Set-Cookie for a fresh session, got %q", rec.Header().Get("Set-Cookie"))
-		}
-	})
+	if rec := send(45*time.Minute, http.MethodGet, "/api/items", ""); rec.Header().Get("Set-Cookie") != "" {
+		t.Error("a background GET (polling) must not renew the idle clock")
+	}
+	if rec := send(45*time.Minute, http.MethodGet, "/api/events", "text/event-stream"); rec.Header().Get("Set-Cookie") != "" {
+		t.Error("a live stream must not renew the idle clock")
+	}
+	if rec := send(45*time.Minute, http.MethodPost, "/api/items", ""); rec.Header().Get("Set-Cookie") == "" {
+		t.Error("a change (POST) is use and should renew")
+	}
+	if rec := send(45*time.Minute, http.MethodGet, "/", "text/html"); rec.Header().Get("Set-Cookie") == "" {
+		t.Error("loading the page is use and should renew")
+	}
+	if rec := send(30*time.Second, http.MethodPost, "/api/items", ""); rec.Header().Get("Set-Cookie") != "" {
+		t.Error("renewal is at most once a minute")
+	}
 }
 
 // --- Hijacker survival ---
@@ -622,10 +620,9 @@ func (h *hijackableRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 func TestGateHijackerSurvivesUpgradeRequest(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	p := &Policy{
-		Modules:         map[string]ModulePolicy{"multissh": {}},
-		LDAP:            config.LDAPConfig{URL: "ldap://fake"},
-		SessionTTL:      time.Hour,
-		RefreshFraction: 0.5,
+		Modules:    map[string]ModulePolicy{"multissh": {}},
+		LDAP:       config.LDAPConfig{URL: "ldap://fake"},
+		SessionTTL: time.Hour,
 	}
 	svc := newGateService(t, now, p)
 
@@ -658,10 +655,9 @@ func TestGateHijackerSurvivesUpgradeRequest(t *testing.T) {
 func TestGateSessionRequiredPasskeyRoutes(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	p := &Policy{
-		Modules:         map[string]ModulePolicy{"grocery": {PinFile: "/tmp/does-not-matter"}},
-		LDAP:            config.LDAPConfig{URL: "ldap://fake"},
-		SessionTTL:      time.Hour,
-		RefreshFraction: 0.5,
+		Modules:    map[string]ModulePolicy{"grocery": {PinFile: "/tmp/does-not-matter"}},
+		LDAP:       config.LDAPConfig{URL: "ldap://fake"},
+		SessionTTL: time.Hour,
 	}
 	svc := newGateService(t, now, p)
 
@@ -1004,10 +1000,9 @@ func TestGatePrincipalOnAPIKeyPath(t *testing.T) {
 func TestGatePrincipalOnSessionPath(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	p := &Policy{
-		Modules:         map[string]ModulePolicy{"grocery": {}},
-		LDAP:            config.LDAPConfig{URL: "ldap://fake"},
-		SessionTTL:      time.Hour,
-		RefreshFraction: 0.5,
+		Modules:    map[string]ModulePolicy{"grocery": {}},
+		LDAP:       config.LDAPConfig{URL: "ldap://fake"},
+		SessionTTL: time.Hour,
 	}
 	svc := newGateService(t, now, p)
 	tok := sessionCookieToken(t, "alice", []string{"ldap"}, time.Hour, now)
@@ -1064,10 +1059,9 @@ func TestGateWhoamiAPIKey(t *testing.T) {
 func TestGateWhoamiSession(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	p := &Policy{
-		Modules:         map[string]ModulePolicy{"grocery": {}},
-		LDAP:            config.LDAPConfig{URL: "ldap://fake"},
-		SessionTTL:      time.Hour,
-		RefreshFraction: 0.5,
+		Modules:    map[string]ModulePolicy{"grocery": {}},
+		LDAP:       config.LDAPConfig{URL: "ldap://fake"},
+		SessionTTL: time.Hour,
 	}
 	svc := newGateService(t, now, p)
 	tok := sessionCookieToken(t, "alice", []string{"ldap"}, time.Hour, now)

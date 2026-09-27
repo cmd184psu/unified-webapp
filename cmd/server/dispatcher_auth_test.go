@@ -491,7 +491,7 @@ func TestAC4_TokenLifecycle(t *testing.T) {
 		Modules: map[string]config.ModuleAuthConfig{"slideshow": {PinFile: modulePinFile(t, "4242")}},
 		LDAP:    config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
 		DataDir: authDataDir,
-		Session: config.SessionConfig{TTLHours: 1}, // 1h TTL, default 0.5 refresh fraction.
+		Session: config.SessionConfig{TTLHours: 1}, // 1h maximum session length; default 60-minute idle.
 	}
 	svc, err := auth.FromConfig(cfg.Auth, knownModules, false)
 	if err != nil {
@@ -510,8 +510,12 @@ func TestAC4_TokenLifecycle(t *testing.T) {
 
 	now := time.Now()
 
+	// The forged tokens carry an LDAP identity grant: a door-code grant also
+	// carries a keyed fingerprint of the PIN (auth/session_scope.go), which
+	// is out of reach from here.
+
 	t.Run("expired token", func(t *testing.T) {
-		tok := signSessionToken(t, realKey, "carol", []string{"pin:slideshow"}, now.Add(-2*time.Hour), now.Add(-time.Hour))
+		tok := signSessionToken(t, realKey, "carol", []string{"ldap"}, now.Add(-2*time.Hour), now.Add(-time.Hour))
 		res := doHostWithCookie(t, srv, http.MethodGet, "slideshow.example", "/", &http.Cookie{Name: "uw_session", Value: tok})
 		defer res.Body.Close()
 		if res.StatusCode != http.StatusUnauthorized {
@@ -532,7 +536,7 @@ func TestAC4_TokenLifecycle(t *testing.T) {
 		if _, err := rand.Read(otherKey); err != nil {
 			t.Fatalf("generate other key: %v", err)
 		}
-		tok := signSessionToken(t, otherKey, "carol", []string{"pin:slideshow"}, now.Add(-time.Minute), now.Add(time.Hour))
+		tok := signSessionToken(t, otherKey, "carol", []string{"ldap"}, now.Add(-time.Minute), now.Add(time.Hour))
 		res := doHostWithCookie(t, srv, http.MethodGet, "slideshow.example", "/", &http.Cookie{Name: "uw_session", Value: tok})
 		defer res.Body.Close()
 		if res.StatusCode != http.StatusUnauthorized {
@@ -540,11 +544,12 @@ func TestAC4_TokenLifecycle(t *testing.T) {
 		}
 	})
 
-	t.Run("near-expiry refreshes the cookie", func(t *testing.T) {
-		iat := now.Add(-40 * time.Minute) // > 50% of the 1h TTL has elapsed.
+	t.Run("use renews the cookie", func(t *testing.T) {
+		iat := now.Add(-40 * time.Minute) // within the default 60-minute idle limit.
 		exp := iat.Add(time.Hour)         // still valid: 20 minutes remain.
-		tok := signSessionToken(t, realKey, "carol", []string{"pin:slideshow"}, iat, exp)
-		res := doHostWithCookie(t, srv, http.MethodGet, "slideshow.example", "/", &http.Cookie{Name: "uw_session", Value: tok})
+		tok := signSessionToken(t, realKey, "carol", []string{"ldap"}, iat, exp)
+		// A click or keypress, as reported by the shared page code.
+		res := doHostWithCookie(t, srv, http.MethodPost, "slideshow.example", "/api/auth/activity", &http.Cookie{Name: "uw_session", Value: tok})
 		defer res.Body.Close()
 		if res.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(res.Body)

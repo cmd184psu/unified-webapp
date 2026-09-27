@@ -554,6 +554,11 @@
   border-radius: var(--radius-full);
   background: var(--color-primary);
 }
+.ui-menu-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
 .ui-menu-trigger {
   display: inline-flex;
   align-items: center;

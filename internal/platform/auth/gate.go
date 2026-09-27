@@ -17,6 +17,7 @@ package auth
 
 import (
 	_ "embed"
+	"html"
 	"log"
 	"net/http"
 	"strings"
@@ -60,6 +61,7 @@ var authGateRoutes = []authGateRoute{
 	{path: "/api/auth/login", method: http.MethodPost, handle: (*Service).handleLogin},
 	{path: "/api/auth/logout", method: http.MethodPost, handle: (*Service).handleLogout},
 	{path: "/api/auth/session", method: http.MethodGet, handle: (*Service).handleSession},
+	{path: "/api/auth/activity", method: http.MethodPost, handle: (*Service).handleActivity},
 	{path: "/api/auth/passkey/login/begin", method: http.MethodPost, handle: (*Service).handlePasskeyLoginBegin},
 	{path: "/api/auth/passkey/login/finish", method: http.MethodPost, handle: (*Service).handlePasskeyLoginFinish},
 	{path: "/api/auth/passkeys", method: http.MethodGet, session: true, requiredGrant: "ldap", handle: (*Service).handlePasskeysList},
@@ -197,16 +199,18 @@ func (s *Service) Gate(module string, next http.Handler) http.Handler {
 		// Step 5: everything else -- static assets, SSE, WS upgrades
 		// included, with no special-casing. admin is PIN-only, exclusively:
 		// no API key ever satisfies it, and only a session carrying the
-		// admin_pin grant does (grantsAllow). Every other protected module
+		// admin_pin grant does (sessionAllows). Every other protected module
 		// accepts a bearer API key unconditionally (no per-module opt-in),
 		// falling through to the session cookie -- an identity grant
 		// (ldap/passkey) or that module's own scoped door-code grant.
+		// sessionAllows (session_scope.go) also checks a door-code grant
+		// against the module's current PIN file, the module's own idle
+		// limit and the maximum session length; only real use
+		// (isUserActivity) renews this module's idle clock.
 		if module == "admin" {
-			if claims, ok := s.sessionClaimsFromRequest(r, now); ok && grantsAllow(claims, "admin") {
-				if needsRefresh(claims, p.SessionTTL, p.RefreshFraction, now) {
-					if tok, err := issueToken(s.key, claims.Subject, claims.Grants, p.SessionTTL, now); err == nil {
-						setSessionCookie(w, tok, p.SessionTTL, p.CookieSecure, p.CookieDomain)
-					}
+			if claims, ok := s.sessionClaimsFromRequest(r, now); ok && s.sessionAllows(claims, "admin", p, now) {
+				if isUserActivity(r) && moduleNeedsRenewal(claims, "admin", now) {
+					s.renewModule(w, claims, "admin", p, now)
 				}
 				r = r.WithContext(WithPrincipal(r.Context(), Principal{Method: identityGrantOf(claims.Grants), Subject: claims.Subject}))
 				next.ServeHTTP(w, r)
@@ -219,11 +223,9 @@ func (s *Service) Gate(module string, next http.Handler) http.Handler {
 				return
 			}
 
-			if claims, ok := s.sessionClaimsFromRequest(r, now); ok && grantsAllow(claims, module) {
-				if needsRefresh(claims, p.SessionTTL, p.RefreshFraction, now) {
-					if tok, err := issueToken(s.key, claims.Subject, claims.Grants, p.SessionTTL, now); err == nil {
-						setSessionCookie(w, tok, p.SessionTTL, p.CookieSecure, p.CookieDomain)
-					}
+			if claims, ok := s.sessionClaimsFromRequest(r, now); ok && s.sessionAllows(claims, module, p, now) {
+				if isUserActivity(r) && moduleNeedsRenewal(claims, module, now) {
+					s.renewModule(w, claims, module, p, now)
 				}
 				r = r.WithContext(WithPrincipal(r.Context(), Principal{Method: identityGrantOf(claims.Grants), Subject: claims.Subject}))
 				next.ServeHTTP(w, r)
@@ -296,14 +298,47 @@ func (s *Service) sessionClaimsFromRequest(r *http.Request, now time.Time) (*ses
 }
 
 // loginPage serves the embedded, platform-owned login page (T4.4, FR-A12):
-// a single module-agnostic HTML file with inline CSS/JS that fetches
-// /api/auth/mode and shows only the relevant sign-in forms. It is always a
-// 401 -- the page is an error response that happens to be usable, not a
-// distinct success surface.
+// one HTML file with inline CSS/JS that fetches /api/auth/mode and shows
+// only the relevant sign-in forms. The module it guards is filled in here
+// (its display name for the heading, its key for the page's theme lookup).
+// It is always a 401 -- the page is an error response that happens to be
+// usable, not a distinct success surface.
 func (s *Service) loginPage(w http.ResponseWriter, r *http.Request, module string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusUnauthorized)
-	w.Write(loginPageHTML)
+	w.Write(renderLoginPage(module))
+}
+
+// moduleDisplayNames are the names the login page shows, matching each
+// module's own page title where it has a sensible one.
+var moduleDisplayNames = map[string]string{
+	"admin":        "Admin",
+	"certmachine":  "CertMachine",
+	"grocery":      "Grocery List",
+	"issuetracker": "IssueTracker",
+	"menuserver":   "Menu Server",
+	"multissh":     "Multi-System SSH",
+	"obsidianoid":  "Obsidianoid",
+	"sampler":      "UI Sampler",
+	"slideshow":    "Slideshow",
+	"smbedit":      "smbedit",
+	"taskmaster":   "Taskmaster",
+	"timetracker":  "Time Tracker",
+	"todo":         "Todo",
+	"utuber":       "uTuber",
+}
+
+// renderLoginPage fills the login page's module placeholders, HTML-escaped
+// (module names are config keys, but the page must never trust that).
+func renderLoginPage(module string) []byte {
+	name, ok := moduleDisplayNames[module]
+	if !ok {
+		name = module
+	}
+	return []byte(strings.NewReplacer(
+		"__UW_MODULE_NAME__", html.EscapeString(name),
+		"__UW_MODULE__", html.EscapeString(module),
+	).Replace(string(loginPageHTML)))
 }
 
 // The handlers backing the gate-owned auth routes (authGateRoutes, above)

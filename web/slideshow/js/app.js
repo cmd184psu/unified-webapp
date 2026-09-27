@@ -355,7 +355,7 @@ function connectSSE() {
 function applyState(state) {
   const prev = currentState;
   currentState = state;
-  themes.set(state.theme);
+  if (state.theme) themes.adopt(state.theme);
   layoutCard(cardVisual, state.visual_card);
   layoutCard(cardAudio, state.audio_card);
   visualPicker.sync(state.visual_card?.drag ? "" : state.visual_card?.position ?? "");

@@ -372,6 +372,13 @@
    it is also the first real at-rule this sheet has ever carried, which is
    what B1.3's C4 leg checks clause 7 descends into. */
 
+/* The sign-out icon and ☰ together (signout.ts), laid out as one item. */
+.ui-menu-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
 .ui-menu-trigger {
   display: inline-flex;
   align-items: center;

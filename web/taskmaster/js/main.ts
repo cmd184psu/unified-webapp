@@ -99,28 +99,7 @@ function buildNav(): void {
 
   nav.appendChild(buildLiveControl());
   nav.appendChild(buildBrakeControl());
-  if (authEnabled) nav.appendChild(buildSignOut());
   nav.appendChild(hamburger?.trigger ?? document.createElement('span'));
-}
-
-// ─── Sign out (top nav, beside the hamburger) ─────────────────────────────
-// A door-and-arrow icon, not a menu entry — the same control admin uses.
-
-const SVG_SIGN_OUT =
-  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-  '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>';
-
-function buildSignOut(): HTMLButtonElement {
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'ui-menu-trigger nav-signout';
-  btn.title = 'Sign out';
-  btn.setAttribute('aria-label', 'Sign out');
-  btn.innerHTML = SVG_SIGN_OUT;
-  btn.addEventListener('click', () => {
-    void api.logout().then(() => window.location.reload());
-  });
-  return btn;
 }
 
 // ─── Live/pause (top nav, left of hand brake) ─────────────────────────────

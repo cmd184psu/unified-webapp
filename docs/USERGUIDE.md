@@ -188,6 +188,25 @@ accepted methods, and login/logout are `POST /api/auth/login` /
 `POST /api/auth/logout` on the module's own hostname. Wrong PINs and
 passwords are throttled server-side.
 
+Each module signs you out on its own idle time, even when modules share a
+PIN file or a cookie domain. Set it per module with
+`auth.modules.<module>.idle_minutes` (or the "Idle sign-out" column in
+admin's Module Access); unset means 60 minutes. Only real use counts:
+clicks, typing, touches, scrolling, page loads and saves. A page's
+background polling and live updates keep working but don't keep you signed
+in, so an untouched tab idles out, and an open page drops to the login screen
+when its time is up. `auth.session.ttl_hours` is the maximum session length:
+sign in again after that long however active (default 720 hours = 30 days).
+Signing out never stops server-side work: taskmaster tasks and utuber
+downloads keep running.
+
+A PIN login is tied to the PIN it used, so changing a PIN file signs out
+every session made with the old PIN on the modules that use that file. Every
+protected module shows a sign-out icon beside ☰; it signs out of that module
+only (signing out of an LDAP or passkey login ends the whole session, since
+it covers every module). Sessions issued before this change must sign in
+once more.
+
 ---
 
 ## Grocery

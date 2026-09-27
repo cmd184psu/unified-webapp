@@ -201,8 +201,10 @@ themes.apply();
 function buildHamburger() {
   const items = [];
   const menu = new HamburgerMenu({ title: "TimeTracker", items, themePicker: true, themes, side: "right" });
-  menu.trigger.classList.add("app-menu-trigger");
-  document.body.append(menu.trigger);
+  const corner = document.createElement("div");
+  corner.className = "app-menu-corner";
+  corner.append(menu.trigger);
+  document.body.append(corner);
 }
 document.addEventListener("DOMContentLoaded", function() {
   buildHamburger();

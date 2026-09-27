@@ -327,6 +327,10 @@ table.matrix th:first-child, table.matrix td:first-child {
   text-align: left;
 }
 
+table.matrix .matrix-idle {
+  width: 5.5em;
+}
+
 table.matrix select {
   max-width: 100%;
   box-sizing: border-box;
