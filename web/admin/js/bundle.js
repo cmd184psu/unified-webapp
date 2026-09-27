@@ -1,5 +1,5 @@
 // web/admin/js/main.ts
-import { ThemeManager, HamburgerMenu, showToast } from "/shared/dist/shared.mjs";
+import { ThemeManager, HamburgerMenu, createCopyButton } from "/shared/dist/shared.mjs";
 function debounce(fn, ms) {
   let timer = null;
   return (...args) => {
@@ -331,55 +331,17 @@ async function revokeKey(name) {
 }
 var keyModal = document.getElementById("key-modal");
 var keyModalValue = document.getElementById("key-modal-value");
-var keyModalCopied = document.getElementById("key-modal-copied");
 function showKeyModal(key) {
   keyModalValue.textContent = key;
-  keyModalCopied.textContent = "";
   keyModal.classList.remove("hidden");
 }
 function closeKeyModal() {
   keyModal.classList.add("hidden");
   keyModalValue.textContent = "";
 }
-document.getElementById("key-modal-copy").addEventListener("click", () => {
-  const value = keyModalValue.textContent;
-  const fallbackCopy = () => {
-    const range = document.createRange();
-    range.selectNodeContents(keyModalValue);
-    const selection = window.getSelection();
-    if (!selection) return false;
-    selection.removeAllRanges();
-    selection.addRange(range);
-    let ok = false;
-    try {
-      ok = document.execCommand("copy");
-    } catch {
-      ok = false;
-    }
-    selection.removeAllRanges();
-    return ok;
-  };
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(value).then(() => {
-      keyModalCopied.textContent = "Copied.";
-      showToast("Copied!", "success");
-    }).catch(() => {
-      if (fallbackCopy()) {
-        keyModalCopied.textContent = "Copied.";
-        showToast("Copied!", "success");
-      } else {
-        keyModalCopied.textContent = "Copy failed -- select and copy manually.";
-        showToast("Failed to copy.", "error");
-      }
-    });
-  } else if (fallbackCopy()) {
-    keyModalCopied.textContent = "Copied.";
-    showToast("Copied!", "success");
-  } else {
-    keyModalCopied.textContent = "Copy not supported -- select and copy manually.";
-    showToast("Copy not supported -- select and copy manually.", "error");
-  }
-});
+document.getElementById("key-modal-copy").replaceWith(
+  createCopyButton({ text: () => keyModalValue.textContent ?? "", label: "API key", className: "btn btn-primary" })
+);
 document.getElementById("key-modal-close").addEventListener("click", closeKeyModal);
 keyModal.addEventListener("click", (e) => {
   if (e.target === keyModal) closeKeyModal();

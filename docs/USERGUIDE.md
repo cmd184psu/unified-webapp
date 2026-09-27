@@ -270,11 +270,16 @@ at the same moment**. Optional background music.
 - Subjects are subdirectories of `slideshow.image_dir` (jpg/jpeg/png/gif;
   a leading `_` hides a directory). Music collections are subdirectories of
   the audio dir (mp3/flac/ogg/m4a/wav/aac); no audio dir, no music controls.
-- Controls bar: previous/next image, previous/next subject, play/pause,
-  plus music stop/play/next-collection.
-- Settings panel (hamburger): display mode (**Ken Burns** / Pan & Scan /
-  Static), seconds per image (1–300), shuffle, dark/light theme, controls
-  at top or bottom.
+- Controls are two translucent cards over the image: **images**
+  (previous/next image, previous/next subject, play/pause) and **audio**
+  (stop/play/next collection; only when there's music). Each card has a grip
+  to drag it anywhere, and a minimize button that shrinks it to its grip and
+  icon. In ☰ you snap each card to one of 8 positions around the edge.
+- Click the image to skip to the next one.
+- Settings (☰): display mode (**Ken Burns** / Pan & Scan / Static), seconds
+  per image (1–300), shuffle, card positions, theme, and **Image age limit
+  (days)**: images whose file is older than that are skipped (0 = no limit;
+  the image set is rechecked hourly).
 - Keyboard: `←`/`→` previous/next, `Space` play/pause, `Enter` music
   play/pause, `Esc` closes settings.
 - There is no upload UI — populate the image directory server-side (rsync,
@@ -315,20 +320,39 @@ handful of always-there scratch "threads."
 
 **Using it:**
 
-- **Notes view:** vault selector (multi-vault), search box filtering the
-  file tree, resizable sidebar. Open a note, toggle edit/preview, save
-  manually or let the debounced autosave do it. New notes via the +
-  button (`folder/My Note.md` paths allowed). Per-vault theme picker.
-- **Threads view:** a fixed grid (default 4 slots) of scratch notes
-  (`Threads/Thread01.md`, …) you can enable/disable independently — the
-  disabled flag lives outside the vault so the markdown files stay clean.
+- **Notes view:** vault selector (multi-vault) and a resizable sidebar with
+  the file tree. Sort it by **Name** or **Recent** (last modified). The
+  search box is a filter: it searches note *contents* (grep) and shows only
+  the notes that match. Open a note, toggle edit/preview, save manually or
+  let the debounced autosave do it. New notes via the + button
+  (`folder/My Note.md` paths allowed).
+- **Organizing:** drag a note by its grip onto a folder to move it (onto
+  another note: into that note's folder; onto empty space: the vault root).
+  Notes and folders have rename and delete buttons (delete asks first), and
+  there's a new-folder button. The tree works from the keyboard too: arrows
+  move and open/close folders, Enter opens a note. Only empty folders can be
+  deleted. If the target name already exists, the move or rename is refused
+  unless **Allow overwrites** (☰) is on, and then it asks first. **Lock
+  file tree** (☰) turns off moving, renaming and deleting (editing notes
+  still works).
+- **Threads view:** a grid of scratch notes (`Threads/Thread01.md`, …; the
+  count is set in ☰, 1–24, default 4) you can enable/disable independently.
+  Each thread can have a title; untitled ones show the file name. Titles and
+  enable flags live outside the vault, so the markdown files stay clean and
+  keep their names. The threads folder itself can't be renamed. Moving a
+  thread file out of the folder (to keep it) frees its slot, which starts
+  again as a fresh empty thread; with overwrites allowed, you can move a
+  file back into a slot.
 - **Live refresh:** the server watches each vault with fsnotify; edit a
   file in the real Obsidian (or any editor) and open browsers refresh.
 - **Git sync:** if the vault is a git repo, a sync button appears —
   commit-message dialog, then `git add -A && git commit && git push`.
+- **Settings (☰):** theme (per vault), sort, thread count, lock file tree,
+  allow overwrites.
 
 **Storage:** the vault directories themselves (notes are plain `.md`
-files); thread enable-flags in `{data_dir}/state.json`.
+files); thread titles, enable flags and the thread count in
+`{data_dir}/state.json`.
 
 ## Multissh
 

@@ -491,7 +491,7 @@ func TestExecutor_RunsCommand(t *testing.T) {
 }
 
 // TestExecutor_ContextCancel verifies a long-running task's Execute call
-// returns promptly once runCtx is cancelled.
+// returns promptly once runCtx is canceled.
 func TestExecutor_ContextCancel(t *testing.T) {
 	te := &worker.TaskExecutor{}
 	task := &models.Task{Command: "sleep 300"}

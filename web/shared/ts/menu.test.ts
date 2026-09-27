@@ -369,7 +369,7 @@ function labels(menu: HamburgerMenu): string[] {
     "aria-controls names an id nothing in the document carries",
   );
   check(
-    'the drawer is role="dialog" aria-modal="true", labelled by the title option',
+    'the drawer is role="dialog" aria-modal="true", labeled by the title option',
     drawer.attrs.role === "dialog" && drawer.attrs["aria-modal"] === "true" && drawer.attrs["aria-label"] === "A11y",
     JSON.stringify(drawer.attrs),
   );

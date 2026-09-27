@@ -26,7 +26,7 @@ TLS is **out of scope for the module and the binary in this deployment**: nginx 
   - `upload_dir` (default: `os.TempDir()/multissh-uploads`)
   - `hosts_path` (saved host presets JSON; default under `data_dir` or `multissh-hosts.json`)
   - `browse_root` (server-side file browser sandbox; default = resolved `upload_dir`)
-  - `max_sessions` (int, default 3) — number of host cards / terminal panels / max broadcast targets (see §3.4)
+  - `max_sessions` (int, default 10, at most 10) — number of host cards / terminal panels / max broadcast targets (see §3.4)
   - `max_upload_bytes` (default 8 GiB)
   - `secure_mode` (bool, default false)
   - `strict_host_key` (bool, default false), `known_hosts_path` (default `<ssh_dir>/known_hosts`)
@@ -62,7 +62,7 @@ TLS is **out of scope for the module and the binary in this deployment**: nginx 
 - **FR-U5.** `GET /api/broadcast/ws?job=<id>` streams per-target progress (`pending → transferring → done` or `error: <reason>`, then `complete`); UI shows a progress row per target with transferred/total.
 
 ### 3.4 Redesign items (new vs. reference)
-- **FR-N1 — N sessions.** The hard-coded 3-session limit becomes `max_sessions` (config, default 3, must be ≥1). Host rail, terminal panels, broadcast target validation, and SFTP fan-out all honor it. UI layout must stay usable at larger N (panels wrap/stack).
+- **FR-N1 — N sessions.** The hard-coded 3-session limit becomes `max_sessions` (config, default 10, 1–10). Host rail, terminal panels, broadcast target validation, and SFTP fan-out all honor it. UI layout must stay usable at larger N (panels wrap/stack).
 - **FR-N2 — Collapsible sessions.** Each terminal panel can be collapsed/expanded individually. Collapsing hides the terminal viewport but does **not** disconnect the session or change its pause state; status stays visible on the collapsed header.
 - **FR-N3 — Blast-line history.** The broadcast ("blast") input keeps a history of sent lines; Up/Down arrows walk it (shell-style). History is per browser session (in-memory; no persistence required).
 - **FR-N4 — In-memory password auth.** A host may authenticate with an SSH **password instead of a key**. The password is entered in the UI, held **in memory only** on the server for the life of the session/job, used for both terminal connects and SFTP broadcasts, and **never** written to `hosts_path`, logs, or any file. Key-based auth remains the default; per host, exactly one of key or password is used.
@@ -87,7 +87,7 @@ TLS is **out of scope for the module and the binary in this deployment**: nginx 
 
 ## 5. Known limitations (accepted, carried over)
 
-- Max `max_sessions` hosts for consoles and broadcasts (configurable; default 3).
+- Max `max_sessions` hosts for consoles and broadcasts (configurable; default 10, at most 10).
 - Unencrypted private keys only (passwords supported per FR-N4, in-memory only).
 - Upload registry is in-memory (staged files survive restart, IDs don't).
 - Single LDAP directory; passkeys require HTTPS + matching rpID/origins.

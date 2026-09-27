@@ -542,19 +542,6 @@ select:focus {
   margin-top: 18px;
 }
 
-.toast {
-  position: fixed;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--color-surface-1);
-  border: 1px solid var(--color-border);
-  padding: 10px 16px;
-  border-radius: 8px;
-  z-index: 100;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-}
-
 .chip-toggle {
   cursor: pointer;
   user-select: none;

@@ -789,7 +789,7 @@ function openGenerateForm(defaultValidityDays, onCreated) {
 }
 
 // web/certmachine/js/detail.ts
-import { showToast as showToast3 } from "/shared/dist/shared.mjs";
+import { showToast as showToast3, createCopyButton } from "/shared/dist/shared.mjs";
 function el4(tag, className) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -799,28 +799,6 @@ function formatDate2(iso) {
   if (iso === null) return "unknown";
   const date = iso.slice(0, 10);
   return date.length === 10 ? date : iso;
-}
-async function copyText(text) {
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-  }
-  try {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.append(ta);
-    ta.select();
-    const ok = document.execCommand("copy");
-    ta.remove();
-    return ok;
-  } catch {
-    return false;
-  }
 }
 function addMetaRow(dl, label, value) {
   const dt = el4("dt", "cert-detail-key");
@@ -957,21 +935,11 @@ function openCertDetail(id, config, now, callbacks) {
       a.textContent = label;
       downloads.append(a);
     }
-    const copyBtn = el4("button", "cert-action cert-action-btn");
-    copyBtn.type = "button";
-    copyBtn.textContent = "Copy cert.pem";
-    copyBtn.addEventListener("click", () => {
-      if (cert.certPem === void 0) {
-        showToast3("Nothing to copy: this certificate has no readable PEM.", "error");
-        return;
-      }
-      void copyText(cert.certPem).then((ok) => {
-        showToast3(
-          ok ? "cert.pem copied to clipboard." : "Copy failed \u2014 select and copy the file instead.",
-          ok ? "success" : "error"
-        );
-      });
-    });
+    const copyBtn = createCopyButton({ text: () => cert.certPem ?? "", label: "cert.pem", className: "cert-action cert-action-btn" });
+    if (cert.certPem === void 0) {
+      copyBtn.disabled = true;
+      copyBtn.title = "Nothing to copy: this certificate has no readable PEM.";
+    }
     downloads.append(copyBtn);
     body.append(downloads);
     const renewBtn = el4("button", "cert-btn cert-btn-primary");

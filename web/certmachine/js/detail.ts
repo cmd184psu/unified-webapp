@@ -13,7 +13,7 @@ import type { AppConfig, Cert } from "./types";
 import { fetchCertDetail, renewCert, deleteCert } from "./api";
 import { badgeFor, BADGE_LABEL } from "./status";
 import { clampedNoticeText } from "./generate";
-import { showToast } from "@shared";
+import { showToast, createCopyButton } from "@shared";
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -28,33 +28,6 @@ function formatDate(iso: string | null): string {
   if (iso === null) return "unknown";
   const date = iso.slice(0, 10);
   return date.length === 10 ? date : iso;
-}
-
-/** Copy text to the clipboard. The Clipboard API needs a secure context and
- * this module is reachable over plain HTTP, so a hidden-textarea +
- * `execCommand('copy')` fallback is required, not optional. */
-async function copyText(text: string): Promise<boolean> {
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    /* fall through to the legacy path */
-  }
-  try {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.append(ta);
-    ta.select();
-    const ok = document.execCommand("copy");
-    ta.remove();
-    return ok;
-  } catch {
-    return false;
-  }
 }
 
 function addMetaRow(dl: HTMLDListElement, label: string, value: string): void {
@@ -227,21 +200,11 @@ export function openCertDetail(
       downloads.append(a);
     }
 
-    const copyBtn = el("button", "cert-action cert-action-btn");
-    copyBtn.type = "button";
-    copyBtn.textContent = "Copy cert.pem";
-    copyBtn.addEventListener("click", () => {
-      if (cert.certPem === undefined) {
-        showToast("Nothing to copy: this certificate has no readable PEM.", "error");
-        return;
-      }
-      void copyText(cert.certPem).then((ok) => {
-        showToast(
-          ok ? "cert.pem copied to clipboard." : "Copy failed — select and copy the file instead.",
-          ok ? "success" : "error",
-        );
-      });
-    });
+    const copyBtn = createCopyButton({ text: () => cert.certPem ?? "", label: "cert.pem", className: "cert-action cert-action-btn" });
+    if (cert.certPem === undefined) {
+      copyBtn.disabled = true;
+      copyBtn.title = "Nothing to copy: this certificate has no readable PEM.";
+    }
     downloads.append(copyBtn);
     body.append(downloads);
 

@@ -23,7 +23,7 @@ Four modules, each with distinct migration shapes:
 ### Principles
 1. **Mechanical over creative** — token renames and import swaps are deterministic; minimize judgment calls
 2. **React modules keep React** — don't rewrite React components; adapt the bridging layer only
-3. **Shared library is the source of truth** — delete local theme/toast/dialog implementations in favour of @shared
+3. **Shared library is the source of truth** — delete local theme/toast/dialog implementations in favor of @shared
 4. **One commit per module** — each module is independently testable and revertible
 5. **utuber file split is Phase 4's only structural change** — everything else is adoption
 

@@ -70,7 +70,7 @@ Two other things worth knowing up front:
                      │                           │
                      │                           ├──▶ haproxy.pem  ──▶ HAProxy
   Init Root CA  ─────┘                           ├──▶ .tgz bundle  ──▶ manual copy
-                                                  ├──▶ rootCA.crt   ──▶ client trust stores
+                                                  ├──▶ <CA name>.crt ─▶ client trust stores
                                                   └──▶ cert.pem/key.pem
 ```
 
@@ -98,7 +98,11 @@ to; nothing about running certmachine touches it.
 3. Open the certmachine hostname, e.g. `http://certmachine-test.cmdhome.net:8080`.
 4. If `legacy_import_dir` points at a real PKI, the **import wizard**
    appears automatically (see [§8](#8-the-import-wizard)). Otherwise, click
-   **Init Root CA** to generate a fresh one.
+   **Init Root CA**, give the CA a name (its Common Name; blank means
+   "CertMachine Root CA"), and generate it. The name tells CAs, and versions
+   of one CA, apart: the root download, the bundle entry and the trust-store
+   anchor are all named after it (e.g. "Home Lab CA 2026" →
+   `Home-Lab-CA-2026.crt`).
 5. Click **New certificate**, fill in an FQDN (and optional DNS/IP SANs), and
    submit. Download `haproxy.pem` straight from the list row.
 
@@ -109,15 +113,16 @@ to; nothing about running certmachine touches it.
 The page has a CA panel at the top (root CA metadata, download, trust
 instructions — see [§6](#6-trusting-the-root-ca)) and a certificate list
 below it, with a toolbar: search box, sort (name / created / expiry) with
-direction toggle, a group-by-domain toggle, **New certificate**, and a
-**Tools** menu (re-run the import wizard, when available).
+direction toggle, a group-by-domain toggle, **New certificate**, and an
+**Import** button (re-run the import wizard; disabled when there is nothing to
+import, with the reason as its tooltip).
 
 Each row shows the FQDN, its status badge, and two inline actions —
 `haproxy.pem` and `.tgz` bundle downloads — because that pair covers the
 common deployment workflow without opening the detail view. Opening a row's
 **Details** button gets you the full parsed record (CN, SANs, serial,
 SHA-256 fingerprint, validity window, `importedFrom` when applicable),
-per-file downloads, copy-to-clipboard for any PEM, **Renew**, and **Delete**
+per-file downloads, a copy button for `cert.pem`, **Renew**, and **Delete**
 (which requires typing the FQDN, case-insensitively, before it unlocks).
 
 Expired and archived certificates are collapsed out of the default view
@@ -156,15 +161,17 @@ for the one surprising edge case: `expiry_warn_days: 0` does **not** mean
 ## 6. Trusting the root CA
 
 Certificates issued by this CA are only trusted by clients that have been
-told to trust the root. Download `rootCA.crt` from the CA panel and install
-it:
+told to trust the root. **Trust this CA…** in the CA panel does it for you,
+either on this server or on another machine over SSH (see below). To do it by
+hand, download the root from the CA panel (named after the CA, e.g.
+`Home-Lab-CA-2026.crt`; written `<CA name>.crt` below) and install it:
 
 | OS | Procedure |
 |---|---|
-| macOS | Open the downloaded `rootCA.crt` in Keychain Access, then set it to "Always Trust". |
-| Linux | Copy `rootCA.crt` to `/usr/local/share/ca-certificates/` and run `update-ca-certificates`. |
-| Windows | Import `rootCA.crt` into the "Trusted Root Certification Authorities" store. |
-| iOS | Install the configuration profile for `rootCA.crt`, then enable full trust under Settings > General > About > Certificate Trust Settings. |
+| macOS | Open the downloaded `<CA name>.crt` in Keychain Access, then set it to "Always Trust". |
+| Linux | Copy `<CA name>.crt` to `/usr/local/share/ca-certificates/` and run `update-ca-certificates`. |
+| Windows | Import `<CA name>.crt` into the "Trusted Root Certification Authorities" store. |
+| iOS | Install the configuration profile for `<CA name>.crt`, then enable full trust under Settings > General > About > Certificate Trust Settings. |
 
 Every client that needs to trust certificates issued by this CA needs this
 done once. When the root CA is ever replaced (see [§10](#10-replacing-the-root-ca)),
@@ -172,8 +179,10 @@ every one of those clients needs it done again for the new root.
 
 ### Automatic device trust
 
-The CA panel shows a **Trust this CA on this device** button when
-`certmachine.trust_device_enabled` is `true` in config. Clicking it runs the
+**Trust this CA…** opens a dialog with two targets: **This server** and
+**Another machine over SSH** ([below](#trusting-another-machine-over-ssh)).
+"This server" is offered when `certmachine.trust_device_enabled` is `true`
+in config and the server's OS is supported. Choosing it runs the
 detected platform's native trust-install procedure, via `sudo`, against the
 host **the unified-webapp process itself is running on** — not the browser's
 machine. This only does something useful when certmachine and the services
@@ -182,10 +191,13 @@ host running both), and it is off by default.
 
 | Detected platform | What runs |
 |---|---|
-| macOS (`darwin`) | `sudo -n security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain <rootCA.crt>` |
-| RHEL family (`ID`/`ID_LIKE` matches `rhel`/`rocky`/`centos`/`fedora`/`almalinux`) | `sudo -n cp <rootCA.crt> /etc/pki/ca-trust/source/anchors/certmachine-rootCA.pem` then `sudo -n update-ca-trust extract` |
-| Debian family (`ID`/`ID_LIKE` matches `debian`/`ubuntu`) | `sudo -n cp <rootCA.crt> /usr/local/share/ca-certificates/certmachine-rootCA.crt` then `sudo -n update-ca-certificates` |
-| Anything else (Windows, an unrecognized Linux distro) | Not automated — the button doesn't appear (`GET /api/config`'s `trustPlatform` comes back empty); use the manual procedure in [§6](#6-trusting-the-root-ca) above. |
+| macOS (`darwin`) | `sudo -n security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain <CA file>` |
+| RHEL family (`ID`/`ID_LIKE` matches `rhel`/`rocky`/`centos`/`fedora`/`almalinux`) | `sudo -n cp <CA file> /etc/pki/ca-trust/source/anchors/certmachine-<CA name>.pem` then `sudo -n update-ca-trust extract` |
+| Debian family (`ID`/`ID_LIKE` matches `debian`/`ubuntu`) | `sudo -n cp <CA file> /usr/local/share/ca-certificates/certmachine-<CA name>.crt` then `sudo -n update-ca-certificates` |
+| Anything else (Windows, an unrecognized Linux distro) | Not automated — "This server" is unavailable (`GET /api/config`'s `trustPlatform` comes back empty); use SSH from elsewhere, or the manual procedure in [§6](#6-trusting-the-root-ca) above. |
+
+The anchor is named after the CA (`certmachine-<CA name>`), so trusting a
+new CA adds an anchor beside the old one rather than overwriting it.
 
 **Every command runs `sudo -n`** (non-interactive): an HTTP handler has no
 TTY to answer a password prompt on, so without `-n` a host that needs a
@@ -196,7 +208,7 @@ passwordless sudo for these specific commands ahead of time, e.g. via a
 
 ```
 # /etc/sudoers.d/certmachine-trust — only as specific as InstallTrust's own commands
-<service-user> ALL=(root) NOPASSWD: /usr/bin/security add-trusted-cert *, /usr/bin/cp * /etc/pki/ca-trust/source/anchors/certmachine-rootCA.pem, /usr/bin/update-ca-trust extract, /usr/bin/cp * /usr/local/share/ca-certificates/certmachine-rootCA.crt, /usr/sbin/update-ca-certificates
+<service-user> ALL=(root) NOPASSWD: /usr/bin/security add-trusted-cert *, /usr/bin/cp * /etc/pki/ca-trust/source/anchors/certmachine-*.pem, /usr/bin/update-ca-trust extract, /usr/bin/cp * /usr/local/share/ca-certificates/certmachine-*.crt, /usr/sbin/update-ca-certificates
 ```
 
 (Adjust binary paths and pick only the lines for your platform.) Whatever the
@@ -217,6 +229,27 @@ better-scoped mechanism for actions like this is expected eventually; until
 then, this is the whole safety story, and the default is `false` for exactly
 that reason.
 
+### Trusting another machine over SSH
+
+"Another machine over SSH" takes a hostname, port, username, and either an
+SSH key (picked by name from the server's key folder) or a password. The
+server connects, works out the remote OS, and installs the CA there:
+
+- **macOS, RHEL family (Rocky), Debian family (Ubuntu):** the CA is uploaded
+  to a `mktemp` file over the SSH session's input (never on a command line),
+  then the same commands as the table above run, through `sudo -n` unless
+  the login is root. The SSH user therefore needs passwordless sudo, or log
+  in as root; no sudo password is ever asked for or sent.
+- **Windows (OpenSSH):** the CA is added to the machine's Trusted Root store
+  with `certutil -addstore -f Root`; the SSH user must be an administrator.
+- **Anything else:** nothing is installed, and the dialog says so.
+
+Every command run, and its output, is shown in the dialog. SSH itself uses
+the same settings as multissh — its `ssh_dir` key folder and host-key policy
+(`known_hosts_path`, `strict_host_key`) — so there is one SSH configuration
+for the whole app. If multissh's SSH settings are missing or invalid, the
+option is disabled with the reason as its tooltip.
+
 ---
 
 ## 7. Downloads and the HAProxy workflow
@@ -226,12 +259,12 @@ that reason.
   concatenated into the one combined PEM HAProxy expects for `bind ... ssl
   crt`. In most deployments this is the only file you need.
 - **`.tgz` bundle** contains `cert.pem`, `key.pem`, `haproxy.pem`, and
-  `rootCA.crt`. Tar (not zip) is deliberate: it preserves Unix permission
+  `<CA name>.crt`. Tar (not zip) is deliberate: it preserves Unix permission
   bits, so `key.pem` and `haproxy.pem` arrive `0600` and `cert.pem` /
-  `rootCA.crt` arrive `0644`, without your having to `chmod` anything after
+  `<CA name>.crt` arrive `0644`, without your having to `chmod` anything after
   extraction — see the note below.
 - Individual files are also available from the detail view:
-  `<fqdn>.cert.pem`, `<fqdn>.key.pem`, `<fqdn>.haproxy.pem`, `rootCA.crt`.
+  `<fqdn>.cert.pem`, `<fqdn>.key.pem`, `<fqdn>.haproxy.pem`, `<CA name>.crt`.
   Wildcard FQDNs have their `*` sanitized in filenames (e.g.
   `_wildcard.example.local`).
 - All download routes are parameterized by the certificate's database row
@@ -254,7 +287,7 @@ manually assembled PEM) where nothing already set the mode bit.
 
 Shown automatically when the database holds zero certificates and
 `legacy_import_dir` is set and readable; also reachable later from the
-**Tools** menu (e.g. if you declined it the first time, or a second legacy
+**Import** button (e.g. if you declined it the first time, or a second legacy
 tree needs importing).
 
 1. **Preview** (`GET /api/import/preview`) — a dry run. Scans the legacy
@@ -387,7 +420,7 @@ on that quoted text; they do not contradict it.
    whatever CA is currently stored. There is no shortcut here; every
    deployed certificate's replacement has to be distributed the same way
    the original was.
-6. **Re-distribute the new `rootCA.crt`** to every client that trusted the
+6. **Re-distribute the new root CA** (its `<CA name>.crt`) to every client that trusted the
    old one, following [§6](#6-trusting-the-root-ca) again for each. Until a
    client has done this, it will show a certificate-trust error for
    *every* certificate issued after step 4, even ones that renewed
@@ -525,17 +558,19 @@ are the exception by design (generic to the client, detailed in the log).
 
 | Method & path | Purpose | Notes |
 |---|---|---|
-| `GET /api/config` | Runtime config for the SPA | `defaultValidityDays`, `expiryWarnDays`, `certCount`, `legacyImportAvailable`, `legacyImportDir`, `legacyImportReason`, `trustDeviceAvailable`, `trustPlatform` |
+| `GET /api/config` | Runtime config for the SPA | `defaultValidityDays`, `expiryWarnDays`, `certCount`, `legacyImportAvailable`, `legacyImportDir`, `legacyImportReason`, `trustDeviceAvailable`, `trustPlatform`, `trustRemoteAvailable`, `trustRemoteReason` |
 | `GET /api/ca` | Current CA status | `{"exists": false}` if none yet |
-| `POST /api/ca/init` | Initialize a new root CA | 201 with none stored, 409 if one exists, 409 `ErrImportPending` if an import is pending |
-| `GET /api/ca/root.crt` | Download the root CA certificate | `Content-Disposition: attachment; filename="rootCA.crt"` |
+| `POST /api/ca/init` | Initialize a new root CA | Optional body `{name}` (the CA's Common Name; blank = "CertMachine Root CA"); 201 with none stored, 409 if one exists, 409 `ErrImportPending` if an import is pending |
+| `GET /api/ca/root.crt` | Download the root CA certificate | `Content-Disposition: attachment; filename="<CA name>.crt"` |
 | `POST /api/ca/trust` | Run this host's device-trust install (see [Automatic device trust](#automatic-device-trust)) | 409 if `trust_device_enabled` is false or no CA exists; body always carries `output` (the ran commands' combined stdout+stderr) alongside `platform` and, on failure, `error` |
+| `POST /api/ca/trust/remote` | Install the CA on another machine over SSH (see [above](#trusting-another-machine-over-ssh)) | `{host, port?, user, key \| password}`; 200 with `platform` and `output`; 400 bad request; 409 SSH unavailable, or the install failed on that machine (with `output`); 422 unsupported OS, nothing installed (with `output`); 502 couldn't connect |
+| `GET /api/ssh/keys` | The SSH key folder's files, for the dialog | `{keys: [...]}`: names only, never key material |
 | `GET /api/certs` | List certificates | Metadata only — no PEM in the response |
 | `POST /api/certs` | Generate a certificate | `{fqdn, dnsSans[], ipSans[]}` → 201; no validity field, it is always `default_validity_days` (possibly clamped) |
 | `GET /api/certs/{id}` | Certificate detail | Includes `certPem`; never `keyPem` |
 | `DELETE /api/certs/{id}` | Delete a row | Requires `?confirm=<fqdn>` (case-insensitive); 400 without it, 204 on success |
 | `POST /api/certs/{id}/renew` | Renew | 201 with the new row; the predecessor is archived |
 | `GET /api/certs/{id}/files/{name}` | Individual file download | `name` is a closed enum: `cert.pem`, `key.pem`, `haproxy.pem` |
-| `GET /api/certs/{id}/bundle` | `.tgz` bundle download | `cert.pem`, `key.pem`, `haproxy.pem`, `rootCA.crt` |
+| `GET /api/certs/{id}/bundle` | `.tgz` bundle download | `cert.pem`, `key.pem`, `haproxy.pem`, `<CA name>.crt` |
 | `GET /api/import/preview` | Dry-run the legacy import | Counts and per-item reasons; never writes |
 | `POST /api/import` | Execute the legacy import | Idempotent-safe; already-imported leaves report `skipped` |

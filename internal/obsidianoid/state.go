@@ -47,7 +47,7 @@ type StateStore struct {
 	states   []ThreadState
 }
 
-// NewStateStore initialises the store, creating DataDir if needed.
+// NewStateStore initializes the store, creating DataDir if needed.
 // defaultCount is the configured thread_count, used unless Settings set one.
 func NewStateStore(dataDir string, defaultCount int) (*StateStore, error) {
 	if err := os.MkdirAll(dataDir, 0o750); err != nil {

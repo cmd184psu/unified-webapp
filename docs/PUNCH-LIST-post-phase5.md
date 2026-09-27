@@ -4,7 +4,27 @@ Date: 2026-09-22
 Branch: ui-upgrade
 Source: manual testing session against local-test config
 
-## Status Summary
+## Resolution (2026-09-26)
+
+Every module was retested in the browser and signed off, and every item
+below is resolved except **A-2** (passkey registration), which can't be
+tested over plain HTTP. It needs an HTTPS host.
+
+| Item | Resolution |
+|------|------------|
+| CC-1 | `HamburgerMenu` `side` option; every ☰ is top-right and opens on the right |
+| CC-2 | JetBrains Mono ligatures turned off globally (`font-variant-ligatures: none` in shared `index.css`), which fixes every module at once |
+| CC-3 | One shared menu per module; module settings moved into it |
+| CC-4 | New login page: module name and theme, Account tab (plus passkey), and a PIN tab when the module has a PIN file |
+| menuserver, timetracker | Rebuilt; the light theme reproduces the old look exactly |
+| admin | Toggles, auto-save, shared copy button, sign-out icon; **A-2 open** (HTTPS) |
+| multissh, smbedit, utuber, taskmaster, obsidianoid, todo, certmachine, slideshow, sampler | All items fixed and signed off, plus new features (see `docs/USERGUIDE.md`) |
+
+Later in the same pass: per-module idle sign-out, PIN changes end sessions,
+a shared sign-out icon, a shared copy button, and American spelling
+throughout.
+
+## Status Summary (as found on 2026-09-22)
 
 | Rating | Modules |
 |--------|---------|
@@ -93,7 +113,7 @@ PIN and LDAP login are in the same space, which is confusing. Needs better visua
 - SL-2: Likely running old custom hamburger with shared one hidden — reconcile (see CC-3)
 
 ### sampler — Minor
-- SA-1: "colour" should be "color" — US English spelling
+- SA-1: British spelling of "color" in the sampler — use US English
 
 ### issuetracker — Good
 - No issues found. API token creation UI could be future work.

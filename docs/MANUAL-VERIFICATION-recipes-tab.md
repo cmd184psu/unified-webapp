@@ -200,7 +200,7 @@ above, and the progress bar stays hidden on **both** tabs and after every switch
 
 **While switching, watch the Grocery/Recipes buttons themselves.** They must stay put, hard
 against the title, in every combination — progress on and off, both tabs. They used to drift
-toward centre whenever the progress bar was hidden, which under the default `progress:false`
+toward center whenever the progress bar was hidden, which under the default `progress:false`
 means on both tabs, not just Recipes. Header controls appearing and disappearing is expected;
 the tabs moving is not.
 

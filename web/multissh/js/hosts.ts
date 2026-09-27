@@ -1,7 +1,7 @@
 import { openKeyPicker } from "./keypicker";
 import { openDirPicker } from "./dirpicker";
 import { fetchHosts, saveHosts } from "./api";
-import { confirmDialog } from "@shared";
+import { confirmDialog, createCopyButton, showToast } from "@shared";
 import type { AuthMethod, HostConfig, PersistedHost } from "./types";
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -49,31 +49,6 @@ export function buildSSHCommand(h: HostConfig): string {
   if (h.port && h.port !== 22) parts.push("-p", String(h.port));
   parts.push(`${h.user}@${h.ip}`);
   return parts.join(" ");
-}
-
-/** Copy text to the clipboard, falling back to a temporary textarea. */
-async function copyText(text: string): Promise<boolean> {
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    void 0;
-  }
-  try {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.append(ta);
-    ta.select();
-    const ok = document.execCommand("copy");
-    ta.remove();
-    return ok;
-  } catch {
-    return false;
-  }
 }
 
 function labeledInput(
@@ -417,29 +392,17 @@ export function mountHostRail(root: HTMLElement, maxHosts: number): HostStore {
     });
     applyAuthMethod();
 
-    const copyBtn = el("button", "btn host-copy-ssh");
-    copyBtn.type = "button";
-    copyBtn.textContent = "Copy ssh command";
-    copyBtn.title = "Copy an ssh CLI command for this host";
-    let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
-    copyBtn.addEventListener("click", () => {
-      if (!h.ip || !h.user) {
-        const prev = copyBtn.textContent;
-        copyBtn.textContent = "Set host & user first";
-        if (copyResetTimer !== null) clearTimeout(copyResetTimer);
-        copyResetTimer = setTimeout(() => {
-          copyBtn.textContent = prev;
-        }, 2000);
-        return;
-      }
-      void copyText(buildSSHCommand(h)).then((ok) => {
-        copyBtn.textContent = ok ? "Copied!" : "Copy failed";
-        if (copyResetTimer !== null) clearTimeout(copyResetTimer);
-        copyResetTimer = setTimeout(() => {
-          copyBtn.textContent = "Copy ssh command";
-        }, 2000);
-      });
-    });
+    const copyBtn = createCopyButton({ text: () => buildSSHCommand(h), label: "ssh command", className: "btn host-copy-ssh" });
+    // Nothing useful to copy until the host has an address and a user.
+    copyBtn.addEventListener(
+      "click",
+      (e) => {
+        if (h.ip && h.user) return;
+        e.stopImmediatePropagation();
+        showToast("Set the host and user first.", "error");
+      },
+      { capture: true },
+    );
     cardBody.append(copyBtn, copyHint);
 
     return card;

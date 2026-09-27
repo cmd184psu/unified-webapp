@@ -27,7 +27,7 @@ const CSS_DIR = "web/shared/css";
 const SHARED_DIR = "web/shared";
 const FONT_DIR = "web/shared/public/fonts";
 
-// T1 — the canonical per-theme colour vocabulary (Step 1.1).
+// T1 — the canonical per-theme color vocabulary (Step 1.1).
 const T1 = [
   "--color-bg",
   "--color-surface-1",
@@ -105,7 +105,7 @@ const EXPECTED_FONT_FACES = 15;
 // clause fail closed on a sheet nobody thought to add (Step 2.3(a)).
 const CLAUSE7_EXEMPT = ["tokens.css", "themes.css", "fonts.css", "index.css"];
 
-const COLOUR_LITERAL = /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i;
+const COLOR_LITERAL = /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i;
 const UI_SELECTOR = /^\.ui-[a-z0-9-]+/;
 // Font binaries and images carry no custom-property names; clause 11 skips them.
 const BINARY_EXT = /\.(woff2?|ttf|otf|eot|png|jpg|jpeg|gif|webp|ico|pdf|zip)$/i;
@@ -150,7 +150,7 @@ function normalizeSelector(selector) {
 // with the blocks *inside* it instead of dropping it, so a rule written inside
 // a @media reaches clause 7's selector loop. It is opt-in, and only clause 7
 // passes it: clauses 3, 4 and 5 are set-equality and running-total assertions
-// over a file modelled as flat (exactly one `:root` block; a roster equal to
+// over a file modeled as flat (exactly one `:root` block; a roster equal to
 // THEME_SELECTORS; EXPECTED_COLOR_DECLARATIONS --color-* cells), so an
 // unconditional descent would let one `@media print` in tokens.css or
 // themes.css fail clause 3, 4 or 5 with a message naming the wrong problem.
@@ -312,11 +312,11 @@ for (const required of ["tokens.css", "themes.css", "components.css", "index.css
   // Clause 5 — per-block set equality against T1, then the running total of
   // --color-* declarations across all 8 blocks. Both are needed: the set test
   // alone passes a block that declares one key twice and omits another.
-  let colourTotal = 0;
+  let colorTotal = 0;
   for (const block of blocks) {
-    const colours = block.declarations.filter((d) => d.prop.startsWith("--color-"));
-    colourTotal += colours.length;
-    const { missing, extra } = setDiff(colours.map((d) => d.prop), T1);
+    const colors = block.declarations.filter((d) => d.prop.startsWith("--color-"));
+    colorTotal += colors.length;
+    const { missing, extra } = setDiff(colors.map((d) => d.prop), T1);
     if (missing.length) {
       fail(file, block.line, 5, `${block.selector}: missing ${missing.length} T1 key(s): ${missing.join(", ")}`);
     }
@@ -324,8 +324,8 @@ for (const required of ["tokens.css", "themes.css", "components.css", "index.css
       fail(file, block.line, 5, `${block.selector}: ${extra.length} key(s) not in T1: ${extra.join(", ")}`);
     }
   }
-  if (colourTotal !== EXPECTED_COLOR_DECLARATIONS) {
-    fail(file, 1, 5, `expected ${EXPECTED_COLOR_DECLARATIONS} --color-* declarations across the 8 blocks, found ${colourTotal}`);
+  if (colorTotal !== EXPECTED_COLOR_DECLARATIONS) {
+    fail(file, 1, 5, `expected ${EXPECTED_COLOR_DECLARATIONS} --color-* declarations across the 8 blocks, found ${colorTotal}`);
   }
 
   // Clause 6 — the three-member allowlist for everything else.
@@ -344,13 +344,13 @@ for (const required of ["tokens.css", "themes.css", "components.css", "index.css
 // Re-keyed at phase2 §5 Step 2.3(a) to fail closed: the subject is now EVERY
 // sheet in web/shared/css/ that is not one of the four exempted by name, where
 // before it named components.css and nothing else. Today that set is exactly
-// {components.css}, so behaviour is unchanged at this boundary — which is the
+// {components.css}, so behavior is unchanged at this boundary — which is the
 // point. A future component sheet is linted without anyone remembering to add
 // it here, and the extension is verified by the existing suite still passing.
 //
 // The selector loop passes `{ intoAtRules: true }`, the descent's only caller,
 // so a rule written inside a @media is inspected rather than silently skipped.
-// The colour scan needs nothing: it is a whole-file per-line loop and has
+// The color scan needs nothing: it is a whole-file per-line loop and has
 // always been depth-blind.
 
 {
@@ -360,8 +360,8 @@ for (const required of ["tokens.css", "themes.css", "components.css", "index.css
 
     const lines = text.split("\n");
     for (let i = 0; i < lines.length; i++) {
-      const hit = lines[i].match(COLOUR_LITERAL);
-      if (hit) fail(file, i + 1, 7, `colour literal "${hit[0]}" — every colour must come from a token`);
+      const hit = lines[i].match(COLOR_LITERAL);
+      if (hit) fail(file, i + 1, 7, `color literal "${hit[0]}" — every color must come from a token`);
     }
 
     for (const block of parseBlocks(text, { intoAtRules: true })) {

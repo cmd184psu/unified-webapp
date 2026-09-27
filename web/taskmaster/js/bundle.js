@@ -363,7 +363,7 @@ import { confirmDialog as confirmDialog2, ThemeManager, HamburgerMenu } from "/s
 import { openModal as openModal3, confirmDialog, alertDialog as alertDialog3 } from "/shared/dist/shared.mjs";
 
 // web/taskmaster/js/designer.ts
-import { openModal, alertDialog as alertDialog2, showToast, copyText } from "/shared/dist/shared.mjs";
+import { openModal, alertDialog as alertDialog2, createCopyButton } from "/shared/dist/shared.mjs";
 function shQuote(s) {
   if (s === "") return "''";
   if (/^[A-Za-z0-9_\-./:=@%,]+$/.test(s)) return s;
@@ -401,8 +401,6 @@ function buildCurlExport(f) {
   -H "Authorization: Bearer $API_KEY" \\
   -d '${body.replace(/'/g, `'\\''`)}'`;
 }
-var SVG_COPY = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-var SVG_CHECK = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
 function buildExportPanel(title, render3) {
   const wrap = document.createElement("div");
   wrap.className = "export-panel";
@@ -420,20 +418,10 @@ function buildExportPanel(title, render3) {
   body.hidden = true;
   const pre = document.createElement("pre");
   pre.className = "export-panel-code";
-  const copyBtn = document.createElement("button");
-  copyBtn.type = "button";
-  copyBtn.className = "btn btn-secondary btn-sm export-panel-copy";
-  copyBtn.title = "Copy";
-  copyBtn.setAttribute("aria-label", `Copy ${title}`);
-  copyBtn.innerHTML = SVG_COPY;
-  copyBtn.addEventListener("click", () => {
-    void copyText(pre.textContent ?? "").then((ok) => {
-      showToast(ok ? "Copied!" : "Copy failed", ok ? "success" : "error");
-      if (ok) {
-        copyBtn.innerHTML = SVG_CHECK;
-        setTimeout(() => copyBtn.innerHTML = SVG_COPY, 1200);
-      }
-    });
+  const copyBtn = createCopyButton({
+    text: () => pre.textContent ?? "",
+    label: title,
+    className: "btn btn-secondary btn-sm export-panel-copy"
   });
   body.append(pre, copyBtn);
   wrap.append(header, body);
@@ -1664,17 +1652,17 @@ function mountTaskView(container, live2, caps3, taskName) {
   right.textContent = "Loading task\u2026";
   let unmountLeft = null;
   let unmountRight = null;
-  let cancelled = false;
+  let canceled = false;
   const goBack = () => {
     window.location.hash = "#board";
   };
   void api.getTask(taskName).then((task) => {
-    if (cancelled) return;
+    if (canceled) return;
     unmountLeft = mountBoard(left, live2, caps3, { laneFilter: task.lane_name });
     right.textContent = "";
     unmountRight = mountTaskDetail(right, live2, task, goBack);
   }).catch(() => {
-    if (cancelled) return;
+    if (canceled) return;
     right.textContent = "";
     const err = document.createElement("div");
     err.className = "empty-state";
@@ -1688,14 +1676,14 @@ function mountTaskView(container, live2, caps3, taskName) {
     right.appendChild(back);
   });
   return () => {
-    cancelled = true;
+    canceled = true;
     if (unmountLeft) unmountLeft();
     if (unmountRight) unmountRight();
   };
 }
 
 // web/taskmaster/js/buildinfo.ts
-var FRONTEND_BUILD_TIME = "1f3dc162a9c5";
+var FRONTEND_BUILD_TIME = "a1608efcca5e";
 
 // web/taskmaster/js/main.ts
 var caps2 = { allow_sudo: false };

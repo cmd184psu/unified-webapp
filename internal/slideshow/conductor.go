@@ -82,7 +82,7 @@ type Conductor struct {
 	stopOnce sync.Once
 }
 
-// NewConductor creates a Conductor initialised from cfg and the subjects in store.
+// NewConductor creates a Conductor initialized from cfg and the subjects in store.
 // It does not start the background goroutine; call Run() for that.
 func NewConductor(store *Store, music *MusicStore, b *broker.Broker, cfg config.SlideshowConfig) *Conductor {
 	maxAge := store.DefaultMaxAgeDays()

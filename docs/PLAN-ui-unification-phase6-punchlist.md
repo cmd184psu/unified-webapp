@@ -105,10 +105,10 @@ Investigate the CSS leak causing `#` (obsidianoid) and `&` (taskmaster) to visua
 - Build + typecheck green
 
 ### C3: Sampler spelling fix (SA-1)
-**Files:** `web/sampler/` — find and fix "colour" → "color"
+**Files:** `web/sampler/` — find the British spelling of "color" and fix it
 
 **Acceptance criteria:**
-- Zero occurrences of "colour" in web/sampler/
+- Zero British spellings of "color" in web/sampler/
 - US English spelling used throughout
 
 ### C4: Obsidianoid fixes (O-1, O-2)

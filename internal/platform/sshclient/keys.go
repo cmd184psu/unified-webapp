@@ -28,7 +28,7 @@ func DefaultSSHDir() (string, error) {
 
 // ListKeys returns the regular files directly inside dir, sorted by name. The
 // picker is intentionally non-navigable: subdirectories are reported (IsDir)
-// only so the UI can grey them out, never to descend into them. Public-key
+// only so the UI can gray them out, never to descend into them. Public-key
 // (.pub) and bookkeeping files are still listed so the user can see the full
 // directory, but the UI is expected to highlight private keys.
 func ListKeys(dir string) ([]KeyFile, error) {

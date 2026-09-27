@@ -1115,7 +1115,7 @@ describe('addIngredient leaves the input it was typed in empty', () => {
 
 describe('header layout — the tabs do not move when the tab changes', () => {
   // Reported from manual use: the Grocery/Recipes buttons sat beside the title
-  // on one tab and drifted toward centre on the other. Cause: .app-header is
+  // on one tab and drifted toward center on the other. Cause: .app-header is
   // justify-content: space-between, and the only thing holding the tabs left
   // was #progress-bar { flex: 1 } absorbing the free space. Switching to
   // Recipes hides that bar and three icon buttons, so nothing absorbed it.

@@ -54,7 +54,7 @@ or to a reasoned, tree-verified rebuttal.
 > edit**, not citation density, so §13(a4) gains a **third, diff-scoped half**:
 > every `path:N` citation this revision added or changed is re-derived against
 > the tree before the revision is published — exhaustively, not sampled. That
-> set is small by construction and shrinks as the plan stabilises.
+> set is small by construction and shrinks as the plan stabilizes.
 > **§13 also gains (a5)**, which closes the last audit blind spot the
 > reviewers found: pointers *inside* this document. Three of iteration-3's
 > findings were stale cross-references (`§4.2` for `§4.4`, `§5.5` for Step
@@ -112,7 +112,7 @@ on them:
 **Mode: SHORT.** Phase 2 writes ~900 lines of new TypeScript and CSS into an
 existing, fully gated harness and changes pixels in two modules. It is not a
 platform-posture change: no new dependency, no new token, no new build driver,
-one narrow auth carve-out that the user has already authorised in principle
+one narrow auth carve-out that the user has already authorized in principle
 (Q8). Deliberate mode is not warranted; §8.5 still carries a three-scenario
 pre-mortem because two of the commits are coupled.
 
@@ -121,8 +121,8 @@ pre-mortem because two of the commits are coupled.
 - **P-I — The component owns the chrome; the module owns the contents.**
   Every hook in FR-4 exists so that a module's odd control (a number input, a
   four-checkbox group, a pair of selects) is mounted *verbatim* rather than
-  re-modelled. Zero functionality loss is achieved by refusing to model, not
-  by modelling harder.
+  re-modeled. Zero functionality loss is achieved by refusing to model, not
+  by modeling harder.
 - **P-II — Adoption is proved by a preservation checklist, not by a diff.**
   FRD `:308-310` makes the per-module checklist the acceptance condition for
   FR-4. §7's B4 family instantiates it for all three modules; a control that
@@ -159,15 +159,15 @@ pre-mortem because two of the commits are coupled.
    *selector* rule — the loop at `:310-318`, whose `!UI_SELECTOR.test(one)`
    at `:314` fails any depth-1 selector not matching
    `UI_SELECTOR = /^\.ui-[a-z0-9-]+/` (`:102`) — is a **separate check from**
-   its colour-literal rule (the per-line scan at `:304-308`, `COLOUR_LITERAL`
+   its color-literal rule (the per-line scan at `:304-308`, `COLOR_LITERAL`
    at `:101`); a mechanism can be legal under one and illegal under the other,
    which is exactly how v1's swatch proposal passed review as "gate-legal".
    (c) `parseBlocks()` ends `return blocks.filter((b) => !b.selector.startsWith("@"))`
    (`:182`), so the **selector** rule — and *only* the selector rule — is
    blind inside an at-rule. *(v2 said "nothing inside an at-rule is checked by
-   either rule". That is **false** and is corrected here: the colour-literal
+   either rule". That is **false** and is corrected here: the color-literal
    rule at `:304-308` iterates `text.split("\n")` over the **whole file** and
-   is indifferent to nesting, so a colour literal inside an `@media` block is
+   is indifferent to nesting, so a color literal inside an `@media` block is
    caught today. The asymmetry is the point — the two rules do not share a
    parse.)* The selector blindness is latent today
    (`grep -c '@' web/shared/css/components.css` = **0**) and opened by Step
@@ -175,8 +175,8 @@ pre-mortem because two of the commits are coupled.
    one existing file, that clause 7 is re-keyed to fail closed, that
    `parseBlocks` gains an opt-in at-rule descent, and that the re-key ships
    with a **negative** test (ADR-012, B1.4) — a test which, *because* of the
-   asymmetry just stated, must be a **selector** escape rather than a colour
-   literal: a colour literal inside `@media` is caught by the existing
+   asymmetry just stated, must be a **selector** escape rather than a color
+   literal: a color literal inside `@media` is caught by the existing
    whole-file scan whether the new descent parameter works or not, so it
    probes nothing.
 3. **D3 — The `dark` → `obsidian` rename is a data migration, not only a
@@ -224,14 +224,14 @@ Donor of record: `web/certmachine/js/toast.ts` (81 lines), named by FRD `:319`.
 | 3B | `class ToastHost` with per-instance stacks | Testable without globals; multiple regions possible | Multiple `aria-live` regions is an a11y regression, not a feature; and obsidianoid's 16 call sites (`app.ts:160,173,267,270,272,335,338,340,402,403,405`; `threads.ts:163,180,181,204,205`) all expect a free function — a class forces an instance to be threaded through two files that share no module scope |
 | 3C | Keep obsidianoid's `showToast(msg, type)` shape (2 args, 2800 ms fixed) | Smallest diff in obsidianoid | Throws away sticky errors, which is the donor's entire reason for existing (`toast.ts:17-19`); FRD `:319` names certmachine as the base, and §7 of the FRD is settled |
 
-**Decision 4 — where the theme swatch's per-theme colour comes from.**
+**Decision 4 — where the theme swatch's per-theme color comes from.**
 *(v1 left this as an "open detail for review" and recommended an option that
 both reviewers refuted. It is now decided here, with the refutations recorded,
 and it is ADR-015.)* Four constraints must hold **simultaneously**, and v1's
 analysis satisfied at most two of them at once:
 
 - **gate-legal** — survives clause 7's *selector* rule (`:310-316`,
-  `UI_SELECTOR = /^\.ui-[a-z0-9-]+/` at `:102`) **and** its colour-literal
+  `UI_SELECTOR = /^\.ui-[a-z0-9-]+/` at `:102`) **and** its color-literal
   rule (`:304-307`). These are two checks, not one;
 - **functionally correct** — the eight swatches in **one open picker** render
   eight **distinct** fills at the same instant;
@@ -250,9 +250,9 @@ analysis satisfied at most two of them at once:
 | | Option | Gate-legal | Correct | G12 | Barrel | Verdict |
 |---|---|---|---|---|---|---|
 | 4A | `getComputedStyle` probe: stamp a hidden element with each theme in turn and read `--color-primary` | ✅ | ✅ | ✅ | ✅ | **Viable, rejected.** Unreliable before first paint — exactly when a pre-paint picker may build — and forces a layout read per swatch. Kept as the documented fallback if 4D ever fails |
-| 4B | `THEMES` → `{name,label,color}[]`, colour literals emitted per theme in `components.css` *(v1's recommendation)* | ❌ | ❌ | ✅ | ⚠️ | **Refuted.** The eight literals survive clause 7 only through the colour rule's literal-only blind spot — in the very phase whose ADR-012 exists to close blind spots. And `option.value = theme` at `main.ts:72` silently becomes the string `"[object Object]"`, breaking sampler's picker **with every gate still green** (see the reach note above). A silent break is worse than a caught one |
+| 4B | `THEMES` → `{name,label,color}[]`, color literals emitted per theme in `components.css` *(v1's recommendation)* | ❌ | ❌ | ✅ | ⚠️ | **Refuted.** The eight literals survive clause 7 only through the color rule's literal-only blind spot — in the very phase whose ADR-012 exists to close blind spots. And `option.value = theme` at `main.ts:72` silently becomes the string `"[object Object]"`, breaking sampler's picker **with every gate still green** (see the reach note above). A silent break is worse than a caught one |
 | 4C | `[data-theme="x"] .ui-theme-swatch { background: var(--color-primary) }`, one rule per theme *(Architect's iteration-1 recommendation)* | ❌ | ❌ | ✅ | ✅ | **Refuted.** Eight depth-1 selectors starting with `[` → **eight hard clause-7 failures** at `:314`. And the selector keys on the **ancestor's** active theme, which is one value at any instant, so all eight swatches in one open picker render **identically** |
-| 4E | Inline `style="background:${color}"` per swatch — **what the donor does today**, `web/obsidianoid/js/app.ts:438` | ✅ | ✅ | ✅ | ⚠️ | **Refuted.** Gate-legal only by scope (clause 7 reads CSS files, not `.ts`), but the colours must come from somewhere: the donor's literals live in its own `THEMES` at `app.ts:46-52` and cover **5** themes, not 8. Adopting it therefore *requires* 4B's reshape and inherits 4B's silent break. It also re-introduces inline style, which G12's spirit and the shared-CSS gate exist to remove |
+| 4E | Inline `style="background:${color}"` per swatch — **what the donor does today**, `web/obsidianoid/js/app.ts:438` | ✅ | ✅ | ✅ | ⚠️ | **Refuted.** Gate-legal only by scope (clause 7 reads CSS files, not `.ts`), but the colors must come from somewhere: the donor's literals live in its own `THEMES` at `app.ts:46-52` and cover **5** themes, not 8. Adopting it therefore *requires* 4B's reshape and inherits 4B's silent break. It also re-introduces inline style, which G12's spirit and the shared-CSS gate exist to remove |
 | **4D** *(chosen)* | Stamp `data-theme` on **each swatch element itself**; **one** rule in `components.css`: `.ui-theme-swatch { background: var(--color-primary); }` | ✅ | ✅ | ✅ | ✅ | **Chosen.** See the four proofs below |
 
 **Why 4D satisfies all four, each verified in this tree:**
@@ -262,8 +262,8 @@ analysis satisfied at most two of them at once:
    *(Note the mechanics: `UI_SELECTOR` is applied with `.test()`, an unanchored-
    at-the-right prefix match, so even `.ui-theme-swatch[data-theme="x"]` would
    pass — but 4D needs no such form. One rule, not eight.)*
-2. **Gate-legal — colour rule.** `components.css` gains **zero** colour
-   literals; the fill is `var(--color-primary)`. `COLOUR_LITERAL` (`:101`) has
+2. **Gate-legal — color rule.** `components.css` gains **zero** color
+   literals; the fill is `var(--color-primary)`. `COLOR_LITERAL` (`:101`) has
    nothing to match. The `data-theme` value is written by TypeScript
    (`el.dataset.theme = name`) and never appears in CSS.
 3. **Functionally correct.** `web/shared/css/themes.css` keys every palette on
@@ -278,7 +278,7 @@ analysis satisfied at most two of them at once:
    `#4dbb6e`, `#5b9cf6`, `#f0a04a`, `#e05c7a`, `#3fbf9c` — **8 distinct
    values**, which is what makes B4.2's `Set(...).size === 8` assertion
    satisfiable rather than aspirational. *Cross-check on the rename:* the
-   donor's own `dark` swatch colour is `#7c6af7` (`app.ts:47`), which is
+   donor's own `dark` swatch color is `#7c6af7` (`app.ts:47`), which is
    byte-identical to shared **`obsidian`**'s `--color-primary`
    (`themes.css:61` block) and **not** to shared `dark`'s `#7c3aed`. The donor
    palette the user sees today is the one FRD `:191` renames to `obsidian`, so
@@ -304,7 +304,7 @@ blocks are pure custom-property blocks — `check-shared-css.mjs` clause 6
 (`:287-295`) permits only `--color-*` plus
 `THEME_ALLOW = ["--font-body", "--font-mono", "--overlay-scrim"]` (`:96`), and
 `grep -c '@' web/shared/css/themes.css` = 0 — so stamping `data-theme` on a
-small empty `<span>` has exactly one effect: **every** colour token resolves to
+small empty `<span>` has exactly one effect: **every** color token resolves to
 the previewed theme inside that span's subtree. The swatch's own
 `border: 1px solid var(--color-border)` (FRD `:257-261`'s requirement,
 replacing the donor's `rgba(255,255,255,.15)` at `app.css:810`) therefore
@@ -320,7 +320,7 @@ architectural:
 
 - **Where Phase-2 CSS lives.** `check-shared-css.mjs:298` keys clause 7 to
   the filename `components.css`. A new `menu.css`/`toast.css` would be linted
-  by clauses 8, 9 and 11 but **not** by clause 7's colour-literal ban or its
+  by clauses 8, 9 and 11 but **not** by clause 7's color-literal ban or its
   `^\.ui-` selector rule. Splitting therefore *reduces* gate coverage over
   the code this phase writes. The only alternative — split the files *and*
   extend clause 7's key to a set — is strictly more work for an identical
@@ -343,7 +343,7 @@ architectural:
 2. **HamburgerMenu** — FR-4, `web/shared/ts/menu.ts`, hook-fed (FRD `:263-310`).
 3. **Toast** — FR-5's widget table, row 2 (FRD `:319`), `web/shared/ts/toast.ts`.
 4. **obsidianoid adoption**, with the `dark` → `obsidian` rename **coupled in
-   the same commit** and its duplicated theme roster dropped in favour of the
+   the same commit** and its duplicated theme roster dropped in favor of the
    shared source. Two distinct authorities, kept distinct (D3): the **rename
    decision** is FRD `:191` ("**renamed** (decision confirmed)"); the
    **same-commit coupling principle** is the user ruling at
@@ -437,7 +437,7 @@ One settled platform item lands last, isolated:
 | **P3** | The working tree's **current** dirty state is user side-car only | `git status --short` at plan time shows only modified `tools/baseline-shots/*` and untracked `docs/INVENTORY-*.md` + `tools/baseline-shots/interactions.js`. **No Phase-2 commit may contain any of these paths.** *(**v5 FINAL** — re-derived at the amendment pass, 2026-09-16, and published as an **operator note** because it is the one premise an executor inherits from the environment rather than from this document. `git status --short` returns exactly **7** lines: `M docs/OPEN-QUESTIONS-ui-unification.md`, `M tools/baseline-shots/README.md`, `M tools/baseline-shots/shoot.js`, `?? docs/INVENTORY-hamburger-menus.md`, `?? docs/INVENTORY-menuserver.md`, `?? docs/PLAN-ui-unification-phase2.md`, `?? tools/baseline-shots/interactions.js`. **Five of the seven are the exact paths BX.4 forbids in any commit** — they are user side-cars: never staged, never committed, never cleaned up by a step. The other two are this planning pass's own output (this plan, still untracked, and the companion question log). So the executor starts C1 on a tree that is *dirty by design*, and the discipline that makes that safe is per-commit and path-scoped, not global: `git add` only the paths in that commit's **Touches** cell, never `git add -A`, never `git commit -a`. **P2**'s hand-run `clean-tree.mjs` and **BX.4**'s `git show --stat --name-only` are the two sides of this; BX.4 is the one that cannot be forgotten, since it inspects the commit after the fact.)* |
 | **P4** | Phase 1 is landed: barrel, `/shared/` route, sampler, 15 artifacts | `node scripts/gates/artifacts.mjs` passes and `scripts/descriptors.mjs:162` reads `EXPECTED_ARTIFACT_COUNT = 15` |
 | **P5** | Baseline pixels captured before C5 and C6a | `tools/baseline-shots/` + its `interactions.js` scene harness, run against obsidianoid (5 themes × notes/threads mode) and todo (dark + light, drawer open and closed) **before** C5. Output stays untracked (P3). |
-| **P5a** | **obsidianoid's baseline is re-captured *inside* C5, at the first point in C5 at which obsidianoid is renderable on its own vocabulary** — i.e. after **Step 5.3 items 1–4** (the shared link replaces the `css/themes.css` link in place, the local `themes.css` is deleted, the four renames are applied, and item 4 confirms `--color-surface-dynamic`'s two consumers need no edit — **v5**, user ruling on Q12) **plus** Step 5.4's first bullet, `index.html:2` `data-theme="dark"` → `"obsidian"`. Those five edits land as **one working-tree sub-step** and the capture follows them. Step 5.1 may land on either side (pixel-inert); **Steps 5.2 and 5.3 item 5 land after the capture** | The single-baseline model is wrong for obsidianoid and v1 missed it. `web/obsidianoid/index.html` links only `css/themes.css` (`:7`) and `css/app.css` (`:8`) — **no shared CSS, and therefore none of `web/shared/css/fonts.css`'s 15 `@font-face` rules** (2 Inter, 4 JetBrains Mono, 5 Sora, 4 IBM Plex Mono; the gate pins this exact number at `check-shared-css.mjs:99`, `EXPECTED_FONT_FACES = 15`, checked at `:365-366`. Beware `grep -c "@font-face" web/shared/css/fonts.css`, which returns **16** because the file's header comment at `:1` contains the literal string — the 15 real rules start at `:11`). Adding the `shared.css` link changes `--font-body`/`--font-mono` from the OS fallback stack to self-hosted Inter/JetBrains Mono, so **every glyph on the page reflows**. A pre-C5 baseline cannot be compared to a post-C5 render at the pixel level; comparing them would either fail spuriously or, worse, be waved off and hide a real regression. C5 therefore captures a second baseline once the module is rendering the shared matrix under its own theme name, and compares its own later steps against **that**. The font shift itself is a declared visual delta (ledger row 13, D-2), asserted by B2.6 as an intended change, not a preserved pixel. **v4 — the capture point is specified by *state*, not by edit order, and this is the third specification rather than the third reword** (Architect B-1/A1, Critic F-6; §5 Step 5.6 was unsatisfiable in v2 and again in v3, by two different mechanisms). "After the link lands and before any other C5 edit" names a tree in which obsidianoid **does not render**: the link alone, with `css/themes.css` already unlinked and the renames not yet applied, leaves **32** `var()` references undefined (R3's exact failure mode — 15 + 8 + 6 + 3 across the four renamed names; `--color-surface-dynamic`'s two are **not** among them, because post-C1 the shared sheet defines that name and the link has already landed) and — because `web/obsidianoid/css/themes.css:2` and `web/shared/css/themes.css:15` are **both** `:root, [data-theme="dark"]` at identical specificity, while `index.html:2` still says `dark` — recolours every panel on the page from obsidianoid's 12 colliding token values to shared `dark`'s. Naming the capture by the *state* obsidianoid must be in ("renderable on its own vocabulary") resolves the ordering ambiguity v3's wording created against §5's own numbering — 5.1 and 5.2 are edits and both precede 5.3 — and makes §5 Step 5.6's expected-residue list exact and small (ledger row 13/D-2 and D-1 — **v5**: D-3 is retired, so the list is shorter still and item 3 of that composition is now a zero-delta assertion) instead of a scope claim that was false at every candidate capture point. |
+| **P5a** | **obsidianoid's baseline is re-captured *inside* C5, at the first point in C5 at which obsidianoid is renderable on its own vocabulary** — i.e. after **Step 5.3 items 1–4** (the shared link replaces the `css/themes.css` link in place, the local `themes.css` is deleted, the four renames are applied, and item 4 confirms `--color-surface-dynamic`'s two consumers need no edit — **v5**, user ruling on Q12) **plus** Step 5.4's first bullet, `index.html:2` `data-theme="dark"` → `"obsidian"`. Those five edits land as **one working-tree sub-step** and the capture follows them. Step 5.1 may land on either side (pixel-inert); **Steps 5.2 and 5.3 item 5 land after the capture** | The single-baseline model is wrong for obsidianoid and v1 missed it. `web/obsidianoid/index.html` links only `css/themes.css` (`:7`) and `css/app.css` (`:8`) — **no shared CSS, and therefore none of `web/shared/css/fonts.css`'s 15 `@font-face` rules** (2 Inter, 4 JetBrains Mono, 5 Sora, 4 IBM Plex Mono; the gate pins this exact number at `check-shared-css.mjs:99`, `EXPECTED_FONT_FACES = 15`, checked at `:365-366`. Beware `grep -c "@font-face" web/shared/css/fonts.css`, which returns **16** because the file's header comment at `:1` contains the literal string — the 15 real rules start at `:11`). Adding the `shared.css` link changes `--font-body`/`--font-mono` from the OS fallback stack to self-hosted Inter/JetBrains Mono, so **every glyph on the page reflows**. A pre-C5 baseline cannot be compared to a post-C5 render at the pixel level; comparing them would either fail spuriously or, worse, be waved off and hide a real regression. C5 therefore captures a second baseline once the module is rendering the shared matrix under its own theme name, and compares its own later steps against **that**. The font shift itself is a declared visual delta (ledger row 13, D-2), asserted by B2.6 as an intended change, not a preserved pixel. **v4 — the capture point is specified by *state*, not by edit order, and this is the third specification rather than the third reword** (Architect B-1/A1, Critic F-6; §5 Step 5.6 was unsatisfiable in v2 and again in v3, by two different mechanisms). "After the link lands and before any other C5 edit" names a tree in which obsidianoid **does not render**: the link alone, with `css/themes.css` already unlinked and the renames not yet applied, leaves **32** `var()` references undefined (R3's exact failure mode — 15 + 8 + 6 + 3 across the four renamed names; `--color-surface-dynamic`'s two are **not** among them, because post-C1 the shared sheet defines that name and the link has already landed) and — because `web/obsidianoid/css/themes.css:2` and `web/shared/css/themes.css:15` are **both** `:root, [data-theme="dark"]` at identical specificity, while `index.html:2` still says `dark` — recolors every panel on the page from obsidianoid's 12 colliding token values to shared `dark`'s. Naming the capture by the *state* obsidianoid must be in ("renderable on its own vocabulary") resolves the ordering ambiguity v3's wording created against §5's own numbering — 5.1 and 5.2 are edits and both precede 5.3 — and makes §5 Step 5.6's expected-residue list exact and small (ledger row 13/D-2 and D-1 — **v5**: D-3 is retired, so the list is shorter still and item 3 of that composition is now a zero-delta assertion) instead of a scope claim that was false at every candidate capture point. |
 | **P6** | Q4, Q8 and **Q9** are settled; Q3 is not | `docs/OPEN-QUESTIONS-ui-unification.md:126-129` (Q4 — closed, and note it adjudicates the `tsconfig` glob, supplying only the *coupling principle* this plan borrows), `:187-199` (Q8 — closed), `:31` (Q3 — `--color-primary-fg`; **its checkbox is unticked `- [ ]` while its body states the values as settled by measurement**, so the plan treats the values as usable and the question as formally open; this asymmetry is itself recorded because a reviewer reading only the checkbox would conclude the values are unknown), `:200` (**Q9 — closed 2026-09-16 by user ruling**, moved into that file's `### Closed` section in the same pass that produced v5: the `.mjs` half is carved out and B6.3 is a positive probe). *(**v5**: all four coordinates moved, because closing Q9 and amending Q2 grew that file **160 → 235** lines — the committed baseline is `git show HEAD:docs/OPEN-QUESTIONS-ui-unification.md | wc -l` = **160**, and v5 published 161 by counting a trailing newline as a line; the parenthetical claimed to be grep-derived, so the one-unit error is the clause's own kind of defect and is corrected rather than annotated. v1–v4 read `:87-90`, `:148-160`, `:19`, `:40`, and the last of those read "Q9 — **open**". Re-derived by `grep -n`, not adjusted by arithmetic. Q3 is the only one of the four still in the open list.)* |
 
 ---
@@ -497,7 +497,7 @@ two. G16 is new in v2.
     for **exactly one** addition: `--color-surface-dynamic` as T1's **18th**
     key, 8 declarations plus a header-comment correction (§5 Step 1.5). At
     C2…C8 it is in no manifest and B1.1's ranged diff over it must be empty.
-  - Any colour a new component needs must already exist among the **18**
+  - Any color a new component needs must already exist among the **18**
     `--color-*` keys or the 27 structural names. No *second* token may be
     added in this phase on this precedent: a further addition is a plan
     revision, and **B1.1 part C**'s ranged diff from C1's SHA fails at the
@@ -675,7 +675,7 @@ correct.)* §5 Step 5.1 carries the corrected range.
 - **Theme roster is stated three times.** `css/themes.css` has 5 depth-1
   blocks — `:root, [data-theme="dark"]` `:2-37`, `forest` `:40-75`, `ocean`
   `:78-113`, `ember` `:116-151`, `rose` `:154-189` — each declaring the same
-  **38** properties (17 colour + 21 structural). `js/app.ts:46-52` holds a
+  **38** properties (17 color + 21 structural). `js/app.ts:46-52` holds a
   5-entry `THEMES` array whose `color:` field is a **third** copy of each
   theme's `--color-primary` hex. There is **no light theme**.
 
@@ -714,14 +714,14 @@ correct.)* §5 Step 5.1 carries the corrected range.
 - **All five donor themes already exist in the shared matrix with
   hex-identical values — not just `obsidian`.** v1 verified only the
   `obsidian` block and left the other four as an assumption; verified here
-  across every mapped colour name in all five blocks, after applying the four
+  across every mapped color name in all five blocks, after applying the four
   renames in the table below. *(v2–v4 also had to set `--color-surface-dynamic`
   aside, because it had no shared counterpart. **In v5 nothing is set aside:**
   the user's Q12 ruling makes it T1's 18th key at C1 (§5 Step 1.5), donated
   verbatim from these same five blocks, so the parity check now covers **every
-  one** of obsidianoid's 17 colour names.)*
+  one** of obsidianoid's 17 color names.)*
 
-  | donor block | shared block | names compared | colour mismatches |
+  | donor block | shared block | names compared | color mismatches |
   |---|---|---|---|
   | `:root, [data-theme="dark"]` `:2-37` | `[data-theme="obsidian"]` `:61-79` | 17 | **0** |
   | `[data-theme="forest"]` `:40-75` | `[data-theme="forest"]` `:82-100` | 17 | **0** |
@@ -731,7 +731,7 @@ correct.)* §5 Step 5.1 carries the corrected range.
 
   **85 comparisons, 0 mismatches, 0 unmapped names** — re-derived by machine in
   v5 against the post-Step-1.5 shared file, applying the four renames and
-  mapping `--color-surface-dynamic` to itself. The only shared colour key with
+  mapping `--color-surface-dynamic` to itself. The only shared color key with
   **no** obsidianoid donor is `--color-primary-fg`, in all five blocks; it is
   authored by Step 1.4's contrast matrix and is reported by the same script, so
   its absence is a measured result rather than an omission. *(Shared-block line
@@ -741,10 +741,10 @@ correct.)* §5 Step 5.1 carries the corrected range.
   This is the single most load-bearing fact in C5: it is what makes the
   commit a *rename plus delete* rather than a re-authoring, and it is what
   makes B2's pixel-parity claim provable for **five** themes instead of one.
-  The 16 varying colour values are exactly the palette differences, and every
+  The 16 varying color values are exactly the palette differences, and every
   one of them is already reproduced in the shared file.
 - **Token-name deltas obsidianoid must absorb.** The two rosters are both 17
-  colour names, but **only 12 names overlap** — so five must be resolved, not
+  color names, but **only 12 names overlap** — so five must be resolved, not
   four (v1's prose said "four" above a five-row table; the table was right).
   All **21** structural names obsidianoid declares exist in
   `web/shared/css/tokens.css` under the same spelling (verified: zero absent;
@@ -817,7 +817,7 @@ correct.)* §5 Step 5.1 carries the corrected range.
   > | the three rule-local `app.css` edits (`:202`, `:437`'s shift, `:455`) | **deleted.** The **`--color-surface-dynamic` name is unchanged at both of its sites**, `:202`'s middle gradient stop and `:455`'s background (§5 Step 5.3 **item 4**), and `:455` is therefore not edited at all; `:202` and `:437` keep only the plain, value-preserving `--color-surface-offset` → `--color-surface-3` rename that **item 3** applies everywhere (`:202` carries **two** such references, `:437` one) |
   > | **D-3** ("shift one surface step at 3 edits") | **retired to zero delta** (§5 Step 5.5) |
   > | ledger row **14** | rewritten to record option B and the user's ruling |
-  > | **B2.8** ("the pair shift preserved one step of contrast") | rewritten to assert two *distinct* computed colours on **8** themes |
+  > | **B2.8** ("the pair shift preserved one step of contrast") | rewritten to assert two *distinct* computed colors on **8** themes |
   > | `--color-surface-offset`'s 12/3 split | gone; uniform, value-preserving at 15 |
   >
   > **Why this is a better answer and not merely the user's answer.** The pair
@@ -846,7 +846,7 @@ correct.)* §5 Step 5.1 carries the corrected range.
   > carries the two premise corrections below and records that **`--radius-xl`
   > is not swept along**: it stays deferred on its own grounds (grocery-only,
   > one consumer, unread by any module in Phase 2's manifest), because the
-  > ruling widens the theme *colour* vocabulary, not the structural token set.
+  > ruling widens the theme *color* vocabulary, not the structural token set.
   > Q2's other two errors are unaffected and still stand
   > corrected above: this token has **two** consumers, not one, and "Phase 3"
   > and "with obsidianoid's migration" were never two different events.
@@ -965,7 +965,7 @@ correct.)* §5 Step 5.1 carries the corrected range.
   listener. The toggle is duplicated at `compare.html:41-43` with the same
   `id`.
 
-  > **The inverted polarity is a real behavioural delta at exactly one input,
+  > **The inverted polarity is a real behavioral delta at exactly one input,
   > and C6a resolves it toward the shared manager.** `theme.js:15` probes
   > `'(prefers-color-scheme: light)'` and falls back to `dark`; the shared
   > `ThemeManager` probes `dark` and maps the negative case to `light`. FRD
@@ -1089,7 +1089,7 @@ out of scope; (3) no page is left calling an undefined global. Deleting
 `theme.js` removes `window.toggleTheme`, and `compare.html:41`'s inline
 `onclick` is a live reference to it — so leaving compare.html untouched
 produces a button that throws `ReferenceError` on every click, on a page that
-is reachable in normal use. v2 resolves it by dropping claim (2) in favour of
+is reachable in normal use. v2 resolves it by dropping claim (2) in favor of
 a precise statement: compare.html is **out of scope for the drawer** and **in
 scope for the theme system**, it is edited at **C6a only**, and it is named in
 C6a's Touches cell and its own acceptance criterion (B4.12).
@@ -1168,7 +1168,7 @@ output — in the file whose entire purpose is to enforce that facts have one
 definition. **B10.2** asserts the PASS line; the header is verified by
 `grep -c '11 clauses' scripts/check-shared-css.mjs` returning **0** after the
 commit. *(A third mention exists — Step 4's clause-7 at-rule descent, ADR-012
-— but that changes a clause's *behaviour*, not their count, so neither string
+— but that changes a clause's *behavior*, not their count, so neither string
 moves again.)*
 
 **1.4 — `bundle-shape.mjs` gets a `--require` flag, and the `Makefile`
@@ -1290,7 +1290,7 @@ the direction that palette's own surface ladder already travels.** Measured
 across all five donors, that step is a uniform per-channel lightening of
 `--color-surface-3` by **×1.19–1.25** (obsidian ×1.243/1.243/1.245, forest
 ×1.192/1.196/1.188, ocean ×1.25/1.238/1.25, ember ×1.208/1.189/1.25, rose
-×1.196/1.25/1.2) — hue-preserving, not a grey wash. Applied per theme:
+×1.196/1.25/1.2) — hue-preserving, not a gray wash. Applied per theme:
 
 - **`dark`** — its surface ladder is *arithmetic*: `#0d1117` → `#161b22` →
   `#21262d` → `#2c3138`, the last two steps both exactly `+0x0b` per channel.
@@ -1479,13 +1479,13 @@ all three mechanical:
 - class names `cert-toast*` → `ui-toast*` (G13/clause 7's `^\.ui-` rule);
 - the dismiss button's `×` glyph stays a text node via `textContent`
   (donor `:61`), and gains `aria-label="Dismiss"` (donor `:62`) unchanged;
-- no colour literal anywhere — tones map to `data-tone` and the CSS selects
+- no color literal anywhere — tones map to `data-tone` and the CSS selects
   on it.
 
 **2.2 —** `web/shared/css/components.css` gains `.ui-toast-stack`,
 `.ui-toast`, `.ui-toast[data-tone="success"|"error"|"notice"]`,
 `.ui-toast-text`, `.ui-toast-close` (+ `:hover`, `:focus-visible`). Donor
-geometry: `web/certmachine/js/cert.css:916-966`. Colours come from
+geometry: `web/certmachine/js/cert.css:916-966`. Colors come from
 `--color-surface-1`, `--color-border`, `--color-text`, `--color-success`,
 `--color-danger`, `--color-primary`; spacing/radius/shadow from `tokens.css`.
 No `!important` (clause 9).
@@ -1498,7 +1498,7 @@ clause must be hardened *before* that arrives, not after.
 *(a) Re-key.* The clause body `:300-319` selects `components.css` by name at
 `:301-302`. It becomes: *every* sheet in `web/shared/css/` except
 `tokens.css`, `themes.css`, `fonts.css`, `index.css`. Today that set is
-exactly `{components.css}`, so behaviour is unchanged at this boundary —
+exactly `{components.css}`, so behavior is unchanged at this boundary —
 which is the point: the extension is verified by the existing suite still
 passing, and a future sheet is linted without anyone remembering to add it.
 
@@ -1547,7 +1547,7 @@ touch the gate.
 > **Why opt-in and not simply recursive.** `parseBlocks` has exactly three
 > callers — `:236` (tokens.css, clause 3), `:252` (themes.css, clauses 4, 5
 > and 6) and `:310` (clause 7) — and the first two are **set-equality**
-> assertions over a file modelled as flat:
+> assertions over a file modeled as flat:
 >
 > - clause 3 `:237` requires `blocks.length === 1` and `:240` requires that
 >   block's selector to be exactly `:root`;
@@ -1566,7 +1566,7 @@ touch the gate.
 > names the wrong problem, or bump clause 3's block count, or double-count
 > `--color-*` into clause 5's total. The `:182` filter is precisely what makes
 > the flat model true, so removing it globally silently re-specifies three
-> clauses. Opt-in changes exactly one caller's behaviour, which is the one we
+> clauses. Opt-in changes exactly one caller's behavior, which is the one we
 > intend to change.
 >
 > **The honest caveat, stated because it is the reason (c) exists:**
@@ -1636,7 +1636,7 @@ Config, per FRD `:230-244`:
 `{ module: string; default: string; serverDefault?: () => string | undefined;
 storageKey?: () => string; onChange?: (name: string) => void }`.
 
-Behaviour, per FRD `:245-261`:
+Behavior, per FRD `:245-261`:
 
 - resolution order **localStorage → `serverDefault()` → `system` → `default`**.
   **Step 4 is a typed-config floor, not a reachable branch: the `system` step
@@ -1689,7 +1689,7 @@ mechanism is:
 ```
 
 ```ts
-// the picker, per theme — no colour value appears in TypeScript either.
+// the picker, per theme — no color value appears in TypeScript either.
 const sw = document.createElement("span");
 sw.className = "ui-theme-swatch";
 sw.dataset.theme = name;          // <- this is what makes the fill differ
@@ -1713,14 +1713,14 @@ Gate legality, stated against the code rather than by assertion.
 - the **selector** rule, `:310-316`, rejects any depth-1 selector not matching
   `UI_SELECTOR = /^\.ui-[a-z0-9-]+/` (`:102`) — `.ui-theme-swatch` matches,
   and there is **one** such selector, not eight;
-- the **colour-literal** rule, `:304-308`, keyed on `COLOUR_LITERAL` (`:101`)
+- the **color-literal** rule, `:304-308`, keyed on `COLOR_LITERAL` (`:101`)
   — `var(--color-primary)` is not a literal, and no hex, `rgb()` or `hsl()`
   enters the file.
 
 No inline `style.background` is written at all, so the G14 note about the
 donor's `innerHTML` at `app.ts:438` still holds and the picker additionally
-stops carrying colour values in JavaScript. **Declared consequence:** because
-a theme block sets *every* colour token on the stamped element, the swatch's
+stops carrying color values in JavaScript. **Declared consequence:** because
+a theme block sets *every* color token on the stamped element, the swatch's
 own `border: 1px solid var(--color-border)` also follows the **previewed**
 theme — a deliberate micro-preview, which is what makes the border legible on
 light and dark swatches alike (FRD `:257-261`'s actual goal). **Ledger row
@@ -1756,7 +1756,7 @@ re-backed by a `ThemeManager` instance (`module: "sampler"`), and
 `THEMES` directly. A "Theme picker" section shows the shared
 `.ui-theme-picker` swatch grid — the same widget `HamburgerMenu` will mount
 at C4. The sampler thereby also becomes the first module with persisted
-theme selection, which is a visible behaviour change in a gallery with no
+theme selection, which is a visible behavior change in a gallery with no
 users (sanctioned delta).
 
   **A second sanctioned delta at C3, stated because it is the one place
@@ -1799,7 +1799,7 @@ onOpen?, onClose?, mountTrigger?: HTMLElement }`. Methods: `open()`,
 `close()`, `toggle()`, `addItem()`, `removeItem(id)`, `updateItem(id, patch)`,
 `destroy()`.
 
-Chrome, modelled on todo's drawer (FRD `:265-269` names it "the most complete
+Chrome, modeled on todo's drawer (FRD `:265-269` names it "the most complete
 implementation in the repo" — structurally; §4.4 records that it has no a11y
 at all, so the three a11y features below are **net-new, not ported**):
 
@@ -1947,7 +1947,7 @@ relative-path-only.
 without it, obsidianoid entering the `sharedConsumer` set is not actually
 *asserted* by anything, only relied upon. This is the edit that makes B9.1 a
 real criterion for this boundary rather than a restatement of the gate's
-default behaviour.
+default behavior.
 
 **5.2 — TypeScript.**
 
@@ -2051,7 +2051,7 @@ default behaviour.
   > applied at the two moments `state.activeVault`'s meaning changes — once
   > when the roster first arrives, once on every switch.
   >
-  > One behaviour difference is **intended** and is why `:479` is an
+  > One behavior difference is **intended** and is why `:479` is an
   > improvement rather than a translation: today's line reads
   > `state.vaults[**0**].theme` while its key came from
   > `themeStorageKey()` → `state.activeVault`. Those agree only because
@@ -2086,7 +2086,7 @@ default behaviour.
   owns that fact for all three orphaned ids at once.
   Tone mapping: `'success'` → `success`, `'error'` → `error`. **The
   16 call sites keep their two-argument shape**, so the tone becomes sticky
-  for errors — a deliberate behaviour change, sanctioned delta.
+  for errors — a deliberate behavior change, sanctioned delta.
 - `js/app.ts:449-455` (`#btn-hamburger` wiring) becomes a `HamburgerMenu`
   with `themePicker: true`, mounted on the existing `index.html:54-56`
   button via `mountTrigger`. Its only content is the theme picker, per FRD
@@ -2100,7 +2100,7 @@ default behaviour.
   nothing to call. A `storageKey` **closure** does not re-run itself when the
   value it closes over changes, so without an entry point switching vaults
   would silently keep the previous vault's theme — a regression in the one
-  behaviour FRD `:253` explicitly says to preserve ("obsidianoid keeps
+  behavior FRD `:253` explicitly says to preserve ("obsidianoid keeps
   per-vault persistence — behavior preserved"). `ThemeManager` therefore
   exposes **`reresolve(): void`** — re-runs the full resolution order
   (localStorage → `serverDefault()` → `system` → `default`) against the
@@ -2163,7 +2163,7 @@ default behaviour.
   there is no intermediate tree in which ESM artifacts are loaded classically.
 
   > *Guaranteed by (criterion): **B2.12**.*
-- **`window.ThreadsView`'s *runtime* behaviour is untouched, but its
+- **`window.ThreadsView`'s *runtime* behavior is untouched, but its
   *declaration* must be rewritten in this same commit (Architect N1, v3).**
   At runtime nothing changes: `threads.js` executes before `app.js` under
   `type="module"` document order, exactly as today (§4.3, R6). At compile
@@ -2221,18 +2221,18 @@ states the capture point that depends on this; the two must not drift.
    `web/shared/css/themes.css:15` are **both** `:root, [data-theme="dark"] {`,
    the same selector list at the same specificity, so while both sheets are
    linked **link order alone decides all 12 colliding token values** and the
-   page silently recolours. Replacing in place means the two are never linked
+   page silently recolors. Replacing in place means the two are never linked
    together in the first place, which is why this is a replacement and not an
    addition. *(The 12 names and the 12 value pairs are §4.3's parity row
    read the other way round: obsidianoid's `dark` is parity-equal to
    shared's **`obsidian`** block `:61-79`, not to shared's `dark` `:15-33`.)*
 2. `web/obsidianoid/css/themes.css` (189 lines) is **deleted in full.**
-   Surviving definitions: the **18** colour keys × 5 themes at
+   Surviving definitions: the **18** color keys × 5 themes at
    `web/shared/css/themes.css:63-170` (obsidian/forest/ocean/ember/rose), and
    the 21 structural names at `web/shared/css/tokens.css:9-43`. Verified
    hex-for-hex for obsidian in §4.3; forest/ocean/ember/rose were donated from
    this very file by Phase 1 (`themes.css:81,102,123,144` name the donor
-   ranges). *(**v5 FINAL**, Critic minor 2. v5 published "17 colour keys ×
+   ranges). *(**v5 FINAL**, Critic minor 2. v5 published "17 color keys ×
    5 themes at `:61-164`", which was wrong twice over. **Today**, before C1,
    the five non-`dark`/`light` blocks are 17 keys × 5 = **85** declarations at
    `:61-163` — `:163` is rose's closing brace and `:164` is blank, so the
@@ -2324,18 +2324,18 @@ no reviewer has to re-derive them.** All three were raised in iteration 1 as
    which lives outside the container, and the rule at `:463` is left
    untouched. This is what makes **D-5** true rather than accidental; put
    another way, D-5 is a *fix* delivered by placement, not by a CSS edit.
-3. **Two colour values *are at issue* outside the token vocabulary, and both
+3. **Two color values *are at issue* outside the token vocabulary, and both
    are accounted for.** `:383`'s `dialog::backdrop` keeps its literal (ledger
    row 7, §11 item 8). `:740`'s chevron data URI does **not** survive — the
    `stroke='%237878a0'` literal is removed by the `mask-image` rewrite above,
    which is **D-7**. So after C5 the file contains exactly **one**
-   out-of-vocabulary colour, deliberately, and a later token audit will find
+   out-of-vocabulary color, deliberately, and a later token audit will find
    it already documented instead of rediscovering it. *(**v5**: the heading
    said "survive C5", which its own second sentence contradicts — only one
    survives. Architect **N-1**.)*
 
    **The inventory this claim rests on, by command.** The whole
-   out-of-vocabulary colour surface of the 812-line `web/obsidianoid/css/app.css`
+   out-of-vocabulary color surface of the 812-line `web/obsidianoid/css/app.css`
    is six declarations plus one escaped literal inside a data URI, and every
    one of them now has an owner:
 
@@ -2463,7 +2463,7 @@ no reviewer has to re-derive them.** All three were raised in iteration 1 as
   half of C5 cannot fail silently: `make test` exercises `handler_test.go`
   and **B2.5** covers `build.go:41` by asserting `grep -c '"dark"' internal/obsidianoid/build.go` = 0, rc=1.
 
-**5.5 — Sanctioned visual/behavioural deltas in obsidianoid** (nothing else
+**5.5 — Sanctioned visual/behavioral deltas in obsidianoid** (nothing else
 may move):
 
 | | Delta | Why |
@@ -2474,10 +2474,10 @@ may move):
 | D-4 | Errors become sticky toasts; toast geometry becomes the shared stack | ADR-010; FRD `:319` |
 | D-5 | The theme picker is now reachable in Threads mode | it was unreachable via `css/app.css:463`; the shared trigger mounts outside `#topbar-actions` |
 | D-6 | 8 themes offered where 5 were | FRD `:183-196`'s roster is the single definition |
-| D-7 | The vault-selector chevron now follows the theme | `:740` was frozen at obsidian's muted grey |
-| **D-15** | Each swatch's 1px border now follows the **previewed** theme, not the page theme — replacing the donor's fixed `rgba(255,255,255,0.15)` (`css/app.css:810`) with `var(--color-border)` | the unavoidable consequence of ADR-015: stamping `data-theme` on the swatch re-resolves **every** colour token in that element's subtree, the border included. Deliberate, and the reason the border reads correctly on light *and* dark swatches (FRD `:257-261`). §0 Decision 4, ledger row 15. **One theme behaves unlike the other seven and it is worth knowing before the review:** of the eight `--color-border` values in `web/shared/css/themes.css` (`:20, :43, :66, :87, :108, :129, :150, :172`) seven are opaque hexes and **puma's (`:172`) is `rgba(255, 255, 255, 0.11)` — translucent**. So the puma swatch's border composites against the swatch's own `--color-primary` fill (`#3fbf9c`) rather than replacing it, giving a subtly lighter edge than the other seven; that is the *closest* behaviour to the donor's fixed `rgba(255,255,255,0.15)` and is the one swatch a pixel diff will show moving least. Not a defect and not worth special-casing — recorded so a reviewer comparing the eight swatches side by side does not read the odd one out as a bug *(v3, Critic minor)* |
+| D-7 | The vault-selector chevron now follows the theme | `:740` was frozen at obsidian's muted gray |
+| **D-15** | Each swatch's 1px border now follows the **previewed** theme, not the page theme — replacing the donor's fixed `rgba(255,255,255,0.15)` (`css/app.css:810`) with `var(--color-border)` | the unavoidable consequence of ADR-015: stamping `data-theme` on the swatch re-resolves **every** color token in that element's subtree, the border included. Deliberate, and the reason the border reads correctly on light *and* dark swatches (FRD `:257-261`). §0 Decision 4, ledger row 15. **One theme behaves unlike the other seven and it is worth knowing before the review:** of the eight `--color-border` values in `web/shared/css/themes.css` (`:20, :43, :66, :87, :108, :129, :150, :172`) seven are opaque hexes and **puma's (`:172`) is `rgba(255, 255, 255, 0.11)` — translucent**. So the puma swatch's border composites against the swatch's own `--color-primary` fill (`#3fbf9c`) rather than replacing it, giving a subtly lighter edge than the other seven; that is the *closest* behavior to the donor's fixed `rgba(255,255,255,0.15)` and is the one swatch a pixel diff will show moving least. Not a defect and not worth special-casing — recorded so a reviewer comparing the eight swatches side by side does not read the odd one out as a bug *(v3, Critic minor)* |
 
-| **D-16** | `.disabled-overlay`'s scrim stops being obsidian-specific: `css/app.css:634`'s `rgba(19, 19, 26, 0.72)` becomes `var(--overlay-scrim)`. On **7** themes that resolves to `rgba(0, 0, 0, 0.55)` (`web/shared/css/tokens.css:42`); on **light** the theme overrides it to `rgba(40, 37, 29, 0.35)` (`web/shared/css/themes.css:56`), one of `THEME_ALLOW`'s three permitted non-colour props (`check-shared-css.mjs:96`) | ***New in v5 — Architect B-2.*** This is one of the four edits §5 Step 5.3 **item 5** already prescribed, and v4 gave it no D-row, so §5 Step 5.6's attribution rule made the only compliant executor response a **scheduled stop**. Two directions of change, both intended: on obsidian the overlay loses its purple tint and drops from 0.72 to 0.55 alpha (the literal's own comment says it "matches `--color-bg` at 72% opacity", i.e. `#13131a` — a value that is *wrong by construction* on the seven themes obsidianoid did not have), and on light it becomes a warm ink at 0.35 instead of near-black at 0.72, which is the light-theme-correctness defect item 5 exists to fix. The same token and the same two-direction behaviour are already documented for todo's backdrop at **D-14**, so this is the second consumer of one decision, not a second decision |
+| **D-16** | `.disabled-overlay`'s scrim stops being obsidian-specific: `css/app.css:634`'s `rgba(19, 19, 26, 0.72)` becomes `var(--overlay-scrim)`. On **7** themes that resolves to `rgba(0, 0, 0, 0.55)` (`web/shared/css/tokens.css:42`); on **light** the theme overrides it to `rgba(40, 37, 29, 0.35)` (`web/shared/css/themes.css:56`), one of `THEME_ALLOW`'s three permitted non-color props (`check-shared-css.mjs:96`) | ***New in v5 — Architect B-2.*** This is one of the four edits §5 Step 5.3 **item 5** already prescribed, and v4 gave it no D-row, so §5 Step 5.6's attribution rule made the only compliant executor response a **scheduled stop**. Two directions of change, both intended: on obsidian the overlay loses its purple tint and drops from 0.72 to 0.55 alpha (the literal's own comment says it "matches `--color-bg` at 72% opacity", i.e. `#13131a` — a value that is *wrong by construction* on the seven themes obsidianoid did not have), and on light it becomes a warm ink at 0.35 instead of near-black at 0.72, which is the light-theme-correctness defect item 5 exists to fix. The same token and the same two-direction behavior are already documented for todo's backdrop at **D-14**, so this is the second consumer of one decision, not a second decision |
 | **D-17** | The three `color: #fff` literals become `var(--color-primary-fg)`: `css/app.css:90` (`#btn-save:not(:disabled):hover`), `:404` (`.dialog-actions .btn-primary`) and `:540` (`.btn-save:hover:not(:disabled)`, where the `!important` is **preserved** — module CSS, so clause 9 does not apply). On `dark`, `light` and `obsidian` the value is `#ffffff` (`themes.css:29`, `:52`, `:75`) — **byte-identical, zero pixel delta**; on `forest`, `ocean`, `ember`, `rose` and `puma` it is `#0b0f14` (`:96`, `:117`, `:138`, `:159`, `:181`) | ***New in v5 — Architect B-2***, same defect as D-16: prescribed by §5 Step 5.3 item 5, unattributable in v4. All three sites set foreground text on a `var(--color-primary)` **background** declared on the line immediately above (`:89`, `:403`, `:539`), which is precisely what `--color-primary-fg` is for — Step 1.4 authored its 8 values as a contrast matrix against those primaries. The delta is a **fix on the five themes where it appears**: ember's primary is `#f0a04a` and rose's `#e05c7a`, on which white text was failing contrast; `#0b0f14` is the value Step 1.4 chose for exactly those grounds. Three themes show no change at all, which is why this row's pixel diff is expected to be *empty* on the P5a reference theme (`obsidian`) and non-empty on five of the other seven |
 
 > **Numbering:** D-rows are unique across the whole plan, so the swatch-border
@@ -2498,9 +2498,9 @@ may move):
 > the rule in flight, so an executor who performed item 5 correctly would reach
 > two unattributable diff regions and, following the plan exactly, **stop the
 > commit**. That is the plan defeating itself, not a gap in the executor's
-> judgement. The generalisation, which is the Architect's back-pointer rule
+> judgement. The generalization, which is the Architect's back-pointer rule
 > applied to pixels rather than to gate output: **every prescribed edit that
-> changes a rendered colour needs a D-row, and every D-row needs a prescribing
+> changes a rendered color needs a D-row, and every D-row needs a prescribing
 > step** — §5 Step 5.6's composition lists are now the both-ways check, and the
 > four edits of item 5 map to D-15, D-16, D-17 and D-7 with nothing left over.
 
@@ -2543,7 +2543,7 @@ each broken state fails in a way the step would then have to excuse:
 | Candidate trigger | The state it names | Why it is not a reference |
 |---|---|---|
 | after 5.3 item 1 alone | shared linked, local `themes.css` gone, no renames | **32** `var()` references undefined (R3) — panels lose their surfaces. *(**v5 FINAL**, Critic minor 1: 15 + 8 + 6 + 3 across the four renamed names; `--color-surface-dynamic`'s two references resolve, because post-C1 the shared sheet defines that name and item 1's link has already landed. §2 P5a and §5 Step 5.3 item 3 publish the same 32.)* |
-| after 5.3 items 1–4, before 5.4 | vocabulary complete, document still says `data-theme="dark"` | shared `themes.css:15` is `:root, [data-theme="dark"]`, so the page resolves shared **dark**, not **obsidian** — all 12 colliding names differ in value (§4.3's parity table) and `web/obsidianoid/css/app.css` consumes them **121** times (measured `var(--name)` occurrences; `--color-primary` and `--color-text` 21 each, `--color-border` 20, `--color-text-faint` 14, `--color-text-muted` 13, `--color-divider` and `--color-surface-2` 8 each, `--color-primary-active` 6, `--color-bg` 5, `--color-primary-hover` 3, `--color-success` 2, `--color-warning` 0). Every panel recolours |
+| after 5.3 items 1–4, before 5.4 | vocabulary complete, document still says `data-theme="dark"` | shared `themes.css:15` is `:root, [data-theme="dark"]`, so the page resolves shared **dark**, not **obsidian** — all 12 colliding names differ in value (§4.3's parity table) and `web/obsidianoid/css/app.css` consumes them **121** times (measured `var(--name)` occurrences; `--color-primary` and `--color-text` 21 each, `--color-border` 20, `--color-text-faint` 14, `--color-text-muted` 13, `--color-divider` and `--color-surface-2` 8 each, `--color-primary-active` 6, `--color-bg` 5, `--color-primary-hover` 3, `--color-success` 2, `--color-warning` 0). Every panel recolors |
 | "after the link, before any other C5 edit" (v3) | both of the above at once | and it contradicts §5's own numbering, since 5.1 and 5.2 are edits that precede 5.3 |
 | **after 5.3 items 1–4 + 5.4's stamp (v4)** | obsidianoid rendering obsidian from the shared matrix | **the reference.** B2.7's 0-mismatch parity makes this palette hex-for-hex the old local `dark` palette |
 
@@ -2577,7 +2577,7 @@ was unattributable by construction:
      edited at all", which is false at `:202`.)* So the
      shimmer, the mode switcher and every other surface in the module must be
      **pixel-identical** across this window except for the glyph reflow that
-     moves their text. A non-empty surface-colour region here is now a
+     moves their text. A non-empty surface-color region here is now a
      **finding**, where in v4 it was expected.
 
   That is the whole list. **D-4, D-5, D-6, D-7, D-15, D-16 and D-17 fall on
@@ -2586,7 +2586,7 @@ was unattributable by construction:
   mounts — so they belong to the P5a → end-of-C5 window, not here.
 
   *(v4 deletes v3's "no element gains or loses a box, **no panel changes
-  colour**" claim. The second half was false — and it was false **with a
+  color**" claim. The second half was false — and it was false **with a
   mechanism attached** ("the theme matrix is not yet being consumed by any
   *renamed* token"), which is the shape that gets an executor to wave away the
   exact diff the step exists to catch. The premise was true and the conclusion
@@ -2596,7 +2596,7 @@ was unattributable by construction:
   D-1 and D-7 are box-preserving (as was D-3, before v5 retired it), so "no
   element gains or loses a box" is the residual property and it is stated below
   as the check. D-16 and D-17 are box-preserving too — both change only a
-  colour value — so the property holds for the whole commit, not just for this
+  color value — so the property holds for the whole commit, not just for this
   window.)*
 
   **What is checked:** every non-empty region of the P5 → P5a diff is
@@ -2606,7 +2606,7 @@ was unattributable by construction:
   below. *(v5: v4 wrote "one of the four rows above" over a three-item list,
   counting row 13, D-2, D-1 and D-3 as four rows across three items. With D-3
   retired the list is two attributing rows plus item 3's explicit
-  zero-delta assertion, so the rows are named instead of counted.)* Colour
+  zero-delta assertion, so the rows are named instead of counted.)* Color
   equality is *not* asserted at this boundary and does not need to be:
   **B2.7** asserts it directly and far more precisely, by comparing all 17
   keys × 5 blocks for 0 mismatches.
@@ -2639,9 +2639,9 @@ was unattributable by construction:
 
 **The attribution rule may not be widened in flight.** If a diff at either
 boundary cannot be attributed, C5 stops and the plan is revised — adding a
-"palette churn" row to absorb an unexplained global recolour would delete the
+"palette churn" row to absorb an unexplained global recolor would delete the
 only instrument in Phase 2 pointed at **cascade-order** defects. C5's other
-guards (B2.7 parity, B1.1's ranged diff, B2.8's computed-colour assertion,
+guards (B2.7 parity, B1.1's ranged diff, B2.8's computed-color assertion,
 B2.6's both-ways migration) are all **value** checks; none of them sees a
 stylesheet linked in the wrong position. *(v4 — Architect B-1's stated repair
 hazard, recorded as a rule so the repair is not available.)*
@@ -2671,8 +2671,8 @@ Diffs are inspected, not committed (P3).
 > **font reflow**. P5 → P5a is expected to be non-empty essentially
 > everywhere, and no realistic reviewer can confirm by eye that a global
 > glyph reflow hides nothing. v4 wrote that window as if it could be
-> discharged; under this ruling it is honestly labelled as the window whose
-> colour evidence comes from **B2.7** (17 keys × 5 blocks, 0 mismatches) and
+> discharged; under this ruling it is honestly labeled as the window whose
+> color evidence comes from **B2.7** (17 keys × 5 blocks, 0 mismatches) and
 > whose pixel evidence is corroborating at best.
 
 **Acceptance (C5):** B1.1, B1.2, B2.1–B2.12, B3.9, B4.2, B5.8, B9.1–B9.4,
@@ -2950,7 +2950,7 @@ ordering rather than merely hoping for it.
   > > visually validate each one anyway."
   >
   > Read as: *place* the bump in C6b, alongside the edits that make it
-  > necessary — **not** as authorisation to remove the `?v=` mechanism. The
+  > necessary — **not** as authorization to remove the `?v=` mechanism. The
   > mechanism stays; only the number moves, and it moves once.
   >
   > **`compare.html` is therefore on C6b's touch list**, which it was not in
@@ -2980,11 +2980,11 @@ where it goes. `D` = deliberate delta.
 | `display`/`flex-direction`/`gap`/`overflow-y` `:112-115` | `flex` / `column` / `0` / `auto` | same |
 | `z-index` `:116` | `200` | same |
 | `transform` `:117` + `.sidebar-open` `:122` | `translateX(-100%)` → `translateX(0)` | same mechanism, driven by `.ui-menu-drawer[data-open]` instead of `.sidebar-open` |
-| `transition` `:118` | `transform 220ms ease, background 150ms ease, border-color 150ms ease` | **D-11** — shared uses `transform var(--transition)` = `160ms cubic-bezier(0.16, 1, 0.3, 1)` (`tokens.css:40`). The slide gets **60ms faster** with a different easing curve, and the `background`/`border-color` transitions are dropped, so a theme switch while the drawer is open recolours it instantly rather than easing |
+| `transition` `:118` | `transform 220ms ease, background 150ms ease, border-color 150ms ease` | **D-11** — shared uses `transform var(--transition)` = `160ms cubic-bezier(0.16, 1, 0.3, 1)` (`tokens.css:40`). The slide gets **60ms faster** with a different easing curve, and the `background`/`border-color` transitions are dropped, so a theme switch while the drawer is open recolors it instantly rather than easing |
 | `box-shadow` `:119` | `4px 0 24px rgba(0,0,0,.35)` | **D-12** — becomes `var(--shadow-md)` = `0 8px 32px rgba(0,0,0,0.4)`. The shadow stops being directional (rightward) and becomes downward — the most visible single delta in C6b, and the reason B4.11 captures a drawer-open shot rather than trusting the D-table |
 | `.sidebar-section` `:124` | `padding: .5rem 0` | `.ui-menu-section`, `var(--space-2) 0` = same `0.5rem` |
 | `.sidebar-divider` `:126-130` | `height:1px; background:var(--border); margin:.375rem 0` | `.ui-menu-divider`; margin becomes `var(--space-1) 0` = `0.25rem`, **D-13** (−2px a side) |
-| `.sidebar-backdrop` `:134-143` + `.sidebar-backdrop.sidebar-open` `:144` | `display:none`→`block`, `inset:0; top:52px; background:rgba(0,0,0,.45); z-index:199; backdrop-filter:blur(1px)` + `-webkit-` | `.ui-menu-backdrop`. `top:52px` → `0` (follows D-8); `rgba(0,0,0,.45)` → `var(--overlay-scrim)`, **D-14** — on `dark` that is `rgba(0, 0, 0, 0.55)` (`tokens.css:42`), i.e. 10 points more opaque; on `light` the theme overrides it (one of `THEME_ALLOW`'s three permitted non-colour props, `check-shared-css.mjs:96`) to light's own ink at 0.35, so the light-theme scrim gets **lighter** while dark's gets darker. Both directions are intended; B4.11 captures both themes for this reason. `blur(1px)` **preserved**, both prefixes, because dropping it is a visible change with no upside |
+| `.sidebar-backdrop` `:134-143` + `.sidebar-backdrop.sidebar-open` `:144` | `display:none`→`block`, `inset:0; top:52px; background:rgba(0,0,0,.45); z-index:199; backdrop-filter:blur(1px)` + `-webkit-` | `.ui-menu-backdrop`. `top:52px` → `0` (follows D-8); `rgba(0,0,0,.45)` → `var(--overlay-scrim)`, **D-14** — on `dark` that is `rgba(0, 0, 0, 0.55)` (`tokens.css:42`), i.e. 10 points more opaque; on `light` the theme overrides it (one of `THEME_ALLOW`'s three permitted non-color props, `check-shared-css.mjs:96`) to light's own ink at 0.35, so the light-theme scrim gets **lighter** while dark's gets darker. Both directions are intended; B4.11 captures both themes for this reason. `blur(1px)` **preserved**, both prefixes, because dropping it is a visible change with no upside |
 | `@media (max-width:640px) { .sidebar { width:85vw } }` `:617-619` | `85vw` | shared media query, same breakpoint and value |
 
 **Two further todo D-rows, neither of them the drawer's.** *(New in
@@ -2994,16 +2994,16 @@ neither is caused by the drawer edits above.)*
 
 | todo delta | commit | disposition |
 |---|---|---|
-| **D-18 — first-visit theme under `prefers-color-scheme: no-preference` flips `dark` → `light`.** *Behavioural, and the reason the "none behavioural" claim below is qualified rather than restated.* `web/todo/js/theme.js:15` reads `window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'` — it asks about **light** and defaults to **dark**, so a profile expressing no preference gets dark. `ThemeManager`'s `system` step asks the opposite question, `(prefers-color-scheme: dark)`, and defaults to **light** (§5 Step 3.1) | **C6a** (Step 6.3's `theme.js` deletion) | **Accepted, declared, and deliberately not papered over.** The two OS cases that are *expressed* — `light` and `dark` — resolve identically before and after; only `no-preference` moves, and it moves because the shared resolver's polarity is the shared resolver's, used by eight modules, not todo's to invert. It is invisible to any user who has ever toggled the theme (storage wins at step 1) and invisible on any profile that expresses a preference, which is nearly all of them: `no-preference` is what a headless or freshly-provisioned profile reports. It is nonetheless a **first-paint behaviour change on a real page**, so it gets a row rather than a footnote, and it is the one todo delta that is not a pixel measurement — a capture taken under either explicit OS setting will not show it |
+| **D-18 — first-visit theme under `prefers-color-scheme: no-preference` flips `dark` → `light`.** *Behavioral, and the reason the "none behavioral" claim below is qualified rather than restated.* `web/todo/js/theme.js:15` reads `window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'` — it asks about **light** and defaults to **dark**, so a profile expressing no preference gets dark. `ThemeManager`'s `system` step asks the opposite question, `(prefers-color-scheme: dark)`, and defaults to **light** (§5 Step 3.1) | **C6a** (Step 6.3's `theme.js` deletion) | **Accepted, declared, and deliberately not papered over.** The two OS cases that are *expressed* — `light` and `dark` — resolve identically before and after; only `no-preference` moves, and it moves because the shared resolver's polarity is the shared resolver's, used by eight modules, not todo's to invert. It is invisible to any user who has ever toggled the theme (storage wins at step 1) and invisible on any profile that expresses a preference, which is nearly all of them: `no-preference` is what a headless or freshly-provisioned profile reports. It is nonetheless a **first-paint behavior change on a real page**, so it gets a row rather than a footnote, and it is the one todo delta that is not a pixel measurement — a capture taken under either explicit OS setting will not show it |
 | **D-19 — glyphs at weight 700 re-face from Google's closest-match 600 to shared `fonts.css`'s exact-match InterVariable.** Derivation, consumer and why it cannot be designed away: §5 Step 6.2's option-3 residual note | **C6b** (Step 6.2's `shared.css` link) | **Predicted, best-effort, data-dependent.** The single consumer is `web/todo/js/todo-utils.js:950`'s `<strong><b>` on periodic-and-due items, so whether it appears in a capture depends on the fixture's clock and data. **B4.11** therefore treats its presence as attributable and its absence as acceptable — the only D-row in the plan with that shape, and it is stated here so that shape is a decision rather than a loophole |
 
 Nine todo D-rows in all. The seven drawer deltas (**D-8…D-14**) are cosmetic
-and none of them is behavioural; **D-18** is behavioural and belongs to a
+and none of them is behavioral; **D-18** is behavioral and belongs to a
 different commit; **D-19** is cosmetic and data-dependent. *(**v5 FINAL**,
 Critic's unconditional-approve row: v5 wrote "Seven deltas (D-8…D-14), all
-cosmetic, none behavioural" over a step whose sibling deleted `theme.js` and
+cosmetic, none behavioral" over a step whose sibling deleted `theme.js` and
 changed what a first visit renders. The claim was true of the drawer and false
-of the commit pair, and a reader checking "none behavioural" against C6a would
+of the commit pair, and a reader checking "none behavioral" against C6a would
 have found the counter-example the plan itself states at Step 6.3.)* The two a
 reviewer should actually look at are **D-8** (drawer now spans the topbar) and
 **D-12** (shadow direction), which is what B4.11's drawer-open capture exists
@@ -3150,7 +3150,7 @@ to catch.
   and cited three ranges that hold 8 of them, missing `:373`, `:454`, `:455`
   and `:480` entirely) is a re-skin of todo, not an adoption of three
   components, and
-  it would put a second definition of every colour in play mid-phase. §11
+  it would put a second definition of every color in play mid-phase. §11
   item 1. **Consequence to state plainly:** todo's own chrome stays on
   `--bg`/`--surface`/`--accent` while the drawer, toasts and dialogs render
   from `--color-*`. Because both vocabularies' `dark`/`light` values were
@@ -3184,7 +3184,7 @@ optional forward wiring for §11 item 6. **Architect answered NO and the answer
 is adopted**, on the evidence in §4.4: **zero** legacy todo `.js` files call
 `showToast` today, so the global would have no caller in this phase — it would
 be a new permanent entry in the global namespace, justified entirely by a
-follow-up item, and G14's neighbourhood is exactly where this phase is
+follow-up item, and G14's neighborhood is exactly where this phase is
 *removing* ambient globals rather than adding them. Recorded as the governing
 rule for the future case, in Architect's own terms: **if legacy todo JS ever
 needs a boundary, it is one deliberate façade (`window.todoShell`) applied to
@@ -3193,7 +3193,7 @@ functions onto `window`. That decision belongs to §11 item 6, not here.
 
 **6.5 — Escape now closes the drawer** *(C6b)*. `index.html:149-151`'s handler
 is left alone (it closes the three modals); `HamburgerMenu` installs its own.
-This is net-new behaviour, sanctioned. *(`:149-151` is a **pre-C6a**
+This is net-new behavior, sanctioned. *(`:149-151` is a **pre-C6a**
 coordinate, like every `index.html:NN` citation in Step 6.2 — read it as
 `:154-156` in the C6b tree, per the shift declared once at the top of Step 6.2.)*
 
@@ -3344,7 +3344,7 @@ none of the 40 files is in the generated list).
 > match, not a prefix: `/shared/dist/` does not become readable, only that one
 > file, which is why B6.4 keeps a 401 probe for `/shared/ts/theme.ts` and
 > gains one for `POST` on shape 3. §9 Q9 and ledger row 20 record the change;
-> §11 item 11 records what the ruling does **not** authorise (restyling the
+> §11 item 11 records what the ruling does **not** authorize (restyling the
 > login page, which stays Phase 3+).
 >
 > *Guaranteed by (criteria): B6.1 asserts shape 1, B6.2 shape 2, B6.3 shape 3,
@@ -3352,7 +3352,7 @@ none of the 40 files is in the generated list).
 
 **8.2 —** The allowlist delegates to the same `static.SharedHandler` the
 dispatcher already uses (`cmd/server/main.go:326`), so path confinement,
-method handling and content-type behaviour have exactly one definition. This
+method handling and content-type behavior have exactly one definition. This
 is what makes shape 3 cheap: `SharedHandler` already confines to `dist/` and
 `public/` (`internal/platform/static/shared.go:57`), already refuses dotfile
 segments (`:65`), already refuses anything but GET/HEAD (`:40`), and already
@@ -3369,7 +3369,7 @@ Two precisions on that delegation, both pre-existing and both deliberate:
   through to the `protected` check at `:157` and 401s there. `SharedHandler`'s
   own `:40` guard answers **405**, which is the right answer for an
   *authenticated* POST and is not what probes 5 and 6 measure. The handler
-  guard is defence in depth behind the gate, not the source of the expectation.
+  guard is defense in depth behind the gate, not the source of the expectation.
 - **GET-only means `HEAD` on a carved path also 401s** when unauthenticated,
   because `http.MethodHead` is not in the condition. That is intentional
   narrowness carried unchanged from v1: no stylesheet `<link>`, font fetch or
@@ -3447,14 +3447,14 @@ it.
 > B9.3 at C6a, BX.7 at C1. B3.8 and BX.7 are in both lists, which is the
 > signature of the underlying error — each was scheduled at the wrong
 > boundary and absent from its right one. Two were worse than misplaced:
-> **B1.3** was labelled `→ C2` and appeared in no cell, and **B10.5** had
+> **B1.3** was labeled `→ C2` and appeared in no cell, and **B10.5** had
 > neither a label nor a cell, so both were criteria with **no boundary
 > anywhere** — stated, agreed, and unrunnable. Six carried no label at all
 > (B1.1, B1.2, B2.7, B10.5, BX.1, BX.3) while four of those six were being
 > enforced by a cell, which is the same fact-with-two-owners problem pointing
 > the other way.
 >
-> A labelled criterion that no cell schedules is a criterion that never runs
+> A labeled criterion that no cell schedules is a criterion that never runs
 > — the same defect class as G16's never-passed flag, one level up — and the
 > reason it survived two reviews is that **§13 audited names, definitions and
 > counts but never scheduling**. So three things changed together and the
@@ -3573,7 +3573,7 @@ revert of C1 that leaves any later `--require=` in the recipe breaks
 - Reverting C5 or C6a **must** also drop the corresponding name from
   `Makefile:62`, because `--require=` names descriptors that only ever *gain*
   members and a name with no descriptor fails by name. That is the intended
-  behaviour — it is what makes the flag a gate — but it means the `Makefile`
+  behavior — it is what makes the flag a gate — but it means the `Makefile`
   line is part of the revert, not collateral. Recorded in the C1, C5, C6a and
   C6b commit messages.
 
@@ -3764,7 +3764,7 @@ B10 for FR-10/sampler, B2 for FR-2's roster, BX for cross-cutting).
 
   Run at the C2, C3, C4, C5, C6a, C6b, C7 and C8 boundaries. It is empty at
   the C1 boundary by identity (`HEAD` *is* C1) and is therefore **not** the
-  check that authorises C1 — part B is; but at every later boundary it fails
+  check that authorizes C1 — part B is; but at every later boundary it fails
   the moment a commit whose subject is not "make three gates real" touches
   either file. That is the property G12's enumeration needs: the carve is open
   for exactly one commit and closed in the other eight.
@@ -3830,7 +3830,7 @@ B10 for FR-10/sampler, B2 for FR-2's roster, BX for cross-cutting).
        blocks where `THEME_SELECTORS` expects 8. **If instead the gate
        passes, the descent is global** and this criterion has caught it:
        passing requires having walked into the at-rule, which is exactly the
-       behaviour clauses 3/4/5 must not have.
+       behavior clauses 3/4/5 must not have.
      - **The positive control.** Force the opt-in **on** for this caller and
        re-run: the gate returns to PASS, clause 4 seeing the full 8-selector
        roster and clause 5's total back at `144`
@@ -3879,8 +3879,8 @@ B10 for FR-10/sampler, B2 for FR-2's roster, BX for cross-cutting).
   contrast the criterion rests on is *rc 1 vs rc 0*, and the clause-5 total is
   the positive control's corroborating number, so the shift changes the
   expected integer and nothing about the probe's logic. *(v5: the executed
-  evidence is left at the value it was measured at, and labelled, rather than
-  edited to 144 — a re-labelled measurement is honest, a re-written one is
+  evidence is left at the value it was measured at, and labeled, rather than
+  edited to 144 — a re-labeled measurement is honest, a re-written one is
   not. Step 1.5's demonstration is the executed evidence for 144.)* So the
   contrast is measured, not predicted, and probe 2 is now a probe that
   demonstrably fails in the descent-off direction.
@@ -3893,22 +3893,22 @@ B10 for FR-10/sampler, B2 for FR-2's roster, BX for cross-cutting).
   *Executed (reading `:27`).* `[re-asserted → C1…C8]` Re-run at every
   boundary; a non-zero exit means a new shared name collided with
   taskmaster's sheet.
-- **B1.3 — every colour in `components.css` is a `var(--color-*)`
+- **B1.3 — every color in `components.css` is a `var(--color-*)`
   reference.** `[deferred → C2/C3/C4]` — enforced by clause 7's existing
-  `COLOUR_LITERAL` check, whose current scope was read at
+  `COLOR_LITERAL` check, whose current scope was read at
   `check-shared-css.mjs:298-320`. Substitute evidence: the clause exists and
-  passes on the 101-line file today. *(v3: v2 labelled this `→ C2` and then
+  passes on the 101-line file today. *(v3: v2 labeled this `→ C2` and then
   scheduled it at **no** boundary at all. Both halves are fixed — it is now in
   C2's, C3's and C4's Acceptance lines and §6 cells, and the label reads
   C2/C3/C4 because **all three** commits write new rules into
-  `components.css`, so all three can introduce the first colour literal.
+  `components.css`, so all three can introduce the first color literal.
   Critic C-1.)*
 
   **C4's leg carries one extra assertion, because C4 is where clause 7 meets
   its first *real* at-rule.** *(v3 — answering the Critic's unscored
   question (c): yes, C4's real `@media` selectors get a post-C4 assertion,
   and here it is.)* Clause 7 is two independent rules (§11 item 1): the
-  colour scan at `check-shared-css.mjs:304-308` is a whole-file per-line
+  color scan at `check-shared-css.mjs:304-308` is a whole-file per-line
   loop and is therefore depth-blind — it already sees inside at-rules today,
   and covers C4's new blocks with no change. The **selector** loop at
   `:310-318` is the one that depends on C2's descent, because `parseBlocks`
@@ -4033,7 +4033,7 @@ B10 for FR-10/sampler, B2 for FR-2's roster, BX for cross-cutting).
   `web/obsidianoid/css/themes.css`'s 5 blocks (`:2-37`, `:40-75`, `:78-113`,
   `:116-151`, `:154-189`) against `web/shared/css/themes.css`'s `obsidian`,
   `forest`, `ocean`, `ember` and `rose` blocks, applying the four renames and
-  mapping `--color-surface-dynamic` to itself: **85 comparisons, 0 colour
+  mapping `--color-surface-dynamic` to itself: **85 comparisons, 0 color
   mismatches and 0 unmapped names across all five**, with `--color-primary-fg`
   the only shared-only key in each block. *(v5 — re-run by machine after the
   Q12 ruling; the comparison widened 16 → 17 names per block, 80 → 85 pairs,
@@ -4073,7 +4073,7 @@ B10 for FR-10/sampler, B2 for FR-2's roster, BX for cross-cutting).
   runs this comparison and stops C5 on a non-zero result.* *(**v5 FINAL**,
   Critic finding 4: §17 claimed six bidirectional pointer pairs, and this was
   the criterion with **no** `Guaranteed by (step)` line at all while Step 5.6
-  and §11 both cited it as the colour evidence of record.)*
+  and §11 both cited it as the color evidence of record.)*
 - **B2.8 — `--color-surface-dynamic` is a shared token on all 8 themes, both
   of its obsidianoid consumers are carried unedited, and both effects that
   depend on it still work.** ***Rewritten in v5 on the user's Q12 ruling; the
@@ -4105,7 +4105,7 @@ B10 for FR-10/sampler, B2 for FR-2's roster, BX for cross-cutting).
      unaffected either way, so the assertion was always runnable — it was the
      stated reason for it that could not be true.)*
   3. `.skeleton-text`'s three gradient stops resolve to **two distinct**
-     computed colours in all 8 themes, never one — the stops being
+     computed colors in all 8 themes, never one — the stops being
      `--color-surface-3` / `--color-surface-dynamic` / `--color-surface-3`
      after `surface-offset`'s uniform rename. This is still the assertion that
      catches a flattened gradient: one name for both stops makes the `shimmer`
@@ -4135,7 +4135,7 @@ B10 for FR-10/sampler, B2 for FR-2's roster, BX for cross-cutting).
   than lighter — the ladder step is away from the page ground on every theme,
   which is what makes one assertion correct for all eight instead of needing a
   light-theme special case. *Substitute:* both consumer sites, and the
-  colour-only `:hover:not(.active)` rule, are confirmed in today's tree; the
+  color-only `:hover:not(.active)` rule, are confirmed in today's tree; the
   eight-pair distinctness above is measured, not deferred.
 
   *Guaranteed by (step): §5 **Step 1.5**, which authors the eight values and
@@ -4231,7 +4231,7 @@ B10 for FR-10/sampler, B2 for FR-2's roster, BX for cross-cutting).
   and a config whose vault 0 carries `"theme": "ocean"`, boot obsidianoid and
   assert three things after the roster arrives:
   1. `document.documentElement.dataset.theme` is `ocean` — the server default
-     was honoured, so resolution step 2 is live;
+     was honored, so resolution step 2 is live;
   2. `localStorage.getItem('obsidianoid-theme-0')` is **`null`** — the server
      default was **not** persisted;
   3. `grep -c "default: 'obsidian'" web/obsidianoid/js/app.ts` = **1** — the
@@ -4345,7 +4345,7 @@ B10 for FR-10/sampler, B2 for FR-2's roster, BX for cross-cutting).
   > so, and §5 Step 3.1 now says it in the resolution order itself.
   >
   > A test claiming to isolate step 4 could only do it by removing
-  > `matchMedia` from the stub, which asserts the behaviour of a browser this
+  > `matchMedia` from the stub, which asserts the behavior of a browser this
   > repo does not serve and contradicts this criterion's own "Runtime guard —
   > deliberately none" note below. So step 4 is asserted where it actually
   > lives: `default` is a **typed-config floor**, present in the
@@ -4454,7 +4454,7 @@ B10 for FR-10/sampler, B2 for FR-2's roster, BX for cross-cutting).
   > `:root, [data-theme="dark"]`, so an unstamped document resolves the full
   > `dark` palette from its `:root` half. Demonstrating exactly that default
   > is B10.5's purpose, so stamping the sampler would *delete* a covered
-  > behaviour.
+  > behavior.
   >
   > **todo is different on both counts, and precisely how matters.** It
   > persists a choice (`theme.js:13`, key `'todo-theme'`), and `todo.css`
@@ -4479,7 +4479,7 @@ B10 for FR-10/sampler, B2 for FR-2's roster, BX for cross-cutting).
   > initial class, and Step 6.3 says so.
 - **B3.9 — obsidianoid's per-vault persistence still works.**
   `[deferred → C5]` Switch vault, pick a theme, switch away and back: the
-  per-vault choice is remembered. This is the behaviour FRD `:250-252`
+  per-vault choice is remembered. This is the behavior FRD `:250-252`
   requires be preserved.
 - **B3.10 — `reresolve()` exists, is public, and re-reads a changed
   `storageKey()`.** `[deferred → C3]` Unit case: construct a `ThemeManager`
@@ -4559,7 +4559,7 @@ B10 for FR-10/sampler, B2 for FR-2's roster, BX for cross-cutting).
   > stamped descendant re-resolves `--color-primary` for its own subtree. A
   > markup-level check ("eight `<span class="ui-theme-swatch">` elements
   > exist") would pass on the broken variant where all eight render the
-  > *active* theme's colour, which is the exact failure mode of the rejected
+  > *active* theme's color, which is the exact failure mode of the rejected
   > option 4C. The test is therefore: open the picker once, collect
   > `getComputedStyle(el).backgroundColor` for all eight, and assert the set
   > has **cardinality 8**. The eight authored values are pairwise distinct
@@ -4712,7 +4712,7 @@ B10 for FR-10/sampler, B2 for FR-2's roster, BX for cross-cutting).
      `fas fa-sun`), and the choice survives a reload — i.e. `compare.html`
      has its **own owned path** through `shell.ts`, not a borrowed one.
      `compare.html` loads neither `todo.js` nor `todo-utils.js` (§4.8), so
-     nothing else on that page can supply the behaviour.
+     nothing else on that page can supply the behavior.
 - **B4.13 — the shared stylesheet is linked on exactly one todo page, in the
   right position, and the cache-buster moved.** `[deferred → C6b]` *(New in
   v5 — the criterion for §5 Step 6.2's two new bullets, which v4 had no step
@@ -4792,7 +4792,7 @@ B10 for FR-10/sampler, B2 for FR-2's roster, BX for cross-cutting).
   `[deferred → C2]`
 - **B5.6 — the close button carries `aria-label="Dismiss"`** and its glyph
   is a text node. `[deferred → C2]`
-- **B5.7 — no colour literal in the toast CSS**; caught by clause 7.
+- **B5.7 — no color literal in the toast CSS**; caught by clause 7.
   `[deferred → C2]`
 - **B5.8 — obsidianoid's 16 call sites all resolve, and neither file still
   declares the name.** `[deferred → C5]`
@@ -5270,7 +5270,7 @@ B10 for FR-10/sampler, B2 for FR-2's roster, BX for cross-cutting).
   [ "$*" = "web/todo/compare.html web/todo/index.html" ] \
     || { echo "bootstrap copy set drifted: [$*]"; exit 1; }
 
-  # part 2 — the two copies are byte-identical after indent normalisation
+  # part 2 — the two copies are byte-identical after indent normalization
   a=$(mktemp); b=$(mktemp)
   extract() { sed -n '/theme-bootstrap:start/,/theme-bootstrap:end/p' "$1" \
               | sed 's/^[[:space:]]*//'; }
@@ -5304,7 +5304,7 @@ B10 for FR-10/sampler, B2 for FR-2's roster, BX for cross-cutting).
   > is P-III's dual: a criterion that cannot fail in the one state it most
   > needs to catch, since forgetting the sentinel wrapper is a far more
   > likely executor slip than mistyping one of the two copies. Existence of
-  > the *behaviour* is **B3.8**'s, browser-verified — but existence of the
+  > the *behavior* is **B3.8**'s, browser-verified — but existence of the
   > **sentinels** is nobody's but this criterion's, because nothing else in
   > the plan mentions them.
   >
@@ -5314,7 +5314,7 @@ B10 for FR-10/sampler, B2 for FR-2's roster, BX for cross-cutting).
   > minifier, a copy-paste that grabs only the `<script>` body, or an
   > editor's "remove comments" action all produce a third live bootstrap that
   > part 1 cannot see. Part 3 closes it from the other side, by keying on the
-  > one string the behaviour cannot work without: the storage-key literal
+  > one string the behavior cannot work without: the storage-key literal
   > `todo-theme` (`theme.js:2` today; §5 Step 6.3 keeps the bare key and
   > ADR-014's migration deliberately does **not** apply to todo, so the
   > literal is stable across the phase). Any HTML page under `web/` holding
@@ -5365,7 +5365,7 @@ B10 for FR-10/sampler, B2 for FR-2's roster, BX for cross-cutting).
   > the v2 pass that fixed the others. The fix is a **narrowing**, not a
   > widening: nothing is added to any touch list, and adding a bootstrap to
   > the sampler is what was rejected — doing so would delete B10.5's covered
-  > behaviour, because `themes.css:15`'s `:root, [data-theme="dark"]` already
+  > behavior, because `themes.css:15`'s `:root, [data-theme="dark"]` already
   > defaults an unstamped sampler to the full `dark` palette.
   >
   > ***And v3's extraction rule was independently broken on the two pages it
@@ -5447,12 +5447,12 @@ B10 for FR-10/sampler, B2 for FR-2's roster, BX for cross-cutting).
   > paint has to be correct from static markup and cannot be made correct by
   > anything it ships in JS.
   >
-  > **Indent normalisation is an allowance, not a requirement here.** Both
+  > **Indent normalization is an allowance, not a requirement here.** Both
   > slots sit at the same two-space depth today (`index.html:20`,
   > `compare.html:18` are both `  <script src="js/theme.js"></script>`), so
   > the copies should be byte-identical even before the `s/^[[:space:]]*//`
   > pass. The pass is kept so that a future re-indent of one page is not a
-  > false failure; it is deliberately the *only* normalisation, because
+  > false failure; it is deliberately the *only* normalization, because
   > anything more — collapsing internal whitespace, stripping comments —
   > would start hiding the drift the criterion exists to find.
 - **BX.11 — `--require`'s list is complete, not merely present.**
@@ -5515,9 +5515,9 @@ B10 for FR-10/sampler, B2 for FR-2's roster, BX for cross-cutting).
 |---|---|---|
 | **R1** | `bundle-shape.mjs` crashes with `EISDIR` the moment obsidianoid carries `sharedConsumer` | The gate extension and the descriptor flip are in the **same** commit (C5); B9.3 asserts it |
 | **R2** | A stored `"dark"` silently becomes shared `dark` for existing obsidianoid users | ADR-014's one-time migration, discovering keys by **prefix scan over `Object.keys(localStorage)`** rather than from the vault roster — which is `[]` when the migration runs (§5 Step 5.4). **B2.6** proves it both ways *and across more than one vault*. ***v5 correction (Critic F-D item 6): this row's coverage claim was overstated through v4.*** "B2.6 proves it both ways" was true of the *direction* (migrated / not migrated) but not of the *population*: the v4 criterion seeded one key, `obsidianoid-theme-0`, so a vault-0-only implementation passed green and a user's vault 3 kept its regression. B2.6 now seeds two obsidianoid keys, a non-`dark` obsidianoid key and a foreign module's key, and asserts the guard flag plus a second-boot no-op |
-| **R3** | Deleting `web/obsidianoid/css/themes.css` leaves a `var()` undefined and a rule renders transparent | The **38**-name census in §4.3 is the complete per-block vocabulary (17 colour + 21 structural); **34** names match shared exactly (13 colour + all 21 structural), **4** are renamed by table (`--color-surface`, `--color-surface-offset`, `--color-primary-highlight`, `--color-error`), and **0** are rewritten at their consumers. B1.1's ranged `git diff` plus the post-C5 pixel diff catch a miss. *v1 said 36 and 21 — it counted 34 lines as 34 declarations and then mis-split the remainder; §4.3 carries the corrected derivation (190 declarations / 5 blocks = 38, on 170 lines / 5 = 34).* ***v5:*** *the split moved from 33/4/1 to **34/4/0** — the user's Q12 ruling lands `--color-surface-dynamic` as T1's 18th key at C1 (§5 Step 1.5), so the one name that used to need rewriting now matches shared by name and by value. 34 + 4 + 0 = 38 still.* |
+| **R3** | Deleting `web/obsidianoid/css/themes.css` leaves a `var()` undefined and a rule renders transparent | The **38**-name census in §4.3 is the complete per-block vocabulary (17 color + 21 structural); **34** names match shared exactly (13 color + all 21 structural), **4** are renamed by table (`--color-surface`, `--color-surface-offset`, `--color-primary-highlight`, `--color-error`), and **0** are rewritten at their consumers. B1.1's ranged `git diff` plus the post-C5 pixel diff catch a miss. *v1 said 36 and 21 — it counted 34 lines as 34 declarations and then mis-split the remainder; §4.3 carries the corrected derivation (190 declarations / 5 blocks = 38, on 170 lines / 5 = 34).* ***v5:*** *the split moved from 33/4/1 to **34/4/0** — the user's Q12 ruling lands `--color-surface-dynamic` as T1's 18th key at C1 (§5 Step 1.5), so the one name that used to need rewriting now matches shared by name and by value. 34 + 4 + 0 = 38 still.* |
 | **R4** | `--color-surface-dynamic`'s two consumers break on the 3 new themes | **Removed at the source in v5, not mitigated.** The risk existed only while the token was module-local: after the user's Q12 ruling, §5 **Step 1.5** declares `--color-surface-dynamic` in `web/shared/css/themes.css` for **all 8** themes at C1, so `app.css:202` and `:455` resolve everywhere and there is no theme on which they can fail to resolve. **B2.8** asserts the resolved values; **B1.1 part B** asserts the 8 declarations landed and that nothing else in `themes.css` moved. *(v1 pointed this at "Step 6.3" — that is todo; obsidianoid is Step 5. v2–v4 mitigated it by rewriting both sites onto other tokens, which is the plan that ruling 3 superseded.)* |
-| **R5** | Mapping both surface names onto one token would flatten the skeleton shimmer to a solid bar | Explicitly avoided and recorded (§4.3). Under option B the two gradient stops are **different shared names** — `--color-surface-3` and `--color-surface-dynamic` — so the flattening would now require merging two shared tokens rather than mis-mapping one local one. **B2.8** still asserts the gradient resolves to **two distinct** computed colours in all 8 themes, and Step 1.5's value table shows all 8 pairs are distinct by construction (light's moves darker rather than lighter, which is why one assertion covers all eight), so the collapse cannot land green |
+| **R5** | Mapping both surface names onto one token would flatten the skeleton shimmer to a solid bar | Explicitly avoided and recorded (§4.3). Under option B the two gradient stops are **different shared names** — `--color-surface-3` and `--color-surface-dynamic` — so the flattening would now require merging two shared tokens rather than mis-mapping one local one. **B2.8** still asserts the gradient resolves to **two distinct** computed colors in all 8 themes, and Step 1.5's value table shows all 8 pairs are distinct by construction (light's moves darker rather than lighter, which is why one assertion covers all eight), so the collapse cannot land green |
 | **R6** | Under ESM, `window.ThreadsView` breaks | **Split in v3, because the two halves have opposite answers.** *Runtime:* it does not break — it is a real global property (`threads.ts:22`) read through the scope chain (`app.ts:3`), and `type="module"` preserves document order. Verified by reading both files; re-verified in the browser at C5. *Compile time:* it **does** break, and v2 wrongly asserted otherwise. `threads.ts`'s `interface Window` (`:17-20`) merges globally only while the file is a script (0 top-level `import`/`export` today); Step 5.2's import makes it module-local and `:22` fails with **TS2339**. Mitigated by Step 5.2's `declare global` sub-edit — legal only once the import lands (script form is rejected with **TS2669**) — and asserted by **B2.9** |
 | **R7** | todo's 9 drawer controls lose their inline `onchange` wiring | Decision 2A: `render` slots mount into the live document, so `document.getElementById` still resolves. B4.3 asserts node identity |
 | **R8** | Moving `toggleSidebar` out of todo's inline `<script>` disturbs the rest of it | The block is `web/todo/index.html:21-164` — **144 lines** including both `<script>` tags (v2 said "143-line", off by one at the open tag). Only `:78-85` is removed; the other **136** lines (settings, column config, three modals, `$(document).ready`) are untouched and named as such |
@@ -5527,14 +5527,14 @@ B10 for FR-10/sampler, B2 for FR-2's roster, BX for cross-cutting).
 | **R12** | `EXPECTED_ARTIFACT_COUNT` is edited in more than one commit | G15; §6's artifact column is the record; `artifacts.mjs:83-86` fails on any mismatch |
 | **R13** | The 40-file deletion takes a live file with it | The set was derived two independent ways and intersected; B8.2's guarded grep runs at the boundary; B8.3 asserts the 11 live pshelper files survive |
 | **R14** | `GET /base.html` returning 404-via-SPA-fallback breaks a bookmark | `static.go:23-30`'s fallback serves `index.html`, so the URL degrades to the app rather than an error. Recorded, accepted |
-| **R15** | C8 widens the auth surface more than Q8 authorised | GET-only; **three** path shapes — two exact (`shared.css`, `shared.mjs`) and one prefix+suffix (`public/fonts/…/*.woff2`); `HEAD` excluded with the reason recorded (§5 Step 8.2); five two-sided criteria over **seven** probes (B6.1–B6.5). *(**v5 FINAL**, Critic amendment 5: six through v5 DRAFT; the seventh is `GET /shared/public/fonts/inter/OFL.txt` → **401**, which is the only probe that can distinguish shape 2's prefix-**plus-suffix** match from a bare `HasPrefix("/shared/public/")`. Without it an over-wide handler passes every §7 criterion.)* *v5: the `.mjs` shape was excluded "pending Q9" through v4; the user closed Q9 on 2026-09-16 and it is now in. The widening is one exact file, and it is **authorised**, which is the distinction this row exists to police — B6.4 gains `POST /shared/dist/shared.mjs` → 401 so the new shape cannot silently become method-agnostic, and `/shared/ts/theme.ts` → 401 still proves `dist/` did not become a readable prefix* |
+| **R15** | C8 widens the auth surface more than Q8 authorized | GET-only; **three** path shapes — two exact (`shared.css`, `shared.mjs`) and one prefix+suffix (`public/fonts/…/*.woff2`); `HEAD` excluded with the reason recorded (§5 Step 8.2); five two-sided criteria over **seven** probes (B6.1–B6.5). *(**v5 FINAL**, Critic amendment 5: six through v5 DRAFT; the seventh is `GET /shared/public/fonts/inter/OFL.txt` → **401**, which is the only probe that can distinguish shape 2's prefix-**plus-suffix** match from a bare `HasPrefix("/shared/public/")`. Without it an over-wide handler passes every §7 criterion.)* *v5: the `.mjs` shape was excluded "pending Q9" through v4; the user closed Q9 on 2026-09-16 and it is now in. The widening is one exact file, and it is **authorized**, which is the distinction this row exists to police — B6.4 gains `POST /shared/dist/shared.mjs` → 401 so the new shape cannot silently become method-agnostic, and `/shared/ts/theme.ts` → 401 still proves `dist/` did not become a readable prefix* |
 | **R16** | A side-car file is swept into a commit | P2's path-scoped `clean-tree.mjs`, plus BX.4 as a per-commit assertion |
 | **R17** | `--shadow-md`'s change makes obsidianoid's panels look wrong | Declared as sanctioned delta D-1 with the pixel diff as the check. **The fallback is now closed off by ruling, not left open:** the user answered Q11 with *"accept for now"* on 2026-09-16, so D-1 stands and a module-local override is **not** the escape hatch — §9 Q11. What §11 item 4 now records instead is the opposite direction the same ruling set: decide the shadow ladder centrally in a later phase so every module gets the better value, rather than letting obsidianoid keep it privately. *(v1–v4 read: "reverting means a module-local override, which §11 item 4 records as the fallback".)* |
-| **R18** | ~~The theme-swatch colour source forces a `THEMES` shape change late~~ | **RESOLVED in v2 — ADR-015.** Option 4D needs no `THEMES` change at all: the swatch carries `data-theme` and one CSS rule reads `var(--color-primary)`. `THEMES` stays `readonly string[]`, `main.ts:72` is untouched, and `ThemeName` is no longer exported (barrel trajectory 7/6 → 8/7 → **9/9**). Nothing is flagged for Architect |
+| **R18** | ~~The theme-swatch color source forces a `THEMES` shape change late~~ | **RESOLVED in v2 — ADR-015.** Option 4D needs no `THEMES` change at all: the swatch carries `data-theme` and one CSS rule reads `var(--color-primary)`. `THEMES` stays `readonly string[]`, `main.ts:72` is untouched, and `ThemeName` is no longer exported (barrel trajectory 7/6 → 8/7 → **9/9**). Nothing is flagged for Architect |
 | **R23** | `compare.html` keeps a live `onclick="toggleTheme()"` after `theme.js` is deleted | The convergent iteration-1 blocker. §4.8 inventories the page, §1 and Step 6 name it, it is in **C6a's Touches cell**, and **B4.12** asserts zero `onclick="toggleTheme()"` on *both* pages plus zero `toggleTheme` definition anywhere under `web/todo/` |
 | **R24** | The plan cites a gate flag that `make gates` never passes | **G16**, and it is a *recorded* failure rather than a hypothetical: v1 did exactly this with `--expect-nonempty`. `Makefile` is now in the Touches cell of C1, C5 and C6a; **BX.8** proves the flag can fail by flipping a `sharedConsumer` and watching it fail by name |
 | **R25** | Deleting orphaned markup leaves a non-null-asserted handle resolving to `null` | The `!` at `app.ts:31`/`:41`/`:42` keeps `tsc --noEmit` green, so no build gate catches it. Step 5.2 makes markup and handle **one edit**; **BX.9** asserts no adopter TS names an id its HTML lacks, for both adopters |
-| **R26** | All eight swatches render the active theme's colour and the picker looks broken while every gate passes | The rejected option 4C's exact failure. **B4.2** asserts **8 DISTINCT computed `background-color`s** read simultaneously from one open picker, not the presence of 8 elements — the only form of the assertion that can fail on this defect |
+| **R26** | All eight swatches render the active theme's color and the picker looks broken while every gate passes | The rejected option 4C's exact failure. **B4.2** asserts **8 DISTINCT computed `background-color`s** read simultaneously from one open picker, not the presence of 8 elements — the only form of the assertion that can fail on this defect |
 | **R19** | `HamburgerMenu` and `modal.ts` both open, and the two focus traps fight | The menu closes on open of a modal it hosts; the trap predicate has one definition (B4.8) and the drawer's `role="dialog"` nesting is exercised in the sampler at C4 |
 | **R20** | obsidianoid's errors becoming sticky floods the screen | The shared stack dismisses on click and the tone mapping is explicit; D-4 records the change and the sampler's "3 at once" demo is where stacking is judged |
 | **R21** | todo's pre-paint inline bootstrap diverges from `ThemeManager`'s resolution, or the two pages' copies diverge from each other | The bootstrap reads the same key and the same `THEMES` membership rule. **BX.10** is the mitigation that matters: it asserts the two inline blocks are **byte-identical**, which is the only divergence a command can catch — `index.html` versus `compare.html` drift is the failure mode that shows on one page only and is hardest to reproduce. **B3.8** additionally checks that the stamp is present pre-paint at C6a. Bootstrap-versus-`ThemeManager` drift is not command-checkable (the bootstrap is inline text and the manager is bundled TS) and shows as a visible flash rather than a silent error. *(v2's row leaned on B3.8 alone; BX.10 is the stronger half and v2 omitted it here — v3, Architect minor.)* |
@@ -5546,9 +5546,9 @@ Three scenarios, each with the earliest signal and the response.
 
 **Scenario 1 — C5 lands and obsidianoid's `forest` theme is subtly wrong.**
 The `forest`/`ocean`/`ember`/`rose` blocks in `web/shared/css/themes.css`
-carry 17 colour keys each, and so do obsidianoid's — but **the two sets
+carry 17 color keys each, and so do obsidianoid's — but **the two sets
 overlap rather than nest**, and Phase 1's donor comments
-(`themes.css:81,102,123,144`) cite the colour runs `:40-57` etc., not the
+(`themes.css:81,102,123,144`) cite the color runs `:40-57` etc., not the
 full blocks. If any of the four shared blocks silently dropped a key during
 Phase 1's transcription, C5 makes it visible in a non-default theme that no
 Phase-1 gate exercised. **Signal:** the post-C5 pixel diff for forest/ocean/
@@ -5557,7 +5557,7 @@ ember/rose shows a change that no D-row explains. **Response:** the fix is in
 becomes a **blocking finding**, parked with the diff, not patched inside C5.
 
 > **v5 FINAL — the key arithmetic, corrected** *(Critic minor 8).* v5 wrote
-> that obsidianoid's blocks carry "17 colour keys *plus*
+> that obsidianoid's blocks carry "17 color keys *plus*
 > `--color-surface-dynamic`", i.e. 18, with shared's 17 a subset. Both halves
 > are wrong, and the real shape is the reason Step 5.0 compares *mapped pairs*
 > rather than key counts. Machine-derived over the two sheets as they stand:
@@ -5658,7 +5658,7 @@ recorded as an ADR.
   and `.woff2` shapes, and **B6.3 flips from a negative to a positive** —
   unauthenticated `GET /shared/dist/shared.mjs` must now return **200** with
   the correct `Content-Type`, not 401. **What it does not change:** *styling
-  the login page itself stays out of Phase 2.* The ruling authorises the
+  the login page itself stays out of Phase 2.* The ruling authorizes the
   transport, not the page; no login-page markup, CSS or theme-restore script
   is in any commit manifest. That work is recorded as a follow-up (§11 item
   11), which is also the one place that will need the pre-paint question
@@ -5707,7 +5707,7 @@ recorded as an ADR.
 - **Q12 — CLOSED in v5 by user ruling (2026-09-16): option B, land the 18th
   shared token.** The question was: accept the one-step surface shift, or land
   an 18th shared token? `--color-surface-dynamic` was the one obsidianoid
-  colour name with no shared counterpart, and **G12** forbade Phase 2 from
+  color name with no shared counterpart, and **G12** forbade Phase 2 from
   declaring a new token. The two answers as put to the user:
 
   | | What it means | Cost |
@@ -5742,7 +5742,7 @@ recorded as an ADR.
   instead of left as a silent contradiction between two documents. That
   amendment also records that **`--radius-xl` is not swept along** by the
   ruling: deferred on its own grounds, since this ruling widens the theme
-  colour vocabulary and not the structural token set.
+  color vocabulary and not the structural token set.
 
   **The part of the ruling Phase 2 does *not* act on**, stated here so the
   scope line is visible next to the mandate: "any theme can be used with any
@@ -5791,8 +5791,8 @@ the brief's framing — each stated once, with the reason.
 | 2 | **FR-9 names the wrong CSS file.** FRD `:393-394` lists `responsivenav.css` as part of the `base.html` `#rightToggle` hamburger. It is not: that hamburger's CSS is `web/todo/css/panels.css:57-101` (`#rightToggle` at `:57` through the last `.hamburger-icon.open` rule, closing at `:101` — v1 stopped at `:89` and cut three `nth-child` rules off the range). `responsivenav.css` belongs to a *fourth* dead menu (`js/menuserver.js:266-268` + `js/navcontrols.js:3-6`), and the sheet's only `<link>` is `web/todo/menuserver.html:16` — the page, not `base.html` *(that link was missing from v1's evidence; iteration 1 supplied it and it is verified here)* | Verified by grep; `responsivenav.css`, `menuserver.js`, `navcontrols.js` and `menuserver.html` are all in C7's 40-file deletion set, so the FRD's *intent* is satisfied and nothing is left dangling |
 | 3 | **FR-9's "delete the legacy pshelper tree" is satisfied partially.** 40 of the 51 pshelper-identical files go; 11 stay because the live pages still load them | Deleting a referenced file is a regression, not a cleanup. §11 item 5 carries the rest |
 | 4 | **FR-6 is untouched**, including todo's two Google-Fonts `<link>` groups and its three FontAwesome sheets, and `HamburgerMenu` carries a private SVG instead of using an `icons.ts` | FR-6 is not one of the five Phase-2 deliverables. G10 already scoped the `<link>`s as survivors |
-| 5 | **Phase-1 §9 item 12** ("de-duplicate obsidianoid's theme list") is labelled *Phase 3* there; the Phase-2 brief assigns it to Phase 2 | The brief is the later instruction; landing it with the rename avoids editing the same file in two phases |
-| 6 | **`todo.css`'s 13 bare token names are not retokenised**, so todo carries two colour vocabularies after C6, and its picker offers 2 of the 8 themes | §5 Step 6.3 + B4.10: **forced**, not chosen — the sheet declares its 13 names in only two blocks (`:3-17`, `:19-33`) and has 74 `var(--…)` consumers, so a third theme name unstyles the page. Q10 is closed in v2 for this reason; survivor plan is §11 item 1 |
+| 5 | **Phase-1 §9 item 12** ("de-duplicate obsidianoid's theme list") is labeled *Phase 3* there; the Phase-2 brief assigns it to Phase 2 | The brief is the later instruction; landing it with the rename avoids editing the same file in two phases |
+| 6 | **`todo.css`'s 13 bare token names are not retokenised**, so todo carries two color vocabularies after C6, and its picker offers 2 of the 8 themes | §5 Step 6.3 + B4.10: **forced**, not chosen — the sheet declares its 13 names in only two blocks (`:3-17`, `:19-33`) and has 74 `var(--…)` consumers, so a third theme name unstyles the page. Q10 is closed in v2 for this reason; survivor plan is §11 item 1 |
 | 7 | **`web/obsidianoid/css/app.css:383`'s `dialog::backdrop { oklch(0 0 0 / 0.6) }` is left alone** | Theme-independent by intent; FRD `:433-450` does not name it. §11 item 8 |
 | 8 | **`web/shared/ts/modal.ts` is edited in C4** (extracting the focusable predicate), although Phase 2's deliverables do not include the modal | Rule 1: the alternative is a second definition of the trap predicate. The public surface is unchanged and `modal.test.ts` proves it |
 | 9 | **`internal/obsidianoid/build.go` and four config/doc files are edited**, although the brief says "modules touched: sampler, obsidianoid, todo ONLY" | They *are* obsidianoid: its server-side theme default and the config values that feed it. The rename is incomplete without them |
@@ -5801,15 +5801,15 @@ the brief's framing — each stated once, with the reason.
 | 12 | **`docs/INVENTORY-hamburger-menus.md` and `docs/INVENTORY-menuserver.md` are cited but never committed or edited** | User side-cars, read-only. Every `[side-car]` claim in this plan was independently re-verified against the tree |
 | 13 | **obsidianoid's typography changes wholesale at C5, and this is accepted as a delta rather than avoided.** Today `index.html` links only `css/themes.css:7` and `css/app.css:8` — no shared CSS, so none of `web/shared/css/fonts.css`'s 15 `@font-face` rules. C5 adds the `/shared/dist/shared.css` link (Step 5.3), which switches `--font-body`/`--font-mono` from an OS fallback stack to self-hosted Inter/JetBrains Mono: **every glyph on the page reflows** | Q7 closed the delivery question as "adopt via `<link>`", and the shared bundle is one sheet — `index.css`'s four `@import`s are not separable, so there is no way to take `themes.css` without `fonts.css`. Avoiding it would mean a module-local copy of the theme matrix, i.e. the duplication this phase exists to remove. Consequences: the font shift is a declared delta (**D-2** for the fallback chain, asserted by B2.6 as an *intended* change), and it forces **P5a** — obsidianoid's pixel baseline is re-captured *inside* C5 after the link lands, because no pre-C5 shot is comparable to a post-C5 render |
 | 14 | **`--color-surface-dynamic` is resolved by landing an 18th shared token, not by a pair shift.** `web/shared/css/themes.css` gains 8 declarations at **C1** (§5 Step 1.5); the **`--color-surface-dynamic` name is unchanged at both of its sites**, `web/obsidianoid/css/app.css:202`'s middle gradient stop and `:455`'s background, so `:455` is **not edited at all**, while `:202` and `:437` take only the value-preserving `--color-surface-offset` → `--color-surface-3` rename they were always taking (`:202` carries **two** such references, `:437` one). *(**v5 FINAL**, Critic finding 7: v5 wrote "`:202` and `:455` are **not edited at all**", which is false at `:202` — §5 Step 5.3 item 3's rename is a byte edit to that line and item 3's own grep requires it. The zero delta here is a zero **value** delta. Same correction at §4.3, D-3, Step 5.6's item 3 and **B2.8**.)* | ***Reversed in v5 by user ruling (2026-09-16), and this is the one deviation the user chose rather than accepted.*** The row read: "resolved by a one-step pair shift, not by a new token. Three rule-local edits in `web/obsidianoid/css/app.css` (`:202`, `:437`, `:455`) — G12 forbids an 18th token this phase, and only 5 of the 8 shared themes have a donor value for it." Both premises were true and both were **amended by the ruling**: *"…extend the themes so that any theme can be used with any module."* G12 now carries a closed one-item carve for exactly this token (§3), and the 3 donor-less values are **authored** from each palette's own surface ladder rather than treated as a blocker — the same method `themes.css` already used for its 14 authored cells. Consequences: **D-3 is retired to zero delta** (§5 Step 5.5), the visual delta this row used to declare **does not happen**, **B2.8** now asserts the zero-delta shape and the 8 resolved values, and **B1.1 part B** machine-checks the diff shape (8 added declarations, 0 other additions, 0 deletions). The cost is one commit's edit to a frozen file; the gain is that `--color-surface-dynamic` works on all 8 themes instead of on 5, which is what the ruling asked for. §9 **Q12** carries the full disposition and §11 item 2 the program direction |
-| 15 | **The theme swatch is coloured by a stamped `data-theme` attribute plus one `var(--color-primary)` rule, not by an inline colour or a per-theme rule set** | **ADR-015.** The three alternatives each break something: an inline literal re-introduces 8 colour literals in TS, a per-theme rule block fails `check-shared-css.mjs` clause 7's selector loop (`:314`) 8 times, and an ancestor-keyed rule renders all 8 swatches identically while every gate passes (**R26**). Declared consequence: the swatch border follows the previewed theme, not the page theme — **D-15** |
+| 15 | **The theme swatch is colored by a stamped `data-theme` attribute plus one `var(--color-primary)` rule, not by an inline color or a per-theme rule set** | **ADR-015.** The three alternatives each break something: an inline literal re-introduces 8 color literals in TS, a per-theme rule block fails `check-shared-css.mjs` clause 7's selector loop (`:314`) 8 times, and an ancestor-keyed rule renders all 8 swatches identically while every gate passes (**R26**). Declared consequence: the swatch border follows the previewed theme, not the page theme — **D-15** |
 | 16 | **todo's two pages each gain a small inline pre-paint `<script>`, duplicated, rather than importing a shared function** | `type="module"` is deferred by specification, so no bundled code can run before first paint, and `theme.js` — the head-position **classic** script doing the job today (`index.html:20`, `compare.html:18`) — is deleted at C6a. The duplication is **2 pages × ~5 lines** and is a deliberate exception to rule 1, bounded by **BX.10**, which asserts the two blocks are byte-identical. Not the sampler (no persisted choice, and `themes.css:15`'s `:root` half already defaults it — B3.8, B10.5) and not obsidianoid, whose first paint is correct from **static markup**: `index.html:2` ships a `data-theme` attribute (`"dark"` today, `"obsidian"` after Step 5.4), B2.7 proves shared `obsidian` equals the retiring local `dark` block hex for hex, and Step 5.4 renames markup and server default in one commit. ***v5 correction (Critic F-C) — this cell was false in both halves.*** *It read "not obsidianoid (its `js/app.js` is a classic end-of-body tag at `index.html:132`, so its existing stamp is already pre-paint and C5 does not change the tag)". (a) **There is no module-level stamp in `app.ts`** — the only `dataset.theme` write is `:428` inside `setTheme`, reachable only from a click handler, `switchVault`, or `fetchVaults` behind `await fetch('/api/vaults')` (`:467`), so obsidianoid stamps a theme a network round-trip after paint, never before it. (b) **C5 does change the tags:** `index.html:131-132` both gain `type="module"`, because driver rule 10 externalizes `@shared` (`scripts/build-web.mjs:82-85`) and the emitted artifacts therefore carry a real top-level `import` — §5 Step 5.2, **B2.12**, ADR-011's v5 amendment. The correction cuts the same way the row does: obsidianoid's scripts become **more** deferred at C5, which is why its first paint must come from static markup and not from anything it ships in JS.* |
 | 17 | **`Makefile:62` is edited three times** — at C1, C5 and C6a — rather than once | **G16**: a gate not invoked with the flag the plan cites is not the gate the plan describes. `--require=<name>,…` can only name boundaries that already exist, so the argument grows with the tree. Each edit is one line and is asserted at its own boundary by **B9.1** |
 | 18 | **C6 is two commits, C6a and C6b**, so the sequence is 9 commits rather than 8 | **ADR-016.** C6a's claim ("todo renders pixel-identically") is true *by construction* only if the drawer is untouched in the same commit; bundling them makes the claim unverifiable and the revert all-or-nothing. Cost: one extra boundary where `initDrawer` is a no-op |
 | 19 | **`web/todo/compare.html` is migrated in C6a even though FR-4 gives it nothing.** It gets the build entry, the pre-paint block and the `#theme-toggle`/`#theme-icon` handles, but no hamburger | It loads `js/theme.js` at **`:18`** and calls `toggleTheme()` from a live `onclick` at `:41`; deleting `theme.js` without touching the page leaves a hard `ReferenceError` on every click (**R23**). v1 assumed the page away. Its hamburger is §11 item 7. *(v2's row said `:20`, which is `compare.html`'s inline `<script>`; `:16` is `jquery.js`, `:17` `utils.js`, **`:18` `js/theme.js`**, `:19` `compare.js`. Corrected in v3 — Architect minor. §4.8's page table and ledger row 16 already read `:18`, so this row was the outlier.)* |
-| 20 | **C8's unauthenticated allowlist admits `/shared/dist/shared.mjs` — executable code, not just a stylesheet and fonts.** *(New in v5.)* Three GET-only path shapes instead of two (§5 Step 8.1) | Q8(a) authorised the carve-out in principle and left the `.mjs` half to Q9, which v1–v4 recorded as open and deliberately excluded. The user closed it on 2026-09-16: *"yes, the login page should use the theme previously selected."* A login page that restores a stored theme must run the code that reads the store, and that code ships only in the barrel — so the shape is the ruling's **minimum**, not a convenience. What bounds the deviation: the match is **exact**, so `/shared/dist/` does not become a readable prefix (**B6.4** keeps `GET /shared/ts/theme.ts` → 401); the method guard is unchanged, so `POST` and `HEAD` on the new shape 401 (**B6.4** gains the `POST` probe); the handler is the same `static.SharedHandler` the dispatcher already uses, so path confinement and MIME behaviour gain no second definition; and the barrel is already world-readable on every *unprotected* module, so the carve-out narrows an asymmetry rather than opening new content. **B6.3 flips from negative to positive** and keeps its number. §9 **Q9**, **R15**, §11 item 11 |
-| 21 | **C6b writes a `<link>` that v1–v4 asserted was already there, and touches `web/todo/compare.html` for a one-line cache-buster and nothing else.** *(New in v5.)* §5 Step 6.2 now adds `<link rel="stylesheet" href="/shared/dist/shared.css">` immediately before `web/todo/index.html:8`, and bumps `css/todo.css?v=19` → `?v=20` on **both** `index.html:13` and `compare.html:13` | Two separate declarations, landed together because they share a commit. (i) §4.8 read "only `index.html` links `shared.css`" from v1 onward, and **no step ever wrote the element** — yet B4.10 and B4.11 both presuppose todo rendering shared `.ui-menu-*` rules. §13(a5) could not catch it because there was no pointer to dangle; §13(a6) does not catch it either, since (a6) walks *deleted* symbols, not absent elements. The position is forced, not chosen: after `todo.css` it inverts precedence, and after `index.html:8-10`'s font group it silently re-faces every glyph on the page (both sheets supply `Inter`, `todo.css:42` requests it, `todo.css` has **0** `@font-face`, and the later `@font-face` wins) — a whole-page reflow with no D-row to account for it. Before `:8` satisfies both. *(**v5 FINAL**, Architect A-1: this row said `:8-12`. The Google group is `:8-10` — `preconnect`, `preconnect`, stylesheet — and `:11-12` are todo's **local** `css/fontawsme.css` and `css/fontawall.css`, which declare **no** `Inter` face and are therefore irrelevant to the hazard this row is about. §5 Step 6.2 already published `:8-10`, so the row was the only site disagreeing.)* (ii) `compare.html` gets no FR-4 behaviour at C6b (ledger row 19 covers its C6a migration); it is on the touch list solely because the `?v=` query it shares with `index.html` must move when the sheet's bytes move. The user authorised the placement on 2026-09-16: *"yeah, it can land in the same commit.. that's fine. I'll need to visually validate each one anyway."* Read as authority to **place** the bump in C6b, **not** to remove the `?v=` mechanism. **B4.13** asserts the link, its line ordering and both bumps. §4.8, §5 Step 6.2, §6's C6b row |
-| 22 | **`system` is *not* a selectable theme name in Phase 2.** FRD `:254-255` specifies "4. `system` is a selectable pseudo-theme (smbedit's tri-state, promoted to everyone), live-updating on `matchMedia` change." Phase 2 delivers the **live-updating** half and **not** the **selectable** half: `system` is the resolver's implicit third step, never an entry a user can choose | *(New in **v5 FINAL**, Critic finding 1 secondary.)* The tree decides this one, in three independent places: `system` is absent from `THEMES` (`web/shared/ts/theme.ts:8-17`, 8 names), it is therefore absent from `themes.list` (**B3.5** asserts those two are the same set), and §5 Step 3.1's validation rule **rejects** it on read-back from storage — so even a hand-written `localStorage` entry cannot select it, and **B3.2** requires exactly that rejection. What Phase 2 *does* deliver is the behaviour the FRD item is actually about: with storage empty and `serverDefault()` silent, the OS preference decides the theme and a `matchMedia` `change` re-applies live (**B3.4**). What it does not deliver is a ninth option in the picker. The deviation is bounded and cheap to close — a name in `THEMES`, a `themes.list` entry, a validation carve and a picker row — and it is **§11 item 17**. Why it is not closed here: adding `system` to `THEMES` widens the set every module's picker enumerates (**B3.5**, **B4.10**, **B10.6**), and `THEMES` is also the set `check-shared-css.mjs` counts declarations against — a pseudo-theme with no `themes.css` block would have to be carved out of the gate that Step 1 exists to make real. **B3.4**'s title was corrected to match this row; §5 Step 3.1 is the single definition of the resolution semantics |
-| 23 | **todo's first visit under `prefers-color-scheme: no-preference` renders `light` where it rendered `dark`.** The one *behavioural* delta in the todo commits | *(New in **v5 FINAL**.)* `web/todo/js/theme.js:15` asks `(prefers-color-scheme: light)` and falls back to `dark`; the shared resolver asks `(prefers-color-scheme: dark)` and falls back to `light`. Both are defensible; they are opposite. The shared polarity wins because it is shared — inverting it for todo would give the phase two resolution orders and put a module-specific branch inside the component the phase exists to unify. Bounded: invisible to anyone who has ever toggled the theme (storage is resolution step 1), and invisible on any profile that expresses a preference. **D-18** in §5 Step 6.2a carries it, §5 Step 6.6's C6a bullet pins the OS preference explicitly so the capture is not confounded by it, and §5 Step 6.2a's "none behavioural" claim is qualified rather than restated |
+| 20 | **C8's unauthenticated allowlist admits `/shared/dist/shared.mjs` — executable code, not just a stylesheet and fonts.** *(New in v5.)* Three GET-only path shapes instead of two (§5 Step 8.1) | Q8(a) authorized the carve-out in principle and left the `.mjs` half to Q9, which v1–v4 recorded as open and deliberately excluded. The user closed it on 2026-09-16: *"yes, the login page should use the theme previously selected."* A login page that restores a stored theme must run the code that reads the store, and that code ships only in the barrel — so the shape is the ruling's **minimum**, not a convenience. What bounds the deviation: the match is **exact**, so `/shared/dist/` does not become a readable prefix (**B6.4** keeps `GET /shared/ts/theme.ts` → 401); the method guard is unchanged, so `POST` and `HEAD` on the new shape 401 (**B6.4** gains the `POST` probe); the handler is the same `static.SharedHandler` the dispatcher already uses, so path confinement and MIME behavior gain no second definition; and the barrel is already world-readable on every *unprotected* module, so the carve-out narrows an asymmetry rather than opening new content. **B6.3 flips from negative to positive** and keeps its number. §9 **Q9**, **R15**, §11 item 11 |
+| 21 | **C6b writes a `<link>` that v1–v4 asserted was already there, and touches `web/todo/compare.html` for a one-line cache-buster and nothing else.** *(New in v5.)* §5 Step 6.2 now adds `<link rel="stylesheet" href="/shared/dist/shared.css">` immediately before `web/todo/index.html:8`, and bumps `css/todo.css?v=19` → `?v=20` on **both** `index.html:13` and `compare.html:13` | Two separate declarations, landed together because they share a commit. (i) §4.8 read "only `index.html` links `shared.css`" from v1 onward, and **no step ever wrote the element** — yet B4.10 and B4.11 both presuppose todo rendering shared `.ui-menu-*` rules. §13(a5) could not catch it because there was no pointer to dangle; §13(a6) does not catch it either, since (a6) walks *deleted* symbols, not absent elements. The position is forced, not chosen: after `todo.css` it inverts precedence, and after `index.html:8-10`'s font group it silently re-faces every glyph on the page (both sheets supply `Inter`, `todo.css:42` requests it, `todo.css` has **0** `@font-face`, and the later `@font-face` wins) — a whole-page reflow with no D-row to account for it. Before `:8` satisfies both. *(**v5 FINAL**, Architect A-1: this row said `:8-12`. The Google group is `:8-10` — `preconnect`, `preconnect`, stylesheet — and `:11-12` are todo's **local** `css/fontawsme.css` and `css/fontawall.css`, which declare **no** `Inter` face and are therefore irrelevant to the hazard this row is about. §5 Step 6.2 already published `:8-10`, so the row was the only site disagreeing.)* (ii) `compare.html` gets no FR-4 behavior at C6b (ledger row 19 covers its C6a migration); it is on the touch list solely because the `?v=` query it shares with `index.html` must move when the sheet's bytes move. The user authorized the placement on 2026-09-16: *"yeah, it can land in the same commit.. that's fine. I'll need to visually validate each one anyway."* Read as authority to **place** the bump in C6b, **not** to remove the `?v=` mechanism. **B4.13** asserts the link, its line ordering and both bumps. §4.8, §5 Step 6.2, §6's C6b row |
+| 22 | **`system` is *not* a selectable theme name in Phase 2.** FRD `:254-255` specifies "4. `system` is a selectable pseudo-theme (smbedit's tri-state, promoted to everyone), live-updating on `matchMedia` change." Phase 2 delivers the **live-updating** half and **not** the **selectable** half: `system` is the resolver's implicit third step, never an entry a user can choose | *(New in **v5 FINAL**, Critic finding 1 secondary.)* The tree decides this one, in three independent places: `system` is absent from `THEMES` (`web/shared/ts/theme.ts:8-17`, 8 names), it is therefore absent from `themes.list` (**B3.5** asserts those two are the same set), and §5 Step 3.1's validation rule **rejects** it on read-back from storage — so even a hand-written `localStorage` entry cannot select it, and **B3.2** requires exactly that rejection. What Phase 2 *does* deliver is the behavior the FRD item is actually about: with storage empty and `serverDefault()` silent, the OS preference decides the theme and a `matchMedia` `change` re-applies live (**B3.4**). What it does not deliver is a ninth option in the picker. The deviation is bounded and cheap to close — a name in `THEMES`, a `themes.list` entry, a validation carve and a picker row — and it is **§11 item 17**. Why it is not closed here: adding `system` to `THEMES` widens the set every module's picker enumerates (**B3.5**, **B4.10**, **B10.6**), and `THEMES` is also the set `check-shared-css.mjs` counts declarations against — a pseudo-theme with no `themes.css` block would have to be carved out of the gate that Step 1 exists to make real. **B3.4**'s title was corrected to match this row; §5 Step 3.1 is the single definition of the resolution semantics |
+| 23 | **todo's first visit under `prefers-color-scheme: no-preference` renders `light` where it rendered `dark`.** The one *behavioral* delta in the todo commits | *(New in **v5 FINAL**.)* `web/todo/js/theme.js:15` asks `(prefers-color-scheme: light)` and falls back to `dark`; the shared resolver asks `(prefers-color-scheme: dark)` and falls back to `light`. Both are defensible; they are opposite. The shared polarity wins because it is shared — inverting it for todo would give the phase two resolution orders and put a module-specific branch inside the component the phase exists to unify. Bounded: invisible to anyone who has ever toggled the theme (storage is resolution step 1), and invisible on any profile that expresses a preference. **D-18** in §5 Step 6.2a carries it, §5 Step 6.6's C6a bullet pins the OS preference explicitly so the capture is not confounded by it, and §5 Step 6.2a's "none behavioral" claim is qualified rather than restated |
 | 24 | **Weight-700 glyphs on `web/todo/index.html` re-face to the shared InterVariable file.** The only font delta the `<head>` ordering of §5 Step 6.2 cannot prevent | *(New in **v5 FINAL**, Architect A-3.)* `index.html:10` supplies `wght@400;500;600` and `todo.css` requests exactly those three weights (400 × 1, 500 × 3, 600 × 4, no italics), so at every weight the **stylesheet** asks for, Google's later-declared faces keep winning. At 700 Google has no face; shared `fonts.css:13`/`:21`'s `font-weight: 100 900` face matches exactly, and an exact match beats a closest-match regardless of declaration order. One live consumer: `web/todo/js/todo-utils.js:950`'s `<strong><b>` on periodic-and-due items, inside C6b's pixel window. **D-19** carries it; **B4.11** part 3 accepts its presence as attributed and its absence as equally correct, because whether it renders depends on the fixture's data rather than on the code — the only D-row in the plan with that shape |
 
 ---
@@ -5825,7 +5825,7 @@ Deliberately **not** in Phase 2.
    declarations, not six** — `:359`, `:361`, `:365`, `:367`, `:416`, `:419`,
    `:424`, `:427` — and the **file holds twelve**, the other four being
    `:373` (`padding`), `:454`, `:455` (drag-indicator borders) and `:480`
-   (`.ctrl-delete:hover i`). Only the eight carry colour literals and are
+   (`.ctrl-delete:hover i`). Only the eight carry color literals and are
    therefore in scope for retokenising; the remaining four are specificity
    overrides against jQuery-UI and are a separate question. *(v2 said "six";
    corrected in v3 by `grep -n '!important' web/todo/css/todo.css` — Architect
@@ -5910,7 +5910,7 @@ Deliberately **not** in Phase 2.
      taskmaster's donor modal rather than from the structural donor, so that
      modal stayed reproducible — `web/shared/css/tokens.css:3-4` says exactly
      this. Every obsidianoid block is `0 4px 16px oklch(0 0 0 / …)`. That
-     whole delta — blur, offset, colour space and, for four themes, alpha — is
+     whole delta — blur, offset, color space and, for four themes, alpha — is
      what D-1 accepts;
    - **a stale comment in `tokens.css`, found while deriving the above, that
      Phase 2 must not fix.** `tokens.css:3-4` cites the donor as
@@ -5936,7 +5936,7 @@ Deliberately **not** in Phase 2.
      carve, a gate edit).
 
    This is the same "any module, any theme" mandate as item 2, applied to a
-   structural token instead of a colour. *Phase 3.*
+   structural token instead of a color. *Phase 3.*
 5. **Delete `web/todo/js/jquery-ui.js`** (520,714 bytes — re-verified by
    `wc -c` in this tree, since iteration 1 flagged the figure as taken on
    faith; `index.html:16`) and
@@ -6009,7 +6009,7 @@ Deliberately **not** in Phase 2.
     no `matchMedia` — disjoint from everything `ThemeManager` touches. That
     makes the new helper **additive**, not a replacement: `modal.test.ts` is
     deliberately left alone in Phase 2 so that no Phase-1 test changes in a
-    commit that is also adding new behaviour. Collapsing the two stubs into
+    commit that is also adding new behavior. Collapsing the two stubs into
     one is a pure test refactor with no product change. *Phase 3.*
 15. **Pass `--build` to `artifacts.mjs` in the `web-verify` recipe.** *(New in
     **v5**, and it is the follow-up §13(b) duplication 5's blockquote names.)*
@@ -6064,7 +6064,7 @@ Deliberately **not** in Phase 2.
     validation rejects it on read-back. Closing the gap is four small edits —
     a name in `THEMES`, a `themes.list` entry, a carve in the read-back
     validation so the stored value `system` means "keep resolving", and a
-    picker row whose swatch has no single colour to show. What makes it a
+    picker row whose swatch has no single color to show. What makes it a
     follow-up rather than a line item is the **third** edit and the swatch:
     `THEMES` is also the set `check-shared-css.mjs` counts per-theme
     declarations against (§5 Step 1.1's clause 12, `EXPECTED_COLOR_DECLARATIONS`),
@@ -6100,7 +6100,7 @@ calling `setTheme`. Accepted: `setTheme` is the primitive, documented as such.
 > (`app.ts:425` `themeStorageKey()`), and `switchVault` (`:484-498`) changes
 > which key is current *without* changing the theme. A `ThemeManager` that
 > resolves storage only in its constructor therefore keeps showing the
-> previous vault's theme — the exact behaviour FRD `:250-253` requires be
+> previous vault's theme — the exact behavior FRD `:250-253` requires be
 > preserved, and the one obsidianoid feature that has no analogue in the
 > sampler or todo. *Alternatives:* construct a new `ThemeManager` per vault
 > switch (leaks the old instance's listeners, and `destroy()` on the theme
@@ -6240,7 +6240,7 @@ re-keyed to fail closed.**
 *Decision:* no new file under `web/shared/css/`; clause 7's selector becomes
 "every sheet that is not `tokens`/`themes`/`fonts`/`index`".
 *Drivers:* D2 — `check-shared-css.mjs:298` keys clause 7 to the literal
-filename, so a new sheet escapes the colour-literal ban and the `^\.ui-`
+filename, so a new sheet escapes the color-literal ban and the `^\.ui-`
 rule.
 *Alternatives:* split into `toast.css`/`menu.css` and extend clause 7's key
 to a set (strictly more work, identical guarantee, plus `index.css` and
@@ -6249,13 +6249,13 @@ code this phase writes).
 *Why chosen:* the gate coverage is the point, and one file preserves it with
 zero new plumbing.
 *Consequences:* `components.css` grows from 101 lines to roughly 300; the
-re-key is a behaviour-preserving change at its own boundary, verified by the
+re-key is a behavior-preserving change at its own boundary, verified by the
 existing suite passing.
 *Follow-ups:* §11 item 10.
 
 > **v2 amendment — at-rule descent in `parseBlocks` is opt-in, and the v1
 > rationale for that was wrong.** Phase 2's components live partly inside
-> `@media` blocks (the drawer's breakpoint behaviour), and
+> `@media` blocks (the drawer's breakpoint behavior), and
 > `check-shared-css.mjs:182`'s filter makes `parseBlocks` skip at-rules
 > entirely — so clause 7's **selector loop** (`:310-318`) never sees a rule
 > nested in a media query, and a `body { display: block }` hidden in one would
@@ -6265,17 +6265,17 @@ existing suite passing.
 > wrong escape (Architect N6).** v2 wrote the example as
 > `body { background: #fff }`, which is *not* an escape: clause 7's other,
 > independent rule is a per-line scan of the **whole file**
-> (`:304-308`, `text.split("\n")`), so a colour literal inside an at-rule is
+> (`:304-308`, `text.split("\n")`), so a color literal inside an at-rule is
 > caught today. Proved by copying `web/shared/css/` and
 > `scripts/check-shared-css.mjs` into a scratch tree and running the gate
 > three times — baseline `11 clauses pass`, rc 0; with
 > `@media (…) { body { background: #fff } }` appended to `components.css`,
-> **rc 1**, `clause 7: colour literal "#fff"`; with
+> **rc 1**, `clause 7: color literal "#fff"`; with
 > `@media (…) { body { display: block } }` appended instead, **rc 0 — the
 > escape**. The same `body { display: block }` at top level is caught
 > (`clause 7: selector "body" does not start with .ui-*`, rc 1). The probe
 > below is rewritten accordingly, and the declaration inside it must be
-> **colourless** or the colour scan catches it first and the result says
+> **colorless** or the color scan catches it first and the result says
 > nothing about the descent.
 >
 > *Corrected rationale.* v1 argued descent must be opt-in because making it
@@ -6285,7 +6285,7 @@ existing suite passing.
 > which is ever passed `fonts.css`, and clause 10's font count is a raw-text
 > `text.match(/@font-face\b/g)` at `:364`, not a block parse. The true reason
 > is **clauses 3, 4 and 5**: each is a *set-equality* assertion over a file
-> modelled as flat — clause 3 fails unless `tokens.css` yields exactly one
+> modeled as flat — clause 3 fails unless `tokens.css` yields exactly one
 > block (`blocks.length !== 1`, `:237`), and clauses 4/5 compare
 > `themes.css`'s block roster and its total declaration count
 > (`EXPECTED_COLOR_DECLARATIONS = 136`, `:98`) against fixed expectations. Any
@@ -6302,7 +6302,7 @@ existing suite passing.
 > `components.css`, confirm clause 7 now fails **naming the inner selector**
 > (`selector "body" does not start with .ui-*`) with a non-zero exit, and
 > revert (nothing committed). It must be a **selector** escape carrying a
-> **colourless** declaration: a colour literal in the same position is caught
+> **colorless** declaration: a color literal in the same position is caught
 > by the pre-existing whole-file scan whether the descent works or not, so it
 > probes nothing (v3, N6 — measured both ways above). Under the pre-C2 gate
 > the identical probe exits 0, which is the "before" half of the proof.
@@ -6328,7 +6328,7 @@ it covers.
 `/shared/dist/shared.mjs` with no descriptor (no typecheck, no
 `bundle-shape.mjs` coverage — a shared consumer invisible to both gates);
 migrating `js/todo.js` + `js/todo-utils.js` to TS in this phase (1,490 lines
-of jQuery-flavoured JS; a re-write, not an adoption).
+of jQuery-flavored JS; a re-write, not an adoption).
 *Why chosen:* one new file, one new artifact, full typecheck and gate
 coverage, and zero risk to 1,490 lines of working code.
 *Consequences:* todo runs a module script alongside six classic scripts;
@@ -6359,13 +6359,13 @@ item 3 removes them.
 different reason — a *key* rename, not a value rename — and both are written
 in the same idiom (§5 Step 6.3).
 
-**ADR-015 — the theme swatch is coloured by a stamped `data-theme` attribute
+**ADR-015 — the theme swatch is colored by a stamped `data-theme` attribute
 resolving one `var(--color-primary)` rule.** *(New in v2. This is the decision
 both reviewers identified as the plan's central unresolved conflict.)*
 *Decision:* `components.css` gains exactly one rule —
 `.ui-theme-swatch { background: var(--color-primary); }` — and the picker's
 TypeScript stamps `el.dataset.theme = name` on each swatch element. No
-per-theme CSS, no inline colour, no colour literal anywhere in TypeScript.
+per-theme CSS, no inline color, no color literal anywhere in TypeScript.
 
 *Prior art in this very module, so the idiom is adopted rather than invented:*
 `web/obsidianoid/js/app.ts:437` already writes `btn.dataset.theme = t.name;`
@@ -6396,10 +6396,10 @@ is why the two facts are one fact. Consequence (3) below — "no other rule in
 `components.css` may key off `.ui-theme-swatch`'s ancestors" — is the
 forward-looking half of this same dependency.
 *Drivers:* (1) **clause 7**, which has two independent rules — a
-colour-literal scan (`check-shared-css.mjs:304-308`) *and* a selector loop
+color-literal scan (`check-shared-css.mjs:304-308`) *and* a selector loop
 requiring every top-level selector in the file to match
 `UI_SELECTOR = /^\.ui-[a-z0-9-]+/` (`:102`, enforced at `:314`); (2) the
-functional requirement that one open picker shows **8 different** colours
+functional requirement that one open picker shows **8 different** colors
 simultaneously (FRD `:257-261`); (3) **G12** — no token may be declared this
 phase; (4) barrel stability — `THEMES` must keep its
 `readonly string[]`-compatible shape so `web/sampler/js/main.ts:9`'s
@@ -6408,10 +6408,10 @@ destructuring and `check-shared-barrel.mjs`'s 6-value allowlist are unaffected.
 
 | | Option | Fails on |
 |---|---|---|
-| 4A | `getComputedStyle` probe: stamp a hidden element per theme and read the colour back | Viable and gate-legal, but unreliable before first paint — exactly when a picker may build — and costs a layout read per swatch. Retained as the documented fallback if 4D ever fails |
-| 4B | v1's reshape of `THEMES` into objects carrying a `color` literal | Re-introduces 8 colour literals in TypeScript (a second definition of every palette's primary, which the shared matrix exists to be), changes the barrel's exported *shape*, and breaks `main.ts:72` **silently** — `check-shared-barrel.mjs` never inspects `THEMES`' type (`:25`, `:103-104`), so every gate stays green |
-| 4C | a per-theme rule set keyed on an ancestor, e.g. `[data-theme="ocean"] .ui-theme-swatch` | **8 clause-7 failures** at `:314`: those selectors do not start with `.ui-`. And even if the gate allowed it, every swatch in an open picker would render the *page's* colour, so all 8 look identical while a markup-level test passes — **R26** |
-| 4E | keep the donor's inline `style="background:${t.color}"` (`app.ts:438`) | Keeps the colour literals in TS (4B's defect) and leaves the shared picker unable to render swatches at all without per-module data |
+| 4A | `getComputedStyle` probe: stamp a hidden element per theme and read the color back | Viable and gate-legal, but unreliable before first paint — exactly when a picker may build — and costs a layout read per swatch. Retained as the documented fallback if 4D ever fails |
+| 4B | v1's reshape of `THEMES` into objects carrying a `color` literal | Re-introduces 8 color literals in TypeScript (a second definition of every palette's primary, which the shared matrix exists to be), changes the barrel's exported *shape*, and breaks `main.ts:72` **silently** — `check-shared-barrel.mjs` never inspects `THEMES`' type (`:25`, `:103-104`), so every gate stays green |
+| 4C | a per-theme rule set keyed on an ancestor, e.g. `[data-theme="ocean"] .ui-theme-swatch` | **8 clause-7 failures** at `:314`: those selectors do not start with `.ui-`. And even if the gate allowed it, every swatch in an open picker would render the *page's* color, so all 8 look identical while a markup-level test passes — **R26** |
+| 4E | keep the donor's inline `style="background:${t.color}"` (`app.ts:438`) | Keeps the color literals in TS (4B's defect) and leaves the shared picker unable to render swatches at all without per-module data |
 
 *Why chosen:* 4D is the only option that satisfies all four drivers at once,
 and it does so because of a property of the tree rather than a new mechanism.
@@ -6435,7 +6435,7 @@ inspection, so **B4.2** must assert eight **distinct computed** backgrounds —
 (3) A future `.ui-theme-swatch` descendant inherits the previewed palette too;
 that is intended, and it is why no other rule in `components.css` may key off
 `.ui-theme-swatch`'s ancestors.
-*Follow-ups:* none. If 4D is ever invalidated, 4A is the pre-analysed
+*Follow-ups:* none. If 4D is ever invalidated, 4A is the pre-analyzed
 replacement and only `components.css` plus the picker's build function change.
 
 **ADR-016 — C6 is split into C6a (theme system) and C6b (drawer).**
@@ -6876,12 +6876,12 @@ stay runnable, and one exhaustive because the diff is small by construction:
    run by someone else.** The regex matches **fully-qualified** citations
    only. This document's convention lets a citation be **bare** — `:810`,
    `:2205` — resolving against the last-named file in the surrounding prose,
-   and the `app.css` colour inventory in §5 Step 5.3a is written that way on
+   and the `app.css` color inventory in §5 Step 5.3a is written that way on
    purpose because seven rows of the same path would be noise. Those bare
    citations are **outside** part 3's automated half; they are covered by the
    by-hand half (the pass re-derived every row of that inventory by `grep`,
    which is how `:383`'s `oklch` and `:740`'s `%23` were found to escape a
-   naive colour sweep) and by part 2's sample, which includes the D-table's
+   naive color sweep) and by part 2's sample, which includes the D-table's
    one bare citation explicitly. Resolving bare citations mechanically needs
    a last-named-file tracker across the whole body, which is a real piece of
    machinery and not one this pass built. Recorded as a limit rather than
@@ -7174,7 +7174,7 @@ survivor, and every deliberate duplication is declared:
    **pre-existing** duplication the plan inherits rather than one it creates
    — what is new is that Phase 2 now **moves** it, so it stops being
    harmless.)* The reason it exists: the sampler renders a live swatch for
-   every colour token, which means it needs the token *names* as data at
+   every color token, which means it needs the token *names* as data at
    runtime, and CSS custom properties are not enumerable from
    `getComputedStyle` — so the list cannot be derived from
    `web/shared/css/themes.css` in the browser. `main.ts:11-14` declares the
@@ -7231,9 +7231,9 @@ survivor, and every deliberate duplication is declared:
 different trajectories were stated inconsistently in v1 (§6 said the gate
 inspects "three, then four" bundles; this clause said 2 → 4 → 5). The clause
 was right; §6 was wrong, and §6 is corrected. *(**v4** — the third column was
-labelled "`bundle-shape.mjs` inputs" through v2 and v3 while holding artifact
+labeled "`bundle-shape.mjs` inputs" through v2 and v3 while holding artifact
 counts; B9.1 calls the same quantity "Outputs inspected" and the gate's own
-PASS line says `N sharedConsumer bundle(s) inspected`. Relabelled to match, so
+PASS line says `N sharedConsumer bundle(s) inspected`. Relabeled to match, so
 the two places naming this column agree. Architect A8 — benign, since the cell
 text disambiguated, but it is the same one-definition rule.)*
 
@@ -7335,7 +7335,7 @@ for k, ln in enumerate(L):
 lab = collections.defaultdict(set)
 for c, bs in labels.items():
     for b in bs: lab[b].add(c)
-print('criteria:', len(labels), '| unlabelled:',
+print('criteria:', len(labels), '| unlabeled:',
       sorted(c for c, v in labels.items() if not v) or 'none')
 fail = pairs = 0
 for b in B9:
@@ -7353,7 +7353,7 @@ PY
 **Result, run against this revision:**
 
 ```
-criteria: 82 | unlabelled: none
+criteria: 82 | unlabeled: none
 C1   label=11 §6=11 §5=11 OK
 C2   label=17 §6=17 §5=17 OK
 C3   label=17 §6=17 §5=17 OK
@@ -7384,7 +7384,7 @@ pairs: 136
 > because §6 was one of the two places that were already right.
 
 Set equality at every
-boundary implies the weaker property v2 violated outright — **no labelled
+boundary implies the weaker property v2 violated outright — **no labeled
 criterion is scheduled at none of its boundaries** — which is the check
 B1.3 and B10.5 failed.
 
@@ -7499,7 +7499,7 @@ earlier fixes turned out to be wrong and were withdrawn in-document.
 |---|---|---|
 | **B1** | `compare.html` jointly unsatisfiable at C6 | **Fixed, and it drove the largest structural change in v2.** §4.8 inventories the page; **ADR-016** splits C6 into C6a/C6b; `compare.html` is in C6a's Touches and **only** C6a's; §6 is a 9-commit table; **B4.12** asserts the toggle works and no undefined global survives; ledger row 19 records why the page is migrated despite FR-4 giving it nothing; **R23** carries the risk |
 | **B2** | deleting obsidianoid's `themes.css` collapses two distinct shadow values, and §8.5's pre-check structurally cannot catch it | **Fixed on both halves.** The pre-check is now **Step 5.0**, a numbered sub-step that runs *before any edit in C5*, compares **every declaration** in all **five** blocks (not v1's names-only 4×17), and stops C5 outright on a non-zero result — **B2.7**, executed at plan time with 0 mismatches. The shadow finding itself is widened in **Q11**: the four non-`dark` donors carry `--shadow-md` at `/0.45`, not `/0.4`, so the delta is non-uniform across the five themes — a fact v1 did not state |
-| **B3** | `--expect-nonempty` requires a `Makefile` edit no commit manifest contains | **Fixed, and generalised into a guardrail.** The flag was proven a no-op by running the gate. **Step 1.4** adds `--require=<name>,…`; `Makefile:62` is wired at **C1** (`sampler,taskmaster`), **C5** (`+obsidianoid`) and **C6a** (`+todo`), each in that boundary's Touches (ledger row 17); **BX.8** proves the flag by making it fail; **G16** states the principle — "a gate not invoked with the flag the plan cites is not the gate the plan describes"; **R24** carries the class |
+| **B3** | `--expect-nonempty` requires a `Makefile` edit no commit manifest contains | **Fixed, and generalized into a guardrail.** The flag was proven a no-op by running the gate. **Step 1.4** adds `--require=<name>,…`; `Makefile:62` is wired at **C1** (`sampler,taskmaster`), **C5** (`+obsidianoid`) and **C6a** (`+todo`), each in that boundary's Touches (ledger row 17); **BX.8** proves the flag by making it fail; **G16** states the principle — "a gate not invoked with the flag the plan cites is not the gate the plan describes"; **R24** carries the class |
 | **B4** | C6's pixel acceptance invokes a todo D-table that does not exist | **Fixed.** §5 Step 6.2a now carries the table, **D-8…D-14**, and D-15 is filed under obsidianoid with an explicit numbering note (v1's §0 mis-cited it as "D-12", which is todo's drawer `box-shadow`) |
 | **B5** | `#theme-toggle`'s inline `onclick` survives C6 into ES-module scope | **Fixed.** Step 6.3 now names **three** sub-edits per page where v1 named one: remove the `onclick` attribute, move the icon swap, replace the `<script src>`. **B4.12** asserts zero `onclick="toggleTheme()"` on both pages and zero `toggleTheme` definition under `web/todo/` |
 
@@ -7510,10 +7510,10 @@ earlier fixes turned out to be wrong and were withdrawn in-document.
 | **M1** | B9.4's extraction range excludes the symbol it tests | **Fixed.** The range is `:25-27` **+** `:38-45`, not `:31-46`: `jsName` is defined at `:26`, outside the mode dispatch, so lifting the dispatch alone yields an undefined reference. Stated in Step 5.1 and in ADR-011's amendment |
 | **M2** | phantom path, and §13(a)'s grep is structurally blind to its form | **Fixed, and the clause was worse than reported.** v1's regex had an **ordering bug** — `js` precedes `json` in the alternation, so every `.json` citation was truncated to a `.js` path and reported as a phantom. §13(a) is rewritten with a longest-first alternation, a trailing boundary, and *classification* rather than bare existence-testing. Re-run against v2 **as the document now writes it**: 62 paths, 51 existing, 9 declared-new, 2 **counterfactual**, **0** phantom. The counterfactual category is new and named (`COUNTERFACTUAL` in the script): ADR-011's `app.js/app.js` and v1's own `build_test.go`, both cited in order to be refuted. The clause was also re-scoped to audit **§14 as well** and to exclude §13 itself — its first v2 run reported 2 hits for the retired-name check, and both were this clause quoting its own search pattern |
 | **M3** | undeclared fourth duplication: the pre-paint bootstrap | **Fixed.** Ledger row 16, §13(b) declared-duplication item 4, and **BX.10** — a new criterion asserting the two blocks are byte-identical. Also corrected along the way: the set is **todo's two pages**, not three — the sampler has no persisted choice and `themes.css:15`'s `:root` half already defaults it, and obsidianoid's stamp is already pre-paint via a classic end-of-body tag *(**Historical, and left as written.** v5 FINAL, Critic minor 7: that last clause is the premise iteration-4's **F-C / §17 row 5** found **false in the tree** — obsidianoid has no end-of-body theme tag; `web/obsidianoid/index.html:2` carries a **static** `data-theme` attribute, which is why the module needs no bootstrap. The row's *conclusion* — the copy set is todo's two pages, not three — was and is correct. This row records what the iteration-2 pass decided; §14, §15 and §16 are not rewritten when later findings move the facts they record. The live statement of the exclusion and its real grounds is **§17 row 5**, which owns it.)* |
-| **M4** | orphaned obsidianoid markup and element handles | **Fixed.** Step 5.2 deletes markup and handles as **one edit**, naming `index.html:60-64` and `:102` against `toastEl:31`, `themePanel:41`, `themeOptions:42`, and recording that `btnHamburger:40` **survives**. **BX.9** generalises it cross-cutting, because C6a creates the same hazard in todo. The reason it needs a criterion at all is that all four handles use **non-null assertions**, so `tsc --noEmit` stays green and the failure is runtime-only — **R25** |
+| **M4** | orphaned obsidianoid markup and element handles | **Fixed.** Step 5.2 deletes markup and handles as **one edit**, naming `index.html:60-64` and `:102` against `toastEl:31`, `themePanel:41`, `themeOptions:42`, and recording that `btnHamburger:40` **survives**. **BX.9** generalizes it cross-cutting, because C6a creates the same hazard in todo. The reason it needs a criterion at all is that all four handles use **non-null assertions**, so `tsc --noEmit` stays green and the failure is runtime-only — **R25** |
 | **M5** | `ThemeManager` has no re-resolution entry point for the vault switch | **Fixed.** `reresolve()` is added in Step 5.2 and specified in **ADR-008's v2 amendment**; **B3.10** asserts both halves — it follows a changed `storageKey()`, and it does **not write** storage (or switching vaults would overwrite the destination's saved choice) |
 | **M6** | G15's single-line edit leaves the adjacent comment lying | **Fixed.** G15 is now a **two-line** edit: the constant at `descriptors.mjs:162` and the value-bearing line of the trajectory comment that narrates it. *(v2 cited that comment as `:157-158`; the comment is `:157-161` and the numbers are on `:160`. Corrected in v3 — §15, M-1.)* |
-| **M7** | §4.3's property census is wrong in three ways | **REBUTTED, with arithmetic.** `web/obsidianoid/css/themes.css` has **190** declarations across **5** blocks = **38 per block**, and 170 content lines / 5 = 34 *lines* per block. The reviewer's "34" is the line count, not the declaration count. 38 = 17 colour + 21 structural. The census stands; §4.3 now shows the derivation so the next reader does not have to redo it |
+| **M7** | §4.3's property census is wrong in three ways | **REBUTTED, with arithmetic.** `web/obsidianoid/css/themes.css` has **190** declarations across **5** blocks = **38 per block**, and 170 content lines / 5 = 34 *lines* per block. The reviewer's "34" is the line count, not the declaration count. 38 = 17 color + 21 structural. The census stands; §4.3 now shows the derivation so the next reader does not have to redo it |
 | **M8** | obsidianoid's popover→drawer transformation is absent from D-1..D-7 | **Fixed.** **D-5** records that the theme picker becomes reachable in Threads mode, and Step 5.3a item 2 explains *why* it is a fix delivered by placement — the trigger mounts outside `#topbar-actions`, so `app.css:463` no longer hides it |
 | **M9** | P-III's bundle-shape framing and C1's gate-composition note are both wrong | **Fixed.** See B3 above for the flag; §13(c) is now a per-boundary table reconciling artifact count, gate input count (**2 → 4 → 5**) and `--require=` contents, and §6's contradicting "three, then four" is corrected. The input count grows 2 → **4** at C5 because obsidianoid has two entries — the same fact that forces `artifact-paths.mjs` to exist |
 
@@ -7525,7 +7525,7 @@ earlier fixes turned out to be wrong and were withdrawn in-document.
 | `panels.css:57-89` understated | — | **Fixed → `:57-101`.** `#rightToggle` starts at `:57`; the `.hamburger-icon.open` `nth-child` rules run to `:101`. v1's range cut three rules off |
 | `panels.js:39-53` mis-cited | — | **Fixed.** The click listener is `:20-22`; it calls `toggleRightPanel()` at `:39-53`, whose icon-class toggle is `:42`. Both citations now appear |
 | `jquery-ui.js` 520,714 bytes "unverified" | — | **Verified:** `wc -c` = **520714**. §11 item 5 now says so explicitly |
-| **4a** — swatch colour source | — | **Answered: option 4D, ADR-015.** See "the swatch resolution" below |
+| **4a** — swatch color source | — | **Answered: option 4D, ADR-015.** See "the swatch resolution" below |
 | **4b** — `window.showToast` from `shell.ts`? | — | **Answered NO**, as directed. No `window.*` surface is added. If legacy todo JS ever needs one it is a single deliberate façade (`window.todoShell`) applied to all legacy call sites at once, or nothing — never one incidental global |
 
 ### Critic — critical and majors
@@ -7538,7 +7538,7 @@ earlier fixes turned out to be wrong and were withdrawn in-document.
 | **M-3** | `--expect-nonempty` never wired, and cannot fail for the reason B9.1 needs | **Fixed** — see Architect B3. **Partially rebutted:** the Critic's remedy included "fix obsidianoid's descriptor `out` to a file path", which is **mechanically impossible** — `list-artifacts.mjs:38-45`'s transpile arm is `path.posix.join(d.out, jsName(entry))`, so a file-valued `out` yields `web/obsidianoid/js/app.js/app.js`, and obsidianoid has **two** entries that one file path cannot name. The gate is the side that must iterate; ADR-011's amendment records this |
 | **M-4** | §6's gate-composition table contradicts §13(c) | **Fixed; §13(c) was right and §6 was wrong.** Both now read **2 → 4 → 5** from one per-boundary table |
 | **M-5** | clause 7 fails open inside at-rules; C4 is the first commit to open that hole | **Fixed** — opt-in at-rule descent for clause 7, ADR-012's v2 amendment |
-| **M-6** | the clause-7 re-key has no negative test | **Fixed.** A negative probe injects a non-`.ui-` **selector** carrying a colourless declaration inside an `@media` block, confirms clause 7 now fails naming the inner selector, and reverts (B1.4 item 1). Also fixed here: the clause count string moves in **two** places (`:426` and the header at `:2`), where v1 named only the PASS line. *(v2's row described the probe as a **colour literal** — wrong, and it would have proved nothing, since the colour scan is a whole-file per-line scan that already catches that case. Corrected in v3; §15, N6.)* |
+| **M-6** | the clause-7 re-key has no negative test | **Fixed.** A negative probe injects a non-`.ui-` **selector** carrying a colorless declaration inside an `@media` block, confirms clause 7 now fails naming the inner selector, and reverts (B1.4 item 1). Also fixed here: the clause count string moves in **two** places (`:426` and the header at `:2`), where v1 named only the PASS line. *(v2's row described the probe as a **color literal** — wrong, and it would have proved nothing, since the color scan is a whole-file per-line scan that already catches that case. Corrected in v3; §15, N6.)* |
 | **M-7** | Step 7.3's deletion proof validates only the last of 40 files | **Fixed, and a second defect was found in the same command.** `done; rc=$?` reads only the final iteration — now a `hits` accumulator with an `rc -eq 1` guard so a malformed pattern fails instead of passing. The second defect: **basename matching produces phantom references** (`utils.js` is a substring of the live `todo-utils.js`; `nav.css` of `responsivenav.css`), which would have *blocked a correct deletion*. The command now matches the last **two** path segments |
 | **M-8** | Q4 misattributed as the rename-coupling authority | **Fixed.** §0 states the authority split explicitly (rename decision = FRD `:191`; coupling *principle* = Q4's user ruling, which adjudicates `tsconfig`), and the three loose "Q4 settled" phrasings in §5, §6 and ADR-014 are tightened. **P6** additionally records Q3's asymmetry: its checkbox is unticked while its body states the values as settled by measurement |
 | **M-9** | §13(a) under-reports by 2× and misses a real phantom | **Fixed** — see Architect M2 for the regex. The `build_test.go` phantom is real and worse than reported: **there is no `internal/obsidianoid/build_test.go` at all.** Step 5.4 now runs the command v1 deferred and records its exact output — **two** `"dark"` occurrences in the package, `build.go:41` (the default, must change) and `handler_test.go:40` (fixture data, still passes unchanged, changed anyway as declared hygiene) — and **B2.5** is widened from `build.go` to the whole package so the criterion matches the edit |
@@ -7557,10 +7557,10 @@ earlier fixes turned out to be wrong and were withdrawn in-document.
 | 3 | `responsivenav.css` is linked from `menuserver.html:16` | **Accepted and verified.** Ledger row 2 now carries the link, and notes that all four files (`responsivenav.css`, `menuserver.js`, `navcontrols.js`, `menuserver.html`) are in C7's 40-file deletion set, so nothing dangles |
 | 4 | `app.css:417`'s `:root { --sidebar-width: 200px; }` co-exists with shared `280px` | **Written down** — Step 5.3a item 1. Verified as the file's **only** custom-property declaration; `shared.css` links before `app.css`, so app.css wins inside its media query and shared wins outside, identical to today. G12 is not engaged: redeclaring an existing token's value in module CSS is not declaring a new token |
 | 5 | `clean-tree.mjs` is wired into no `make` target | **Accepted, verified, and answered rather than patched.** `grep -rn clean-tree` finds no invocation anywhere outside the script itself. It **cannot** be a `make gates` line — it requires path arguments (`:53` fails without them) and the paths differ per commit. It stays operator-invoked; what changed is that the plan no longer *relies* on it, because **BX.4** asserts the same property from the other side by inspecting what each commit actually contains. Recorded on **P2** |
-| 6 | `dialog::backdrop` and the chevron data URI are untokenised colours absent from the ledger | **Both accounted for** — Step 5.3a item 3. The chevron does **not** survive: `:740`'s `stroke='%237878a0'` is removed by the `mask-image` rewrite (**D-7**). `dialog::backdrop` survives deliberately (ledger row 7, §11 item 8). After C5 exactly **one** out-of-vocabulary colour remains, documented |
+| 6 | `dialog::backdrop` and the chevron data URI are untokenised colors absent from the ledger | **Both accounted for** — Step 5.3a item 3. The chevron does **not** survive: `:740`'s `stroke='%237878a0'` is removed by the `mask-image` rewrite (**D-7**). `dialog::backdrop` survives deliberately (ledger row 7, §11 item 8). After C5 exactly **one** out-of-vocabulary color remains, documented |
 | 7 | `:463` interacts with the C4 trigger's placement | **Written down** — Step 5.3a item 2; the trigger mounts outside `#topbar-actions`, which is what makes **D-5** true |
 | 8 | ADR-011's `transpile` + `bundle` shape deserves a legality note | **Added.** `mode` is this repo's descriptor vocabulary, not esbuild's; esbuild bundles each entry independently and writes one output per entry, so the combination is ordinary usage and `EXPECTED_ARTIFACT_COUNT` (`descriptors.mjs:162`) does not move at C5 |
-| 9 | `theme.js:15`'s `matchMedia` polarity is inverted relative to the shared manager | **Decided, not deferred.** §4.4 now records that the two agree whenever the OS expresses a preference and differ only under **`no-preference`** (todo → `dark`, shared → `light`). The plan **adopts the shared polarity**: the alternative is a per-module override of the one resolution rule, to protect a first-visit-only, one-click difference. FRD `:250-251` fixes the resolution *order* and is silent on polarity, so this is the plan's call and is labelled as such rather than quoted |
+| 9 | `theme.js:15`'s `matchMedia` polarity is inverted relative to the shared manager | **Decided, not deferred.** §4.4 now records that the two agree whenever the OS expresses a preference and differ only under **`no-preference`** (todo → `dark`, shared → `light`). The plan **adopts the shared polarity**: the alternative is a per-module override of the one resolution rule, to protect a first-visit-only, one-click difference. FRD `:250-251` fixes the resolution *order* and is silent on polarity, so this is the plan's call and is labeled as such rather than quoted |
 
 ### Rebuttals, collected
 
@@ -7578,7 +7578,7 @@ where it matters, not only here.
    is **withdrawn in-document**. `fonts.css` is never passed to
    `parseBlocks` (three callers: `:236`, `:252`, `:310`) and clause 10 counts
    faces by raw `text.match` at `:364`. The real reason is clauses 3/4/5, each
-   a set-equality assertion over a file modelled as flat. Honest caveat also
+   a set-equality assertion over a file modeled as flat. Honest caveat also
    recorded: on today's tree global descent would pass, since
    `grep -c '@'` is 0 for both files — so this is future-proofing, not
    bug-avoidance.
@@ -7616,7 +7616,7 @@ an honest one.
    deviation.
 8. **B10.5 was nearly "fixed" into a defect.** It asserts the sampler carries
    no `data-theme`, and I initially read that as a latent bug — `tokens.css`
-   declares **zero** `--color-*` names, so an unstamped page has no colour
+   declares **zero** `--color-*` names, so an unstamped page has no color
    fallback. Then `web/shared/css/themes.css:15` turned out to be the
    two-selector list `:root, [data-theme="dark"]`, so an unstamped document
    resolves the full `dark` palette and B10.5 is correct as written. What did
@@ -7671,7 +7671,7 @@ with reduced probes in a scratch directory rather than an edit to
 | **N3** | B7.5 and B9.1 say "first line", but esbuild writes a `// <input path>` banner as line 1 | **Fixed, sharpened to what the gate actually tests.** `web/sampler/js/bundle.js:1` is `// web/sampler/js/main.ts` and the `/shared/dist/shared.mjs` import is on line **2**; `web/taskmaster/js/bundle.js` is the same shape. The gate never cared about line 1: `bundle-shape.mjs:38`'s `TOP_LEVEL_IMPORT` carries the `/m` flag, so it matches a **column-0** `import` anywhere in the file. B7.5 item 3 and B9.1's lead now say "a column-0 `import … from` statement", which is both true and the property the gate enforces |
 | **N4** | C1 is named as the last-revertable commit; the dependency graph says otherwise | **Fixed.** The revert-order paragraph is rewritten and ADR-016's consequence 2 with it: **C1 is the *least*-revertable of the nine**, because every later boundary's `make check` runs the clause 12 and `--require` machinery C1 introduces. The correct last-revertable commits are the leaves — C8, then C7, then C6b |
 | **N5** | Step 5.1's `bundle-shape.mjs` rewrite leaves the PASS line printing the wrong number | **Fixed, and the finding is stronger than reported.** `bundle-shape.mjs:101` prints `inputs.length`, which is the **descriptor** count, not the artifact count — and `:101` sits *outside* Step 5.1's `:68-94` rewrite range, so without an explicit edit the gate at C5 would inspect 4 artifacts and print `3`. Step 5.1 now names `:101` as part of the edit, and B9.1's per-boundary table **pins the expected PASS-line text** at each boundary rather than leaving it inferred. *(**v4:** this row said `:100` in v3 — the off-by-one the v3 fix itself introduced. Corrected at all six sites; see §16.)* |
-| **N6** | ADR-012's negative test injects a colour literal, which proves nothing about the descent | **Fixed, after measuring it three ways.** A sandbox experiment confirmed the asymmetry the report implies: clause 7 is **two independent rules**, a whole-file per-line colour scan (`check-shared-css.mjs:304-308`) that is depth-blind and already catches a literal inside an `@media`, and a `parseBlocks`-driven selector loop (`:310-318`) that never sees inside at-rules because `parseBlocks` discards them at `:182`. So the colour half of v2's probe was a **no-op** and the selector half is the real hole. §0's Decision 2(c), ADR-012's amendment, B1.4 item 1 and §14's own M-6 row are all rewritten to inject a **non-`.ui-` selector carrying a colourless declaration**; §14's row carries a pointer here because it was describing the wrong probe |
+| **N6** | ADR-012's negative test injects a color literal, which proves nothing about the descent | **Fixed, after measuring it three ways.** A sandbox experiment confirmed the asymmetry the report implies: clause 7 is **two independent rules**, a whole-file per-line color scan (`check-shared-css.mjs:304-308`) that is depth-blind and already catches a literal inside an `@media`, and a `parseBlocks`-driven selector loop (`:310-318`) that never sees inside at-rules because `parseBlocks` discards them at `:182`. So the color half of v2's probe was a **no-op** and the selector half is the real hole. §0's Decision 2(c), ADR-012's amendment, B1.4 item 1 and §14's own M-6 row are all rewritten to inject a **non-`.ui-` selector carrying a colorless declaration**; §14's row carries a pointer here because it was describing the wrong probe |
 
 ### Architect — minors (four, matching the review)
 
@@ -7680,13 +7680,13 @@ with reduced probes in a scratch directory rather than an edit to
 | ADR-015's prior art unstated | — | **Fixed.** ADR-015 now cites the two places obsidianoid already does exactly this — `app.ts:437` (`btn.dataset.theme = t.name;`) and `:429` (`(b as HTMLElement).dataset.theme === name`) — and adds the paragraph on 4D's one real dependency: it works **only** because all eight blocks in `web/shared/css/themes.css` use bare attribute selectors (`:15, :38, :61, :82, :103, :124, :145, :167`), so a future `html[data-theme=…]` re-key would silently flatten all eight swatches |
 | **R21** leaned on B3.8 alone | — | **Fixed.** R21's mitigation is **BX.10** — byte-identical inline blocks — with B3.8 as the secondary check. The `index.html`-versus-`compare.html` divergence is the failure mode that shows on one page only |
 | ledger row 19 cites `compare.html:20` | — | **Fixed → `:18`.** `:16` is `jquery.js`, `:17` `utils.js`, **`:18` `js/theme.js`**, `:19` `compare.js`, `:20` the inline `<script>`. §4.8's page table and ledger row 16 already read `:18`, so this row was the outlier |
-| §11 item 1's `!important` count | — | **Fixed by measurement.** `grep -n '!important' web/todo/css/todo.css` gives **twelve** in the file (`:359, :361, :365, :367, :373, :416, :419, :424, :427, :454, :455, :480`), of which **eight** fall inside the three ranges §11 spans — all eight colour literals. The item now states both numbers |
+| §11 item 1's `!important` count | — | **Fixed by measurement.** `grep -n '!important' web/todo/css/todo.css` gives **twelve** in the file (`:359, :361, :365, :367, :373, :416, :419, :424, :427, :454, :455, :480`), of which **eight** fall inside the three ranges §11 spans — all eight color literals. The item now states both numbers |
 
 ### Critic — critical and majors
 
 | | Finding | Disposition |
 |---|---|---|
-| **C-1** | §7's `[deferred → Cn]` labels and §6's per-boundary gate cells disagree; some criteria are scheduled nowhere | **Fixed at all three levels, and this was the largest edit in the pass.** *The instance:* measured against the labels as they now stand, v2's cells **under-scheduled 19** distinct criteria and **over-scheduled 4** (B3.8 at C3, B3.9 at C6a, B9.3 at C6a, BX.7 at C1); drift existed at **all nine** boundaries; **B1.3** was labelled `→ C2` and appeared in no cell, and **B10.5** had neither a label nor a cell, so both were criteria with no boundary anywhere. *The reconciliation:* all nine §6 cells and all nine §5 `**Acceptance**` lines are re-derived from §7's labels, which are now the single definition; B10.5, BX.1 and BX.3 gained the labels §6 had been enforcing tacitly; B9.4 (`→ C5/C6a`) and BX.5 (`→ C5/C6a/C8`) were **widened with stated reasons** rather than trimmed; BX.7's C1 cell entry is corrected to **BX.8**; B3.8 moves C3 → C6a; B3.9 and B9.3 leave C6a as obsidianoid-only. *The enabling gap:* §13 audited names, definitions, counts and shape but **never scheduling**, which is why two reviews passed over it — so §13 gained **(d2)**, which requires set equality between label, §6 cell and §5 Acceptance in **both directions at all nine boundaries**. It was run; it reports **PASS, 9/9, 77 criteria, 131 (criterion, boundary) pairs, 0 unlabelled**, and the published script reproduces the published output when extracted verbatim from this document |
+| **C-1** | §7's `[deferred → Cn]` labels and §6's per-boundary gate cells disagree; some criteria are scheduled nowhere | **Fixed at all three levels, and this was the largest edit in the pass.** *The instance:* measured against the labels as they now stand, v2's cells **under-scheduled 19** distinct criteria and **over-scheduled 4** (B3.8 at C3, B3.9 at C6a, B9.3 at C6a, BX.7 at C1); drift existed at **all nine** boundaries; **B1.3** was labeled `→ C2` and appeared in no cell, and **B10.5** had neither a label nor a cell, so both were criteria with no boundary anywhere. *The reconciliation:* all nine §6 cells and all nine §5 `**Acceptance**` lines are re-derived from §7's labels, which are now the single definition; B10.5, BX.1 and BX.3 gained the labels §6 had been enforcing tacitly; B9.4 (`→ C5/C6a`) and BX.5 (`→ C5/C6a/C8`) were **widened with stated reasons** rather than trimmed; BX.7's C1 cell entry is corrected to **BX.8**; B3.8 moves C3 → C6a; B3.9 and B9.3 leave C6a as obsidianoid-only. *The enabling gap:* §13 audited names, definitions, counts and shape but **never scheduling**, which is why two reviews passed over it — so §13 gained **(d2)**, which requires set equality between label, §6 cell and §5 Acceptance in **both directions at all nine boundaries**. It was run; it reports **PASS, 9/9, 77 criteria, 131 (criterion, boundary) pairs, 0 unlabeled**, and the published script reproduces the published output when extracted verbatim from this document |
 | **M-1** | G15's "two-line edit" cites the trajectory comment as `:157-158` | **Fixed → `:157-161`, with the value-bearing numbers on `:160`.** Corrected in all three places it appeared: G15 at `:410`, §5 Step 6.1, and §14's own M6 row |
 | **M-2** | §5 Step 5.6's pixel-evidence step is unsatisfiable | **Fixed by rewriting §5 Step 5.6 whole.** Two independent defects: (1) it prescribed a P5-versus-post-C5 diff, the exact comparison **P5a** exists to forbid — adding the `/shared/dist/shared.css` link pulls in `fonts.css`'s 15 `@font-face` rules, so every glyph reflows and the diff is non-empty essentially everywhere; the reference of record is now **P5a's** in-C5 capture, taken after the link lands and before any other C5 edit. (2) It required every non-empty diff to map to "a row of the D-table above", but the typography change is **ledger row 13**, not a D-row, so a correct run could not be attributed. The attribution rule is now explicitly two-part |
 
@@ -7694,8 +7694,8 @@ with reduced probes in a scratch directory rather than an edit to
 
 | | Finding | Disposition |
 |---|---|---|
-| ADR-015's consequence cites "ledger row 13" | **Fixed** to **Ledger row 15 / D-15** at `:1217`. Row 13 is obsidianoid's *typography* deviation, a different fact entirely; clause 7's colour scan is cited at `:304-308` in the same passage |
-| D-15 does not mention that one theme's border is translucent | **Fixed.** Of the eight `--color-border` values in `web/shared/css/themes.css` (`:20, :43, :66, :87, :108, :129, :150, :172`), seven are opaque hexes and **puma's `:172` is `rgba(255, 255, 255, 0.11)`**. D-15 now records that the puma swatch's border composites against its own `--color-primary` fill rather than replacing it — the closest behaviour to the donor's fixed `rgba(255,255,255,0.15)`, and the swatch a pixel diff will show moving least. Not a defect; recorded so a reviewer does not read the odd one out as a bug |
+| ADR-015's consequence cites "ledger row 13" | **Fixed** to **Ledger row 15 / D-15** at `:1217`. Row 13 is obsidianoid's *typography* deviation, a different fact entirely; clause 7's color scan is cited at `:304-308` in the same passage |
+| D-15 does not mention that one theme's border is translucent | **Fixed.** Of the eight `--color-border` values in `web/shared/css/themes.css` (`:20, :43, :66, :87, :108, :129, :150, :172`), seven are opaque hexes and **puma's `:172` is `rgba(255, 255, 255, 0.11)`**. D-15 now records that the puma swatch's border composites against its own `--color-primary` fill rather than replacing it — the closest behavior to the donor's fixed `rgba(255,255,255,0.15)`, and the swatch a pixel diff will show moving least. Not a defect; recorded so a reviewer does not read the odd one out as a bug |
 | the remaining minors | — | Each is folded into the row of §14 or §7 it corrects rather than restated here; every one is marked in place with a `*(… v3 …)*` note, and `grep -n 'v3' docs/PLAN-ui-unification-phase2.md` enumerates them |
 
 ### The three unscored questions, answered in place
@@ -7704,7 +7704,7 @@ with reduced probes in a scratch directory rather than an edit to
 |---|---|---|
 | **(a)** | Is §6's scheduling of BX.5, B3.9, B9.3 and B9.4 at boundaries their labels do not name deliberate? | **Two yes, two no, and each answer is now written into the label.** **B9.4 at C6a — deliberate:** C6a adds the fourth `sharedConsumer` descriptor, and a new descriptor is exactly the occasion on which someone re-inlines the `.tsx?$` derivation "just for this one case"; the label reads `C5/C6a`. **BX.5 at C5/C6a — deliberate:** the range is `b73d31c..<boundary>`, so each run is a *prefix* check, and catching a stray fourth module at C5 is worth three commits more than catching it at C8; the label reads `C5/C6a/C8`, and C8 — which v2's cell had dropped — is restored as the full-phase run of record. **B3.9 at C6a — not deliberate, removed:** it is obsidianoid's per-vault persistence. **B9.3 at C6a — not deliberate, removed:** it is the `EISDIR` fix for `out: "web/obsidianoid/js/"`, and todo's descriptor is `mode: "bundle"` with `out: "web/todo/js/shell.js"`, a *file* path, so the directory hazard cannot recur there |
 | **(b)** | Add or decline a criterion catching a `--require` list left too short by a C5 deferral? | **Added — BX.11**, `[deferred → C1/C5/C6a]`. Nothing covered it: BX.8 proves the flag can fail, but only for names that are *in* the list; a name never added is a name whose bundle shape is simply not required, and every gate stays green — the same failure mode as v1's `--expect-nonempty`, one level in. BX.11 asserts **set equality**, not subset, between the recipe's comma list and the `sharedConsumer` descriptors that exist at that commit, and it derives the expected set from `scripts/descriptors.mjs` rather than restating B9.1's prose lists, so it stays correct without edit even if C5 is deferred out of the phase. *Executed for the premise:* `Makefile:62` is `node scripts/gates/bundle-shape.mjs` with no flag at all today, so the check fails — the correct result before C1 |
-| **(c)** | Do C4's real `@media` selectors get a post-C4 assertion? | **Yes, and it is now stated** on B1.3's C4 leg. C4 adds the first at-rules the plan ships (`components.css` has **zero** `@` characters today, which is why **B1.4's probe is synthetic by necessity**), and a descent that works on a hand-written probe but not on real content is the gap a synthetic probe cannot close. Clause 7's colour scan (`:305-308`) is depth-blind and already covers the new blocks; its selector loop (`:310-318`) is the half that depends on C2's descent, because `parseBlocks` discards at-rules at `:182`. So C4 adds a positive (clause 7 passes, rc 0) and a negative on real content (retitle a selector inside C4's `prefers-reduced-motion` block; clause 7 must fail naming that inner selector **at a line greater than the enclosing `@media`'s line**, which is the descent evidence; revert). *(**v4** — this row said the positive leg also asserts "the selector loop's inspected-block count exceeds the depth-0 block count". The gate emits no block counts and exports nothing, so that was unobservable; the descent proof moved to the negative leg's line number, which `fail()` already prints. Architect A2/M-1, Critic F-7.)* |
+| **(c)** | Do C4's real `@media` selectors get a post-C4 assertion? | **Yes, and it is now stated** on B1.3's C4 leg. C4 adds the first at-rules the plan ships (`components.css` has **zero** `@` characters today, which is why **B1.4's probe is synthetic by necessity**), and a descent that works on a hand-written probe but not on real content is the gap a synthetic probe cannot close. Clause 7's color scan (`:305-308`) is depth-blind and already covers the new blocks; its selector loop (`:310-318`) is the half that depends on C2's descent, because `parseBlocks` discards at-rules at `:182`. So C4 adds a positive (clause 7 passes, rc 0) and a negative on real content (retitle a selector inside C4's `prefers-reduced-motion` block; clause 7 must fail naming that inner selector **at a line greater than the enclosing `@media`'s line**, which is the descent evidence; revert). *(**v4** — this row said the positive leg also asserts "the selector loop's inspected-block count exceeds the depth-0 block count". The gate emits no block counts and exports nothing, so that was unobservable; the descent proof moved to the negative leg's line number, which `fail()` already prints. Architect A2/M-1, Critic F-7.)* |
 
 ### New in v3, and why each is new rather than a rewording
 
@@ -7728,7 +7728,7 @@ Full outputs are published in §13 beside the clause that produced them. Summary
 | b | one-definition table extended by one row; 4 declared duplications unchanged |
 | c | artifact/gate-input trajectory unchanged: 15/15/15/**16**, inputs 2 → 4 → 5 |
 | d | shape clause unchanged; its two v2 corrections stand |
-| **d2** | **PASS, 9/9** — label-set == §6 cell == §5 Acceptance at every boundary; 131 pairs; 0 unlabelled; 0 criteria scheduled at none of their boundaries |
+| **d2** | **PASS, 9/9** — label-set == §6 cell == §5 Acceptance at every boundary; 131 pairs; 0 unlabeled; 0 criteria scheduled at none of their boundaries |
 | e | scope list unchanged; BX.5's label widened, so the clause is now asserted at three boundaries rather than one |
 
 ### Rebuttals
@@ -7737,7 +7737,7 @@ Full outputs are published in §13 beside the clause that produced them. Summary
 iteration-2 reviews was checked against the tree and every one was confirmed
 as stated. Three were confirmed *and strengthened* — N2's blast radius was 20
 citations rather than 1, N5's wrong number is printed from a line outside the
-range the plan proposed to rewrite, and N6's colour-literal probe turned out
+range the plan proposed to rewrite, and N6's color-literal probe turned out
 to be a strict no-op rather than merely a weak test — and in each case the
 plan records the stronger version, not the reported one. v2's two standing
 rebuttals (Architect M7 / Critic M-10 on the 38-per-block census, and Critic
@@ -7746,7 +7746,7 @@ evidence.
 
 ### Corrections to my own v3 work, made before publishing
 
-1. **The Step 5.2 N1 edit was first labelled "Architect N2"** and corrected in
+1. **The Step 5.2 N1 edit was first labeled "Architect N2"** and corrected in
    place. N2 is the `todo.css` citation.
 2. **BX.1's first rationale claimed C1 is the only commit touching
    `Makefile`/`scripts/gates/`** — false: B9.3 edits
@@ -7796,7 +7796,7 @@ Both reviewers independently reached the same four conclusions. Each is a
 
 | # | Item | Architect | Critic | Resolution |
 |---|---|---|---|---|
-| 1 | §5 Step 5.6 / P5a's capture point is unsatisfiable — again, by a second mechanism | B-1 + A1 | F-6 | **Re-specified by state.** P5a is now "the first renderable, vocabulary-consistent state": Step 5.3 items 1–4 **plus** Step 5.4's first bullet, as **one** working-tree sub-step, capture after. Step 5.3's link is pinned as an **in-place replacement of `index.html:7`**; Steps 5.2 and 5.3 item 5 are pinned **after** the capture; the false "no panel changes colour" claim is deleted and the expected residue is enumerated exactly |
+| 1 | §5 Step 5.6 / P5a's capture point is unsatisfiable — again, by a second mechanism | B-1 + A1 | F-6 | **Re-specified by state.** P5a is now "the first renderable, vocabulary-consistent state": Step 5.3 items 1–4 **plus** Step 5.4's first bullet, as **one** working-tree sub-step, capture after. Step 5.3's link is pinned as an **in-place replacement of `index.html:7`**; Steps 5.2 and 5.3 item 5 are pinned **after** the capture; the false "no panel changes color" claim is deleted and the expected residue is enumerated exactly |
 | 2 | B1.4's probe 2 cannot fail | A3 + M-2 | F-2 | **Replaced with a measured probe.** Wrap `web/shared/css/themes.css:167-187` in `@media (min-width: 1px)`; descent-off must fail with the exact `fail()` string, descent-on must return to PASS. Both directions were **run** at plan time |
 | 3 | B1.3's C4 positive leg asserts an unobservable quantity | A2 + M-1 | F-7 | **Both reviewers' fixes taken together**, because they are complementary: the unobservable count is **deleted** (Architect) and the descent proof moves to part 2's **line number**, which `fail()` already prints (Critic). No instrumentation is added |
 | 4 | `bundle-shape.mjs`'s PASS line is `:101`, not `:100` | A4 | F-3 | Fixed at all six sites, with the line map recorded once |
@@ -7806,7 +7806,7 @@ Both reviewers independently reached the same four conclusions. Each is a
 | Item | Finding | Disposition |
 |---|---|---|
 | **B-1** | §5 Step 5.6's reference-of-record is a state in which obsidianoid does not render, and its scope claim is false at **every** candidate capture point | **Accepted in full; convergent item 1.** §5 Step 5.6 is re-specified whole, with a table of the four candidate triggers and why each broken one fails, an exact expected-residue list, and a new rule forbidding the attribution rule from being widened in flight |
-| **A1** | Re-specify P5a by **state**, not edit order; delete the "no panel changes colour" claim; name D-1/D-2/D-3 + ledger row 13 as expected residue | **Accepted, with one ordering constraint added beyond the amendment's wording.** A1 lists **D-7** in the residue; D-7's chevron `mask-image` rewrite is Step 5.3 **item 5**, so its presence in the diff would depend on executor sequencing. Pinning Steps 5.2 and 5.3 item 5 **after** the capture makes the residue exactly ledger row 13/D-2, D-1 and D-3, and D-4/D-5/D-6/D-7/D-15 fall on the other side of the shutter. Stated as an addition rather than folded in silently. *(**Historical, and left as written.** v5's Q12 ruling retired **D-3** to zero delta and added **D-16**/**D-17**, so the live residue list is no longer this one — it is **§5 Step 5.6**'s, and only that. This row records what v4 decided in response to iteration-3's A1; §15 and §16 are not rewritten when later rulings move the facts they record. The retired D-3 row is §5 Step 5.5, so the label still resolves.)* |
+| **A1** | Re-specify P5a by **state**, not edit order; delete the "no panel changes color" claim; name D-1/D-2/D-3 + ledger row 13 as expected residue | **Accepted, with one ordering constraint added beyond the amendment's wording.** A1 lists **D-7** in the residue; D-7's chevron `mask-image` rewrite is Step 5.3 **item 5**, so its presence in the diff would depend on executor sequencing. Pinning Steps 5.2 and 5.3 item 5 **after** the capture makes the residue exactly ledger row 13/D-2, D-1 and D-3, and D-4/D-5/D-6/D-7/D-15 fall on the other side of the shutter. Stated as an addition rather than folded in silently. *(**Historical, and left as written.** v5's Q12 ruling retired **D-3** to zero delta and added **D-16**/**D-17**, so the live residue list is no longer this one — it is **§5 Step 5.6**'s, and only that. This row records what v4 decided in response to iteration-3's A1; §15 and §16 are not rewritten when later rulings move the facts they record. The retired D-3 row is §5 Step 5.5, so the label still resolves.)* |
 | **A2** | Make B1.3's C4-leg part 1 observable, or drop it | **Accepted; convergent item 3.** Dropped, and the observable half substituted — see the rebuttal-free rationale in B1.3 for why the print-and-pin alternative was declined |
 | **A3** | Restate B1.4 item 2 so it can fail | **Accepted; convergent item 2.** The old form was permanently vacuous (`tokens.css` and `themes.css` have zero `@` characters and B1.1 freezes both for the phase) *and* stated the logic inverted. Both defects are recorded in the criterion |
 
@@ -7826,7 +7826,7 @@ Both reviewers independently reached the same four conclusions. Each is a
 | **A5** | §13(a4) attributes the N2 defect's 20-row table to Step 5.5 (obsidianoid's D-table) | **Fixed** — the table is §5 **Step 6.2a**'s, at both sites. The pointer *resolved*, which is why only a reader could catch it — recorded as (a5)'s stated limit |
 | **A6** | BX.1 says C1 introduces clause 12 "(Step 5.1)"; it is **Step 1.3** | **Fixed.** Step 5.1 is C5's descriptor plumbing. Same class as A5 |
 | **A7** | §13(a4)'s "including every citation the v3 pass rewrote" is falsified by A4 | **Fixed** — the clause deleted, and (a4) **part 3** added as the axis that claim was reaching for |
-| **A8** | §13(c)'s column is labelled "`bundle-shape.mjs` inputs" while holding artifact counts; B9.1 calls it "Outputs inspected" | **Fixed** — relabelled to match the gate's own PASS wording |
+| **A8** | §13(c)'s column is labeled "`bundle-shape.mjs` inputs" while holding artifact counts; B9.1 calls it "Outputs inspected" | **Fixed** — relabeled to match the gate's own PASS wording |
 | **A9** | §4.4's drawer inventory omits `.sidebar-section` `:124` | **Fixed** — added, and the note that cross-references the inventory is corrected too (it said "§4.2" and listed four of the block's six rules) |
 | **A10** | Deleting `todo.css:617-619` strands `:615`'s `/* ── Responsive ── */` heading as a 616-line file's tail | **Fixed** — the deletion is **`:615-619`**, stated in §5 Step 6.2 and in §13(b)'s row, by the same reasoning as the `:101-102` head tidy |
 
@@ -7896,7 +7896,7 @@ ones. Outputs are published in §13 next to their clauses; the summary:
 | a5 pointers | **0** dangling (first run, over v3's text: **12** across 5 targets) |
 | a5 census | **PASS** — (a2) derives `(77, 6, 71, 28)`, §7 states `(77, 6, 71, 28)` |
 | b | unchanged in structure; one row re-derived (`todo.css` `:615-619`) |
-| c | unchanged in content; third column relabelled (A8) |
+| c | unchanged in content; third column relabeled (A8) |
 | d / d2 | (d2) **PASS**, 9/9 boundaries, 131 label⇄schedule pairs — unchanged |
 | e | unchanged |
 
@@ -7916,7 +7916,7 @@ finding accepted in both cases and verified in the tree first:
    exactly that detector. One mechanism discharges both halves.
 2. **The Architect's alternative for A2 — have C2's descent print
    `clause 7: N block(s) inspected` and pin the string per boundary as B9.1
-   pins `bundle-shape`'s — is declined** in favour of its own cheaper form
+   pins `bundle-shape`'s — is declined** in favor of its own cheaper form
    plus the Critic's line-number assertion. It would add a stdout contract to
    a gate this phase otherwise only re-scopes, and the line number `fail()`
    already prints buys the same descent proof with no code change.
@@ -8009,7 +8009,7 @@ a gate's output that the step writing the gate never specified.**
 | Item | Finding | Disposition |
 |---|---|---|
 | **A-1** | Descent must preserve absolute line numbers; pin it in Step 2.3(b) and make it fail at C2 | **Accepted; convergent item above.** |
-| **B-2** | Step 5.3 item 5 lands *after* the P5a shutter with two of its four edits undeclared in the D-table — `.disabled-overlay`'s `rgba(19, 19, 26, 0.72)` and the three `color: #fff` sites | **Accepted in full, and the D-table is now the single roster.** **D-16** (`app.css:634` → `var(--overlay-scrim)`) and **D-17** (`color:#fff` → `var(--color-primary-fg)` at `:90`, `:404`, `:540`) are added; the residue list and Step 5.6's attribution roster read **D-1…D-7, D-15…D-17**. The pass then went further than the amendment, because the amendment's own logic demanded it: §5 Step 5.3a item 3 now carries a **machine inventory** of every out-of-vocabulary colour in `app.css`, since a hand-built roster is exactly what B-2 caught being incomplete. That inventory found the two values a single naive `grep` misses — `:383`'s `oklch(0 0 0 / 0.6)` (not in the usual `#`/`rgb`/`hsl` alternation) and `:740`'s `stroke='%237878a0'` (the `#` percent-encoded inside a data URI) — which are also the two most easily forgotten |
+| **B-2** | Step 5.3 item 5 lands *after* the P5a shutter with two of its four edits undeclared in the D-table — `.disabled-overlay`'s `rgba(19, 19, 26, 0.72)` and the three `color: #fff` sites | **Accepted in full, and the D-table is now the single roster.** **D-16** (`app.css:634` → `var(--overlay-scrim)`) and **D-17** (`color:#fff` → `var(--color-primary-fg)` at `:90`, `:404`, `:540`) are added; the residue list and Step 5.6's attribution roster read **D-1…D-7, D-15…D-17**. The pass then went further than the amendment, because the amendment's own logic demanded it: §5 Step 5.3a item 3 now carries a **machine inventory** of every out-of-vocabulary color in `app.css`, since a hand-built roster is exactly what B-2 caught being incomplete. That inventory found the two values a single naive `grep` misses — `:383`'s `oklch(0 0 0 / 0.6)` (not in the usual `#`/`rgb`/`hsl` alternation) and `:740`'s `stroke='%237878a0'` (the `#` percent-encoded inside a data URI) — which are also the two most easily forgotten |
 
 **The Architect's iteration-5 proposal was adopted as specified.** Rather
 than a new clause for the back-pointer class, each criterion that pins a
@@ -8033,7 +8033,7 @@ only one of the six that has never broken.
 >   (Step 1.4, Step 6.1) did not. Both now do.
 > - **B2.7** — worse than one-legged in the other direction: it had **no
 >   `Guaranteed by (step)` line at all**, while §5 Step 5.6 and §11 both cited
->   it as the colour evidence of record. Step 5.0 is now named on the
+>   it as the color evidence of record. Step 5.0 is now named on the
 >   criterion and B2.7 on the step.
 >
 > **B1.4** and **B1.3**'s C4 leg were genuinely two-legged as claimed, and
@@ -8054,7 +8054,7 @@ only one of the six that has never broken.
 | 2 | No criterion exercises the first-load `serverDefault()` path on an empty `localStorage`, in the only adopter that has one | **CRITICAL (F-B)** | **Accepted.** New **B2.11**: fresh profile, vault configured `forest`, renders forest — not `system`, not `default`. B3.9's existing scenario writes storage first and so could never reach position 2 |
 | 3 | B3.10 and §6 both say `reresolve()` has "one caller"; after item 1 there are two | **minor** | **Accepted.** B3.10's blockquote becomes a two-caller table (boot, switch) and §6's C5 revert text is corrected. Recorded as more than a typo: that sentence is where F-B's blind spot was *written down* |
 | 4 | Step 2.3(b) must pin the descent's coordinate contract | **CRITICAL (F-A)** | **Accepted; convergent item above** |
-| 5 | ADR-011's *Consequences* contradicts ledger row 16 and BX.10, and the premise both rely on ("its existing stamp is already pre-paint") is **false in the tree** | **MAJOR (F-C)** | **Accepted.** The false premise is deleted from ADR-011's *Consequences*, ledger row 16 and **BX.10** — **three** live sites — and **annotated** at the one historical site that also carries it, §14's **M3** row, which is left as written per the §15/§16 convention. *(**v5 FINAL**, Critic minor 7: v4 wrote "all three places" while the string lived at **four**; the fourth is a historical record, so it is labelled rather than edited, and the count is now stated as 3 live + 1 annotated instead of a bare "all".)* The exclusion is restated on its real grounds: `index.html:2`'s **static** `data-theme` is obsidianoid's only pre-paint signal, Step 5.4's first bullet keeps it correct through the coupled rename, and **B2.7**'s 0-mismatch parity leaves the pre-paint appearance unchanged. The *conclusion* (no inline bootstrap for obsidianoid) was always right, which is why this was a major and not a critical — but it was right for a reason the document did not contain |
+| 5 | ADR-011's *Consequences* contradicts ledger row 16 and BX.10, and the premise both rely on ("its existing stamp is already pre-paint") is **false in the tree** | **MAJOR (F-C)** | **Accepted.** The false premise is deleted from ADR-011's *Consequences*, ledger row 16 and **BX.10** — **three** live sites — and **annotated** at the one historical site that also carries it, §14's **M3** row, which is left as written per the §15/§16 convention. *(**v5 FINAL**, Critic minor 7: v4 wrote "all three places" while the string lived at **four**; the fourth is a historical record, so it is labeled rather than edited, and the count is now stated as 3 live + 1 annotated instead of a bare "all".)* The exclusion is restated on its real grounds: `index.html:2`'s **static** `data-theme` is obsidianoid's only pre-paint signal, Step 5.4's first bullet keeps it correct through the coupled rename, and **B2.7**'s 0-mismatch parity leaves the pre-paint appearance unchanged. The *conclusion* (no inline bootstrap for obsidianoid) was always right, which is why this was a major and not a critical — but it was right for a reason the document did not contain |
 | 6 | Step 5.4's migration is unsatisfiable under one of its two readings; B2.6 cannot distinguish them; **R2 claims coverage B2.6 does not provide** | **MAJOR (F-D)** | **Accepted.** The migration bullet now states the key-discovery mechanism — a prefix-scan of `Object.keys(localStorage)` for `obsidianoid-theme-` — and where it runs relative to construction; **B2.6** is widened to **two** vault keys so a per-vault loop is distinguishable from a single-key special case; R2's coverage sentence is rewritten to what B2.6 now actually proves |
 | 7 | The construction point of `ThemeManager` is unstated in all three adopters — `new ThemeManager` appeared **zero** times in 5,110 lines | **MAJOR (F-D)** | **Accepted, and it is the shared root of items 1, 2 and 6.** Each adopter's construction site is now written out, and **B2.10** asserts `new ThemeManager` appears exactly once in `app.ts` — because "the instance exists" was the unstated premise under three separate findings |
 | 8 | No §13 clause checks **reference-completeness for deleted symbols**; (b) is definition-side only and (a4) checks cited lines, never uncited ones. This is the clause that would have caught item 1 mechanically, and item 1 survived three iterations because it did not exist | **structural** | **Accepted as proposed, and it immediately earned its place — see below.** New **§13(a6)**: 13 symbols across four boundaries, **36** remaining authored references, each reconciled against the plan text |
@@ -8071,7 +8071,7 @@ question in §4.3's ADR-011 discussion.
 
 | # | Disposition |
 |---|---|
-| **N-1** | Step 5.3a item 3's heading now reads "Two colour values **are at issue**", and the item carries the machine inventory described under B-2 |
+| **N-1** | Step 5.3a item 3's heading now reads "Two color values **are at issue**", and the item carries the machine inventory described under B-2 |
 | **N-2** | `:11` → **`:10`**: the first stylesheet link on both todo pages is the Google-Fonts one, whose `rel="stylesheet"` trails its `href`. Conclusion unaffected |
 | **N-3** | BX.10 part 2 gains `[ -s … ]` non-emptiness on both extracted blocks, so two files with sentinels around nothing no longer `diff` clean |
 | **N-4** | BX.10 gains a **third** part: a grep for the bootstrap's storage-key **literal** across `web/ --include='*.html'`, requiring the same two-file set. This is the comment-stripped-paste detector; part 1 finds only sentinel-bearing copies |
@@ -8081,7 +8081,7 @@ question in §4.3's ADR-011 discussion.
 
 | # | Ruling | What it moved |
 |---|---|---|
-| **1 — Q9** | *"yes, the login page should use the theme previously selected."* | The C8 carve-out extends to **`/shared/dist/shared.mjs`**, and **B6.3 flips from a negative probe (expect 401) to a positive one (expect 200 + correct `Content-Type`)** — a criterion changing sign, which is why the census had to be re-derived rather than adjusted. §5 Step 8 is rewritten around **three GET-only path shapes — two exact (`/shared/dist/shared.css`, `/shared/dist/shared.mjs`) and one prefix-plus-suffix (`/shared/public/fonts/…/*.woff2`)** — with four bounding conditions; *(**v5 FINAL**, Critic minor 4: this row said "three **exact** … shapes", which contradicts Step 8.1's own table — shape 1 exact, **shape 2 prefix + suffix**, shape 3 exact — and would read as authorising an exact-match-only allowlist that the font shape cannot satisfy. The exactness that bounds the Q9 widening is **shape 3**'s, and that is what B6.4's `GET /shared/ts/theme.ts` → 401 probe polices.)* ledger row 20, B6.4 and B6.5 follow. Q9 is **moved into the Closed section** of `OPEN-QUESTIONS-ui-unification.md` (`:200-235`). **Styling the login page stays out of Phase 2** — §11 item 11 records the capability/appearance split explicitly |
+| **1 — Q9** | *"yes, the login page should use the theme previously selected."* | The C8 carve-out extends to **`/shared/dist/shared.mjs`**, and **B6.3 flips from a negative probe (expect 401) to a positive one (expect 200 + correct `Content-Type`)** — a criterion changing sign, which is why the census had to be re-derived rather than adjusted. §5 Step 8 is rewritten around **three GET-only path shapes — two exact (`/shared/dist/shared.css`, `/shared/dist/shared.mjs`) and one prefix-plus-suffix (`/shared/public/fonts/…/*.woff2`)** — with four bounding conditions; *(**v5 FINAL**, Critic minor 4: this row said "three **exact** … shapes", which contradicts Step 8.1's own table — shape 1 exact, **shape 2 prefix + suffix**, shape 3 exact — and would read as authorizing an exact-match-only allowlist that the font shape cannot satisfy. The exactness that bounds the Q9 widening is **shape 3**'s, and that is what B6.4's `GET /shared/ts/theme.ts` → 401 probe polices.)* ledger row 20, B6.4 and B6.5 follow. Q9 is **moved into the Closed section** of `OPEN-QUESTIONS-ui-unification.md` (`:200-235`). **Styling the login page stays out of Phase 2** — §11 item 11 records the capability/appearance split explicitly |
 | **2 — Q11** | *"accept for now; but the goal is that all the modules should adopt the same capability for look and feel… so if obsidianoid does this neat thing with shadow drop, probably want that same effect in all the modules."* | **D-1 stands at C5** as planned, and the rider is recorded as **program direction** in §11 item 4 — propagate a good effect once, in the shared layer, not per module. No Phase-2 scope change |
 | **3 — Q12** | *"In order for todo to enjoy the bredth of theming options, that means we need color choices to extend each theme in a way that works for todo. I'm in favor of doing exactly that: extend the themes so that any theme can be used with any module."* | **Option B**, and it is the largest structural change in v5. `--color-surface-dynamic` lands as the **18th shared token** at **C1**, superseding §4.3's three rule-local `app.css` edits (option A). Consequences: new **§5 Step 1.5**; **G12** amended to a closed one-item enumeration; **B1.1** split into parts A/B/C; `EXPECTED_COLOR_DECLARATIONS` 136 → **144** (8×18); ledger row 14 **reversed**; Q2's answer in the open-questions document amended in place at `:91-125` with two of its premises corrected against the tree (**5** donors, not 3; **2** `app.css` references, not 1) and `--radius-xl` explicitly **not** swept along; new **B10.6** for the sampler's second copy of table T1. The **broader** mandate — every theme usable with every module — is Phase-3+ and is recorded in **§11 item 2 in the user's own words**, deliberately without widening Phase 2 |
 | **4 — todo's `?v=19`** | *"yeah, it can land in the same commit.. that's fine. I'll need to visually validate each one anyway."* | Read as authority to **place** the bump, not to remove the mechanism: **C6b** bumps `css/todo.css?v=19` → **`?v=20`** on `index.html:13` **and** `compare.html:13`. Chasing it down found a **structural omission inherited from v1**: `web/todo/index.html` has **no `shared.css` link at all**, and §4.8 asserted it as already true while no step ever wrote it. C6b now writes the `<link>` immediately **before `index.html:8`** — a position forced by a three-way cascade (after `todo.css` it inverts precedence; after the `:8-10` font group it silently re-faces every glyph, because both sheets supply `Inter`, `todo.css:42` requests it, and `todo.css` has **zero** `@font-face`; `:11-12` are todo's own FontAwesome sheets and declare no `Inter` face — **v5 FINAL**, Architect A-1) — asserted by new **B4.13**, with `compare.html` added to C6b's touch list and **deviation-ledger row 21** recording both declarations |
@@ -8146,7 +8146,7 @@ no pass's edits are.
    delta and added D-16/D-17, so v4's residue list is no longer live — but
    §15 and §16 are historical records of what those passes decided, and
    rewriting them to match later rulings would destroy the only account of
-   how the plan got here. The row is labelled *historical* and the live fact
+   how the plan got here. The row is labeled *historical* and the live fact
    is routed to §5 Step 5.6, which owns it.
 8. **`type="module"` is load-bearing in a way v4 stated only as an ADR
    consequence.** Driver rule 10 — `@shared` is externalised, never inlined
@@ -8220,7 +8220,7 @@ revision's own.
 
 | Item | Where it landed |
 |---|---|
-| A deviation row for todo's `no-preference` polarity flip, qualifying Step 6.2a's "none behavioural" | **D-18** (C6a, behavioural) in a new "Two further todo D-rows" table in **Step 6.2a**; its closing sentence now reads "Nine todo D-rows in all…" and qualifies the "none behavioural" claim instead of contradicting it. **Step 6.6**'s C6a bullet now requires the OS preference be set **explicitly** during capture, so D-18 cannot confound "pixel-identical" |
+| A deviation row for todo's `no-preference` polarity flip, qualifying Step 6.2a's "none behavioral" | **D-18** (C6a, behavioral) in a new "Two further todo D-rows" table in **Step 6.2a**; its closing sentence now reads "Nine todo D-rows in all…" and qualifies the "none behavioral" claim instead of contradicting it. **Step 6.6**'s C6a bullet now requires the OS preference be set **explicitly** during capture, so D-18 cannot confound "pixel-identical" |
 | The FRD `system`-un-selectability row | **§10 ledger row 22**, plus §11 item 17 and B3.4's retitle (Critic row 1(e)) |
 | §11 item 11 gains a sentence saying Q9's *observable* outcome lands in Phase 3 | Done: Phase 2 ships **B6.3**'s open door; no §5 step edits a login template; the appearance half is named as Phase 3 work |
 | The sampler's default render becomes OS-dependent at C3 | **Step 3.5** gains a second sanctioned delta, stated as the one place the `system` step reaches a pixel in this phase, with `web/sampler/index.html:2` (no `data-theme`) as the reason and B10.5's stylesheet premise explicitly untouched |
@@ -8234,13 +8234,13 @@ revision's own.
 | # | Minor | Disposition |
 |---|---|---|
 | 1 | Option-A arithmetic residue: "five tokens … 34 references" | **Fixed at three sites** — Step 5.3 item 3 now reads **four** tokens / **32** references (15+8+6+3); Step 5.6's candidate-trigger table and the P5a residue note carried the same 34. The Critic named two of the three; the third was found by grepping the integer |
-| 2 | "17 colour keys × 5 themes at `themes.css:61-164`" | **Fixed, with a tree-verified rebuttal on the post-C1 half** — today it is **17 × 5 = 85** declarations over `web/shared/css/themes.css:61-163` (`:163` is rose's `}`, `:164` is blank); post-C1 it is **18 × 5 = 90** over **`:63-170`**, not the `:63-171` the review proposed. Both derived from a built sheet, not from arithmetic. The same off-by-one stood at §13(a4)'s re-derivation table and §13(b)'s survivor row; both corrected |
+| 2 | "17 color keys × 5 themes at `themes.css:61-164`" | **Fixed, with a tree-verified rebuttal on the post-C1 half** — today it is **17 × 5 = 85** declarations over `web/shared/css/themes.css:61-163` (`:163` is rose's `}`, `:164` is blank); post-C1 it is **18 × 5 = 90** over **`:63-170`**, not the `:63-171` the review proposed. Both derived from a built sheet, not from arithmetic. The same off-by-one stood at §13(a4)'s re-derivation table and §13(b)'s survivor row; both corrected |
 | 3 | B6.5 says five probes, Step 8.3 has six | **Fixed and superseded** — B6.5 now says **seven**, because amendment 5 added probe 7 in the same pass |
 | 4 | §17 says "three **exact** path shapes" | **Fixed** — three shapes, **two exact and one prefix + suffix**, matching Step 8.1's own table; the sentence now also names which exactness bounds the Q9 widening (shape 3's) |
 | 5 | "`shared.css` `@import`s the self-hosted faces" | **Fixed** — the faces arrive **inlined**; `web/shared/css/index.css:5` is the importer, the descriptor is `scripts/descriptors.mjs:57-64`, and `grep -c '@import' web/shared/dist/shared.css` = **0** while `grep -c '@font-face'` = **15**. The conclusion survived; the mechanism was wrong |
 | 6 | Google-Fonts group cited as `:8-12` | **Fixed at both sites** (§10 ledger row 21 and the §17 user-ruling row) → **`:8-10`**; `:11-12` are todo's two local FontAwesome sheets, which declare only `font-family:'FontAwesome'` and no Inter face. Same item as Architect **A-1** |
-| 7 | §14's M3 row still carries the retracted pre-paint premise, unannotated, while §17 row 5 claims it was deleted "from all three places" | **Fixed on both sides** — §14's M3 row is labelled **Historical, and left as written**, in the same style §15 and §16 use, with the live statement routed to §17 row 5; and §17 row 5 now says the premise is deleted from **three live sites** and **annotated** at the one historical site, instead of "all three" |
-| 8 | Pre-mortem Scenario 1's key arithmetic | **Fixed with the real shape published.** The two `forest` blocks each carry **17** colour declarations, and the sets **overlap rather than nest**: 12 names in common, five unique to each side. The rename maps four of five, leaving `--color-surface-dynamic` (no shared counterpart until C1) and `--color-primary-fg` (no obsidianoid counterpart) unpaired — hence **16 × 5 = 80** mapped pairs today and **17 × 5 = 85** from C1, which are exactly B2.7's two numbers |
+| 7 | §14's M3 row still carries the retracted pre-paint premise, unannotated, while §17 row 5 claims it was deleted "from all three places" | **Fixed on both sides** — §14's M3 row is labeled **Historical, and left as written**, in the same style §15 and §16 use, with the live statement routed to §17 row 5; and §17 row 5 now says the premise is deleted from **three live sites** and **annotated** at the one historical site, instead of "all three" |
+| 8 | Pre-mortem Scenario 1's key arithmetic | **Fixed with the real shape published.** The two `forest` blocks each carry **17** color declarations, and the sets **overlap rather than nest**: 12 names in common, five unique to each side. The rename maps four of five, leaving `--color-surface-dynamic` (no shared counterpart until C1) and `--color-primary-fg` (no obsidianoid counterpart) unpaired — hence **16 × 5 = 80** mapped pairs today and **17 × 5 = 85** from C1, which are exactly B2.7's two numbers |
 | 9 | B2.7's "85 comparisons, *Executed*" is not reproducible today | **Fixed by qualifying the label, not by moving the number.** The tree yields **80** pairs today; the published **85** came from Step 1.5's sandbox and is live from C1. The two related §13 notes are qualified the same way: (a4)'s embedded scripts are published **indented** and must be de-indented before they run, and part 3 needs a `BASE` snapshot held outside the tree; (a6)'s "53 hits" aside is an observation, never a published command |
 | 10 | §11 item 15 says "B10.6's **two** greps over `bundle.js`" | **Fixed → one.** Verified from the criterion: B10.6 runs exactly one `bundle.js` grep; its others target `themes.css` and `main.ts`. The item also gained Architect **N-4**'s point in the same edit |
 | 11 | BX.5's headline says "the three named" while its command exempts four prefixes | **Fixed** — the headline now reads "nothing under `web/` changes outside the four exempted prefixes"; `web/shared/` is the fourth, and every commit in the phase touches it |
@@ -8308,7 +8308,7 @@ notice.
 | a6 deleted symbols | 13 symbols, 36 references | **13 symbols, 36 references** | unmoved; no deletion roster changed |
 | b one-definition | declared | **declared, and one row corrected** | §13(b)'s obsidianoid-`themes.css` survivor row carried minor 2's off-by-one |
 | c / d artifact count and gate census | 15 → 16 at C6a; census by label | **unchanged** | no commit boundary and no artifact count moved in this pass |
-| d2 label ⇄ schedule | PASS, 9/9, 136 pairs | **PASS, 9/9, 136 pairs, 0 unlabelled** | unmoved, and this is the mechanical confirmation that the census did not move: 11 / 17 / 17 / 20 / 26 / 19 / 8 / 8 / 10 across C1…C8, identical on all three sides |
+| d2 label ⇄ schedule | PASS, 9/9, 136 pairs | **PASS, 9/9, 136 pairs, 0 unlabeled** | unmoved, and this is the mechanical confirmation that the census did not move: 11 / 17 / 17 / 20 / 26 / 19 / 8 / 8 / 10 across C1…C8, identical on all three sides |
 | e scope | 79 path tokens, 0 outside | **79 path tokens, 0 outside the allowlist** | unmoved; no Touches cell changed |
 
 **The census confirmation, stated as its own claim because the brief asked for

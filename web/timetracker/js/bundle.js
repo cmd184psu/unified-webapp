@@ -1,5 +1,5 @@
 // web/timetracker/js/main.ts
-import { ThemeManager, HamburgerMenu } from "/shared/dist/shared.mjs";
+import { ThemeManager, HamburgerMenu, createCopyButton } from "/shared/dist/shared.mjs";
 
 // web/timetracker/js/time-selector.ts
 var TimeSelector = class {
@@ -194,7 +194,6 @@ var TimeSelector = class {
 // web/timetracker/js/main.ts
 var SVG_EDIT = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>';
 var SVG_DOWNLOAD = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
-var SVG_COPY = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 var APP_VERSION = "2.0.0";
 var themes = new ThemeManager({ module: "timetracker", default: "dark" });
 themes.apply();
@@ -464,14 +463,18 @@ document.addEventListener("DOMContentLoaded", function() {
                         <div class="report-preview">
                             <label>Processed Report:</label>
                             <div id="processedReport"></div>
-                            <button id="copyReportBtn" data-tooltip="copyReportBtn">${SVG_COPY}</button>
+                            <span id="copyReportBtn"></span>
                         </div>
                     </div>
                 `;
       rightPanel.appendChild(deleteButton);
       const reportInput = document.getElementById("reportInput");
       const processedReport = document.getElementById("processedReport");
-      const copyReportBtn = document.getElementById("copyReportBtn");
+      const copyReportBtn = createCopyButton({ text: () => buildMarkdownReport(), label: "the processed report" });
+      copyReportBtn.id = "copyReportBtn";
+      copyReportBtn.dataset.tooltip = "copyReportBtn";
+      copyReportBtn.removeAttribute("title");
+      document.getElementById("copyReportBtn").replaceWith(copyReportBtn);
       const reportDate = document.getElementById("reportDate");
       const prevReportBtn = document.getElementById("prevReportBtn");
       const nextReportBtn = document.getElementById("nextReportBtn");
@@ -560,7 +563,6 @@ document.addEventListener("DOMContentLoaded", function() {
         if (nextDate) loadReport(nextDate);
       });
       todayReportBtn.addEventListener("click", () => loadReport(localToday()));
-      copyReportBtn.addEventListener("click", copyReportToClipboard);
       refreshReport = processReport;
       notifyTimeChanged = scheduleSave;
       flushActiveReport = saveReportNow;
@@ -701,7 +703,7 @@ document.addEventListener("DOMContentLoaded", function() {
           processedReport.innerHTML = processed;
         }
       }
-      function copyReportToClipboard() {
+      function buildMarkdownReport() {
         const selectedDate = new Date(reportDate.value);
         selectedDate.setMinutes(selectedDate.getMinutes() + selectedDate.getTimezoneOffset());
         const formattedDate = selectedDate.toLocaleDateString("en-US", {
@@ -710,7 +712,7 @@ document.addEventListener("DOMContentLoaded", function() {
           year: "numeric"
         });
         const totalTime = document.getElementById("totalTimeInput")?.value || "0h 0m";
-        const markdownReport = `### Date: ${formattedDate}
+        return `### Date: ${formattedDate}
 
 Customer: ${customer.customerName}
 Author: ${data.author}
@@ -719,13 +721,6 @@ ${reportInput.value.trim()}
 
 Time related to update ${formattedDate}
 Hours worked: ${totalTime}`;
-        const tempElement = document.createElement("textarea");
-        tempElement.value = markdownReport;
-        document.body.appendChild(tempElement);
-        tempElement.select();
-        document.execCommand("copy");
-        document.body.removeChild(tempElement);
-        showMessage("Report copied.");
       }
       deleteButton.onclick = function() {
         modal.classList.remove("hidden");

@@ -83,7 +83,7 @@ function buildToggle(text, opts = {}) {
   input.type = "checkbox";
   input.checked = opts.checked ?? false;
   input.disabled = opts.disabled ?? false;
-  if (!text) input.setAttribute("aria-label", "Unlabelled toggle");
+  if (!text) input.setAttribute("aria-label", "Unlabeled toggle");
   const track = document.createElement("span");
   track.className = "ui-toggle-track";
   label.append(input, track);

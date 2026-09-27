@@ -1,5 +1,5 @@
 // web/obsidianoid/js/app.ts
-import { HamburgerMenu, ThemeManager, showToast, confirmDialog, promptDialog } from "/shared/dist/shared.mjs";
+import { HamburgerMenu, ThemeManager, FileTree, showToast, confirmDialog, promptDialog } from "/shared/dist/shared.mjs";
 var SORT_KEY = "obsidianoid-sort";
 var LOCK_KEY = "obsidianoid-tree-locked";
 var OVERWRITE_KEY = "obsidianoid-allow-overwrite";
@@ -52,110 +52,40 @@ var btnAutoSave = document.getElementById("btn-autosave");
 function vaultParam() {
   return `vault=${state.activeVault}`;
 }
-function fileIcon() {
-  return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+function toEntries(nodes = []) {
+  return nodes.map((n) => ({
+    name: n.name,
+    path: n.path ?? "",
+    isDir: !!n.is_dir,
+    mtime: n.mtime,
+    children: n.is_dir ? toEntries(n.children) : void 0
+  }));
 }
-function chevronIcon() {
-  return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>`;
+function holdsThreads(folder) {
+  return folder === state.threadsFolder || state.threadsFolder.startsWith(folder + "/");
 }
-function editIcon() {
-  return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>`;
+function matchesFilter(entry) {
+  if (state.searchPaths) return state.searchPaths.has(entry.path);
+  return entry.name.toLowerCase().includes(state.filterText.toLowerCase());
 }
-function gripIcon() {
-  return `<svg viewBox="0 0 14 14" fill="currentColor" width="12" height="12" aria-hidden="true"><circle cx="4" cy="3" r="1.2"/><circle cx="10" cy="3" r="1.2"/><circle cx="4" cy="7" r="1.2"/><circle cx="10" cy="7" r="1.2"/><circle cx="4" cy="11" r="1.2"/><circle cx="10" cy="11" r="1.2"/></svg>`;
-}
-function trashIcon() {
-  return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>`;
-}
-function folderIcon() {
-  return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
-}
-function matchesFilter(node, filter) {
-  if (!filter) return true;
-  if (node.is_dir) return (node.children || []).some((c) => matchesFilter(c, filter));
-  if (state.searchPaths) return state.searchPaths.has(node.path);
-  return node.name.toLowerCase().includes(filter.toLowerCase());
-}
-function sortNodes(nodes) {
-  const byName = (a, b) => a.name.localeCompare(b.name, void 0, { sensitivity: "base", numeric: true });
-  return [...nodes].sort((a, b) => {
-    if (state.sortMode === "recent") return (b.mtime ?? 0) - (a.mtime ?? 0) || byName(a, b);
-    if (!!a.is_dir !== !!b.is_dir) return a.is_dir ? -1 : 1;
-    return byName(a, b);
-  });
-}
-function renderNode(node, depth = 0) {
-  if (!matchesFilter(node, state.filterText)) return null;
-  if (node.is_dir) {
-    const wrapper = document.createElement("div");
-    const label = document.createElement("div");
-    label.className = "tree-dir-label";
-    label.style.paddingLeft = `calc(var(--space-3) + ${depth * 14}px)`;
-    const isEmpty = (node.children || []).length === 0;
-    const folderPath = node.path ?? "";
-    const holdsThreads = folderPath === state.threadsFolder || state.threadsFolder.startsWith(folderPath + "/");
-    const tools = state.treeLocked ? "" : `<span class="tree-dir-tools">` + (holdsThreads ? "" : `<button type="button" class="tree-note-edit tree-dir-rename" title="Rename folder" aria-label="Rename folder ${node.name}">${editIcon()}</button>`) + (isEmpty ? `<button type="button" class="tree-note-edit tree-note-delete tree-dir-delete" title="Delete empty folder" aria-label="Delete folder ${node.name}">${trashIcon()}</button>` : "") + `</span>`;
-    label.innerHTML = `${chevronIcon()}${folderIcon()}<span>${node.name}</span>` + tools;
-    label.setAttribute("role", "treeitem");
-    label.setAttribute("aria-expanded", "true");
-    label.dataset.folder = node.path ?? "";
-    const children = document.createElement("div");
-    children.className = "tree-dir-children";
-    label.querySelector(".tree-dir-delete")?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      void deleteFolder(node);
-    });
-    label.querySelector(".tree-dir-rename")?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      void renameFolder(node);
-    });
-    label.addEventListener("click", () => {
-      const collapsed = children.classList.toggle("collapsed");
-      label.classList.toggle("collapsed", collapsed);
-      label.setAttribute("aria-expanded", String(!collapsed));
-    });
-    wrapper.appendChild(label);
-    sortNodes(node.children || []).forEach((child) => {
-      const el = renderNode(child, depth + 1);
-      if (el) children.appendChild(el);
-    });
-    wrapper.appendChild(children);
-    return wrapper;
-  } else {
-    const item = document.createElement("div");
-    item.className = "tree-note" + (node.path === state.currentPath ? " active" : "");
-    item.style.paddingLeft = `calc(var(--space-3) + ${depth * 14}px)`;
-    item.innerHTML = (state.treeLocked ? "" : `<span class="tree-grip" title="Drag to move into a folder">${gripIcon()}</span>`) + `${fileIcon()}<span class="tree-note-name" title="${node.path}">${node.name}</span>` + (state.treeLocked ? "" : `<button type="button" class="tree-note-edit" title="Rename note" aria-label="Rename ${node.name}">${editIcon()}</button><button type="button" class="tree-note-edit tree-note-delete" title="Delete note" aria-label="Delete ${node.name}">${trashIcon()}</button>`);
-    item.setAttribute("role", "treeitem");
-    item.setAttribute("tabindex", "0");
-    item.dataset.path = node.path;
-    const open = () => loadNote(node.path);
-    item.addEventListener("click", open);
-    item.querySelector(".tree-note-edit:not(.tree-note-delete)")?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      void renameNote(node);
-    });
-    item.querySelector(".tree-note-delete")?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      void deleteNote(node);
-    });
-    const grip = item.querySelector(".tree-grip");
-    if (grip) attachNoteDrag(grip, item, node);
-    item.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        open();
-      }
-    });
-    return item;
-  }
-}
+var tree = new FileTree({
+  label: "Notes",
+  emptyText: "No notes yet.",
+  onOpen: (entry) => void loadNote(entry.path),
+  rename: (entry) => void (entry.isDir ? renameFolder(entry) : renameNote(entry)),
+  canRename: (entry) => !entry.isDir || !holdsThreads(entry.path),
+  // Only empty folders can be deleted.
+  remove: (entry) => void (entry.isDir ? deleteFolder(entry) : deleteNote(entry)),
+  canRemove: (entry) => !entry.isDir || (entry.children ?? []).length === 0,
+  move: (entry, folder) => void moveNote(entry, folder)
+});
+fileTree.replaceChildren(tree.el);
 function renderTree() {
-  if (!state.treeData) return;
-  fileTree.innerHTML = "";
-  sortNodes(state.treeData.children || []).forEach((child) => {
-    const el = renderNode(child, 0);
-    if (el) fileTree.appendChild(el);
+  tree.update({
+    sort: state.sortMode,
+    filter: state.filterText ? matchesFilter : null,
+    activePath: state.currentPath,
+    locked: state.treeLocked
   });
 }
 async function fetchTree() {
@@ -163,15 +93,16 @@ async function fetchTree() {
     const res = await fetch(`/api/tree?${vaultParam()}`);
     if (!res.ok) throw new Error("tree fetch failed");
     state.treeData = await res.json();
+    tree.update({ emptyText: "No notes yet." });
+    tree.setEntries(toEntries(state.treeData.children));
     renderTree();
   } catch (e) {
-    fileTree.innerHTML = `<div style="padding:var(--space-3);font-size:var(--text-xs);color:var(--color-danger)">\u26A0 Failed to load vault</div>`;
+    tree.update({ emptyText: "\u26A0 Failed to load vault" });
+    tree.setEntries([]);
   }
 }
 function syncActiveHighlight() {
-  document.querySelectorAll(".tree-note").forEach((el) => {
-    el.classList.toggle("active", el.dataset.path === state.currentPath);
-  });
+  tree.update({ activePath: state.currentPath });
 }
 async function loadNote(path) {
   if (state.isDirty) {
@@ -418,50 +349,6 @@ sortSelector.addEventListener("change", () => {
 function folderOf(path) {
   const i = path.lastIndexOf("/");
   return i < 0 ? "" : path.slice(0, i);
-}
-function dropTargetAt(x, y) {
-  const hit = document.elementFromPoint(x, y);
-  if (!hit || !fileTree.contains(hit)) return null;
-  const dir = hit.closest(".tree-dir-label");
-  if (dir) return { folder: dir.dataset.folder ?? "", el: dir };
-  const note = hit.closest(".tree-note");
-  if (note) {
-    const folder = folderOf(note.dataset.path ?? "");
-    const label = folder ? fileTree.querySelector(`.tree-dir-label[data-folder="${CSS.escape(folder)}"]`) : null;
-    return { folder, el: label ?? fileTree };
-  }
-  return { folder: "", el: fileTree };
-}
-function clearDropMarks() {
-  fileTree.classList.remove("drop-target");
-  fileTree.querySelectorAll(".drop-target").forEach((el) => el.classList.remove("drop-target"));
-}
-function attachNoteDrag(grip, item, node) {
-  grip.addEventListener("click", (e) => e.stopPropagation());
-  grip.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    grip.setPointerCapture(e.pointerId);
-    item.classList.add("dragging");
-    let target = null;
-    const onMove = (ev) => {
-      clearDropMarks();
-      target = dropTargetAt(ev.clientX, ev.clientY);
-      if (target && target.folder !== folderOf(node.path)) target.el.classList.add("drop-target");
-    };
-    const onEnd = () => {
-      grip.removeEventListener("pointermove", onMove);
-      grip.removeEventListener("pointerup", onEnd);
-      grip.removeEventListener("pointercancel", onEnd);
-      item.classList.remove("dragging");
-      clearDropMarks();
-      if (target && target.folder !== folderOf(node.path)) void moveNote(node, target.folder);
-    };
-    grip.addEventListener("pointermove", onMove);
-    grip.addEventListener("pointerup", onEnd);
-    grip.addEventListener("pointercancel", onEnd);
-  });
 }
 function noteInTree(path, node = state.treeData) {
   if (!node) return false;

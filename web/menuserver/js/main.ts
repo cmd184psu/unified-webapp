@@ -1,4 +1,4 @@
-import { ThemeManager, HamburgerMenu, showToast } from "@shared";
+import { ThemeManager, HamburgerMenu, createCopyButton } from "@shared";
 
 const themes = new ThemeManager({ module: "menuserver", default: "dark" });
 themes.apply();
@@ -83,22 +83,6 @@ function makeID(length: number): string {
   return result;
 }
 
-function copyToClipBoard(text: string): void {
-  const c = document.getElementById("copytext") as HTMLInputElement | null;
-  const x = document.getElementById("hiddentext");
-  if (!c || !x) return;
-  c.value = text;
-  x.hidden = false;
-  c.select();
-  try {
-    document.execCommand("copy");
-    showToast("Copied!", "success");
-  } catch {
-    showToast("Failed to copy.", "error");
-  }
-  x.hidden = true;
-}
-
 function renderSiteRow(site: SiteEntry, i: number): string {
   let link = "";
   if (site.url != null) link = site.url;
@@ -125,7 +109,7 @@ function renderSiteRow(site: SiteEntry, i: number): string {
       `<div id="${site.prefix}pwd${i}_hidden">xxxxxxxxxx</div></td></tr>` +
       `<tr><td></td><td><table><tr>` +
       `<td><button type="button" data-toggle="${site.prefix}pwd${i}">Hide/Show</button></td>` +
-      `<td><button type="button" data-copy="${site.password}">Copy</button></td>` +
+      `<td><span data-copy-from="${site.prefix}txt${i}"></span></td>` +
       `</tr></table></td></tr>`;
   }
   return content;
@@ -152,6 +136,11 @@ function addPage(el: HTMLElement, json: Submenu): void {
     content += '<div><a href="#top">&uarr;</a></div><div class="pageClass"><hr><br></div>';
   }
   el.insertAdjacentHTML("beforeend", content);
+  // Each password gets the shared copy button, reading the (hidden) field.
+  el.querySelectorAll<HTMLElement>("span[data-copy-from]").forEach((slot) => {
+    const field = document.getElementById(slot.dataset.copyFrom!) as HTMLInputElement | null;
+    slot.replaceWith(createCopyButton({ text: () => field?.value ?? "", label: "password" }));
+  });
 }
 
 function showPage(id: string): void {
@@ -286,10 +275,6 @@ if (lower) {
     if (toggleId) {
       toggle(toggleId);
       return;
-    }
-    const copyText = target.getAttribute("data-copy");
-    if (copyText) {
-      copyToClipBoard(copyText);
     }
   });
 }

@@ -4,7 +4,7 @@ import { confirmDialog } from "@shared";
 import { api } from "../api";
 import { useData } from "../DataContext";
 import { IssueModal } from "../components/IssueModal";
-import { Avatar, StateBadge, TagPill } from "../components/common";
+import { Avatar, CopyButton, StateBadge, TagPill } from "../components/common";
 import {
   RELATION_LABELS,
   RELATION_TYPES,
@@ -22,7 +22,6 @@ export function IssueDetailPage() {
   const [issue, setIssue] = useState<Issue | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [toast, setToast] = useState("");
 
   const load = () => {
     if (!ident) return;
@@ -40,16 +39,6 @@ export function IssueDetailPage() {
     if (!issue) return;
     const updated = await api.updateIssue(issue.id, body);
     setIssue(updated);
-  };
-
-  const flash = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(""), 1800);
-  };
-
-  const copyLink = () => {
-    navigator.clipboard.writeText(window.location.href);
-    flash("Link copied to clipboard");
   };
 
   if (notFound) return <div className="empty">Issue “{ident}” not found.</div>;
@@ -75,9 +64,7 @@ export function IssueDetailPage() {
         </span>
         <h1>{issue.identifier}</h1>
         <div className="spacer" />
-        <button className="btn" onClick={copyLink}>
-          🔗 Copy link
-        </button>
+        <CopyButton text={() => window.location.href} label="link to this issue" />
         <button className="btn" onClick={() => setEditing(true)}>
           Edit
         </button>
@@ -198,7 +185,6 @@ export function IssueDetailPage() {
           onSaved={(i) => setIssue(i)}
         />
       )}
-      {toast && <div className="toast">{toast}</div>}
     </>
   );
 }

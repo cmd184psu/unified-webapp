@@ -7274,12 +7274,12 @@ var require_jsx_runtime = __commonJS({
 });
 
 // web/smbedit/src/main.tsx
-var import_react8 = __toESM(require_react());
+var import_react7 = __toESM(require_react());
 var import_client = __toESM(require_client());
 import { ThemeManager, HamburgerMenu } from "/shared/dist/shared.mjs";
 
 // web/smbedit/src/App.tsx
-var import_react7 = __toESM(require_react());
+var import_react6 = __toESM(require_react());
 var import_react_dom = __toESM(require_react_dom());
 
 // web/smbedit/src/api.ts
@@ -7325,82 +7325,25 @@ var api = {
 import { showToast as showToast2 } from "/shared/dist/shared.mjs";
 
 // web/smbedit/src/SharesPage.tsx
-var import_react2 = __toESM(require_react());
+var import_react = __toESM(require_react());
 import { showToast } from "/shared/dist/shared.mjs";
 
 // web/smbedit/src/FolderPicker.tsx
-var import_react = __toESM(require_react());
-var import_jsx_runtime = __toESM(require_jsx_runtime());
-function FolderPicker({ onSelect, onClose }) {
-  const [folders, setFolders] = (0, import_react.useState)([]);
-  const [loading, setLoading] = (0, import_react.useState)(true);
-  const [error, setError] = (0, import_react.useState)("");
-  const [selected, setSelected] = (0, import_react.useState)(null);
-  (0, import_react.useEffect)(() => {
-    api.getFolders().then(setFolders).catch((e) => setError(String(e))).finally(() => setLoading(false));
-  }, []);
-  (0, import_react.useEffect)(() => {
-    const handler = (e) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "modal-overlay", onClick: (e) => {
-    if (e.target === e.currentTarget) onClose();
-  }, children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "modal", role: "dialog", "aria-modal": "true", "aria-label": "Pick a folder", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "modal-header", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "modal-title", children: "\u{1F4C1} Pick a folder from /opt" }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "btn btn-icon", onClick: onClose, children: "\xD7" })
-    ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "modal-body", children: [
-      loading && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "text-muted", style: { padding: "20px 0", textAlign: "center" }, children: "Loading\u2026" }),
-      error && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "text-red", children: error }),
-      !loading && !error && folders.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "empty-state", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "empty-state-icon", children: "\u{1F5C2}" }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "empty-state-text", children: "/opt is empty" }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "empty-state-sub", children: "No subdirectories found" })
-      ] }),
-      !loading && !error && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "folder-list", children: folders.map((f) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
-        "div",
-        {
-          className: `folder-item${selected?.path === f.path ? " selected" : ""}`,
-          onClick: () => setSelected(f),
-          onDoubleClick: () => {
-            onSelect(f);
-            onClose();
-          },
-          children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "folder-icon", children: "\u{1F4C2}" }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { flex: 1 }, children: f.name }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "text-muted", style: { fontSize: 10 }, children: f.path })
-          ]
-        },
-        f.path
-      )) })
-    ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "modal-footer", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "btn btn-ghost", onClick: onClose, children: "Cancel" }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-        "button",
-        {
-          className: "btn btn-primary",
-          disabled: !selected,
-          onClick: () => {
-            if (selected) {
-              onSelect(selected);
-              onClose();
-            }
-          },
-          children: "Select"
-        }
-      )
-    ] })
-  ] }) });
+import { openTreePicker } from "/shared/dist/shared.mjs";
+async function pickFolder() {
+  const chosen = await openTreePicker({
+    title: "Pick a folder from /opt",
+    select: "dir",
+    confirmLabel: "Select",
+    emptyText: "/opt has no subdirectories.",
+    // /opt's folders, one level: they can be chosen but not opened.
+    load: async () => (await api.getFolders()).map((f) => ({ name: f.name, path: f.path, isDir: true, leaf: true }))
+  });
+  return chosen ? { name: chosen.name, path: chosen.path } : null;
 }
 
 // web/smbedit/src/SharesPage.tsx
-var import_jsx_runtime2 = __toESM(require_jsx_runtime());
+var import_jsx_runtime = __toESM(require_jsx_runtime());
 var HOME_SHARE = "home";
 function emptyShare() {
   return {
@@ -7414,9 +7357,9 @@ function emptyShare() {
   };
 }
 function Toggle({ checked, onChange }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("label", { className: "ui-toggle", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("input", { type: "checkbox", checked, onChange: (e) => onChange(e.target.checked) }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "ui-toggle-track" })
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { className: "ui-toggle", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", { type: "checkbox", checked, onChange: (e) => onChange(e.target.checked) }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "ui-toggle-track" })
   ] });
 }
 function ShareEditor({
@@ -7425,19 +7368,19 @@ function ShareEditor({
   onDelete,
   onPickFolder
 }) {
-  const [expanded, setExpanded] = (0, import_react2.useState)(!share.name);
+  const [expanded, setExpanded] = (0, import_react.useState)(!share.name);
   const set = (k, v) => onChange({ ...share, [k]: v });
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: `share-card${share.enabled ? "" : " disabled"}`, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "share-card-header", onClick: () => setExpanded((e) => !e), children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { style: { fontSize: 16 }, children: expanded ? "\u25BE" : "\u25B8" }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "share-card-name", children: share.name || /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("em", { className: "text-muted", children: "unnamed" }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "share-card-path", children: share.path }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: `share-badge ${share.enabled ? "enabled" : "disabled"}`, children: share.enabled ? "on" : "off" })
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: `share-card${share.enabled ? "" : " disabled"}`, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "share-card-header", onClick: () => setExpanded((e) => !e), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { fontSize: 16 }, children: expanded ? "\u25BE" : "\u25B8" }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "share-card-name", children: share.name || /* @__PURE__ */ (0, import_jsx_runtime.jsx)("em", { className: "text-muted", children: "unnamed" }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "share-card-path", children: share.path }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: `share-badge ${share.enabled ? "enabled" : "disabled"}`, children: share.enabled ? "on" : "off" })
     ] }),
-    expanded && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "share-card-body", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "field", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("label", { className: "field-label", children: "Share name" }),
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+    expanded && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "share-card-body", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("label", { className: "field-label", children: "Share name" }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
           "input",
           {
             className: "input input-sm",
@@ -7447,10 +7390,10 @@ function ShareEditor({
           }
         )
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "field", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("label", { className: "field-label", children: "Path" }),
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "row", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("label", { className: "field-label", children: "Path" }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "row", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
             "input",
             {
               className: "input input-sm",
@@ -7460,15 +7403,15 @@ function ShareEditor({
               style: { flex: 1 }
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: "btn btn-ghost btn-sm", onClick: onPickFolder, title: "Browse /opt", children: "\u{1F4C2}" })
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "btn btn-ghost btn-sm", onClick: onPickFolder, title: "Browse /opt", children: "\u{1F4C2}" })
         ] })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "field", style: { gridColumn: "1 / -1" }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("label", { className: "field-label", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "field", style: { gridColumn: "1 / -1" }, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { className: "field-label", children: [
           "Comment ",
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "text-muted", children: "(optional)" })
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "text-muted", children: "(optional)" })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
           "input",
           {
             className: "input input-sm",
@@ -7478,45 +7421,50 @@ function ShareEditor({
           }
         )
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "col", style: { gap: 2 }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "toggle-row", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { children: [
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "toggle-label", children: "Enabled" }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "toggle-hint", children: "Include in smb.conf" })
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "col", style: { gap: 2 }, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "toggle-row", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "toggle-label", children: "Enabled" }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "toggle-hint", children: "Include in smb.conf" })
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Toggle, { checked: share.enabled, onChange: (v) => set("enabled", v) })
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Toggle, { checked: share.enabled, onChange: (v) => set("enabled", v) })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "toggle-row", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { children: [
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "toggle-label", children: "Writable" }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "toggle-hint", children: "Allow write access" })
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "toggle-row", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "toggle-label", children: "Writable" }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "toggle-hint", children: "Allow write access" })
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Toggle, { checked: share.writable, onChange: (v) => set("writable", v) })
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Toggle, { checked: share.writable, onChange: (v) => set("writable", v) })
         ] })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "col", style: { gap: 2 }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "toggle-row", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { children: [
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "toggle-label", children: "Browseable" }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "toggle-hint", children: "Visible in network browser" })
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "col", style: { gap: 2 }, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "toggle-row", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "toggle-label", children: "Browseable" }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "toggle-hint", children: "Visible in network browser" })
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Toggle, { checked: share.browseable, onChange: (v) => set("browseable", v) })
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Toggle, { checked: share.browseable, onChange: (v) => set("browseable", v) })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "toggle-row", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { children: [
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "toggle-label", children: "Guest OK" }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "toggle-hint", children: "Allow anonymous access" })
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "toggle-row", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "toggle-label", children: "Guest OK" }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "toggle-hint", children: "Allow anonymous access" })
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Toggle, { checked: share.public, onChange: (v) => set("public", v) })
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Toggle, { checked: share.public, onChange: (v) => set("public", v) })
         ] })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "share-actions", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: "btn btn-danger btn-sm", onClick: onDelete, children: "\u{1F5D1} Remove share" }) })
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "share-actions", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "btn btn-danger btn-sm", onClick: onDelete, children: "\u{1F5D1} Remove share" }) })
     ] })
   ] });
 }
 function SharesPage({ shares, onChange, shareOwner }) {
-  const [pickerIdx, setPickerIdx] = (0, import_react2.useState)(null);
-  const [findingHome, setFindingHome] = (0, import_react2.useState)(false);
+  const [findingHome, setFindingHome] = (0, import_react.useState)(false);
+  const pickFor = async (i) => {
+    const folder = await pickFolder();
+    if (!folder) return;
+    const share = shares[i];
+    update(i, { ...share, path: folder.path, name: share.name || folder.name });
+  };
   const shareHome = async () => {
     const owner = shareOwner.trim();
     if (!owner) {
@@ -7556,14 +7504,14 @@ function SharesPage({ shares, onChange, shareOwner }) {
   const add = () => {
     onChange([...shares, emptyShare()]);
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "page-header", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "row-between", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "page-title", children: "Shares" }),
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "page-subtitle", children: "Editable list of Samba share definitions. All shares are owned by the configured user." })
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "page-header", children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "row-between", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "page-title", children: "Shares" }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "page-subtitle", children: "Editable list of Samba share definitions. All shares are owned by the configured user." })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "row", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
           "button",
           {
             className: "btn btn-ghost",
@@ -7573,46 +7521,32 @@ function SharesPage({ shares, onChange, shareOwner }) {
             children: findingHome ? "\u27F3 Finding home\u2026" : "\u{1F3E0} Share home"
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: "btn btn-primary", onClick: add, children: "+ Add share" })
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "btn btn-primary", onClick: add, children: "+ Add share" })
       ] })
     ] }) }),
-    shares.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "empty-state", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "empty-state-icon", children: "\u{1F5C2}" }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "empty-state-text", children: "No shares defined" }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "empty-state-sub", children: 'Click "Add share" to pick a folder from /opt' })
-    ] }) : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "share-list", children: shares.map((s, i) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+    shares.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "empty-state", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "empty-state-icon", children: "\u{1F5C2}" }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "empty-state-text", children: "No shares defined" }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "empty-state-sub", children: 'Click "Add share" to pick a folder from /opt' })
+    ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "share-list", children: shares.map((s, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
       ShareEditor,
       {
         share: s,
         onChange: (updated) => update(i, updated),
         onDelete: () => remove(i),
-        onPickFolder: () => setPickerIdx(i)
+        onPickFolder: () => void pickFor(i)
       },
       i
-    )) }),
-    pickerIdx !== null && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
-      FolderPicker,
-      {
-        onSelect: (folder) => {
-          const share = shares[pickerIdx];
-          update(pickerIdx, {
-            ...share,
-            path: folder.path,
-            name: share.name || folder.name
-          });
-        },
-        onClose: () => setPickerIdx(null)
-      }
-    )
+    )) })
   ] });
 }
 
 // web/smbedit/src/GlobalsPage.tsx
-var import_react3 = __toESM(require_react());
-var import_jsx_runtime3 = __toESM(require_jsx_runtime());
+var import_react2 = __toESM(require_react());
+var import_jsx_runtime2 = __toESM(require_jsx_runtime());
 function GlobalsPage({ globals, onChange }) {
-  const [newKey, setNewKey] = (0, import_react3.useState)("");
-  const [newVal, setNewVal] = (0, import_react3.useState)("");
+  const [newKey, setNewKey] = (0, import_react2.useState)("");
+  const [newVal, setNewVal] = (0, import_react2.useState)("");
   const update = (i, field, v) => {
     const next = [...globals];
     next[i] = { ...next[i], [field]: v };
@@ -7627,24 +7561,24 @@ function GlobalsPage({ globals, onChange }) {
     setNewKey("");
     setNewVal("");
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "page-header", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "page-title", children: "Global settings" }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "page-subtitle", children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "page-header", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "page-title", children: "Global settings" }),
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "page-subtitle", children: [
         "Key/value pairs written to the ",
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("code", { children: "[global]" }),
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("code", { children: "[global]" }),
         " section of smb.conf."
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "card", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("table", { className: "globals-table", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("thead", { children: /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("tr", { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("th", { style: { width: "38%" }, children: "Key" }),
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("th", { children: "Value" }),
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("th", { style: { width: 60 } })
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "card", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("table", { className: "globals-table", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("thead", { children: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("tr", { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("th", { style: { width: "38%" }, children: "Key" }),
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("th", { children: "Value" }),
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("th", { style: { width: 60 } })
         ] }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("tbody", { children: globals.map((g, i) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("tr", { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("td", { children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("tbody", { children: globals.map((g, i) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("tr", { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("td", { children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
             "input",
             {
               className: "input input-sm",
@@ -7652,7 +7586,7 @@ function GlobalsPage({ globals, onChange }) {
               onChange: (e) => update(i, "key", e.target.value)
             }
           ) }),
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("td", { children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("td", { children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
             "input",
             {
               className: "input input-sm",
@@ -7660,12 +7594,12 @@ function GlobalsPage({ globals, onChange }) {
               onChange: (e) => update(i, "value", e.target.value)
             }
           ) }),
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("td", { children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "globals-row-actions", children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { className: "btn btn-danger btn-sm", onClick: () => remove(i), title: "Delete row", children: "\u2715" }) }) })
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("td", { children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "globals-row-actions", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: "btn btn-danger btn-sm", onClick: () => remove(i), title: "Delete row", children: "\u2715" }) }) })
         ] }, i)) })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "divider" }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "row", style: { gap: 8 }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "divider" }),
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "row", style: { gap: 8 }, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
           "input",
           {
             className: "input input-sm",
@@ -7678,7 +7612,7 @@ function GlobalsPage({ globals, onChange }) {
             }
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
           "input",
           {
             className: "input input-sm",
@@ -7691,24 +7625,24 @@ function GlobalsPage({ globals, onChange }) {
             }
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { className: "btn btn-primary btn-sm", onClick: add, children: "+ Add" })
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: "btn btn-primary btn-sm", onClick: add, children: "+ Add" })
       ] })
     ] })
   ] });
 }
 
 // web/smbedit/src/SettingsPage.tsx
-var import_react4 = __toESM(require_react());
-var import_jsx_runtime4 = __toESM(require_jsx_runtime());
+var import_react3 = __toESM(require_react());
+var import_jsx_runtime3 = __toESM(require_jsx_runtime());
 import { confirmDialog } from "/shared/dist/shared.mjs";
 function SettingsPage({ config, onChange, importing, onImport }) {
-  const [importPath, setImportPath] = (0, import_react4.useState)(config.smb_conf_path);
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "drawer-settings", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "card", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "card-title", children: "\u2699\uFE0F Server" }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "field", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { className: "field-label", children: "smb.conf output path" }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+  const [importPath, setImportPath] = (0, import_react3.useState)(config.smb_conf_path);
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "drawer-settings", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "card", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "card-title", children: "\u2699\uFE0F Server" }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { className: "field-label", children: "smb.conf output path" }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
           "input",
           {
             className: "input",
@@ -7718,12 +7652,12 @@ function SettingsPage({ config, onChange, importing, onImport }) {
           }
         )
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "field", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("label", { className: "field-label", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("label", { className: "field-label", children: [
           "Samba log path ",
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "text-muted", children: "(tailed on the Logs page)" })
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "text-muted", children: "(tailed on the Logs page)" })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
           "input",
           {
             className: "input",
@@ -7734,16 +7668,16 @@ function SettingsPage({ config, onChange, importing, onImport }) {
         )
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "card", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "card-title", children: "\u{1F4E5} Import existing configuration" }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "page-subtitle", style: { marginBottom: 14 }, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "card", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "card-title", children: "\u{1F4E5} Import existing configuration" }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "page-subtitle", style: { marginBottom: 14 }, children: [
         "Read an existing smb.conf and load its ",
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("code", { children: "[global]" }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("code", { children: "[global]" }),
         " settings and shares into the editor. This replaces the Globals and Shares shown here \u2014 review them, then click Save to persist. Nothing is written to disk until you save."
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "field", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { className: "field-label", children: "smb.conf path to import" }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { className: "field-label", children: "smb.conf path to import" }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
           "input",
           {
             className: "input",
@@ -7753,7 +7687,7 @@ function SettingsPage({ config, onChange, importing, onImport }) {
           }
         )
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
         "button",
         {
           className: "btn btn-primary",
@@ -7770,18 +7704,18 @@ function SettingsPage({ config, onChange, importing, onImport }) {
         }
       )
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "card", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "card-title", children: "\u{1F464} Share ownership" }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "page-subtitle", style: { marginBottom: 14 }, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "card", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "card-title", children: "\u{1F464} Share ownership" }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "page-subtitle", style: { marginBottom: 14 }, children: [
         "All shares use this Linux user as ",
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("code", { children: "valid users" }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("code", { children: "valid users" }),
         " and ",
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("code", { children: "force user" }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("code", { children: "force user" }),
         "."
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "field", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("label", { className: "field-label", children: "Share owner" }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("label", { className: "field-label", children: "Share owner" }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
           "input",
           {
             className: "input",
@@ -7796,8 +7730,8 @@ function SettingsPage({ config, onChange, importing, onImport }) {
 }
 
 // web/smbedit/src/PreviewPage.tsx
-var import_react5 = __toESM(require_react());
-var import_jsx_runtime5 = __toESM(require_jsx_runtime());
+var import_react4 = __toESM(require_react());
+var import_jsx_runtime4 = __toESM(require_jsx_runtime());
 function highlight(text) {
   return text.split("\n").map((line) => {
     const trimmed = line.trim();
@@ -7820,46 +7754,46 @@ function escHtml(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 function PreviewPage({ globals, shares, shareOwner }) {
-  const [content, setContent] = (0, import_react5.useState)(null);
-  const [loading, setLoading] = (0, import_react5.useState)(false);
-  const [error, setError] = (0, import_react5.useState)("");
-  const load = (0, import_react5.useCallback)(() => {
+  const [content, setContent] = (0, import_react4.useState)(null);
+  const [loading, setLoading] = (0, import_react4.useState)(false);
+  const [error, setError] = (0, import_react4.useState)("");
+  const load = (0, import_react4.useCallback)(() => {
     setLoading(true);
     setError("");
     api.preview({ globals, shares, share_owner: shareOwner }).then(setContent).catch((e) => setError(String(e))).finally(() => setLoading(false));
   }, [globals, shares, shareOwner]);
-  (0, import_react5.useEffect)(() => {
+  (0, import_react4.useEffect)(() => {
     load();
   }, [load]);
-  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "page-header", children: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "row-between", children: /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "page-title", children: "Preview" }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "page-subtitle", children: "Rendered smb.conf based on current settings \u2014 not yet written to disk." })
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "page-header", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "row-between", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "page-title", children: "Preview" }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "page-subtitle", children: "Rendered smb.conf based on current settings \u2014 not yet written to disk." })
     ] }) }) }),
-    error && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "card", style: { borderColor: "var(--color-danger)" }, children: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "text-red", children: error }) }),
-    content !== null && !error && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
+    error && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "card", style: { borderColor: "var(--color-danger)" }, children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "text-red", children: error }) }),
+    content !== null && !error && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
       "pre",
       {
         className: "preview-pre",
         dangerouslySetInnerHTML: { __html: highlight(content) }
       }
     ),
-    content === null && !error && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "empty-state", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "empty-state-icon", children: "\u{1F4C4}" }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "empty-state-text", children: loading ? "Rendering preview\u2026" : "No preview available" })
+    content === null && !error && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "empty-state", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "empty-state-icon", children: "\u{1F4C4}" }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "empty-state-text", children: loading ? "Rendering preview\u2026" : "No preview available" })
     ] })
   ] });
 }
 
 // web/smbedit/src/LogsPage.tsx
-var import_react6 = __toESM(require_react());
-var import_jsx_runtime6 = __toESM(require_jsx_runtime());
+var import_react5 = __toESM(require_react());
+var import_jsx_runtime5 = __toESM(require_jsx_runtime());
 function LogPanel({ title, icon, url }) {
-  const [lines, setLines] = (0, import_react6.useState)([]);
-  const [connected, setConnected] = (0, import_react6.useState)(false);
-  const boxRef = (0, import_react6.useRef)(null);
-  const stickToBottom = (0, import_react6.useRef)(true);
-  (0, import_react6.useEffect)(() => {
+  const [lines, setLines] = (0, import_react5.useState)([]);
+  const [connected, setConnected] = (0, import_react5.useState)(false);
+  const boxRef = (0, import_react5.useRef)(null);
+  const stickToBottom = (0, import_react5.useRef)(true);
+  (0, import_react5.useEffect)(() => {
     const es = new EventSource(url);
     es.onopen = () => setConnected(true);
     es.onerror = () => setConnected(false);
@@ -7875,7 +7809,7 @@ function LogPanel({ title, icon, url }) {
     };
     return () => es.close();
   }, [url]);
-  (0, import_react6.useEffect)(() => {
+  (0, import_react5.useEffect)(() => {
     const el = boxRef.current;
     if (el && stickToBottom.current) {
       el.scrollTop = el.scrollHeight;
@@ -7886,12 +7820,12 @@ function LogPanel({ title, icon, url }) {
     if (!el) return;
     stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "card log-panel", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "card-title", children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "card log-panel", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "card-title", children: [
       icon,
       " ",
       title,
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
         "span",
         {
           className: `status-dot${connected ? "" : " error"}`,
@@ -7900,26 +7834,26 @@ function LogPanel({ title, icon, url }) {
         }
       )
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "log-box", ref: boxRef, onScroll, children: lines.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "text-muted", children: "Waiting for log output\u2026" }) : lines.map((l, i) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "log-line", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "log-time", children: new Date(l.time).toLocaleTimeString() }),
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "log-box", ref: boxRef, onScroll, children: lines.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "text-muted", children: "Waiting for log output\u2026" }) : lines.map((l, i) => /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "log-line", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "log-time", children: new Date(l.time).toLocaleTimeString() }),
       " ",
       l.message
     ] }, i)) })
   ] });
 }
 function LogsPage() {
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "page-header", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "page-title", children: "Logs" }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "page-subtitle", children: "Live tail of smbed's own operations (config writes, backups, restarts) and the Samba daemon's own log." })
+  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "page-header", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "page-title", children: "Logs" }),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "page-subtitle", children: "Live tail of smbed's own operations (config writes, backups, restarts) and the Samba daemon's own log." })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(LogPanel, { title: "smbed operations", icon: "\u{1F6E0}", url: "/api/logs/ops/stream" }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(LogPanel, { title: "Samba (smbd) log", icon: "\u{1F4C4}", url: "/api/logs/samba/stream" })
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(LogPanel, { title: "smbed operations", icon: "\u{1F6E0}", url: "/api/logs/ops/stream" }),
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(LogPanel, { title: "Samba (smbd) log", icon: "\u{1F4C4}", url: "/api/logs/samba/stream" })
   ] });
 }
 
 // web/smbedit/src/App.tsx
-var import_jsx_runtime7 = __toESM(require_jsx_runtime());
+var import_jsx_runtime6 = __toESM(require_jsx_runtime());
 var NAV = [
   { id: "shares", label: "Shares", icon: "\u{1F5C2}" },
   { id: "globals", label: "Globals", icon: "\u{1F4CB}" },
@@ -7936,40 +7870,40 @@ function warnAutoDisabled(before, after) {
   }
 }
 function App() {
-  const [config, setConfig] = (0, import_react7.useState)(null);
-  const [page, setPage] = (0, import_react7.useState)("shares");
-  const [dirty, setDirty] = (0, import_react7.useState)(false);
-  const [saving, setSaving] = (0, import_react7.useState)(false);
-  const [restarting, setRestarting] = (0, import_react7.useState)(false);
-  const [importing, setImporting] = (0, import_react7.useState)(false);
-  const [restartOutput, setRestartOutput] = (0, import_react7.useState)(null);
-  const [version, setVersion] = (0, import_react7.useState)("");
-  const [settingsHost2, setSettingsHost] = (0, import_react7.useState)(null);
-  (0, import_react7.useEffect)(() => {
+  const [config, setConfig] = (0, import_react6.useState)(null);
+  const [page, setPage] = (0, import_react6.useState)("shares");
+  const [dirty, setDirty] = (0, import_react6.useState)(false);
+  const [saving, setSaving] = (0, import_react6.useState)(false);
+  const [restarting, setRestarting] = (0, import_react6.useState)(false);
+  const [importing, setImporting] = (0, import_react6.useState)(false);
+  const [restartOutput, setRestartOutput] = (0, import_react6.useState)(null);
+  const [version, setVersion] = (0, import_react6.useState)("");
+  const [settingsHost2, setSettingsHost] = (0, import_react6.useState)(null);
+  (0, import_react6.useEffect)(() => {
     Promise.all([api.getConfig(), api.version()]).then(([cfg, ver]) => {
       setConfig(cfg);
       setVersion(ver.version);
     }).catch((e) => showToast2(`Failed to load config: ${String(e)}`, "error"));
   }, []);
-  (0, import_react7.useEffect)(() => {
+  (0, import_react6.useEffect)(() => {
     if (config) setSettingsHost(initHamburger());
   }, [config]);
-  const patchConfig = (0, import_react7.useCallback)((patch) => {
+  const patchConfig = (0, import_react6.useCallback)((patch) => {
     setConfig((c) => c ? { ...c, ...patch } : c);
     setDirty(true);
   }, []);
-  (0, import_react7.useEffect)(() => {
+  (0, import_react6.useEffect)(() => {
     setPersistTheme((t) => patchConfig({ theme: t }));
   }, [patchConfig]);
-  const patchShares = (0, import_react7.useCallback)((shares) => {
+  const patchShares = (0, import_react6.useCallback)((shares) => {
     setConfig((c) => c ? { ...c, shares } : c);
     setDirty(true);
   }, []);
-  const patchGlobals = (0, import_react7.useCallback)((globals) => {
+  const patchGlobals = (0, import_react6.useCallback)((globals) => {
     setConfig((c) => c ? { ...c, globals } : c);
     setDirty(true);
   }, []);
-  const save = (0, import_react7.useCallback)(async () => {
+  const save = (0, import_react6.useCallback)(async () => {
     if (!config || saving) return;
     setSaving(true);
     try {
@@ -7992,7 +7926,7 @@ function App() {
       setSaving(false);
     }
   }, [config, saving]);
-  const importConf = (0, import_react7.useCallback)(async (path) => {
+  const importConf = (0, import_react6.useCallback)(async (path) => {
     if (importing) return;
     setImporting(true);
     try {
@@ -8014,7 +7948,7 @@ function App() {
       setImporting(false);
     }
   }, [importing]);
-  const saveAndRestart = (0, import_react7.useCallback)(async () => {
+  const saveAndRestart = (0, import_react6.useCallback)(async () => {
     if (!config || restarting) return;
     setRestarting(true);
     setRestartOutput(null);
@@ -8045,24 +7979,24 @@ function App() {
     }
   }, [config, restarting]);
   if (!config) {
-    return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { style: { display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", color: "var(--color-text-muted)" }, children: "Loading smbed\u2026" });
+    return /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { style: { display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", color: "var(--color-text-muted)" }, children: "Loading smbed\u2026" });
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "layout", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("header", { className: "topbar", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "topbar-logo", children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "layout", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("header", { className: "topbar", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { className: "topbar-logo", children: [
         "smbed",
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { children: " \u2014 Samba Mini-editor" })
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: " \u2014 Samba Mini-editor" })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "topbar-spacer" }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "topbar-status", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: `status-dot${saving || restarting ? " saving" : ""}` }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "topbar-spacer" }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { className: "topbar-status", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: `status-dot${saving || restarting ? " saving" : ""}` }),
         saving ? "Saving\u2026" : restarting ? "Restarting Samba\u2026" : dirty ? "Unsaved changes" : "Saved"
       ] }),
-      version && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "text-muted", style: { fontSize: 10 }, children: [
+      version && /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { className: "text-muted", style: { fontSize: 10 }, children: [
         "v",
         version
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
         "button",
         {
           id: "hamburger-trigger",
@@ -8073,23 +8007,23 @@ function App() {
         }
       )
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("nav", { className: "sidebar", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "sidebar-section-label", children: "Navigation" }),
-      NAV.map((n) => /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("nav", { className: "sidebar", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "sidebar-section-label", children: "Navigation" }),
+      NAV.map((n) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
         "div",
         {
           className: `nav-item${page === n.id ? " active" : ""}`,
           onClick: () => setPage(n.id),
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "nav-icon", children: n.icon }),
+            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "nav-icon", children: n.icon }),
             n.label
           ]
         },
         n.id
       )),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "divider", style: { margin: "12px 16px" } }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "sidebar-section-label", children: "Share owner" }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { style: { padding: "4px 16px" }, children: /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "divider", style: { margin: "12px 16px" } }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "sidebar-section-label", children: "Share owner" }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { style: { padding: "4px 16px" }, children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
         "input",
         {
           className: "input input-sm",
@@ -8099,26 +8033,26 @@ function App() {
         }
       ) })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("main", { className: "main-content", children: [
-      page === "shares" && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(SharesPage, { shares: config.shares, onChange: patchShares, shareOwner: config.share_owner }),
-      page === "globals" && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(GlobalsPage, { globals: config.globals, onChange: patchGlobals }),
-      page === "preview" && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(PreviewPage, { globals: config.globals, shares: config.shares, shareOwner: config.share_owner }),
-      page === "logs" && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(LogsPage, {}),
-      restartOutput && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "card mt-16", style: { borderColor: restartOutput.success ? "var(--color-success)" : "var(--color-danger)" }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "card-title", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("main", { className: "main-content", children: [
+      page === "shares" && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(SharesPage, { shares: config.shares, onChange: patchShares, shareOwner: config.share_owner }),
+      page === "globals" && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(GlobalsPage, { globals: config.globals, onChange: patchGlobals }),
+      page === "preview" && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(PreviewPage, { globals: config.globals, shares: config.shares, shareOwner: config.share_owner }),
+      page === "logs" && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(LogsPage, {}),
+      restartOutput && /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "card mt-16", style: { borderColor: restartOutput.success ? "var(--color-success)" : "var(--color-danger)" }, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "card-title", children: [
           restartOutput.success ? "\u2705" : "\u274C",
           " Samba restart output"
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "restart-output", children: restartOutput.output || "(no output)" })
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "restart-output", children: restartOutput.output || "(no output)" })
       ] })
     ] }),
     settingsHost2 && (0, import_react_dom.createPortal)(
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(SettingsPage, { config, onChange: patchConfig, importing, onImport: importConf }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(SettingsPage, { config, onChange: patchConfig, importing, onImport: importConf }),
       settingsHost2
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("footer", { className: "action-bar", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "action-bar-hint", children: dirty ? "\u26A0\uFE0F You have unsaved changes." : "\u2713 All changes saved to state.json." }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("footer", { className: "action-bar", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "action-bar-hint", children: dirty ? "\u26A0\uFE0F You have unsaved changes." : "\u2713 All changes saved to state.json." }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
         "button",
         {
           className: "btn btn-ghost",
@@ -8127,7 +8061,7 @@ function App() {
           children: "\u{1F4BE} Save"
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
         "button",
         {
           className: "btn btn-success",
@@ -8141,7 +8075,7 @@ function App() {
 }
 
 // web/smbedit/src/main.tsx
-var import_jsx_runtime8 = __toESM(require_jsx_runtime());
+var import_jsx_runtime7 = __toESM(require_jsx_runtime());
 var _persistTheme = () => {
 };
 function setPersistTheme(fn) {
@@ -8174,7 +8108,7 @@ function initHamburger() {
   return settingsHost;
 }
 (0, import_client.createRoot)(document.getElementById("root")).render(
-  /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(import_react8.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(App, {}) })
+  /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_react7.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(App, {}) })
 );
 export {
   initHamburger,

@@ -1,5 +1,5 @@
 // web/menuserver/js/main.ts
-import { ThemeManager, HamburgerMenu, showToast } from "/shared/dist/shared.mjs";
+import { ThemeManager, HamburgerMenu, createCopyButton } from "/shared/dist/shared.mjs";
 var themes = new ThemeManager({ module: "menuserver", default: "dark" });
 themes.apply();
 var config = {};
@@ -46,21 +46,6 @@ function makeID(length) {
   }
   return result;
 }
-function copyToClipBoard(text) {
-  const c = document.getElementById("copytext");
-  const x = document.getElementById("hiddentext");
-  if (!c || !x) return;
-  c.value = text;
-  x.hidden = false;
-  c.select();
-  try {
-    document.execCommand("copy");
-    showToast("Copied!", "success");
-  } catch {
-    showToast("Failed to copy.", "error");
-  }
-  x.hidden = true;
-}
 function renderSiteRow(site, i) {
   let link = "";
   if (site.url != null) link = site.url;
@@ -76,7 +61,7 @@ function renderSiteRow(site, i) {
     content += `<tr><td colspan="2"><a href="${link}" target="_blank">${label}</a></td></tr>`;
   }
   if (site.username != null && site.username !== "") {
-    content += `<tr><td>Username: </td><td>${site.username}</td></tr><tr><td>Password: </td><td><div id="${site.prefix}pwd${i}_inner" hidden><input type="text" id="${site.prefix}txt${i}" value="${site.password}" readonly></div><div id="${site.prefix}pwd${i}_hidden">xxxxxxxxxx</div></td></tr><tr><td></td><td><table><tr><td><button type="button" data-toggle="${site.prefix}pwd${i}">Hide/Show</button></td><td><button type="button" data-copy="${site.password}">Copy</button></td></tr></table></td></tr>`;
+    content += `<tr><td>Username: </td><td>${site.username}</td></tr><tr><td>Password: </td><td><div id="${site.prefix}pwd${i}_inner" hidden><input type="text" id="${site.prefix}txt${i}" value="${site.password}" readonly></div><div id="${site.prefix}pwd${i}_hidden">xxxxxxxxxx</div></td></tr><tr><td></td><td><table><tr><td><button type="button" data-toggle="${site.prefix}pwd${i}">Hide/Show</button></td><td><span data-copy-from="${site.prefix}txt${i}"></span></td></tr></table></td></tr>`;
   }
   return content;
 }
@@ -100,6 +85,10 @@ function addPage(el, json) {
     content += '<div><a href="#top">&uarr;</a></div><div class="pageClass"><hr><br></div>';
   }
   el.insertAdjacentHTML("beforeend", content);
+  el.querySelectorAll("span[data-copy-from]").forEach((slot) => {
+    const field = document.getElementById(slot.dataset.copyFrom);
+    slot.replaceWith(createCopyButton({ text: () => field?.value ?? "", label: "password" }));
+  });
 }
 function showPage(id) {
   if (SHOWALLPAGES) {
@@ -214,10 +203,6 @@ if (lower) {
     if (toggleId) {
       toggle(toggleId);
       return;
-    }
-    const copyText = target.getAttribute("data-copy");
-    if (copyText) {
-      copyToClipBoard(copyText);
     }
   });
 }

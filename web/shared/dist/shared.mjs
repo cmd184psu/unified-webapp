@@ -469,6 +469,23 @@ async function sessionState(method) {
 var REPORT_EVERY_MS = 6e4;
 var RECHECK_CAP_MS = 5 * 6e4;
 var ACTIVITY_EVENTS = ["pointerdown", "keydown", "wheel", "touchstart"];
+function watchFetch(onUnauthorized) {
+  if (typeof window.fetch !== "function") return () => void 0;
+  const original = window.fetch;
+  const wrapped = async (input, init) => {
+    const res = await original.call(window, input, init);
+    if (res.status === 401) {
+      const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const url = new URL(raw, window.location.href);
+      if (url.origin === window.location.origin && !url.pathname.startsWith("/api/auth/")) onUnauthorized();
+    }
+    return res;
+  };
+  window.fetch = wrapped;
+  return () => {
+    if (window.fetch === wrapped) window.fetch = original;
+  };
+}
 function watchIdle(initialIdleSeconds) {
   let stopped = false;
   let timer;
@@ -477,8 +494,10 @@ function watchIdle(initialIdleSeconds) {
   const signedOut = () => {
     if (stopped) return;
     stop();
-    window.location.reload();
+    showToast("Your session has ended. Taking you to sign in\u2026", "notice");
+    setTimeout(() => window.location.reload(), 1500);
   };
+  const unwatchFetch = watchFetch(() => signedOut());
   const schedule = (idleSeconds) => {
     if (stopped) return;
     clearTimeout(timer);
@@ -513,6 +532,7 @@ function watchIdle(initialIdleSeconds) {
   schedule(initialIdleSeconds);
   function stop() {
     stopped = true;
+    unwatchFetch();
     clearTimeout(timer);
     for (const type of ACTIVITY_EVENTS) window.removeEventListener(type, onUse, { capture: true });
     document.removeEventListener("visibilitychange", onVisible);
@@ -520,11 +540,11 @@ function watchIdle(initialIdleSeconds) {
   return stop;
 }
 function mountSignOut(trigger) {
-  let cancelled = false;
+  let canceled = false;
   let group = null;
   let observer = null;
   const place = () => {
-    if (cancelled || !trigger.isConnected) return false;
+    if (canceled || !trigger.isConnected) return false;
     group = document.createElement("span");
     group.className = "ui-menu-actions";
     trigger.before(group);
@@ -533,7 +553,7 @@ function mountSignOut(trigger) {
   };
   let stopWatching = null;
   void sessionState("GET").then((state) => {
-    if (state.kind !== "signed-in" || cancelled) return;
+    if (state.kind !== "signed-in" || canceled) return;
     stopWatching = watchIdle(state.idleSeconds);
     if (place() || typeof MutationObserver !== "function") return;
     observer = new MutationObserver(() => {
@@ -542,7 +562,7 @@ function mountSignOut(trigger) {
     observer.observe(document.body, { childList: true, subtree: true });
   });
   return () => {
-    cancelled = true;
+    canceled = true;
     observer?.disconnect();
     stopWatching?.();
     if (group) {
@@ -748,52 +768,52 @@ var HamburgerMenu = class {
     target.addEventListener(type, fn, capture);
     this.bindings.push({ target, type, fn, capture });
   }
-  unbindWithin(el) {
+  unbindWithin(el2) {
     for (let i = this.bindings.length - 1; i >= 0; i--) {
       const binding = this.bindings[i];
-      if (binding.target !== el) continue;
+      if (binding.target !== el2) continue;
       binding.target.removeEventListener(binding.type, binding.fn, binding.capture);
       this.bindings.splice(i, 1);
     }
   }
   buildRecord(item) {
     if (isSeparator(item)) {
-      const el2 = document.createElement("div");
-      el2.className = "ui-menu-separator";
-      el2.setAttribute("role", "separator");
-      return { item, el: el2 };
+      const el3 = document.createElement("div");
+      el3.className = "ui-menu-separator";
+      el3.setAttribute("role", "separator");
+      return { item, el: el3 };
     }
     if (isSection(item)) {
-      const el2 = document.createElement("div");
-      el2.className = "ui-menu-label";
-      el2.textContent = item.section;
-      return { item, el: el2 };
+      const el3 = document.createElement("div");
+      el3.className = "ui-menu-label";
+      el3.textContent = item.section;
+      return { item, el: el3 };
     }
     if (isRender(item)) {
-      const el2 = document.createElement("div");
-      el2.className = "ui-menu-slot";
-      el2.id = item.id;
-      this.drawer.append(el2);
-      item.render(el2);
-      return { item, el: el2 };
+      const el3 = document.createElement("div");
+      el3.className = "ui-menu-slot";
+      el3.id = item.id;
+      this.drawer.append(el3);
+      item.render(el3);
+      return { item, el: el3 };
     }
     if (isLink(item)) {
-      const el2 = document.createElement("a");
-      el2.className = "ui-menu-link";
-      el2.href = item.href;
-      el2.textContent = item.label;
-      return { item, el: el2 };
+      const el3 = document.createElement("a");
+      el3.className = "ui-menu-link";
+      el3.href = item.href;
+      el3.textContent = item.label;
+      return { item, el: el3 };
     }
-    const el = document.createElement("button");
-    el.type = "button";
-    el.className = "ui-menu-item";
-    el.textContent = item.label;
-    if (item.icon !== void 0) el.dataset.icon = item.icon;
-    this.bind(el, "click", () => {
+    const el2 = document.createElement("button");
+    el2.type = "button";
+    el2.className = "ui-menu-item";
+    el2.textContent = item.label;
+    if (item.icon !== void 0) el2.dataset.icon = item.icon;
+    this.bind(el2, "click", () => {
       item.onSelect();
       this.close();
     });
-    return { item, el };
+    return { item, el: el2 };
   }
   refresh(record) {
     const item = record.item;
@@ -868,6 +888,57 @@ var HamburgerMenu = class {
   }
 };
 
+// web/shared/ts/icons.ts
+var SVG_NS3 = "http://www.w3.org/2000/svg";
+function icon(shapes, filled = false) {
+  const svg = document.createElementNS(SVG_NS3, "svg");
+  const base = {
+    viewBox: "0 0 24 24",
+    width: "1em",
+    height: "1em",
+    "aria-hidden": "true",
+    focusable: "false"
+  };
+  const paint = filled ? { fill: "currentColor" } : { fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round" };
+  for (const [k, v] of Object.entries({ ...base, ...paint })) svg.setAttribute(k, v);
+  for (const [tag, attrs] of shapes) {
+    const node = document.createElementNS(SVG_NS3, tag);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    svg.append(node);
+  }
+  return svg;
+}
+var copyIcon = () => icon([
+  ["rect", { x: "9", y: "9", width: "13", height: "13", rx: "2" }],
+  ["path", { d: "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" }]
+]);
+var checkIcon = () => icon([["polyline", { points: "20 6 9 17 4 12" }]]);
+var chevronIcon = () => icon([["polyline", { points: "9 18 15 12 9 6" }]]);
+var folderIcon = () => icon([["path", { d: "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" }]]);
+var fileIcon = () => icon([
+  ["path", { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" }],
+  ["polyline", { points: "14 2 14 8 20 8" }]
+]);
+var editIcon = () => icon([["path", { d: "M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" }]]);
+var trashIcon = () => icon([
+  ["polyline", { points: "3 6 5 6 21 6" }],
+  ["path", { d: "M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" }],
+  ["path", { d: "M10 11v6" }],
+  ["path", { d: "M14 11v6" }],
+  ["path", { d: "M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" }]
+]);
+var gripIcon = () => icon(
+  [
+    [7, 5],
+    [17, 5],
+    [7, 12],
+    [17, 12],
+    [7, 19],
+    [17, 19]
+  ].map(([cx, cy]) => ["circle", { cx: String(cx), cy: String(cy), r: "2" }]),
+  true
+);
+
 // web/shared/ts/clipboard.ts
 async function copyText(text) {
   try {
@@ -892,14 +963,541 @@ async function copyText(text) {
     return false;
   }
 }
+function createCopyButton(options) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = options.className ? `ui-copy-btn ${options.className}` : "ui-copy-btn";
+  btn.title = `Copy ${options.label}`;
+  btn.setAttribute("aria-label", `Copy ${options.label}`);
+  btn.append(copyIcon());
+  let reset;
+  btn.addEventListener("click", () => {
+    void copyText(options.text()).then((ok) => {
+      showToast(ok ? "Copied!" : "Copy failed. Select the text and copy it by hand.", ok ? "success" : "error");
+      if (!ok) return;
+      btn.replaceChildren(checkIcon());
+      clearTimeout(reset);
+      reset = setTimeout(() => btn.replaceChildren(copyIcon()), 1200);
+    });
+  });
+  return btn;
+}
+
+// web/shared/ts/filetree.ts
+var byName = (a, b) => a.name.localeCompare(b.name, void 0, { sensitivity: "base", numeric: true });
+function el(tag, className) {
+  const node = document.createElement(tag);
+  node.className = className;
+  return node;
+}
+var FileTree = class {
+  constructor(options) {
+    this.entries = [];
+    /** Folders opened or closed by the user, overriding openFolders. */
+    this.open = /* @__PURE__ */ new Map();
+    this.byPath = /* @__PURE__ */ new Map();
+    this.parentOf = /* @__PURE__ */ new Map();
+    this.loading = /* @__PURE__ */ new Set();
+    this.errors = /* @__PURE__ */ new Map();
+    this.selectedPath = null;
+    this.topLoaded = false;
+    /** The last row click, to spot a double-click even if the row was redrawn in between. */
+    this.lastClick = { path: "", at: 0 };
+    /** Open folders met while rendering that still need loading; started after. */
+    this.queued = [];
+    this.options = options;
+    this.el = el("div", "ui-tree");
+    this.el.setAttribute("role", "tree");
+    this.el.setAttribute("aria-label", options.label);
+    this.el.addEventListener("click", (e) => this.onClick(e));
+    this.el.addEventListener("keydown", (e) => this.onKeydown(e));
+    if (options.entries) {
+      this.entries = options.entries;
+      this.topLoaded = true;
+      this.render();
+    } else {
+      void this.loadTop();
+    }
+  }
+  /** Replaces the top-level entries (open/closed folders are kept). */
+  setEntries(entries) {
+    this.entries = entries;
+    this.topLoaded = true;
+    this.render();
+  }
+  /** Changes options (sort, filter, activePath, locked, …) and redraws. */
+  update(changes) {
+    this.options = { ...this.options, ...changes };
+    this.render();
+  }
+  /** The selected entry, in a picker. */
+  get selected() {
+    return this.selectedPath === null ? null : this.byPath.get(this.selectedPath) ?? null;
+  }
+  /** Reloads a folder's contents (or, with no path, the top level). */
+  async reload(path) {
+    if (path === void 0) {
+      await this.loadTop();
+      return;
+    }
+    const entry = this.byPath.get(path);
+    if (entry && entry.isDir) {
+      entry.children = void 0;
+      await this.loadChildren(entry);
+    }
+  }
+  /**
+   * Opens the folders down to `path`, loading them as needed, then selects
+   * it (in a picker) and scrolls it into view. Paths nest by prefix: a
+   * folder "a/b" (or "/a") contains "a/b/c" (or "/a/b").
+   */
+  async reveal(path) {
+    if (!this.topLoaded) await this.loadTop();
+    let level = this.entries;
+    for (; ; ) {
+      const hit = level.find((e) => e.path === path || e.isDir && contains(e.path, path));
+      if (!hit) break;
+      if (hit.path === path) {
+        this.choose(hit, false);
+        break;
+      }
+      this.open.set(hit.path, true);
+      if (hit.children === void 0) await this.loadChildren(hit);
+      level = hit.children ?? [];
+    }
+    this.render();
+    this.rowFor(path)?.scrollIntoView({ block: "nearest" });
+  }
+  /** Focuses the selected, active or first row. */
+  focus() {
+    const row = this.selectedPath && this.rowFor(this.selectedPath) || this.options.activePath && this.rowFor(this.options.activePath) || this.rows()[0];
+    row?.focus();
+  }
+  // --- loading ---------------------------------------------------------------
+  async loadTop() {
+    if (!this.options.load) return;
+    this.loading.add("");
+    this.render();
+    try {
+      this.entries = await this.options.load(null);
+      this.errors.delete("");
+    } catch (err) {
+      this.errors.set("", err instanceof Error ? err.message : String(err));
+    } finally {
+      this.loading.delete("");
+      this.topLoaded = true;
+      this.render();
+    }
+  }
+  async loadChildren(entry) {
+    if (!this.options.load || this.loading.has(entry.path)) return;
+    this.loading.add(entry.path);
+    this.render();
+    try {
+      entry.children = await this.options.load(entry);
+      this.errors.delete(entry.path);
+    } catch (err) {
+      this.errors.set(entry.path, err instanceof Error ? err.message : String(err));
+    } finally {
+      this.loading.delete(entry.path);
+      this.render();
+    }
+  }
+  // --- rendering ---------------------------------------------------------------
+  isOpen(entry) {
+    if (entry.leaf) return false;
+    if (this.options.filter) return true;
+    const set = this.open.get(entry.path);
+    if (set !== void 0) return set;
+    const all = this.options.openFolders ?? (this.options.load ? "none" : "all");
+    return all === "all";
+  }
+  visible(entry) {
+    const filter = this.options.filter;
+    if (!filter) return true;
+    if (!entry.isDir) return filter(entry);
+    return entry.children === void 0 || entry.children.some((c) => this.visible(c));
+  }
+  sorted(entries) {
+    const recent = this.options.sort === "recent";
+    return [...entries].sort((a, b) => {
+      if (recent) return (b.mtime ?? 0) - (a.mtime ?? 0) || byName(a, b);
+      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+      return byName(a, b);
+    });
+  }
+  render() {
+    const active = document.activeElement;
+    const focusedPath = active && this.el.contains(active) ? active.closest(".ui-tree-row")?.dataset.path : void 0;
+    this.byPath.clear();
+    this.parentOf.clear();
+    const frag = document.createDocumentFragment();
+    if (this.loading.has("")) {
+      frag.append(this.noteRow("Loading\u2026", 0));
+    } else if (this.errors.has("")) {
+      frag.append(this.noteRow(this.errors.get(""), 0, true));
+    } else {
+      const shown = this.appendLevel(frag, this.entries, 0, this.options.rootPath ?? "");
+      if (!shown && this.topLoaded) frag.append(this.noteRow(this.options.emptyText ?? "Nothing here.", 0));
+    }
+    this.el.replaceChildren(frag);
+    this.el.classList.toggle("is-locked", this.isLocked());
+    const tabRow = focusedPath && this.rowFor(focusedPath) || this.selectedPath && this.rowFor(this.selectedPath) || this.options.activePath && this.rowFor(this.options.activePath) || this.rows()[0];
+    if (tabRow) tabRow.tabIndex = 0;
+    if (focusedPath && tabRow && tabRow.dataset.path === focusedPath) tabRow.focus();
+    for (const entry of this.queued.splice(0)) void this.loadChildren(entry);
+  }
+  /** Appends one level's rows; returns how many were shown. */
+  appendLevel(parent, entries, depth, parentPath) {
+    let shown = 0;
+    for (const entry of this.sorted(entries)) {
+      this.byPath.set(entry.path, entry);
+      this.parentOf.set(entry.path, parentPath);
+      if (!this.visible(entry)) continue;
+      shown++;
+      const row = this.row(entry, depth);
+      if (!entry.isDir) {
+        parent.appendChild(row);
+        continue;
+      }
+      const wrap = el("div", "ui-tree-branch");
+      wrap.append(row);
+      if (this.isOpen(entry)) {
+        const group = el("div", "ui-tree-group");
+        group.setAttribute("role", "group");
+        if (this.loading.has(entry.path) || entry.children === void 0 && this.options.load && !this.errors.has(entry.path)) {
+          group.append(this.noteRow("Loading\u2026", depth + 1));
+          if (!this.loading.has(entry.path)) this.queued.push(entry);
+        } else if (this.errors.has(entry.path)) {
+          group.append(this.noteRow(this.errors.get(entry.path), depth + 1, true));
+        } else if (entry.children === void 0) {
+          if (!this.options.filter) group.append(this.noteRow("Empty", depth + 1));
+        } else if (entry.children.length === 0) {
+          if (!this.options.filter) group.append(this.noteRow("Empty", depth + 1));
+        } else {
+          this.appendLevel(group, entry.children, depth + 1, entry.path);
+        }
+        wrap.append(group);
+      }
+      parent.appendChild(wrap);
+    }
+    return shown;
+  }
+  row(entry, depth) {
+    const row = el("div", "ui-tree-row");
+    row.setAttribute("role", "treeitem");
+    row.setAttribute("aria-level", String(depth + 1));
+    row.tabIndex = -1;
+    row.dataset.path = entry.path;
+    row.style.setProperty("--ui-tree-depth", String(depth));
+    row.title = entry.title ?? entry.path;
+    if (entry.isDir) {
+      const open = this.isOpen(entry);
+      row.classList.add("is-dir");
+      row.classList.toggle("is-open", open);
+      if (!entry.leaf) row.setAttribute("aria-expanded", String(open));
+    }
+    if (entry.path === this.options.activePath) row.classList.add("is-active");
+    if (this.options.select) {
+      const selected = entry.path === this.selectedPath;
+      row.classList.toggle("is-selected", selected);
+      row.setAttribute("aria-selected", String(selected));
+    }
+    if (entry.disabled) {
+      row.classList.add("is-disabled");
+      row.setAttribute("aria-disabled", "true");
+    }
+    if (this.canDo("move", entry)) {
+      const grip = el("span", "ui-tree-grip");
+      grip.title = "Drag to move into a folder";
+      grip.append(gripIcon());
+      grip.addEventListener("pointerdown", (e) => this.startDrag(e, grip, row, entry));
+      row.append(grip);
+    }
+    const twisty = el("span", "ui-tree-twisty");
+    if (entry.isDir && !entry.leaf) twisty.append(chevronIcon());
+    const iconEl = el("span", "ui-tree-icon");
+    iconEl.append(entry.isDir ? folderIcon() : fileIcon());
+    const name = el("span", "ui-tree-name");
+    name.textContent = entry.name;
+    row.append(twisty, iconEl, name);
+    if (entry.meta) {
+      const meta = el("span", "ui-tree-meta");
+      meta.textContent = entry.meta;
+      row.append(meta);
+    }
+    const tools = el("span", "ui-tree-tools");
+    const kind = entry.isDir ? "folder" : "file";
+    if (this.canDo("rename", entry)) tools.append(this.tool("rename", editIcon(), `Rename ${kind} ${entry.name}`, `Rename ${kind}`));
+    if (this.canDo("remove", entry)) tools.append(this.tool("remove", trashIcon(), `Delete ${kind} ${entry.name}`, `Delete ${kind}`));
+    if (tools.childElementCount) row.append(tools);
+    return row;
+  }
+  tool(action, icon2, label, tip) {
+    const btn = el("button", `ui-tree-tool ui-tree-${action}`);
+    btn.type = "button";
+    btn.dataset.action = action;
+    btn.title = tip;
+    btn.setAttribute("aria-label", label);
+    btn.tabIndex = -1;
+    btn.append(icon2);
+    return btn;
+  }
+  noteRow(text, depth, error = false) {
+    const note = el("div", error ? "ui-tree-note is-error" : "ui-tree-note");
+    note.style.setProperty("--ui-tree-depth", String(depth));
+    note.textContent = text;
+    return note;
+  }
+  isLocked() {
+    return !!this.options.locked;
+  }
+  canDo(action, entry) {
+    if (this.isLocked()) return false;
+    const o = this.options;
+    if (action === "rename") return !!o.rename && (o.canRename?.(entry) ?? true);
+    if (action === "remove") return !!o.remove && (o.canRemove?.(entry) ?? true);
+    return !!o.move && (o.canMove?.(entry) ?? !entry.isDir);
+  }
+  // --- interaction ---------------------------------------------------------------
+  rows() {
+    return Array.from(this.el.querySelectorAll(".ui-tree-row"));
+  }
+  rowFor(path) {
+    return this.el.querySelector(`.ui-tree-row[data-path="${CSS.escape(path)}"]`);
+  }
+  entryOf(target) {
+    const row = target?.closest?.(".ui-tree-row");
+    return row?.dataset.path !== void 0 ? this.byPath.get(row.dataset.path) ?? null : null;
+  }
+  toggle(entry, open = !this.isOpen(entry)) {
+    this.open.set(entry.path, open);
+    if (open) this.errors.delete(entry.path);
+    this.render();
+  }
+  /** Selects (picker) an entry; with `open`, also treats it as chosen. */
+  choose(entry, open) {
+    if (entry.disabled) return;
+    const selectable = this.options.select === (entry.isDir ? "dir" : "file");
+    if (selectable) {
+      this.selectedPath = entry.path;
+      this.options.onSelect?.(entry);
+    }
+    if (open && (selectable || !this.options.select)) this.options.onOpen?.(entry);
+  }
+  /** The row's main action: a folder opens/closes (and selects, in a folder
+   * picker); a file opens, or is selected in a picker. */
+  activate(entry) {
+    if (entry.isDir) {
+      if (this.options.select === "dir") {
+        this.choose(entry, false);
+        if (entry.leaf) this.markSelection();
+        else this.toggle(entry, true);
+      } else {
+        this.toggle(entry);
+      }
+      return;
+    }
+    if (this.options.select) {
+      this.choose(entry, false);
+      this.markSelection();
+    } else {
+      this.choose(entry, true);
+    }
+  }
+  onClick(e) {
+    const target = e.target;
+    if (target.closest(".ui-tree-grip")) return;
+    const entry = this.entryOf(target);
+    if (!entry) return;
+    const tool = target.closest(".ui-tree-tool");
+    if (tool) {
+      e.stopPropagation();
+      if (tool.dataset.action === "rename") this.options.rename?.(entry);
+      if (tool.dataset.action === "remove") this.options.remove?.(entry);
+      return;
+    }
+    if (entry.isDir && !entry.leaf && target.closest(".ui-tree-twisty")) {
+      this.toggle(entry);
+      return;
+    }
+    const now = Date.now();
+    const again = this.lastClick.path === entry.path && now - this.lastClick.at < 450;
+    this.lastClick = again ? { path: "", at: 0 } : { path: entry.path, at: now };
+    if (again && this.options.select === (entry.isDir ? "dir" : "file")) {
+      this.choose(entry, true);
+      return;
+    }
+    this.activate(entry);
+  }
+  /** Moves the selection mark without redrawing the rows. */
+  markSelection() {
+    for (const row of this.rows()) {
+      const selected = row.dataset.path === this.selectedPath;
+      row.classList.toggle("is-selected", selected);
+      row.setAttribute("aria-selected", String(selected));
+    }
+  }
+  onKeydown(e) {
+    const entry = this.entryOf(e.target);
+    if (!entry) return;
+    const rows = this.rows();
+    const at = rows.indexOf(e.target);
+    const focusRow = (row) => {
+      if (!row) return;
+      for (const r of rows) r.tabIndex = -1;
+      row.tabIndex = 0;
+      row.focus();
+    };
+    switch (e.key) {
+      case "ArrowDown":
+        focusRow(rows[at + 1]);
+        break;
+      case "ArrowUp":
+        focusRow(rows[at - 1]);
+        break;
+      case "Home":
+        focusRow(rows[0]);
+        break;
+      case "End":
+        focusRow(rows[rows.length - 1]);
+        break;
+      case "ArrowRight":
+        if (!entry.isDir || entry.leaf) return;
+        if (!this.isOpen(entry)) this.toggle(entry, true);
+        else focusRow(rows[at + 1]);
+        break;
+      case "ArrowLeft":
+        if (entry.isDir && !entry.leaf && this.isOpen(entry)) {
+          this.toggle(entry, false);
+        } else {
+          const parent = this.parentOf.get(entry.path);
+          if (parent !== void 0) focusRow(this.rowFor(parent) ?? void 0);
+        }
+        break;
+      case "Enter":
+        if (this.options.select && this.options.select === (entry.isDir ? "dir" : "file")) this.choose(entry, true);
+        else this.activate(entry);
+        break;
+      case " ":
+        this.activate(entry);
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+  }
+  // --- drag to move (grocery/todo-style grip, pointer-driven) -------------------
+  dropFolderAt(x, y, dragged) {
+    const hit = document.elementFromPoint(x, y);
+    if (!hit || !this.el.contains(hit)) return null;
+    const root = this.options.rootPath ?? "";
+    const target = this.entryOf(hit);
+    let folder;
+    if (!target) folder = root;
+    else if (target.isDir) folder = target.path;
+    else folder = this.parentOf.get(target.path) ?? root;
+    if (folder === this.parentOf.get(dragged.path)) return null;
+    if (dragged.isDir && (folder === dragged.path || contains(dragged.path, folder))) return null;
+    const mark = folder === root ? this.el : this.rowFor(folder) ?? this.el;
+    return { folder, mark };
+  }
+  startDrag(e, grip, row, entry) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    grip.setPointerCapture(e.pointerId);
+    row.classList.add("is-dragging");
+    let target = null;
+    const clear = () => {
+      this.el.classList.remove("is-drop-target");
+      this.el.querySelectorAll(".is-drop-target").forEach((n) => n.classList.remove("is-drop-target"));
+    };
+    const onMove = (ev) => {
+      clear();
+      target = this.dropFolderAt(ev.clientX, ev.clientY, entry);
+      target?.mark.classList.add("is-drop-target");
+    };
+    const onEnd = () => {
+      grip.removeEventListener("pointermove", onMove);
+      grip.removeEventListener("pointerup", onEnd);
+      grip.removeEventListener("pointercancel", onEnd);
+      row.classList.remove("is-dragging");
+      clear();
+      if (target) this.options.move?.(entry, target.folder);
+    };
+    grip.addEventListener("pointermove", onMove);
+    grip.addEventListener("pointerup", onEnd);
+    grip.addEventListener("pointercancel", onEnd);
+  }
+};
+function contains(dir, path) {
+  if (dir === "" || dir === "/") return path !== dir;
+  return path.startsWith(dir.endsWith("/") ? dir : dir + "/");
+}
+function openTreePicker(options) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    const content = el("div", "ui-tree-picker");
+    if (options.note) {
+      const note = el("p", "ui-modal-message");
+      note.textContent = options.note;
+      content.append(note);
+    }
+    const pathBar = el("div", "ui-tree-picker-path");
+    pathBar.textContent = "Nothing selected";
+    const actions = el("div", "ui-modal-actions");
+    const cancel = el("button", "ui-modal-btn");
+    cancel.type = "button";
+    cancel.textContent = "Cancel";
+    const ok = el("button", "ui-modal-btn ui-modal-btn-primary");
+    ok.type = "button";
+    ok.textContent = options.confirmLabel ?? "Choose";
+    ok.disabled = true;
+    actions.append(cancel, ok);
+    let modal = null;
+    const finish = (entry) => {
+      settle(entry);
+      modal?.close();
+    };
+    const tree = new FileTree({
+      label: options.title,
+      select: options.select,
+      load: options.load,
+      entries: options.entries,
+      emptyText: options.emptyText,
+      onSelect: (entry) => {
+        pathBar.textContent = entry.path;
+        ok.disabled = false;
+      },
+      onOpen: (entry) => finish(entry)
+    });
+    tree.el.classList.add("ui-tree-picker-tree");
+    content.append(pathBar, tree.el, actions);
+    modal = openModal(content, { title: options.title, onClose: () => settle(null) });
+    cancel.addEventListener("click", () => finish(null));
+    ok.addEventListener("click", () => finish(tree.selected));
+    if (options.startPath !== void 0) {
+      void tree.reveal(options.startPath).then(() => tree.focus());
+    }
+  });
+}
 export {
+  FileTree,
   HamburgerMenu,
   THEMES,
   ThemeManager,
   alertDialog,
   confirmDialog,
   copyText,
+  createCopyButton,
   openModal,
+  openTreePicker,
   promptDialog,
   setTheme,
   showToast

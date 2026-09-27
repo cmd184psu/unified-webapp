@@ -19,8 +19,8 @@ obsidian-stamp premise, never a default direction.*
 *Reconciled again on **2026-09-16** against the **Phase-2** plan
 (`docs/PLAN-ui-unification-phase2.md`, v5) after three user rulings the same
 day. Three changes, all confined to this section's own questions: **Q9** moved
-from open to Closed (the `.mjs` half of Q8's carve-out is authorised, and the
-part it does not authorise is written down); **Q2** gained a dated amendment
+from open to Closed (the `.mjs` half of Q8's carve-out is authorized, and the
+part it does not authorize is written down); **Q2** gained a dated amendment
 overriding its Phase-3 timing for `--color-surface-dynamic` and correcting two
 of its premises against the tree; and **Q3** is untouched — still open, still
 gated on C6 landing the attribute, and unaffected by either ruling. Section
@@ -113,7 +113,7 @@ explicitly, because the two plans number their sections differently.*
   >
   > **`--radius-xl` is not swept along.** It stays deferred on its original
   > grounds — grocery-only, one consumer, and no module in Phase 2's manifest
-  > reads it. The ruling widens the *theme colour* vocabulary so any theme
+  > reads it. The ruling widens the *theme color* vocabulary so any theme
   > works with any module; it does not open the structural token set.
   >
   > Phase-2 plan: §9 **Q12** carries the full disposition, guardrail **G12**
@@ -185,7 +185,7 @@ explicitly, because the two plans number their sections differently.*
   different cadence) stand on their own and are sufficient. Plan §9 item 2
   carries the adoption work. *Needed by: Phase 2.*
 - **Q8 — `/shared/` sits inside `svc.Gate`, so the login page structurally
-  cannot link `shared.css`.** **Closed: direction (a) authorised** — "there's no
+  cannot link `shared.css`.** **Closed: direction (a) authorized** — "there's no
   need to protect css files like that". `internal/platform/auth/gate.go:28`
   embeds and serves `login.html` before any module handler runs, yet the FRD's
   scope includes styling it. Of the two options — **(a)** a narrow
@@ -226,7 +226,7 @@ explicitly, because the two plans number their sections differently.*
   probe** under this ruling and keeps its number), **B6.4** and **B6.5**.
   Phase-2 §9 Q9 carries the full disposition.
 
-  **What this answer does *not* authorise.** *Styling* the login page — the FRD
+  **What this answer does *not* authorize.** *Styling* the login page — the FRD
   scope item that motivated Q8 in the first place — is **still not in Phase 2**.
   C8 makes the three assets reachable without a session; it does not add a
   `<link>`, a pre-paint block or a theme control to `login.html`, and

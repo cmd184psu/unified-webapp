@@ -428,7 +428,7 @@
       if (!ceremony) return;
       return navigator.credentials.get({ publicKey: assertionOptions(ceremony.options) })
         .then(function (credential) {
-          if (!credential) throw new Error("cancelled");
+          if (!credential) throw new Error("canceled");
           return fetch("/api/auth/passkey/login/finish", {
             method: "POST",
             headers: { "Content-Type": "application/json" },

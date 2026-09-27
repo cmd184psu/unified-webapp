@@ -261,8 +261,8 @@ Only one module can be the `localhost` fallback at a time. Change it to switch w
 
 ## Grocery: the Recipes tab
 
-The Grocery module has two tabs over one shared list. **Grocery** organises food by where it
-sits in the store; **Recipes** organises the same food by the meal it belongs to. There is one
+The Grocery module has two tabs over one shared list. **Grocery** organizes food by where it
+sits in the store; **Recipes** organizes the same food by the meal it belongs to. There is one
 set of items underneath — a recipe ingredient *is* a grocery item, not a copy of one.
 
 ### Enabling a recipe

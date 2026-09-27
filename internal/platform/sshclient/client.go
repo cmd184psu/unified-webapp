@@ -138,7 +138,7 @@ func Dial(ctx context.Context, c Credentials, hostKeyCB ssh.HostKeyCallback) (*s
 // Run executes one command in a new session and returns its combined stdout
 // and stderr. stdin, when non-nil, is fed to the command (e.g. file contents
 // for `cat > path`), so data never has to be spliced into the command line.
-// A non-zero exit returns the output together with the error. Cancelling ctx
+// A non-zero exit returns the output together with the error. Canceling ctx
 // closes the session.
 func Run(ctx context.Context, client *ssh.Client, cmd string, stdin []byte) (string, error) {
 	sess, err := client.NewSession()

@@ -1,6 +1,6 @@
 # Sampler manual-verification checklist
 
-This is the manual verification surface for the behaviour Phase-1 automated
+This is the manual verification surface for the behavior Phase-1 automated
 tests do not cover (ADR-005: no jsdom). It is checked once per theme before
 C5 is considered done, and re-run in every later phase that touches shared
 CSS (`web/shared/css/`) or a shared primitive (`web/shared/ts/modal.ts`,
@@ -58,7 +58,7 @@ Each theme section also carries a **Theme picker** row (Phase-2 C3). From the
 grid that `HamburgerMenu` will mount at C4 — verify per theme:
 
 - **8 swatch fills distinct** — all eight swatches are visible at once and no
-  two render the same colour. Each swatch carries its own `data-theme`, so it
+  two render the same color. Each swatch carries its own `data-theme`, so it
   previews *that* theme's `--color-primary` rather than the active theme's
   (ADR-015); eight identical fills is the specific defect this row catches.
 - **Swatch border legible** — every swatch's `var(--color-border)` ring is
@@ -110,7 +110,7 @@ rather than per theme:
 
 | One-off check | What it proves | Done |
 | --- | --- | --- |
-| Every item kind is present and functional | B4.2's sampler row: two action items (each fires its handler and closes the drawer), one `<a href>` link item (keyboard-activatable, jumps to "Colour tokens"), one `.ui-menu-separator`, one `.ui-menu-label` section header, the `render` slot, the guarded item, and the themePicker section | [ ] |
+| Every item kind is present and functional | B4.2's sampler row: two action items (each fires its handler and closes the drawer), one `<a href>` link item (keyboard-activatable, jumps to "Color tokens"), one `.ui-menu-separator`, one `.ui-menu-label` section header, the `render` slot, the guarded item, and the themePicker section | [ ] |
 | "flip the when() guard" hides and restores "Guarded item" on the **next** open | B4.4: the guard is re-read on every open rather than cached at construction, and no `addItem`/`removeItem` call is involved | [ ] |
 | With `prefers-reduced-motion: reduce` set in the OS, the drawer and the backdrop appear and disappear with no slide and no fade | B4.9, and that the suppression is CSS-only: the `@media` block in `components.css` is the whole implementation, so there is no JavaScript branch to get wrong | [ ] |
 

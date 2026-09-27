@@ -388,6 +388,17 @@
 .ui-modal-btn-primary:hover {
   background: var(--color-primary-hover);
 }
+.ui-modal-btn:disabled,
+.ui-modal-btn:disabled:hover {
+  opacity: 0.5;
+  cursor: not-allowed;
+  border-color: var(--color-border);
+}
+.ui-modal-btn-primary:disabled,
+.ui-modal-btn-primary:disabled:hover {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
 .ui-toast-stack {
   position: fixed;
   right: var(--space-4);
@@ -553,6 +564,26 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-full);
   background: var(--color-primary);
+}
+.ui-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  font-size: var(--text-base);
+  line-height: 1;
+  cursor: pointer;
+}
+.ui-copy-btn:hover {
+  background: var(--color-surface-3);
+}
+.ui-copy-btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 .ui-menu-actions {
   display: inline-flex;
@@ -738,6 +769,175 @@
   .ui-menu-drawer.is-open {
     transition: none;
   }
+}
+.ui-tree {
+  padding: var(--space-1) 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+.ui-tree.is-drop-target {
+  outline: 2px dashed var(--color-primary);
+  outline-offset: -4px;
+}
+.ui-tree-row,
+.ui-tree-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  padding-left: calc(var(--space-3) + var(--ui-tree-depth, 0) * 14px);
+  white-space: nowrap;
+}
+.ui-tree-row {
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--transition), color var(--transition);
+}
+.ui-tree-row:hover {
+  background: var(--color-surface-3);
+  color: var(--color-text);
+}
+.ui-tree-row:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+.ui-tree-row.is-active,
+.ui-tree-row.is-selected {
+  background: var(--color-primary-tint);
+  color: var(--color-primary);
+}
+.ui-tree-row.is-disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.ui-tree-row.is-dragging {
+  opacity: 0.4;
+}
+.ui-tree-row.is-drop-target {
+  background: var(--color-primary-tint);
+  color: var(--color-primary);
+  outline: 1px dashed var(--color-primary);
+  outline-offset: -1px;
+}
+.ui-tree-note {
+  color: var(--color-text-faint);
+  font-style: italic;
+}
+.ui-tree-note.is-error {
+  color: var(--color-danger);
+  font-style: normal;
+  white-space: normal;
+}
+.ui-tree-twisty,
+.ui-tree-icon,
+.ui-tree-grip {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.ui-tree-twisty {
+  width: 1em;
+  font-size: var(--text-xs);
+  transition: transform var(--transition);
+}
+.ui-tree-row.is-open .ui-tree-twisty {
+  transform: rotate(90deg);
+}
+.ui-tree-icon {
+  opacity: 0.6;
+}
+.ui-tree-row.is-active .ui-tree-icon,
+.ui-tree-row.is-selected .ui-tree-icon {
+  opacity: 1;
+}
+.ui-tree-grip {
+  color: var(--color-text-faint);
+  cursor: grab;
+  touch-action: none;
+  margin-left: calc(-1 * var(--space-1));
+}
+.ui-tree-grip:active {
+  cursor: grabbing;
+  color: var(--color-text-muted);
+}
+.ui-tree-grip svg {
+  pointer-events: none;
+}
+.ui-tree-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ui-tree-meta {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+}
+.ui-tree-tools {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 2px;
+}
+.ui-tree-tool {
+  display: inline-flex;
+  padding: 2px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  opacity: 0;
+}
+.ui-tree-row:hover .ui-tree-tool,
+.ui-tree-row:focus-within .ui-tree-tool,
+.ui-tree-row.is-active .ui-tree-tool {
+  opacity: 1;
+}
+.ui-tree-tool:hover {
+  background: var(--color-surface-dynamic);
+  color: var(--color-text);
+}
+.ui-tree-remove:hover {
+  color: var(--color-danger);
+}
+.ui-tree-tool:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+@media (pointer: coarse) {
+  .ui-tree-row {
+    padding-top: var(--space-2);
+    padding-bottom: var(--space-2);
+  }
+  .ui-tree-tool {
+    opacity: 1;
+  }
+}
+.ui-tree-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(32rem, 80vw);
+  max-width: 100%;
+}
+.ui-tree-picker-path {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+.ui-tree-picker-tree {
+  height: min(22rem, 50vh);
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-1);
 }
 
 /* web/shared/css/index.css */

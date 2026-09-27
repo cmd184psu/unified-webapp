@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { showToast } from '@shared'
 import { api, Share } from './api'
-import { FolderPicker } from './FolderPicker'
+import { pickFolder } from './FolderPicker'
 
 interface Props {
   shares: Share[]
@@ -148,12 +148,19 @@ function ShareEditor({
 }
 
 export function SharesPage({ shares, onChange, shareOwner }: Props) {
-  const [pickerIdx, setPickerIdx] = useState<number | null>(null)
   const [findingHome, setFindingHome] = useState(false)
 
   // The share owner's home directory lives outside /opt, where the folder
   // picker cannot go, so the server resolves it. An existing "home" share is
   // re-pointed rather than duplicated, keeping its other settings.
+  const pickFor = async (i: number) => {
+    const folder = await pickFolder()
+    if (!folder) return
+    const share = shares[i]
+    // Default the name from the folder if share has no name yet.
+    update(i, { ...share, path: folder.path, name: share.name || folder.name })
+  }
+
   const shareHome = async () => {
     const owner = shareOwner.trim()
     if (!owner) {
@@ -235,26 +242,12 @@ export function SharesPage({ shares, onChange, shareOwner }: Props) {
               share={s}
               onChange={updated => update(i, updated)}
               onDelete={() => remove(i)}
-              onPickFolder={() => setPickerIdx(i)}
+              onPickFolder={() => void pickFor(i)}
             />
           ))}
         </div>
       )}
 
-      {pickerIdx !== null && (
-        <FolderPicker
-          onSelect={folder => {
-            const share = shares[pickerIdx]
-            // Default the name from the folder if share has no name yet.
-            update(pickerIdx, {
-              ...share,
-              path: folder.path,
-              name: share.name || folder.name,
-            })
-          }}
-          onClose={() => setPickerIdx(null)}
-        />
-      )}
     </div>
   )
 }

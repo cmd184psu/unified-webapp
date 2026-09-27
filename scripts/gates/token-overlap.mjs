@@ -8,7 +8,7 @@
 // Phase 3 C1 retired taskmaster's local token vocabulary; the only remaining
 // local token (--status-blue) has no shared equivalent, so the expected
 // overlap is now empty. If the set ever grows, this gate fails and the new
-// overlap must be analysed before landing.
+// overlap must be analyzed before landing.
 //
 // The mechanism is `comm -12` over two sorted -u name lists; it lives in a
 // file rather than a make recipe because process substitution is not portable
@@ -62,7 +62,7 @@ process.stdout.write(
     `intersection: ${intersection.length ? intersection.join(", ") : "(empty)"}\n`,
 );
 
-if (unexpected.length) fail(`unanalysed overlap(s): ${unexpected.join(", ")}`);
+if (unexpected.length) fail(`unanalyzed overlap(s): ${unexpected.join(", ")}`);
 if (absent.length) {
   fail(`expected overlap(s) missing — the analysis in Step 7 no longer holds: ${absent.join(", ")}`);
 }

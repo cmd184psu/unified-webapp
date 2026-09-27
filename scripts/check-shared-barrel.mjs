@@ -4,7 +4,9 @@
 //
 // Asserts that web/shared/ts/index.ts's exported-name set EQUALS the
 // allowlist below: 10 named values + 9 types — Phase 2's end state plus
-// copyText (the shared clipboard helper, added post-Phase 5) (§5
+// copyText and createCopyButton (the shared clipboard helper and its
+// button), and FileTree/openTreePicker (the shared file tree), added
+// post-Phase 5 (§5
 // Step 2.4 added showToast, ToastTone and ToastHandle; §5 Step 3.3 added
 // ThemeManager and ThemeManagerOptions; §5 Step 4.3 added HamburgerMenu,
 // HamburgerMenuOptions and MenuItem, each in the same commit as the barrel
@@ -32,8 +34,8 @@ process.chdir(path.resolve(import.meta.dirname, ".."));
 
 const BARREL = "web/shared/ts/index.ts";
 
-const ALLOWED_VALUES = ["openModal", "confirmDialog", "alertDialog", "promptDialog", "THEMES", "setTheme", "ThemeManager", "showToast", "HamburgerMenu", "copyText"];
-const ALLOWED_TYPES = ["ModalOptions", "ModalHandle", "DialogOptions", "PromptOptions", "ThemeManagerOptions", "ToastTone", "ToastHandle", "HamburgerMenuOptions", "MenuItem"];
+const ALLOWED_VALUES = ["openModal", "confirmDialog", "alertDialog", "promptDialog", "THEMES", "setTheme", "ThemeManager", "showToast", "HamburgerMenu", "copyText", "createCopyButton", "FileTree", "openTreePicker"];
+const ALLOWED_TYPES = ["ModalOptions", "ModalHandle", "DialogOptions", "PromptOptions", "ThemeManagerOptions", "ToastTone", "ToastHandle", "HamburgerMenuOptions", "MenuItem", "CopyButtonOptions", "TreeEntry", "TreeSort", "FileTreeOptions", "TreePickerOptions"];
 
 function fail(message) {
   process.stderr.write(`check-shared-barrel: FAIL ${message}\n`);

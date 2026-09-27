@@ -222,107 +222,27 @@ function renderList(list, note, keys, finish) {
 }
 
 // web/multissh/js/dirpicker.ts
-function el2(tag, className) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  return node;
-}
-function parentPath(p) {
-  if (p === "/" || p === "") return "/";
-  const idx = p.lastIndexOf("/");
-  if (idx <= 0) return "/";
-  return p.slice(0, idx);
-}
-function openDirPicker(target, startPath = "/tmp") {
-  return new Promise((resolve) => {
-    const overlay = el2("div", "modal-overlay");
-    const dialog = el2("div", "modal");
-    const header = el2("div", "modal-header");
-    const title = el2("h2", "modal-title");
-    title.textContent = "Choose remote directory";
-    const closeBtn = el2("button", "modal-close");
-    closeBtn.type = "button";
-    closeBtn.textContent = "\xD7";
-    header.append(title, closeBtn);
-    const pathBar = el2("div", "nav-path-bar");
-    const pathText = el2("span", "nav-path-text");
-    pathBar.append(pathText);
-    const note = el2("p", "modal-note");
-    note.textContent = "Loading\u2026";
-    const list = el2("ul", "key-list");
-    const footer = el2("div", "modal-footer");
-    const useBtn = el2("button", "btn btn-connect nav-use-btn");
-    useBtn.type = "button";
-    useBtn.textContent = "Use this directory";
-    footer.append(useBtn);
-    dialog.append(header, pathBar, note, list, footer);
-    overlay.append(dialog);
-    document.body.append(overlay);
-    let currentPath = startPath;
-    let settled = false;
-    const finish = (value) => {
-      if (settled) return;
-      settled = true;
-      overlay.remove();
-      document.removeEventListener("keydown", onKey);
-      resolve(value);
-    };
-    const onKey = (e) => {
-      if (e.key === "Escape") finish(null);
-    };
-    document.addEventListener("keydown", onKey);
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) finish(null);
-    });
-    closeBtn.addEventListener("click", () => finish(null));
-    useBtn.addEventListener("click", () => finish(currentPath));
-    const navigate = (path) => {
-      note.textContent = "Loading\u2026";
-      list.innerHTML = "";
-      pathText.textContent = path;
-      listRemoteDir(target, path).then(({ path: resolved, entries }) => {
-        currentPath = resolved;
-        pathText.textContent = resolved;
-        renderDirList(list, note, entries, resolved, navigate);
-      }).catch((err) => {
-        note.textContent = `Error: ${err.message}`;
-      });
-    };
-    navigate(startPath);
+import { openTreePicker } from "/shared/dist/shared.mjs";
+async function openDirPicker(target, startPath = "/tmp") {
+  const chosen = await openTreePicker({
+    title: "Choose remote directory",
+    select: "dir",
+    note: `Folders on ${target.user}@${target.host}. Select one and press the button, or double-click it.`,
+    confirmLabel: "Use this directory",
+    emptyText: "No subdirectories.",
+    startPath,
+    load: async (dir) => {
+      if (!dir) return [{ name: "/", path: "/", isDir: true }];
+      const { path, entries } = await listRemoteDir(target, dir.path);
+      return entries.filter((e) => e.isDir).map((e) => ({ name: e.name, path: path === "/" ? `/${e.name}` : `${path}/${e.name}`, isDir: true }));
+    }
   });
-}
-function renderDirList(list, note, entries, currentPath, navigate) {
-  list.innerHTML = "";
-  const dirs = entries.filter((e) => e.isDir);
-  note.textContent = dirs.length === 0 ? "No subdirectories." : "Click a directory to navigate into it.";
-  if (currentPath !== "/") {
-    const upItem = el2("li", "key-item nav-up");
-    const icon = el2("span", "key-icon");
-    icon.textContent = "\u{1F4C2}";
-    const name = el2("span", "key-name");
-    name.textContent = "..";
-    upItem.append(icon, name);
-    upItem.addEventListener("click", () => navigate(parentPath(currentPath)));
-    list.append(upItem);
-  }
-  for (const e of dirs) {
-    const item = el2("li", "key-item");
-    const icon = el2("span", "key-icon");
-    icon.textContent = "\u{1F4C1}";
-    const name = el2("span", "key-name");
-    name.textContent = e.name;
-    item.append(icon, name);
-    item.addEventListener("click", () => {
-      const sep = currentPath.endsWith("/") ? "" : "/";
-      navigate(`${currentPath}${sep}${e.name}`);
-    });
-    list.append(item);
-  }
+  return chosen?.path ?? null;
 }
 
 // web/multissh/js/hosts.ts
-import { confirmDialog } from "/shared/dist/shared.mjs";
-function el3(tag, className) {
+import { confirmDialog, createCopyButton, showToast } from "/shared/dist/shared.mjs";
+function el2(tag, className) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   return node;
@@ -352,33 +272,11 @@ function buildSSHCommand(h2) {
   parts.push(`${h2.user}@${h2.ip}`);
   return parts.join(" ");
 }
-async function copyText(text) {
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-  }
-  try {
-    const ta2 = document.createElement("textarea");
-    ta2.value = text;
-    ta2.style.position = "fixed";
-    ta2.style.opacity = "0";
-    document.body.append(ta2);
-    ta2.select();
-    const ok = document.execCommand("copy");
-    ta2.remove();
-    return ok;
-  } catch {
-    return false;
-  }
-}
 function labeledInput(parent, label, placeholder) {
-  const row = el3("div", "field");
-  const lbl = el3("label", "field-label");
+  const row = el2("div", "field");
+  const lbl = el2("label", "field-label");
   lbl.textContent = label;
-  const input = el3("input", "field-input");
+  const input = el2("input", "field-input");
   input.type = "text";
   input.placeholder = placeholder;
   input.autocomplete = "off";
@@ -389,10 +287,10 @@ function labeledInput(parent, label, placeholder) {
 var GRIP_SVG = '<svg viewBox="0 0 14 14" fill="currentColor" width="14" height="14"><circle cx="4" cy="3" r="1.2"/><circle cx="10" cy="3" r="1.2"/><circle cx="4" cy="7" r="1.2"/><circle cx="10" cy="7" r="1.2"/><circle cx="4" cy="11" r="1.2"/><circle cx="10" cy="11" r="1.2"/></svg>';
 function mountHostRail(root, maxHosts) {
   root.classList.add("host-rail");
-  const titleEl = el3("h1", "rail-title");
+  const titleEl = el2("h1", "rail-title");
   titleEl.textContent = "Hosts";
-  const list = el3("div", "host-list");
-  const addBtn = el3("button", "btn host-add");
+  const list = el2("div", "host-list");
+  const addBtn = el2("button", "btn host-add");
   addBtn.type = "button";
   addBtn.textContent = "+ Add host";
   root.append(titleEl, list, addBtn);
@@ -468,17 +366,17 @@ function mountHostRail(root, maxHosts) {
     });
   };
   const buildCard = (h2, i) => {
-    const card = el3("div", "host-card");
+    const card = el2("div", "host-card");
     cardHost.set(card, h2);
-    const cardHeader = el3("div", "host-card-header");
-    const grip = el3("span", "drag-handle");
+    const cardHeader = el2("div", "host-card-header");
+    const grip = el2("span", "drag-handle");
     grip.title = "Drag to reorder";
     grip.innerHTML = GRIP_SVG;
-    const collapseBtn = el3("button", "host-card-collapse");
+    const collapseBtn = el2("button", "host-card-collapse");
     collapseBtn.type = "button";
-    const cardTitle = el3("h3", "host-card-title");
+    const cardTitle = el2("h3", "host-card-title");
     cardTitle.textContent = hostDisplayName(h2, i);
-    const removeBtn = el3("button", "host-card-remove");
+    const removeBtn = el2("button", "host-card-remove");
     removeBtn.type = "button";
     removeBtn.textContent = "\u2715";
     removeBtn.title = "Remove this host";
@@ -486,7 +384,7 @@ function mountHostRail(root, maxHosts) {
     cardHeader.append(grip, collapseBtn, cardTitle, removeBtn);
     card.append(cardHeader);
     attachDrag(grip, card, h2);
-    const cardBody = el3("div", "host-card-body");
+    const cardBody = el2("div", "host-card-body");
     card.append(cardBody);
     const collapsed = openHost !== h2;
     card.classList.toggle("collapsed", collapsed);
@@ -535,18 +433,18 @@ function mountHostRail(root, maxHosts) {
       h2.port = isNaN(v2) ? 22 : v2;
       scheduleSave();
     });
-    const authRow = el3("div", "field auth-field");
-    const authLabel = el3("label", "field-label");
+    const authRow = el2("div", "field auth-field");
+    const authLabel = el2("label", "field-label");
     authLabel.textContent = "Authenticate with";
-    const authChoices = el3("div", "auth-choices");
+    const authChoices = el2("div", "auth-choices");
     const authRadio = (value, text) => {
-      const choice = el3("label", "auth-choice");
-      const radio = el3("input");
+      const choice = el2("label", "auth-choice");
+      const radio = el2("input");
       radio.type = "radio";
       radio.name = `auth-method-${i}`;
       radio.value = value;
       radio.checked = h2.authMethod === value;
-      const span = el3("span");
+      const span = el2("span");
       span.textContent = text;
       choice.append(radio, span);
       authChoices.append(choice);
@@ -556,10 +454,10 @@ function mountHostRail(root, maxHosts) {
     const passwordRadio = authRadio("password", "Password");
     authRow.append(authLabel, authChoices);
     cardBody.append(authRow);
-    const keyRow = el3("div", "field");
-    const keyLabel = el3("label", "field-label");
+    const keyRow = el2("div", "field");
+    const keyLabel = el2("label", "field-label");
     keyLabel.textContent = "SSH key";
-    const keyInput = el3("input", "field-input key-field");
+    const keyInput = el2("input", "field-input key-field");
     keyInput.type = "text";
     keyInput.readOnly = true;
     keyInput.placeholder = "Click to select from ~/.ssh\u2026";
@@ -575,10 +473,10 @@ function mountHostRail(root, maxHosts) {
     });
     keyRow.append(keyLabel, keyInput);
     cardBody.append(keyRow);
-    const pwRow = el3("div", "field password-field");
-    const pwLabel = el3("label", "field-label");
+    const pwRow = el2("div", "field password-field");
+    const pwLabel = el2("label", "field-label");
     pwLabel.textContent = "Password (memory only)";
-    const pwInput = el3("input", "field-input password-input");
+    const pwInput = el2("input", "field-input password-input");
     pwInput.type = "password";
     pwInput.autocomplete = "off";
     pwInput.placeholder = "Not saved; cleared on reload";
@@ -589,10 +487,10 @@ function mountHostRail(root, maxHosts) {
     });
     pwRow.append(pwLabel, pwInput);
     cardBody.append(pwRow);
-    const dirRow = el3("div", "field");
-    const dirLabel = el3("label", "field-label");
+    const dirRow = el2("div", "field");
+    const dirLabel = el2("label", "field-label");
     dirLabel.textContent = "Remote directory";
-    const dirInput = el3("input", "field-input dir-field");
+    const dirInput = el2("input", "field-input dir-field");
     dirInput.type = "text";
     dirInput.readOnly = true;
     dirInput.placeholder = "/tmp";
@@ -623,7 +521,7 @@ function mountHostRail(root, maxHosts) {
     });
     dirRow.append(dirLabel, dirInput);
     cardBody.append(dirRow);
-    const copyHint = el3("p", "copy-hint");
+    const copyHint = el2("p", "copy-hint");
     copyHint.textContent = "The command has no password in it \u2014 ssh will prompt for it.";
     const applyAuthMethod = () => {
       const usesPassword = h2.authMethod === "password";
@@ -645,29 +543,16 @@ function mountHostRail(root, maxHosts) {
       if (passwordRadio.checked) chooseAuth("password");
     });
     applyAuthMethod();
-    const copyBtn = el3("button", "btn host-copy-ssh");
-    copyBtn.type = "button";
-    copyBtn.textContent = "Copy ssh command";
-    copyBtn.title = "Copy an ssh CLI command for this host";
-    let copyResetTimer = null;
-    copyBtn.addEventListener("click", () => {
-      if (!h2.ip || !h2.user) {
-        const prev = copyBtn.textContent;
-        copyBtn.textContent = "Set host & user first";
-        if (copyResetTimer !== null) clearTimeout(copyResetTimer);
-        copyResetTimer = setTimeout(() => {
-          copyBtn.textContent = prev;
-        }, 2e3);
-        return;
-      }
-      void copyText(buildSSHCommand(h2)).then((ok) => {
-        copyBtn.textContent = ok ? "Copied!" : "Copy failed";
-        if (copyResetTimer !== null) clearTimeout(copyResetTimer);
-        copyResetTimer = setTimeout(() => {
-          copyBtn.textContent = "Copy ssh command";
-        }, 2e3);
-      });
-    });
+    const copyBtn = createCopyButton({ text: () => buildSSHCommand(h2), label: "ssh command", className: "btn host-copy-ssh" });
+    copyBtn.addEventListener(
+      "click",
+      (e) => {
+        if (h2.ip && h2.user) return;
+        e.stopImmediatePropagation();
+        showToast("Set the host and user first.", "error");
+      },
+      { capture: true }
+    );
     cardBody.append(copyBtn, copyHint);
     return card;
   };
@@ -5419,7 +5304,7 @@ function za(s15, t) {
   return t.cols - s15;
 }
 function Ga(s15, t, e, i, r, n) {
-  return sn(t, i, r, n).length === 0 ? "" : Fi(el4(s15, t, s15, t - gt(t, r), false, r).length, Ni("D", n));
+  return sn(t, i, r, n).length === 0 ? "" : Fi(el3(s15, t, s15, t - gt(t, r), false, r).length, Ni("D", n));
 }
 function sn(s15, t, e, i) {
   let r = s15 - gt(s15, e), n = t - gt(t, e), o2 = Math.abs(r - n) - Va(s15, t, e);
@@ -5429,7 +5314,7 @@ function $a(s15, t, e, i, r, n) {
   let o2;
   sn(t, i, r, n).length > 0 ? o2 = i - gt(i, r) : o2 = t;
   let l = i, a = qa(s15, t, e, i, r, n);
-  return Fi(el4(s15, o2, e, l, a === "C", r).length, Ni(a, n));
+  return Fi(el3(s15, o2, e, l, a === "C", r).length, Ni(a, n));
 }
 function Va(s15, t, e) {
   let i = 0, r = s15 - gt(s15, e), n = t - gt(t, e);
@@ -5451,7 +5336,7 @@ function qa(s15, t, e, i, r, n) {
 function Qo(s15, t) {
   return s15 > t ? "A" : "B";
 }
-function el4(s15, t, e, i, r, n) {
+function el3(s15, t, e, i, r, n) {
   let o2 = s15, l = t, a = "";
   for (; (o2 !== e || l !== i) && l >= 0 && l < n.buffer.lines.length; ) o2 += r ? 1 : -1, r && o2 > n.cols - 1 ? (a += n.buffer.translateBufferLineToString(l, false, s15, o2), o2 = 0, s15 = 0, l++) : !r && o2 < 0 && (a += n.buffer.translateBufferLineToString(l, false, 0, s15 + 1), o2 = n.cols - 1, s15 = o2, l--);
   return a + n.buffer.translateBufferLineToString(l, false, s15, o2);
@@ -10054,7 +9939,7 @@ var TerminalSession = class {
 };
 
 // web/multissh/js/ui.ts
-function el5(tag, className) {
+function el4(tag, className) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   return node;
@@ -10063,9 +9948,9 @@ var MAX_OPEN_PANELS = 4;
 function mountSSHApp(root, store, maxSessions) {
   root.innerHTML = "";
   root.classList.add("ssh-app");
-  const terminals = el5("section", "ssh-terminals");
+  const terminals = el4("section", "ssh-terminals");
   const master = buildMasterBar();
-  const grid = el5("div", "term-grid");
+  const grid = el4("div", "term-grid");
   terminals.append(master.bar, grid);
   const panels = /* @__PURE__ */ new Map();
   let clock = 0;
@@ -10136,17 +10021,17 @@ var KEY_SEQUENCES = {
   "ctrl+c": ""
 };
 function buildMasterBar() {
-  const bar = el5("div", "master-bar");
-  const label = el5("label", "master-label");
+  const bar = el4("div", "master-bar");
+  const label = el4("label", "master-label");
   label.textContent = "Broadcast";
-  const input = el5("input", "master-input");
+  const input = el4("input", "master-input");
   input.type = "text";
   input.placeholder = "Type a command to send to all connected hosts, or key:ctrl+c\u2026";
   input.autocomplete = "off";
-  const sendBtn = el5("button", "master-send");
+  const sendBtn = el4("button", "master-send");
   sendBtn.type = "button";
   sendBtn.textContent = "Send to all";
-  const hint = el5("span", "master-hint");
+  const hint = el4("span", "master-hint");
   const api = { bar, onSend: (_text) => {
   } };
   let hintTimer = null;
@@ -10233,35 +10118,35 @@ function parseKeyword(text) {
 }
 function buildPanel(index, initialConfig, container, control) {
   let config = { ...initialConfig };
-  const panelEl = el5("div", "term-panel");
-  const header = el5("div", "term-header");
-  const collapseBtn = el5("button", "term-collapse");
+  const panelEl = el4("div", "term-panel");
+  const header = el4("div", "term-header");
+  const collapseBtn = el4("button", "term-collapse");
   collapseBtn.type = "button";
   collapseBtn.textContent = "\u25BE";
   collapseBtn.title = "Collapse this terminal (the session stays connected)";
   collapseBtn.setAttribute("aria-expanded", "true");
-  const dot = el5("span", "status-dot");
-  const titleEl = el5("span", "term-title");
+  const dot = el4("span", "status-dot");
+  const titleEl = el4("span", "term-title");
   titleEl.textContent = hostDisplayName(config, index);
-  const statusText = el5("span", "status-text");
+  const statusText = el4("span", "status-text");
   statusText.textContent = "disconnected";
-  const spacer = el5("span", "term-spacer");
-  const pauseLabel = el5("label", "ui-toggle pause-toggle");
-  const pause = el5("input");
+  const spacer = el4("span", "term-spacer");
+  const pauseLabel = el4("label", "ui-toggle pause-toggle");
+  const pause = el4("input");
   pause.type = "checkbox";
-  const pauseTrack = el5("span", "ui-toggle-track");
-  const pauseText = el5("span");
+  const pauseTrack = el4("span", "ui-toggle-track");
+  const pauseText = el4("span");
   pauseText.textContent = "Pause";
   pauseLabel.append(pause, pauseTrack, pauseText);
-  const interruptBtn = el5("button", "btn btn-interrupt");
+  const interruptBtn = el4("button", "btn btn-interrupt");
   interruptBtn.type = "button";
   interruptBtn.textContent = "Ctrl-C";
   interruptBtn.title = "Send Ctrl-C (SIGINT) to this host";
   interruptBtn.disabled = true;
-  const connectBtn = el5("button", "btn btn-connect");
+  const connectBtn = el4("button", "btn btn-connect");
   connectBtn.type = "button";
   connectBtn.textContent = "Connect";
-  const disconnectBtn = el5("button", "btn btn-disconnect");
+  const disconnectBtn = el4("button", "btn btn-disconnect");
   disconnectBtn.type = "button";
   disconnectBtn.textContent = "Disconnect";
   disconnectBtn.disabled = true;
@@ -10276,7 +10161,7 @@ function buildPanel(index, initialConfig, container, control) {
     connectBtn,
     disconnectBtn
   );
-  const body = el5("div", "term-body");
+  const body = el4("div", "term-body");
   panelEl.append(header, body);
   container.append(panelEl);
   const session = new TerminalSession(body);
@@ -10339,118 +10224,35 @@ function buildPanel(index, initialConfig, container, control) {
 }
 
 // web/multissh/js/filepicker.ts
-function el6(tag, className) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  return node;
-}
+import { openTreePicker as openTreePicker2 } from "/shared/dist/shared.mjs";
 function fmtBytes(n) {
   if (n < 1024) return `${n} B`;
   if (n < 1048576) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1048576).toFixed(2)} MB`;
 }
-function parentPath2(p) {
-  if (p === "") return "";
-  const idx = p.lastIndexOf("/");
-  if (idx < 0) return "";
-  return p.slice(0, idx);
-}
-function openFilePicker(startPath = "") {
-  return new Promise((resolve) => {
-    const overlay = el6("div", "modal-overlay");
-    const dialog = el6("div", "modal");
-    const header = el6("div", "modal-header");
-    const title = el6("h2", "modal-title");
-    title.textContent = "Choose server file";
-    const closeBtn = el6("button", "modal-close");
-    closeBtn.type = "button";
-    closeBtn.textContent = "\xD7";
-    header.append(title, closeBtn);
-    const pathBar = el6("div", "nav-path-bar");
-    const pathText = el6("span", "nav-path-text");
-    pathBar.append(pathText);
-    const note = el6("p", "modal-note");
-    note.textContent = "Loading\u2026";
-    const list = el6("ul", "key-list");
-    dialog.append(header, pathBar, note, list);
-    overlay.append(dialog);
-    document.body.append(overlay);
-    let currentPath = startPath;
-    let settled = false;
-    const finish = (value) => {
-      if (settled) return;
-      settled = true;
-      overlay.remove();
-      document.removeEventListener("keydown", onKey);
-      resolve(value);
-    };
-    const onKey = (e) => {
-      if (e.key === "Escape") finish(null);
-    };
-    document.addEventListener("keydown", onKey);
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) finish(null);
-    });
-    closeBtn.addEventListener("click", () => finish(null));
-    const navigate = (path) => {
-      note.textContent = "Loading\u2026";
-      list.innerHTML = "";
-      pathText.textContent = path === "" ? "(root)" : path;
-      listServerFiles(path).then(({ path: resolved, entries }) => {
-        currentPath = resolved;
-        pathText.textContent = resolved === "" ? "(root)" : resolved;
-        renderFileList(list, note, entries, currentPath, navigate, finish);
-      }).catch((err) => {
-        note.textContent = `Error: ${err.message}`;
-      });
-    };
-    navigate(startPath);
-  });
-}
-function renderFileList(list, note, entries, currentPath, navigate, finish) {
-  list.innerHTML = "";
-  if (entries.length === 0) {
-    note.textContent = "Empty directory.";
-  } else {
-    note.textContent = "Click a file to select it; click a folder to open it.";
-  }
-  if (currentPath !== "") {
-    const upItem = el6("li", "key-item nav-up");
-    const icon = el6("span", "key-icon");
-    icon.textContent = "\u{1F4C2}";
-    const name = el6("span", "key-name");
-    name.textContent = "..";
-    upItem.append(icon, name);
-    upItem.addEventListener("click", () => navigate(parentPath2(currentPath)));
-    list.append(upItem);
-  }
-  for (const e of entries) {
-    const item = el6("li", e.isDir ? "key-item" : "key-item file-item");
-    const icon = el6("span", "key-icon");
-    icon.textContent = e.isDir ? "\u{1F4C1}" : "\u{1F4C4}";
-    const name = el6("span", "key-name");
-    name.textContent = e.name;
-    item.append(icon, name);
-    if (e.isDir) {
-      item.addEventListener("click", () => {
-        const sep = currentPath === "" || currentPath.endsWith("/") ? "" : "/";
-        navigate(`${currentPath}${sep}${e.name}`);
-      });
-    } else {
-      const sizeEl = el6("span", "key-tag");
-      sizeEl.textContent = fmtBytes(e.size);
-      item.append(sizeEl);
-      item.addEventListener("click", () => {
-        const sep = currentPath === "" || currentPath.endsWith("/") ? "" : "/";
-        finish(`${currentPath}${sep}${e.name}`);
-      });
+async function openFilePicker(startPath = "") {
+  const chosen = await openTreePicker2({
+    title: "Choose server file",
+    select: "file",
+    note: "Open folders with the arrow; double-click a file (or select it and press the button) to use it.",
+    confirmLabel: "Use this file",
+    emptyText: "No files here.",
+    startPath: startPath || void 0,
+    load: async (dir) => {
+      const { path, entries } = await listServerFiles(dir ? dir.path : "");
+      return entries.map((e) => ({
+        name: e.name,
+        path: path === "" ? e.name : `${path}/${e.name}`,
+        isDir: e.isDir,
+        meta: e.isDir ? void 0 : fmtBytes(e.size)
+      }));
     }
-    list.append(item);
-  }
+  });
+  return chosen?.path ?? null;
 }
 
 // web/multissh/js/upload.ts
-function el7(tag, className) {
+function el5(tag, className) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   return node;
@@ -10463,57 +10265,57 @@ function fmtBytes2(n) {
 function mountUploadApp(root, store) {
   root.innerHTML = "";
   root.classList.add("upload-app");
-  const scroll = el7("div", "upload-scroll");
+  const scroll = el5("div", "upload-scroll");
   root.append(scroll);
   let source = null;
-  const stageA = el7("section", "upload-section");
-  const aTitle = el7("h2", "upload-section-title");
+  const stageA = el5("section", "upload-section");
+  const aTitle = el5("h2", "upload-section-title");
   aTitle.textContent = "1 \xB7 Choose broadcast source";
   stageA.append(aTitle);
-  const dropZone = el7("div", "drop-zone");
-  const dropText = el7("p", "drop-text");
+  const dropZone = el5("div", "drop-zone");
+  const dropText = el5("p", "drop-text");
   dropText.textContent = "Drag & drop a file here, or click to upload";
-  const fileInput = el7("input");
+  const fileInput = el5("input");
   fileInput.type = "file";
   fileInput.style.display = "none";
   dropZone.append(dropText, fileInput);
   stageA.append(dropZone);
-  const serverFileBtn = el7("button", "btn source-server-btn");
+  const serverFileBtn = el5("button", "btn source-server-btn");
   serverFileBtn.type = "button";
   serverFileBtn.textContent = "Or choose a server-resident file\u2026";
   stageA.append(serverFileBtn);
-  const fileInfo = el7("div", "file-info");
+  const fileInfo = el5("div", "file-info");
   fileInfo.style.display = "none";
-  const fileNameEl = el7("span", "file-info-name");
-  const fileSizeEl = el7("span", "file-info-size");
-  const clearBtn = el7("button", "btn btn-clear");
+  const fileNameEl = el5("span", "file-info-name");
+  const fileSizeEl = el5("span", "file-info-size");
+  const clearBtn = el5("button", "btn btn-clear");
   clearBtn.type = "button";
   clearBtn.textContent = "Remove";
   fileInfo.append(fileNameEl, fileSizeEl, clearBtn);
   stageA.append(fileInfo);
-  const uploadProgress = el7("div", "upload-progress");
+  const uploadProgress = el5("div", "upload-progress");
   uploadProgress.style.display = "none";
-  const upBar = el7("div", "progress-bar");
-  const upFill = el7("div", "progress-fill");
+  const upBar = el5("div", "progress-bar");
+  const upFill = el5("div", "progress-fill");
   upBar.append(upFill);
-  const upText = el7("span", "progress-text");
+  const upText = el5("span", "progress-text");
   uploadProgress.append(upBar, upText);
   stageA.append(uploadProgress);
-  const errorMsg = el7("p", "upload-error");
+  const errorMsg = el5("p", "upload-error");
   errorMsg.style.display = "none";
   stageA.append(errorMsg);
   scroll.append(stageA);
-  const stageB = el7("section", "upload-section");
-  const bTitle = el7("h2", "upload-section-title");
+  const stageB = el5("section", "upload-section");
+  const bTitle = el5("h2", "upload-section-title");
   bTitle.textContent = "2 \xB7 Broadcast to hosts";
   stageB.append(bTitle);
-  const hostChecksEl = el7("div", "host-checks");
+  const hostChecksEl = el5("div", "host-checks");
   stageB.append(hostChecksEl);
-  const broadcastBtn = el7("button", "btn btn-connect broadcast-btn");
+  const broadcastBtn = el5("button", "btn btn-connect broadcast-btn");
   broadcastBtn.type = "button";
   broadcastBtn.textContent = "Broadcast";
   stageB.append(broadcastBtn);
-  const jobProgress = el7("div", "job-progress");
+  const jobProgress = el5("div", "job-progress");
   jobProgress.style.display = "none";
   stageB.append(jobProgress);
   scroll.append(stageB);
@@ -10527,21 +10329,21 @@ function mountUploadApp(root, store) {
       if (!h2) continue;
       const selectable = !!(h2.ip && h2.user) && hostHasCredential(h2);
       if (selectable) hasAny = true;
-      const row = el7("label", "host-check-row");
-      const cb = el7("input");
+      const row = el5("label", "host-check-row");
+      const cb = el5("input");
       cb.type = "checkbox";
       cb.disabled = !selectable;
       cb.checked = selectable && (checked.get(h2) ?? false);
       cb.addEventListener("change", () => {
         checked.set(h2, cb.checked);
       });
-      const text = el7("span", "host-check-label");
+      const text = el5("span", "host-check-label");
       text.textContent = h2.ip ? `${hostDisplayName(h2, i)} \u2014 ${h2.ip}` : `${hostDisplayName(h2, i)} (not configured)`;
       row.append(cb, text);
       hostChecksEl.append(row);
     }
     if (!hasAny) {
-      const hint = el7("p", "modal-note");
+      const hint = el5("p", "modal-note");
       hint.textContent = "Configure at least one host (IP, user, key) in the rail on the left.";
       hostChecksEl.append(hint);
     }
@@ -10674,16 +10476,16 @@ function mountUploadApp(root, store) {
   });
 }
 function buildProgressRow(host, container) {
-  const row = el7("div", "job-row");
-  const hostEl = el7("span", "job-host");
+  const row = el5("div", "job-row");
+  const hostEl = el5("span", "job-host");
   hostEl.textContent = host;
-  const stateEl = el7("span", "job-state");
+  const stateEl = el5("span", "job-state");
   stateEl.textContent = "pending";
   stateEl.dataset.state = "pending";
-  const bar = el7("div", "progress-bar");
-  const fill = el7("div", "progress-fill");
+  const bar = el5("div", "progress-bar");
+  const fill = el5("div", "progress-fill");
   bar.append(fill);
-  const bytesEl = el7("span", "progress-text");
+  const bytesEl = el5("span", "progress-text");
   bytesEl.textContent = "\u2014";
   row.append(hostEl, stateEl, bar, bytesEl);
   container.append(row);
@@ -10734,7 +10536,7 @@ function runBroadcastJob(jobId, targets, container, onDone) {
 }
 
 // web/multissh/js/tabs.ts
-function el8(tag, className) {
+function el6(tag, className) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   return node;
@@ -10742,11 +10544,11 @@ function el8(tag, className) {
 function mountTabs(root, maxSessions) {
   root.innerHTML = "";
   root.classList.add("tabbed-app");
-  const rail = el8("aside", "host-rail");
+  const rail = el6("aside", "host-rail");
   const store = mountHostRail(rail, maxSessions);
-  const right = el8("div", "right-pane");
-  const tabBar = el8("nav", "tab-bar");
-  const content = el8("div", "tab-content");
+  const right = el6("div", "right-pane");
+  const tabBar = el6("nav", "tab-bar");
+  const content = el6("div", "tab-content");
   const defs = [
     { id: "ssh", label: "SSH Console", mount: mountSSHApp },
     { id: "upload", label: "Upload to Host", mount: mountUploadApp }
@@ -10754,12 +10556,12 @@ function mountTabs(root, maxSessions) {
   const panels = /* @__PURE__ */ new Map();
   const btns = /* @__PURE__ */ new Map();
   for (const def of defs) {
-    const btn = el8("button", "tab-btn");
+    const btn = el6("button", "tab-btn");
     btn.type = "button";
     btn.textContent = def.label;
     tabBar.append(btn);
     btns.set(def.id, btn);
-    const panel = el8("div", "tab-panel");
+    const panel = el6("div", "tab-panel");
     panel.dataset.panel = def.id;
     content.append(panel);
     panels.set(def.id, panel);

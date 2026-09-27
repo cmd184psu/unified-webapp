@@ -864,7 +864,7 @@ main {
 /* ── Hide-not-needed active state ─────────────────────────────── */
 .header-icon-btn.active {
   color: var(--color-primary);
-  background: var(--color-primary-highlight);
+  background: var(--color-primary-tint);
 }
 
 /* ── Groups modal drag handle ──────────────────────────────────── */
@@ -1005,12 +1005,6 @@ main {
 }
 .groups-modal-item.gdrag-below {
   border-bottom: 2px solid var(--color-primary);
-}
-
-/* ── Hide-not-needed active state ─────────────────────────────── */
-.header-icon-btn.active {
-  color: var(--color-primary);
-  background: var(--color-primary-highlight);
 }
 
 /* ── Clickable title button ─────────────────────────────────────── */
@@ -1087,7 +1081,7 @@ main {
      BETWEEN children unless something absorbs it. On the Grocery tab with
      progress:true, #progress-bar { flex: 1 } absorbs it and the tabs sit left.
      On the Recipes tab that bar and three icon buttons are display:none, so
-     nothing absorbs it and the tabs slide toward centre. The same drift happens
+     nothing absorbs it and the tabs slide toward center. The same drift happens
      on BOTH tabs under the default progress:false, so this is not a
      Recipes-only fix.
 

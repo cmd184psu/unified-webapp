@@ -125,7 +125,7 @@ Recipes are persisted in the **existing `grocery.json`** alongside `title`, `gro
 `items`. The Recipes tab is a **client-side tab in the existing SPA** — same `app.js`, same
 `/api/events` SSE stream, same in-memory state.
 
-> **Rationale.** Recipes are part of the grocery construct, not a neighbouring feature.
+> **Rationale.** Recipes are part of the grocery construct, not a neighboring feature.
 > Creating an ingredient writes a Recipe row and an Item row; in one file that is a single
 > atomic `save()`. Split across two files it is two writes with a torn-state window.
 

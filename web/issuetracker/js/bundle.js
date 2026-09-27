@@ -8977,6 +8977,10 @@ function useData() {
   return ctx;
 }
 
+// web/issuetracker/src/components/common.tsx
+var import_react2 = __toESM(require_react());
+import { createCopyButton } from "/shared/dist/shared.mjs";
+
 // web/issuetracker/src/types.ts
 var STATES = [
   "backlog",
@@ -9071,6 +9075,17 @@ function Modal({
     children
   ] }) });
 }
+function CopyButton({ text, label, className = "btn" }) {
+  const host = (0, import_react2.useRef)(null);
+  const read = (0, import_react2.useRef)(text);
+  read.current = text;
+  (0, import_react2.useEffect)(() => {
+    const btn = createCopyButton({ text: () => read.current(), label, className });
+    host.current?.replaceChildren(btn);
+    return () => btn.remove();
+  }, [label, className]);
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { ref: host, style: { display: "contents" } });
+}
 
 // web/issuetracker/src/components/AccountBar.tsx
 var import_jsx_runtime3 = __toESM(require_jsx_runtime());
@@ -9085,7 +9100,7 @@ function AccountBar() {
 }
 
 // web/issuetracker/src/pages/IssuesPage.tsx
-var import_react3 = __toESM(require_react());
+var import_react4 = __toESM(require_react());
 
 // web/issuetracker/src/components/IssueRow.tsx
 var import_jsx_runtime4 = __toESM(require_jsx_runtime());
@@ -9102,7 +9117,7 @@ function IssueRow({ issue }) {
 }
 
 // web/issuetracker/src/components/IssueModal.tsx
-var import_react2 = __toESM(require_react());
+var import_react3 = __toESM(require_react());
 import { alertDialog } from "/shared/dist/shared.mjs";
 var import_jsx_runtime5 = __toESM(require_jsx_runtime());
 function IssueModal({
@@ -9114,19 +9129,19 @@ function IssueModal({
 }) {
   const { teams, users, tags, userLabel, me } = useData();
   const reporterUser = initial ? initial.reporter : me;
-  const [title, setTitle] = (0, import_react2.useState)(initial?.title ?? "");
-  const [description, setDescription] = (0, import_react2.useState)(initial?.description ?? "");
-  const [teamId, setTeamId] = (0, import_react2.useState)(initial?.teamId ?? teams[0]?.id ?? "");
-  const [kind, setKind] = (0, import_react2.useState)(initial?.kind ?? "feature");
-  const [state, setState] = (0, import_react2.useState)(
+  const [title, setTitle] = (0, import_react3.useState)(initial?.title ?? "");
+  const [description, setDescription] = (0, import_react3.useState)(initial?.description ?? "");
+  const [teamId, setTeamId] = (0, import_react3.useState)(initial?.teamId ?? teams[0]?.id ?? "");
+  const [kind, setKind] = (0, import_react3.useState)(initial?.kind ?? "feature");
+  const [state, setState] = (0, import_react3.useState)(
     initial?.state ?? defaultState ?? "backlog"
   );
-  const [priority, setPriority] = (0, import_react2.useState)(initial?.priority ?? 0);
-  const [assigneeId, setAssigneeId] = (0, import_react2.useState)(initial?.assigneeId ?? "");
-  const [tagIds, setTagIds] = (0, import_react2.useState)(
+  const [priority, setPriority] = (0, import_react3.useState)(initial?.priority ?? 0);
+  const [assigneeId, setAssigneeId] = (0, import_react3.useState)(initial?.assigneeId ?? "");
+  const [tagIds, setTagIds] = (0, import_react3.useState)(
     initial?.tags.map((t) => t.id) ?? []
   );
-  const [saving, setSaving] = (0, import_react2.useState)(false);
+  const [saving, setSaving] = (0, import_react3.useState)(false);
   const toggleTag = (id) => setTagIds(
     (cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]
   );
@@ -9278,12 +9293,12 @@ function IssuesPage({
   title = "Issues"
 }) {
   const { tags } = useData();
-  const [issues, setIssues] = (0, import_react3.useState)([]);
-  const [loading, setLoading] = (0, import_react3.useState)(true);
-  const [stateFilter, setStateFilter] = (0, import_react3.useState)("");
-  const [tagFilter, setTagFilter] = (0, import_react3.useState)("");
-  const [search, setSearch] = (0, import_react3.useState)("");
-  const [showModal, setShowModal] = (0, import_react3.useState)(false);
+  const [issues, setIssues] = (0, import_react4.useState)([]);
+  const [loading, setLoading] = (0, import_react4.useState)(true);
+  const [stateFilter, setStateFilter] = (0, import_react4.useState)("");
+  const [tagFilter, setTagFilter] = (0, import_react4.useState)("");
+  const [search, setSearch] = (0, import_react4.useState)("");
+  const [showModal, setShowModal] = (0, import_react4.useState)(false);
   const load = () => {
     setLoading(true);
     api.listIssues({
@@ -9293,8 +9308,8 @@ function IssuesPage({
       assignee: mine ? "me" : void 0
     }).then(setIssues).finally(() => setLoading(false));
   };
-  (0, import_react3.useEffect)(load, [stateFilter, tagFilter, search, mine]);
-  const grouped = (0, import_react3.useMemo)(() => {
+  (0, import_react4.useEffect)(load, [stateFilter, tagFilter, search, mine]);
+  const grouped = (0, import_react4.useMemo)(() => {
     const m = /* @__PURE__ */ new Map();
     STATES.forEach((s) => m.set(s, []));
     for (const i of issues) m.get(i.state)?.push(i);
@@ -9367,25 +9382,25 @@ function IssuesPage({
 }
 
 // web/issuetracker/src/pages/BoardPage.tsx
-var import_react4 = __toESM(require_react());
+var import_react5 = __toESM(require_react());
 var import_jsx_runtime7 = __toESM(require_jsx_runtime());
 function BoardPage({
   mine = false,
   title = "Board"
 }) {
   const { tags } = useData();
-  const [issues, setIssues] = (0, import_react4.useState)([]);
-  const [loading, setLoading] = (0, import_react4.useState)(true);
-  const [tagFilter, setTagFilter] = (0, import_react4.useState)("");
-  const [dragId, setDragId] = (0, import_react4.useState)(null);
-  const [dropState, setDropState] = (0, import_react4.useState)(null);
-  const [newFor, setNewFor] = (0, import_react4.useState)(null);
+  const [issues, setIssues] = (0, import_react5.useState)([]);
+  const [loading, setLoading] = (0, import_react5.useState)(true);
+  const [tagFilter, setTagFilter] = (0, import_react5.useState)("");
+  const [dragId, setDragId] = (0, import_react5.useState)(null);
+  const [dropState, setDropState] = (0, import_react5.useState)(null);
+  const [newFor, setNewFor] = (0, import_react5.useState)(null);
   const load = () => {
     setLoading(true);
     api.listIssues({ tagId: tagFilter, assignee: mine ? "me" : void 0 }).then(setIssues).finally(() => setLoading(false));
   };
-  (0, import_react4.useEffect)(load, [tagFilter, mine]);
-  const byState = (0, import_react4.useMemo)(() => {
+  (0, import_react5.useEffect)(load, [tagFilter, mine]);
+  const byState = (0, import_react5.useMemo)(() => {
     const m = /* @__PURE__ */ new Map();
     STATES.forEach((s) => m.set(s, []));
     for (const i of issues) m.get(i.state)?.push(i);
@@ -9508,17 +9523,16 @@ function BoardCard({
 }
 
 // web/issuetracker/src/pages/IssueDetailPage.tsx
-var import_react5 = __toESM(require_react());
+var import_react6 = __toESM(require_react());
 import { confirmDialog } from "/shared/dist/shared.mjs";
 var import_jsx_runtime8 = __toESM(require_jsx_runtime());
 function IssueDetailPage() {
   const { ident } = useParams();
   const nav = useNavigate();
   const { users, tags, userLabel } = useData();
-  const [issue, setIssue] = (0, import_react5.useState)(null);
-  const [notFound, setNotFound] = (0, import_react5.useState)(false);
-  const [editing, setEditing] = (0, import_react5.useState)(false);
-  const [toast, setToast] = (0, import_react5.useState)("");
+  const [issue, setIssue] = (0, import_react6.useState)(null);
+  const [notFound, setNotFound] = (0, import_react6.useState)(false);
+  const [editing, setEditing] = (0, import_react6.useState)(false);
   const load = () => {
     if (!ident) return;
     api.getIssueByIdentifier(ident).then((i) => {
@@ -9526,19 +9540,11 @@ function IssueDetailPage() {
       setNotFound(false);
     }).catch(() => setNotFound(true));
   };
-  (0, import_react5.useEffect)(load, [ident]);
+  (0, import_react6.useEffect)(load, [ident]);
   const patch = async (body) => {
     if (!issue) return;
     const updated = await api.updateIssue(issue.id, body);
     setIssue(updated);
-  };
-  const flash = (msg) => {
-    setToast(msg);
-    setTimeout(() => setToast(""), 1800);
-  };
-  const copyLink = () => {
-    navigator.clipboard.writeText(window.location.href);
-    flash("Link copied to clipboard");
   };
   if (notFound) return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "empty", children: [
     "Issue \u201C",
@@ -9564,7 +9570,7 @@ function IssueDetailPage() {
       ),
       /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h1", { children: issue.identifier }),
       /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "spacer" }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("button", { className: "btn", onClick: copyLink, children: "\u{1F517} Copy link" }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(CopyButton, { text: () => window.location.href, label: "link to this issue" }),
       /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("button", { className: "btn", onClick: () => setEditing(true), children: "Edit" }),
       /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
         "button",
@@ -9671,8 +9677,7 @@ function IssueDetailPage() {
         onClose: () => setEditing(false),
         onSaved: (i) => setIssue(i)
       }
-    ),
-    toast && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "toast", children: toast })
+    )
   ] });
 }
 function RelationsEditor({
@@ -9680,11 +9685,11 @@ function RelationsEditor({
   onChange
 }) {
   const nav = useNavigate();
-  const [adding, setAdding] = (0, import_react5.useState)(false);
-  const [type, setType] = (0, import_react5.useState)("relates");
-  const [target, setTarget] = (0, import_react5.useState)("");
-  const [options, setOptions] = (0, import_react5.useState)([]);
-  (0, import_react5.useEffect)(() => {
+  const [adding, setAdding] = (0, import_react6.useState)(false);
+  const [type, setType] = (0, import_react6.useState)("relates");
+  const [target, setTarget] = (0, import_react6.useState)("");
+  const [options, setOptions] = (0, import_react6.useState)([]);
+  (0, import_react6.useEffect)(() => {
     if (adding) api.listIssues().then(
       (all) => setOptions(all.filter((i) => i.id !== issue.id))
     );
@@ -9755,18 +9760,18 @@ function RelationsEditor({
 }
 
 // web/issuetracker/src/pages/StoriesPage.tsx
-var import_react6 = __toESM(require_react());
+var import_react7 = __toESM(require_react());
 var import_jsx_runtime9 = __toESM(require_jsx_runtime());
 function StoriesPage() {
   const nav = useNavigate();
-  const [stories, setStories] = (0, import_react6.useState)([]);
-  const [loading, setLoading] = (0, import_react6.useState)(true);
-  const [creating, setCreating] = (0, import_react6.useState)(false);
+  const [stories, setStories] = (0, import_react7.useState)([]);
+  const [loading, setLoading] = (0, import_react7.useState)(true);
+  const [creating, setCreating] = (0, import_react7.useState)(false);
   const load = () => {
     setLoading(true);
     api.listStories().then(setStories).finally(() => setLoading(false));
   };
-  (0, import_react6.useEffect)(load, []);
+  (0, import_react7.useEffect)(load, []);
   return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
     /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "topbar", children: [
       /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h1", { children: "Stories" }),
@@ -9806,9 +9811,9 @@ function StoryModal({
   epicId
 }) {
   const { teams } = useData();
-  const [title, setTitle] = (0, import_react6.useState)("");
-  const [description, setDescription] = (0, import_react6.useState)("");
-  const [teamId, setTeamId] = (0, import_react6.useState)(teams[0]?.id ?? "");
+  const [title, setTitle] = (0, import_react7.useState)("");
+  const [description, setDescription] = (0, import_react7.useState)("");
+  const [teamId, setTeamId] = (0, import_react7.useState)(teams[0]?.id ?? "");
   const save = async () => {
     if (!title.trim()) return;
     await api.createStory({ teamId, title, description, epicId });
@@ -9847,17 +9852,17 @@ function StoryModal({
 }
 
 // web/issuetracker/src/pages/StoryDetailPage.tsx
-var import_react7 = __toESM(require_react());
+var import_react8 = __toESM(require_react());
 var import_jsx_runtime10 = __toESM(require_jsx_runtime());
 function StoryDetailPage() {
   const { id } = useParams();
   const nav = useNavigate();
-  const [story, setStory] = (0, import_react7.useState)(null);
-  const [adding, setAdding] = (0, import_react7.useState)(false);
+  const [story, setStory] = (0, import_react8.useState)(null);
+  const [adding, setAdding] = (0, import_react8.useState)(false);
   const load = () => {
     if (id) api.getStory(id).then(setStory).catch(() => setStory(null));
   };
-  (0, import_react7.useEffect)(load, [id]);
+  (0, import_react8.useEffect)(load, [id]);
   if (!story) return /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("div", { className: "loading", children: "Loading\u2026" });
   return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(import_jsx_runtime10.Fragment, { children: [
     /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "topbar", children: [
@@ -9901,18 +9906,18 @@ function StoryDetailPage() {
 }
 
 // web/issuetracker/src/pages/EpicsPage.tsx
-var import_react8 = __toESM(require_react());
+var import_react9 = __toESM(require_react());
 var import_jsx_runtime11 = __toESM(require_jsx_runtime());
 function EpicsPage() {
   const nav = useNavigate();
-  const [epics, setEpics] = (0, import_react8.useState)([]);
-  const [loading, setLoading] = (0, import_react8.useState)(true);
-  const [creating, setCreating] = (0, import_react8.useState)(false);
+  const [epics, setEpics] = (0, import_react9.useState)([]);
+  const [loading, setLoading] = (0, import_react9.useState)(true);
+  const [creating, setCreating] = (0, import_react9.useState)(false);
   const load = () => {
     setLoading(true);
     api.listEpics().then(setEpics).finally(() => setLoading(false));
   };
-  (0, import_react8.useEffect)(load, []);
+  (0, import_react9.useEffect)(load, []);
   return /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(import_jsx_runtime11.Fragment, { children: [
     /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "topbar", children: [
       /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("h1", { children: "Epics" }),
@@ -9951,9 +9956,9 @@ function EpicModal({
   onSaved
 }) {
   const { teams } = useData();
-  const [title, setTitle] = (0, import_react8.useState)("");
-  const [description, setDescription] = (0, import_react8.useState)("");
-  const [teamId, setTeamId] = (0, import_react8.useState)(teams[0]?.id ?? "");
+  const [title, setTitle] = (0, import_react9.useState)("");
+  const [description, setDescription] = (0, import_react9.useState)("");
+  const [teamId, setTeamId] = (0, import_react9.useState)(teams[0]?.id ?? "");
   const save = async () => {
     if (!title.trim()) return;
     await api.createEpic({ teamId, title, description });
@@ -9992,17 +9997,17 @@ function EpicModal({
 }
 
 // web/issuetracker/src/pages/EpicDetailPage.tsx
-var import_react9 = __toESM(require_react());
+var import_react10 = __toESM(require_react());
 var import_jsx_runtime12 = __toESM(require_jsx_runtime());
 function EpicDetailPage() {
   const { id } = useParams();
   const nav = useNavigate();
-  const [epic, setEpic] = (0, import_react9.useState)(null);
-  const [adding, setAdding] = (0, import_react9.useState)(false);
+  const [epic, setEpic] = (0, import_react10.useState)(null);
+  const [adding, setAdding] = (0, import_react10.useState)(false);
   const load = () => {
     if (id) api.getEpic(id).then(setEpic).catch(() => setEpic(null));
   };
-  (0, import_react9.useEffect)(load, [id]);
+  (0, import_react10.useEffect)(load, [id]);
   if (!epic) return /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("div", { className: "loading", children: "Loading\u2026" });
   return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(import_jsx_runtime12.Fragment, { children: [
     /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "topbar", children: [
@@ -10060,7 +10065,7 @@ function EpicDetailPage() {
 }
 
 // web/issuetracker/src/pages/TagsPage.tsx
-var import_react10 = __toESM(require_react());
+var import_react11 = __toESM(require_react());
 import { confirmDialog as confirmDialog2 } from "/shared/dist/shared.mjs";
 var import_jsx_runtime13 = __toESM(require_jsx_runtime());
 var PALETTE = [
@@ -10076,8 +10081,8 @@ var PALETTE = [
 ];
 function TagsPage() {
   const { tags, reloadTags } = useData();
-  const [name, setName] = (0, import_react10.useState)("");
-  const [color, setColor] = (0, import_react10.useState)(PALETTE[5]);
+  const [name, setName] = (0, import_react11.useState)("");
+  const [color, setColor] = (0, import_react11.useState)(PALETTE[5]);
   const add = async () => {
     if (!name.trim()) return;
     await api.createTag(name.trim(), color);
@@ -10156,7 +10161,7 @@ function TagsPage() {
 }
 
 // web/issuetracker/src/pages/ProjectsPage.tsx
-var import_react11 = __toESM(require_react());
+var import_react12 = __toESM(require_react());
 import { confirmDialog as confirmDialog3 } from "/shared/dist/shared.mjs";
 var import_jsx_runtime14 = __toESM(require_jsx_runtime());
 var PALETTE2 = [
@@ -10192,11 +10197,11 @@ function ColorDots({
 }
 function ProjectsPage() {
   const { teams, reloadTeams } = useData();
-  const [name, setName] = (0, import_react11.useState)("");
-  const [key, setKey] = (0, import_react11.useState)("");
-  const [color, setColor] = (0, import_react11.useState)(PALETTE2[5]);
-  const [error, setError] = (0, import_react11.useState)("");
-  const [editId, setEditId] = (0, import_react11.useState)(null);
+  const [name, setName] = (0, import_react12.useState)("");
+  const [key, setKey] = (0, import_react12.useState)("");
+  const [color, setColor] = (0, import_react12.useState)(PALETTE2[5]);
+  const [error, setError] = (0, import_react12.useState)("");
+  const [editId, setEditId] = (0, import_react12.useState)(null);
   const add = async () => {
     setError("");
     if (!name.trim() || !key.trim()) {
@@ -10319,10 +10324,10 @@ function ProjectEditRow({
   onDone,
   onCancel
 }) {
-  const [name, setName] = (0, import_react11.useState)(team.name);
-  const [key, setKey] = (0, import_react11.useState)(team.key);
-  const [color, setColor] = (0, import_react11.useState)(team.color);
-  const [error, setError] = (0, import_react11.useState)("");
+  const [name, setName] = (0, import_react12.useState)(team.name);
+  const [key, setKey] = (0, import_react12.useState)(team.key);
+  const [color, setColor] = (0, import_react12.useState)(team.color);
+  const [error, setError] = (0, import_react12.useState)("");
   const save = async () => {
     setError("");
     try {
@@ -10371,16 +10376,9 @@ function ProjectEditRow({
 }
 
 // web/issuetracker/src/pages/ApiPage.tsx
-var import_react12 = __toESM(require_react());
 var import_jsx_runtime15 = __toESM(require_jsx_runtime());
 function ApiPage() {
-  const [copied, setCopied] = (0, import_react12.useState)(false);
   const origin = window.location.origin;
-  const copy = (text) => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
   const curlExample = `curl -X POST ${origin}/graphql \\
   -H "Authorization: Bearer <api-key>" \\
   -H "Content-Type: application/json" \\
@@ -10421,15 +10419,7 @@ function ApiPage() {
           ] }),
           /* @__PURE__ */ (0, import_jsx_runtime15.jsx)("h3", { children: "Example request" }),
           /* @__PURE__ */ (0, import_jsx_runtime15.jsx)("div", { style: box, children: curlExample }),
-          /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(
-            "button",
-            {
-              className: "btn",
-              style: { marginTop: 10 },
-              onClick: () => copy(curlExample),
-              children: copied ? "Copied" : "Copy curl"
-            }
-          ),
+          /* @__PURE__ */ (0, import_jsx_runtime15.jsx)("div", { style: { marginTop: 10 }, children: /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(CopyButton, { text: () => curlExample, label: "curl example" }) }),
           /* @__PURE__ */ (0, import_jsx_runtime15.jsx)("h3", { style: { marginTop: 24 }, children: "Supported operations" }),
           /* @__PURE__ */ (0, import_jsx_runtime15.jsxs)("ul", { style: { color: "var(--color-text-muted)" }, children: [
             /* @__PURE__ */ (0, import_jsx_runtime15.jsxs)("li", { children: [

@@ -256,7 +256,7 @@ func classifyLeaf(certsDir, dirName string, rootCert *x509.Certificate) *legacyL
 		// from a legacy tree someone repaired by hand. Its bytes are NOT
 		// retained: cert_pem is projected into every /api/certs/{id} response
 		// and served verbatim from the public files/cert.pem route, so
-		// retaining a mislabelled key here would publish it. The reason text
+		// retaining a mislabeled key here would publish it. The reason text
 		// deliberately does not echo block.Type, for the same reason.
 		leaf.quarantined = true
 		leaf.reason = "cert.pem does not contain a CERTIFICATE block"

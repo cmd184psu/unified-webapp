@@ -1,14 +1,7 @@
-import { useState } from "react";
+import { CopyButton } from "../components/common";
 
 export function ApiPage() {
-  const [copied, setCopied] = useState(false);
   const origin = window.location.origin;
-
-  const copy = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
 
   const curlExample = `curl -X POST ${origin}/graphql \\
   -H "Authorization: Bearer <api-key>" \\
@@ -48,13 +41,9 @@ export function ApiPage() {
 
         <h3>Example request</h3>
         <div style={box}>{curlExample}</div>
-        <button
-          className="btn"
-          style={{ marginTop: 10 }}
-          onClick={() => copy(curlExample)}
-        >
-          {copied ? "Copied" : "Copy curl"}
-        </button>
+        <div style={{ marginTop: 10 }}>
+          <CopyButton text={() => curlExample} label="curl example" />
+        </div>
 
         <h3 style={{ marginTop: 24 }}>Supported operations</h3>
         <ul style={{ color: "var(--color-text-muted)" }}>

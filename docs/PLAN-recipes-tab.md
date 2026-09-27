@@ -29,7 +29,7 @@ or modify **only** these paths:
 `.omc/plans/*.md` is untracked planning state (`.omc/` is the only entry in `git status` on this
 branch and holds `plans/`, `sessions/`, `state/`, `project-memory.json`). It is listed explicitly
 because §8 directs open questions there; without the entry the allowlist gate would fail on a
-correct execution. It is **not** a licence to write source or config anywhere under `.omc/`.
+correct execution. It is **not** a license to write source or config anywhere under `.omc/`.
 
 **Explicitly off-limits — do not edit, even to "fix" something obviously wrong:**
 
@@ -179,7 +179,7 @@ Exactly four changes:
 
 | # | Change | Why |
 |---|---|---|
-| R3b-1 | **AC-9.6 assigned to T8.** New `revealRecipe(recipeId)`: `delete collapsedRecipes[id]` → `setActiveTab('recipes')` (which renders) → `CSS.escape`'d `querySelector` → `scrollIntoView({block:'nearest'})` behind a mandatory `if (card)` guard. **T9**'s chip arm collapses to a one-line call. T8's AC list gains AC-9.6; T9's gains AC-9.6 (call site) and AC-9.7. | F-3 was resolved in favour of the full-polish chip, so expand-and-scroll is **genuine new client work**, not a missing gate — r3's T8/T9 built the chip and the tab switch and implemented neither. It lands in T8 because `collapsedRecipes` does. The ordering is load-bearing: the card is not in the DOM until after the render, and a deleted recipe must be a clean no-op rather than a `null.scrollIntoView` throw inside a delegated listener. |
+| R3b-1 | **AC-9.6 assigned to T8.** New `revealRecipe(recipeId)`: `delete collapsedRecipes[id]` → `setActiveTab('recipes')` (which renders) → `CSS.escape`'d `querySelector` → `scrollIntoView({block:'nearest'})` behind a mandatory `if (card)` guard. **T9**'s chip arm collapses to a one-line call. T8's AC list gains AC-9.6; T9's gains AC-9.6 (call site) and AC-9.7. | F-3 was resolved in favor of the full-polish chip, so expand-and-scroll is **genuine new client work**, not a missing gate — r3's T8/T9 built the chip and the tab switch and implemented neither. It lands in T8 because `collapsedRecipes` does. The ordering is load-bearing: the card is not in the DOM until after the render, and a deleted recipe must be a clean no-op rather than a `null.scrollIntoView` throw inside a delegated listener. |
 | R3b-2 | **Three gates added.** §5.3 e2e **step 18** (AC-9.6), **step 19** (AC-8.8), and **step 13 promoted** from an R-17 aside to AC-9.7's named two-site `Chili <b>` assertion, covering the Recipes-tab card title **and** the Grocery-tab suffix. T7 gains AC-8.8 and its `setAllCollapsed` bullet drops the now-false "untested-by-AC per D-6". | AC-8.8 and AC-9.7 were already specified as behavior; only the gates were missing. D-6 is precisely what F-9 closed, so the r3 parenthetical had become wrong. |
 | R3b-3 | **T10's AC walk made dischargeable** — a three-row table mapping AC-8.8 / AC-9.6 / AC-9.7 to a numbered step, with the R-19 rationale for why none of the three gets a unit gate. §5.1's T7/T8/T9/T10 rows updated to match. | T10's own done-when requires every FRD §9 line to map to a named assertion or a numbered step. Without this it could not pass, which is a done-when that fails on a correct implementation. |
 | R3b-4 | **Every FRD line citation in this document re-verified against the current file; 23 distinct citations (38 occurrences) were stale or short and are corrected.** | The FRD grew when the nine amendments landed and no citation was re-based. Both prior review rounds were burned by bad citations, so leaving them in place was not acceptable. The corrections: AC-8.4 424-426→**429-431**, AC-9.4 435-437→**441-443**, AC-8.8 434→**435**, AC-9.6 440-441→**445-446**, AC-9.7 442-445→**447-450**, AC-10.1 437→**453**, AC-7 417-418→**422-423**, AC-1.5 378→**383**, AC-2.6 386→**391**, AC-9 group 429-434→**437-450** and 430-434→**438-444**, §5 asymmetry note 212-215→**214-217**, §5.1 reset row 226→**230**, "empty name → 400" 218→**222**, §6.1.3 240-241→**244-245**, §6.5 274-276→**276-285** and 277-280→**278-281**, §7.1 table 294-302→**299-307**, §7.1 Collapse/Expand row 298→**303**, §7.3 330-331→**330-336**, §7.4.2 337-338→**342-343**, §10 mirroring convention 453→**469**, §11 drag bullet 474→**486**. Historical "was FRD:nnn" values in §6 are left as written, since they record the pre-amendment file. |
@@ -1195,7 +1195,7 @@ Rules to add:
   > tab, where `#recipes-container` is `hidden` and `elementFromPoint` cannot return anything inside
   > it. That is a **weaker** guarantee than r2 described, which makes the directive *more*
   > necessary, not less: the isolation is incidental and must not be leaned on. A few duplicated
-  > declarations are cheaper than a coupling whose only defence is that one container currently
+  > declarations are cheaper than a coupling whose only defense is that one container currently
   > happens to be invisible.
 - `.recipe-switch` reusing the `.sync-toggle` track/thumb pattern at **461-486** (FRD §7.2) — again
   as a new standalone rule set.
@@ -1218,18 +1218,18 @@ Rules to add:
     > over lines 1-1076, and by the appended-rules rule below. The `text-decoration: inherit`
     > declaration is a bare new-class rule, which that rule plainly permits.
   - `.recipe-chip` — because the element is now a `<button>` rather than a `<span>`, it arrives
-    carrying the UA's button defaults (grey background, border, padding, `font: 400 13.333px Arial`,
-    `color: buttontext`). Left alone, `beef (Chili)` would render as a grey box in a different
+    carrying the UA's button defaults (gray background, border, padding, `font: 400 13.333px Arial`,
+    `color: buttontext`). Left alone, `beef (Chili)` would render as a gray box in a different
     typeface mid-row. **The `.recipe-chip` rule must therefore reset them:**
     `background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer;
     text-decoration: inherit;` (the last one per R5-3 — an atomic inline inherits no decoration)
     (add `-webkit-appearance: none` if the phone build needs it). `font: inherit` and
     `color: inherit` are what hand the styling back to `.item-recipe-suffix`, so **order the two
     rules with `.recipe-chip` first and `.item-recipe-suffix` second** — equal specificity, so
-    source order decides, and the subdued colour must win over the reset's `inherit`.
+    source order decides, and the subdued color must win over the reset's `inherit`.
   - The element still needs to be a real `<button>`, not a styled `<span>`: it is keyboard-focusable
     and Enter/Space-activatable for free, which a `<span>` would need `tabindex` and a `keydown` arm
-    to fake. AC-9.6 says "clicking"; the free keyboard path costs nothing and is not a behaviour
+    to fake. AC-9.6 says "clicking"; the free keyboard path costs nothing and is not a behavior
     change anyone has to test.
 - `.offline-hint`, `.recipe-ingredient-row` and its remove `✕` (following `.groups-modal-item` at
   823 / `.groups-modal-delete` at 835), `.recipe-ingredient-input`, and the up/down reorder buttons
@@ -2007,7 +2007,7 @@ three universal gates.
   > listener bullet below.
   >
   > **T6 must style the two classes as one element** — a `<button>` carries UA defaults that would
-  > otherwise render the suffix as a grey box in Arial. See T6's `.recipe-chip` bullet for the exact
+  > otherwise render the suffix as a gray box in Arial. See T6's `.recipe-chip` bullet for the exact
   > reset and rule ordering.
   > **Why the helper is mandatory here.** r1 had T10 unit-test `displayName(item, recipes) → "beef
   > (Chili)"` while T9's `buildRow` needed the two halves separately to wrap the suffix in its own
@@ -2086,7 +2086,7 @@ three universal gates.
   > **r3b's clause here was a defect, and r4 removes it rather than implementing it.** r3b said the
   > option "must also read Unallocated" — prescribing a **relabel of an option that does not
   > exist**, which an executor can only discharge by *adding* one. That would be an unrequested
-  > behaviour change reversing a deliberate exclusion: the footer `<select>` is the add-form's
+  > behavior change reversing a deliberate exclusion: the footer `<select>` is the add-form's
   > **destination picker** (`app.js:875`: `const group = groupSel.value || groups[0] || NO_GROUP;`),
   > so adding the option would let users **create items directly into Unallocated**. No AC asks for
   > that. The `<select>` cannot move an existing item in any case — moves go through the drag path
@@ -2623,7 +2623,7 @@ The table below is retained as the record of what each contradiction was.
 | **F-1** ✅ **APPLIED** | §5 table, rows 3-4 (FRD:202-203) | `PATCH` returns `{recipe, items}` but `DELETE` returns `{items}` only — asymmetric, so the client must delete the recipe from local state itself after a DELETE while a PATCH hands it back (D-1). | Either add a note making the asymmetry deliberate and stating the client obligation, **or** change DELETE to `{recipe, items}` for symmetry. This plan implements the FRD literally (AC-2/AC-5 assert the current shapes) and compensates in T8. |
 | **F-2** ✅ **APPLIED** | §5.1, `POST /api/reset` row (FRD:230) | Says reset "sets every recipe `enabled=false`" without stating the **response shape**, and AC-7 (FRD:422-423) plus the live contract return a bare `[]Item`. An executor reading §5.1 alone may return `{items, recipes}`, which makes `app.js:341`'s `items = data` a non-array and throws on the next render (D-2). | Add to the row: *"Response shape is unchanged — a bare `[]Item`. Recipe changes reach clients via `Notify()` → SSE."* **Resolved in this plan** by keeping `Reset()`'s signature (D-3). |
 | **F-3** ✅ **APPLIED** | §7.4.2 (FRD:342-343) | The clickable recipe chip has **no acceptance criterion** — AC-9 (FRD:438-444) tests only the suffix (D-4). | Either add `AC-9.6 — clicking an owned row's recipe chip switches to the Recipes tab and scrolls that recipe into view`, **or** move §7.4.2 to §11 (deferred). This plan builds it but gates nothing on it. |
-| **F-4** ✅ **APPLIED** | §7.4.4 / AC-9.4 (was FRD:433, now **FRD:441-443**) vs `web/grocery/index.html:156` | AC-9.4 relabels the section heading to "Unallocated", but the Groups modal hard-codes *"Removing a group moves its items to **No Group** until reassigned."* No AC covers that string, so the UI would ship with two names for one bucket (D-5). | **Applied, and narrowed in r4 (R4-1).** AC-9.4 now reads: every user-visible occurrence of the `"No Group"` string reads "Unallocated" — the Grocery section heading **and the Groups-modal hint** — while the stored value remains `"No Group"` (renaming it stays deferred to §11). **The "group `<select>` option" clause is removed as a defect r4 corrected, not as a scope cut.** r3b's rationale ("the `<select>` was added because r2 relabelled only two of the three") was itself the error: there is no third site. `rebuildGroupSelect()` (`app.js:209-221`) never offers NO_GROUP as an add target (`app.js:212`), `groups` is documented as real groups only (`app.js:9`), and `index.html:112` is an empty `<select>` the code fills. The `<select>` is the add-form's destination picker (`app.js:875`), not a move control — moves go through drag — so relabelling it would have been a feature change, not a rename. T5 and T9 ship the two real sites. |
+| **F-4** ✅ **APPLIED** | §7.4.4 / AC-9.4 (was FRD:433, now **FRD:441-443**) vs `web/grocery/index.html:156` | AC-9.4 relabels the section heading to "Unallocated", but the Groups modal hard-codes *"Removing a group moves its items to **No Group** until reassigned."* No AC covers that string, so the UI would ship with two names for one bucket (D-5). | **Applied, and narrowed in r4 (R4-1).** AC-9.4 now reads: every user-visible occurrence of the `"No Group"` string reads "Unallocated" — the Grocery section heading **and the Groups-modal hint** — while the stored value remains `"No Group"` (renaming it stays deferred to §11). **The "group `<select>` option" clause is removed as a defect r4 corrected, not as a scope cut.** r3b's rationale ("the `<select>` was added because r2 relabeled only two of the three") was itself the error: there is no third site. `rebuildGroupSelect()` (`app.js:209-221`) never offers NO_GROUP as an add target (`app.js:212`), `groups` is documented as real groups only (`app.js:9`), and `index.html:112` is an empty `<select>` the code fills. The `<select>` is the add-form's destination picker (`app.js:875`), not a move control — moves go through drag — so relabelling it would have been a feature change, not a rename. T5 and T9 ship the two real sites. |
 | **F-5** ✅ **APPLIED** | §6.5 (FRD:276-285) vs AC-10.1 (FRD:457) | §6.5 enumerates the offline-disabled controls as "enable switches, add, rename, delete, and reorder" and **omits the shared footer form**, which on the Recipes tab creates recipes (§7.3, FRD:330-336). AC-10.1 says "all Recipes-tab mutation controls" (D-9). | Add the footer form to §6.5's list explicitly. This plan reads AC-10.1 broadly and disables it (T8). |
 | **F-6** ✅ **APPLIED** | §9, AC-9 group (FRD:437-454) | No criterion covers **output encoding of recipe names**, which now reach `innerHTML` in two new places (the Grocery-tab suffix and the Recipes-tab cards). `app.js` escapes every other rendered string via `esc()` (`app.js:151`), so this is a consistency gap, not a new policy (B17/R-17). | Add `AC-9.6/9.7 — a recipe named "Chili <b>" renders as literal text in both the Recipes-tab card and the Grocery-tab suffix; no recipe name is interpolated into markup without esc().` |
 | **F-7** ✅ **APPLIED** | §6.1.3 (**FRD:244-245** — r2 cited 242-243, which is §6.1.4 *Delete*; a citation error neither r2 reviewer caught) | Says recipes are "editable by drag (mirrors the existing groups-modal drag implementation)". `attachGroupDrag` (`app.js:409-496`) is not reusable — it hard-codes `groupsList`, `.groups-modal-item`, `dataset.group`, and ends in `reorderGroups()` at :467 (R-14). **AC-2.6 (FRD:391) requires only that the endpoint set `Order`**, so nothing breaks. | **Applied.** §6.1.3 now reads *"Recipes render in `Order`, editable via per-card up/down controls. Drag-reorder of recipe cards is deferred to §11."*, and a matching bullet was added to §11 (**FRD:490**). |
@@ -2851,5 +2851,5 @@ task and a named assertion or numbered step, and nothing in this plan is waiting
 call. `.omc/plans/open-questions.md` therefore records nothing for this plan beyond the resolved
 history above.
 
-*(§5.3's `-race` fork is no longer an open item — it is resolved in favour of the concurrent store
+*(§5.3's `-race` fork is no longer an open item — it is resolved in favor of the concurrent store
 test, per R3-26.)*

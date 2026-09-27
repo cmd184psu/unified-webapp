@@ -1,4 +1,5 @@
-import { HamburgerMenu, ThemeManager, showToast, confirmDialog, promptDialog } from "@shared";
+import { HamburgerMenu, ThemeManager, FileTree, showToast, confirmDialog, promptDialog } from "@shared";
+import type { TreeEntry } from "@shared";
 
 interface VaultInfo { name: string; theme: string; }
 interface TreeNode { name: string; path?: string; is_dir?: boolean; mtime?: number; children?: TreeNode[]; }
@@ -58,134 +59,55 @@ const btnAutoSave    = document.getElementById('btn-autosave')!;
 
 function vaultParam() { return `vault=${state.activeVault}`; }
 
-/* ─── Icon helpers ─── */
-function fileIcon() {
-  return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
-}
-function chevronIcon() {
-  return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>`;
-}
-function editIcon() {
-  return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>`;
-}
-function gripIcon() {
-  return `<svg viewBox="0 0 14 14" fill="currentColor" width="12" height="12" aria-hidden="true">` +
-    `<circle cx="4" cy="3" r="1.2"/><circle cx="10" cy="3" r="1.2"/>` +
-    `<circle cx="4" cy="7" r="1.2"/><circle cx="10" cy="7" r="1.2"/>` +
-    `<circle cx="4" cy="11" r="1.2"/><circle cx="10" cy="11" r="1.2"/></svg>`;
-}
-function trashIcon() {
-  return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>`;
-}
-function folderIcon() {
-  return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
+/* ─── File tree (the shared FileTree) ─── */
+// The shared tree draws the rows and handles sorting, folding, keyboard and
+// the drag grip; obsidianoid decides what each action means for the vault
+// (threads, overwrites, save-before-move), in the functions further down.
+
+/** The server's tree, as the shared tree's entries. */
+function toEntries(nodes: TreeNode[] = []): TreeEntry[] {
+  return nodes.map(n => ({
+    name: n.name,
+    path: n.path ?? '',
+    isDir: !!n.is_dir,
+    mtime: n.mtime,
+    children: n.is_dir ? toEntries(n.children) : undefined,
+  }));
 }
 
-/* ─── File tree rendering ─── */
+/** Whether a folder holds (or is) the threads folder, which can't be renamed. */
+function holdsThreads(folder: string): boolean {
+  return folder === state.threadsFolder || state.threadsFolder.startsWith(folder + '/');
+}
+
 // While searching, a note shows only if the server's grep matched it (name or
 // content); until that answer arrives, the name alone is matched so the tree
 // responds as you type. A folder shows if anything inside it does.
-function matchesFilter(node: TreeNode, filter: string): boolean {
-  if (!filter) return true;
-  if (node.is_dir) return (node.children || []).some(c => matchesFilter(c, filter));
-  if (state.searchPaths) return state.searchPaths.has(node.path!);
-  return node.name.toLowerCase().includes(filter.toLowerCase());
+function matchesFilter(entry: TreeEntry): boolean {
+  if (state.searchPaths) return state.searchPaths.has(entry.path);
+  return entry.name.toLowerCase().includes(state.filterText.toLowerCase());
 }
 
-// Name: folders first, then A–Z. Recent: newest first (a folder counts as
-// its newest note), so recently edited notes and their folders rise to the top.
-function sortNodes(nodes: TreeNode[]): TreeNode[] {
-  const byName = (a: TreeNode, b: TreeNode) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
-  return [...nodes].sort((a, b) => {
-    if (state.sortMode === 'recent') return (b.mtime ?? 0) - (a.mtime ?? 0) || byName(a, b);
-    if (!!a.is_dir !== !!b.is_dir) return a.is_dir ? -1 : 1;
-    return byName(a, b);
-  });
-}
+const tree = new FileTree({
+  label: 'Notes',
+  emptyText: 'No notes yet.',
+  onOpen: entry => void loadNote(entry.path),
+  rename: entry => void (entry.isDir ? renameFolder(entry) : renameNote(entry)),
+  canRename: entry => !entry.isDir || !holdsThreads(entry.path),
+  // Only empty folders can be deleted.
+  remove: entry => void (entry.isDir ? deleteFolder(entry) : deleteNote(entry)),
+  canRemove: entry => !entry.isDir || (entry.children ?? []).length === 0,
+  move: (entry, folder) => void moveNote(entry, folder),
+});
+fileTree.replaceChildren(tree.el); // replaces the loading placeholders
 
-function renderNode(node: TreeNode, depth = 0): HTMLElement | null {
-  if (!matchesFilter(node, state.filterText)) return null;
-
-  if (node.is_dir) {
-    const wrapper = document.createElement('div');
-    const label = document.createElement('div');
-    label.className = 'tree-dir-label';
-    label.style.paddingLeft = `calc(var(--space-3) + ${depth * 14}px)`;
-    const isEmpty = (node.children || []).length === 0;
-    const folderPath = node.path ?? '';
-    const holdsThreads = folderPath === state.threadsFolder || state.threadsFolder.startsWith(folderPath + '/');
-    const tools = state.treeLocked ? '' :
-      `<span class="tree-dir-tools">` +
-      (holdsThreads ? '' : `<button type="button" class="tree-note-edit tree-dir-rename" title="Rename folder" aria-label="Rename folder ${node.name}">${editIcon()}</button>`) +
-      (isEmpty ? `<button type="button" class="tree-note-edit tree-note-delete tree-dir-delete" title="Delete empty folder" aria-label="Delete folder ${node.name}">${trashIcon()}</button>` : '') +
-      `</span>`;
-    label.innerHTML = `${chevronIcon()}${folderIcon()}<span>${node.name}</span>` + tools;
-    label.setAttribute('role', 'treeitem');
-    label.setAttribute('aria-expanded', 'true');
-    label.dataset.folder = node.path ?? '';
-
-    const children = document.createElement('div');
-    children.className = 'tree-dir-children';
-
-    label.querySelector<HTMLButtonElement>('.tree-dir-delete')?.addEventListener('click', e => {
-      e.stopPropagation();
-      void deleteFolder(node);
-    });
-    label.querySelector<HTMLButtonElement>('.tree-dir-rename')?.addEventListener('click', e => {
-      e.stopPropagation();
-      void renameFolder(node);
-    });
-
-    label.addEventListener('click', () => {
-      const collapsed = children.classList.toggle('collapsed');
-      label.classList.toggle('collapsed', collapsed);
-      label.setAttribute('aria-expanded', String(!collapsed));
-    });
-
-    wrapper.appendChild(label);
-    sortNodes(node.children || []).forEach(child => {
-      const el = renderNode(child, depth + 1);
-      if (el) children.appendChild(el);
-    });
-    wrapper.appendChild(children);
-    return wrapper;
-  } else {
-    const item = document.createElement('div');
-    item.className = 'tree-note' + (node.path === state.currentPath ? ' active' : '');
-    item.style.paddingLeft = `calc(var(--space-3) + ${depth * 14}px)`;
-    // A locked tree shows no grip, rename or delete controls.
-    item.innerHTML = (state.treeLocked ? '' : `<span class="tree-grip" title="Drag to move into a folder">${gripIcon()}</span>`) +
-      `${fileIcon()}<span class="tree-note-name" title="${node.path}">${node.name}</span>` +
-      (state.treeLocked ? '' :
-        `<button type="button" class="tree-note-edit" title="Rename note" aria-label="Rename ${node.name}">${editIcon()}</button>` +
-        `<button type="button" class="tree-note-edit tree-note-delete" title="Delete note" aria-label="Delete ${node.name}">${trashIcon()}</button>`);
-    item.setAttribute('role', 'treeitem');
-    item.setAttribute('tabindex', '0');
-    item.dataset.path = node.path!;
-
-    const open = () => loadNote(node.path!);
-    item.addEventListener('click', open);
-    item.querySelector<HTMLButtonElement>('.tree-note-edit:not(.tree-note-delete)')?.addEventListener('click', e => {
-      e.stopPropagation();
-      void renameNote(node);
-    });
-    item.querySelector<HTMLButtonElement>('.tree-note-delete')?.addEventListener('click', e => {
-      e.stopPropagation();
-      void deleteNote(node);
-    });
-    const grip = item.querySelector<HTMLElement>('.tree-grip');
-    if (grip) attachNoteDrag(grip, item, node);
-    item.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }});
-    return item;
-  }
-}
-
+/** Redraws the tree from the current sort, search, open note and lock. */
 function renderTree() {
-  if (!state.treeData) return;
-  fileTree.innerHTML = '';
-  sortNodes(state.treeData.children || []).forEach(child => {
-    const el = renderNode(child, 0);
-    if (el) fileTree.appendChild(el);
+  tree.update({
+    sort: state.sortMode,
+    filter: state.filterText ? matchesFilter : null,
+    activePath: state.currentPath,
+    locked: state.treeLocked,
   });
 }
 
@@ -194,17 +116,18 @@ async function fetchTree() {
     const res = await fetch(`/api/tree?${vaultParam()}`);
     if (!res.ok) throw new Error('tree fetch failed');
     state.treeData = await res.json() as TreeNode;
+    tree.update({ emptyText: 'No notes yet.' });
+    tree.setEntries(toEntries(state.treeData.children));
     renderTree();
   } catch (e) {
-    fileTree.innerHTML = `<div style="padding:var(--space-3);font-size:var(--text-xs);color:var(--color-danger)">⚠ Failed to load vault</div>`;
+    tree.update({ emptyText: '⚠ Failed to load vault' });
+    tree.setEntries([]);
   }
 }
 
 /* ─── Active note highlight sync ─── */
 function syncActiveHighlight() {
-  document.querySelectorAll('.tree-note').forEach(el => {
-    el.classList.toggle('active', (el as HTMLElement).dataset.path === state.currentPath);
-  });
+  tree.update({ activePath: state.currentPath });
 }
 
 /* ─── Load note ─── */
@@ -463,64 +386,12 @@ sortSelector.addEventListener('change', () => {
   renderTree();
 });
 
-/* ─── Drag to move (grocery/todo-style grip, pointer-driven) ─── */
-// Order inside a folder comes from the Name/Recent sort, so a drag only
-// changes which folder a note lives in. Drop on a folder to move into it, on
-// a note to move beside it (into its folder), or on empty tree space to move
-// to the vault root. The target folder highlights while dragging.
+/* ─── Moving, renaming, deleting ─── */
+// The tree's grip drags a note onto a folder (into it), a note (beside it) or
+// empty space (the vault root); order inside a folder comes from the sort.
 function folderOf(path: string): string {
   const i = path.lastIndexOf('/');
   return i < 0 ? '' : path.slice(0, i);
-}
-
-function dropTargetAt(x: number, y: number): { folder: string; el: HTMLElement } | null {
-  const hit = document.elementFromPoint(x, y) as HTMLElement | null;
-  if (!hit || !fileTree.contains(hit)) return null;
-  const dir = hit.closest<HTMLElement>('.tree-dir-label');
-  if (dir) return { folder: dir.dataset.folder ?? '', el: dir };
-  const note = hit.closest<HTMLElement>('.tree-note');
-  if (note) {
-    const folder = folderOf(note.dataset.path ?? '');
-    const label = folder
-      ? fileTree.querySelector<HTMLElement>(`.tree-dir-label[data-folder="${CSS.escape(folder)}"]`)
-      : null;
-    return { folder, el: label ?? fileTree };
-  }
-  return { folder: '', el: fileTree };
-}
-
-function clearDropMarks() {
-  fileTree.classList.remove('drop-target');
-  fileTree.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target'));
-}
-
-function attachNoteDrag(grip: HTMLElement, item: HTMLElement, node: TreeNode) {
-  grip.addEventListener('click', e => e.stopPropagation());
-  grip.addEventListener('pointerdown', e => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    grip.setPointerCapture(e.pointerId);
-    item.classList.add('dragging');
-    let target: { folder: string; el: HTMLElement } | null = null;
-
-    const onMove = (ev: PointerEvent) => {
-      clearDropMarks();
-      target = dropTargetAt(ev.clientX, ev.clientY);
-      if (target && target.folder !== folderOf(node.path!)) target.el.classList.add('drop-target');
-    };
-    const onEnd = () => {
-      grip.removeEventListener('pointermove', onMove);
-      grip.removeEventListener('pointerup', onEnd);
-      grip.removeEventListener('pointercancel', onEnd);
-      item.classList.remove('dragging');
-      clearDropMarks();
-      if (target && target.folder !== folderOf(node.path!)) void moveNote(node, target.folder);
-    };
-    grip.addEventListener('pointermove', onMove);
-    grip.addEventListener('pointerup', onEnd);
-    grip.addEventListener('pointercancel', onEnd);
-  });
 }
 
 /** Whether the loaded tree already has a note at path. */
@@ -579,7 +450,7 @@ function treeUnlocked(): boolean {
   return !state.treeLocked;
 }
 
-async function moveNote(node: TreeNode, folder: string) {
+async function moveNote(node: TreeEntry, folder: string) {
   if (!treeUnlocked()) return;
   const path = node.path!;
   if (path === state.currentPath && state.isDirty) {
@@ -642,7 +513,7 @@ btnNewFolder.addEventListener('click', async () => {
 });
 
 /* ─── Rename folder ─── */
-async function renameFolder(node: TreeNode) {
+async function renameFolder(node: TreeEntry) {
   if (!treeUnlocked()) return;
   const path = node.path ?? '';
   if (!path) return;
@@ -683,7 +554,7 @@ async function renameFolder(node: TreeNode) {
 /* ─── Delete empty folder ─── */
 // The trash icon only appears on folders with nothing in them; the server
 // double-checks, and refuses a folder that still holds hidden files.
-async function deleteFolder(node: TreeNode) {
+async function deleteFolder(node: TreeEntry) {
   if (!treeUnlocked()) return;
   const path = node.path ?? '';
   if (!path) return;
@@ -706,7 +577,7 @@ async function deleteFolder(node: TreeNode) {
 }
 
 /* ─── Delete ─── */
-async function deleteNote(node: TreeNode) {
+async function deleteNote(node: TreeEntry) {
   if (!treeUnlocked()) return;
   const path = node.path!;
   const isOpen = path === state.currentPath;
@@ -742,7 +613,7 @@ async function deleteNote(node: TreeNode) {
 }
 
 /* ─── Rename ─── */
-async function renameNote(node: TreeNode) {
+async function renameNote(node: TreeEntry) {
   if (!treeUnlocked()) return;
   const path = node.path!;
   if (path === state.currentPath && state.isDirty) {

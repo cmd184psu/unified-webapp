@@ -1045,7 +1045,7 @@ func TestDeletingAnImportedRowLeavesTheLegacyTreeUntouched(t *testing.T) {
 	}
 	// The wildcard leaf, deliberately: it is the tree's one importable leaf with
 	// neither a duplicate-serial sibling (valid.example.local.bak) nor a
-	// duplicate CN, so deleting it isolates the skip-set behaviour being tested
+	// duplicate CN, so deleting it isolates the skip-set behavior being tested
 	// from the duplicate-resolution rules.
 	var target *Cert
 	for i := range certs {

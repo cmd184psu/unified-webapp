@@ -208,7 +208,7 @@ actually accept (cross-check B5/B6).
    events.
 4. **Hamburger:** live/pause + interval, logout icon (auth-aware, existing
    logic), server status. All toggles use `toggle.ts`.
-Done-check: cancel → card shows `canceled`; brake engaged greys the board and
+Done-check: cancel → card shows `canceled`; brake engaged grays the board and
 stops launches; release restores.
 
 ### Phase F5 — Metrics tab (global)

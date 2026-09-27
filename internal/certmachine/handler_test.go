@@ -30,7 +30,7 @@ func newHandlerTestServer(t *testing.T) *Server {
 }
 
 // newHandlerTestServerWithLegacyDir is newHandlerTestServer with
-// legacy_import_dir set, for the import routes -- whose behaviour differs by
+// legacy_import_dir set, for the import routes -- whose behavior differs by
 // design between "unconfigured", "configured but unusable", and "usable".
 func newHandlerTestServerWithLegacyDir(t *testing.T, legacyDir string) *Server {
 	t.Helper()

@@ -55,7 +55,7 @@ func newSettingsStore(path, configDefault string) *settingsStore {
 }
 
 // PythonBin resolves the effective interpreter: saved override → config
-// default → the package-level default (defence in depth for a hand-built
+// default → the package-level default (defense in depth for a hand-built
 // config that skipped Load).
 func (s *settingsStore) PythonBin() string {
 	s.mu.RLock()

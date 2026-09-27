@@ -10,7 +10,7 @@
 
 ## 0. Scope
 
-**This round ports the multissh module.** Auth, passkeys, TLS and origin policy are a **separate round of work to follow**, not cancelled work. Nothing in this plan is designed to be hard to add them to later.
+**This round ports the multissh module.** Auth, passkeys, TLS and origin policy are a **separate round of work to follow**, not canceled work. Nothing in this plan is designed to be hard to add them to later.
 
 The auth design from v1–v8 is kept in `shelved/` so round two starts from it rather than from scratch:
 
@@ -415,7 +415,7 @@ NFR-2 requires the module to be inert until a request arrives — the reference 
 |---|---|
 | **Unit** | Ported `sshproxy` suites; credential exactly-one-of and redaction across all three password-carrying structs; strict-host-key missing-file error path; config round-trip, defaults and `~` expansion. |
 | **Integration** | Ported server handler suites; `max_sessions` accept/reject at the configured bound; password absent from `hosts_path` (2.4c; the temp-file assertion v6 listed here is **dropped** — no task specifies it); `GET /api/config` returns the configured `maxSessions` (3.6b); path-traversal rejection on key names, `filePath` broadcasts and the file browser; WS connect with a password credential; `static_dir` four-row fallback table; **4.8** WebSocket upgrade with matching, absent and foreign `Origin` through the dispatcher; **4.5** two hostnames → one `Build`; **4.7** one module 503s while five serve. |
-| **E2E** | Manual and labelled as such (6.4): AC-4..AC-10 plus NFR-2/3/4, executed **through the real nginx/HAProxy front end** rather than `localhost:8080` — a Go handler test with a synthetic `Host` cannot observe what the proxy does to `Host`, which is precisely R1. Frontend redesign items (collapse, history, `key:ctrl+c`, password entry, copy-ssh-command) are gated at Verify Phase 5, not deferred into the acceptance pass. |
+| **E2E** | Manual and labeled as such (6.4): AC-4..AC-10 plus NFR-2/3/4, executed **through the real nginx/HAProxy front end** rather than `localhost:8080` — a Go handler test with a synthetic `Host` cannot observe what the proxy does to `Host`, which is precisely R1. Frontend redesign items (collapse, history, `key:ctrl+c`, password entry, copy-ssh-command) are gated at Verify Phase 5, not deferred into the acceptance pass. |
 | **Observability** | The reference logs a handful of failure-side lines via bare `log.Printf` and nothing in unified captures them — yet FR-A7 routes all client-facing error detail there and AC-10 greps it. Required: **(a)** audit lines on terminal connect/disconnect and on each broadcast target start/finish, carrying timestamp, target host/user and outcome — a browser-driven SSH executor with no record of which host was reached is not operable; **(b)** a test asserting audit output contains **no** credential field, alongside the redaction tests; **(c)** a **named sink** — `unified.service` exists, so stdout lands in journald; document the exact `journalctl -u unified` invocation AC-10's grep depends on, without which AC-10 is not executable as written; **(d)** per-risk detection signals — R1: successful WS upgrades at zero while origin rejections are non-zero; R4: the redaction tests plus the AC-10 grep. |
 
 **Known coverage gap:** R1 is only falsifiable against the real proxy, so the 4.8 handler test is necessary but not sufficient — AC-4's manual pass through nginx is the actual verification.

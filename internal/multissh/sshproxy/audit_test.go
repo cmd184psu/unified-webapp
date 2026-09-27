@@ -97,7 +97,7 @@ func TestAuditLinesCarryNoCredential(t *testing.T) {
 	}
 }
 
-// A key session is labelled auth=key, and the key path -- which names a file on
+// A key session is labeled auth=key, and the key path -- which names a file on
 // the server -- stays out of the audit line.
 func TestAuditLabelsKeySessionsWithoutTheKeyPath(t *testing.T) {
 	logged := captureLog(t)

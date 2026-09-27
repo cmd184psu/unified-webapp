@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { createCopyButton } from "@shared";
 import {
   PRIORITY_LABELS,
   STATE_COLORS,
@@ -78,4 +79,20 @@ export function Modal({
       </div>
     </div>
   );
+}
+
+/**
+ * The platform's shared copy button (icon, tooltip, toast, check mark),
+ * mounted into React. `text` is read at click time.
+ */
+export function CopyButton({ text, label, className = "btn" }: { text: () => string; label: string; className?: string }) {
+  const host = useRef<HTMLSpanElement>(null);
+  const read = useRef(text);
+  read.current = text;
+  useEffect(() => {
+    const btn = createCopyButton({ text: () => read.current(), label, className });
+    host.current?.replaceChildren(btn);
+    return () => btn.remove();
+  }, [label, className]);
+  return <span ref={host} style={{ display: "contents" }} />;
 }
