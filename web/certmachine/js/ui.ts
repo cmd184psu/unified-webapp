@@ -1,8 +1,9 @@
 import { fetchConfig, fetchCerts, fetchCA, initCA } from "./api";
 import { openTrustDialog } from "./trustdialog";
+import { openReplaceCADialog, confirmSwitchBackCA } from "./cadialog";
 import type { CAStatus } from "./api";
 import { renderCertList } from "./render";
-import { filterCerts, sortCerts } from "./listmodel";
+import { filterCerts, filterStale, sortCerts } from "./listmodel";
 import type { SortKey, SortDir } from "./listmodel";
 import { openCertDetail } from "./detail";
 import { openGenerateForm } from "./generate";
@@ -86,6 +87,8 @@ function renderCAPanel(
   heading.textContent = "Certificate authority";
   panel.append(heading);
 
+  const openTrust = (): void => openTrustDialog(config);
+
   if (ca.exists) {
     const meta = el("dl", "cert-detail-meta");
     addMetaRow(meta, "Subject", ca.subject ?? "unknown");
@@ -94,6 +97,24 @@ function renderCAPanel(
     addMetaRow(meta, "Fingerprint", ca.fingerprint ?? "unknown");
     if (ca.importedFrom !== undefined) addMetaRow(meta, "Imported from", ca.importedFrom);
     panel.append(meta);
+
+    // The previous CA (CA-replacement plan FR-R7): shown only when one
+    // exists, with the active-cert count that also drives the Replace
+    // dialog's forced previousStale choice (D7).
+    if (ca.previous !== undefined) {
+      const prevHeading = el("p", "cert-field-label");
+      prevHeading.textContent = "Previous certificate authority";
+      panel.append(prevHeading);
+      const prevMeta = el("dl", "cert-detail-meta");
+      addMetaRow(prevMeta, "Subject", ca.previous.subject);
+      addMetaRow(prevMeta, "Valid", `${formatCADate(ca.previous.notBefore)} – ${formatCADate(ca.previous.notAfter)}`);
+      addMetaRow(
+        prevMeta,
+        "Signs",
+        `${ca.previous.activeCount} active certificate${ca.previous.activeCount === 1 ? "" : "s"}`,
+      );
+      panel.append(prevMeta);
+    }
 
     const actions = el("div", "cert-ca-actions");
     const download = el("a", "cert-btn");
@@ -106,9 +127,26 @@ function renderCAPanel(
       const trustBtn = el("button", "cert-btn cert-btn-secondary");
       trustBtn.type = "button";
       trustBtn.textContent = "Trust this CA…";
-      trustBtn.addEventListener("click", () => openTrustDialog(config));
+      trustBtn.addEventListener("click", openTrust);
       actions.append(trustBtn);
     }
+
+    const replaceBtn = el("button", "cert-btn cert-btn-secondary");
+    replaceBtn.type = "button";
+    replaceBtn.textContent = "Replace CA…";
+    replaceBtn.addEventListener("click", () => openReplaceCADialog(ca, onCAChanged, openTrust));
+    actions.append(replaceBtn);
+
+    if (ca.previous !== undefined) {
+      const switchBackBtn = el("button", "cert-btn cert-btn-secondary");
+      switchBackBtn.type = "button";
+      switchBackBtn.textContent = "Switch back to previous CA";
+      switchBackBtn.addEventListener("click", () => {
+        void confirmSwitchBackCA(onCAChanged, openTrust);
+      });
+      actions.append(switchBackBtn);
+    }
+
     panel.append(actions);
 
     const trustNote = el("p", "cert-ca-note");
@@ -201,9 +239,10 @@ export async function mountCertApp(root: HTMLElement): Promise<void> {
   let sortKey: SortKey = "name";
   let sortDir: SortDir = "asc";
   let groupByDomain = false;
+  let staleOnly = false;
 
   function renderList(): void {
-    const filtered = filterCerts(certs, query);
+    const filtered = filterStale(filterCerts(certs, query), staleOnly);
     const sorted = sortCerts(filtered, sortKey, sortDir);
     renderCertList(listWrap, sorted, config.expiryWarnDays, new Date(), {
       groupByDomain,
@@ -276,6 +315,19 @@ export async function mountCertApp(root: HTMLElement): Promise<void> {
     });
     groupToggle.append(groupCheckbox, el("span", "ui-toggle-track"), document.createTextNode("Group by domain"));
 
+    // "Stale only" (CA-replacement plan FR-R4): same toggle pattern as
+    // "Group by domain" above -- a pure client-side filter over the
+    // already-fetched `certs` array, no re-fetch.
+    const staleToggle = el("label", "ui-toggle cert-group-toggle");
+    const staleCheckbox = el("input");
+    staleCheckbox.type = "checkbox";
+    staleCheckbox.checked = staleOnly;
+    staleCheckbox.addEventListener("change", () => {
+      staleOnly = staleCheckbox.checked;
+      renderList();
+    });
+    staleToggle.append(staleCheckbox, el("span", "ui-toggle-track"), document.createTextNode("Stale only"));
+
     const newBtn = el("button", "cert-btn cert-btn-primary");
     newBtn.type = "button";
     newBtn.textContent = "New certificate";
@@ -287,7 +339,7 @@ export async function mountCertApp(root: HTMLElement): Promise<void> {
 
     const importBtn = buildImportButton(config, () => openImportWizard(config.certCount, () => void refresh()));
 
-    toolbar.append(search, sortSelect, dirBtn, groupToggle, newBtn, importBtn);
+    toolbar.append(search, sortSelect, dirBtn, groupToggle, staleToggle, newBtn, importBtn);
   }
 
   // Every mutating action (generate, renew, delete, import) fires its own

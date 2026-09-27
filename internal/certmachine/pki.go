@@ -413,11 +413,13 @@ func GenerateNamedCA(name string) (certPEM, keyPEM []byte, err error) {
 }
 
 // GenerateLeaf issues a leaf certificate for req, signed by caCert/caKey,
-// valid for validityDays (always default_validity_days -- FR-4 forbids a
-// per-cert override) unless that would outlive the CA, in which case the
-// leaf's NotAfter is clamped to caCert.NotAfter and LeafResult.Clamped is
-// set. The clamp is owned here, not by a validator: it is not a rejection,
-// and two owners could disagree about the resulting NotAfter.
+// valid for validityDays (default_validity_days for every caller except
+// Store.Edit, the CA-replacement plan's one FR-4 exception, which passes an
+// operator-chosen validity -- see Edit's own doc comment for its bounds)
+// unless that would outlive the CA, in which case the leaf's NotAfter is
+// clamped to caCert.NotAfter and LeafResult.Clamped is set regardless of
+// which caller asked. The clamp is owned here, not by a validator: it is not
+// a rejection, and two owners could disagree about the resulting NotAfter.
 //
 // req.FQDN is always the certificate's CN and its first DNS SAN
 // (deduplicated against req.DNSSans), so a generated leaf always validates

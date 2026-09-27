@@ -125,9 +125,12 @@ function mutation(overrides: Partial<CertMutationResponse>): CertMutationRespons
       notAfter: "2026-03-02T00:00:00Z",
       created: "2026-01-01T00:00:00Z",
       status: "active",
+      caId: 1,
+      stale: false,
       ...overrides.cert,
     },
     validityClamped: true,
+    previousDropped: false,
     ...overrides,
   };
 }

@@ -6,7 +6,7 @@
 // bundled for node and throws on failure, so a non-zero exit is the whole
 // report.
 
-import { filterCerts, sortCerts, groupCerts } from "./listmodel";
+import { filterCerts, sortCerts, groupCerts, filterStale, isUnknownSigner } from "./listmodel";
 import type { Cert } from "./types";
 
 function check(name: string, cond: boolean, detail: string): void {
@@ -27,6 +27,8 @@ function makeCert(overrides: Partial<Cert> & { id: number; fqdn: string }): Cert
     sans: overrides.sans ?? { dns: [], ip: [] },
     fingerprint: overrides.fingerprint ?? `FP-${overrides.id}`,
     status: overrides.status ?? "active",
+    caId: "caId" in overrides ? (overrides.caId as number | null) : 1,
+    stale: overrides.stale ?? false,
     created: overrides.created ?? "2026-01-01T00:00:00Z",
     ...(overrides.certPem !== undefined ? { certPem: overrides.certPem } : {}),
     ...(overrides.importedFrom !== undefined ? { importedFrom: overrides.importedFrom } : {}),
@@ -236,4 +238,63 @@ check(
   "groupCerts covers every input cert exactly once",
   groups.reduce((n, g) => n + g.certs.length, 0) === toGroup.length,
   `got ${groups.reduce((n, g) => n + g.certs.length, 0)}`,
+);
+
+// ---------- filterStale ----------
+
+const staleMix: Cert[] = [
+  makeCert({ id: 1, fqdn: "a.local", stale: false }),
+  makeCert({ id: 2, fqdn: "b.local", stale: true }),
+  makeCert({ id: 3, fqdn: "c.local", stale: true }),
+  makeCert({ id: 4, fqdn: "d.local", stale: false }),
+];
+
+check(
+  "filterStale(false) is a no-op, unchanged order",
+  filterStale(staleMix, false).map((c) => c.id).join(",") === "1,2,3,4",
+  `got ${filterStale(staleMix, false).map((c) => c.id).join(",")}`,
+);
+
+check(
+  "filterStale(true) keeps only stale rows",
+  filterStale(staleMix, true).map((c) => c.id).join(",") === "2,3",
+  `got ${filterStale(staleMix, true).map((c) => c.id).join(",")}`,
+);
+
+check(
+  "filterStale does not mutate its input",
+  staleMix.length === 4,
+  "expected the original certs array to be untouched",
+);
+
+check(
+  "filterStale(true) on an all-non-stale list returns empty",
+  filterStale([makeCert({ id: 1, fqdn: "a.local", stale: false })], true).length === 0,
+  "expected no rows",
+);
+
+// ---------- isUnknownSigner ----------
+
+check(
+  "a non-quarantined row with caId === null is an unknown signer",
+  isUnknownSigner(makeCert({ id: 1, fqdn: "a.local", caId: null, status: "active" })) === true,
+  "expected true",
+);
+
+check(
+  "a non-quarantined row with a real caId is not an unknown signer",
+  isUnknownSigner(makeCert({ id: 2, fqdn: "b.local", caId: 1, status: "active" })) === false,
+  "expected false",
+);
+
+check(
+  "a quarantined row with caId === null is NOT flagged unknown-signer (its own badge already covers it)",
+  isUnknownSigner(makeCert({ id: 3, fqdn: "c.local", caId: null, status: "quarantined" })) === false,
+  "expected false",
+);
+
+check(
+  "an archived row with caId === null is still flagged unknown-signer",
+  isUnknownSigner(makeCert({ id: 4, fqdn: "d.local", caId: null, status: "archived" })) === true,
+  "expected true",
 );

@@ -246,7 +246,7 @@ func TestBundleTGZContainsFourEntriesWithModesAndContent(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 	setupCA(t, s, time.Now().AddDate(10, 0, 0))
-	ca, err := s.GetCA(ctx)
+	ca, err := s.GetCurrentCA(ctx)
 	if err != nil {
 		t.Fatalf("GetCA: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestRootMismatchRefusesHAProxyPEMAndBundle(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 	setupCA(t, s, time.Now().AddDate(10, 0, 0))
-	ca, err := s.GetCA(ctx)
+	ca, err := s.GetCurrentCA(ctx)
 	if err != nil {
 		t.Fatalf("GetCA: %v", err)
 	}

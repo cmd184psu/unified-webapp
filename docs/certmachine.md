@@ -46,10 +46,11 @@ entire access-control story. See [Security posture](#12-security-posture).
 
 Two other things worth knowing up front:
 
-- **There is no CA rotation or deletion route through the API.** FR-6
-  deliberately ships no "delete the CA" button — see
-  [Replacing the root CA](#10-replacing-the-root-ca) for why, and for the
-  manual procedure that exists instead.
+- **The current CA can never be deleted through the API, but it can be
+  replaced.** There is still no "delete the CA" button — the only route that
+  removes a `ca` row is the automatic cleanup that follows a replace or
+  switch-back, and it refuses anything but the *previous* CA. See
+  [Replacing the root CA](#10-replacing-the-root-ca) for the UI procedure.
 - **A healthy process is not proof certmachine came up.** An unwritable
   `db_path` directory makes the module fail to build; the process stays up,
   every other module keeps serving, and every certmachine hostname returns
@@ -111,19 +112,24 @@ to; nothing about running certmachine touches it.
 ## 4. The interface
 
 The page has a CA panel at the top (root CA metadata, download, trust
-instructions — see [§6](#6-trusting-the-root-ca)) and a certificate list
-below it, with a toolbar: search box, sort (name / created / expiry) with
-direction toggle, a group-by-domain toggle, **New certificate**, and an
-**Import** button (re-run the import wizard; disabled when there is nothing to
-import, with the reason as its tooltip).
+instructions, **Replace CA…**, and — when a previous CA exists — its own
+summary block and a **Switch back to previous CA** button; see
+[§6](#6-trusting-the-root-ca) and [§10](#10-replacing-the-root-ca)) and a
+certificate list below it, with a toolbar: search box, sort
+(name / created / expiry) with direction toggle, a group-by-domain toggle, a
+**Stale only** filter, **New certificate**, and an **Import** button (re-run
+the import wizard; disabled when there is nothing to import, with the reason
+as its tooltip).
 
-Each row shows the FQDN, its status badge, and two inline actions —
-`haproxy.pem` and `.tgz` bundle downloads — because that pair covers the
-common deployment workflow without opening the detail view. Opening a row's
-**Details** button gets you the full parsed record (CN, SANs, serial,
-SHA-256 fingerprint, validity window, `importedFrom` when applicable),
-per-file downloads, a copy button for `cert.pem`, **Renew**, and **Delete**
-(which requires typing the FQDN, case-insensitively, before it unlocks).
+Each row shows the FQDN, its status badge (plus a separate **Stale** badge
+when it applies — see [§10](#10-replacing-the-root-ca)), and two inline
+actions — `haproxy.pem` and `.tgz` bundle downloads — because that pair
+covers the common deployment workflow without opening the detail view.
+Opening a row's **Details** button gets you the full parsed record (CN,
+SANs, serial, SHA-256 fingerprint, validity window, signing CA,
+`importedFrom` when applicable), per-file downloads, a copy button for
+`cert.pem`, **Re-issue**, **Edit…**, and **Delete…** (which requires typing
+the FQDN, case-insensitively, before it unlocks).
 
 Expired and archived certificates are collapsed out of the default view
 behind a "Show N expired/archived certificate(s)" toggle, so the list you see
@@ -380,58 +386,113 @@ early:
 
 ## 10. Replacing the root CA
 
-FR-6 deliberately provides **no** API route to delete or rotate the
-certificate authority: doing that safely (re-chaining every leaf, telling
-every already-deployed client to trust a new root) is an operational
-decision, not something a button should do silently. Instead, replacing the
-CA — because it is expiring, because a legacy import chose the wrong one, or
-because a fingerprint mismatch left you stuck — is a **documented manual
-procedure**. Three server error messages point at exactly this procedure by
-quoting its literal text (see `internal/certmachine/importer.go`'s
-`caReplacementRemedy` constant): the `ErrImportPending` refusal from
-`POST /api/ca/init`, the fingerprint-mismatch refusal from the import
-wizard, and the expiring-CA 409 from generate/renew. The steps below expand
-on that quoted text; they do not contradict it.
+Replacing the CA — because it is expiring, because a legacy import chose the
+wrong one, or because a fingerprint mismatch left you stuck — is a UI
+operation: **Replace CA…** in the CA panel. Three server error messages point
+here (see `internal/certmachine/importer.go`'s `caReplacementRemedy`
+constant): the `ErrImportPending` refusal from `POST /api/ca/init`, the
+fingerprint-mismatch refusal from the import wizard, and the expiring-CA 409
+from generate/renew.
 
-1. **Stop the binary.** The database is single-writer; editing `ca` rows
-   while the server holds the file open is unsupported and can corrupt the
-   file.
-2. **Back it up first:**
+The database keeps at most two CA rows: the **current** one, signing new
+issuance, and at most one **previous** one, kept only so certificates it
+already signed keep working. There is no unbounded history — as soon as
+nothing active is signed by the previous CA, it (and its *archived*
+certificates) is deleted automatically, whether that happens right after a
+replace, or later because a renew, edit, or delete emptied it out.
+
+### Replace CA…
+
+1. Click **Replace CA…** in the CA panel, confirm the "are you sure" step,
+   and give the new CA a name (its Common Name). The name must not collide,
+   case-insensitively, with the current or previous CA's download filename.
+2. **Choose what happens to certificates currently signed by the outgoing
+   CA** (this includes any certificate whose signer is unknown, e.g. an
+   unresolved legacy import):
+   - **Re-issue under the new CA** — same FQDN and SANs, freshly signed.
+   - **Delete** — removed outright.
+   - **Keep as-is (marked stale)** — left signed by the old CA; the download
+     routes still serve them chained to that CA, not the new one, and the
+     list marks them **Stale**.
+3. **If the previous CA (the one already being retired to make room) still
+   signs any active certificate**, a second choice appears: **re-issue** or
+   **delete** those certificates too. This choice has no "keep" option —
+   either way, that CA's archived certificates are discarded in the same
+   step, along with the CA row itself. (With re-issue, the new copies are the
+   only ones kept.) This choice is required whenever it appears; the dialog
+   only shows it when there is something to decide.
+4. If the blanket choice in step 2 is **re-issue** or **delete**, the dialog
+   warns that the current CA will be removed as soon as nothing active uses
+   it any more, which means **Switch back** will not be available
+   afterwards. Only **keep** preserves the ability to switch back.
+5. Submit. The success message reports counts (re-issued / deleted / kept),
+   and if the previous CA dropped out as a result, an added sentence says so:
+   *"The previous CA no longer signed any active certificate and was removed,
+   along with its archived certificates."*
+6. **The D6 reminder always follows a successful replace:** *"Machines that
+   trusted the old CA are unchanged. Use 'Trust this CA…' for the new CA and
+   redeploy the re-issued certificates."* Machines that trusted the retired
+   CA keep trusting it — replacing the CA never touches anything outside this
+   database. Use the reminder's button (or [§6](#6-trusting-the-root-ca)
+   again) for the new CA, and redistribute every re-issued certificate's
+   files the same way the originals were.
+
+### Switch back to previous CA
+
+Visible whenever a previous CA exists. Behind an "are you sure" confirm, it
+swaps the two roles: the CA that was previous becomes current again, and the
+one that was current becomes previous. It refuses (409) if there is no
+previous CA, or if the previous CA has itself drifted within
+`expiry_warn_days` of expiring — you could not issue under it anyway. The D6
+reminder above follows a successful switch-back too, and it can itself cause
+the (new) previous CA to drop if nothing active still needs it.
+
+### Per-certificate: re-issue, edit, delete
+
+From a certificate's detail view:
+
+- **Re-issue** (the existing renew action) re-signs the same FQDN/SANs under
+  whichever CA is current now. This is the per-certificate way to clear a
+  **Stale** badge.
+- **Edit…** is available on every non-quarantined certificate — stale or not
+  — and opens a form pre-filled with the current FQDN, SANs, and validity
+  (defaulting to the server's `default_validity_days`). Submitting re-signs
+  under the current CA with whatever was changed; a duplicate active FQDN or
+  an out-of-range validity is refused before anything is written.
+- **Delete…** works as before (type the FQDN to confirm).
+
+Any of Re-issue, Edit, or Delete can be the operation that finally drops the
+previous CA — its success toast gets the same added sentence as a Replace
+that drops it.
+
+### The CA panel's previous-CA block
+
+When a previous CA exists, the CA panel shows its subject, validity window,
+and how many active certificates still depend on it. This count is exactly
+what decides whether Replace's second (previous-CA) choice appears at all,
+and it is also visible ahead of time via `GET /api/ca`'s `previous.activeCount`.
+
+### Last resort: editing the database by hand
+
+There is still no supported way to edit `ca` rows while the server is
+running — SQLite here is single-writer, and the schema's own invariants (at
+most one current CA, at most one previous CA, the current CA never deleted)
+are enforced in application code around each operation, not by the database
+alone. If the UI procedure above cannot get you where you need to go:
+
+1. **Stop the binary first.** Editing rows while the server holds the file
+   open is unsupported and can corrupt the file.
+2. **Back it up before touching anything:**
    ```bash
    cp certmachine.db certmachine.db.bak
    ```
-3. **Delete the CA row:**
-   ```bash
-   sqlite3 certmachine.db "DELETE FROM ca;"
-   ```
-4. **Restart, then either click Init Root CA** (generates a fresh
-   RSA-4096, ~10-year root) **or re-run the import wizard** against a
-   legacy tree if the replacement root should come from there instead.
-5. **Renew every existing certificate.** This is the expensive step, and
-   the reason the CA's remaining lifetime is worth watching before it
-   becomes urgent: every leaf still on disk was signed by the *old* root,
-   which the `ca` row no longer holds. The root-match guard
-   (`checkDownloadable`, `ErrRootMismatch` in `bundle.go`) refuses to
-   assemble `haproxy.pem` or a `.tgz` bundle for any leaf that no longer
-   chains to the currently-stored CA, with a 409 whose message literally
-   names the remedy: renew it. Renewing re-issues the same CN and SAN set
-   fresh under the new root and clears the mismatch in one action — it is
-   not blocked by the guard itself, since Renew always signs under
-   whatever CA is currently stored. There is no shortcut here; every
-   deployed certificate's replacement has to be distributed the same way
-   the original was.
-6. **Re-distribute the new root CA** (its `<CA name>.crt`) to every client that trusted the
-   old one, following [§6](#6-trusting-the-root-ca) again for each. Until a
-   client has done this, it will show a certificate-trust error for
-   *every* certificate issued after step 4, even ones that renewed
-   cleanly — the leaf changed roots, and the client's trust store did not
-   move with it.
+3. **Never delete the current CA row.** Every code path that removes a `ca`
+   row refuses to touch anything but a row already marked `previous` — there
+   is no equivalent guard on raw SQL run by hand.
 
-Step 5 is why the CA's remaining lifetime matters even though nothing
-appears broken day to day: the closer it gets to `expiry_warn_days` of
-remaining life, the more certificates step 5 will eventually mean
-re-issuing, and the 409 from `checkCAExpiry` starts refusing new
-generate/renew calls before you necessarily notice the calendar.
+Prefer the UI procedure above. This section exists for the case where it
+cannot be reached at all (for example, a database so damaged the server
+won't boot).
 
 ---
 
@@ -559,18 +620,35 @@ are the exception by design (generic to the client, detailed in the log).
 | Method & path | Purpose | Notes |
 |---|---|---|
 | `GET /api/config` | Runtime config for the SPA | `defaultValidityDays`, `expiryWarnDays`, `certCount`, `legacyImportAvailable`, `legacyImportDir`, `legacyImportReason`, `trustDeviceAvailable`, `trustPlatform`, `trustRemoteAvailable`, `trustRemoteReason` |
-| `GET /api/ca` | Current CA status | `{"exists": false}` if none yet |
+| `GET /api/ca` | Current CA status | `{"exists": false}` if none yet. Otherwise `id`, `subject`, `serial`, `notBefore`, `notAfter`, `fingerprint`, `importedFrom`, `unknownSignerActiveCount` (always present, even 0), and `previous` (omitted if there is no previous CA — see below) |
 | `POST /api/ca/init` | Initialize a new root CA | Optional body `{name}` (the CA's Common Name; blank = "CertMachine Root CA"); 201 with none stored, 409 if one exists, 409 `ErrImportPending` if an import is pending |
 | `GET /api/ca/root.crt` | Download the root CA certificate | `Content-Disposition: attachment; filename="<CA name>.crt"` |
+| `POST /api/ca/replace` | Replace the current CA (see [§10](#10-replacing-the-root-ca)) | Body `{"name", "existing": "reissue"\|"delete"\|"keep", "previousStale": "reissue"\|"delete"}` (`previousStale` omitted unless the previous CA still signs an active row). 200 `{"ca": <GET /api/ca shape>, "reissued", "deleted", "kept", "clamped", "previousDropped"}`. 400 on a bad `existing`/`previousStale` value or a name collision; 409 `ErrPreviousStaleChoiceRequired` if `previousStale` is required but missing, 409 `ErrConcurrentChange` if the certificate set moved between the read and the write |
+| `POST /api/ca/switch-back` | Swap the current and previous CA (see [§10](#10-replacing-the-root-ca)) | Empty body. 200 `{"ca": <GET /api/ca shape>}`. 409 `ErrNoPreviousCA` if there is none, or if the previous CA itself fails its own expiry check |
 | `POST /api/ca/trust` | Run this host's device-trust install (see [Automatic device trust](#automatic-device-trust)) | 409 if `trust_device_enabled` is false or no CA exists; body always carries `output` (the ran commands' combined stdout+stderr) alongside `platform` and, on failure, `error` |
 | `POST /api/ca/trust/remote` | Install the CA on another machine over SSH (see [above](#trusting-another-machine-over-ssh)) | `{host, port?, user, key \| password}`; 200 with `platform` and `output`; 400 bad request; 409 SSH unavailable, or the install failed on that machine (with `output`); 422 unsupported OS, nothing installed (with `output`); 502 couldn't connect |
 | `GET /api/ssh/keys` | The SSH key folder's files, for the dialog | `{keys: [...]}`: names only, never key material |
-| `GET /api/certs` | List certificates | Metadata only — no PEM in the response |
-| `POST /api/certs` | Generate a certificate | `{fqdn, dnsSans[], ipSans[]}` → 201; no validity field, it is always `default_validity_days` (possibly clamped) |
-| `GET /api/certs/{id}` | Certificate detail | Includes `certPem`; never `keyPem` |
-| `DELETE /api/certs/{id}` | Delete a row | Requires `?confirm=<fqdn>` (case-insensitive); 400 without it, 204 on success |
-| `POST /api/certs/{id}/renew` | Renew | 201 with the new row; the predecessor is archived |
-| `GET /api/certs/{id}/files/{name}` | Individual file download | `name` is a closed enum: `cert.pem`, `key.pem`, `haproxy.pem` |
-| `GET /api/certs/{id}/bundle` | `.tgz` bundle download | `cert.pem`, `key.pem`, `haproxy.pem`, `<CA name>.crt` |
+| `GET /api/certs` | List certificates | Metadata only — no PEM in the response. Each row now carries `caId` (the signing CA's row id, or `null` for an unresolved/unknown signer), `caSubject` (omitted when unknown), and `stale` (`true` exactly when `caId` is non-null and differs from the current CA's id) |
+| `POST /api/certs` | Generate a certificate | `{fqdn, dnsSans[], ipSans[]}` → 201; no validity field, it is always `default_validity_days` (possibly clamped). Response gains `previousDropped` (bool) alongside the existing `cert`/`validityClamped`/`requestedNotAfter` fields |
+| `GET /api/certs/{id}` | Certificate detail | Includes `certPem`; never `keyPem`. Also carries `caId`, `caSubject`, `stale` |
+| `DELETE /api/certs/{id}` | Delete a row | Requires `?confirm=<fqdn>` (case-insensitive); 400 without it. **200** `{"previousDropped": bool}` on success (previously 204 with no body — deleting the last active certificate under the previous CA can now trigger its automatic removal, which the response reports) |
+| `POST /api/certs/{id}/renew` | Renew | 201 with the new row; the predecessor is archived. Response gains `previousDropped` (bool), same reason as Delete above |
+| `POST /api/certs/{id}/edit` | Edit FQDN, SANs, and/or validity in place (see [§10](#10-replacing-the-root-ca)) | Body `{fqdn, dnsSans[], ipSans[], validityDays}` — the only issuance route that accepts a validity directly, still clamped to the current CA's own expiry. 201, same shape as `POST /api/certs`'s response plus `previousDropped`. 409 `ErrDuplicateActive` if another row is already active for the new FQDN; 409 `ErrQuarantined` for a quarantined source |
+| `GET /api/certs/{id}/files/{name}` | Individual file download | `name` is a closed enum: `cert.pem`, `key.pem`, `haproxy.pem`. 409 `ErrUnknownSigner` if the certificate's signing CA cannot be resolved (`caId` is `null`) — re-issue it first |
+| `GET /api/certs/{id}/bundle` | `.tgz` bundle download | `cert.pem`, `key.pem`, `haproxy.pem`, `<CA name>.crt`. Same `ErrUnknownSigner` 409 as above |
 | `GET /api/import/preview` | Dry-run the legacy import | Counts and per-item reasons; never writes |
 | `POST /api/import` | Execute the legacy import | Idempotent-safe; already-imported leaves report `skipped` |
+
+**Errors, in general:** `ErrValidation` and a malformed confirm/body are
+**400**; a missing row is **404**; everything else this package returns —
+including every new sentinel above (`ErrNoPreviousCA`,
+`ErrPreviousStaleChoiceRequired`, `ErrConcurrentChange`, `ErrUnknownSigner`)
+plus the existing ones (`ErrDuplicateActive`, `ErrCAExists`, `ErrQuarantined`,
+`ErrNewerActiveExists`, `ErrCAFingerprintMismatch`, …) — is a **409**: a
+well-formed request that conflicts with the database's current state.
+
+**Schema note.** The database schema is version 2. An existing (version-1)
+database is migrated automatically, inside one transaction, the first time
+the server opens it — there is nothing to run by hand. Once a database has
+been migrated, it holds the version-2 shape permanently; going back to an
+older binary against that same file afterward is not a supported path.

@@ -1,9 +1,16 @@
 # FRD: Admin UI v2, unified identity, and module auth
 
-Status: DRAFT, round 2. The **auth model** below (two-state modules, module
-PINs, orthogonal API keys) was settled in discussion on 2026-09-11 and is the
-next implementation round. The access matrix and module instances remain a
-later round. Nothing here is implemented yet. Mark up freely.
+Status: CLOSED, not pursuing further (2026-09-27). The **auth model** section
+below (two-state modules, module PINs, orthogonal API keys, passkey-requires-
+LDAP, admin PIN-only) shipped starting 2026-09-11 — see
+`docs/PLAN-auth-two-state.md` and the auth code in `internal/platform/auth/`
+and `internal/platform/config/` for what's actually live, plus the admin
+matrix editor in `web/admin`. Everything else in this document — the LDAP-
+groups × module-instances access matrix, the named module-instances /
+host_routing schema, fixed-local-time session expiry, and the React-based
+Admin UI v2 — is deemed no longer necessary and will not be implemented. This
+FRD is kept for historical context only; do not treat "Decided" below as a
+live commitment.
 
 ## Problem
 

@@ -31,6 +31,27 @@ export function filterCerts(certs: Cert[], query: string): Cert[] {
   });
 }
 
+/**
+ * The "Stale only" toolbar filter (CA-replacement plan FR-R4). `staleOnly`
+ * false is a no-op, matching the empty-query behavior of `filterCerts` --
+ * both filters compose freely and neither one special-cases the other being
+ * off.
+ */
+export function filterStale(certs: Cert[], staleOnly: boolean): Cert[] {
+  if (!staleOnly) return certs;
+  return certs.filter((cert) => cert.stale);
+}
+
+/**
+ * "Unknown signer" classification for the list badge (CA-replacement plan
+ * P1): `caId === null` on a non-quarantined row. A quarantined row's `caId`
+ * is never meaningful (its own badge already says everything that matters),
+ * so it is deliberately excluded here rather than double-badged.
+ */
+export function isUnknownSigner(cert: Cert): boolean {
+  return cert.caId === null && cert.status !== "quarantined";
+}
+
 export type SortKey = "name" | "created" | "expiry";
 export type SortDir = "asc" | "desc";
 

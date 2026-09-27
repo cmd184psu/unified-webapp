@@ -26,11 +26,12 @@ import (
 var (
 	// ErrImportPending means InitCA was called against an empty database
 	// while the configured legacy_import_dir still holds a parseable
-	// rootCA.crt. Initializing a new CA now would occupy the ca singleton
-	// and permanently orphan the legacy root -- FR-6 provides no CA
-	// rotation or deletion route through the API, so the wizard's later
-	// ImportCA would hit a fingerprint mismatch with no clean way back.
-	// Import must run first; never the reverse.
+	// rootCA.crt. Initializing a new CA now would occupy the current-CA role
+	// with a new, unrelated root and leave the legacy one orphaned -- the
+	// wizard's later ImportCA would hit a fingerprint mismatch with no clean
+	// way back short of the CA-replacement plan's Replace route (a later
+	// story), which is a bigger hammer than simply importing first. Import
+	// must run first; never the reverse.
 	ErrImportPending = errors.New("certmachine: cannot initialize a certificate authority while a legacy import is pending")
 
 	// ErrCAExpiringSoon means the stored CA has fewer than expiry_warn_days
@@ -45,15 +46,22 @@ var (
 	ErrNewerActiveExists = errors.New("certmachine: a newer active certificate already exists for this fqdn")
 )
 
-// IssueResult is what Generate and Renew return for the newly issued leaf.
-// Cert.NotAfter already carries the actual (possibly clamped) expiry;
+// IssueResult is what Generate, Renew and Edit return for the newly issued
+// leaf. Cert.NotAfter already carries the actual (possibly clamped) expiry;
 // Clamped and RequestedNotAfter surface GenerateLeaf's validity clamp
 // (LeafResult, pki.go) so a caller can report FR-4's validityClamped fact
 // rather than silently issuing a shorter certificate.
+//
+// PreviousDropped (the CA-replacement plan, P2) reports whether this call's
+// transaction also dropped the previous CA -- Renew, Edit and Delete can all
+// leave the previous CA signing nothing active, which triggers
+// dropPreviousIfUnusedTx. It is always false for Generate, which never
+// touches an existing row.
 type IssueResult struct {
 	Cert              Cert
 	Clamped           bool
 	RequestedNotAfter time.Time
+	PreviousDropped   bool
 }
 
 // InitCA creates a new root CA (RSA-4096, ~10-year, CN "CertMachine Root
@@ -74,7 +82,7 @@ func (s *Store) InitCA(ctx context.Context, legacyImportDir string) error {
 // InitNamedCA is InitCA with the root CA's name (its Common Name) chosen by
 // the caller; name must already be normalized with NormalizeCAName.
 func (s *Store) InitNamedCA(ctx context.Context, legacyImportDir, name string) error {
-	switch _, err := s.GetCA(ctx); {
+	switch _, err := s.GetCurrentCA(ctx); {
 	case err == nil:
 		return ErrCAExists
 	case !errors.Is(err, ErrCANotFound):
@@ -137,9 +145,9 @@ func legacyRootPending(dir string) bool {
 // expiryWarnDays of life left. Generate and Renew share this refusal and its
 // threshold -- expiry_warn_days, not a hardcoded 30 -- so the deployment has
 // exactly one notion of "about to expire", the same number the UI paints
-// badges with. The message names the manual remedy: FR-6 provides no CA
-// rotation route, so "rotate the CA" would name a button that does not
-// exist.
+// badges with. The message names the remedy: "Replace CA..." (the
+// CA-replacement plan's rotation route, a later story), not a manual
+// database edit.
 func checkCAExpiry(caCert *x509.Certificate, expiryWarnDays int) error {
 	warn := time.Duration(expiryWarnDays) * 24 * time.Hour
 	if time.Until(caCert.NotAfter) < warn {
@@ -149,18 +157,25 @@ func checkCAExpiry(caCert *x509.Certificate, expiryWarnDays int) error {
 	return nil
 }
 
-// issueLeaf generates a fresh leaf certificate for fqdn/req under the stored
-// CA. It performs no database writes: Generate and Renew each decide how the
-// resulting Cert is persisted (a plain insert vs. an archive-then-insert),
-// and per the "crypto happens before the transaction opens" binding
-// decision, this is exactly the validation/crypto step that must complete
-// before either opens WithTx. Fails with ErrCANotFound when no CA exists, or
-// ErrCAExpiringSoon when the CA has fewer than expiryWarnDays left.
+// issueLeaf generates a fresh leaf certificate for fqdn/req under the current
+// stored CA: GetCurrentCA followed by issueLeafWith. Fails with
+// ErrCANotFound when no CA exists.
 func (s *Store) issueLeaf(ctx context.Context, fqdn string, req CertRequest, defaultValidityDays, expiryWarnDays int) (Cert, LeafResult, error) {
-	ca, err := s.GetCA(ctx)
+	ca, err := s.GetCurrentCA(ctx)
 	if err != nil {
 		return Cert{}, LeafResult{}, err
 	}
+	return issueLeafWith(ca, fqdn, req, defaultValidityDays, expiryWarnDays)
+}
+
+// issueLeafWith generates a fresh leaf certificate for fqdn/req under ca. It
+// performs no database access at all -- not even a read -- so every caller
+// (Generate via issueLeaf, Renew, Edit) can call it, then open WithTx,
+// satisfying the "crypto happens before the transaction opens" binding
+// decision (R2) regardless of which CA row (current, in every case here) is
+// doing the signing. Fails with ErrCAExpiringSoon when ca has fewer than
+// expiryWarnDays left.
+func issueLeafWith(ca *CA, fqdn string, req CertRequest, validityDays, expiryWarnDays int) (Cert, LeafResult, error) {
 	caCert, err := ParseCert([]byte(ca.CertPEM))
 	if err != nil {
 		return Cert{}, LeafResult{}, fmt.Errorf("certmachine: parse stored ca cert: %w", err)
@@ -173,7 +188,7 @@ func (s *Store) issueLeaf(ctx context.Context, fqdn string, req CertRequest, def
 		return Cert{}, LeafResult{}, fmt.Errorf("certmachine: parse stored ca key: %w", err)
 	}
 
-	leaf, err := GenerateLeaf(caCert, caKey, req, defaultValidityDays)
+	leaf, err := GenerateLeaf(caCert, caKey, req, validityDays)
 	if err != nil {
 		return Cert{}, LeafResult{}, err
 	}
@@ -182,7 +197,14 @@ func (s *Store) issueLeaf(ctx context.Context, fqdn string, req CertRequest, def
 		return Cert{}, LeafResult{}, fmt.Errorf("certmachine: parse generated leaf cert: %w", err)
 	}
 
-	return certFromLeaf(fqdn, leaf, leafCert), leaf, nil
+	c := certFromLeaf(fqdn, leaf, leafCert)
+	// A leaf issued here is, by construction, freshly signed by ca -- record
+	// that signer now (P1/§3.4) rather than leaving ca_id NULL until a later
+	// re-issue. certAndCA (handler.go, FR-R3) resolves a cert's downloads by
+	// this field, and Generate's certAndCA callers must keep working
+	// unchanged for a brand-new certificate.
+	c.CAID = &ca.ID
+	return c, leaf, nil
 }
 
 // certFromLeaf builds the Cert row for a freshly issued leaf. Its metadata
@@ -254,6 +276,11 @@ func (s *Store) Generate(ctx context.Context, req CertRequest, defaultValidityDa
 
 	var id int64
 	if err := s.WithTx(ctx, func(tx *sql.Tx) error {
+		if c.CAID != nil {
+			if err := requireCurrentCATx(ctx, tx, *c.CAID); err != nil {
+				return err
+			}
+		}
 		var err error
 		id, err = s.InsertCert(ctx, tx, c)
 		return err
@@ -300,6 +327,14 @@ func (s *Store) activeCertForFQDN(ctx context.Context, fqdn string) (*Cert, erro
 // from (ErrQuarantined), and an archived row is refused when a newer active
 // row already exists for the fqdn (ErrNewerActiveExists) -- renewing it
 // would resurrect a stale SAN set and discard the newer cert's.
+//
+// Renew always uses defaultValidityDays (D8): it is FR-R5's per-certificate
+// "re-issue under the current CA", not a validity override -- Edit is the
+// one place an operator chooses validityDays. The new row's ca_id is set to
+// the current CA by issueLeaf/issueLeafWith; dropPreviousIfUnusedTx (P2) runs
+// in the same transaction, so a Renew that leaves the previous CA signing
+// nothing active drops it (and its archived rows) immediately, which
+// IssueResult.PreviousDropped reports.
 func (s *Store) Renew(ctx context.Context, id int64, defaultValidityDays, expiryWarnDays int) (IssueResult, error) {
 	source, err := s.GetCert(ctx, id)
 	if err != nil {
@@ -330,19 +365,36 @@ func (s *Store) Renew(ctx context.Context, id int64, defaultValidityDays, expiry
 	}
 
 	var newID int64
+	var dropped bool
 	if err := s.WithTx(ctx, func(tx *sql.Tx) error {
 		if err := s.ArchiveAllForFQDN(ctx, tx, source.FQDN); err != nil {
 			return err
 		}
+		if c.CAID != nil {
+			if err := requireCurrentCATx(ctx, tx, *c.CAID); err != nil {
+				return err
+			}
+		}
 		var err error
 		newID, err = s.InsertCert(ctx, tx, c)
-		return err
+		if err != nil {
+			return err
+		}
+		if err := s.runHook("write"); err != nil {
+			return err
+		}
+		d, err := s.dropPreviousIfUnusedAndHookTx(ctx, tx)
+		if err != nil {
+			return err
+		}
+		dropped = d
+		return nil
 	}); err != nil {
 		return IssueResult{}, err
 	}
 	c.ID = newID
 
-	return IssueResult{Cert: c, Clamped: leaf.Clamped, RequestedNotAfter: leaf.RequestedNotAfter}, nil
+	return IssueResult{Cert: c, Clamped: leaf.Clamped, RequestedNotAfter: leaf.RequestedNotAfter, PreviousDropped: dropped}, nil
 }
 
 // Delete permanently removes the cert row with id (FR-6: a hard delete,
@@ -351,16 +403,167 @@ func (s *Store) Renew(ctx context.Context, id int64, defaultValidityDays, expiry
 // nothing -- FR-6's "explicit confirmation naming the FQDN" is enforced
 // here, server-side, because a browser-only confirm() leaves the
 // destructive route one stray curl from firing. active, archived, and
-// quarantined rows are all deletable this way. There is deliberately no
-// function anywhere in this package that deletes the ca row: FR-6 makes the
-// CA non-deletable through any code path.
-func (s *Store) Delete(ctx context.Context, id int64, confirmFQDN string) error {
-	c, err := s.GetCert(ctx, id)
+// quarantined rows are all deletable this way.
+//
+// FR-6's "the CA is non-deletable" is narrowed by the CA-replacement plan
+// (R4, Principle 2): the *current* CA is never deletable through any code
+// path -- dropPreviousCATx is the only function in this package that
+// deletes the ca row, and it refuses anything but role='previous'. A
+// *previous* CA is dropped automatically, in the same transaction, once
+// nothing active still uses it: the read, the confirmation check, the
+// delete and dropPreviousIfUnusedTx (P2) all run inside one WithTx, so a
+// concurrent change or a hook failure leaves the row (and the previous CA)
+// untouched. The returned bool is IssueResult.PreviousDropped's twin for a
+// call that issues nothing new.
+func (s *Store) Delete(ctx context.Context, id int64, confirmFQDN string) (bool, error) {
+	var dropped bool
+	err := s.WithTx(ctx, func(tx *sql.Tx) error {
+		c, err := getCertTx(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if !strings.EqualFold(c.FQDN, confirmFQDN) {
+			return ErrConfirmMismatch
+		}
+		if err := deleteCertTx(ctx, tx, id); err != nil {
+			return err
+		}
+		if err := s.runHook("write"); err != nil {
+			return err
+		}
+		d, err := s.dropPreviousIfUnusedAndHookTx(ctx, tx)
+		if err != nil {
+			return err
+		}
+		dropped = d
+		return nil
+	})
 	if err != nil {
-		return err
+		return false, err
 	}
-	if !strings.EqualFold(c.FQDN, confirmFQDN) {
-		return ErrConfirmMismatch
+	return dropped, nil
+}
+
+// minEditValidityDays and maxEditValidityDays bound Edit's validityDays
+// (FR-4's one narrowing, P5): GenerateLeaf still clamps to the CA's
+// NotAfter regardless, but Edit is the one caller that accepts an
+// operator-chosen validity at all, so it is the one place that must reject
+// a nonsensical value up front rather than let a 0- or 4000-day request
+// through to the clamp.
+const (
+	minEditValidityDays = 1
+	maxEditValidityDays = 3650
+)
+
+// Edit re-issues the certificate identified by id under a new request and
+// validity (FR-R6, P5) -- the one path through which an operator can change
+// an existing certificate's fqdn, SANs, or validity without going through
+// Renew's "copy the source row verbatim" contract. req must already be
+// normalized and validated (ValidateRequest); Edit itself validates only
+// validityDays, which ValidateRequest knows nothing about.
+//
+// Every branch below is pinned by P5:
+//   - validityDays outside [1, 3650] -> ErrValidation, checked first (no
+//     crypto, no reads) so a bad request never touches the store.
+//   - the source row is quarantined -> ErrQuarantined (no parseable cert to
+//     build on).
+//   - the fqdn is unchanged and the source is archived while a newer active
+//     row exists for that fqdn -> ErrNewerActiveExists, the same refusal
+//     Renew raises for the same reason: editing it would resurrect a stale
+//     SAN set and discard the newer cert's.
+//   - the fqdn changes and another row is already active for the new one
+//     -> ErrDuplicateActive, raised here as an early, friendly check; the
+//     real guard is InsertCert's own in-transaction duplicate check, so a
+//     concurrent collision still surfaces as ErrDuplicateActive (409).
+//
+// The new leaf is generated (issueLeafWith) before WithTx opens (R2). Inside
+// the transaction: an unchanged fqdn is handled by ArchiveAllForFQDN alone
+// (it already covers the source row when active); a changed fqdn archives
+// only the source row, and only if it is active -- the old fqdn is then left
+// with no active row, which is the point of a rename. InsertCert then
+// inserts the new row with ca_id set to the current CA (issueLeafWith set
+// it), and dropPreviousIfUnusedTx (P2) runs last, same as Renew and Delete.
+func (s *Store) Edit(ctx context.Context, id int64, req CertRequest, validityDays, expiryWarnDays int) (IssueResult, error) {
+	if validityDays < minEditValidityDays || validityDays > maxEditValidityDays {
+		return IssueResult{}, fmt.Errorf("%w: validityDays must be between %d and %d, got %d",
+			ErrValidation, minEditValidityDays, maxEditValidityDays, validityDays)
 	}
-	return s.DeleteCert(ctx, id)
+
+	source, err := s.GetCert(ctx, id)
+	if err != nil {
+		return IssueResult{}, err
+	}
+	if source.Status == StatusQuarantined {
+		return IssueResult{}, ErrQuarantined
+	}
+
+	fqdnUnchanged := strings.EqualFold(source.FQDN, req.FQDN)
+	if fqdnUnchanged && source.Status == StatusArchived {
+		active, err := s.activeCertForFQDN(ctx, source.FQDN)
+		if err != nil {
+			return IssueResult{}, err
+		}
+		if active != nil {
+			return IssueResult{}, fmt.Errorf("%w: certificate %d is active for %s; edit that one instead", ErrNewerActiveExists, active.ID, source.FQDN)
+		}
+	}
+	if !fqdnUnchanged {
+		active, err := s.activeCertForFQDN(ctx, req.FQDN)
+		if err != nil {
+			return IssueResult{}, err
+		}
+		if active != nil && active.ID != source.ID {
+			return IssueResult{}, fmt.Errorf("%w: %s", ErrDuplicateActive, req.FQDN)
+		}
+	}
+
+	current, err := s.GetCurrentCA(ctx)
+	if err != nil {
+		return IssueResult{}, err
+	}
+	c, leaf, err := issueLeafWith(current, req.FQDN, req, validityDays, expiryWarnDays)
+	if err != nil {
+		return IssueResult{}, err
+	}
+
+	var newID int64
+	var dropped bool
+	if err := s.WithTx(ctx, func(tx *sql.Tx) error {
+		switch {
+		case fqdnUnchanged:
+			if err := s.ArchiveAllForFQDN(ctx, tx, source.FQDN); err != nil {
+				return err
+			}
+		case source.Status == StatusActive:
+			if err := archiveCertTx(ctx, tx, source.ID); err != nil {
+				return err
+			}
+		}
+
+		if c.CAID != nil {
+			if err := requireCurrentCATx(ctx, tx, *c.CAID); err != nil {
+				return err
+			}
+		}
+
+		var err error
+		newID, err = s.InsertCert(ctx, tx, c)
+		if err != nil {
+			return err
+		}
+		if err := s.runHook("write"); err != nil {
+			return err
+		}
+		d, err := s.dropPreviousIfUnusedAndHookTx(ctx, tx)
+		if err != nil {
+			return err
+		}
+		dropped = d
+		return nil
+	}); err != nil {
+		return IssueResult{}, err
+	}
+	c.ID = newID
+
+	return IssueResult{Cert: c, Clamped: leaf.Clamped, RequestedNotAfter: leaf.RequestedNotAfter, PreviousDropped: dropped}, nil
 }

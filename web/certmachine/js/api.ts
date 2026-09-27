@@ -4,6 +4,7 @@ import type {
   CertListResponse,
   CertMutationResponse,
   ImportReport,
+  ReplaceResult,
 } from "./types";
 
 /** Config values used if `/api/config` cannot be reached, matching the server's own defaults. */
@@ -114,28 +115,82 @@ export async function renewCert(id: number): Promise<CertMutationResponse> {
  * server independently re-checks it case-insensitively against the row's
  * real FQDN, so a stale/mismatched value fails server-side even if the UI's
  * own gating (see `detail.ts`) is somehow bypassed.
+ *
+ * The server answers 200 with `{previousDropped}` (CA-replacement plan §4:
+ * delete used to be a bare 204, but deleting a row can itself trigger the
+ * auto-drop of a previous CA that no longer signs anything active).
  */
-export async function deleteCert(id: number, confirmFqdn: string): Promise<void> {
+export async function deleteCert(id: number, confirmFqdn: string): Promise<{ previousDropped: boolean }> {
   const res = await fetch(`/api/certs/${id}?confirm=${encodeURIComponent(confirmFqdn)}`, {
     method: "DELETE",
   });
-  if (!res.ok && res.status !== 204) {
+  if (!res.ok) {
     throw new Error(await errorMessage(res, "failed to delete certificate"));
   }
+  return (await res.json()) as { previousDropped: boolean };
 }
 
-/** GET/POST /api/ca response shape. Every field but `exists` is absent when no CA exists. */
+/** Request body for `POST /api/certs/{id}/edit` (CA-replacement plan P5). */
+export interface EditInput {
+  fqdn: string;
+  dnsSans: string[];
+  ipSans: string[];
+  validityDays: number;
+}
+
+/**
+ * Edit an existing cert row: re-issue it (possibly under a new FQDN and/or a
+ * requested validity) rather than just renewing with the default validity.
+ * Rejects with the server's own message -- e.g. `ErrQuarantined`,
+ * `ErrDuplicateActive` on an FQDN collision, or `ErrNewerActiveExists`.
+ */
+export async function editCert(id: number, input: EditInput): Promise<CertMutationResponse> {
+  const res = await fetch(`/api/certs/${id}/edit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    throw new Error(await errorMessage(res, "failed to edit certificate"));
+  }
+  return (await res.json()) as CertMutationResponse;
+}
+
+/**
+ * The previous CA's identity plus how many active rows still depend on it
+ * (CA-replacement plan FR-R7/D7). `activeCount` drives both the panel's
+ * display and the forced `previousStale` choice in the Replace dialog.
+ */
+export interface PreviousCA {
+  id: number;
+  subject: string;
+  notBefore: string;
+  notAfter: string;
+  fingerprint: string;
+  activeCount: number;
+}
+
+/**
+ * GET/POST /api/ca response shape. Every field but `exists` (and, once a CA
+ * exists, `unknownSignerActiveCount`) is absent when no CA exists.
+ * `previous` is present only when there is a previous CA; `id` and
+ * `unknownSignerActiveCount` are the CA-replacement plan's additions.
+ */
 export interface CAStatus {
   exists: boolean;
+  id?: number;
   subject?: string;
   serial?: string;
   notBefore?: string;
   notAfter?: string;
   fingerprint?: string;
   importedFrom?: string;
+  previous?: PreviousCA;
+  /** Always present, even 0 and even when no CA exists yet -- the server never omits it. */
+  unknownSignerActiveCount: number;
 }
 
-const FALLBACK_CA_STATUS: CAStatus = { exists: false };
+const FALLBACK_CA_STATUS: CAStatus = { exists: false, unknownSignerActiveCount: 0 };
 
 /**
  * Fetch CA status. Never rejects -- like `fetchConfig`, a transient boot
@@ -166,6 +221,44 @@ export async function initCA(name = ""): Promise<CAStatus> {
     throw new Error(await errorMessage(res, "failed to initialize the certificate authority"));
   }
   return (await res.json()) as CAStatus;
+}
+
+/** Request body for `POST /api/ca/replace` (CA-replacement plan §4, D1/D2/D7). */
+export interface ReplaceCAInput {
+  name: string;
+  existing: "reissue" | "delete" | "keep";
+  /** Required only when the outgoing previous CA still signs an active row (409 `ErrPreviousStaleChoiceRequired` otherwise). */
+  previousStale?: "reissue" | "delete";
+}
+
+/**
+ * Replace the current CA with a newly generated one. Rejects with the
+ * server's own message on failure -- a name collision (400), a required but
+ * omitted `previousStale` choice (409), or a concurrent-change conflict (409).
+ */
+export async function replaceCA(input: ReplaceCAInput): Promise<ReplaceResult> {
+  const res = await fetch("/api/ca/replace", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    throw new Error(await errorMessage(res, "failed to replace the certificate authority"));
+  }
+  return (await res.json()) as ReplaceResult;
+}
+
+/**
+ * Swap the previous CA back to being current (CA-replacement plan D9).
+ * Rejects with the server's own message -- e.g. `ErrNoPreviousCA` or an
+ * expiring/expired previous CA (both 409).
+ */
+export async function switchBackCA(): Promise<{ ca: CAStatus }> {
+  const res = await fetch("/api/ca/switch-back", { method: "POST" });
+  if (!res.ok) {
+    throw new Error(await errorMessage(res, "failed to switch back to the previous certificate authority"));
+  }
+  return (await res.json()) as { ca: CAStatus };
 }
 
 /** Step 1 of the import wizard: a dry-run scan of the legacy directory. Writes nothing. */

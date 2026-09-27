@@ -141,6 +141,14 @@ body {
   background: rgba(176, 115, 240, 0.2);
   color: var(--purple);
 }
+.cert-badge[data-kind=stale] {
+  background: rgba(245, 166, 35, 0.18);
+  color: var(--color-warning);
+}
+.cert-badge[data-kind=unknown-signer] {
+  background: rgba(176, 115, 240, 0.2);
+  color: var(--purple);
+}
 .cert-row-meta {
   display: flex;
   align-items: center;

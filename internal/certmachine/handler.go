@@ -41,6 +41,8 @@ func (s *Server) mountRoutes() {
 	s.mux.HandleFunc("GET /api/ca/root.crt", s.handleCARootGet)
 	s.mux.HandleFunc("POST /api/ca/trust", s.handleCATrust)
 	s.mux.HandleFunc("POST /api/ca/trust/remote", s.handleCATrustRemote)
+	s.mux.HandleFunc("POST /api/ca/replace", s.handleCAReplace)
+	s.mux.HandleFunc("POST /api/ca/switch-back", s.handleCASwitchBack)
 	s.mux.HandleFunc("GET /api/ssh/keys", s.handleSSHKeys)
 
 	s.mux.HandleFunc("GET /api/certs", s.handleCertsGet)
@@ -48,6 +50,7 @@ func (s *Server) mountRoutes() {
 	s.mux.HandleFunc("GET /api/certs/{id}", s.handleCertGet)
 	s.mux.HandleFunc("DELETE /api/certs/{id}", s.handleCertDelete)
 	s.mux.HandleFunc("POST /api/certs/{id}/renew", s.handleCertRenew)
+	s.mux.HandleFunc("POST /api/certs/{id}/edit", s.handleCertEdit)
 	s.mux.HandleFunc("GET /api/certs/{id}/files/{name}", s.handleCertFileGet)
 	s.mux.HandleFunc("GET /api/certs/{id}/bundle", s.handleCertBundleGet)
 
@@ -60,9 +63,12 @@ func (s *Server) mountRoutes() {
 	s.mux.HandleFunc("/api/ca/init", methodNotAllowed("POST"))
 	s.mux.HandleFunc("/api/ca/trust", methodNotAllowed("POST"))
 	s.mux.HandleFunc("/api/ca/trust/remote", methodNotAllowed("POST"))
+	s.mux.HandleFunc("/api/ca/replace", methodNotAllowed("POST"))
+	s.mux.HandleFunc("/api/ca/switch-back", methodNotAllowed("POST"))
 	s.mux.HandleFunc("/api/certs", methodNotAllowed("GET, POST"))
 	s.mux.HandleFunc("/api/certs/{id}", methodNotAllowed("GET, DELETE"))
 	s.mux.HandleFunc("/api/certs/{id}/renew", methodNotAllowed("POST"))
+	s.mux.HandleFunc("/api/certs/{id}/edit", methodNotAllowed("POST"))
 	s.mux.HandleFunc("/api/import", methodNotAllowed("POST"))
 
 	s.logBoot()
@@ -79,8 +85,12 @@ func (s *Server) logBoot() {
 		count = -1
 	}
 	caStatus := "absent"
-	if _, err := s.db.GetCA(ctx); err == nil {
+	if _, err := s.db.GetCurrentCA(ctx); err == nil {
 		caStatus = "present"
+	}
+	previousStatus := "absent"
+	if previous, err := s.db.GetPreviousCA(ctx); err == nil && previous != nil {
+		previousStatus = "present"
 	}
 	legacyDir := s.opts.LegacyImportDir
 	legacyStatus := "ok"
@@ -90,8 +100,8 @@ func (s *Server) logBoot() {
 	} else if s.legacyImportReason != "" {
 		legacyStatus = s.legacyImportReason
 	}
-	log.Printf("certmachine: db=%s schema=v%d certs=%d ca=%s legacy_import=%s(%s)",
-		s.opts.DBPath, schemaVersion, count, caStatus, legacyDir, legacyStatus)
+	log.Printf("certmachine: db=%s schema=v%d certs=%d ca=%s previous_ca=%s legacy_import=%s(%s)",
+		s.opts.DBPath, schemaVersion, count, caStatus, previousStatus, legacyDir, legacyStatus)
 }
 
 // methodNotAllowed answers every request with a 405 and the given Allow
@@ -149,7 +159,17 @@ func storeErrorStatus(err error) (int, string) {
 		// only documented way out of a fingerprint mismatch -- by burying it
 		// behind a generic 500.
 		errors.Is(err, ErrCAKeyMismatch),
-		errors.Is(err, ErrCAFingerprintMismatch):
+		errors.Is(err, ErrCAFingerprintMismatch),
+		// certAndCA's FR-R3 refusal (a NULL ca_id, "unknown signer"): a
+		// well-formed request against a row that exists but cannot be
+		// resolved to a signer, same class as the two mismatches above.
+		errors.Is(err, ErrUnknownSigner),
+		// Replace/SwitchBack's own conflicts (the CA-replacement plan,
+		// US-004): each is a well-formed request against a state it cannot
+		// proceed against, not an internal failure.
+		errors.Is(err, ErrNoPreviousCA),
+		errors.Is(err, ErrPreviousStaleChoiceRequired),
+		errors.Is(err, ErrConcurrentChange):
 		return http.StatusConflict, err.Error()
 	default:
 		log.Printf("certmachine: internal error: %v", err)
@@ -255,20 +275,40 @@ func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
 
 // caResponse is GET /api/ca and POST /api/ca/init's body. Exists is always
 // present; the rest are omitted (an absent CA has no subject/serial/etc. to
-// report) when Exists is false.
+// report) when Exists is false. Id, Previous and UnknownSignerActiveCount
+// are the CA-replacement plan's additions (§4, US-005): Previous is omitted
+// entirely when there is no previous CA, and UnknownSignerActiveCount always
+// reports (even 0), since the Replace dialog needs it unconditionally.
 type caResponse struct {
-	Exists       bool    `json:"exists"`
-	Subject      string  `json:"subject,omitempty"`
-	Serial       string  `json:"serial,omitempty"`
-	NotBefore    string  `json:"notBefore,omitempty"`
-	NotAfter     string  `json:"notAfter,omitempty"`
-	Fingerprint  string  `json:"fingerprint,omitempty"`
-	ImportedFrom *string `json:"importedFrom,omitempty"`
+	Exists                   bool                `json:"exists"`
+	ID                       int64               `json:"id,omitempty"`
+	Subject                  string              `json:"subject,omitempty"`
+	Serial                   string              `json:"serial,omitempty"`
+	NotBefore                string              `json:"notBefore,omitempty"`
+	NotAfter                 string              `json:"notAfter,omitempty"`
+	Fingerprint              string              `json:"fingerprint,omitempty"`
+	ImportedFrom             *string             `json:"importedFrom,omitempty"`
+	Previous                 *previousCAResponse `json:"previous,omitempty"`
+	UnknownSignerActiveCount int                 `json:"unknownSignerActiveCount"`
+}
+
+// previousCAResponse is caResponse's "previous" field: the previous CA's
+// identity plus how many active rows still depend on it (FR-R7, D7) -- the
+// count that drives both the panel's display and POST /api/ca/replace's
+// ErrPreviousStaleChoiceRequired 409.
+type previousCAResponse struct {
+	ID          int64  `json:"id"`
+	Subject     string `json:"subject"`
+	NotBefore   string `json:"notBefore"`
+	NotAfter    string `json:"notAfter"`
+	Fingerprint string `json:"fingerprint"`
+	ActiveCount int    `json:"activeCount"`
 }
 
 func caResponseFrom(ca *CA) caResponse {
 	return caResponse{
 		Exists:       true,
+		ID:           ca.ID,
 		Subject:      ca.Subject,
 		Serial:       ca.Serial,
 		NotBefore:    ca.NotBefore,
@@ -278,8 +318,40 @@ func caResponseFrom(ca *CA) caResponse {
 	}
 }
 
+// buildCAResponse assembles GET /api/ca's full body: the current CA (already
+// known to exist -- callers check ErrCANotFound first), plus the previous CA
+// block (omitted when there is none) and the top-level unknown-signer count.
+func (s *Server) buildCAResponse(ctx context.Context, ca *CA) (caResponse, error) {
+	resp := caResponseFrom(ca)
+	unknownCount, err := s.db.countActiveUnknownSigner(ctx)
+	if err != nil {
+		return caResponse{}, err
+	}
+	resp.UnknownSignerActiveCount = unknownCount
+
+	previous, err := s.db.GetPreviousCA(ctx)
+	if err != nil {
+		return caResponse{}, err
+	}
+	if previous != nil {
+		activeCount, err := s.db.countActiveByCA(ctx, previous.ID)
+		if err != nil {
+			return caResponse{}, err
+		}
+		resp.Previous = &previousCAResponse{
+			ID:          previous.ID,
+			Subject:     previous.Subject,
+			NotBefore:   previous.NotBefore,
+			NotAfter:    previous.NotAfter,
+			Fingerprint: previous.Fingerprint,
+			ActiveCount: activeCount,
+		}
+	}
+	return resp, nil
+}
+
 func (s *Server) handleCAGet(w http.ResponseWriter, r *http.Request) {
-	ca, err := s.db.GetCA(r.Context())
+	ca, err := s.db.GetCurrentCA(r.Context())
 	if err != nil {
 		if errors.Is(err, ErrCANotFound) {
 			response.WriteJSON(w, http.StatusOK, caResponse{Exists: false})
@@ -288,7 +360,208 @@ func (s *Server) handleCAGet(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	response.WriteJSON(w, http.StatusOK, caResponseFrom(ca))
+	resp, err := s.buildCAResponse(r.Context(), ca)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, resp)
+}
+
+// caReplaceRequest is POST /api/ca/replace's body (§4). PreviousStale is a
+// pointer -- decoded as *string, never defaulted to "" -- because P4
+// distinguishes "omitted" (ErrPreviousStaleChoiceRequired when the outgoing
+// previous CA still signs an active row) from any string value.
+type caReplaceRequest struct {
+	Name          string  `json:"name"`
+	Existing      string  `json:"existing"`
+	PreviousStale *string `json:"previousStale"`
+}
+
+// caReplaceResponse is POST /api/ca/replace's 200 body: the post-replace CA
+// (GET /api/ca shape) plus ReplaceResult's counts.
+type caReplaceResponse struct {
+	CA              caResponse `json:"ca"`
+	Reissued        int        `json:"reissued"`
+	Deleted         int        `json:"deleted"`
+	Kept            int        `json:"kept"`
+	Clamped         int        `json:"clamped"`
+	PreviousDropped bool       `json:"previousDropped"`
+}
+
+// ndjsonAccept is the Accept header value that switches POST /api/ca/replace
+// from its default JSON response into the streaming NDJSON progress mode (§
+// "real progress bar" -- owner feedback that a blanket re-issue of dozens of
+// certs gave no sign anything was happening).
+const ndjsonAccept = "application/x-ndjson"
+
+func (s *Server) handleCAReplace(w http.ResponseWriter, r *http.Request) {
+	var body caReplaceRequest
+	if err := decodeOptionalJSON(w, r, &body); err != nil {
+		writeBodyError(w, err)
+		return
+	}
+	if strings.Contains(r.Header.Get("Accept"), ndjsonAccept) {
+		s.handleCAReplaceStream(w, r, body)
+		return
+	}
+	result, err := s.db.ReplaceCA(r.Context(), body.Name, body.Existing, body.PreviousStale, s.opts.DefaultValidityDays, s.opts.ExpiryWarnDays)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	ca, err := s.db.GetCurrentCA(r.Context())
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	caResp, err := s.buildCAResponse(r.Context(), ca)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, caReplaceResponse{
+		CA:              caResp,
+		Reissued:        result.Reissued,
+		Deleted:         result.Deleted,
+		Kept:            result.Kept,
+		Clamped:         result.Clamped,
+		PreviousDropped: result.PreviousDropped,
+	})
+}
+
+// ndjsonProgressLine is one "progress" line of the NDJSON stream.
+type ndjsonProgressLine struct {
+	Type  string `json:"type"`
+	Phase string `json:"phase"`
+	Done  int    `json:"done,omitempty"`
+	Total int    `json:"total,omitempty"`
+}
+
+// ndjsonResultLine is the stream's final line on success: caReplaceResponse's
+// same fields, plus the "result" discriminator.
+type ndjsonResultLine struct {
+	Type            string     `json:"type"`
+	CA              caResponse `json:"ca"`
+	Reissued        int        `json:"reissued"`
+	Deleted         int        `json:"deleted"`
+	Kept            int        `json:"kept"`
+	Clamped         int        `json:"clamped"`
+	PreviousDropped bool       `json:"previousDropped"`
+}
+
+// ndjsonErrorLine is the stream's final line on failure, once streaming has
+// already started (an earlier failure -- 400 validation, 409
+// previousStale-required, etc. -- is answered exactly as the non-streaming
+// path does, via writeStoreError, since no line has been written yet). Error
+// is the same client-safe message writeStoreError would send: it goes
+// through storeErrorStatus, never err.Error() directly, so internal detail
+// (SQL text, file paths, PEM material) never leaks through a mid-stream
+// failure any more than it does through a 500.
+type ndjsonErrorLine struct {
+	Type   string `json:"type"`
+	Status int    `json:"status"`
+	Error  string `json:"error"`
+}
+
+// handleCAReplaceStream is handleCAReplace's NDJSON path: headers (200,
+// Content-Type application/x-ndjson, Cache-Control no-store) are written
+// lazily on the first line this writes, via ndjsonWriter.write, so a failure
+// before any progress event (validation, P4's 409, etc.) still reaches the
+// client as a normal writeStoreError response. Every write is flushed
+// immediately through http.ResponseController -- certmachine's own handler
+// chain (stripCORS, and the platform's Gate/BodyLimit/CORS middleware
+// upstream of it in cmd/server) never wraps the ResponseWriter, so the
+// underlying *http.response's Flusher reaches this call unobstructed.
+func (s *Server) handleCAReplaceStream(w http.ResponseWriter, r *http.Request, body caReplaceRequest) {
+	ctx := r.Context()
+	nw := &ndjsonWriter{w: w, rc: http.NewResponseController(w)}
+
+	progress := func(ev ReplaceProgress) {
+		nw.write(ndjsonProgressLine{Type: "progress", Phase: string(ev.Phase), Done: ev.Done, Total: ev.Total})
+	}
+
+	result, err := s.db.ReplaceCA(ctx, body.Name, body.Existing, body.PreviousStale,
+		s.opts.DefaultValidityDays, s.opts.ExpiryWarnDays, WithReplaceProgress(progress))
+	if err != nil {
+		nw.writeError(w, err)
+		return
+	}
+
+	ca, err := s.db.GetCurrentCA(ctx)
+	if err != nil {
+		nw.writeError(w, err)
+		return
+	}
+	caResp, err := s.buildCAResponse(ctx, ca)
+	if err != nil {
+		nw.writeError(w, err)
+		return
+	}
+
+	nw.write(ndjsonResultLine{
+		Type:            "result",
+		CA:              caResp,
+		Reissued:        result.Reissued,
+		Deleted:         result.Deleted,
+		Kept:            result.Kept,
+		Clamped:         result.Clamped,
+		PreviousDropped: result.PreviousDropped,
+	})
+}
+
+// ndjsonWriter lazily commits the streaming response's headers on its first
+// line, then writes and flushes every subsequent line immediately.
+type ndjsonWriter struct {
+	w       http.ResponseWriter
+	rc      *http.ResponseController
+	started bool
+}
+
+func (nw *ndjsonWriter) write(v any) {
+	if !nw.started {
+		nw.w.Header().Set("Content-Type", ndjsonAccept)
+		nw.w.Header().Set("Cache-Control", "no-store")
+		nw.w.WriteHeader(http.StatusOK)
+		nw.started = true
+	}
+	_ = json.NewEncoder(nw.w).Encode(v)
+	_ = nw.rc.Flush()
+}
+
+// writeError answers err either as a normal (non-streamed) writeStoreError
+// response, when nothing has been written to w yet, or as the stream's final
+// "error" line once streaming has already started.
+func (nw *ndjsonWriter) writeError(w http.ResponseWriter, err error) {
+	if !nw.started {
+		writeStoreError(w, err)
+		return
+	}
+	status, msg := storeErrorStatus(err)
+	nw.write(ndjsonErrorLine{Type: "error", Status: status, Error: msg})
+}
+
+// caSwitchBackResponse is POST /api/ca/switch-back's 200 body.
+type caSwitchBackResponse struct {
+	CA caResponse `json:"ca"`
+}
+
+func (s *Server) handleCASwitchBack(w http.ResponseWriter, r *http.Request) {
+	if _, err := s.db.SwitchBack(r.Context(), s.opts.ExpiryWarnDays); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	ca, err := s.db.GetCurrentCA(r.Context())
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	caResp, err := s.buildCAResponse(r.Context(), ca)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, caSwitchBackResponse{CA: caResp})
 }
 
 // handleCAInit creates the root CA. An optional JSON body {"name": "..."}
@@ -313,7 +586,7 @@ func (s *Server) handleCAInit(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	ca, err := s.db.GetCA(ctx)
+	ca, err := s.db.GetCurrentCA(ctx)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -322,7 +595,7 @@ func (s *Server) handleCAInit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCARootGet(w http.ResponseWriter, r *http.Request) {
-	ca, err := s.db.GetCA(r.Context())
+	ca, err := s.db.GetCurrentCA(r.Context())
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -351,7 +624,7 @@ func (s *Server) handleCATrust(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	ca, err := s.db.GetCA(r.Context())
+	ca, err := s.db.GetCurrentCA(r.Context())
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -422,7 +695,7 @@ func (s *Server) handleCATrustRemote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ca, err := s.db.GetCA(r.Context())
+	ca, err := s.db.GetCurrentCA(r.Context())
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -479,18 +752,22 @@ type generateRequest struct {
 	IPSans  []string `json:"ipSans"`
 }
 
-// issueResponse is the shared body for POST /api/certs and
-// POST /api/certs/{id}/renew: the newly issued row plus the FR-4 validity
-// clamp fact. RequestedNotAfter is only present when ValidityClamped is true
-// -- when it isn't, it would just repeat Cert.NotAfter.
+// issueResponse is the shared body for POST /api/certs,
+// POST /api/certs/{id}/renew, and POST /api/certs/{id}/edit: the newly
+// issued row plus the FR-4 validity clamp fact. RequestedNotAfter is only
+// present when ValidityClamped is true -- when it isn't, it would just
+// repeat Cert.NotAfter. PreviousDropped (the CA-replacement plan, §4) is
+// always present: Renew, Edit and Delete can all trigger dropPreviousIfUnusedTx,
+// so a caller cannot infer it from the route alone.
 type issueResponse struct {
 	Cert              Cert   `json:"cert"`
 	ValidityClamped   bool   `json:"validityClamped"`
 	RequestedNotAfter string `json:"requestedNotAfter,omitempty"`
+	PreviousDropped   bool   `json:"previousDropped"`
 }
 
 func issueResponseFrom(result IssueResult) issueResponse {
-	resp := issueResponse{Cert: result.Cert, ValidityClamped: result.Clamped}
+	resp := issueResponse{Cert: result.Cert, ValidityClamped: result.Clamped, PreviousDropped: result.PreviousDropped}
 	if result.Clamped {
 		resp.RequestedNotAfter = result.RequestedNotAfter.UTC().Format(time.RFC3339)
 	}
@@ -530,6 +807,13 @@ func (s *Server) handleCertGet(w http.ResponseWriter, r *http.Request) {
 	response.WriteJSON(w, http.StatusOK, c)
 }
 
+// deleteResponse is DELETE /api/certs/{id}'s 200 body (the CA-replacement
+// plan, §4: 204 with no body becomes 200 carrying previousDropped, since
+// Delete can trigger dropPreviousIfUnusedTx same as Renew and Edit).
+type deleteResponse struct {
+	PreviousDropped bool `json:"previousDropped"`
+}
+
 func (s *Server) handleCertDelete(w http.ResponseWriter, r *http.Request) {
 	id, err := parseCertID(r)
 	if err != nil {
@@ -541,11 +825,12 @@ func (s *Server) handleCertDelete(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, http.StatusBadRequest, "confirm query parameter is required")
 		return
 	}
-	if err := s.db.Delete(r.Context(), id, confirm); err != nil {
+	dropped, err := s.db.Delete(r.Context(), id, confirm)
+	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	response.WriteJSON(w, http.StatusOK, deleteResponse{PreviousDropped: dropped})
 }
 
 func (s *Server) handleCertRenew(w http.ResponseWriter, r *http.Request) {
@@ -555,6 +840,40 @@ func (s *Server) handleCertRenew(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.db.Renew(r.Context(), id, s.opts.DefaultValidityDays, s.opts.ExpiryWarnDays)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	response.WriteJSON(w, http.StatusCreated, issueResponseFrom(result))
+}
+
+// editRequest is POST /api/certs/{id}/edit's body (§4, P5): the same shape
+// generateRequest carries plus ValidityDays, the one field Edit accepts that
+// no other issuance route does (the FR-4 narrowing).
+type editRequest struct {
+	FQDN         string   `json:"fqdn"`
+	DNSSans      []string `json:"dnsSans"`
+	IPSans       []string `json:"ipSans"`
+	ValidityDays int      `json:"validityDays"`
+}
+
+func (s *Server) handleCertEdit(w http.ResponseWriter, r *http.Request) {
+	id, err := parseCertID(r)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	var body editRequest
+	if err := decodeOptionalJSON(w, r, &body); err != nil {
+		writeBodyError(w, err)
+		return
+	}
+	req, err := ValidateRequest(body.FQDN, body.DNSSans, body.IPSans)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	result, err := s.db.Edit(r.Context(), id, req, body.ValidityDays, s.opts.ExpiryWarnDays)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -658,15 +977,29 @@ func (s *Server) handleCertBundleGet(w http.ResponseWriter, r *http.Request) {
 	writeDownload(w, SafeFilename(c.FQDN)+".tgz", tgzContentType, data)
 }
 
-// certAndCA fetches both the cert (with its key) and the stored CA -- the
-// pair haproxy.pem and bundle downloads both need before they can call
-// AssembleHAProxyPEM/BundleTGZ.
+// certAndCA fetches both the cert (with its key) and its recorded signer --
+// the pair haproxy.pem and bundle downloads both need before they can call
+// AssembleHAProxyPEM/BundleTGZ. It resolves the signer by the cert's own
+// ca_id (GetCAByID), never GetCurrentCA (FR-R3): a stale cert's haproxy.pem
+// and bundle must embed the CA that actually signed it, not whichever CA is
+// current now. A NULL ca_id (P1, "unknown signer") is ErrUnknownSigner --
+// except on a quarantined row, whose ca_id is never meaningful (P1) and
+// whose real refusal is checkDownloadable's ErrQuarantinedDownload, naming
+// the stored quarantine reason. That check runs inside
+// AssembleHAProxyPEM/BundleTGZ, before either PEM argument is ever read, so
+// the placeholder *CA returned here is never dereferenced.
 func (s *Server) certAndCA(ctx context.Context, id int64) (*Cert, *CA, error) {
 	c, err := s.db.getCertWithKey(ctx, id)
 	if err != nil {
 		return nil, nil, err
 	}
-	ca, err := s.db.GetCA(ctx)
+	if c.Status == StatusQuarantined {
+		return c, &CA{}, nil
+	}
+	if c.CAID == nil {
+		return nil, nil, ErrUnknownSigner
+	}
+	ca, err := s.db.GetCAByID(ctx, *c.CAID)
 	if err != nil {
 		return nil, nil, err
 	}

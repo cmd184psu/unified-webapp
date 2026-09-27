@@ -131,40 +131,40 @@
         "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/admin.pin"
       },
       "certmachine": {
-        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
       },
       "grocery": {
-        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
       },
       "issuetracker": {
-        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
       },
       "menuserver": {
-        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
       },
       "multissh": {
-        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
       },
       "obsidianoid": {
-        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
       },
       "slideshow": {
-        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/slideshow.pin"
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
       },
       "smbedit": {
-        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
       },
       "taskmaster": {
-        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
       },
       "timetracker": {
-        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
       },
       "todo": {
-        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
       },
       "utuber": {
-        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/test.pin"
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
       }
     },
     "admin_pin": "",

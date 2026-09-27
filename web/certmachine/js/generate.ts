@@ -71,7 +71,8 @@ export function isValidIPv6(s: string): boolean {
   return compressed ? count <= 7 : count === 8;
 }
 
-function isValidIP(s: string): boolean {
+/** Exported so `detail.ts`'s Edit form reuses the identical IP shape check. */
+export function isValidIP(s: string): boolean {
   return isValidIPv4(s) || isValidIPv6(s);
 }
 

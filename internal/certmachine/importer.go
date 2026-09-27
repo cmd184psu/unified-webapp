@@ -24,12 +24,13 @@ import (
 	"time"
 )
 
-// caReplacementRemedy is the manual procedure quoted by every message that
-// needs an escape from "no CA rotation or deletion route exists" (FR-6):
-// ImportCA's fingerprint-mismatch refusal here, and (in later slices)
-// InitCA's ErrImportPending and the expiring-CA 409 from Generate/Renew.
-// docs/certmachine.md (slice 11) documents the same procedure in full.
-const caReplacementRemedy = `stop the binary, delete the CA row with sqlite3 <db> "DELETE FROM ca;", restart, re-initialize the CA, and re-issue every certificate -- existing leaves will no longer chain and must be regenerated`
+// caReplacementRemedy is the remedy quoted by every message that needs an
+// escape from "the stored CA does not match what's expected": ImportCA's
+// fingerprint-mismatch refusal here, InitCA's ErrImportPending, and the
+// expiring-CA 409 from Generate/Renew. The CA-replacement plan retires the
+// old manual database-editing procedure in favor of the Replace CA route (a
+// later story); docs/certmachine.md is updated alongside that story.
+const caReplacementRemedy = `use "Replace CA…" in the certmachine CA panel (POST /api/ca/replace) to install a new certificate authority and re-issue or retire existing certificates`
 
 // Sentinel errors for CA import/reconciliation (FR-3). Both are wrapped with
 // fmt.Errorf so the message can name the dynamic detail (the offending path,
@@ -54,14 +55,17 @@ var (
 // re-encodes what it reads, preserving FR-3's byte-for-byte guarantee, and it
 // verifies the key pairs with the certificate before storing either.
 //
-// Three outcomes (CA precedence, FR-3 + pre-mortem 3.1 ordering variant):
+// Three outcomes (CA precedence, FR-3 + pre-mortem 3.1 ordering variant,
+// widened by the CA-replacement plan's FR-R8 to check both CA slots):
 //
 //   - no ca row -> the legacy root is inserted verbatim; imported is true.
-//   - a ca row whose fingerprint equals the legacy root's -> skipped, this is
-//     a re-run after a partial import; imported is false, err is nil.
-//   - a ca row whose fingerprint differs -> the whole import is refused with
-//     ErrCAFingerprintMismatch naming both fingerprints and the remedy;
-//     nothing is changed.
+//   - the legacy root's fingerprint matches the current OR the previous CA
+//     -> skipped (a re-run after a partial import, or a legacy root that
+//     matches a CA this database has since rotated away from); imported is
+//     false, err is nil.
+//   - it matches neither -> the whole import is refused with
+//     ErrCAFingerprintMismatch naming the current fingerprint, the legacy
+//     one, and the remedy; nothing is changed.
 func (s *Store) ImportCA(ctx context.Context, dir string) (imported bool, err error) {
 	certPEM, keyPEM, err := ReadLegacyRoot(dir)
 	if err != nil {
@@ -81,13 +85,20 @@ func (s *Store) ImportCA(ctx context.Context, dir string) (imported bool, err er
 
 	legacyFP := Fingerprint(cert.Raw)
 
-	existing, err := s.GetCA(ctx)
+	current, err := s.GetCurrentCA(ctx)
 	switch {
 	case err == nil:
-		if existing.Fingerprint == legacyFP {
+		if current.Fingerprint == legacyFP {
 			return false, nil
 		}
-		return false, fmt.Errorf("%w: stored=%s legacy=%s; %s", ErrCAFingerprintMismatch, existing.Fingerprint, legacyFP, caReplacementRemedy)
+		previous, err := s.GetPreviousCA(ctx)
+		if err != nil {
+			return false, err
+		}
+		if previous != nil && previous.Fingerprint == legacyFP {
+			return false, nil
+		}
+		return false, fmt.Errorf("%w: stored=%s legacy=%s; %s", ErrCAFingerprintMismatch, current.Fingerprint, legacyFP, caReplacementRemedy)
 	case !errors.Is(err, ErrCANotFound):
 		return false, err
 	}
@@ -537,6 +548,59 @@ func certFromLeafScan(l *legacyLeaf) Cert {
 	return c
 }
 
+// storedCARef pairs a stored ca row's id with its parsed certificate, for
+// resolveImportCAID's signature check.
+type storedCARef struct {
+	id   int64
+	cert *x509.Certificate
+}
+
+// storedCARefs collects the current CA and, if one exists, the previous CA,
+// each parsed once. An unparseable stored cert_pem is skipped rather than
+// failing the whole import -- Execute must still be able to import leaves
+// against whichever stored CA does parse.
+func (s *Store) storedCARefs(ctx context.Context) ([]storedCARef, error) {
+	var refs []storedCARef
+	current, err := s.GetCurrentCA(ctx)
+	switch {
+	case err == nil:
+		if cert, err := ParseCert([]byte(current.CertPEM)); err == nil {
+			refs = append(refs, storedCARef{id: current.ID, cert: cert})
+		}
+	case !errors.Is(err, ErrCANotFound):
+		return nil, err
+	}
+	previous, err := s.GetPreviousCA(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if previous != nil {
+		if cert, err := ParseCert([]byte(previous.CertPEM)); err == nil {
+			refs = append(refs, storedCARef{id: previous.ID, cert: cert})
+		}
+	}
+	return refs, nil
+}
+
+// resolveImportCAID returns the id of whichever stored CA leaf's signature
+// checks out against (CheckSignatureFrom, never Verify -- R6), current
+// before previous, or nil when it verifies against neither -- "unknown
+// signer" (P1), the same outcome a non-chaining leaf already gets against
+// the legacy root via import_warning. leaf is nil for a leaf that never
+// parsed at all (quarantined), which is also nil.
+func resolveImportCAID(leaf *x509.Certificate, cas []storedCARef) *int64 {
+	if leaf == nil {
+		return nil
+	}
+	for _, ca := range cas {
+		if err := leaf.CheckSignatureFrom(ca.cert); err == nil {
+			id := ca.id
+			return &id
+		}
+	}
+	return nil
+}
+
 // Preview performs a read-only scan and classification of legacyDir: it
 // writes nothing to the database (no ImportCA, no cert inserts) and nothing
 // to legacyDir. It runs the identical scan() and skip-determination steps
@@ -594,17 +658,49 @@ func (s *Store) Execute(ctx context.Context, legacyDir string, confirmNonEmpty b
 	resolveDuplicateCNs(leaves)
 	report := buildReport(leaves, strayFiles)
 
+	stored, err := s.storedCARefs(ctx)
+	if err != nil {
+		return report, err
+	}
+
 	toInsert := make([]Cert, 0, len(leaves))
 	for _, l := range leaves {
 		if l.skipped {
 			continue
 		}
-		toInsert = append(toInsert, certFromLeafScan(l))
+		c := certFromLeafScan(l)
+		// D1 (architect review, ca-replacement plan): a quarantined leaf's
+		// l.cert can still be non-nil (e.g. a key mismatch, not a parse
+		// failure), so resolveImportCAID could otherwise resolve a signer for
+		// a row that is not active and never re-issued -- if the CA it points
+		// at later drops (dropPreviousIfUnusedTx only sweeps archived rows),
+		// the quarantined row's ca_id would dangle and fail structural
+		// invariant 3 on the next boot. Quarantined rows always keep ca_id
+		// NULL (P1: "unknown signer"), regardless of what resolveImportCAID
+		// would have found.
+		if !l.quarantined {
+			c.CAID = resolveImportCAID(l.cert, stored)
+		}
+		toInsert = append(toInsert, c)
 	}
 
 	if len(toInsert) > 0 {
 		if err := s.WithTx(ctx, func(tx *sql.Tx) error {
 			for _, c := range toInsert {
+				// D2 (architect review): CAID was resolved against
+				// storedCARefs' pre-transaction read of the current/previous
+				// CA. A concurrent Replace or SwitchBack could have dropped
+				// that exact ca row before this transaction opened, which
+				// would otherwise let this insert commit a dangling ca_id.
+				if c.CAID != nil {
+					exists, err := caExistsTx(ctx, tx, *c.CAID)
+					if err != nil {
+						return err
+					}
+					if !exists {
+						return ErrConcurrentChange
+					}
+				}
 				if _, err := s.InsertCert(ctx, tx, c); err != nil {
 					return err
 				}

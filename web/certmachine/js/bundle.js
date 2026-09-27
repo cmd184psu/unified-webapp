@@ -67,11 +67,23 @@ async function deleteCert(id, confirmFqdn) {
   const res = await fetch(`/api/certs/${id}?confirm=${encodeURIComponent(confirmFqdn)}`, {
     method: "DELETE"
   });
-  if (!res.ok && res.status !== 204) {
+  if (!res.ok) {
     throw new Error(await errorMessage(res, "failed to delete certificate"));
   }
+  return await res.json();
 }
-var FALLBACK_CA_STATUS = { exists: false };
+async function editCert(id, input) {
+  const res = await fetch(`/api/certs/${id}/edit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  if (!res.ok) {
+    throw new Error(await errorMessage(res, "failed to edit certificate"));
+  }
+  return await res.json();
+}
+var FALLBACK_CA_STATUS = { exists: false, unknownSignerActiveCount: 0 };
 async function fetchCA() {
   try {
     const res = await fetch("/api/ca");
@@ -90,6 +102,24 @@ async function initCA(name = "") {
   });
   if (!res.ok) {
     throw new Error(await errorMessage(res, "failed to initialize the certificate authority"));
+  }
+  return await res.json();
+}
+async function replaceCA(input) {
+  const res = await fetch("/api/ca/replace", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  if (!res.ok) {
+    throw new Error(await errorMessage(res, "failed to replace the certificate authority"));
+  }
+  return await res.json();
+}
+async function switchBackCA() {
+  const res = await fetch("/api/ca/switch-back", { method: "POST" });
+  if (!res.ok) {
+    throw new Error(await errorMessage(res, "failed to switch back to the previous certificate authority"));
   }
   return await res.json();
 }
@@ -335,6 +365,170 @@ function openTrustDialog(config) {
   });
 }
 
+// web/certmachine/js/cadialog.ts
+import { openModal as openModal2, confirmDialog, showToast as showToast2 } from "/shared/dist/shared.mjs";
+function el2(tag, className) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  return node;
+}
+function field2(label, input) {
+  const wrap = el2("label", "cert-field");
+  const span = el2("span", "cert-field-label");
+  span.textContent = label;
+  wrap.append(span, input);
+  return wrap;
+}
+function radio2(name, value, text, checked) {
+  const label = el2("label", "cert-trust-radio");
+  const input = el2("input");
+  input.type = "radio";
+  input.name = name;
+  input.value = value;
+  input.checked = checked;
+  label.append(input, document.createTextNode(text));
+  return { label, input };
+}
+function errorText(err) {
+  return err instanceof Error ? err.message : String(err);
+}
+function showD6Reminder(onOpenTrustDialog) {
+  const content = el2("div", "cert-ca-reminder");
+  const msg = el2("p", "cert-ca-note");
+  msg.textContent = "Machines that trusted the old CA are unchanged. Use \u201CTrust this CA\u2026\u201D for the new CA and redeploy the re-issued certificates.";
+  content.append(msg);
+  const actions = el2("div", "cert-ca-actions");
+  const trustBtn = el2("button", "cert-btn cert-btn-primary");
+  trustBtn.type = "button";
+  trustBtn.textContent = "Trust this CA\u2026";
+  const closeBtn = el2("button", "cert-btn cert-btn-secondary");
+  closeBtn.type = "button";
+  closeBtn.textContent = "Close";
+  actions.append(trustBtn, closeBtn);
+  content.append(actions);
+  const modal = openModal2(content, { title: "Redeploy trust" });
+  closeBtn.addEventListener("click", () => modal.close());
+  trustBtn.addEventListener("click", () => {
+    modal.close();
+    onOpenTrustDialog();
+  });
+}
+function openReplaceCADialog(ca, onReplaced, onOpenTrustDialog) {
+  const content = el2("div", "cert-trust-dialog");
+  const confirmMsg = el2("p", "ui-modal-message");
+  confirmMsg.textContent = "This installs a new certificate authority and retires the current one. Existing certificates keep working only if you choose to re-issue or keep them below -- this cannot be undone once the old CA is retired.";
+  content.append(confirmMsg);
+  const confirmActions = el2("div", "cert-trust-actions");
+  const cancelBtn = el2("button", "cert-btn");
+  cancelBtn.type = "button";
+  cancelBtn.textContent = "Cancel";
+  const continueBtn = el2("button", "cert-btn cert-btn-primary");
+  continueBtn.type = "button";
+  continueBtn.textContent = "Continue";
+  confirmActions.append(cancelBtn, continueBtn);
+  content.append(confirmActions);
+  const modal = openModal2(content, { title: "Replace CA\u2026" });
+  cancelBtn.addEventListener("click", () => modal.close());
+  continueBtn.addEventListener("click", () => renderForm());
+  function renderForm() {
+    content.textContent = "";
+    const nameInput = el2("input", "cert-field-input");
+    nameInput.type = "text";
+    nameInput.placeholder = "CertMachine Root CA";
+    nameInput.autocomplete = "off";
+    content.append(field2("Name for the new certificate authority", nameInput));
+    const previous = ca.previous;
+    const previousActive = previous !== void 0 && previous.activeCount > 0;
+    const existingHeading = el2("p", "cert-field-label");
+    existingHeading.textContent = "Certificates currently signed by the outgoing CA";
+    content.append(existingHeading);
+    const existingRow = el2("div", "cert-trust-targets");
+    const reissueR = radio2("ca-existing", "reissue", "Re-issue under the new CA", true);
+    const deleteR = radio2("ca-existing", "delete", "Delete", false);
+    const keepR = radio2("ca-existing", "keep", "Keep as-is (marked stale)", false);
+    existingRow.append(reissueR.label, deleteR.label, keepR.label);
+    content.append(existingRow);
+    let previousStaleReissue = null;
+    let previousStaleDelete = null;
+    if (previousActive) {
+      const note = el2("p", "cert-ca-note cert-ca-note-warn");
+      note.textContent = `The previous CA still signs ${previous.activeCount} active certificate${previous.activeCount === 1 ? "" : "s"} and is about to be removed. Either choice below also discards all of its archived certificates -- with re-issue, the new copies are the only ones kept.`;
+      content.append(note);
+      const staleRow = el2("div", "cert-trust-targets");
+      previousStaleReissue = radio2("ca-previous-stale", "reissue", "Re-issue under the new CA", true);
+      previousStaleDelete = radio2("ca-previous-stale", "delete", "Delete", false);
+      staleRow.append(previousStaleReissue.label, previousStaleDelete.label);
+      content.append(staleRow);
+    }
+    if (ca.unknownSignerActiveCount > 0) {
+      const unknownNote = el2("p", "cert-ca-note");
+      unknownNote.textContent = `${ca.unknownSignerActiveCount} certificate${ca.unknownSignerActiveCount === 1 ? "" : "s"} with an unknown signer are included in this choice.`;
+      content.append(unknownNote);
+    }
+    const switchBackWarning = el2("p", "cert-ca-note cert-ca-note-warn");
+    switchBackWarning.textContent = "The current CA will be removed once no certificate uses it, so Switch back will not be available afterwards.";
+    switchBackWarning.hidden = keepR.input.checked;
+    content.append(switchBackWarning);
+    const syncWarning = () => {
+      switchBackWarning.hidden = keepR.input.checked;
+    };
+    for (const r of [reissueR, deleteR, keepR]) r.input.addEventListener("change", syncWarning);
+    const errorEl = el2("p", "cert-field-error");
+    errorEl.hidden = true;
+    content.append(errorEl);
+    const actions = el2("div", "cert-trust-actions");
+    const backBtn = el2("button", "cert-btn");
+    backBtn.type = "button";
+    backBtn.textContent = "Close";
+    const submitBtn = el2("button", "cert-btn cert-btn-danger");
+    submitBtn.type = "button";
+    submitBtn.textContent = "Replace CA";
+    actions.append(backBtn, submitBtn);
+    content.append(actions);
+    backBtn.addEventListener("click", () => modal.close());
+    submitBtn.addEventListener("click", () => {
+      errorEl.hidden = true;
+      const name = nameInput.value.trim();
+      if (name === "") {
+        errorEl.textContent = "A name is required.";
+        errorEl.hidden = false;
+        return;
+      }
+      const existing = reissueR.input.checked && "reissue" || deleteR.input.checked && "delete" || "keep";
+      const previousStale = previousActive ? previousStaleReissue?.input.checked ? "reissue" : "delete" : void 0;
+      submitBtn.disabled = true;
+      replaceCA({ name, existing, ...previousStale !== void 0 ? { previousStale } : {} }).then((result) => {
+        modal.close();
+        showToast2(
+          `Replaced the certificate authority. Re-issued ${result.reissued}, deleted ${result.deleted}, kept ${result.kept}.`,
+          "success"
+        );
+        onReplaced();
+        showD6Reminder(onOpenTrustDialog);
+      }).catch((err) => {
+        submitBtn.disabled = false;
+        errorEl.textContent = errorText(err);
+        errorEl.hidden = false;
+      });
+    });
+  }
+}
+async function confirmSwitchBackCA(onSwitchedBack, onOpenTrustDialog) {
+  const ok = await confirmDialog(
+    "Switch back to the previous certificate authority? The certificate that is current now becomes the previous one.",
+    { title: "Switch back to previous CA", confirmLabel: "Switch back" }
+  );
+  if (!ok) return;
+  try {
+    await switchBackCA();
+    showToast2("Switched back to the previous certificate authority.", "success");
+    onSwitchedBack();
+    showD6Reminder(onOpenTrustDialog);
+  } catch (err) {
+    showToast2(errorText(err), "error");
+  }
+}
+
 // web/certmachine/js/status.ts
 var BADGE_LABEL = {
   quarantined: "Quarantined",
@@ -376,6 +570,13 @@ function filterCerts(certs, query) {
     return false;
   });
 }
+function filterStale(certs, staleOnly) {
+  if (!staleOnly) return certs;
+  return certs.filter((cert) => cert.stale);
+}
+function isUnknownSigner(cert) {
+  return cert.caId === null && cert.status !== "quarantined";
+}
 function compareExpiry(a, b, dir) {
   if (a.notAfter === null && b.notAfter === null) return 0;
   if (a.notAfter === null) return 1;
@@ -415,7 +616,7 @@ function groupCerts(certs) {
 }
 
 // web/certmachine/js/render.ts
-function el2(tag, className) {
+function el3(tag, className) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   return node;
@@ -426,43 +627,51 @@ function formatDate(iso) {
   return date.length === 10 ? date : iso;
 }
 function badgeElement(kind) {
-  const badge = el2("span", "cert-badge");
+  const badge = el3("span", "cert-badge");
   badge.dataset.kind = kind;
   badge.textContent = BADGE_LABEL[kind];
   return badge;
 }
+function extraBadge(kind, label) {
+  const badge = el3("span", "cert-badge");
+  badge.dataset.kind = kind;
+  badge.textContent = label;
+  return badge;
+}
 function buildCertRow(cert, kind, onOpenDetail) {
-  const row = el2("li", "cert-row");
+  const row = el3("li", "cert-row");
   row.dataset.kind = kind;
-  const main = el2("div", "cert-row-main");
-  const fqdn = el2("span", "cert-fqdn");
+  const main = el3("div", "cert-row-main");
+  const fqdn = el3("span", "cert-fqdn");
   fqdn.textContent = cert.fqdn;
   main.append(fqdn, badgeElement(kind));
-  const meta = el2("div", "cert-row-meta");
-  const expiry = el2("span", "cert-meta-item");
+  if (cert.stale) main.append(extraBadge("stale", "Stale"));
+  if (isUnknownSigner(cert)) main.append(extraBadge("unknown-signer", "Unknown signer"));
+  const meta = el3("div", "cert-row-meta");
+  const expiry = el3("span", "cert-meta-item");
   expiry.textContent = kind === "expired" ? `Expired ${formatDate(cert.notAfter)}` : `Expires ${formatDate(cert.notAfter)}`;
   meta.append(expiry);
   if (cert.importedFrom !== void 0) {
-    const imported = el2("span", "cert-meta-item cert-meta-imported");
+    const imported = el3("span", "cert-meta-item cert-meta-imported");
     imported.textContent = "Imported";
     imported.title = cert.importedFrom;
     meta.append(imported);
   }
   row.append(main, meta);
   if (cert.quarantineReason !== void 0) {
-    const note = el2("p", "cert-row-note");
+    const note = el3("p", "cert-row-note");
     note.dataset.tone = "danger";
     note.textContent = `Quarantined: ${cert.quarantineReason}`;
     row.append(note);
   }
   if (cert.importWarning !== void 0) {
-    const note = el2("p", "cert-row-note");
+    const note = el3("p", "cert-row-note");
     note.dataset.tone = "warn";
     note.textContent = cert.importWarning;
     row.append(note);
   }
-  const actions = el2("div", "cert-row-actions");
-  const details = el2("button", "cert-action cert-action-btn");
+  const actions = el3("div", "cert-row-actions");
+  const details = el3("button", "cert-action cert-action-btn");
   details.type = "button";
   details.textContent = "Details";
   details.addEventListener("click", () => onOpenDetail(cert.id));
@@ -482,20 +691,20 @@ function downloadActions(id) {
   ];
 }
 function downloadLink(label, href) {
-  const a = el2("a", "cert-action");
+  const a = el3("a", "cert-action");
   a.href = href;
   a.textContent = label;
   return a;
 }
 function disabledAction(label, reason) {
-  const span = el2("span", "cert-action cert-action-disabled");
+  const span = el3("span", "cert-action cert-action-disabled");
   span.textContent = label;
   span.title = reason;
   span.setAttribute("aria-disabled", "true");
   return span;
 }
 function emptyState(message) {
-  const p = el2("p", "cert-empty");
+  const p = el3("p", "cert-empty");
   p.textContent = message;
   return p;
 }
@@ -511,7 +720,7 @@ function appendRowGroup(target, certs, warnDays, now, onOpenDetail, emptyMessage
     const row = buildCertRow(cert, kind, onOpenDetail);
     (isDeemphasized(kind) ? deemphasized : primary).push(row);
   }
-  const primaryList = el2("ul", "cert-list");
+  const primaryList = el3("ul", "cert-list");
   primaryList.append(...primary);
   if (primary.length === 0) {
     target.appendChild(emptyState(emptyPrimaryMessage));
@@ -519,10 +728,10 @@ function appendRowGroup(target, certs, warnDays, now, onOpenDetail, emptyMessage
     target.appendChild(primaryList);
   }
   if (deemphasized.length > 0) {
-    const toggle = el2("button", "cert-toggle");
+    const toggle = el3("button", "cert-toggle");
     toggle.type = "button";
     toggle.setAttribute("aria-expanded", "false");
-    const deemphasizedList = el2("ul", "cert-list cert-list-deemphasized");
+    const deemphasizedList = el3("ul", "cert-list cert-list-deemphasized");
     deemphasizedList.hidden = true;
     deemphasizedList.append(...deemphasized);
     const label = (expanded) => `${expanded ? "Hide" : "Show"} ${deemphasized.length} expired/archived certificate${deemphasized.length === 1 ? "" : "s"}`;
@@ -557,9 +766,9 @@ function renderCertList(container, certs, warnDays, now, options) {
     );
   } else {
     for (const group of groupCerts(certs)) {
-      const section = el2("section", "cert-group");
-      const groupBody = el2("div", "cert-group-body");
-      const headingBtn = el2("button", "cert-group-heading");
+      const section = el3("section", "cert-group");
+      const groupBody = el3("div", "cert-group-body");
+      const headingBtn = el3("button", "cert-group-heading");
       headingBtn.type = "button";
       headingBtn.setAttribute("aria-expanded", "true");
       const headingText = `${group.domain} (${group.certs.length})`;
@@ -586,8 +795,8 @@ function renderCertList(container, certs, warnDays, now, options) {
 }
 
 // web/certmachine/js/generate.ts
-import { showToast as showToast2 } from "/shared/dist/shared.mjs";
-function el3(tag, className) {
+import { showToast as showToast3 } from "/shared/dist/shared.mjs";
+function el4(tag, className) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   return node;
@@ -651,14 +860,14 @@ function clampedNoticeText(defaultValidityDays, resp) {
 }
 function buildSanRows(container, kind) {
   const rows = [];
-  const list = el3("div", "cert-san-list");
+  const list = el4("div", "cert-san-list");
   function addRow() {
-    const row = el3("div", "cert-san-row");
-    const input = el3("input", "cert-field-input");
+    const row = el4("div", "cert-san-row");
+    const input = el4("input", "cert-field-input");
     input.type = "text";
     input.placeholder = kind === "dns" ? "www.example.local" : "10.0.0.1";
     input.autocomplete = "off";
-    const removeBtn = el3("button", "cert-san-remove");
+    const removeBtn = el4("button", "cert-san-remove");
     removeBtn.type = "button";
     removeBtn.textContent = "\u2212";
     removeBtn.setAttribute("aria-label", kind === "dns" ? "Remove DNS name" : "Remove IP address");
@@ -671,7 +880,7 @@ function buildSanRows(container, kind) {
     list.append(row);
     rows.push(input);
   }
-  const addBtn = el3("button", "cert-san-add");
+  const addBtn = el4("button", "cert-san-add");
   addBtn.type = "button";
   addBtn.textContent = kind === "dns" ? "+ Add DNS name" : "+ Add IP address";
   addBtn.addEventListener("click", addRow);
@@ -681,51 +890,51 @@ function buildSanRows(container, kind) {
   };
 }
 function openGenerateForm(defaultValidityDays, onCreated) {
-  const overlay = el3("div", "cert-modal-overlay");
-  const dialog = el3("div", "cert-modal");
+  const overlay = el4("div", "cert-modal-overlay");
+  const dialog = el4("div", "cert-modal");
   dialog.setAttribute("role", "dialog");
   dialog.setAttribute("aria-modal", "true");
   dialog.setAttribute("aria-label", "Generate certificate");
-  const header = el3("div", "cert-modal-header");
-  const title = el3("h2", "cert-modal-title");
+  const header = el4("div", "cert-modal-header");
+  const title = el4("h2", "cert-modal-title");
   title.textContent = "Generate certificate";
-  const closeBtn = el3("button", "cert-modal-close");
+  const closeBtn = el4("button", "cert-modal-close");
   closeBtn.type = "button";
   closeBtn.textContent = "\xD7";
   closeBtn.setAttribute("aria-label", "Close");
   header.append(title, closeBtn);
-  const body = el3("div", "cert-modal-body");
-  const form = el3("form", "cert-form");
-  const fqdnField = el3("div", "cert-field");
-  const fqdnLabel = el3("label", "cert-field-label");
+  const body = el4("div", "cert-modal-body");
+  const form = el4("form", "cert-form");
+  const fqdnField = el4("div", "cert-field");
+  const fqdnLabel = el4("label", "cert-field-label");
   fqdnLabel.textContent = "FQDN";
-  const fqdnInput = el3("input", "cert-field-input");
+  const fqdnInput = el4("input", "cert-field-input");
   fqdnInput.type = "text";
   fqdnInput.placeholder = "example.local";
   fqdnInput.autocomplete = "off";
   fqdnLabel.append(fqdnInput);
   fqdnField.append(fqdnLabel);
   form.append(fqdnField);
-  const dnsField = el3("div", "cert-field");
-  const dnsLabel = el3("p", "cert-field-label");
+  const dnsField = el4("div", "cert-field");
+  const dnsLabel = el4("p", "cert-field-label");
   dnsLabel.textContent = "DNS Subject Alternative Names (optional)";
   dnsField.append(dnsLabel);
   const dnsRows = buildSanRows(dnsField, "dns");
   form.append(dnsField);
-  const ipField = el3("div", "cert-field");
-  const ipLabel = el3("p", "cert-field-label");
+  const ipField = el4("div", "cert-field");
+  const ipLabel = el4("p", "cert-field-label");
   ipLabel.textContent = "IP Subject Alternative Names (optional)";
   ipField.append(ipLabel);
   const ipRows = buildSanRows(ipField, "ip");
   form.append(ipField);
-  const errorText2 = el3("p", "cert-field-error");
-  errorText2.hidden = true;
-  form.append(errorText2);
-  const footer = el3("div", "cert-modal-footer");
-  const cancelBtn = el3("button", "cert-btn cert-btn-secondary");
+  const errorText3 = el4("p", "cert-field-error");
+  errorText3.hidden = true;
+  form.append(errorText3);
+  const footer = el4("div", "cert-modal-footer");
+  const cancelBtn = el4("button", "cert-btn cert-btn-secondary");
   cancelBtn.type = "button";
   cancelBtn.textContent = "Cancel";
-  const submitBtn = el3("button", "cert-btn cert-btn-primary");
+  const submitBtn = el4("button", "cert-btn cert-btn-primary");
   submitBtn.type = "submit";
   submitBtn.textContent = "Generate";
   footer.append(cancelBtn, submitBtn);
@@ -748,12 +957,12 @@ function openGenerateForm(defaultValidityDays, onCreated) {
   closeBtn.addEventListener("click", close);
   cancelBtn.addEventListener("click", close);
   function showError(message) {
-    errorText2.textContent = message;
-    errorText2.hidden = false;
+    errorText3.textContent = message;
+    errorText3.hidden = false;
   }
   form.addEventListener("submit", (e) => {
     e.preventDefault();
-    errorText2.hidden = true;
+    errorText3.hidden = true;
     const fqdn = fqdnInput.value.trim();
     if (fqdn === "") {
       showError("FQDN is required.");
@@ -775,7 +984,7 @@ function openGenerateForm(defaultValidityDays, onCreated) {
     generateCert({ fqdn, dnsSans, ipSans }).then((resp) => {
       close();
       const notice = clampedNoticeText(defaultValidityDays, resp);
-      showToast2(
+      showToast3(
         notice ? `Generated ${resp.cert.fqdn}. ${notice}` : `Generated ${resp.cert.fqdn}.`,
         notice ? "notice" : "success"
       );
@@ -789,8 +998,9 @@ function openGenerateForm(defaultValidityDays, onCreated) {
 }
 
 // web/certmachine/js/detail.ts
-import { showToast as showToast3, createCopyButton } from "/shared/dist/shared.mjs";
-function el4(tag, className) {
+import { showToast as showToast4, createCopyButton } from "/shared/dist/shared.mjs";
+var PREVIOUS_DROPPED_NOTICE = "The previous CA no longer signed any active certificate and was removed, along with its archived certificates.";
+function el5(tag, className) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   return node;
@@ -801,26 +1011,59 @@ function formatDate2(iso) {
   return date.length === 10 ? date : iso;
 }
 function addMetaRow(dl, label, value) {
-  const dt = el4("dt", "cert-detail-key");
+  const dt = el5("dt", "cert-detail-key");
   dt.textContent = label;
-  const dd = el4("dd", "cert-detail-value");
+  const dd = el5("dd", "cert-detail-value");
   dd.textContent = value;
   dl.append(dt, dd);
 }
+function buildEditableSanRows(container, kind, initial) {
+  const rows = [];
+  const list = el5("div", "cert-san-list");
+  function addRow(value) {
+    const row = el5("div", "cert-san-row");
+    const input = el5("input", "cert-field-input");
+    input.type = "text";
+    input.placeholder = kind === "dns" ? "www.example.local" : "10.0.0.1";
+    input.autocomplete = "off";
+    input.value = value;
+    const removeBtn = el5("button", "cert-san-remove");
+    removeBtn.type = "button";
+    removeBtn.textContent = "\u2212";
+    removeBtn.setAttribute("aria-label", kind === "dns" ? "Remove DNS name" : "Remove IP address");
+    removeBtn.addEventListener("click", () => {
+      row.remove();
+      const idx = rows.indexOf(input);
+      if (idx >= 0) rows.splice(idx, 1);
+    });
+    row.append(input, removeBtn);
+    list.append(row);
+    rows.push(input);
+  }
+  const addBtn = el5("button", "cert-san-add");
+  addBtn.type = "button";
+  addBtn.textContent = kind === "dns" ? "+ Add DNS name" : "+ Add IP address";
+  addBtn.addEventListener("click", () => addRow(""));
+  container.append(list, addBtn);
+  for (const value of initial) addRow(value);
+  return {
+    getValues: () => rows.map((r) => r.value.trim()).filter((v) => v !== "")
+  };
+}
 function buildSanList(heading, values) {
-  const wrap = el4("div", "cert-detail-sans-group");
-  const h = el4("p", "cert-detail-sans-heading");
+  const wrap = el5("div", "cert-detail-sans-group");
+  const h = el5("p", "cert-detail-sans-heading");
   h.textContent = `${heading} (${values.length})`;
   wrap.append(h);
   if (values.length === 0) {
-    const empty = el4("p", "cert-detail-sans-empty");
+    const empty = el5("p", "cert-detail-sans-empty");
     empty.textContent = "None.";
     wrap.append(empty);
     return wrap;
   }
-  const list = el4("ul", "cert-detail-sans-list");
+  const list = el5("ul", "cert-detail-sans-list");
   for (const v of values) {
-    const li = el4("li");
+    const li = el5("li");
     li.textContent = v;
     list.append(li);
   }
@@ -828,255 +1071,14 @@ function buildSanList(heading, values) {
   return wrap;
 }
 function openCertDetail(id, config, now, callbacks) {
-  const overlay = el4("div", "cert-modal-overlay");
-  const dialog = el4("div", "cert-modal");
-  dialog.setAttribute("role", "dialog");
-  dialog.setAttribute("aria-modal", "true");
-  dialog.setAttribute("aria-label", "Certificate detail");
-  const header = el4("div", "cert-modal-header");
-  const title = el4("h2", "cert-modal-title");
-  title.textContent = "Certificate detail";
-  const closeBtn = el4("button", "cert-modal-close");
-  closeBtn.type = "button";
-  closeBtn.textContent = "\xD7";
-  closeBtn.setAttribute("aria-label", "Close");
-  header.append(title, closeBtn);
-  const body = el4("div", "cert-modal-body");
-  const footer = el4("div", "cert-modal-footer");
-  dialog.append(header, body, footer);
-  overlay.append(dialog);
-  document.body.append(overlay);
-  const close = () => {
-    document.removeEventListener("keydown", onKey);
-    overlay.remove();
-  };
-  const onKey = (e) => {
-    if (e.key === "Escape") close();
-  };
-  document.addEventListener("keydown", onKey);
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) close();
-  });
-  closeBtn.addEventListener("click", close);
-  const loading = el4("p", "cert-modal-note");
-  loading.textContent = "Loading\u2026";
-  body.append(loading);
-  fetchCertDetail(id).then((cert) => renderDetail(cert)).catch((err) => {
-    body.textContent = "";
-    const error = el4("p", "cert-modal-error");
-    error.textContent = err instanceof Error ? err.message : String(err);
-    body.append(error);
-  });
-  function renderDetail(cert) {
-    body.textContent = "";
-    footer.textContent = "";
-    const kind = badgeFor(cert.notAfter, cert.status, config.expiryWarnDays, now);
-    const heading = el4("div", "cert-detail-heading");
-    const fqdn = el4("span", "cert-fqdn");
-    fqdn.textContent = cert.fqdn;
-    const badge = el4("span", "cert-badge");
-    badge.dataset.kind = kind;
-    badge.textContent = BADGE_LABEL[kind];
-    heading.append(fqdn, badge);
-    body.append(heading);
-    const meta = el4("dl", "cert-detail-meta");
-    addMetaRow(meta, "Common Name", cert.fqdn);
-    addMetaRow(meta, "Serial", cert.serial ?? "unknown (certificate did not parse)");
-    addMetaRow(meta, "SHA-256 fingerprint", cert.fingerprint ?? "unknown");
-    addMetaRow(meta, "Valid from", formatDate2(cert.notBefore));
-    addMetaRow(meta, "Valid until", formatDate2(cert.notAfter));
-    addMetaRow(meta, "Created", formatDate2(cert.created));
-    if (cert.importedFrom !== void 0) addMetaRow(meta, "Imported from", cert.importedFrom);
-    body.append(meta);
-    body.append(buildSanList("DNS names", cert.sans.dns), buildSanList("IP addresses", cert.sans.ip));
-    if (cert.quarantineReason !== void 0) {
-      const note = el4("p", "cert-row-note");
-      note.dataset.tone = "danger";
-      note.textContent = `Quarantined: ${cert.quarantineReason}`;
-      body.append(note);
-    }
-    if (cert.importWarning !== void 0) {
-      const note = el4("p", "cert-row-note");
-      note.dataset.tone = "warn";
-      note.textContent = cert.importWarning;
-      body.append(note);
-    }
-    const downloads = el4("div", "cert-detail-downloads");
-    const quarantined = cert.quarantineReason;
-    const files = [
-      [
-        "cert.pem",
-        `/api/certs/${cert.id}/files/cert.pem`,
-        cert.certPem === void 0 ? "Unavailable: this row has no stored certificate" : null
-      ],
-      ["key.pem", `/api/certs/${cert.id}/files/key.pem`, null],
-      [
-        "haproxy.pem",
-        `/api/certs/${cert.id}/files/haproxy.pem`,
-        quarantined === void 0 ? null : `Unavailable: quarantined -- ${quarantined}`
-      ],
-      [
-        "bundle (.tgz)",
-        `/api/certs/${cert.id}/bundle`,
-        quarantined === void 0 ? null : `Unavailable: quarantined -- ${quarantined}`
-      ]
-    ];
-    for (const [label, href, unavailable] of files) {
-      if (unavailable !== null) {
-        const span = el4("span", "cert-action cert-action-disabled");
-        span.textContent = label;
-        span.title = unavailable;
-        span.setAttribute("aria-disabled", "true");
-        downloads.append(span);
-        continue;
-      }
-      const a = el4("a", "cert-action");
-      a.href = href;
-      a.textContent = label;
-      downloads.append(a);
-    }
-    const copyBtn = createCopyButton({ text: () => cert.certPem ?? "", label: "cert.pem", className: "cert-action cert-action-btn" });
-    if (cert.certPem === void 0) {
-      copyBtn.disabled = true;
-      copyBtn.title = "Nothing to copy: this certificate has no readable PEM.";
-    }
-    downloads.append(copyBtn);
-    body.append(downloads);
-    const renewBtn = el4("button", "cert-btn cert-btn-primary");
-    renewBtn.type = "button";
-    renewBtn.textContent = "Renew";
-    renewBtn.addEventListener("click", () => {
-      renewBtn.disabled = true;
-      renewCert(cert.id).then((resp) => {
-        const notice = clampedNoticeText(config.defaultValidityDays, resp);
-        showToast3(
-          notice ? `Renewed ${cert.fqdn}. ${notice}` : `Renewed ${cert.fqdn}.`,
-          notice ? "notice" : "success"
-        );
-        close();
-        callbacks.onChanged();
-      }).catch((err) => {
-        renewBtn.disabled = false;
-        showToast3(err instanceof Error ? err.message : String(err), "error");
-      });
-    });
-    const deleteBtn = el4("button", "cert-btn cert-btn-danger");
-    deleteBtn.type = "button";
-    deleteBtn.textContent = "Delete\u2026";
-    deleteBtn.addEventListener("click", () => renderDeleteConfirm(cert));
-    footer.append(renewBtn, deleteBtn);
-  }
-  function renderDeleteConfirm(cert) {
-    footer.textContent = "";
-    const confirmWrap = el4("div", "cert-delete-confirm");
-    const label = el4("label", "cert-field-label");
-    label.textContent = `Type "${cert.fqdn}" to confirm deletion (case does not matter):`;
-    const input = el4("input", "cert-field-input");
-    input.type = "text";
-    input.autocomplete = "off";
-    label.append(input);
-    confirmWrap.append(label);
-    body.append(confirmWrap);
-    const cancelBtn = el4("button", "cert-btn cert-btn-secondary");
-    cancelBtn.type = "button";
-    cancelBtn.textContent = "Cancel";
-    cancelBtn.addEventListener("click", () => {
-      confirmWrap.remove();
-      renderDetail(cert);
-    });
-    const confirmBtn = el4("button", "cert-btn cert-btn-danger");
-    confirmBtn.type = "button";
-    confirmBtn.textContent = "Delete permanently";
-    confirmBtn.disabled = true;
-    input.addEventListener("input", () => {
-      confirmBtn.disabled = input.value.trim().toLowerCase() !== cert.fqdn.toLowerCase();
-    });
-    confirmBtn.addEventListener("click", () => {
-      confirmBtn.disabled = true;
-      deleteCert(cert.id, input.value.trim()).then(() => {
-        showToast3(`Deleted ${cert.fqdn}.`, "success");
-        close();
-        callbacks.onChanged();
-      }).catch((err) => {
-        confirmBtn.disabled = false;
-        showToast3(err instanceof Error ? err.message : String(err), "error");
-      });
-    });
-    footer.append(cancelBtn, confirmBtn);
-    input.focus();
-  }
-}
-
-// web/certmachine/js/wizard.ts
-import { showToast as showToast4 } from "/shared/dist/shared.mjs";
-function el5(tag, className) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  return node;
-}
-function reportSummary(report) {
-  return `${report.importable} importable, ${report.expired} expired, ${report.broken} broken, ${report.skipped} skipped`;
-}
-function buildItemList(items) {
-  const list = el5("ul", "cert-wizard-items");
-  if (items.length === 0) {
-    const empty = el5("li", "cert-wizard-item-empty");
-    empty.textContent = "No legacy certificate directories found.";
-    list.append(empty);
-    return list;
-  }
-  for (const item of items) {
-    const li = el5("li", "cert-wizard-item");
-    li.dataset.status = item.status;
-    const path = el5("span", "cert-wizard-item-path");
-    path.textContent = item.path;
-    const status = el5("span", "cert-wizard-item-status");
-    status.textContent = item.status;
-    li.append(path, status);
-    if (item.reason !== void 0) {
-      const reason = el5("p", "cert-wizard-item-reason");
-      reason.textContent = item.reason;
-      li.append(reason);
-    }
-    list.append(li);
-  }
-  return list;
-}
-function buildStrayFiles(files) {
-  if (files.length === 0) return null;
-  const wrap = el5("div", "cert-wizard-stray");
-  const heading = el5("p", "cert-wizard-stray-heading");
-  heading.textContent = "Stray files found (not certificate directories, not imported):";
-  const list = el5("ul", "cert-wizard-stray-list");
-  for (const f of files) {
-    const li = el5("li");
-    li.textContent = f;
-    list.append(li);
-  }
-  wrap.append(heading, list);
-  return wrap;
-}
-async function refineWrittenNote(note) {
-  const ca = await fetchCA();
-  if (!ca.exists) {
-    note.textContent = "Nothing was written: no certificate authority and no certificate rows. Fix the issue above and retry.";
-    return;
-  }
-  if (ca.importedFrom !== void 0) {
-    note.textContent = "The legacy root CA was imported -- that step commits before the leaf import -- but no certificate rows were written. Fix the issue above and retry; the CA is skipped on a re-run because its fingerprint matches.";
-    return;
-  }
-  note.textContent = "No certificate rows were written -- the leaf import is a single transaction and it rolled back. The existing certificate authority is unchanged.";
-}
-function openImportWizard(certCount, onImported) {
   const overlay = el5("div", "cert-modal-overlay");
   const dialog = el5("div", "cert-modal");
   dialog.setAttribute("role", "dialog");
   dialog.setAttribute("aria-modal", "true");
-  dialog.setAttribute("aria-label", "Import legacy certificates");
+  dialog.setAttribute("aria-label", "Certificate detail");
   const header = el5("div", "cert-modal-header");
   const title = el5("h2", "cert-modal-title");
-  title.textContent = "Import legacy certificates";
+  title.textContent = "Certificate detail";
   const closeBtn = el5("button", "cert-modal-close");
   closeBtn.type = "button";
   closeBtn.textContent = "\xD7";
@@ -1099,26 +1101,375 @@ function openImportWizard(certCount, onImported) {
     if (e.target === overlay) close();
   });
   closeBtn.addEventListener("click", close);
+  const loading = el5("p", "cert-modal-note");
+  loading.textContent = "Loading\u2026";
+  body.append(loading);
+  fetchCertDetail(id).then((cert) => renderDetail(cert)).catch((err) => {
+    body.textContent = "";
+    const error = el5("p", "cert-modal-error");
+    error.textContent = err instanceof Error ? err.message : String(err);
+    body.append(error);
+  });
+  function renderDetail(cert) {
+    body.textContent = "";
+    footer.textContent = "";
+    const kind = badgeFor(cert.notAfter, cert.status, config.expiryWarnDays, now);
+    const heading = el5("div", "cert-detail-heading");
+    const fqdn = el5("span", "cert-fqdn");
+    fqdn.textContent = cert.fqdn;
+    const badge = el5("span", "cert-badge");
+    badge.dataset.kind = kind;
+    badge.textContent = BADGE_LABEL[kind];
+    heading.append(fqdn, badge);
+    if (cert.stale) {
+      const staleBadge = el5("span", "cert-badge");
+      staleBadge.dataset.kind = "stale";
+      staleBadge.textContent = "Stale";
+      heading.append(staleBadge);
+    }
+    body.append(heading);
+    const meta = el5("dl", "cert-detail-meta");
+    addMetaRow(meta, "Common Name", cert.fqdn);
+    addMetaRow(meta, "Signing CA", cert.caSubject ?? (cert.caId === null ? "unknown signer" : "unknown"));
+    addMetaRow(meta, "Serial", cert.serial ?? "unknown (certificate did not parse)");
+    addMetaRow(meta, "SHA-256 fingerprint", cert.fingerprint ?? "unknown");
+    addMetaRow(meta, "Valid from", formatDate2(cert.notBefore));
+    addMetaRow(meta, "Valid until", formatDate2(cert.notAfter));
+    addMetaRow(meta, "Created", formatDate2(cert.created));
+    if (cert.importedFrom !== void 0) addMetaRow(meta, "Imported from", cert.importedFrom);
+    body.append(meta);
+    body.append(buildSanList("DNS names", cert.sans.dns), buildSanList("IP addresses", cert.sans.ip));
+    if (cert.quarantineReason !== void 0) {
+      const note = el5("p", "cert-row-note");
+      note.dataset.tone = "danger";
+      note.textContent = `Quarantined: ${cert.quarantineReason}`;
+      body.append(note);
+    }
+    if (cert.importWarning !== void 0) {
+      const note = el5("p", "cert-row-note");
+      note.dataset.tone = "warn";
+      note.textContent = cert.importWarning;
+      body.append(note);
+    }
+    const downloads = el5("div", "cert-detail-downloads");
+    const quarantined = cert.quarantineReason;
+    const files = [
+      [
+        "cert.pem",
+        `/api/certs/${cert.id}/files/cert.pem`,
+        cert.certPem === void 0 ? "Unavailable: this row has no stored certificate" : null
+      ],
+      ["key.pem", `/api/certs/${cert.id}/files/key.pem`, null],
+      [
+        "haproxy.pem",
+        `/api/certs/${cert.id}/files/haproxy.pem`,
+        quarantined === void 0 ? null : `Unavailable: quarantined -- ${quarantined}`
+      ],
+      [
+        "bundle (.tgz)",
+        `/api/certs/${cert.id}/bundle`,
+        quarantined === void 0 ? null : `Unavailable: quarantined -- ${quarantined}`
+      ]
+    ];
+    for (const [label, href, unavailable] of files) {
+      if (unavailable !== null) {
+        const span = el5("span", "cert-action cert-action-disabled");
+        span.textContent = label;
+        span.title = unavailable;
+        span.setAttribute("aria-disabled", "true");
+        downloads.append(span);
+        continue;
+      }
+      const a = el5("a", "cert-action");
+      a.href = href;
+      a.textContent = label;
+      downloads.append(a);
+    }
+    const copyBtn = createCopyButton({ text: () => cert.certPem ?? "", label: "cert.pem", className: "cert-action cert-action-btn" });
+    if (cert.certPem === void 0) {
+      copyBtn.disabled = true;
+      copyBtn.title = "Nothing to copy: this certificate has no readable PEM.";
+    }
+    downloads.append(copyBtn);
+    body.append(downloads);
+    const renewBtn = el5("button", "cert-btn cert-btn-primary");
+    renewBtn.type = "button";
+    renewBtn.textContent = "Re-issue";
+    renewBtn.addEventListener("click", () => {
+      renewBtn.disabled = true;
+      renewCert(cert.id).then((resp) => {
+        const notice = clampedNoticeText(config.defaultValidityDays, resp);
+        let message = notice ? `Renewed ${cert.fqdn}. ${notice}` : `Renewed ${cert.fqdn}.`;
+        if (resp.previousDropped) message += ` ${PREVIOUS_DROPPED_NOTICE}`;
+        showToast4(message, notice ? "notice" : "success");
+        close();
+        callbacks.onChanged();
+      }).catch((err) => {
+        renewBtn.disabled = false;
+        showToast4(err instanceof Error ? err.message : String(err), "error");
+      });
+    });
+    const deleteBtn = el5("button", "cert-btn cert-btn-danger");
+    deleteBtn.type = "button";
+    deleteBtn.textContent = "Delete\u2026";
+    deleteBtn.addEventListener("click", () => renderDeleteConfirm(cert));
+    footer.append(renewBtn);
+    if (cert.quarantineReason === void 0) {
+      const editBtn = el5("button", "cert-btn cert-btn-secondary");
+      editBtn.type = "button";
+      editBtn.textContent = "Edit\u2026";
+      editBtn.addEventListener("click", () => renderEditForm(cert));
+      footer.append(editBtn);
+    }
+    footer.append(deleteBtn);
+  }
+  function renderEditForm(cert) {
+    body.textContent = "";
+    footer.textContent = "";
+    const form = el5("form", "cert-form");
+    const fqdnField = el5("div", "cert-field");
+    const fqdnLabel = el5("label", "cert-field-label");
+    fqdnLabel.textContent = "FQDN";
+    const fqdnInput = el5("input", "cert-field-input");
+    fqdnInput.type = "text";
+    fqdnInput.value = cert.fqdn;
+    fqdnInput.autocomplete = "off";
+    fqdnLabel.append(fqdnInput);
+    fqdnField.append(fqdnLabel);
+    form.append(fqdnField);
+    const dnsField = el5("div", "cert-field");
+    const dnsLabel = el5("p", "cert-field-label");
+    dnsLabel.textContent = "DNS Subject Alternative Names (optional)";
+    dnsField.append(dnsLabel);
+    const dnsRows = buildEditableSanRows(dnsField, "dns", cert.sans.dns);
+    form.append(dnsField);
+    const ipField = el5("div", "cert-field");
+    const ipLabel = el5("p", "cert-field-label");
+    ipLabel.textContent = "IP Subject Alternative Names (optional)";
+    ipField.append(ipLabel);
+    const ipRows = buildEditableSanRows(ipField, "ip", cert.sans.ip);
+    form.append(ipField);
+    const validityField = el5("div", "cert-field");
+    const validityLabel = el5("label", "cert-field-label");
+    validityLabel.textContent = "Validity (days)";
+    const validityInput = el5("input", "cert-field-input");
+    validityInput.type = "number";
+    validityInput.min = "1";
+    validityInput.max = "3650";
+    validityInput.value = String(config.defaultValidityDays);
+    validityLabel.append(validityInput);
+    validityField.append(validityLabel);
+    form.append(validityField);
+    const errorText3 = el5("p", "cert-field-error");
+    errorText3.hidden = true;
+    form.append(errorText3);
+    body.append(form);
+    const cancelBtn = el5("button", "cert-btn cert-btn-secondary");
+    cancelBtn.type = "button";
+    cancelBtn.textContent = "Cancel";
+    cancelBtn.addEventListener("click", () => renderDetail(cert));
+    const submitBtn = el5("button", "cert-btn cert-btn-primary");
+    submitBtn.type = "submit";
+    submitBtn.textContent = "Save";
+    footer.append(cancelBtn, submitBtn);
+    function showError(message) {
+      errorText3.textContent = message;
+      errorText3.hidden = false;
+    }
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      errorText3.hidden = true;
+      const fqdn = fqdnInput.value.trim();
+      if (fqdn === "") {
+        showError("FQDN is required.");
+        return;
+      }
+      const validityDays = parseInt(validityInput.value, 10);
+      if (!Number.isFinite(validityDays) || validityDays < 1 || validityDays > 3650) {
+        showError("Validity must be a whole number of days between 1 and 3650.");
+        return;
+      }
+      const dnsSans = dnsRows.getValues();
+      const ipSans = ipRows.getValues();
+      const invalidIp = ipSans.find((ip) => !isValidIP(ip));
+      if (invalidIp !== void 0) {
+        showError(`"${invalidIp}" is not a valid IP address.`);
+        return;
+      }
+      const sanError = sanCountError(fqdn, dnsSans, ipSans);
+      if (sanError !== null) {
+        showError(sanError);
+        return;
+      }
+      const input = { fqdn, dnsSans, ipSans, validityDays };
+      submitBtn.disabled = true;
+      editCert(cert.id, input).then((resp) => {
+        const notice = clampedNoticeText(validityDays, resp);
+        let message = notice ? `Edited ${resp.cert.fqdn}. ${notice}` : `Edited ${resp.cert.fqdn}.`;
+        if (resp.previousDropped) message += ` ${PREVIOUS_DROPPED_NOTICE}`;
+        showToast4(message, notice ? "notice" : "success");
+        close();
+        callbacks.onChanged();
+      }).catch((err) => {
+        submitBtn.disabled = false;
+        showError(err instanceof Error ? err.message : String(err));
+      });
+    });
+  }
+  function renderDeleteConfirm(cert) {
+    footer.textContent = "";
+    const confirmWrap = el5("div", "cert-delete-confirm");
+    const label = el5("label", "cert-field-label");
+    label.textContent = `Type "${cert.fqdn}" to confirm deletion (case does not matter):`;
+    const input = el5("input", "cert-field-input");
+    input.type = "text";
+    input.autocomplete = "off";
+    label.append(input);
+    confirmWrap.append(label);
+    body.append(confirmWrap);
+    const cancelBtn = el5("button", "cert-btn cert-btn-secondary");
+    cancelBtn.type = "button";
+    cancelBtn.textContent = "Cancel";
+    cancelBtn.addEventListener("click", () => {
+      confirmWrap.remove();
+      renderDetail(cert);
+    });
+    const confirmBtn = el5("button", "cert-btn cert-btn-danger");
+    confirmBtn.type = "button";
+    confirmBtn.textContent = "Delete permanently";
+    confirmBtn.disabled = true;
+    input.addEventListener("input", () => {
+      confirmBtn.disabled = input.value.trim().toLowerCase() !== cert.fqdn.toLowerCase();
+    });
+    confirmBtn.addEventListener("click", () => {
+      confirmBtn.disabled = true;
+      deleteCert(cert.id, input.value.trim()).then((resp) => {
+        const message = resp.previousDropped ? `Deleted ${cert.fqdn}. ${PREVIOUS_DROPPED_NOTICE}` : `Deleted ${cert.fqdn}.`;
+        showToast4(message, "success");
+        close();
+        callbacks.onChanged();
+      }).catch((err) => {
+        confirmBtn.disabled = false;
+        showToast4(err instanceof Error ? err.message : String(err), "error");
+      });
+    });
+    footer.append(cancelBtn, confirmBtn);
+    input.focus();
+  }
+}
+
+// web/certmachine/js/wizard.ts
+import { showToast as showToast5 } from "/shared/dist/shared.mjs";
+function el6(tag, className) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  return node;
+}
+function reportSummary(report) {
+  return `${report.importable} importable, ${report.expired} expired, ${report.broken} broken, ${report.skipped} skipped`;
+}
+function buildItemList(items) {
+  const list = el6("ul", "cert-wizard-items");
+  if (items.length === 0) {
+    const empty = el6("li", "cert-wizard-item-empty");
+    empty.textContent = "No legacy certificate directories found.";
+    list.append(empty);
+    return list;
+  }
+  for (const item of items) {
+    const li = el6("li", "cert-wizard-item");
+    li.dataset.status = item.status;
+    const path = el6("span", "cert-wizard-item-path");
+    path.textContent = item.path;
+    const status = el6("span", "cert-wizard-item-status");
+    status.textContent = item.status;
+    li.append(path, status);
+    if (item.reason !== void 0) {
+      const reason = el6("p", "cert-wizard-item-reason");
+      reason.textContent = item.reason;
+      li.append(reason);
+    }
+    list.append(li);
+  }
+  return list;
+}
+function buildStrayFiles(files) {
+  if (files.length === 0) return null;
+  const wrap = el6("div", "cert-wizard-stray");
+  const heading = el6("p", "cert-wizard-stray-heading");
+  heading.textContent = "Stray files found (not certificate directories, not imported):";
+  const list = el6("ul", "cert-wizard-stray-list");
+  for (const f of files) {
+    const li = el6("li");
+    li.textContent = f;
+    list.append(li);
+  }
+  wrap.append(heading, list);
+  return wrap;
+}
+async function refineWrittenNote(note) {
+  const ca = await fetchCA();
+  if (!ca.exists) {
+    note.textContent = "Nothing was written: no certificate authority and no certificate rows. Fix the issue above and retry.";
+    return;
+  }
+  if (ca.importedFrom !== void 0) {
+    note.textContent = "The legacy root CA was imported -- that step commits before the leaf import -- but no certificate rows were written. Fix the issue above and retry; the CA is skipped on a re-run because its fingerprint matches.";
+    return;
+  }
+  note.textContent = "No certificate rows were written -- the leaf import is a single transaction and it rolled back. The existing certificate authority is unchanged.";
+}
+function openImportWizard(certCount, onImported) {
+  const overlay = el6("div", "cert-modal-overlay");
+  const dialog = el6("div", "cert-modal");
+  dialog.setAttribute("role", "dialog");
+  dialog.setAttribute("aria-modal", "true");
+  dialog.setAttribute("aria-label", "Import legacy certificates");
+  const header = el6("div", "cert-modal-header");
+  const title = el6("h2", "cert-modal-title");
+  title.textContent = "Import legacy certificates";
+  const closeBtn = el6("button", "cert-modal-close");
+  closeBtn.type = "button";
+  closeBtn.textContent = "\xD7";
+  closeBtn.setAttribute("aria-label", "Close");
+  header.append(title, closeBtn);
+  const body = el6("div", "cert-modal-body");
+  const footer = el6("div", "cert-modal-footer");
+  dialog.append(header, body, footer);
+  overlay.append(dialog);
+  document.body.append(overlay);
+  const close = () => {
+    document.removeEventListener("keydown", onKey);
+    overlay.remove();
+  };
+  const onKey = (e) => {
+    if (e.key === "Escape") close();
+  };
+  document.addEventListener("keydown", onKey);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close();
+  });
+  closeBtn.addEventListener("click", close);
   function renderStep1() {
     body.textContent = "";
     footer.textContent = "";
-    const loading = el5("p", "cert-modal-note");
+    const loading = el6("p", "cert-modal-note");
     loading.textContent = "Scanning the legacy directory\u2026";
     body.append(loading);
     fetchImportPreview().then((report) => {
       body.textContent = "";
-      const stepLabel = el5("p", "cert-wizard-step");
+      const stepLabel = el6("p", "cert-wizard-step");
       stepLabel.textContent = "Step 1 of 2 \u2014 preview (nothing has been written yet)";
-      const summary = el5("p", "cert-wizard-summary");
+      const summary = el6("p", "cert-wizard-summary");
       summary.textContent = reportSummary(report);
       body.append(stepLabel, summary, buildItemList(report.items));
       const stray = buildStrayFiles(report.strayFiles);
       if (stray) body.append(stray);
-      const cancelBtn = el5("button", "cert-btn cert-btn-secondary");
+      const cancelBtn = el6("button", "cert-btn cert-btn-secondary");
       cancelBtn.type = "button";
       cancelBtn.textContent = "Cancel";
       cancelBtn.addEventListener("click", close);
-      const proceedBtn = el5("button", "cert-btn cert-btn-primary");
+      const proceedBtn = el6("button", "cert-btn cert-btn-primary");
       proceedBtn.type = "button";
       proceedBtn.textContent = "Import now";
       proceedBtn.disabled = report.importable === 0 && report.expired === 0 && report.broken === 0;
@@ -1126,10 +1477,10 @@ function openImportWizard(certCount, onImported) {
       footer.append(cancelBtn, proceedBtn);
     }).catch((err) => {
       body.textContent = "";
-      const error = el5("p", "cert-modal-error");
+      const error = el6("p", "cert-modal-error");
       error.textContent = err instanceof Error ? err.message : String(err);
       body.append(error);
-      const retryBtn = el5("button", "cert-btn cert-btn-primary");
+      const retryBtn = el6("button", "cert-btn cert-btn-primary");
       retryBtn.type = "button";
       retryBtn.textContent = "Retry";
       retryBtn.addEventListener("click", renderStep1);
@@ -1143,16 +1494,16 @@ function openImportWizard(certCount, onImported) {
     }
     body.textContent = "";
     footer.textContent = "";
-    const stepLabel = el5("p", "cert-wizard-step");
+    const stepLabel = el6("p", "cert-wizard-step");
     stepLabel.textContent = "Step 2 of 2 \u2014 confirm";
-    const warn = el5("p", "cert-modal-note cert-modal-note-warn");
+    const warn = el6("p", "cert-modal-note cert-modal-note-warn");
     warn.textContent = "The certificate list already has entries. Confirm to run the import anyway -- certificates already imported are skipped, nothing existing is overwritten.";
     body.append(stepLabel, warn);
-    const backBtn = el5("button", "cert-btn cert-btn-secondary");
+    const backBtn = el6("button", "cert-btn cert-btn-secondary");
     backBtn.type = "button";
     backBtn.textContent = "Back";
     backBtn.addEventListener("click", renderStep1);
-    const confirmBtn = el5("button", "cert-btn cert-btn-primary");
+    const confirmBtn = el6("button", "cert-btn cert-btn-primary");
     confirmBtn.type = "button";
     confirmBtn.textContent = "Confirm import";
     confirmBtn.addEventListener("click", () => execute(true));
@@ -1161,49 +1512,49 @@ function openImportWizard(certCount, onImported) {
   function execute(confirmNonEmpty) {
     body.textContent = "";
     footer.textContent = "";
-    const loading = el5("p", "cert-modal-note");
+    const loading = el6("p", "cert-modal-note");
     loading.textContent = "Importing\u2026";
     body.append(loading);
     runImport(confirmNonEmpty).then((report) => {
       body.textContent = "";
-      const stepLabel = el5("p", "cert-wizard-step");
+      const stepLabel = el6("p", "cert-wizard-step");
       stepLabel.textContent = "Import complete";
-      const summary = el5("p", "cert-wizard-summary");
+      const summary = el6("p", "cert-wizard-summary");
       summary.textContent = reportSummary(report);
       body.append(stepLabel, summary, buildItemList(report.items));
       const stray = buildStrayFiles(report.strayFiles);
       if (stray) body.append(stray);
-      const doneBtn = el5("button", "cert-btn cert-btn-primary");
+      const doneBtn = el6("button", "cert-btn cert-btn-primary");
       doneBtn.type = "button";
       doneBtn.textContent = "Done";
       doneBtn.addEventListener("click", close);
       footer.append(doneBtn);
-      showToast4(`Import complete: ${reportSummary(report)}`, "success");
+      showToast5(`Import complete: ${reportSummary(report)}`, "success");
       onImported();
     }).catch((err) => {
       body.textContent = "";
       const message = err instanceof Error ? err.message : String(err);
-      const stepLabel = el5("p", "cert-wizard-step");
+      const stepLabel = el6("p", "cert-wizard-step");
       stepLabel.textContent = "Import failed";
-      const error = el5("p", "cert-modal-error");
+      const error = el6("p", "cert-modal-error");
       error.textContent = message;
-      const note = el5("p", "cert-modal-note");
+      const note = el6("p", "cert-modal-note");
       note.textContent = "No certificate rows were written -- the leaf import is a single transaction and it rolled back.";
       body.append(stepLabel, error, note);
       const report = err instanceof ImportFailedError ? err.report : null;
       if (report !== null) {
-        const partial = el5("p", "cert-wizard-summary");
+        const partial = el6("p", "cert-wizard-summary");
         partial.textContent = `Partial scan: ${reportSummary(report)}`;
         body.append(partial, buildItemList(report.items));
         const stray = buildStrayFiles(report.strayFiles);
         if (stray) body.append(stray);
       }
       void refineWrittenNote(note);
-      const cancelBtn = el5("button", "cert-btn cert-btn-secondary");
+      const cancelBtn = el6("button", "cert-btn cert-btn-secondary");
       cancelBtn.type = "button";
       cancelBtn.textContent = "Cancel";
       cancelBtn.addEventListener("click", close);
-      const retryBtn = el5("button", "cert-btn cert-btn-primary");
+      const retryBtn = el6("button", "cert-btn cert-btn-primary");
       retryBtn.type = "button";
       retryBtn.textContent = "Retry";
       retryBtn.addEventListener("click", renderStep1);
@@ -1214,13 +1565,13 @@ function openImportWizard(certCount, onImported) {
 }
 
 // web/certmachine/js/ui.ts
-import { showToast as showToast5, promptDialog } from "/shared/dist/shared.mjs";
-function el6(tag, className) {
+import { showToast as showToast6, promptDialog } from "/shared/dist/shared.mjs";
+function el7(tag, className) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   return node;
 }
-function errorText(err) {
+function errorText2(err) {
   return err instanceof Error ? err.message : String(err);
 }
 var SORT_LABELS = {
@@ -1232,9 +1583,9 @@ function formatCADate(iso) {
   return iso !== void 0 ? iso.slice(0, 10) : "unknown";
 }
 function addMetaRow2(dl, label, value) {
-  const dt = el6("dt", "cert-detail-key");
+  const dt = el7("dt", "cert-detail-key");
   dt.textContent = label;
-  const dd = el6("dd", "cert-detail-value");
+  const dd = el7("dd", "cert-detail-value");
   dd.textContent = value;
   dl.append(dt, dd);
 }
@@ -1247,60 +1598,89 @@ async function handleInitCA(button, onCAChanged) {
   if (name === null) return;
   button.disabled = true;
   initCA(name.trim()).then(() => {
-    showToast5("Certificate authority initialized.", "success");
+    showToast6("Certificate authority initialized.", "success");
     onCAChanged();
   }).catch((err) => {
     button.disabled = false;
-    showToast5(errorText(err), "error");
+    showToast6(errorText2(err), "error");
   });
 }
 function renderCAPanel(container, ca, config, onCAChanged, onOpenWizard) {
-  const panel = el6("section", "cert-ca-panel");
-  const heading = el6("h2", "cert-ca-heading");
+  const panel = el7("section", "cert-ca-panel");
+  const heading = el7("h2", "cert-ca-heading");
   heading.textContent = "Certificate authority";
   panel.append(heading);
+  const openTrust = () => openTrustDialog(config);
   if (ca.exists) {
-    const meta = el6("dl", "cert-detail-meta");
+    const meta = el7("dl", "cert-detail-meta");
     addMetaRow2(meta, "Subject", ca.subject ?? "unknown");
     addMetaRow2(meta, "Serial", ca.serial ?? "unknown");
     addMetaRow2(meta, "Valid", `${formatCADate(ca.notBefore)} \u2013 ${formatCADate(ca.notAfter)}`);
     addMetaRow2(meta, "Fingerprint", ca.fingerprint ?? "unknown");
     if (ca.importedFrom !== void 0) addMetaRow2(meta, "Imported from", ca.importedFrom);
     panel.append(meta);
-    const actions = el6("div", "cert-ca-actions");
-    const download = el6("a", "cert-btn");
+    if (ca.previous !== void 0) {
+      const prevHeading = el7("p", "cert-field-label");
+      prevHeading.textContent = "Previous certificate authority";
+      panel.append(prevHeading);
+      const prevMeta = el7("dl", "cert-detail-meta");
+      addMetaRow2(prevMeta, "Subject", ca.previous.subject);
+      addMetaRow2(prevMeta, "Valid", `${formatCADate(ca.previous.notBefore)} \u2013 ${formatCADate(ca.previous.notAfter)}`);
+      addMetaRow2(
+        prevMeta,
+        "Signs",
+        `${ca.previous.activeCount} active certificate${ca.previous.activeCount === 1 ? "" : "s"}`
+      );
+      panel.append(prevMeta);
+    }
+    const actions = el7("div", "cert-ca-actions");
+    const download = el7("a", "cert-btn");
     download.href = "/api/ca/root.crt";
     download.textContent = "Download root CA";
     actions.append(download);
     if (config.trustDeviceAvailable || config.trustRemoteAvailable) {
-      const trustBtn = el6("button", "cert-btn cert-btn-secondary");
+      const trustBtn = el7("button", "cert-btn cert-btn-secondary");
       trustBtn.type = "button";
       trustBtn.textContent = "Trust this CA\u2026";
-      trustBtn.addEventListener("click", () => openTrustDialog(config));
+      trustBtn.addEventListener("click", openTrust);
       actions.append(trustBtn);
     }
+    const replaceBtn = el7("button", "cert-btn cert-btn-secondary");
+    replaceBtn.type = "button";
+    replaceBtn.textContent = "Replace CA\u2026";
+    replaceBtn.addEventListener("click", () => openReplaceCADialog(ca, onCAChanged, openTrust));
+    actions.append(replaceBtn);
+    if (ca.previous !== void 0) {
+      const switchBackBtn = el7("button", "cert-btn cert-btn-secondary");
+      switchBackBtn.type = "button";
+      switchBackBtn.textContent = "Switch back to previous CA";
+      switchBackBtn.addEventListener("click", () => {
+        void confirmSwitchBackCA(onCAChanged, openTrust);
+      });
+      actions.append(switchBackBtn);
+    }
     panel.append(actions);
-    const trustNote = el6("p", "cert-ca-note");
+    const trustNote = el7("p", "cert-ca-note");
     trustNote.textContent = "For other devices, or if the button above isn't available: manual per-OS trust instructions are in the README (and docs/certmachine.md).";
     panel.append(trustNote);
   } else {
     const preferImport = config.legacyImportAvailable && config.certCount === 0;
-    const note = el6("p", "cert-ca-note");
+    const note = el7("p", "cert-ca-note");
     note.textContent = preferImport ? "No certificate authority yet. Import the existing legacy certificates to bring the current root CA forward, or start fresh." : "No certificate authority yet. Initialize one to start issuing certificates.";
     panel.append(note);
-    const actions = el6("div", "cert-ca-actions");
+    const actions = el7("div", "cert-ca-actions");
     if (preferImport) {
-      const importBtn = el6("button", "cert-btn cert-btn-primary");
+      const importBtn = el7("button", "cert-btn cert-btn-primary");
       importBtn.type = "button";
       importBtn.textContent = "Import legacy certificates";
       importBtn.addEventListener("click", onOpenWizard);
-      const initBtn = el6("button", "cert-btn cert-btn-secondary");
+      const initBtn = el7("button", "cert-btn cert-btn-secondary");
       initBtn.type = "button";
       initBtn.textContent = "Initialize a new CA instead";
       initBtn.addEventListener("click", () => void handleInitCA(initBtn, onCAChanged));
       actions.append(importBtn, initBtn);
     } else {
-      const initBtn = el6("button", "cert-btn cert-btn-primary");
+      const initBtn = el7("button", "cert-btn cert-btn-primary");
       initBtn.type = "button";
       initBtn.textContent = "Initialize root CA";
       initBtn.addEventListener("click", () => void handleInitCA(initBtn, onCAChanged));
@@ -1308,7 +1688,7 @@ function renderCAPanel(container, ca, config, onCAChanged, onOpenWizard) {
     }
     panel.append(actions);
     if (config.legacyImportDir !== "" && !config.legacyImportAvailable) {
-      const reason = el6("p", "cert-ca-note cert-ca-note-warn");
+      const reason = el7("p", "cert-ca-note cert-ca-note-warn");
       reason.textContent = `Legacy import unavailable: ${config.legacyImportReason}`;
       panel.append(reason);
     }
@@ -1316,7 +1696,7 @@ function renderCAPanel(container, ca, config, onCAChanged, onOpenWizard) {
   container.append(panel);
 }
 function buildImportButton(config, onOpenWizard) {
-  const btn = el6("button", "cert-btn");
+  const btn = el7("button", "cert-btn");
   btn.type = "button";
   btn.textContent = "Import";
   if (config.legacyImportAvailable) {
@@ -1331,10 +1711,10 @@ function buildImportButton(config, onOpenWizard) {
 async function mountCertApp(root) {
   root.textContent = "";
   root.classList.add("cert-app");
-  const main = el6("main", "cert-main");
-  const caPanelWrap = el6("div", "cert-ca-panel-wrap");
-  const toolbar = el6("div", "cert-toolbar");
-  const listWrap = el6("div", "cert-list-wrap");
+  const main = el7("main", "cert-main");
+  const caPanelWrap = el7("div", "cert-ca-panel-wrap");
+  const toolbar = el7("div", "cert-toolbar");
+  const listWrap = el7("div", "cert-list-wrap");
   main.append(caPanelWrap, toolbar, listWrap);
   root.append(main);
   let config;
@@ -1344,8 +1724,9 @@ async function mountCertApp(root) {
   let sortKey = "name";
   let sortDir = "asc";
   let groupByDomain = false;
+  let staleOnly = false;
   function renderList() {
-    const filtered = filterCerts(certs, query);
+    const filtered = filterStale(filterCerts(certs, query), staleOnly);
     const sorted = sortCerts(filtered, sortKey, sortDir);
     renderCertList(listWrap, sorted, config.expiryWarnDays, /* @__PURE__ */ new Date(), {
       groupByDomain,
@@ -1371,7 +1752,7 @@ async function mountCertApp(root) {
       () => openImportWizard(config.certCount, () => void refresh())
     );
     toolbar.textContent = "";
-    const search = el6("input", "cert-search");
+    const search = el7("input", "cert-search");
     search.type = "search";
     search.placeholder = "Search FQDN or SAN\u2026";
     search.value = query;
@@ -1380,10 +1761,10 @@ async function mountCertApp(root) {
       query = search.value;
       renderList();
     });
-    const sortSelect = el6("select", "cert-sort");
+    const sortSelect = el7("select", "cert-sort");
     sortSelect.setAttribute("aria-label", "Sort by");
     Object.keys(SORT_LABELS).forEach((key) => {
-      const opt = el6("option");
+      const opt = el7("option");
       opt.value = key;
       opt.textContent = SORT_LABELS[key];
       if (key === sortKey) opt.selected = true;
@@ -1394,7 +1775,7 @@ async function mountCertApp(root) {
       renderList();
     });
     const dirLabel = () => sortDir === "asc" ? "\u2191 Ascending" : "\u2193 Descending";
-    const dirBtn = el6("button", "cert-sort-dir");
+    const dirBtn = el7("button", "cert-sort-dir");
     dirBtn.type = "button";
     dirBtn.textContent = dirLabel();
     dirBtn.addEventListener("click", () => {
@@ -1402,16 +1783,25 @@ async function mountCertApp(root) {
       dirBtn.textContent = dirLabel();
       renderList();
     });
-    const groupToggle = el6("label", "ui-toggle cert-group-toggle");
-    const groupCheckbox = el6("input");
+    const groupToggle = el7("label", "ui-toggle cert-group-toggle");
+    const groupCheckbox = el7("input");
     groupCheckbox.type = "checkbox";
     groupCheckbox.checked = groupByDomain;
     groupCheckbox.addEventListener("change", () => {
       groupByDomain = groupCheckbox.checked;
       renderList();
     });
-    groupToggle.append(groupCheckbox, el6("span", "ui-toggle-track"), document.createTextNode("Group by domain"));
-    const newBtn = el6("button", "cert-btn cert-btn-primary");
+    groupToggle.append(groupCheckbox, el7("span", "ui-toggle-track"), document.createTextNode("Group by domain"));
+    const staleToggle = el7("label", "ui-toggle cert-group-toggle");
+    const staleCheckbox = el7("input");
+    staleCheckbox.type = "checkbox";
+    staleCheckbox.checked = staleOnly;
+    staleCheckbox.addEventListener("change", () => {
+      staleOnly = staleCheckbox.checked;
+      renderList();
+    });
+    staleToggle.append(staleCheckbox, el7("span", "ui-toggle-track"), document.createTextNode("Stale only"));
+    const newBtn = el7("button", "cert-btn cert-btn-primary");
     newBtn.type = "button";
     newBtn.textContent = "New certificate";
     newBtn.disabled = !ca.exists;
@@ -1420,7 +1810,7 @@ async function mountCertApp(root) {
       openGenerateForm(config.defaultValidityDays, () => void refresh());
     });
     const importBtn = buildImportButton(config, () => openImportWizard(config.certCount, () => void refresh()));
-    toolbar.append(search, sortSelect, dirBtn, groupToggle, newBtn, importBtn);
+    toolbar.append(search, sortSelect, dirBtn, groupToggle, staleToggle, newBtn, importBtn);
   }
   let refreshGeneration = 0;
   async function refresh() {
@@ -1433,8 +1823,8 @@ async function mountCertApp(root) {
       toolbar.textContent = "";
       caPanelWrap.textContent = "";
       listWrap.textContent = "";
-      const banner = el6("p", "cert-error");
-      banner.textContent = `Failed to load certificates: ${errorText(err)}`;
+      const banner = el7("p", "cert-error");
+      banner.textContent = `Failed to load certificates: ${errorText2(err)}`;
       listWrap.appendChild(banner);
       return;
     }
