@@ -1,12 +1,22 @@
 # Plan: utuber on a taskmaster lane (Go-function tasks, progress, retention, shared queue panel)
 
-Source FRD: `docs/FRD-utuber-taskmaster-lane.md`
+Source FRD: `docs/frd/FRD-utuber-taskmaster-lane.md`
 Mode: RALPLAN-DR consensus, **DELIBERATE** (the FRD deletes `internal/utuber/jobs`; schema migration; new delete/prune paths; cross-module wiring change in `cmd/server`)
 Status: **APPROVED by owner 2026-09-27 (as-is, v3)** — consensus reached round 2 (Architect SOUND-WITH-CHANGES, Critic APPROVE) + improvements applied. Execution: ralph, Sonnet builders.
 
 Provenance: this file was restored to `docs/` on the owner's instruction, after `.omc/plans/utuber-taskmaster-lane.md` was overwritten with 16 bytes of binary data by an unrelated process. It is **not a from-memory reconstruction**. It was rebuilt by an exact, deterministic replay of the planner's recorded Write/Edit/script operations (v1 write → v2 edits → v3 edits), and every recorded edit re-applied cleanly. The only change from the pre-corruption text is the Phase 6 FRD status pointer, which now names this file's new path. §12 still mentions `.omc/plans/open-questions.md` as it did originally.
 
 All line numbers were verified against the working tree at commit `29ac6c7` (branch `ui-upgrade`). Paths are repo-relative. "TM" = taskmaster.
+
+> **Line numbers may have drifted since that commit — locate by symbol, not by line.**
+> This plan is pinned to `29ac6c7`, which is now several commits behind `ui-upgrade`. File
+> *paths* below were re-verified against the current tree, but line numbers were not re-derived,
+> so treat every `file.go:NNN` as approximate and confirm with a symbol search
+> (`grep -n 'SetMaxOpenConns' internal/taskmaster/db/db.go`) before acting on it. Known drift:
+> in `internal/taskmaster/db/db.go`, `dsnFor` is now at line 25 (cited as 20-23), `Open` at 32,
+> `SetMaxOpenConns(1)` at 37 (cited as 28), and `PRAGMA foreign_keys = ON` at 39 (cited as
+> 29-33). R1's rule is unaffected — it depends on the fact that the pool is capped at one
+> connection, not on where the line sits.
 
 ---
 
@@ -101,7 +111,7 @@ Breaking any rule is a defect even when the tests pass.
 | P12 | **D3 for shell tasks:** the progress *storage, API and UI* are kind-agnostic, so any execution with progress shows a bar. The only *reporter* shipped is `RunContext.Progress` (func tasks). A stdout marker protocol for shell tasks is deferred (ADR follow-up). | This narrows D3's "any task", explicitly. Adding the reporter later is a parser only, with no schema, API or UI change. |
 | P13 | `RunContext.SetLabel` lets the callback retitle a job mid-run. utuber calls it after the metadata fetch, which preserves today's behaviour of names appearing mid-download (`handler.go:37-47`). | Avoids a UX regression. |
 | P14 | The utuber page keeps polling `/jobs.json` every 2000 ms. No new SSE surface is added. | Owner floor Q3. Simplest. |
-| P15 | `media.OSExecutor.Run` is rewritten to join all output before returning, with the process group killed on cancel. | Today it does not join its scanner goroutines (`internal/utuber/media/exec.go:30-31`, the "Known limitation" in `docs/utuber.md`). Under TM, a late `onLine` would report progress to a finished execution, and goleak or the race detector would flag it. |
+| P15 | `media.OSExecutor.Run` is rewritten to join all output before returning, with the process group killed on cancel. | Today it does not join its scanner goroutines (`internal/utuber/media/exec.go:30-31`, the "Known limitation" in `docs/guides/utuber.md`). Under TM, a late `onLine` would report progress to a finished execution, and goleak or the race detector would flag it. |
 | P16 | **Headless engine polls owned lanes only.** When utuber is routed and taskmaster is not, `cmd/server` opens the engine with `taskmaster.OpenOptions{OwnedLanesOnly: true}`. The worker then skips every lane whose `owner == ''` when building candidates, the coordinator router is never built or mounted, and `seedLanes` is not run. Boot reconciliation still runs over all rows. That is DB-only, and it produces the same outcome the next taskmaster-routed boot would (`build.go:67-72`). | Today an unrouted taskmaster runs nothing. Without this option, routing only utuber would start the shell worker, including sudo tasks if `allow_sudo` is stored, with no UI. **No behaviour change for shell tasks.** Test: `TestOpen_OwnedLanesOnlySkipsShellLanes`. |
 | P17 | **Func-task metrics are aggregated per (lane, kind).** `GetMetrics…` groups `kind != ''` rows by `(t.lane_name, t.kind)` and reports `task_name = kind`, with a new `kind` field. Shell rows keep per-task grouping. | Grouping by `t.id, t.name` (`db.go:848-862`) would give one Metrics card per download (`utuber-<hex>`) whenever the lane is visible. Test: `TestGetMetrics_FuncTasksAggregatedByKind`. |
 | P18 | **Func tasks re-run only from `failed` or `canceled`.** A func task whose latest execution is `success` is refused (`golane.ErrSucceeded`; HTTP 409 on both `POST /api/executions/{id}/rerun` and utuber's `/jobs/rerun`). | A one-shot job that succeeded is done. This rule is generic, not utuber-specific (Q5), and it stops the TM route from bypassing utuber's D5 duplicate check. |
@@ -113,13 +123,13 @@ Breaking any rule is a defect even when the tests pass.
 | # | Surface | Before | After | Test |
 |---|---------|--------|-------|------|
 | N1 (**added scope**, beyond the FRD, justified because the new `kind`/`payload` columns would otherwise be writable over HTTP) | `PUT /api/tasks/{name}` (`handlers_tasks.go:89-137`, `db.go:455-470`) | Any JSON key is concatenated into SQL as a column name. Unknown keys give 500. | Keys are allow-listed (`lane_name, enabled, paused, cooldown_seconds, repeat, command, position, sudo, output_file`). Anything else gives **400** `unknown or read-only field "<k>"`. A func task gives **409**. | `TestHandleUpdateTask_RejectsUnknownField`, `TestHandleUpdateTask_FuncTaskConflict` |
-| N2 | `task_metrics` retention (`docs/taskmaster.md` "retained indefinitely") | Never pruned. | Rows of **pruned or removed func tasks** are deleted together with the task. Shell metrics are unchanged. | `TestPruneOwnedLane_DeletesTaskExecsMetrics` |
+| N2 | `task_metrics` retention (`docs/guides/taskmaster.md` "retained indefinitely") | Never pruned. | Rows of **pruned or removed func tasks** are deleted together with the task. Shell metrics are unchanged. | `TestPruneOwnedLane_DeletesTaskExecsMetrics` |
 | N3 | `DELETE /api/tasks/{name}` (`handlers_tasks.go:139-150`) | Unconditional. | Shell: unchanged. Func task with a running execution: **409**. | `TestHandleDeleteTask_FuncRunningConflict` |
 | N4 | Hidden lanes (new) | n/a | A hidden lane and its tasks and executions are invisible to every TM HTTP route (404 or filtered, §4.6) and to board events. The brake still applies to them. | §7 coordinator tests |
-| N5 | utuber `/jobs.json` wire format (`docs/utuber.md`, `build_test.go:86-123`) | 11 PascalCase keys; `completed`. | The snake_case shape in §4.10; `success`. | `TestJobsWireFormat` (replaces `TestJobsWireFormatElevenKeys`) |
+| N5 | utuber `/jobs.json` wire format (`docs/guides/utuber.md`, `build_test.go:86-123`) | 11 PascalCase keys; `completed`. | The snake_case shape in §4.10; `success`. | `TestJobsWireFormat` (replaces `TestJobsWireFormatElevenKeys`) |
 | N6 | utuber `POST /settings.json` (`settings.go:109-131`) | Body `{}` clears `python_bin` (it decodes as `""`). | Fields are optional pointers. An absent `python_bin` leaves it untouched, and `"python_bin": ""` still clears it. | `TestSettingsPOST_PartialLeavesPythonBin` |
 | N7 | `utuber.workers` (`config.go:452-465`) | Worker count, applied every boot. | Seed for the lane width on first creation only (P8). | `TestBuild_WorkersSeedsWidthOnlyOnce` |
-| N8 | `docs/utuber.md` "Shutdown behavior (FR-6)" | Workers are un-stoppable; queued jobs are lost on restart. | In-flight downloads are cancelled on `Close` and recorded `failed` (TM shutdown semantics). Queued jobs survive a restart. | `TestUtuber_QueuedJobSurvivesEngineRestart` |
+| N8 | `docs/guides/utuber.md` "Shutdown behavior (FR-6)" | Workers are un-stoppable; queued jobs are lost on restart. | In-flight downloads are cancelled on `Close` and recorded `failed` (TM shutdown semantics). Queued jobs survive a restart. | `TestUtuber_QueuedJobSurvivesEngineRestart` |
 
 ### 2.4 FRD wording satisfied differently (not a behaviour change)
 - FR-T4 "finished executions are pruned": in Option A a job is a task, so the pruner deletes the whole one-shot func task (all its executions) when its **latest** execution finished before the cutoff and it has none pending or running.
@@ -144,7 +154,7 @@ There is no blocking gate. The owner must explicitly accept or override each of 
 3. **Wrong-method requests to `/api/*` fall through** to the static catch-all (`build.go:135` `r.Handle("/*", …)`), which answers 200 with index.html. This was probed with chi v5.3.2: `GET /api/executions/1/cancel` gives 200 from static. TM has no 405 tests. New TM routes follow the same convention, and no 405 test is added. utuber's `/jobs/*` handlers answer 405 via `http.Error` without an `Allow` header (`handler.go:180-185`), and the new utuber handlers mirror that.
 4. **The canceled-eligibility quirk** is described under P3.
 5. **Build order is random** (`cmd/server/main.go:317`, map iteration), and utuber may be routed without taskmaster.
-6. **Doc inaccuracies (not FRD).** `docs/taskmaster.md` says the `GET /api/tasks` filter is `?group=`, but the code reads `?lane=` (`handlers_tasks.go:16`, and metrics `handlers_metrics.go:12`). The doc's route table omits `POST /api/executions/{id}/pause|resume` (`coordinator.go:81-82`). It says configured lane width is "DB authoritative afterward", but `seedLanes` → `UpsertLane` overwrites the width on every boot (`build.go:150-160`, `db.go:312-321`). `docs/utuber.md` omits the interim `POST /jobs/delete` route. Phase 6 fixes all four.
+6. **Doc inaccuracies (not FRD).** `docs/guides/taskmaster.md` says the `GET /api/tasks` filter is `?group=`, but the code reads `?lane=` (`handlers_tasks.go:16`, and metrics `handlers_metrics.go:12`). The doc's route table omits `POST /api/executions/{id}/pause|resume` (`coordinator.go:81-82`). It says configured lane width is "DB authoritative afterward", but `seedLanes` → `UpsertLane` overwrites the width on every boot (`build.go:150-160`, `db.go:312-321`). `docs/guides/utuber.md` omits the interim `POST /jobs/delete` route. Phase 6 fixes all four.
 7. **The FRD's "pause" for Go tasks** (FR-T2) can only mean lane or task pause (P5).
 8. **The FRD's "hand brake not required"**: the brake already pauses every lane and cancels every running execution (`handlers_control.go:112-158`). The utuber lane is therefore braked too, which "falls out for free" per FRD §5. It is documented, not prevented.
 9. **`UpdateTask` builds SQL from JSON keys** (`db.go:462-467`). N1 closes this.
@@ -629,7 +639,7 @@ export const ACTION_GLYPHS: Record<QueueActionKind, { glyph: string; label: stri
 - `taskdetail.ts:56-57`: for a func task, render `kind`, `label` and pretty-printed `payload` read-only instead of `command`.
 
 **utuber adoption (second)** in `web/utuber/js/main.ts`:
-- `refreshJobs`/`jobRow`/`parseProgress` (`main.ts:172-263`) are replaced by one `QueuePanel<UJob>` mounted in `#jobs-list`, with `header: { paused, onTogglePause }` driven by `/settings.json` `queue_paused`. When `queue_paused_by === "brake"`, the header shows "Paused by taskmaster hand brake" and disables the toggle, because releasing the brake is taskmaster's action (G3). When `brake_engaged` is true (even if the lane itself is not marked paused), the header shows "Taskmaster hand brake is engaged — nothing will start until it is released in taskmaster" and disables the toggle. `docs/utuber.md` documents that releasing it requires the taskmaster module to be routed (`DELETE /api/brake`). A new `QueuePanelOptions.header.note?: string` renders that text in `.ui-queue-header-note`, and `setPaused(paused, note?)` updates it.
+- `refreshJobs`/`jobRow`/`parseProgress` (`main.ts:172-263`) are replaced by one `QueuePanel<UJob>` mounted in `#jobs-list`, with `header: { paused, onTogglePause }` driven by `/settings.json` `queue_paused`. When `queue_paused_by === "brake"`, the header shows "Paused by taskmaster hand brake" and disables the toggle, because releasing the brake is taskmaster's action (G3). When `brake_engaged` is true (even if the lane itself is not marked paused), the header shows "Taskmaster hand brake is engaged — nothing will start until it is released in taskmaster" and disables the toggle. `docs/guides/utuber.md` documents that releasing it requires the taskmaster module to be routed (`DELETE /api/brake`). A new `QueuePanelOptions.header.note?: string` renders that text in `.ui-queue-header-note`, and `setPaused(paused, note?)` updates it.
 - Adapter:
   - section: queued → upnext, running → running, else recent.
   - title: `label`.
@@ -732,7 +742,7 @@ Files: `internal/utuber/{build,handler,settings}.go`, `media/exec.go`, `media/ex
   ```
 
 ### Phase 6 — Docs, full gate, e2e-equivalent run
-Files: `docs/taskmaster.md` (func tasks, progress, retention, hidden lanes, rerun route, progress_interval_ms, headless OwnedLanesOnly mode (P16), config-lane vs owned-lane rule (P19), func metrics aggregation (P17), the fact-6 corrections, N1–N4, and a **"Schema v5: no downgrade"** warning box with the K9 consequence and recovery), `docs/utuber.md` (new endpoints and shapes, N5–N8, remove the "Known limitation" section, since P15 fixes it), `docs/FRD-utuber-taskmaster-lane.md` status line → "planned; see docs/PLAN-utuber-taskmaster-lane.md".
+Files: `docs/guides/taskmaster.md` (func tasks, progress, retention, hidden lanes, rerun route, progress_interval_ms, headless OwnedLanesOnly mode (P16), config-lane vs owned-lane rule (P19), func metrics aggregation (P17), the fact-6 corrections, N1–N4, and a **"Schema v5: no downgrade"** warning box with the K9 consequence and recovery), `docs/guides/utuber.md` (new endpoints and shapes, N5–N8, remove the "Known limitation" section, since P15 fixes it), `docs/frd/FRD-utuber-taskmaster-lane.md` status line → "planned; see docs/PLAN-utuber-taskmaster-lane.md".
 - Verify:
   ```sh
   make check
@@ -931,12 +941,12 @@ New log lines (exact prefixes):
 |----|------|-----------|
 | K1 | Existing shell semantics drift through the SQL/scan changes | R3; the existing suite runs unmodified; the pins `TestGetEligibleTasks_ShellCanceledQuirkUnchanged` and `…FuncTaskOnlyWithPending` |
 | K2 | Board's global `listExecutions(undefined, 300)` (`board.ts:122`) is crowded out by many visible utuber executions | Retention bounds the growth; the hidden lane is excluded at the SQL level. Follow-up: per-lane execution fetch |
-| K3 | Payload exposed via `GET /api/tasks` (URLs) | Same trust boundary as the TM module itself (it is RCE by design, `docs/taskmaster.md` Security). Hidden lanes hide it. |
+| K3 | Payload exposed via `GET /api/tasks` (URLs) | Same trust boundary as the TM module itself (it is RCE by design, `docs/guides/taskmaster.md` Security). Hidden lanes hide it. |
 | K4 | A migration 5 failure on an existing on-disk DB | Transactional, with a rollback test; the error surfaces at `Open` → 503 for TM/utuber only; other modules are unaffected (`main.go:320-323`) |
 | K5 | yt-dlp survives a hard crash (a separate process group) | Accepted. It is the same class as a shell task's orphan. The reconcile marks the job failed; the orphan finishes or dies on its own. Documented. |
 | K6 | Partial `<stem>.*` files left after cancel or failure | Documented. The stem is `<jobID>-<execID>` (§4.10), so a re-run writes to a **new** stem, and it neither resumes nor collides with the previous attempt's partial files, which remain in `download_dir` as litter. Follow-up: best-effort removal of `<jobID>-<execID>.*` on cancel or failure. |
 | K7 | `settings.json` partial apply (lane ok, python_bin write fails) | Validate-all-first. The 500 message says "partially saved". Documented (§4.10). |
-| K9 | **Downgrade hazard.** An older binary opened on a v5 DB ignores the new columns, which SQLite permits. Its eligibility SQL (`db.go:534-538`) treats every pending func execution as eligible and runs it through `TaskExecutor.Execute` with an empty command, and that returns `task has no command` (`worker/executor.go:41-43`). So every queued download is consumed as **`failed`**, not `success`. Hidden lanes also reappear, and the owned-lane guards vanish. | Documented as **"no downgrade past schema v5"** in `docs/taskmaster.md` (Phase 6) and in the Phase 1 commit message. Recovery after an accidental downgrade: upgrade again, then re-run the failed jobs from utuber (they are `failed`, so P18 allows it). There is no code guard, since an old binary cannot be changed retroactively. |
+| K9 | **Downgrade hazard.** An older binary opened on a v5 DB ignores the new columns, which SQLite permits. Its eligibility SQL (`db.go:534-538`) treats every pending func execution as eligible and runs it through `TaskExecutor.Execute` with an empty command, and that returns `task has no command` (`worker/executor.go:41-43`). So every queued download is consumed as **`failed`**, not `success`. Hidden lanes also reappear, and the owned-lane guards vanish. | Documented as **"no downgrade past schema v5"** in `docs/guides/taskmaster.md` (Phase 6) and in the Phase 1 commit message. Recovery after an accidental downgrade: upgrade again, then re-run the failed jobs from utuber (they are `failed`, so P18 allows it). There is no code guard, since an old binary cannot be changed retroactively. |
 | K8 | Late registration: TM boots with pending utuber jobs, and utuber fails to build | Jobs stay pending (visible in TM when not hidden). A once-per-kind log line (§7.4) points at the missing kind. |
 
 ---
@@ -960,7 +970,7 @@ New log lines (exact prefixes):
   - Per-execution SIGSTOP pause does not exist for Go tasks (P5).
   - The utuber page still polls every 2 s.
 - **Follow-ups.**
-  1. **Metrics reversal (Q4):** set `metricsIncludeHiddenLanes = true` in `internal/taskmaster/coordinator/handlers_metrics.go`, invert `TestMetrics_HiddenLaneExcludedByPolicy`, and update `docs/taskmaster.md`. No schema or API change is needed.
+  1. **Metrics reversal (Q4):** set `metricsIncludeHiddenLanes = true` in `internal/taskmaster/coordinator/handlers_metrics.go`, invert `TestMetrics_HiddenLaneExcludedByPolicy`, and update `docs/guides/taskmaster.md`. No schema or API change is needed.
   2. **A second module lane (Q5):** call `host.RegisterLane(golane.LaneSpec{…}, golane.NewKind[…](…))` from that module's `Build`, and add a `moduleDeps.taskmasterEngine()` call in its `buildModule` case. No TM change is needed. Do not generalise further until that consumer exists.
   3. A shell-task progress reporter (a stdout marker line) to complete D3 for shell tasks (P12).
   4. Fix or document the shell canceled-eligibility quirk (P3), as its own change with an owner decision.

@@ -20,7 +20,7 @@ Modules:
 | [multissh](#multissh) | Browser SSH console for many hosts + file broadcast |
 | [taskmaster](#taskmaster) | Scheduled/on-demand command runner with live output |
 | [admin](#admin) | Web UI for editing the auth config live |
-| [smbedit](../docs/smbedit.md) | Edit Samba shares (shares, globals, smb.conf preview, save & restart) |
+| [smbedit](../docs/guides/smbedit.md) | Edit Samba shares (shares, globals, smb.conf preview, save & restart) |
 
 ---
 
@@ -359,7 +359,7 @@ files); thread titles, enable flags and the thread count in
 A browser-based operations console: up to `max_sessions` SSH terminals to
 different hosts side by side, a broadcast bar that sends one command to all
 of them, and a file-broadcast workflow that uploads a file once and pushes
-it to many hosts. See `docs/multissh.md` for the full operator guide.
+it to many hosts. See `docs/guides/multissh.md` for the full operator guide.
 
 **Using it:**
 
@@ -387,7 +387,7 @@ browser login, or the API key for scripted access.
 A command runner: define tasks — each a single shell command — that live
 in ordered, width-limited **lanes**; run them on demand or let them repeat
 after a cooldown rest; watch a live lane board and each task's output over
-SSE. See `docs/taskmaster.md` for the full config/API/scheduling reference
+SSE. See `docs/guides/taskmaster.md` for the full config/API/scheduling reference
 and a security write-up you should read before enabling sudo.
 
 **Using it:**
@@ -414,7 +414,7 @@ and a security write-up you should read before enabling sudo.
   execution in one action — it latches until explicitly released, and
   persists across a restart. A `sudo`-run task's child process is
   root-owned and may survive either kind of cancel; see
-  `docs/taskmaster.md`.
+  `docs/guides/taskmaster.md`.
 - **Sudo control:** a sudo toggle on task creation appears only when the
   server's `taskmaster.allow_sudo` is `true` (checked via
   `GET /api/capabilities`); when hidden, tasks can never be created with
@@ -423,7 +423,7 @@ and a security write-up you should read before enabling sudo.
   (`POST /api/capabilities`) and DB-authoritative once seeded from config.
 - **`taskmasterctl`** is a companion CLI for the same API (lane/task/
   executions/output/cancel/brake/metrics/health), authenticating with a
-  platform API key — see `docs/taskmaster.md`.
+  platform API key — see `docs/guides/taskmaster.md`.
 
 In the local profile taskmaster is protected like multissh: LDAP for
 browser login, or the API key for scripted access.

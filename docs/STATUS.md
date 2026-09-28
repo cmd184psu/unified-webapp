@@ -1,251 +1,180 @@
 # Project status — which documents to trust
 
-**Written:** 2026-09-27 · **Branch at time of writing:** `ui-upgrade` @ `5725f5c`
-**Purpose:** the doc set does not agree with itself about what phase the project is in.
-This file records what is actually true, and which of the other 45 files in `docs/` can be
-believed. Ordered most important → least.
+**Written:** 2026-09-28 · **Branch:** `ui-upgrade` @ `2d2523a` · **76** commits ahead of
+`origin/main`, **0** behind
+**Purpose:** the doc set does not agree with itself about what phase the project is in, and —
+as of this rewrite — most of its file paths no longer resolve. This file records what is
+actually true today. Every claim carries the command that verifies it.
 
-Every claim below carries the command that verifies it, so nothing here has to be taken on
-faith.
-
----
-
-## 1. Read this first: the same labels mean different things in different files
-
-This is the root problem. Three independent numbering schemes are in active use, and none of
-the documents disambiguate them. A reader who trusts a filename will draw the wrong conclusion.
-
-### 1a. "Phase 5" / "Phase 6" — three different projects
-
-| Namespace | Defined in | Its "Phase 5" | Its "Phase 6" |
-|---|---|---|---|
-| **A. Consolidation** (original 4-app merge) | `session.md` | Timetracker module | does not exist — stops at 5 |
-
-
-
-| **B. UI unification** | `docs/FRD-ui-unification.md` | menuserver jQuery rewrite | the punch-list doc — **menu/CSS fixes only** |
-| **C. utuber-taskmaster lane** (internal to that one plan) | `docs/PLAN-utuber-taskmaster-lane.md` §6 | migrate utuber, **delete `internal/utuber/jobs`** | docs + `make check` + owner sign-off |
-
-**The Phase 6 described as "certmachine CA regeneration + utuber/taskmaster improvements +
-file tree" is not written down anywhere.** `FRD-ui-unification.md` stops at Phase 5. The only
-document titled "Phase 6" covers hamburger menus and CSS. That scope exists only in
-conversation, and it fragmented — see §5.
-
-> This is what caused a wrong reading during the 2026-09-27 assessment: "Phase 5 already
-> happened" (namespace B — true) was initially read as namespace C's Phase 5 (not started).
-
-- `grep -n 'Phase 6' docs/*.md *.md` → 7 documents use "Phase 6" for 7 unrelated meanings.
-
-### 1b. `C1`…`C14` commit labels — reused across four sequences
-
-| Label | 2026-09-18 (`progress.txt`) | 2026-09-21 | 2026-09-22 (punch list) |
-|---|---|---|---|
-| C1 | taskmaster | delete legacy trees | *(CC-2 text-entry bug — **no such commit**)* |
-| C2 | **certmachine** | todo FA/CDN | todo ban icon |
-| C3 | **multissh** | shared dialogs | sampler spelling |
-| C4 | **admin** | — | **obsidianoid** |
-| C7 | D-5 fix | — | **certmachine** |
-| C8 | deslop | — | multissh |
-| C9–C14 | — | — | smbedit → login page |
-
-`C2` has three meanings. `C3` has three. `C4` and `C7` have two each. **Never cite a `C<n>`
-label without its date and commit hash.**
-
-- `git log --format='%h %ad %s' --date=format:'%m-%d' 5f3e035~4..5725f5c | cat`
-
-
-***progress.txt has been deleted***
+**Supersedes** the 2026-09-27 version of this file, which was wrong in three ways: every
+document path it cited had moved, its branch count was stale, and it reported certmachine as
+awaiting sign-off when the sign-off was already recorded.
 
 ---
 
-## 2. Where the project actually is (verified 2026-09-27)
+## 1. The doc set was reorganised. Old paths are dead.
 
-**Everything is green.** Full `make check` equivalent, run directly:
+`docs/` is now sorted into subdirectories. **A `docs/X.md` path from any pre-2026-09-28
+document is almost certainly wrong.** 38 of the 50 documents moved to `docs/archived/`.
 
-| Gate | Result |
+| Old path (as cited by older docs) | Where it is now |
 |---|---|
-| `go build ./...` | clean |
-| `go vet ./...` | clean |
-| `gofmt -l .` | empty |
-| `go test -race ./...` | all 36 packages pass |
-| `npx tsc --noEmit` | clean |
-| `npm run test:web` | 189/189, 12 suites |
-| `web-verify` / `artifacts.mjs` | 22 artifacts, byte-identical |
-| `bundle-shape` | 19 sharedConsumer bundles pass |
-| `token-overlap` | empty intersection |
-| `check-shared-css` / `check-shared-barrel` | pass |
+| `docs/PLAN-utuber-taskmaster-lane.md` | `docs/plans/PLAN-utuber-taskmaster-lane.md` |
+| `docs/PLAN-ui-unification-phase7-punchlist.md` | `docs/plans/PLAN-ui-unification-phase7-punchlist.md` |
+| `docs/FRD-utuber-taskmaster-lane.md` | `docs/frd/FRD-utuber-taskmaster-lane.md` |
+| `docs/utuber.md` | `docs/guides/utuber.md` |
+| `docs/taskmaster.md` | `docs/guides/taskmaster.md` — **never archived** (see below) |
+| `docs/USERGUIDE.md` | `docs/guides/USERGUIDE.md` |
+| `docs/certmachine.md` · `docs/multissh.md` · `docs/smbedit.md` | `docs/guides/…` |
+| `session.md` (root) | `session-26Sept2026.md` (root) |
+| `progress.txt` · `taskmaster-progress.txt` (root) | **deleted** |
 
-**Branches are clean.** `ui-upgrade` is 73 commits ahead of `origin/main`, 0 behind — a
-straight fast-forward, no merge risk.
-- `git rev-list --count origin/main..HEAD` → 73 · `git rev-list --count HEAD..origin/main` → 0
+Additional older documents — superseded FRDs, plans, per-module specs, and punch lists — are in
+`docs/archived/`, though some were renamed with a date stamp and some were deleted outright, so
+there is no complete old-path → new-path mapping. **Anything in `docs/archived/` is either done or
+abandoned — never "not started."** Their old `docs/*.md` paths are dead and their internal
+cross-references are left exactly as written; treat them as history, not as a path index.
 
-~~~**Toolchain is current.** go.mod `go 1.26.2`, local toolchain go1.26.3.~~~
+Verify: `find docs -name '*.md' | sort` · `ls docs/guides/`
 
-***toolchain is go 1.26 or later; not particularly critical***
+### 1a. One live reference still points at an old path
 
-**Two live workstreams:**
-
-1. **utuber-on-a-taskmaster-lane** — approved 2026-09-27, namespace C above. Internal Phases
-   1–4 **done**, Phases 5–6 **not started**. Evidence:
-   - R4 invariant: `grep -rni utuber internal/taskmaster | wc -l` → **0**
-   - Phase 4 done: `QueuePanel` exported from `web/shared/ts/index.ts` and adopted in
-     `web/taskmaster/js/board.ts` (8 references); artifacts committed, `git status web/` clean
-   - Phase 5 not done: `test -e internal/utuber/jobs` → **still exists**
-2. **certmachine CA replacement** — approved 2026-09-27, code committed, **awaiting owner
-   sign-off**. `MANUAL-VERIFICATION-certmachine-ca-replacement.md` states plainly:
-   *"None of these has been run."* 9 checks need a live server and a real browser.
-
-**Two items only the owner can unblock:** the certmachine 9-point browser checklist, and
-**A-2 passkey registration** — untestable because it needs an HTTPS host.
-
----
-
-## 3. Trust these four (authoritative for current state)
-
-All dated 2026-09-27.
-
-| Document | Claims | Note |
+| Where | Points at | Should be |
 |---|---|---|
-| `docs/PLAN-utuber-taskmaster-lane.md` (120K) | APPROVED, v3, 6 internal phases | Verified independently against §2 |
-| `docs/PLAN-certmachine-ca-replacement.md` (48K) | APPROVED, queued for ralph | Current |
-| `docs/MANUAL-VERIFICATION-certmachine-ca-replacement.md` | PENDING OWNER SIGN-OFF | Honest about its own gap | 
+| `internal/taskmaster/db/db.go:245` (code comment) | `docs/taskmaster.md` | `docs/guides/taskmaster.md` |
 
-***docs/MANUAL-VERIFICATION-certmachine-ca-relacement.md and 
+The reorg moved files but did not update inbound links. All of them are **fixed in the working
+tree** except this one: it is a code comment, deliberately left alone because repairing it needs a
+code change. It is the only broken reference left in the repo.
 
+Verify: `grep -rnoE '\]\(docs/[a-zA-Z0-9/._-]+\.md\)' --include=*.md . | while read _ p; do
+test -e "$p" || echo "BROKEN $p"; done`
 
-| `docs/FRD-admin-identity.md` | CLOSED, not pursuing further | **The only file in the set with an accurate terminal status** |
-
-**One caveat inside a trusted doc:** `FRD-utuber-taskmaster-lane.md` still says *"draft, not yet
-planned."* The status line is stale — its plan is approved and four phases are done. Its
-*decisions* (D1–D10) are still good; the lane plan's own Phase 6 will fix the pointer.
+**`docs/guides/taskmaster.md` is a live document — it was briefly archived by mistake.** The
+2026-09-27 reorg moved it to `docs/archived/`; that was wrong, and it has been moved back. It is
+the *live* taskmaster reference (476 lines, full API and security guidance) that Phase 7's D9
+section updates. **Do not re-archive it.** One consequence: it still contains **no** mention of
+func tasks, metrics retention, or hidden lanes, because it predates the lane migration — that is
+exactly the D9 gap, not an archiving error.
 
 ---
 
-## 4. Do not trust these nine (they assert false state)
+## 2. One phase vocabulary now exists: **D0–D9**
 
-Each claims a project state that is demonstrably false. **These will cause someone to redo
-work that already shipped.**
+This is the answer to the collision that made "Phase 5" and "Phase 6" unreadable.
 
-| Document | Its claim | Reality |
+| Namespace | Where | Status |
 |---|---|---|
-| `docs/SECURITY-NOTES-deferred.md` | "backlog only, do NOT action" · S-1…S-8 all open | **S-1, S-2, S-3, S-4, S-5 all shipped.** Only S-6/S-7 (deployment questions) and S-8 (file modes) are live |
-| `docs/PLAN-ui-unification-phase6-punchlist.md` | "Status: `pending approval`" | All its commits landed — `f7e9157` (C0) … `aed2c30` (C14), plus `5447058` (C12a). 12 `C*` commits on 09-22 |
-| `progress.txt` (root) | "All 8 commits landed (C1–C8). Architect verification in progress." | 12 more `C*` commits landed after C8, on a later date, with colliding labels (§1b) |
-| `shelved/plan-with-platform-auth.md` (152K) | "**Do not execute**" | Its decision O-1 — auth belongs at `internal/platform/auth` — is exactly what shipped |
-| `docs/plan.md` (88K) | "pending approval. Do not execute without approval" | multissh shipped: `internal/multissh` exists, 71 test funcs |
-| `docs/smbedit-plan.md` (144K) | "pending approval" | smbedit shipped: `internal/smbedit`, 65 test funcs |
-| `docs/PLAN-recipes-tab.md` (236K) | "pending approval" | Recipes tab shipped, documented in `README.md` |
-| `docs/plan-issue-tracker.md` (116K) + `docs/plan-issuetracker-port.md` (20K) | "pending approval" | issuetracker shipped: `internal/issuetracker` with db + graphql + actor |
-| `docs/plan-round-two.md` (188K) | "pending consensus review" | The auth/security round shipped: `internal/platform/auth` |
+| **Phase 7** | `docs/plans/PLAN-ui-unification-phase7-punchlist.md`, sections **D0–D9** | **authoritative for current work** |
+| UI unification (older) | superseded punch lists, in `docs/archived/` | shipped, historical |
+| utuber→taskmaster lane | `docs/plans/PLAN-utuber-taskmaster-lane.md` §6 "Phase 1–6" | **its own numbering — not Phase 7** |
 
-**~940KB of plan documents say "pending approval" for work that is in the tree.** A literal
-reading of the doc set implies almost nothing has shipped.
+**The lane plan's "Phase 5" and "Phase 6" are steps 5 and 6 of that one plan.** They are not
+project phases. They are now **D8** and **D9** in Phase 7. If a line in the lane plan says
+"Phase 5", it means D8.
 
-Verify the security claims: `internal/platform/auth` exists · `middleware/bodylimit.go`
-(`http.MaxBytesReader`) · `newServer()` in `cmd/server/main.go:273` sets `ReadHeaderTimeout`
-and `IdleTimeout` · `DefaultMaxSubscribers = 64` in `platform/broker/broker.go` · `cors.go`
-reflects `Origin` only when same-origin.
+The old `C1`…`C14` commit labels remain ambiguous across four dated sequences (2026-09-18,
+09-21, 09-22, and the archived punch lists). **Never cite a `C<n>` label without its commit
+hash.** `git log --format='%h %ad %s' --date=format:'%m-%d'` resolves them.
 
 ---
 
-## 5. The biggest gap: "Phase 6" was never written down
+## 3. Where the work actually is
 
-The scope — certmachine CA regeneration, utuber/taskmaster improvements, obsidianoid file
-tree — survives only in conversation. It shipped as three fragments, none of them a
-"Phase 6" document:
+### Phase 7 sections D0–D9 — sequenced, with one hard ordering constraint
 
-| Fragment | Where it lives | State |
+Full detail in `docs/plans/PLAN-ui-unification-phase7-punchlist.md`. In order:
+
+| # | Section | State |
 |---|---|---|
-| certmachine CA replacement | `FRD-` + `PLAN-certmachine-ca-replacement.md`, both approved 09-27 | Code committed; owner sign-off pending |
-| utuber + taskmaster improvements | `FRD-` + `PLAN-utuber-taskmaster-lane.md`, both approved 09-27 | Phases 1–4 of 6 done |
-| obsidianoid file tree + search | **No plan document.** Commit `89d89e5` only | Shipped, undocumented as a phase |
+| 1 | **D0** hamburger `side` from config, **no auto-detection** | teardown is the only live work; the option itself shipped in `f7e9157` |
+| 2 | **D1** menuserver ☰ anchored far right | not started |
+| 3 | **D2** certmachine | **no action** — see §4 |
+| 4 | **D3** multissh ☰ right + **new** logout button | not started; MS-2 is a build, not a move |
+| 5 | **D4** smbedit scroll past footer | not started |
+| 6 | **D7** login page theme | **verify first** — the mechanism already exists |
+| 7 | **D8** utuber → taskmaster lane; delete `internal/utuber/jobs` | not started |
+| 8 | **D5** utuber error text + cookies | **must run after D8** |
+| 9 | **D6** taskmaster | **verify only** — queue panel already done |
+| 10 | **D9** lane docs + `make check` | runs last |
 
-Consequence: there is no single place that states "this is what Phase 6 was and how much of
-it is left." Reconstructing that cost a full pass over git history, artifact inspection and
-invariant greps.
+**D5 cannot run before D8.** D8 rewrites the same five files D5 edits
+(`build.go`, `handler.go`, `settings.go`, `media/exec.go`, `web/utuber/js/main.ts`) and pins the
+`/settings.json` response shape. Two fixes also appeared in both plans and now have one owner
+each: **`media/exec.go` → D8** (P15, which *deletes* the scanner goroutines) and **the failure
+text → D5** (which the lane plan never fixes).
 
----
+### Lane plan progress: steps 1–4 done, 5–6 are now D8/D9
 
-## 6. Accurate history — safe to read, useless for current state
+```sh
+grep -rni utuber internal/taskmaster | wc -l        # → 0        (R4)
+grep -c QueuePanel web/shared/ts/index.ts          # → 3        (exported)
+grep -c QueuePanel web/taskmaster/js/board.ts      # → 8        (adopted)
+test -d internal/taskmaster/golane && echo ok       # → ok
+test -e internal/utuber/jobs && echo exists        # → exists   (step 5 not done)
+grep -c lineWriter internal/utuber/media/exec.go   # → 0        (P15 not done)
+git status --porcelain web/                        # → clean
+```
 
-- **`session.md`** — clean and authoritative **for its scope**, but it stops at Phase 5
-  (timetracker) and has never heard of multissh, smbedit, utuber, certmachine, issuetracker,
-  obsidianoid or taskmaster. Reads as a complete project log; is not.
-- **`docs/PUNCH-LIST-post-phase5.md`** — the resolution at the *top* says everything is fixed
-  except A-2; the "Status Summary (as found on 2026-09-22)" table at the *bottom* lists 5
-  BROKEN modules. The truth is at the top. Most readers hit the table first.
-- `docs/PLAN-ui-unification-phase1/3/4/5.md` — approved, historical, complete.
-- `docs/PLAN-timetracker.md` — approved 2026-09-15, shipped.
-- `docs/PLAN-auth-two-state.md` — approved 2026-09-11, shipped.
-- `docs/utuber-frd.md`, `docs/smbedit-frd.md`, `docs/multissh-FRD.md`, `docs/certmachine-frd.md`,
-  `docs/timetracker-FRD.md`, `docs/frd-issue-tracker.md`, `docs/FRD-recipes-tab.md` — all
-  pre-date or accompany shipped work. Treat as design history, not status.
-- `taskmaster-progress.txt` (root) — detailed and honest, but ends 2026-09-14. Also logs a
-  **COORDINATION ANOMALY**: two agent sessions committing the same branch with 17 files
-  uncommitted at risk of clobber. See §9.
+### certmachine: **signed off — do not reopen**
 
----
-
-## 7. Reference docs — make no state claim, so they do not lie
-
-Accurate as reference. Several are stale in *content*: the lane plan §147 already catalogues
-four specific inaccuracies in `docs/taskmaster.md` (route table, `?group=` vs `?lane=`, lane
-width authority) and `docs/utuber.md` (missing `POST /jobs/delete`).
-
-`certmachine.md` · `multissh.md` · `smbedit.md` · `taskmaster.md` · `utuber.md` ·
-`USERGUIDE.md` · `adding-a-module.md` · `INVENTORY-hamburger-menus.md` ·
-`INVENTORY-menuserver.md` · `sampler-checklist.md` · `OPEN-QUESTIONS-ui-unification.md` ·
-`MANUAL-VERIFICATION-recipes-tab.md`
+The certmachine manual-verification record in `docs/archived/` ends with the owner's verdict:
+*"all 12: Approved and VERIFIED! Stop asking about this!"* Its own `Status:` header still reads
+**PENDING OWNER SIGN-OFF**, which is older than that line and is now wrong. Phase 7 D2 is
+therefore a no-op.
 
 ---
 
-## 8. Root-level strays
+## 4. Two items only the owner can unblock
 
-Outside `docs/`, dated 2026-09-11…14, no status discipline:
-`security-plan.md` (96K) · `security-FRD.md` · `taskmaster-plan.md` (52K) ·
-`taskmaster-ui-plan.md` · `taskmaster-ui-FRD.md` · `taskmaster-FRD.md` ·
-`taskmaster-progress.txt` · `progress.txt` · `session.md`
-
----
-
-## 9. Two meta-problems
-
-**File dates are useless for judging freshness.** ~40 files show a 2026-09-26/27 mtime from a
-bulk commit while containing content from 2026-09-09…15. The doc set cannot be triaged by
-date — only by reading status lines, which is exactly where it lies.
-
-**No CI.** `README.md` states it: *"There is no CI on this repository; the gate suite only runs
-when you run it."* For a 14-module monorepo with a five-part gate suite, nothing prevents a
-red tree from being committed. `make check` is already one composable command, so CI is close
-to free. Note `internal/certmachine` takes **262s** under `-race` (190 test funcs) and
-`taskmaster/worker` 96s — those want sharding or a scheduled run.
-
-**Test gap:** `internal/issuetracker/{api,db,models,store}` have **no test files at all**;
-only `actor` and `graphql` are covered. `cmd/taskmasterctl` has none. For a DB-backed module
-planned at 116K, an untested data layer is the one place a bug reaches production unnoticed.
-
-**Known flake:** `TestProcessRegistry_SuspendResume_RealProcess`
-(`internal/taskmaster/worker/process_test.go:53`) — timing-sensitive, drives a real process
-group. Flagged pre-existing in `progress.txt`. It passed during the 09-27 run.
+- **A-2 passkey registration** — untestable without an HTTPS host. Genuinely still open; it was
+  recorded on the post-phase-5 punch list, which is itself archived.
+- The lane plan's §7.3 **E1–E3** browser runs are owner sign-off (item A12) and must be listed
+  as pending, not self-certified.
 
 ---
 
-## 10. Suggested cleanup, in priority order
+## 5. Still accurate from the 2026-09-27 assessment
 
-1. Decide the **Phase 6 scope question in §5** and write it down, or accept that the three
-   fragments are the record.
-2. Fix the nine lying status lines in §4 — one line each. Cheapest high-value edit in the repo.
-3. Resolve "Phase 5" ambiguity: state in §1 of this file which namespace is authoritative, or
-   rename the lane plan's internal phases to something that cannot collide (e.g. `L1…L6`).
-4. Add CI (§9).
-5. Add `issuetracker` data-layer tests.
-6. Move the root strays (§8) into `docs/`, or delete them.
-7. Retire `shelved/` — its central decision is implemented.
-8. Quarantine or fix the worker flake.
+These were re-verified and hold:
 
-## 11. Open question for the owner
+- **Everything is green.** `go build`, `go vet`, `gofmt -l`, `go test -race ./...`,
+  `npx tsc --noEmit`, `npm run test:web`, `web-verify` (22 artifacts byte-identical),
+  `bundle-shape`, `token-overlap`, `check-shared-css`, `check-shared-barrel`.
+- **Anything in `docs/archived/` is either done or abandoned — never "not started."** Some carry
+  stale `Status:` headers that say "pending approval" or `PENDING OWNER SIGN-OFF`; treat those as
+  noise, not as a signal that work is outstanding. Read the status line's date, and where a
+  document claims something is pending, check whether a later document (or the code) already
+  landed it.
+- **No CI.** `README.md`: *"There is no CI on this repository."* `make check` is one command.
+- **Test gap:** `internal/issuetracker/{api,db,models,store}` have no test files;
+  `cmd/taskmasterctl` has none.
+- **Known flake:** `TestProcessRegistry_SuspendResume_RealProcess`
+  (`internal/taskmaster/worker/process_test.go:53`).
+- **File dates are useless for freshness** — bulk commits reset mtimes. Read status lines, and
+  even those lie.
+- **The 8 root strays are gone** (`security-plan.md`, `taskmaster-FRD.md`, `progress.txt`, …).
+  Only `README.md` and `session-26Sept2026.md` remain at the root.
 
-The 2026-09-27 assessment read "Phase 5" as namespace C and reported the utuber migration as
-not started, on the evidence that `internal/utuber/jobs` still exists. The owner may have meant
-namespace B (menuserver + the C0–C14 punch list), which **is** complete. Confirming which is
-intended decides whether "finish the lane" is 2 phases of work or 6.
+---
+
+## 6. Corrections to the previous version of this file
+
+| It said | Reality |
+|---|---|
+| `ui-upgrade` 73 commits ahead | **76** |
+| 45 files in `docs/` | 50 `.md` in 4 subdirectories; 38 in `docs/archived/`, 7 in `docs/guides/` |
+| certmachine "awaiting owner sign-off" | **signed off**; the archive file's header is stale |
+| every cited doc path | **all moved** — see §1 |
+| obsidianoid file tree is commit `89d89e5` | **that commit does not exist** — claim unverifiable |
+| `progress.txt` is a live document | **deleted** |
+| "Phase 6 scope was never written down" | partly resolved: the lane plan's steps 5–6 are now D8/D9 |
+| §11: *which "Phase 5" is intended?* | **answered** — namespace C, the lane plan. Its step 5 is D8 |
+
+---
+
+## 7. If you only read one thing
+
+`docs/plans/PLAN-ui-unification-phase7-punchlist.md` is the only document describing work that
+has not happened. Read its "Read this first: execution order and ownership" section before any
+of D0–D9 — the ordering is a correctness constraint, and two fixes have a single owner each.
