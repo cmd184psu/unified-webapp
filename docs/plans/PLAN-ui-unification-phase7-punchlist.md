@@ -19,7 +19,7 @@ rewrite files another section also edits.
 | # | Section | What it does | Must run after |
 |---|---|---|---|
 | 1 | **D0** | Tear down hamburger auto-detection; `side` comes from config only | — |
-| 2 | **D1** | Anchor the menuserver ☰ far right of the header | — |
+| 2 | **D1** | menuserver ☰ far right — already done; no work | — |
 | 3 | **D2** | *No action.* certmachine is tested, verified, complete | — |
 | 4 | **D3** | multissh: move ☰ right; sign-out control already exists — verify | D0 |
 | 5 | **D4** | smbedit: stop scrolling below the footer | — |
@@ -155,14 +155,9 @@ right answer for a page — the requirement is that it be **chosen**, so each of
 sampler, grocery and todo should be eyeballed once and, if the default is not what looks right,
 given an explicit `side`.
 
-> The first version of this table was wrong in five places and has been replaced. It reported
-> `obsidianoid` and `utuber` as passing `"right"` when neither passes any `side` at all; it
-> reported `smbedit` as absent when `smbedit/src/main.tsx:29` passes `'right'`; it called
-> issuetracker "no `HamburgerMenu` call" when `issuetracker/src/main.tsx:15` constructs one with
-> `side: "right"`; it omitted `sampler` entirely; and it marked multissh "default is correct"
-> while **D3 changes it to `right`**. Every row now carries its call site so it can be re-checked
-> with one grep. `make web-verify` is green (22 artifacts, byte-identical), so the emitted `.js`
-> matches every `.ts` and none of this is build drift.
+> Every row carries its call site so it can be re-checked with one grep. `make web-verify` is
+> green (22 artifacts, byte-identical), so the emitted `.js` matches every `.ts` and none of this
+> is build drift.
 
 CMD> The above table may be inaccurate; please double check it.  I'm looking for consistency, but some pages may look better with left instead of right, so it should be deterministic in the configuration.  Tear down the autodetection for this - it does not work.
 
@@ -176,39 +171,45 @@ CMD> The above table may be inaccurate; please double check it.  I'm looking for
 > document the same way — where it names a file, a line, or an existing symbol, check it.
 
 
-### D1: Menuserver — anchor the ☰ at the far right of the header (M-1, M-2)
+### D1: Menuserver — the ☰ is already anchored far right (M-1, M-2)
 **Files:** `web/menuserver/js/main.ts` (and its CSS, wherever `.topnav` is defined)
 
 CMD> this section needs to be rewritten, but the only issue with menuserver is that the hamburger trigger is floating on the header, it should be anchored far right, not just hanging out to the right of the last menu.
 
-**Scope: trigger placement only.** Auth is already correct here — the module's `side` is
-`"right"` (`main.ts:256`), which D0's table confirms. Do not revisit its auth, and do not change
-the drawer side; the drawer is already on the right. The bug is that the *button* is not pushed
-to the edge, so it sits floating after the last nav item.
+**No work — the CMD>'s requested fix is already in the tree. Verify; do not rebuild.**
 
-**The bug, from source.** The trigger is `document.createElement("button")` with class
-`topnav-btn topnav-settings`, then `nav.append(settingsTrigger)` — the last child of the nav, so
-it lands wherever the previous item ends:
+The entire chain the CMD> describes is already present and connected:
 
-```ts
-const settingsTrigger = document.createElement("button");
-settingsTrigger.className = "topnav-btn topnav-settings";
-...
-nav.append(settingsTrigger);
-```
+| Step | Where | State |
+|---|---|---|
+| the row exists and carries the class | `web/menuserver/index.html:15` — `<nav id="topnav" class="topnav">` | present |
+| the script targets that same element | `web/menuserver/js/main.ts:216` — `const nav = document.getElementById("topnav")` | present |
+| the trigger is the last flex child | `main.ts:246-250` — built with `topnav-btn topnav-settings`, then `nav.append(settingsTrigger)` | present |
+| **the trailing-edge fix itself** | `web/menuserver/css/app.css:86-87` — `.topnav-settings { margin-left: auto; … }` | **already applied** |
+| the row is a flex row | `app.css:10` — `.topnav { display: flex; … }` | present |
+| the stylesheet is actually served | `index.html:11` — `<link rel="stylesheet" href="css/app.css">` | present |
 
-Appending as the final child gives it `width: auto` and no claim on the free space at the end of
-the bar. The fix is layout, not markup: the nav row must distribute its space so the trigger is
-pinned to the trailing edge — `margin-left: auto` on `.topnav-settings` (the standard one-line
-answer), or `justify-content: space-between` with the item group and the trigger as two flex
-children. Whichever you pick, the trigger ends flush to the right edge at every viewport width.
+`margin-left: auto` on the last flex child **is** the one-line answer the CMD> asks for, and it is
+the standard way to pin a trailing item to the end of a flex row. `.topnav-btn` (`app.css:22-35`)
+sets no `margin` at all, and no later rule re-sets `margin-left`, so the auto margin is live and
+unoverridden. Adding `margin-left: auto` again, or `justify-content: space-between`, would be
+either a no-op or a regression. **Do not open this module for layout work.**
+
+Auth is also already correct: the module passes `side: "right"` (`main.ts:255`).
+
+**The one thing still worth a human look.** `.topnav` sets `flex-wrap: wrap` (`app.css:13`). If
+the item group overflows a narrow viewport, the trigger can wrap onto a second row, where
+`margin-left: auto` right-aligns it *on that row* — a right-aligned button on its own line. That
+is a different complaint from "hanging out to the right of the last menu," and it is not what the
+CMD> describes. If the floating was observed at desktop width, this is not the cause. Confirm by
+eye at one narrow and one wide viewport before spending anything here.
 
 **Acceptance criteria:**
-- The ☰ button's right edge sits flush against the nav container's right edge, with no gap and
-  no dead space to its right, at wide and narrow viewports
-- The button is still the last tabbable element and still opens the same `HamburgerMenu` drawer
-  with `side: "right"`
-- The other `.topnav-item` entries keep their current order and spacing
+- **No code change.** `.topnav-settings { margin-left: auto; }` is still present at `app.css:87`
+- The ☰ is the last child of the `.topnav` flex row and sits flush to the trailing edge at a wide
+  viewport
+- The drawer still opens from the right (`side: "right"`, `main.ts:255`)
+- One narrow-viewport look confirms the trigger is not stranded on a wrapped second row
 - `npm run typecheck` and `npm run test:web` pass; `make web-verify` byte-identical after build
 
 ### D2: Certmachine
@@ -243,10 +244,10 @@ CMD> Once the hamburger placement bug is fixed in shared code, this should be si
 
   Land the ☰ at the trailing edge by changing the flex behaviour, not by reordering the append:
   either `justify-content: space-between` on `.app-header`, or `margin-inline-start: auto` on the
-  trigger. `.app-header` is declared **twice, identically** — `ssh.css:29` and `bundle.css:30` — and
-  both are tracked and hand-maintained (neither is generated), so **both must be edited or the
-  module will render differently depending on which stylesheet the page loads first.** There is no
-  `.topnav` in multissh; an earlier draft of this section said there was.
+  trigger. `  `.app-header` is declared **twice, identically** — `ssh.css:29` and `bundle.css:30` — and both
+  are tracked and hand-maintained (neither is generated), so **both must be edited or the module
+  will render differently depending on which stylesheet the page loads first.** There is no
+  `.topnav` in multissh.
 
   The sign-out rides along for free. `mountSignOut` wraps `[ Sign out ][ ☰ ]` into one
   `.ui-menu-actions` group and inserts it *at the trigger's position*, so wherever MS-1b puts the ☰,
@@ -264,16 +265,13 @@ CMD> Once the hamburger placement bug is fixed in shared code, this should be si
     **`POST /api/auth/logout`** — the same `handleLogout` at
     `internal/platform/auth/handlers.go:217` — disables itself, then reloads onto the login page.
 
-  An earlier draft of this section claimed the button did not exist, on the strength of a grep for
-  `logout`/`signout`/`sign-out`/`log-out` across `web/multissh/**` that returned zero matches. That
-  grep only covered multissh's *own* files; the control lives in `web/shared/`, which is why it
-  found nothing. **Do not build a second logout control.** The correct work is to confirm the
-  shared one renders, and to confirm D0's teardown of `side: "auto"` does not disturb it.
+  The control lives in `web/shared/`, not in a multissh source file, so a grep scoped to
+  `web/multissh/**` finds nothing. **Do not build a second logout control** — confirm the shared
+  one renders, and confirm D0's teardown of `side: "auto"` does not disturb it.
 
-  It already handles the case the old draft got wrong: `mountSignOut` returns early unless
-  `GET /api/auth/session` reports `signed-in`, so an open multissh shows no sign-out control
-  rather than one that silently does nothing. An open module answers `unknown`, not `signed-in`,
-  because it has no auth routes at all.
+  Auth is already handled: `mountSignOut` returns early unless `GET /api/auth/session` reports
+  `signed-in`, so an open multissh shows no sign-out control rather than one that silently does
+  nothing. An open module answers `unknown`, not `signed-in`, because it has no auth routes.
 
 **Acceptance criteria:**
 - `new HamburgerMenu({ …, side: "right" })` at `main.ts:31-38`; the drawer opens from the right

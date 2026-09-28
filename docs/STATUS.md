@@ -88,7 +88,7 @@ Full detail in `docs/plans/PLAN-ui-unification-phase7-punchlist.md`. In order:
 | # | Section | State |
 |---|---|---|
 | 1 | **D0** hamburger `side` from config, **no auto-detection** | teardown is the only live work; the option itself shipped in `f7e9157` |
-| 2 | **D1** menuserver ☰ anchored far right | not started |
+| 2 | **D1** menuserver ☰ anchored far right | already done — `margin-left: auto` at `app.css:87`; no work |
 | 3 | **D2** certmachine | **no action** — see §4 |
 | 4 | **D3** multissh ☰ right; sign-out control already exists | not started; MS-2 is verify-only — a build would duplicate shared code |
 | 5 | **D4** smbedit scroll past footer | not started |
