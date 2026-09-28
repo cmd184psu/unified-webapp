@@ -99,11 +99,10 @@ export interface HamburgerMenuOptions {
    */
   mountTrigger?: HTMLElement;
   /**
-   * Which edge the drawer slides from. "auto" defers the choice to the first
-   * open(), where it is resolved against the trigger's position on screen
-   * and then cached. Left unset, the drawer uses CSS's left-edge default.
+   * Which edge the drawer slides from. Left unset, the drawer uses CSS's
+   * left-edge default.
    */
-  side?: "left" | "right" | "auto";
+  side?: "left" | "right";
   /**
    * Shows the shared sign-out icon just before the trigger whenever this
    * module has a session, along with idle sign-out (see session.ts). On by default; an open module
@@ -209,8 +208,6 @@ export class HamburgerMenu {
   private readonly picker: HTMLElement | null;
   private opened = false;
   private destroyed = false;
-  /** The resolved edge for `side: "auto"`; null until the first open(). */
-  private resolvedSide: "left" | "right" | null = null;
 
   constructor(options: HamburgerMenuOptions) {
     this.options = options;
@@ -224,14 +221,7 @@ export class HamburgerMenu {
     this.drawer.setAttribute("aria-label", options.title ?? "Menu");
     this.drawer.tabIndex = -1;
 
-    if (options.side === "left" || options.side === "right") {
-      this.resolvedSide = options.side;
-      this.drawer.dataset.side = options.side;
-    } else if (options.side === "auto") {
-      this.resolvedSide = null;
-    } else {
-      this.resolvedSide = "left";
-    }
+    if (options.side !== undefined) this.drawer.dataset.side = options.side;
 
     const header = document.createElement("div");
     header.className = "ui-menu-header";
@@ -284,12 +274,6 @@ export class HamburgerMenu {
 
   open(): void {
     if (this.opened || this.destroyed) return;
-    if (this.options.side === "auto" && this.resolvedSide === null) {
-      const rect = this.trigger.getBoundingClientRect();
-      const center = rect.left + rect.width / 2;
-      this.resolvedSide = center > window.innerWidth / 2 ? "right" : "left";
-      this.drawer.dataset.side = this.resolvedSide;
-    }
     this.opened = true;
     this.sync();
     this.paint();

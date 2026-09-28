@@ -206,7 +206,11 @@ body {
   color: var(--color-text-faint);
 }
 
-.jobs-list { padding: 0.5rem 0; }
+/* Horizontal inset matches .jobs-header's 1.5rem — .ui-queue-row only pads
+   itself 8px (var(--space-2)), so this container has to supply the rest or
+   queue text sits nearly flush against the card edge, misaligned under the
+   header above it. */
+.jobs-list { padding: 0.5rem 1.5rem; }
 
 .job-item {
   padding: 0.9rem 1.5rem;
@@ -284,28 +288,6 @@ body {
 .status-running  { background: rgba(59,130,246,0.2);  color: var(--dl-blue); }
 .status-completed{ background: rgba(34,197,94,0.2);   color: var(--color-success); }
 .status-failed   { background: rgba(239,68,68,0.2);   color: var(--color-danger); }
-
-.progress-wrap {
-  width: 160px;
-  height: 5px;
-  background: var(--color-surface-2);
-  border-radius: 999px;
-  overflow: hidden;
-}
-.progress-bar {
-  height: 100%;
-  width: 0%;
-  border-radius: 999px;
-  transition: width 0.4s ease;
-}
-.progress-bar.dl    { background: var(--dl-blue); }
-.progress-bar.conv  { background: var(--conv-orange); }
-.progress-bar.done  { background: var(--color-success); }
-
-.progress-label {
-  font-size: 0.7rem;
-  color: var(--color-text-faint);
-}
 
 .download-link {
   font-size: 0.75rem;
@@ -424,5 +406,4 @@ body {
 @media (max-width: 480px) {
   .form-row { grid-template-columns: 1fr; }
   .job-right { min-width: 100px; }
-  .progress-wrap { width: 100px; }
 }

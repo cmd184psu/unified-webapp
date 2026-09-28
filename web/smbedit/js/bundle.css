@@ -23,7 +23,8 @@
 body {
   background: var(--color-bg);
   color: var(--color-text);
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   transition: background 0.2s, color 0.2s;
 }
 ::-webkit-scrollbar {
@@ -41,7 +42,7 @@ body {
   display: grid;
   grid-template-columns: 220px 1fr;
   grid-template-rows: 52px 1fr auto;
-  height: 100vh;
+  height: 100%;
 }
 .topbar {
   grid-column: 1 / -1;

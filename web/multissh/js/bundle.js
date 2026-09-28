@@ -10610,7 +10610,8 @@ function buildHamburger(root) {
     items,
     themePicker: true,
     themes,
-    mountTrigger: trigger
+    mountTrigger: trigger,
+    side: "right"
   });
 }
 async function bootstrap() {

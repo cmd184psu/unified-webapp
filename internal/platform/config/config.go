@@ -467,11 +467,21 @@ const (
 // endpoint. It is a config-level default only: a value saved through the
 // module's UI settings menu overrides it at runtime. It is passed as argv[0]
 // to the executor, never through a shell.
+//
+// CookiesFile names the Netscape-format cookie jar yt-dlp uses to
+// authenticate age-restricted downloads (D5 Fix 2). Empty means "let utuber
+// pick a default location that is a sibling of download_dir, deliberately
+// NOT inside it" -- a cookie is a real credential, and /downloads/ serves
+// download_dir unauthenticated. Either way, the flag is only ever passed to
+// yt-dlp when the resolved file actually exists on disk, so an unconfigured
+// or deleted jar degrades to today's cookie-less behavior rather than an
+// error.
 type UtuberConfig struct {
 	StaticDir   string `json:"static_dir"`
 	DownloadDir string `json:"download_dir"`
 	Workers     int    `json:"workers"`
 	PythonBin   string `json:"python_bin"`
+	CookiesFile string `json:"cookies_file"`
 }
 
 // Utuber worker-count bounds and interpreter default. Workers is validated in
@@ -1022,6 +1032,11 @@ func expandUtuberPaths(u *UtuberConfig) error {
 	}
 	if u.DownloadDir, err = ExpandPath(u.DownloadDir); err != nil {
 		return err
+	}
+	if u.CookiesFile != "" {
+		if u.CookiesFile, err = ExpandPath(u.CookiesFile); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -29,11 +29,105 @@ trusted operator group** — see [Security](#security) below.
     for.
   - **"Groups" is gone**, both as a term and as a first-class entity. There
     are only lanes.
-- **No task "type".** A task is a single **command** string, run through a
-  shell (`sh -c "<command>"`). There is no `exec`/`shell`/`script`/
-  `migration` selector, and no JSON `args` blob — those are gone.
+- **No task "type" for shell tasks.** A shell task is a single **command**
+  string, run through a shell (`sh -c "<command>"`). There is no `exec`/
+  `shell`/`script`/`migration` selector, and no JSON `args` blob — those are
+  gone.
 - **No `priority`.** Ordering within a lane is the task's persisted
   `position`; reorder by drag (UI) or `PUT /api/lanes/{name}/order`.
+- **Func tasks** — the second task kind (below), registered in-process by
+  another module rather than typed in through the UI/API.
+
+---
+
+## Func (Go-function) tasks
+
+Alongside shell tasks, a lane can run **func tasks**: registered Go
+callbacks, not shell commands. A module — currently only utuber — calls
+`golane.Host.RegisterLane(spec, kinds...)` against the shared taskmaster
+`*Engine` (`internal/taskmaster/golane`) to declare an **owned lane** (a
+lane with `owner != ""`) and the `Kind`s it runs on that lane. Kinds are
+named `<owner>.<verb>` (e.g. `utuber.download`), each declaring an integer
+`Version`, a strict JSON `Decode` (`json.Decoder.DisallowUnknownFields`,
+version must match exactly), and a `Run(ctx, rc, payload)` callback.
+
+How a func task differs from a shell task:
+
+- **No shell, no sudo.** A func task's `command` is always `""`, `sudo` is
+  always `0`, and it never touches the sudo gate. It runs entirely in-process.
+- **One-shot only.** `repeat=0`, `cooldown_seconds=0` — a func task never
+  re-fires on a cooldown; a new one is submitted by calling `Lane.Submit`
+  again (e.g. utuber's `/enqueue`).
+- **Not editable over plain task HTTP.** `POST /api/tasks` rejects a request
+  that sets `kind` (400 — `"kind" cannot be set over HTTP`); `PUT`, `POST
+  .../pause|resume`, `POST .../up-next` and `POST .../move` against an
+  existing func task all answer **409** (`task "<n>" is managed by module
+  "<o>"`, or, for up-next, `use POST /api/executions/{id}/rerun for
+  module-managed tasks`). `DELETE /api/tasks/{name}` on a func task with a
+  running execution is **409**; otherwise it removes the task via the same
+  path the retention pruner uses (below).
+- **Payload/result live on the row.** `tasks.payload` (JSON, capped at
+  `golane.MaxPayloadBytes` = 64 KiB) is the callback's input, validated by
+  `Decode` both at submit time and again at the start of every run (so a row
+  written by an older binary fails that one execution cleanly instead of
+  crashing). `task_executions.result` is the callback's JSON return value,
+  populated only on success and also capped at 64 KiB.
+- **Cancel reaches queued jobs too.** For a shell task, `POST
+  /api/executions/{id}/cancel` on a still-pending (queued) execution answers
+  `200 {"status":"not_running"}` — cancelling a queue slot). For a func task,
+  the same call on a pending execution actually cancels it:
+  `200 {"status":"canceled"}`. A running func task's cancel still answers
+  `{"status":"canceling"}`, the same as shell.
+- **Metrics group by kind, not by task name.** See "Func-task metrics" below.
+- **Width/order/pause/resume on the *lane*** (not the task) work the same as
+  any lane — an owned lane's width, position order, and pause state are
+  fully controllable through the normal lane routes and UI. Only per-task
+  mutation is blocked.
+
+A lane an owning module registers is invisible as a *config* lane: any
+`taskmaster.lanes` entry in the server config that names an already-owned
+lane is skipped at every boot rather than overwritten (see "Config lanes vs
+owned lanes" below).
+
+---
+
+## Progress reporting
+
+A running task — currently only a func task — can report progress through
+`golane.RunContext`:
+
+```go
+rc.Progress(pct, "Downloading")  // pct 0-100; pct < 0 = indeterminate
+rc.SetLabel("Show — Episode")     // retitle the task, immediately, <= 200 runes
+```
+
+- `Progress` clamps `pct` to `[0,100]`, or `nil` (indeterminate) for any
+  negative value, and truncates `label` to 120 runes.
+- **In-memory value is unthrottled.** Every `Progress` call updates an
+  in-memory `ProgressRegistry` entry immediately, which `GET
+  /api/executions` and the board overlay for `running` rows read — so the
+  live progress bar is always current between polls.
+- **DB persistence and the `task-progress` board event are throttled** to at
+  most once per `progress_interval_ms` (config, see below), except: the
+  first report for an execution always persists immediately, and a **label
+  change always persists immediately** even if it lands inside the throttle
+  window — so a phase change like "Downloading" → "Converting" is never
+  dropped by the throttle. A final write happens when the execution
+  finishes, regardless of the throttle.
+- Shell tasks have the same storage, API and UI (progress bar renders for
+  any execution with a non-null `progress_pct`/`progress_label`), but ship
+  with **no reporter** — nothing currently writes progress for a shell
+  task. Adding one later (e.g. a stdout marker parser) needs no schema, API
+  or UI change.
+
+**Config: `progress_interval_ms`.** `taskmaster.progress_interval_ms` in the
+server config sets the throttle above. Default (and floor-matching value)
+**2000**. `config.Load` normalizes it: `0` → default; negative → a load
+error (`taskmaster: progress_interval_ms must be >= 0`); below 100 or above
+2000 is clamped to that bound with a log line (`taskmaster:
+progress_interval_ms %d below minimum %d; clamping` / `… exceeds %d
+(progress must update at least every 2s); clamping`) — so progress can never
+be configured to update slower than every 2 seconds.
 
 ---
 
@@ -57,8 +151,57 @@ Section `taskmaster` in the server config (`internal/platform/config.TaskmasterC
 |---|---|---|
 | `static_dir` | string | Directory serving the module's frontend (`web/taskmaster`); mounted at `/` via `platform/static`. |
 | `db_path` | string | Path to the SQLite database file. The parent directory is created (`MkdirAll`) if missing. `~` and env vars are expanded. WAL mode + `SetMaxOpenConns(1)` (single-writer by construction). |
-| `lanes` | array | Lanes seeded into the DB at every boot (upsert by `name` — the DB is authoritative afterward, so editing a lane's width via the API/UI persists across restarts even though it isn't reflected back into this file). Each entry: `name` (string), `width` (int, max concurrently-running tasks in the lane). |
+| `lanes` | array | Lanes upserted into the DB at **every** boot, by `name`. **Config is authoritative for width on every restart, not the DB** — `seedLanes` calls `UpsertLane`, whose `ON CONFLICT DO UPDATE SET width = excluded.width` overwrites the lane's width from this file on every boot, even if it was changed since via the API/UI. If you resize a lane through the UI, either also update this file or expect the next restart to revert it. Each entry: `name` (string), `width` (int, max concurrently-running tasks in the lane). **Skipped entirely for owned lanes** — see "Config lanes vs owned lanes" below, where the DB genuinely is authoritative. |
 | `allow_sudo` | bool | Default **false**. Gates whether any task in this module instance may run with `sudo`. **Runtime-togglable** — the DB is authoritative once seeded from this config value; flip it live via the UI or `POST /api/capabilities`, and the change survives restarts. See [Security](#security). |
+| `progress_interval_ms` | int | Throttle for func-task progress persistence and the `task-progress` board event. Default 2000, clamped to [100, 2000]. See [Progress reporting](#progress-reporting). |
+
+### Config lanes vs owned lanes
+
+`taskmaster.lanes` (above) and a module's `golane.RegisterLane` call both
+create/touch rows in the same `lanes` table, but they never step on each
+other:
+
+- **`seedLanes`** (run from every config lane at `Open`, unless the engine
+  is headless — see below) **skips any lane that already exists with
+  `owner != ""`**, and logs `taskmaster: config lane "<name>" is owned by
+  module "<owner>"; ignoring its config entry`. A config lane can never
+  overwrite an owned lane's width, even though `seedLanes` otherwise upserts
+  unconditionally.
+- **`RegisterLane`** (a module's side) calls `EnsureOwnedLane`, which fails
+  with `ErrLaneOwnedByOther` if a lane by that name already exists **without**
+  an owner (i.e. it was created as a plain config/UI lane). The error names
+  the conflict and the fix: `lane "<name>" already exists as a regular
+  taskmaster lane (from config taskmaster.lanes or the UI); rename or delete
+  it`. The owning module then fails its own `Build`/`Open` and that module
+  alone answers 503 — taskmaster itself is unaffected.
+
+In short: whichever side claims a lane name first (config seeding, or a
+module's `RegisterLane`) keeps it; the loser is rejected loudly rather than
+silently overwritten.
+
+### Headless "owned lanes only" mode
+
+When a module that owns a lane (e.g. utuber) is routed to a hostname but
+**taskmaster itself is not**, `cmd/server` still opens the shared engine —
+just with `taskmaster.OpenOptions{OwnedLanesOnly: true}`. In that mode:
+
+- The worker's `poll` loop schedules **only** lanes with `owner != ""` —
+  every config/UI lane (`owner == ""`) is skipped entirely, so routing only
+  utuber never starts running arbitrary shell tasks (including sudo tasks,
+  if `allow_sudo` happens to be persisted true) with no UI in front of them.
+- `seedLanes` does not run at all (there is no taskmaster config surface to
+  seed from in this mode).
+- `Engine.Handler()` returns `nil` — no taskmaster HTTP routes exist, and
+  none are mounted. The owning module's own routes (e.g. utuber's
+  `/jobs.json`) still work normally against the same engine.
+- Boot reconciliation (`ReconcileOrphans`) still runs over **every** row
+  regardless of mode — a still-genuinely-running shell task from a previous
+  taskmaster-routed boot is never silently abandoned just because this boot
+  doesn't serve the shell UI.
+
+This is what lets a deployment route only `utuber` (no `taskmaster` hostname
+at all) while utuber's download lane still runs on the same shared engine,
+DB, and worker as it would if taskmaster were also routed.
 
 There is no `auth.modules` requirement specific to taskmaster — like every
 other module, add a `taskmaster` entry under `auth.modules` (e.g.
@@ -130,19 +273,22 @@ taskmaster-specific auth code exists.
 | POST | `/api/lanes/{name}/resume` | Resume a paused lane. |
 | PUT | `/api/lanes/{name}/width` | Set only a lane's width, leaving its paused state untouched. |
 | PUT | `/api/lanes/{name}/order` | Reorder tasks within a lane: body `{"order": ["task-a","task-b",...]}` sets each named task's `position` to its index in the list. Names outside this lane are silently ignored (safe against a stale client snapshot). |
-| GET | `/api/tasks` | List tasks (optional `?group=` filter, by lane name — a legacy query-param name kept from the pre-rework API). |
-| POST | `/api/tasks` | Create a task. 403 if `sudo:true` and `allow_sudo` is false; 400 if `lane_name` doesn't name an existing lane. |
+| GET | `/api/tasks` | List tasks (optional `?lane=` filter, by lane name). |
+| POST | `/api/tasks` | Create a task. 403 if `sudo:true` and `allow_sudo` is false; 400 if `lane_name` doesn't name an existing lane. **400** if `kind` is set (func tasks can't be created over HTTP); **400**/**409** if the target lane/an existing task by that name is owned by a module — see [Func tasks](#func-go-function-tasks). |
 | GET | `/api/tasks/{name}` | Get one task. |
-| PUT | `/api/tasks/{name}` | Update a task (partial). Re-validates the effective post-merge `sudo` flag the same way creation is validated, so flipping `sudo` on via update is caught too. |
-| DELETE | `/api/tasks/{name}` | Delete a task. |
-| POST | `/api/tasks/{name}/pause` | Pause a task. |
-| POST | `/api/tasks/{name}/resume` | Resume a task. |
-| POST | `/api/tasks/{name}/up-next` | Put the task at the front of its lane's queue now; returns `{"execution_id": N}`. |
-| POST | `/api/tasks/{name}/move` | Move a task to a different lane: body `{"lane_name": "..."}`. 400 if the target lane doesn't exist. |
-| GET | `/api/executions` | List executions (optional `?task=`, `?limit=`). |
+| PUT | `/api/tasks/{name}` | Update a task (partial). Re-validates the effective post-merge `sudo` flag the same way creation is validated, so flipping `sudo` on via update is caught too. Unknown JSON keys are **400** `unknown or read-only field "<k>"` (allow-listed: `lane_name, enabled, paused, cooldown_seconds, repeat, command, position, sudo, output_file`). A func task is **409**. |
+| DELETE | `/api/tasks/{name}` | Delete a task. A func task with a running execution is **409**. |
+| POST | `/api/tasks/{name}/pause` | Pause a task. A func task is **409**. |
+| POST | `/api/tasks/{name}/resume` | Resume a task. A func task is **409**. |
+| POST | `/api/tasks/{name}/up-next` | Put the task at the front of its lane's queue now; returns `{"execution_id": N}`. A func task is **409** (`use POST /api/executions/{id}/rerun for module-managed tasks`). |
+| POST | `/api/tasks/{name}/move` | Move a task to a different lane: body `{"lane_name": "..."}`. 400 if the target lane doesn't exist or is owned. A func task is **409**. |
+| GET | `/api/executions` | List executions (optional `?task=`, `?limit=`). `running` rows carry the live `progress_pct`/`progress_label` overlay. |
 | GET | `/api/executions/{id}/output` | SSE stream of an execution's output (see below). |
-| POST | `/api/executions/{id}/cancel` | Force-kill (SIGKILL) a running execution; 404 if it isn't currently running/registered. See [Cancel + hand brake](#cancel--hand-brake). |
-| GET | `/api/metrics` | Per-task success/failed/canceled counts and duration stats (optional `?group=` [lane], `?task=`, `?hours=`). |
+| POST | `/api/executions/{id}/cancel` | Force-kill (SIGKILL) a running execution. For a **pending func-task** execution, this cancels the still-queued row instead (`200 {"status":"canceled"}`) — see [Func tasks](#func-go-function-tasks). 404 if it isn't currently running/registered/pending-func. See [Cancel + hand brake](#cancel--hand-brake). |
+| POST | `/api/executions/{id}/pause` | Suspend (SIGSTOP) a running shell execution's process group. No effect on a func task (no PID). |
+| POST | `/api/executions/{id}/resume` | Resume (SIGCONT) a suspended execution. |
+| POST | `/api/executions/{id}/rerun` | Re-queue a **finished** execution's task with a new pending execution. `400` non-integer id; `404` unknown id or hidden lane; `409` execution not finished; `409` task already has a pending/running execution; `409` (func task only) latest execution already `success` — a succeeded one-shot job is done, re-run it explicitly instead (see [Func tasks](#func-go-function-tasks)); otherwise `201 {"execution_id": N}`. Shell tasks may re-run from any terminal status (`success`, `failed`, or `canceled`); a func task refuses `success`. |
+| GET | `/api/metrics` | Per-task success/failed/canceled counts and duration stats (optional `?lane=`, `?task=`, `?hours=`). Func tasks are aggregated by kind, not by individual task name — see [Func-task metrics](#func-task-metrics). |
 | GET | `/api/board/events` | SSE stream of compact board-change events for the live lane board. See [Board-events SSE](#board-events-sse). |
 | GET | `/api/brake` | `{"engaged": bool}` — whether the hand brake is currently on. |
 | POST | `/api/brake` | Engage the hand brake. See [Cancel + hand brake](#cancel--hand-brake). |
@@ -191,6 +337,50 @@ outlive the cancel/brake and keep running until it finishes or an operator
 kills it directly. The execution row is still marked `canceled` from
 taskmaster's point of view; the underlying command's actual lifetime is not
 guaranteed. This is the same limitation documented for shutdown, below.
+
+---
+
+## Func-task metrics
+
+`GET /api/metrics` groups **func-task** rows by `(lane, kind)`, not by
+individual task name (P17): every `utuber.download` execution in the
+`utuber` lane rolls into one metrics card, with `task_name` reported as the
+kind (e.g. `utuber.download`) and a new `kind` field carrying the same
+value. Without this, every download would get its own randomly-named task
+(`utuber-<hex>`) and its own one-off metrics card — noise, not a signal.
+Shell tasks are unaffected: they keep the existing per-task grouping.
+
+Task-detail metrics (`GET /api/metrics?task=<name>`) for one func task's own
+name still work: because the row is grouped by kind, the single matching
+row (`task_name == kind`) is that job's own aggregate — not the whole lane's.
+
+## Retention and pruning (owned lanes)
+
+Each **owned** lane (one created via `RegisterLane`, e.g. utuber's `utuber`
+lane) carries a `retention_days` value (`lanes.retention_days`, seeded by
+the module's `LaneSpec.InitialRetentionDays`; `0` means "never prune" — the
+default for every config/UI lane). A background pruner:
+
+- runs once at `Open`,
+- then on an hourly ticker (`pruneInterval`, 1 hour in production — tests
+  can shorten it via `taskmaster.SetPruneIntervalForTest`),
+- and again immediately after a retention change (via the module's own
+  settings UI, since that goes through `Lane.UpdateSettings`).
+
+For each lane with `retention_days > 0`, it deletes every **func** task
+(`kind != ''`) in that lane whose latest execution finished before
+`now - retention_days` and that has nothing pending or running — the task
+row, its executions, its metrics, and any lock row all go together
+(`PruneOwnedLane`/`RemoveIdleTask`). A shell task in the same lane is never
+touched by this pruner, and a func task with an in-flight execution is never
+pruned regardless of age. Each sweep that removes anything logs
+`taskmaster: pruned N job(s) from lane "<lane>" finished before <RFC3339
+cutoff>`.
+
+This is a narrowing of the older "`task_metrics` retained indefinitely"
+guidance below: that guidance still holds for **shell** task metrics — there
+is no automatic pruning for those — but a pruned/removed func task's metrics
+are deleted along with it.
 
 ---
 
@@ -476,3 +666,51 @@ scoped/per-module API keys to close the flattening risk. See
 **Until that lands:** only enable `allow_sudo` on a deployment where every
 holder of a platform API key, and every user who can log into taskmaster at
 all, is someone you'd trust with `sudo` on the host directly.
+
+---
+
+## Schema v5: no downgrade
+
+Migration 5 (the func-task/owned-lane/progress support documented above)
+adds columns to `lanes`, `tasks` and `task_executions` — `owner`, `hidden`,
+`retention_days`, `kind`, `label`, `payload`, `payload_version`,
+`progress_pct`, `progress_label`, `result` — plus an index. It is the first
+**transactional** migration (`tx: true`): it runs inside a single
+transaction and rolls back atomically on any failure, unlike migrations 1–4.
+
+**Do not run an older (pre-migration-5) taskmaster binary against a database
+that has already been migrated to v5.** An older binary's SQL was written
+before these columns existed:
+
+- Any older-binary code path that builds a column list by hand (e.g. the
+  scan/insert code for lanes, tasks, or executions) will not know about the
+  new columns and will either error or silently drop them, and reads that
+  expect the old column count will fail outright.
+- An owned lane's rows (`owner != ''`) are invisible/meaningless to an older
+  binary's logic — it has no concept of a module-owned lane, so it may treat
+  a func task as an ordinary shell task with an empty `command`, which is
+  not a task an older binary can usefully run (K9).
+- The older binary never wrote `schema_version = 5`, so if it opens the
+  database and then a newer binary reopens it later, the newer binary
+  re-runs migration 5's `ALTER TABLE ... ADD COLUMN` statements — which fail
+  because those columns already exist — unless the intervening older-binary
+  session never touched `schema_version` (in which case it's still fine).
+  The real risk is not a corrupt `schema_version` row; it's data written by
+  an older binary that the newer schema's owned-lane/func-task machinery
+  then encounters and cannot make sense of.
+
+**If you've already downgraded and something looks wrong:** the two ways
+back are
+
+1. **Restore from a backup taken before the v5 migration ran** (before
+   upgrading in the first place), and stay on the older binary — you lose
+   any taskmaster activity recorded since that backup.
+2. **Accept the newer binary going forward.** Re-upgrade to the binary that
+   applied migration 5 (or newer) and stay there. Migration 5 is additive
+   (new columns, not renamed/removed ones), so a straight re-upgrade with no
+   intervening older-binary writes is safe and loses nothing.
+
+There is no supported automatic downgrade path (no migration "down" step is
+implemented, matching migrations 1–4). Plan any rollback around one of the
+two recovery options above, not around running the old binary directly
+against the migrated file.

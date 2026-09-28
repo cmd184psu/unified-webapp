@@ -3,6 +3,7 @@ package media
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -63,7 +64,7 @@ func TestDownloadInvokesYtDlp(t *testing.T) {
 	dir := t.TempDir()
 	exec := &captureExec{}
 
-	got, _ := Download(context.Background(), exec, "http://example.com", dir, "out", func(string) {})
+	got, _ := Download(context.Background(), exec, "http://example.com", dir, "out", "", func(string) {}, nil)
 
 	if exec.name != "yt-dlp" {
 		t.Errorf("expected yt-dlp, got %q", exec.name)
@@ -108,6 +109,9 @@ func TestDownloadInvokesYtDlp(t *testing.T) {
 	if strings.Contains(joined, "subtitles=") || strings.Contains(joined, "burn") {
 		t.Errorf("subtitles must not be burned in: %s", joined)
 	}
+	if strings.Contains(joined, "--cookies") {
+		t.Errorf("--cookies must be absent when no cookies file is configured: %s", joined)
+	}
 }
 
 func TestDownloadProgressCallback(t *testing.T) {
@@ -120,9 +124,9 @@ func TestDownloadProgressCallback(t *testing.T) {
 	}}
 
 	var got []string
-	Download(context.Background(), exec, "http://x.com", dir, "out", func(s string) {
+	Download(context.Background(), exec, "http://x.com", dir, "out", "", func(s string) {
 		got = append(got, s)
-	})
+	}, nil)
 
 	want := []string{"10.0", "55.5", "100.0"}
 	if len(got) != len(want) {
@@ -140,9 +144,39 @@ func TestDownloadReturnsExecError(t *testing.T) {
 	boom := errors.New("yt-dlp failed")
 	exec := &captureExec{err: boom}
 
-	_, err := Download(context.Background(), exec, "http://x.com", dir, "out", func(string) {})
+	_, err := Download(context.Background(), exec, "http://x.com", dir, "out", "", func(string) {}, nil)
 	if !errors.Is(err, boom) {
 		t.Errorf("got %v, want %v", err, boom)
+	}
+}
+
+// ── Cookies (D5 Fix 2) ────────────────────────────────────────────────────────
+
+func TestDownloadOmitsCookiesFlagWhenFileMissing(t *testing.T) {
+	dir := t.TempDir()
+	exec := &captureExec{}
+
+	missing := filepath.Join(dir, "does-not-exist.txt")
+	Download(context.Background(), exec, "http://x.com", dir, "out", missing, func(string) {}, nil)
+
+	if strings.Contains(strings.Join(exec.args, " "), "--cookies") {
+		t.Errorf("--cookies must be absent when the configured file does not exist: %v", exec.args)
+	}
+}
+
+func TestDownloadAddsCookiesFlagWhenFileExists(t *testing.T) {
+	dir := t.TempDir()
+	exec := &captureExec{}
+
+	cookiesFile := filepath.Join(dir, "cookies.txt")
+	if err := os.WriteFile(cookiesFile, []byte("# Netscape HTTP Cookie File\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	Download(context.Background(), exec, "http://x.com", dir, "out", cookiesFile, func(string) {}, nil)
+
+	joined := strings.Join(exec.args, " ")
+	if !strings.Contains(joined, "--cookies "+cookiesFile) {
+		t.Errorf("--cookies %s not in args: %s", cookiesFile, joined)
 	}
 }
 

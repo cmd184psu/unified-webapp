@@ -2,8 +2,6 @@ package utuber
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,10 +9,11 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"cmd184psu/unified-webapp/internal/platform/config"
+	"cmd184psu/unified-webapp/internal/taskmaster/golane"
 	"cmd184psu/unified-webapp/internal/utuber/history"
-	"cmd184psu/unified-webapp/internal/utuber/jobs"
 	"cmd184psu/unified-webapp/internal/utuber/media"
 )
 
@@ -22,88 +21,150 @@ type processor struct {
 	exec media.Executor
 	cfg  config.UtuberConfig
 	hist *history.Log
+	// settings supplies the configured cookie-jar path (D5 Fix 2). Tests that
+	// build a processor literal without it get a nil *settingsStore, whose
+	// CookiesPath() safely returns "" (no cookies configured).
+	settings *settingsStore
 }
 
-func (p processor) Process(ctx context.Context, job jobs.Job, q *jobs.Queue) error {
-	// Mirror rule: mirror to the local snapshot exactly the fields Process
-	// reads after writing — ShowName, EpisodeTitle, OutputFile (read back for
-	// naming and hist.Record). Never mirror Progress: nothing reads it back,
-	// and mirroring it inside the onLine callbacks would write the snapshot
-	// from scanner goroutines.
-	if job.ShowName == "" || job.EpisodeTitle == "" {
-		q.Update(job.ID, func(j *jobs.Job) { j.Progress = "fetching metadata" })
+// downloadPayload is the "utuber.download" kind payload (version 1). The JSON
+// tags are the on-the-wire contract stored per task in the taskmaster DB.
+type downloadPayload struct {
+	URL          string `json:"url"`
+	ShowName     string `json:"show_name"`
+	EpisodeTitle string `json:"episode_title"`
+	Season       int    `json:"season"`
+	Episode      int    `json:"episode"`
+	Mode         string `json:"mode"` // "video" or "audio"
+}
+
+// validatePayload is the kind's decode-time validator (defence in depth: the
+// payload is untrusted until decoded).
+func validatePayload(p downloadPayload) error {
+	if p.URL == "" || len(p.URL) > 2048 {
+		return errors.New("url must be non-empty and at most 2048 bytes")
+	}
+	if p.Mode != "video" && p.Mode != "audio" {
+		return errors.New(`mode must be "video" or "audio"`)
+	}
+	if p.Season < 0 || p.Season > 999 || p.Episode < 0 || p.Episode > 999 {
+		return errors.New("season and episode must be between 0 and 999")
+	}
+	return nil
+}
+
+// downloadResult is the kind's success result, stored per execution.
+type downloadResult struct {
+	OutputFile   string `json:"output_file"`
+	ShowName     string `json:"show_name"`
+	EpisodeTitle string `json:"episode_title"`
+}
+
+// run is the "utuber.download" kind's Run. It does exactly what the old
+// jobs-queue Process did, but reports through the RunContext instead of a
+// jobs.Queue: rc.Progress for the progress bar, rc.SetLabel for the title, and
+// rc.Log for every raw yt-dlp/ffmpeg line (which taskmaster replays over SSE
+// and D5 later mines for the real failure reason).
+func (p processor) run(ctx context.Context, rc golane.RunContext, job downloadPayload) (any, error) {
+	show, title := job.ShowName, job.EpisodeTitle
+	if show == "" || title == "" {
+		rc.Progress(-1, "Fetching metadata")
 		m, err := media.FetchMeta(ctx, p.exec, job.URL)
 		if err == nil {
-			if job.ShowName == "" {
-				job.ShowName = m.Uploader
+			if show == "" {
+				show = m.Uploader
 			}
-			if job.EpisodeTitle == "" {
-				job.EpisodeTitle = m.Title
+			if title == "" {
+				title = m.Title
 			}
-			q.Update(job.ID, func(j *jobs.Job) {
-				j.ShowName = job.ShowName
-				j.EpisodeTitle = job.EpisodeTitle
-			})
+		}
+	}
+	rc.SetLabel(show + " — " + title)
+
+	rc.Progress(-1, "Downloading")
+
+	// lastErrorLine tracks the most recent non-empty yt-dlp/ffmpeg output line
+	// containing "ERROR:" (D5 Fix 1). Every raw line still reaches rc.Log()
+	// unconditionally -- this only additionally remembers the best candidate
+	// for the execution's actual failure reason, since a bare exec error like
+	// "exit status 1" names nothing an operator can act on.
+	var lastErrorLine string
+	logLine := func(line string) {
+		fmt.Fprintln(rc.Log(), line)
+		if trimmed := strings.TrimSpace(line); trimmed != "" && strings.Contains(trimmed, "ERROR:") {
+			lastErrorLine = trimmed
 		}
 	}
 
-	q.Update(job.ID, func(j *jobs.Job) { j.Progress = "downloading" })
-
-	// yt-dlp writes to a deterministic "<job ID>.mp4" (see media.Download), so
-	// src is the exact file just produced — no directory scan to guess which
-	// file is the download.
+	// The download filename stem is "<job ID>-<exec ID>": unique per execution
+	// (a rerun gets a fresh exec ID, so its temp file never collides with the
+	// prior run's leftover). yt-dlp writes "<stem>.mp4" deterministically.
+	stem := fmt.Sprintf("%s-%d", rc.JobID(), rc.ExecID())
 	src, err := media.Download(
 		ctx,
 		p.exec,
 		job.URL,
 		p.cfg.DownloadDir,
-		job.ID,
+		stem,
+		p.settings.CookiesPath(),
 		func(s string) {
-			q.Update(job.ID, func(j *jobs.Job) { j.Progress = "download " + s })
+			if pct, perr := strconv.ParseFloat(s, 64); perr == nil {
+				rc.Progress(int(pct), "Downloading")
+			}
 		},
+		logLine,
 	)
 	if err != nil {
-		return err
+		return nil, ytdlpError(err, lastErrorLine)
 	}
 
+	var outputFile string
 	if job.Mode == "audio" {
-		out := outputName(job.ShowName, job.Season, job.Episode, job.EpisodeTitle, "mp3")
+		out := outputName(show, job.Season, job.Episode, title, "mp3")
 		outPath := p.cfg.DownloadDir + "/" + out
 
-		q.Update(job.ID, func(j *jobs.Job) { j.Progress = "converting" })
-		err = media.ExtractAudio(ctx, p.exec, src, outPath, func(s string) {
-			q.Update(job.ID, func(j *jobs.Job) { j.Progress = "convert " + s })
-		})
+		rc.Progress(-1, "Converting")
+		err = media.ExtractAudio(ctx, p.exec, src, outPath, logLine)
 		_ = os.Remove(src)
 		if err != nil {
-			return err
+			return nil, ytdlpError(err, lastErrorLine)
 		}
-		job.OutputFile = out
+		outputFile = out
 	} else {
 		// Keep the yt-dlp .mp4 as-is (Apple-compatible H.264/AAC in an mp4
 		// container); only give it the Plex-friendly name. No transcode, and
 		// no .m4v rename — the extension stays .mp4.
-		out := outputName(job.ShowName, job.Season, job.Episode, job.EpisodeTitle, "mp4")
+		out := outputName(show, job.Season, job.Episode, title, "mp4")
 		if err := os.Rename(src, p.cfg.DownloadDir+"/"+out); err != nil {
-			return err
+			return nil, err
 		}
-		job.OutputFile = out
+		outputFile = out
 	}
-	q.Update(job.ID, func(j *jobs.Job) { j.OutputFile = job.OutputFile })
-
-	q.Update(job.ID, func(j *jobs.Job) { j.Progress = "done" })
 
 	_ = p.hist.Record(history.Entry{
 		URL:        job.URL,
-		OutputFile: job.OutputFile,
-		ShowName:   job.ShowName,
+		OutputFile: outputFile,
+		ShowName:   show,
 		Mode:       job.Mode,
 	})
 
-	return nil
+	return downloadResult{OutputFile: outputFile, ShowName: show, EpisodeTitle: title}, nil
 }
 
-func handleEnqueue(q *jobs.Queue, hist *history.Log) http.HandlerFunc {
+// ytdlpError returns the execution error the worker records (D5 Fix 1): when
+// a captured "ERROR:" line from yt-dlp/ffmpeg's output exists, it replaces
+// the generic exec error (typically "exit status 1", which names nothing
+// actionable) so the taskmaster execution's error field carries the tool's
+// actual stated reason instead. With no captured line, err passes through
+// unchanged.
+func ytdlpError(err error, lastErrorLine string) error {
+	if lastErrorLine == "" {
+		return err
+	}
+	return errors.New(lastErrorLine)
+}
+
+func handleEnqueue(lane golane.Lane, hist *history.Log) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		r.ParseMultipartForm(1 << 20)
 
@@ -133,18 +194,24 @@ func handleEnqueue(q *jobs.Queue, hist *history.Log) http.HandlerFunc {
 			mode = "video"
 		}
 
-		job := &jobs.Job{
-			ID:           randID(),
+		payload := downloadPayload{
 			URL:          url,
 			ShowName:     r.FormValue("show"),
 			EpisodeTitle: r.FormValue("title"),
 			Season:       season,
 			Episode:      episode,
 			Mode:         mode,
-			Status:       jobs.Queued,
 		}
 
-		q.Enqueue(job)
+		label := payload.ShowName + " — " + payload.EpisodeTitle
+		if payload.ShowName == "" && payload.EpisodeTitle == "" {
+			label = url
+		}
+
+		if _, err := lane.Submit("utuber.download", label, payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -175,28 +242,147 @@ func handleYtdlpUpdate(exec media.Executor, s *settingsStore) http.HandlerFunc {
 	}
 }
 
-// handleJobDelete removes a queued or finished job: POST /jobs/delete?id=…
-// A running job is refused with 409; its downloaded file is never touched.
-func handleJobDelete(q *jobs.Queue) http.HandlerFunc {
+// progressJSON is the /jobs.json progress object: {"pct":int|null,"label":str}.
+type progressJSON struct {
+	Pct   *int   `json:"pct"`
+	Label string `json:"label"`
+}
+
+// jobJSON is the /jobs.json wire format (15 snake_case keys). It is the
+// browser-facing contract; the QueuePanel front end decodes exactly these.
+type jobJSON struct {
+	ID           string        `json:"id"`
+	Status       string        `json:"status"` // queued|running|success|failed|canceled
+	Label        string        `json:"label"`
+	URL          string        `json:"url"`
+	ShowName     string        `json:"show_name"`
+	EpisodeTitle string        `json:"episode_title"`
+	Season       int           `json:"season"`
+	Episode      int           `json:"episode"`
+	Mode         string        `json:"mode"`
+	Progress     *progressJSON `json:"progress"`
+	OutputFile   string        `json:"output_file"`
+	Error        string        `json:"error"`
+	CreatedAt    time.Time     `json:"created_at"`
+	StartedAt    *time.Time    `json:"started_at"`
+	FinishedAt   *time.Time    `json:"finished_at"`
+}
+
+func toJobJSON(j golane.Job) jobJSON {
+	var p downloadPayload
+	_ = json.Unmarshal(j.Payload, &p)
+
+	jj := jobJSON{
+		ID:           j.ID,
+		Status:       j.Status,
+		Label:        j.Label,
+		URL:          p.URL,
+		ShowName:     p.ShowName,
+		EpisodeTitle: p.EpisodeTitle,
+		Season:       p.Season,
+		Episode:      p.Episode,
+		Mode:         p.Mode,
+		Error:        j.Error,
+		CreatedAt:    j.CreatedAt,
+		StartedAt:    j.StartedAt,
+		FinishedAt:   j.FinishedAt,
+	}
+	if j.Progress != nil {
+		jj.Progress = &progressJSON{Pct: j.Progress.Pct, Label: j.Progress.Label}
+	}
+	// Result fields win when a successful execution recorded them.
+	if len(j.Result) > 0 {
+		var r downloadResult
+		if json.Unmarshal(j.Result, &r) == nil {
+			jj.OutputFile = r.OutputFile
+			if r.ShowName != "" {
+				jj.ShowName = r.ShowName
+			}
+			if r.EpisodeTitle != "" {
+				jj.EpisodeTitle = r.EpisodeTitle
+			}
+		}
+	}
+	return jj
+}
+
+func handleJobs(lane golane.Lane) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		jobs, err := lane.List()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		out := make([]jobJSON, 0, len(jobs))
+		for _, j := range jobs {
+			out = append(out, toJobJSON(j))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(out)
+	}
+}
+
+// handleJobCancel cancels a queued or running download: POST /jobs/cancel?id=…
+func handleJobCancel(lane golane.Lane) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		switch err := q.Remove(r.URL.Query().Get("id")); {
-		case err == nil:
-			w.WriteHeader(http.StatusNoContent)
-		case errors.Is(err, jobs.ErrRunning):
-			http.Error(w, "that job is running and can't be removed", http.StatusConflict)
-		default:
+		outcome, err := lane.Cancel(r.URL.Query().Get("id"))
+		switch {
+		case errors.Is(err, golane.ErrNotFound):
 			http.Error(w, "job not found", http.StatusNotFound)
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		case outcome == golane.CancelOutcome("not_running"):
+			http.Error(w, "that download already finished", http.StatusConflict)
+		default: // "canceled" | "canceling"
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"status": string(outcome)})
 		}
 	}
 }
 
-func handleJobs(q *jobs.Queue) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(q.All())
+// handleJobRerun re-queues a finished download: POST /jobs/rerun?id=…
+func handleJobRerun(lane golane.Lane) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		_, err := lane.Rerun(r.URL.Query().Get("id"))
+		switch {
+		case err == nil:
+			w.WriteHeader(http.StatusNoContent)
+		case errors.Is(err, golane.ErrNotFound):
+			http.Error(w, "job not found", http.StatusNotFound)
+		case errors.Is(err, golane.ErrBusy):
+			http.Error(w, "that download is queued or running", http.StatusConflict)
+		case errors.Is(err, golane.ErrSucceeded):
+			http.Error(w, "that download already succeeded", http.StatusConflict)
+		default:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	}
+}
+
+// handleJobDelete removes a queued or finished job: POST /jobs/delete?id=…
+// A running job is refused with 409; its downloaded file is never touched.
+func handleJobDelete(lane golane.Lane) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		switch err := lane.Remove(r.URL.Query().Get("id")); {
+		case err == nil:
+			w.WriteHeader(http.StatusNoContent)
+		case errors.Is(err, golane.ErrRunning):
+			http.Error(w, "that job is running and can't be removed", http.StatusConflict)
+		default:
+			http.Error(w, "job not found", http.StatusNotFound)
+		}
 	}
 }
 
@@ -219,12 +405,6 @@ func outputName(show string, season, episode int, title, ext string) string {
 		return fmt.Sprintf("%s - %s.%s", safe(show), safe(title), ext)
 	}
 	return fmt.Sprintf("%s - %s - %s.%s", safe(show), tag, safe(title), ext)
-}
-
-func randID() string {
-	b := make([]byte, 6)
-	rand.Read(b)
-	return hex.EncodeToString(b)
 }
 
 func safe(s string) string {

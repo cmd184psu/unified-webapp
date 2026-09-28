@@ -36,6 +36,20 @@ body {
   flex-shrink: 0;
 }
 
+/* The trigger is appended before the title in the DOM (main.ts keeps that
+   order), but it must render at the trailing edge to match side: "right".
+   `order` flips the visual sequence without touching the append call, and
+   the auto margin then pushes the now-last item flush to that edge. The
+   direct-child selector matters: once signed in, mountSignOut (session.ts)
+   wraps the trigger inside a `.ui-menu-actions` group that becomes the
+   actual flex child of `.app-header`, and this rule must move with it
+   rather than also matching the trigger nested inside that group. */
+.app-header > .ui-menu-trigger,
+.app-header > .ui-menu-actions {
+  order: 1;
+  margin-inline-start: auto;
+}
+
 .app-header h1 {
   margin: 0;
   font-size: var(--text-lg, 18px);

@@ -646,8 +646,6 @@ var HamburgerMenu = class {
     this.bindings = [];
     this.opened = false;
     this.destroyed = false;
-    /** The resolved edge for `side: "auto"`; null until the first open(). */
-    this.resolvedSide = null;
     this.options = options;
     const drawerId = `ui-menu-drawer-${++instanceCount}`;
     this.drawer = document.createElement("aside");
@@ -657,14 +655,7 @@ var HamburgerMenu = class {
     this.drawer.setAttribute("aria-modal", "true");
     this.drawer.setAttribute("aria-label", options.title ?? "Menu");
     this.drawer.tabIndex = -1;
-    if (options.side === "left" || options.side === "right") {
-      this.resolvedSide = options.side;
-      this.drawer.dataset.side = options.side;
-    } else if (options.side === "auto") {
-      this.resolvedSide = null;
-    } else {
-      this.resolvedSide = "left";
-    }
+    if (options.side !== void 0) this.drawer.dataset.side = options.side;
     const header = document.createElement("div");
     header.className = "ui-menu-header";
     const closeButton = document.createElement("button");
@@ -708,12 +699,6 @@ var HamburgerMenu = class {
   }
   open() {
     if (this.opened || this.destroyed) return;
-    if (this.options.side === "auto" && this.resolvedSide === null) {
-      const rect = this.trigger.getBoundingClientRect();
-      const center = rect.left + rect.width / 2;
-      this.resolvedSide = center > window.innerWidth / 2 ? "right" : "left";
-      this.drawer.dataset.side = this.resolvedSide;
-    }
     this.opened = true;
     this.sync();
     this.paint();

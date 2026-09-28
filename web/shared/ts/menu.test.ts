@@ -67,18 +67,9 @@ class FakeElement {
   children: FakeElement[] = [];
   listeners: Record<string, Array<(e: unknown) => void>> = {};
   parent: FakeElement | null = null;
-  _rectLeft: number | undefined;
-  _rectRight: number | undefined;
 
   constructor(tagName: string) {
     this.tagName = tagName;
-  }
-
-  /** Only side:"auto" ever calls this — a hand-set stand-in for real layout. */
-  getBoundingClientRect(): { left: number; right: number; width: number } {
-    const left = this._rectLeft ?? 0;
-    const right = this._rectRight ?? 100;
-    return { left, right, width: right - left };
   }
 
   /** A string argument is a TEXT node — ThemeManager.renderPicker passes one. */
@@ -204,8 +195,8 @@ Object.defineProperty(globalThis, "document", {
   configurable: true,
 });
 
-// Only side:"auto" ever reads this — mutable so that one test can move it.
-const fakeWindow = { innerWidth: 800 };
+// session.ts's idle watch listens on window for real use (clicks, typing, ...).
+const fakeWindow = {};
 Object.defineProperty(globalThis, "window", {
   value: fakeWindow,
   writable: true,
@@ -866,48 +857,6 @@ function labels(menu: HamburgerMenu): string[] {
     el(menu.drawer).dataset.side === "right",
     JSON.stringify(el(menu.drawer).dataset),
   );
-  menu.destroy();
-}
-
-// --- C0: side option — "auto", resolved against the trigger on first open ---
-
-{
-  const menu = new HamburgerMenu({
-    title: "Auto",
-    side: "auto",
-    items: [{ id: "a", label: "A", onSelect: () => {} }],
-  });
-
-  check(
-    "C0: side:'auto' sets no data-side before the first open",
-    el(menu.drawer).dataset.side === undefined,
-    JSON.stringify(el(menu.drawer).dataset),
-  );
-
-  // Put the trigger on the right half of an 800px-wide viewport.
-  el(menu.trigger)._rectLeft = 600;
-  el(menu.trigger)._rectRight = 700;
-  fakeWindow.innerWidth = 800;
-
-  menu.open();
-  check(
-    "C0: side:'auto' resolves to 'right' when the trigger sits on the right half",
-    el(menu.drawer).dataset.side === "right",
-    JSON.stringify(el(menu.drawer).dataset),
-  );
-
-  // Move the trigger's rect after resolution — the cached choice must stick.
-  menu.close();
-  el(menu.trigger)._rectLeft = 0;
-  el(menu.trigger)._rectRight = 50;
-  menu.open();
-  check(
-    "C0: side:'auto' caches its resolution — a later open does not re-query",
-    el(menu.drawer).dataset.side === "right",
-    JSON.stringify(el(menu.drawer).dataset),
-  );
-
-  menu.close();
   menu.destroy();
 }
 

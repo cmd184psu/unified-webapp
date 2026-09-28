@@ -1,4 +1,5 @@
-import { ThemeManager, HamburgerMenu, confirmDialog, showToast } from '@shared';
+import { ThemeManager, HamburgerMenu, confirmDialog, showToast, QueuePanel } from '@shared';
+import type { QueuePanelAdapter, QueueActionKind, QueueSection, QueueProgress } from '@shared';
 
 const themes = new ThemeManager({ module: 'utuber', default: 'dark' });
 themes.apply();
@@ -6,6 +7,36 @@ themes.apply();
 const hamburger = new HamburgerMenu({
   title: 'uTuber',
   items: [
+    { section: 'Queue' },
+    {
+      id: 'queue-setting',
+      render(host: HTMLElement) {
+        host.appendChild(numberField('age-out-days', 'Age-out (days)', 1, 365,
+          v => saveQueueSetting({ age_out_days: v })));
+        host.appendChild(numberField('concurrent-downloads', 'Concurrent downloads', 1, 8,
+          v => saveQueueSetting({ concurrent_downloads: v })));
+
+        const showField = document.createElement('label');
+        showField.className = 'field field-check';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.id = 'show-in-taskmaster';
+        cb.addEventListener('change', () => void saveQueueSetting({ show_in_taskmaster: cb.checked }));
+        const cbText = document.createElement('span');
+        cbText.textContent = 'Show in taskmaster';
+        showField.append(cb, cbText);
+        host.appendChild(showField);
+
+        const status = document.createElement('span');
+        status.id = 'queue-settings-status';
+        status.style.fontSize = '0.75rem';
+        status.style.color = 'var(--color-text-faint)';
+        host.appendChild(status);
+
+        void loadQueueSettings();
+      },
+    },
+    { separator: true as const },
     { section: 'Settings' },
     {
       id: 'python-setting',
@@ -42,6 +73,61 @@ const hamburger = new HamburgerMenu({
     },
     { separator: true as const },
     {
+      id: 'cookies-setting',
+      render(host: HTMLElement) {
+        const heading = document.createElement('div');
+        heading.textContent = 'Age-restricted cookies';
+        heading.style.fontWeight = '600';
+        heading.style.marginBottom = '0.25rem';
+
+        const hint = document.createElement('p');
+        hint.className = 'optional-hint';
+        hint.textContent =
+          'yt-dlp cannot sign in on its own. Export a Netscape-format cookie ' +
+          'file from a browser that is already signed into YouTube — either ' +
+          'the "Get cookies.txt LOCALLY" extension, or on that machine: ' +
+          'yt-dlp --cookies-from-browser chrome --cookies cookies.txt --skip-download <any-url> ' +
+          '— then paste its contents below.';
+        hint.style.whiteSpace = 'pre-wrap';
+
+        const status = document.createElement('span');
+        status.id = 'cookies-status';
+        status.style.display = 'block';
+        status.style.fontSize = '0.75rem';
+        status.style.color = 'var(--color-text-faint)';
+        status.style.marginBottom = '0.5rem';
+
+        const textarea = document.createElement('textarea');
+        textarea.id = 'cookies-txt';
+        textarea.placeholder = '# Netscape HTTP Cookie File\n...';
+        textarea.rows = 4;
+        textarea.spellcheck = false;
+        textarea.style.width = '100%';
+        textarea.style.fontFamily = 'monospace';
+        textarea.style.fontSize = '0.75rem';
+
+        const submitRow = document.createElement('div');
+        submitRow.className = 'submit-row';
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'btn btn-ghost btn-sm';
+        saveBtn.textContent = 'Save';
+        saveBtn.addEventListener('click', saveCookies);
+        const clearBtn = document.createElement('button');
+        clearBtn.className = 'btn btn-ghost btn-sm';
+        clearBtn.textContent = 'Clear';
+        clearBtn.addEventListener('click', clearCookies);
+        const saveStatus = document.createElement('span');
+        saveStatus.id = 'cookies-save-status';
+        saveStatus.style.fontSize = '0.75rem';
+        saveStatus.style.color = 'var(--color-text-faint)';
+        submitRow.append(saveBtn, clearBtn, saveStatus);
+
+        host.append(heading, hint, status, textarea, submitRow);
+        loadCookiesStatus();
+      },
+    },
+    { separator: true as const },
+    {
       id: 'ytdlp-update',
       render(host: HTMLElement) {
         const btn = document.createElement('button');
@@ -66,6 +152,31 @@ const hamburger = new HamburgerMenu({
   // The trigger sits at the right end of the topbar; the drawer opens beside it.
   side: 'right',
 });
+
+function numberField(
+  id: string,
+  label: string,
+  min: number,
+  max: number,
+  onSave: (value: number) => void | Promise<void>,
+): HTMLElement {
+  const field = document.createElement('div');
+  field.className = 'field field-num';
+  const lbl = document.createElement('label');
+  lbl.htmlFor = id;
+  lbl.textContent = label;
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.id = id;
+  input.min = String(min);
+  input.max = String(max);
+  input.addEventListener('change', () => {
+    const v = parseInt(input.value, 10);
+    if (Number.isFinite(v) && v >= min && v <= max) void onSave(v);
+  });
+  field.append(lbl, input);
+  return field;
+}
 
 let currentMode = 'video';
 let pendingFormData: FormData | null = null;
@@ -143,7 +254,7 @@ async function submitForm(formData: FormData): Promise<void> {
   if (res.status === 204) {
     (document.querySelector('input[name="url"]') as HTMLInputElement).value = '';
     hideDupBanner();
-    refreshJobs();
+    void refreshJobs();
     return;
   }
   const body = await res.text().catch(() => '');
@@ -156,110 +267,242 @@ document.getElementById('enqueue-form')!.addEventListener('submit', async (e: Ev
   await submitForm(new FormData(e.target as HTMLFormElement));
 });
 
-interface Job {
-  ID: string;
-  ShowName: string;
-  EpisodeTitle: string;
-  Season: number;
-  Episode: number;
-  Mode?: string;
-  Progress: string;
-  Status: string;
-  OutputFile: string;
-  Error?: string;
+// ── Jobs queue (shared QueuePanel) ──────────────────────────────────────────
+
+// UJob mirrors utuber's /jobs.json 15-key shape.
+interface UJob {
+  id: string;
+  status: string; // queued | running | success | failed | canceled
+  label: string;
+  url: string;
+  show_name: string;
+  episode_title: string;
+  season: number;
+  episode: number;
+  mode: string;
+  progress: { pct: number | null; label: string } | null;
+  output_file: string;
+  error: string;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
 }
 
-async function refreshJobs(): Promise<void> {
-  const res = await fetch('/jobs.json');
-  const jobs: Job[] = await res.json();
+function jobSection(j: UJob): QueueSection {
+  if (j.status === 'queued') return 'upnext';
+  if (j.status === 'running') return 'running';
+  return 'recent';
+}
 
-  const list = document.getElementById('jobs-list')!;
-  const countEl = document.getElementById('jobs-count')!;
+function jobMeta(j: UJob): string {
+  const ep =
+    (j.season > 0 ? 'S' + String(j.season).padStart(2, '0') : '') +
+    (j.episode > 0 ? 'E' + String(j.episode).padStart(2, '0') : '');
+  const mode = j.mode || 'video';
+  return [ep, mode].filter(Boolean).join(' · ');
+}
 
-  if (!jobs || jobs.length === 0) {
-    list.innerHTML = '<div class="empty-state">No jobs yet — add one above.</div>';
-    countEl.textContent = '';
+function jobProgress(j: UJob): QueueProgress | null {
+  return j.status === 'running' ? j.progress : null;
+}
+
+function jobActions(j: UJob): QueueActionKind[] {
+  switch (j.status) {
+    case 'queued': return ['cancel', 'remove'];
+    case 'running': return ['cancel'];
+    case 'failed':
+    case 'canceled': return ['rerun', 'remove'];
+    default: return ['remove']; // success
+  }
+}
+
+async function onJobAction(action: QueueActionKind, j: UJob): Promise<void> {
+  if (action === 'cancel') {
+    const ok = await confirmDialog(
+      `Cancel "${j.label}"?`,
+      { title: 'Cancel download', confirmLabel: 'Cancel download' },
+    );
+    if (!ok) return;
+    await postAction('/jobs/cancel?id=' + encodeURIComponent(j.id), 'cancel');
+  } else if (action === 'rerun') {
+    await postAction('/jobs/rerun?id=' + encodeURIComponent(j.id), 'rerun');
+  } else if (action === 'remove') {
+    const queued = j.status === 'queued';
+    const ok = await confirmDialog(
+      queued
+        ? `Remove "${j.label}" from the queue? It won't be downloaded.`
+        : `Remove "${j.label}" from the list? Any downloaded file is kept.`,
+      { title: queued ? 'Remove queued download' : 'Remove from list', confirmLabel: 'Remove' },
+    );
+    if (!ok) return;
+    await postAction('/jobs/delete?id=' + encodeURIComponent(j.id), 'remove');
+  }
+  void refreshJobs();
+}
+
+async function postAction(url: string, kind: 'cancel' | 'rerun' | 'remove'): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(url, { method: 'POST' });
+  } catch {
+    showToast('Could not reach the server.', 'error');
     return;
   }
-
-  countEl.textContent = jobs.length + (jobs.length === 1 ? ' job' : ' jobs');
-
-  list.innerHTML = jobs.map(j => jobRow(j)).join('');
+  if (res.status === 409) {
+    const msg = (await res.text().catch(() => '')).trim();
+    showToast(msg || 'That download has already changed state.', 'notice');
+  } else if (!res.ok && res.status !== 404) {
+    showToast(`Could not ${kind} it.`, 'error');
+  }
 }
 
-function jobRow(j: Job): string {
-  // Same rule as the file name: a 0 season or episode is left out.
-  const epLabel = (j.Season > 0 ? `S${String(j.Season).padStart(2, '0')}` : '') +
-    (j.Episode > 0 ? `E${String(j.Episode).padStart(2, '0')}` : '');
-  const mode = j.Mode || 'video';
-  const { barClass, pct, label } = parseProgress(j.Progress, j.Status);
-  const statusClass = 'status-' + (j.Status || 'queued');
-  const isAudio = mode === 'audio';
+// decorateJobRow adds the success download links and the failure reason as
+// module extras. Both use DOM APIs / textContent — never innerHTML — so
+// yt-dlp's error text can never inject markup.
+function decorateJobRow(row: HTMLElement, j: UJob): void {
+  row.querySelector('.utuber-links')?.remove();
+  row.querySelector('.utuber-error')?.remove();
 
-  const dlLink = j.Status === 'completed'
-    ? `<div class="dl-actions">
-        <a class="download-link ${isAudio ? 'audio-dl' : ''}" href="/downloads/${encodeURIComponent(j.OutputFile)}" target="_blank" rel="noopener">
-          <svg width="12" height="12" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M6 4l10 6-10 6V4z"/>
-          </svg>
-          Play
-        </a>
-        <a class="download-link ${isAudio ? 'audio-dl' : ''}" href="/downloads/${encodeURIComponent(j.OutputFile)}" download>
-          <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M10 3v10M5 13l5 5 5-5"/><line x1="3" y1="19" x2="17" y2="19"/>
-          </svg>
-          Download
-        </a>
-      </div>`
-    : '';
+  if (j.status === 'success' && j.output_file) {
+    const href = '/downloads/' + encodeURIComponent(j.output_file);
+    const wrap = document.createElement('div');
+    wrap.className = 'utuber-links';
 
-  const errLine = j.Error
-    ? `<div class="job-error" title="${esc(j.Error)}">⚠ ${esc(j.Error)}</div>`
-    : '';
+    const play = document.createElement('a');
+    play.className = 'download-link';
+    play.href = href;
+    play.target = '_blank';
+    play.rel = 'noopener';
+    play.textContent = 'Play';
 
-  return `
-    <div class="job-item">
-      <div class="job-meta">
-        <div class="job-name">${esc(j.ShowName)} — ${esc(j.EpisodeTitle)}</div>
-        <div class="job-sub">
-          ${epLabel ? `<span>${epLabel}</span>` : ''}
-          <span class="mode-badge ${mode}">${mode}</span>
-        </div>
-        ${errLine}
-      </div>
-      <div class="job-right">
-        <div class="job-status-row">
-          <span class="status-pill ${statusClass}">${j.Status}</span>
-          ${j.Status === 'running' ? '' : `<button type="button" class="job-delete" data-job-id="${esc(j.ID)}" data-job-status="${esc(j.Status)}" data-job-name="${esc(j.ShowName)} — ${esc(j.EpisodeTitle)}" title="${j.Status === 'queued' ? 'Remove from queue' : 'Remove from list'}" aria-label="${j.Status === 'queued' ? 'Remove from queue' : 'Remove from list'}">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-          </button>`}
-        </div>
-        ${barClass ? `
-        <div class="progress-wrap">
-          <div class="progress-bar ${barClass}" style="width:${pct}%"></div>
-        </div>
-        <span class="progress-label">${label}</span>
-        ` : ''}
-        ${dlLink}
-      </div>
-    </div>`;
+    const dl = document.createElement('a');
+    dl.className = 'download-link';
+    dl.href = href;
+    dl.setAttribute('download', '');
+    dl.textContent = 'Download';
+
+    wrap.append(play, dl);
+    row.appendChild(wrap);
+  } else if (j.status === 'failed' && j.error) {
+    const err = document.createElement('div');
+    err.className = 'utuber-error';
+    err.textContent = '⚠ ' + j.error;
+    row.appendChild(err);
+  }
 }
 
-function parseProgress(p: string, status: string): { barClass: string; pct: number; label: string } {
-  if (status === 'completed') return { barClass: 'done', pct: 100, label: '' };
-  if (!p) return { barClass: '', pct: 0, label: '' };
+const jobsAdapter: QueuePanelAdapter<UJob> = {
+  key: j => j.id,
+  section: jobSection,
+  title: j => j.label,
+  status: j => j.status,
+  meta: jobMeta,
+  progress: jobProgress,
+  actions: jobActions,
+  onAction: onJobAction,
+  decorate: decorateJobRow,
+};
 
-  if (p.startsWith('download')) {
-    const pct = parseFloat(p.split(' ')[1]) || 0;
-    return { barClass: 'dl', pct, label: `Downloading ${pct.toFixed(0)}%` };
-  }
-  if (p.startsWith('convert') || p === 'converting') {
-    const pct = parseFloat(p.split(' ')[1]) || 0;
-    return { barClass: 'conv', pct: pct || 50, label: 'Converting…' };
-  }
-  if (p === 'done') return { barClass: 'done', pct: 100, label: '' };
+const jobsHost = document.getElementById('jobs-list')!;
+jobsHost.innerHTML = '';
+const jobsPanel = new QueuePanel<UJob>(jobsHost, jobsAdapter, {
+  header: { paused: false, onTogglePause: togglePause },
+});
 
-  return { barClass: '', pct: 0, label: p };
+async function refreshJobs(): Promise<void> {
+  let jobs: UJob[];
+  try {
+    const res = await fetch('/jobs.json');
+    jobs = await res.json();
+  } catch {
+    return;
+  }
+  jobs = jobs || [];
+  jobsPanel.update(jobs);
+
+  const countEl = document.getElementById('jobs-count')!;
+  countEl.textContent = jobs.length ? jobs.length + (jobs.length === 1 ? ' job' : ' jobs') : '';
+}
+
+// ── Queue pause / settings header ────────────────────────────────────────────
+
+async function refreshQueueState(): Promise<void> {
+  let s: SettingsShape;
+  try {
+    const res = await fetch('/settings.json');
+    s = await res.json();
+  } catch {
+    return;
+  }
+  const braked = s.brake_engaged === true || s.queue_paused_by === 'brake';
+  const note = braked ? 'Paused by the taskmaster hand brake' : undefined;
+  jobsPanel.setPaused(!!s.queue_paused, note);
+  syncQueueMenu(s);
+}
+
+async function togglePause(): Promise<void> {
+  let s: SettingsShape;
+  try {
+    const res = await fetch('/settings.json');
+    s = await res.json();
+  } catch {
+    return;
+  }
+  // The hand brake owns the pause state; the toggle is disabled in that case,
+  // but guard here too.
+  if (s.brake_engaged === true || s.queue_paused_by === 'brake') return;
+  await saveQueueSetting({ queue_paused: !s.queue_paused });
+  void refreshQueueState();
+}
+
+interface SettingsShape {
+  python_bin?: string;
+  age_out_days?: number;
+  concurrent_downloads?: number;
+  show_in_taskmaster?: boolean;
+  queue_paused?: boolean;
+  queue_paused_by?: string;
+  brake_engaged?: boolean;
+  cookies_configured?: boolean;
+  cookies_updated_at?: string | null;
+}
+
+function syncQueueMenu(s: SettingsShape): void {
+  const age = document.getElementById('age-out-days') as HTMLInputElement | null;
+  if (age && document.activeElement !== age && s.age_out_days !== undefined) age.value = String(s.age_out_days);
+  const conc = document.getElementById('concurrent-downloads') as HTMLInputElement | null;
+  if (conc && document.activeElement !== conc && s.concurrent_downloads !== undefined) conc.value = String(s.concurrent_downloads);
+  const show = document.getElementById('show-in-taskmaster') as HTMLInputElement | null;
+  if (show && s.show_in_taskmaster !== undefined) show.checked = s.show_in_taskmaster;
+}
+
+async function loadQueueSettings(): Promise<void> {
+  try {
+    const res = await fetch('/settings.json');
+    syncQueueMenu(await res.json());
+  } catch {
+    /* ignore — the poll will retry */
+  }
+}
+
+async function saveQueueSetting(patch: Partial<SettingsShape>): Promise<void> {
+  const status = document.getElementById('queue-settings-status');
+  try {
+    const res = await fetch('/settings.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    if (res.ok) {
+      if (status) { status.style.color = 'var(--color-success)'; status.textContent = 'Saved.'; }
+      void refreshQueueState();
+    } else if (status) {
+      status.style.color = 'var(--color-danger)';
+      status.textContent = (await res.text().catch(() => '')).trim() || 'Save failed.';
+    }
+  } catch {
+    if (status) { status.style.color = 'var(--color-danger)'; status.textContent = 'Connection error.'; }
+  }
 }
 
 function esc(s: string | undefined): string {
@@ -346,34 +589,70 @@ async function saveSettings(): Promise<void> {
   }
 }
 
-// Wire up inline onclick handlers that were in the HTML
+// ── Cookie jar (age-restricted downloads, D5 Fix 2) ─────────────────────────
+
+// cookieAgeText renders the jar's staleness: YouTube rotates these cookies,
+// and a stale jar fails identically to no jar at all, so age has to be
+// visible rather than just "configured: yes".
+function cookieAgeText(s: SettingsShape): string {
+  if (!s.cookies_configured) return 'No cookie file configured.';
+  if (!s.cookies_updated_at) return 'Cookie file configured.';
+  const updated = new Date(s.cookies_updated_at);
+  if (Number.isNaN(updated.getTime())) return 'Cookie file configured.';
+  const ageDays = Math.floor((Date.now() - updated.getTime()) / 86400000);
+  const ageText = ageDays <= 0 ? 'today' : ageDays === 1 ? '1 day ago' : `${ageDays} days ago`;
+  const stale = ageDays >= 14 ? ' — likely stale; YouTube rotates these, re-export if downloads start failing.' : '';
+  return `Cookie file saved ${ageText}.${stale}`;
+}
+
+async function loadCookiesStatus(): Promise<void> {
+  const status = document.getElementById('cookies-status');
+  if (!status) return;
+  try {
+    const res = await fetch('/settings.json');
+    const data: SettingsShape = await res.json();
+    status.textContent = cookieAgeText(data);
+  } catch {
+    status.textContent = 'Connection error.';
+  }
+}
+
+async function saveCookies(): Promise<void> {
+  const textarea = document.getElementById('cookies-txt') as HTMLTextAreaElement;
+  const saveStatus = document.getElementById('cookies-save-status');
+  try {
+    const res = await fetch('/settings.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cookies_txt: textarea.value }),
+    });
+    if (res.ok) {
+      const data: SettingsShape = await res.json();
+      textarea.value = '';
+      if (saveStatus) { saveStatus.style.color = 'var(--color-success)'; saveStatus.textContent = 'Saved.'; }
+      const status = document.getElementById('cookies-status');
+      if (status) status.textContent = cookieAgeText(data);
+    } else if (saveStatus) {
+      saveStatus.style.color = 'var(--color-danger)';
+      saveStatus.textContent = (await res.text().catch(() => '')).trim() || 'Save failed.';
+    }
+  } catch {
+    if (saveStatus) { saveStatus.style.color = 'var(--color-danger)'; saveStatus.textContent = 'Connection error.'; }
+  }
+}
+
+async function clearCookies(): Promise<void> {
+  const textarea = document.getElementById('cookies-txt') as HTMLTextAreaElement;
+  textarea.value = '';
+  await saveCookies();
+}
+
+// Wire up the mode tabs.
 document.querySelectorAll<HTMLButtonElement>('.mode-tab').forEach(tab => {
   tab.addEventListener('click', () => setMode(tab.dataset.mode!));
 });
-// ── Delete a queued or finished job ──
-// The list is rebuilt every poll, so clicks are delegated from the list.
-// A running job has no delete button (stopping a download mid-way needs the
-// cancellation the taskmaster-lane redesign will bring).
-document.getElementById('jobs-list')!.addEventListener('click', async (e) => {
-  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.job-delete');
-  if (!btn) return;
-  const id = btn.dataset.jobId!;
-  const queued = btn.dataset.jobStatus === 'queued';
-  const ok = await confirmDialog(
-    queued
-      ? `Remove "${btn.dataset.jobName}" from the queue? It won't be downloaded.`
-      : `Remove "${btn.dataset.jobName}" from the list? Any downloaded file is kept.`,
-    { title: queued ? 'Remove queued download' : 'Remove from list', confirmLabel: 'Remove' },
-  );
-  if (!ok) return;
-  const res = await fetch(`/jobs/delete?id=${encodeURIComponent(id)}`, { method: 'POST' });
-  if (res.status === 409) {
-    showToast('That download has already started and can\'t be removed.', 'notice');
-  } else if (!res.ok && res.status !== 404) {
-    showToast('Could not remove it.', 'error');
-  }
-  void refreshJobs();
-});
 
-setInterval(refreshJobs, 2000);
-refreshJobs();
+// Poll at the 2000ms floor (Q3).
+setInterval(() => { void refreshJobs(); void refreshQueueState(); }, 2000);
+void refreshJobs();
+void refreshQueueState();

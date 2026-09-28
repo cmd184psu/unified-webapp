@@ -35,6 +35,7 @@ function buildHamburger(root: HTMLElement): void {
     themePicker: true,
     themes,
     mountTrigger: trigger,
+    side: "right",
   });
 }
 
