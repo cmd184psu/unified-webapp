@@ -1,6 +1,6 @@
 # Phase 7: Punch List Fixes
 
-Status: `Approval`
+Status: `Approved`
 Branch: `ui-upgrade`
 Source: `docs/plans/PLAN-ui-unification-phase7-punchlist.md`
 
@@ -70,11 +70,7 @@ CMD> This feels more complex than it should be.. and that's why it's still broke
 | timetracker | C5 restores — set side per trigger position |
 
 
-CMD> The above table may be inaccurate; please double check it
-
-
-Per-module commits (C4-C12) MUST include the `side` wiring from this table.
-
+CMD> The above table may be inaccurate; please double check it.  I'm looking for consistency, but some pages may look better with left instead of right, so it should be deterministic in the configuration.  Tear down the autodetection for this - it does not work.
 
 
 ### C5: Menuserver auth + UI fix (M-1, M-2)
@@ -99,91 +95,22 @@ CMD> Once the hamburger placement bug is fixed in shared code, this should be si
 
 CMD> the only issue is a strange page scrolling issue.  It is possible to scroll too far down and you wind up below the footer
 
-### C10: Utuber consolidation (U-1 through U-3)
+### C10: Utuber
 **Files:** `web/utuber/`
 
-CMD> 
+CMD> Downloads appear to be broken
 
-- U-1/U-2: Remove old hamburger, use shared HamburgerMenu with trigger integrated into existing header on the left
-- U-3: Move python interpreter field and yt-dlp update into the shared hamburger menu + theme picker
-
-**Acceptance criteria:**
-- Single hamburger menu with trigger in existing header (left side)
-- Menu contains: python interpreter, yt-dlp update, theme picker
-- Old custom hamburger menu removed
-- Build succeeds
-
-### C11: Slideshow theme picker + menu reconciliation (SL-1, SL-2)
-**Files:** `web/slideshow/`
-
-Per ADR-020, slideshow keeps its settings panel. Add theme picker dropdown to the existing settings panel. Remove any hidden/unused shared HamburgerMenu if mounted.
-
-**Acceptance criteria:**
-- Theme picker with all 8 themes in slideshow settings panel
-- No duplicate hidden hamburger menu
-- Settings panel continues to work as before
-- Build succeeds
-
-### C12: Admin fixes (A-1 through A-7)
-**Files:** `web/admin/`
-
-- A-1: Fix token copy to clipboard
-- A-2: Investigate passkey registration failure
-- A-3/A-4: Clarify operator PIN UI — improve explanatory text
-- A-5: Add tooltip/help text for cookie domain field
-- A-6: Auto-save settings per action
-- A-7: Improve button/theme styling
-
-**Acceptance criteria:**
-- API token copy works (toast confirms)
-- Passkey registration functional (or clear error if server-side limitation)
-- Operator PIN section has clear, non-confusing text
-- Cookie domain has tooltip explaining purpose
-- Settings save on each individual change
-- Buttons and theme styling consistent with other modules
-- Build succeeds
-
-### C13: Taskmaster fixes (TM-1 through TM-7)
+### C13: Taskmaster 
 **Files:** `web/taskmaster/`
 
-- TM-1: Add toast on copy
-- TM-3: Allow cancel of running task when lane is paused
-- TM-4: Hide "again in ..." countdown during handbrake
-- TM-6: Use `themePicker: true` on the HamburgerMenu (shared button-style picker via `ThemeManager.renderPicker()`). The user asked for a dropdown, but `renderPicker` produces swatch buttons which are the established pattern across all other modules. Use the existing button-style picker for consistency; a dropdown variant would be a separate enhancement.
-- TM-7: Move metrics out of hamburger menu into main content area
+CMD> see taskmaster/utuber lane plan - already approved!
 
-**Acceptance criteria:**
-- Copy button shows toast feedback
-- Can cancel running task when lane is paused
-- No countdown timers visible during handbrake
-- Theme picker functional in hamburger menu
-- Metrics visible in main content, not hamburger menu
-- Build succeeds
-
-### C14: Login page redesign (CC-4) — NON-REGRESSION ENHANCEMENT
+### C14: Login page redesign fix
 **Files:** `web/shared/` or auth module templates
 
-**Scope gate:** This is a UX enhancement, not a regression fix. It is intentionally last in the sequence and may be deferred to a follow-up phase if the regression fixes (C0-C12) consume the available scope. The user explicitly requested it in the punch list.
+CMD> login page looks great, except that it does not keep the theme for the module.  I suspect that we're using a global theme for all login pages -- if so, that's incorrect.  Test: log in: change theme, log out.  Attempt to log in again, the log in should reflect the theme in use for that module.  Try to log in to another module and it should take on the theme for that module.
 
-Redesign the login page to visually separate PIN and LDAP login. Make it look less generic/boring. PIN should be the primary/prominent method with LDAP as a secondary option (e.g., collapsible section or separate tab).
-
-**Acceptance criteria:**
-- PIN and LDAP login are visually separated (not in same form space)
-- PIN is the primary/prominent login method
-- Page looks polished, not generic
-- Works across all themes
-- Responsive at mobile widths
 
 ## ADR
 
 **Decision:** Fix all punch list items in a cross-cutting-first commit sequence.
-
-**Drivers:** 5 BROKEN modules must be restored; shared component fixes (hamburger side, text entry bug) cascade to many modules; user explicitly flagged these as regressions.
-
-**Alternatives considered:** Module-by-module commits — rejected because shared component changes would scatter across commits.
-
-**Why chosen:** Cross-cutting fixes first means each subsequent per-module commit inherits the shared improvements. Clear dependency ordering reduces risk.
-
-**Consequences:** ~15 commits (C0-C14) on ui-upgrade. Shared component changes (C0, C1) must be carefully tested since they affect all modules. Login page redesign (C14) is the most subjective item and may need iteration.
-
-**Follow-ups:** Module-level API token management (issuetracker) noted but explicitly out of scope.

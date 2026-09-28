@@ -1,6 +1,6 @@
 # Mini-FRD: utuber on a taskmaster lane
 
-Status: **draft, not yet planned** (decisions recorded 2026-09-26)
+Status: **planned** (decisions recorded 2026-09-26)
 Scope: `internal/utuber`, `web/utuber`, `internal/taskmaster`, `web/taskmaster`, `web/shared`
 
 ## 1. Goal
