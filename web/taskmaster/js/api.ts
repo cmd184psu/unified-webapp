@@ -22,6 +22,10 @@ export interface Lane extends LaneConfig {
   paused_by?: string;
   created_at: string;
   updated_at: string;
+  /** "" for a regular, config/UI-managed lane; non-empty for a module-owned lane (e.g. "utuber"). */
+  owner?: string;
+  /** 0 = never prune; days after which a module-owned lane's finished func tasks are pruned. */
+  retention_days?: number;
 }
 
 export interface LaneStatus extends Lane {
@@ -40,6 +44,12 @@ export interface Task {
   cooldown_seconds: number;
   sudo: boolean;
   output_file?: string;
+  // Kind, label, payload and payload_version identify and drive a
+  // Go-function ("func") task; kind is "" for an ordinary shell task.
+  kind?: string;
+  label?: string;
+  payload?: unknown;
+  payload_version?: number;
   created_at: string;
   updated_at: string;
 }
@@ -59,10 +69,18 @@ export interface TaskExecution {
   /** Present only for a running execution, merged in from the in-memory process registry. */
   pid?: number;
   suspended?: boolean;
+  // ProgressPct/ProgressLabel are the last persisted progress report for a
+  // func-task execution (undefined/null = never reported or indeterminate).
+  // Result is the func callback's JSON result, set only on success.
+  progress_pct?: number | null;
+  progress_label?: string;
+  result?: unknown;
 }
 
 export interface MetricSummary {
   task_name: string;
+  /** Set (and task_name holds the kind) when this row aggregates every func task of that kind in the lane (P17). */
+  kind?: string;
   group_name: string;
   success_count: number;
   failed_count: number;
@@ -239,6 +257,12 @@ export const api = {
   // surfaces through the normal apiFetch error path.
   cancelExecution(id: number) {
     return apiFetch<{ status: string }>('/api/executions/' + id + '/cancel', { method: 'POST' });
+  },
+  // Creates a new pending execution of the finished execution's task (P18:
+  // 409 if a func task's latest execution already succeeded, or if the
+  // task already has a queued/running execution).
+  rerunExecution(id: number) {
+    return apiFetch<{ execution_id: number }>('/api/executions/' + id + '/rerun', { method: 'POST' });
   },
   pauseExecution(id: number) {
     return apiFetch<{ status: string }>('/api/executions/' + id + '/pause', { method: 'POST' });

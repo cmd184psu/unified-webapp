@@ -51,7 +51,7 @@ func newTestServerFull(t *testing.T, allowSudo bool, sseMax int) (*httptest.Serv
 	procs := worker.NewProcessRegistry()
 	board := broker.NewBroker(0)
 	board.SetMaxSubscribers(sseMax)
-	c := coordinator.New(d, registry, worker.NewSudoGate(allowSudo), cancels, brake, procs, sseMax, board)
+	c := coordinator.New(d, registry, worker.NewSudoGate(allowSudo), cancels, brake, procs, sseMax, board, nil, nil)
 	srv := httptest.NewServer(coordinator.Routes(c))
 	t.Cleanup(func() {
 		srv.Close()
@@ -820,7 +820,7 @@ func TestBrake_EngageCancelsRunningAndPausesLanes_ReleaseRestores(t *testing.T) 
 		w.Wait()
 	}()
 
-	c := coordinator.New(d, outReg, worker.NewSudoGate(false), cancels, brake, procs, 0, board)
+	c := coordinator.New(d, outReg, worker.NewSudoGate(false), cancels, brake, procs, 0, board, nil, nil)
 	srv := httptest.NewServer(coordinator.Routes(c))
 	defer srv.Close()
 

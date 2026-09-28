@@ -89,6 +89,13 @@ func (c *Coordinator) handleExecutionOutput(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// N4: a hidden lane's executions are invisible here too, using the
+	// route's existing 404 (no separate message).
+	if lane, _, found, lerr := c.db.ExecutionLane(execID); lerr == nil && found && c.laneHidden(lane) {
+		response.WriteError(w, http.StatusNotFound, "execution not found")
+		return
+	}
+
 	if c.sseMax > 0 {
 		if n := c.sseSubs.Add(1); n > int64(c.sseMax) {
 			c.sseSubs.Add(-1)

@@ -24,7 +24,7 @@
 
 import { api, MetricSummary, Task, TaskExecution } from './api.js';
 import { LiveController } from './ui/live.js';
-import { patchList } from './ui/live.js';
+import { patchList } from '@shared';
 import { openOutputModal } from './outputmodal.js';
 import { fmtDate, fmtMs, renderStatusBadge } from './status.js';
 
@@ -52,10 +52,30 @@ export function mountTaskDetail(container: HTMLElement, live: LiveController, ta
 
   const meta = document.createElement('div');
   meta.className = 'task-detail-meta';
-  const cmdLine = document.createElement('code');
-  cmdLine.className = 'task-detail-command';
-  cmdLine.textContent = task.command;
-  meta.appendChild(cmdLine);
+  if (task.kind) {
+    // A Go-function task has no shell command — show what drives it
+    // instead: its kind, its (possibly retitled) label, and its payload,
+    // read-only and pretty-printed.
+    const kindLine = document.createElement('code');
+    kindLine.className = 'task-detail-command';
+    kindLine.textContent = 'kind: ' + task.kind + (task.label ? ' · ' + task.label : '');
+    meta.appendChild(kindLine);
+    if (task.payload !== undefined && task.payload !== null) {
+      const payloadPre = document.createElement('pre');
+      payloadPre.className = 'task-detail-payload';
+      try {
+        payloadPre.textContent = JSON.stringify(task.payload, null, 2);
+      } catch {
+        payloadPre.textContent = String(task.payload);
+      }
+      meta.appendChild(payloadPre);
+    }
+  } else {
+    const cmdLine = document.createElement('code');
+    cmdLine.className = 'task-detail-command';
+    cmdLine.textContent = task.command;
+    meta.appendChild(cmdLine);
+  }
   const laneLine = document.createElement('div');
   laneLine.className = 'task-detail-sub';
   laneLine.textContent =

@@ -88,10 +88,11 @@ func apiKeyHash(key string) string {
 func buildControlDispatcher(cfg *config.Config) *Dispatcher {
 	dispatch := newDispatcher()
 	built := make(map[string]http.Handler, len(cfg.Routing))
+	deps := &moduleDeps{cfg: cfg, closers: &dispatch.closers}
 	for host, module := range cfg.Routing {
 		h, ok := built[module]
 		if !ok {
-			hh, err := buildModule(module, cfg, nil)
+			hh, err := buildModule(module, cfg, nil, deps)
 			if err != nil {
 				h = unavailableHandler(module, err)
 			} else {

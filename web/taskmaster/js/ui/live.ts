@@ -1,5 +1,4 @@
-// live.ts — live/pause board-events controller + a surgical DOM list
-// patcher.
+// live.ts — live/pause board-events controller.
 //
 // Global UI policy (see taskmaster-ui-FRD.md §8a): no manual "Refresh"
 // buttons — a live/pause toggle instead, with (a) updates only happening
@@ -8,16 +7,15 @@
 // Built self-contained so it can be lifted wholesale into a future shared
 // UI layer (§8b) — no imports from any taskmaster app code.
 //
+// The surgical DOM list patcher (patchList/PatchListOptions) that used to
+// live here has moved to web/shared/ts/patchlist.ts (plan
+// docs/PLAN-utuber-taskmaster-lane.md §4.11), imported via "@shared" —
+// utuber needs the same primitive, and this file no longer defines it.
+//
 // Usage:
 //   const live = new LiveController();
 //   live.onEvent((ev) => { ... });
 //   live.setEnabled(true); // opens the EventSource
-//
-//   patchList(container, tasks, {
-//     key: (t) => t.id,
-//     create: (t) => renderTaskRow(t),
-//     update: (el, t) => updateTaskRow(el, t),
-//   });
 
 const LIVE_ENABLED_KEY = "tm.live.enabled";
 const LIVE_INTERVAL_KEY = "tm.live.interval";
@@ -33,6 +31,10 @@ export interface BoardEvent {
   execution_id?: number;
   status?: string;
   engaged?: boolean;
+  // ProgressPct/ProgressLabel carry a "task-progress" event's payload
+  // (func-task progress); unset for every other event type.
+  progress_pct?: number | null;
+  progress_label?: string;
 }
 
 type BoardEventListener = (ev: BoardEvent) => void;
@@ -170,72 +172,6 @@ export class LiveController {
     if (this.source) {
       this.source.close();
       this.source = null;
-    }
-  }
-}
-
-export interface PatchListOptions<T> {
-  /** Stable identity for a list item, used to match old/new DOM nodes. */
-  key: (item: T) => string | number;
-  /** Builds a brand-new DOM node for an item not currently rendered. */
-  create: (item: T) => HTMLElement;
-  /** Updates an existing DOM node in place to reflect the item's new data. */
-  update: (el: HTMLElement, item: T) => void;
-}
-
-const KEY_ATTR = "data-tm-key";
-
-/**
- * Surgically reconciles `container`'s children to match `items`, in order:
- * inserts nodes for new keys, removes nodes for keys no longer present, and
- * calls `update` in place (no re-creation) for keys that persist —
- * reordering existing DOM nodes rather than rebuilding them. Never resets
- * innerHTML, so scroll position, focus, and selection inside untouched rows
- * are preserved. This is the anti-jitter primitive backing the live/pause
- * + surgical-refresh UI policy.
- */
-export function patchList<T>(
-  container: HTMLElement,
-  items: T[],
-  opts: PatchListOptions<T>
-): void {
-  const existingByKey = new Map<string, HTMLElement>();
-  for (const child of Array.from(container.children)) {
-    const el = child as HTMLElement;
-    const k = el.getAttribute(KEY_ATTR);
-    if (k !== null) existingByKey.set(k, el);
-  }
-
-  const seenKeys = new Set<string>();
-  let cursor: ChildNode | null = container.firstChild;
-
-  for (const item of items) {
-    const key = String(opts.key(item));
-    seenKeys.add(key);
-
-    let el = existingByKey.get(key);
-    if (el) {
-      opts.update(el, item);
-    } else {
-      el = opts.create(item);
-      el.setAttribute(KEY_ATTR, key);
-    }
-
-    // Ensure `el` is at the current cursor position without disturbing
-    // other untouched nodes.
-    if (cursor !== el) {
-      container.insertBefore(el, cursor);
-    } else {
-      cursor = cursor.nextSibling;
-      continue;
-    }
-    cursor = el.nextSibling;
-  }
-
-  // Remove any nodes whose keys are no longer present.
-  for (const [key, el] of existingByKey) {
-    if (!seenKeys.has(key)) {
-      el.remove();
     }
   }
 }

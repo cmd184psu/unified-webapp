@@ -32,6 +32,14 @@ export interface ModalHandle {
   overlay: HTMLElement;
   panel: HTMLElement;
   close: () => void;
+  /**
+   * Overrides both closeOnEscape and closeOnOverlayClick at runtime.
+   * certmachine's Replace-CA dialog uses this to block Esc/backdrop while a
+   * streamed request is in flight (nothing to undo -- the crypto and the
+   * transaction have already started) and restore normal closing once it
+   * settles.
+   */
+  setClosable: (closable: boolean) => void;
 }
 
 /**
@@ -40,8 +48,14 @@ export interface ModalHandle {
  * element on close.
  */
 export function openModal(contentEl: HTMLElement, opts: ModalOptions = {}): ModalHandle {
-  const closeOnEscape = opts.closeOnEscape !== false;
-  const closeOnOverlayClick = opts.closeOnOverlayClick !== false;
+  // The modal's own configured defaults -- setClosable(true) restores these,
+  // rather than forcing both true, so a modal opened with (say)
+  // closeOnEscape:false stays that way once whatever temporarily disabled
+  // closing (certmachine's in-flight Replace-CA request) re-enables it.
+  const defaultCloseOnEscape = opts.closeOnEscape !== false;
+  const defaultCloseOnOverlayClick = opts.closeOnOverlayClick !== false;
+  let closeOnEscape = defaultCloseOnEscape;
+  let closeOnOverlayClick = defaultCloseOnOverlayClick;
   const previouslyFocused = document.activeElement as HTMLElement | null;
 
   const overlay = document.createElement("div");
@@ -116,7 +130,17 @@ export function openModal(contentEl: HTMLElement, opts: ModalOptions = {}): Moda
   const focusable = getFocusable(panel);
   (focusable[0] ?? panel).focus();
 
-  return { overlay, panel, close };
+  function setClosable(closable: boolean): void {
+    if (closable) {
+      closeOnEscape = defaultCloseOnEscape;
+      closeOnOverlayClick = defaultCloseOnOverlayClick;
+    } else {
+      closeOnEscape = false;
+      closeOnOverlayClick = false;
+    }
+  }
+
+  return { overlay, panel, close, setClosable };
 }
 
 export interface DialogOptions {

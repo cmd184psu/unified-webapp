@@ -38,15 +38,20 @@ function fail(message) {
 // (A7.13), plus web/shared/ts/toast.test.ts, added at phase2 C2 (§5 Step 2.5),
 // plus web/shared/ts/theme.test.ts, added at phase2 C3 (§5 Step 3.4), plus
 // web/shared/ts/menu.test.ts, added at phase2 C4 (§5 Step 4.4).
+// plus web/shared/ts/patchlist.test.ts and web/shared/ts/queuepanel.test.ts,
+// added at PLAN-utuber-taskmaster-lane.md Phase 4 (D10 shared queue panel).
 const suites = [
   { name: "sshcommand", entry: "web/multissh/js/sshcommand.test.ts", runner: "esbuild-cjs" },
   { name: "certmachine-status", entry: "web/certmachine/js/status.test.ts", runner: "esbuild-cjs" },
   { name: "certmachine-listmodel", entry: "web/certmachine/js/listmodel.test.ts", runner: "esbuild-cjs" },
+  { name: "certmachine-ndjson", entry: "web/certmachine/js/ndjson.test.ts", runner: "esbuild-cjs" },
   { name: "certmachine-generate", entry: "web/certmachine/js/generate.test.ts", runner: "esbuild-cjs" },
   { name: "shared-modal", entry: "web/shared/ts/modal.test.ts", runner: "esbuild-cjs" },
   { name: "shared-toast", entry: "web/shared/ts/toast.test.ts", runner: "esbuild-cjs" },
   { name: "shared-theme", entry: "web/shared/ts/theme.test.ts", runner: "esbuild-cjs" },
   { name: "shared-menu", entry: "web/shared/ts/menu.test.ts", runner: "esbuild-cjs" },
+  { name: "shared-patchlist", entry: "web/shared/ts/patchlist.test.ts", runner: "esbuild-cjs" },
+  { name: "shared-queuepanel", entry: "web/shared/ts/queuepanel.test.ts", runner: "esbuild-cjs" },
   { name: "grocery", entry: "web/grocery/js/main.test.ts", runner: "node-test" },
 ];
 

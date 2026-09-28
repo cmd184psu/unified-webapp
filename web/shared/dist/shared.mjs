@@ -6,8 +6,10 @@ function getFocusable(root) {
 
 // web/shared/ts/modal.ts
 function openModal(contentEl, opts = {}) {
-  const closeOnEscape = opts.closeOnEscape !== false;
-  const closeOnOverlayClick = opts.closeOnOverlayClick !== false;
+  const defaultCloseOnEscape = opts.closeOnEscape !== false;
+  const defaultCloseOnOverlayClick = opts.closeOnOverlayClick !== false;
+  let closeOnEscape = defaultCloseOnEscape;
+  let closeOnOverlayClick = defaultCloseOnOverlayClick;
   const previouslyFocused = document.activeElement;
   const overlay = document.createElement("div");
   overlay.className = "ui-modal-overlay";
@@ -70,7 +72,16 @@ function openModal(contentEl, opts = {}) {
   overlay.addEventListener("mousedown", onOverlayClick);
   const focusable = getFocusable(panel);
   (focusable[0] ?? panel).focus();
-  return { overlay, panel, close };
+  function setClosable(closable) {
+    if (closable) {
+      closeOnEscape = defaultCloseOnEscape;
+      closeOnOverlayClick = defaultCloseOnOverlayClick;
+    } else {
+      closeOnEscape = false;
+      closeOnOverlayClick = false;
+    }
+  }
+  return { overlay, panel, close, setClosable };
 }
 function confirmDialog(message, opts = {}) {
   return new Promise((resolve) => {
@@ -1487,18 +1498,308 @@ function openTreePicker(options) {
     }
   });
 }
+
+// web/shared/ts/patchlist.ts
+var KEY_ATTR = "data-ui-key";
+function patchList(container, items, opts) {
+  const existingByKey = /* @__PURE__ */ new Map();
+  for (const child of Array.from(container.children)) {
+    const el2 = child;
+    const k = el2.getAttribute(KEY_ATTR);
+    if (k !== null) existingByKey.set(k, el2);
+  }
+  const seenKeys = /* @__PURE__ */ new Set();
+  let cursor = container.firstChild;
+  for (const item of items) {
+    const key = String(opts.key(item));
+    seenKeys.add(key);
+    let el2 = existingByKey.get(key);
+    if (el2) {
+      opts.update(el2, item);
+    } else {
+      el2 = opts.create(item);
+      el2.setAttribute(KEY_ATTR, key);
+    }
+    if (cursor !== el2) {
+      container.insertBefore(el2, cursor);
+    } else {
+      cursor = cursor.nextSibling;
+      continue;
+    }
+    cursor = el2.nextSibling;
+  }
+  for (const [key, el2] of existingByKey) {
+    if (!seenKeys.has(key)) {
+      el2.remove();
+    }
+  }
+}
+
+// web/shared/ts/status.ts
+function statusSymbol(status) {
+  if (status === "success") return "\u2713";
+  if (status === "failed") return "\u2715";
+  if (status === "canceled") return "\u2298";
+  if (status === "suspended") return "\u23F8";
+  if (status === "running") return "\u25CF";
+  if (status === "pending") return "\u2026";
+  return "\u2022";
+}
+function effectiveStatus(status, suspended) {
+  return status === "running" && suspended ? "suspended" : status;
+}
+
+// web/shared/ts/queuepanel.ts
+var DEFAULT_TITLES = {
+  running: "Running",
+  upnext: "Up next",
+  recent: "Recent"
+};
+var DEFAULT_EMPTY = {
+  running: "nothing running",
+  upnext: "queue is empty",
+  recent: "no history yet"
+};
+var SECTIONS = ["running", "upnext", "recent"];
+var ACTION_GLYPHS = {
+  cancel: { glyph: "\u2716", label: "Cancel" },
+  pause: { glyph: "\u23F8", label: "Pause" },
+  resume: { glyph: "\u25B6", label: "Resume" },
+  rerun: { glyph: "\u21BB", label: "Re-run" },
+  remove: { glyph: "\u{1F5D1}", label: "Remove" }
+};
+function bucketQueue(items, section, recentLimit) {
+  const out = { running: [], upnext: [], recent: [] };
+  for (const item of items) {
+    const sec = section(item);
+    if (sec === null) continue;
+    out[sec].push(item);
+  }
+  if (recentLimit !== void 0 && Number.isFinite(recentLimit) && recentLimit >= 0) {
+    out.recent = out.recent.slice(0, recentLimit);
+  }
+  return out;
+}
+function progressView(p) {
+  if (!p) return { show: false, pct: 0, indeterminate: false, label: "" };
+  if (p.pct === null) return { show: true, pct: 0, indeterminate: true, label: p.label ?? "" };
+  const clamped = Math.max(0, Math.min(100, p.pct));
+  return { show: true, pct: clamped, indeterminate: false, label: p.label ?? "" };
+}
+var EMPTY_KEY = "__empty__";
+var QueuePanel = class {
+  constructor(host, adapter, opts = {}) {
+    this.headerNoteEl = null;
+    this.headerToggleBtn = null;
+    this.host = host;
+    this.adapter = adapter;
+    this.opts = opts;
+    this.root = document.createElement("div");
+    this.root.className = "ui-queue";
+    if (opts.header) {
+      this.root.appendChild(this.buildHeader(opts.header));
+    }
+    this.lists = { running: document.createElement("div"), upnext: document.createElement("div"), recent: document.createElement("div") };
+    for (const sec of SECTIONS) {
+      this.root.appendChild(this.buildSection(sec));
+    }
+    this.host.appendChild(this.root);
+  }
+  buildHeader(header) {
+    const wrap = document.createElement("div");
+    wrap.className = "ui-queue-header";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ui-queue-header-toggle";
+    btn.addEventListener("click", () => void header.onTogglePause());
+    wrap.appendChild(btn);
+    this.headerToggleBtn = btn;
+    const note = document.createElement("span");
+    note.className = "ui-queue-header-note";
+    wrap.appendChild(note);
+    this.headerNoteEl = note;
+    this.applyHeaderState(header.paused, header.note);
+    return wrap;
+  }
+  applyHeaderState(paused, note) {
+    if (this.headerToggleBtn) {
+      this.headerToggleBtn.textContent = paused ? "\u25B6" : "\u23F8";
+      this.headerToggleBtn.title = paused ? "Resume queue" : "Pause queue";
+      this.headerToggleBtn.setAttribute("aria-label", this.headerToggleBtn.title);
+      this.headerToggleBtn.disabled = !!note;
+    }
+    if (this.headerNoteEl) {
+      this.headerNoteEl.textContent = note ?? "";
+      this.headerNoteEl.hidden = !note;
+    }
+  }
+  /** Updates the header pause state and optional note (e.g. "Paused by taskmaster hand brake"). */
+  setPaused(paused, note) {
+    this.applyHeaderState(paused, note);
+  }
+  buildSection(sec) {
+    const title = this.opts.titles?.[sec] ?? DEFAULT_TITLES[sec];
+    const collapsible = sec === "recent" && (this.opts.recentCollapsible ?? true);
+    const wrap = document.createElement(collapsible ? "details" : "div");
+    wrap.className = "ui-queue-section ui-queue-section-" + sec;
+    if (collapsible) wrap.open = this.opts.recentOpen ?? false;
+    const heading = document.createElement(collapsible ? "summary" : "div");
+    heading.className = "ui-queue-title";
+    heading.textContent = title;
+    wrap.appendChild(heading);
+    const list = this.lists[sec];
+    list.className = "ui-queue-list ui-queue-list-" + sec;
+    wrap.appendChild(list);
+    return wrap;
+  }
+  /** Within a section, input order is preserved. */
+  update(items) {
+    const buckets = bucketQueue(items, (t) => this.adapter.section(t), this.opts.recentLimit);
+    for (const sec of SECTIONS) {
+      this.renderSection(sec, buckets[sec]);
+    }
+  }
+  renderSection(sec, items) {
+    const list = this.lists[sec];
+    patchList(list, items, {
+      key: (item) => this.adapter.key(item),
+      create: (item) => this.createRow(item),
+      update: (row, item) => this.updateRow(row, item)
+    });
+    this.toggleEmptyNote(list, items.length === 0, this.opts.emptyText?.[sec] ?? DEFAULT_EMPTY[sec]);
+  }
+  toggleEmptyNote(list, empty, text) {
+    let note = list.querySelector(".ui-queue-empty-note");
+    if (empty) {
+      if (!note) {
+        note = document.createElement("div");
+        note.className = "ui-queue-empty-note";
+        note.setAttribute("data-ui-key", EMPTY_KEY);
+        list.appendChild(note);
+      }
+      note.textContent = text;
+    } else {
+      note?.remove();
+    }
+  }
+  createRow(item) {
+    const row = document.createElement("div");
+    row.className = "ui-queue-row";
+    const name = document.createElement("span");
+    name.className = "ui-queue-name";
+    row.appendChild(name);
+    const badge = document.createElement("span");
+    badge.className = "ui-queue-badge";
+    row.appendChild(badge);
+    const meta = document.createElement("span");
+    meta.className = "ui-queue-meta";
+    row.appendChild(meta);
+    const progressWrap = document.createElement("div");
+    progressWrap.className = "ui-queue-progress";
+    const progressBar = document.createElement("div");
+    progressBar.className = "ui-queue-progress-bar";
+    const progressLabel = document.createElement("span");
+    progressLabel.className = "ui-queue-progress-label";
+    progressWrap.append(progressBar, progressLabel);
+    row.appendChild(progressWrap);
+    const actions = document.createElement("div");
+    actions.className = "ui-queue-actions";
+    row.appendChild(actions);
+    this.updateRow(row, item, true);
+    return row;
+  }
+  updateRow(row, item, created = false) {
+    const nameEl = row.querySelector(".ui-queue-name");
+    if (nameEl) {
+      nameEl.textContent = this.adapter.title(item);
+      if (this.adapter.onTitleClick) {
+        nameEl.classList.add("ui-queue-name-clickable");
+        nameEl.setAttribute("role", "button");
+        nameEl.tabIndex = 0;
+        const onClick = () => this.adapter.onTitleClick?.(item);
+        nameEl.onclick = onClick;
+        nameEl.onkeydown = (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onClick();
+          }
+        };
+      }
+    }
+    const badgeEl = row.querySelector(".ui-queue-badge");
+    if (badgeEl) {
+      if (this.adapter.renderBadge) {
+        this.adapter.renderBadge(badgeEl, item);
+      } else {
+        const status = this.adapter.status(item);
+        badgeEl.className = "ui-queue-badge ui-queue-badge-" + status;
+        badgeEl.textContent = status;
+        badgeEl.title = status;
+        badgeEl.setAttribute("aria-label", status);
+      }
+    }
+    const metaEl = row.querySelector(".ui-queue-meta");
+    if (metaEl) metaEl.textContent = this.adapter.meta ? this.adapter.meta(item) : "";
+    const progressWrap = row.querySelector(".ui-queue-progress");
+    const progressBar = row.querySelector(".ui-queue-progress-bar");
+    const progressLabelEl = row.querySelector(".ui-queue-progress-label");
+    const pv = progressView(this.adapter.progress ? this.adapter.progress(item) : null);
+    if (progressWrap) progressWrap.hidden = !pv.show;
+    if (progressBar) {
+      progressBar.classList.toggle("ui-queue-progress-indeterminate", pv.indeterminate);
+      progressBar.style.width = pv.indeterminate ? "" : pv.pct + "%";
+      progressBar.setAttribute("role", "progressbar");
+      progressBar.setAttribute("aria-valuemin", "0");
+      progressBar.setAttribute("aria-valuemax", "100");
+      if (pv.indeterminate) {
+        progressBar.removeAttribute("aria-valuenow");
+      } else {
+        progressBar.setAttribute("aria-valuenow", String(pv.pct));
+      }
+      const ariaLabel = pv.label || (pv.indeterminate ? "in progress" : pv.pct + "%");
+      progressBar.setAttribute("aria-label", ariaLabel);
+    }
+    if (progressLabelEl) progressLabelEl.textContent = pv.label;
+    const actionsEl = row.querySelector(".ui-queue-actions");
+    if (actionsEl) {
+      actionsEl.textContent = "";
+      for (const kind of this.adapter.actions(item)) {
+        const glyph = ACTION_GLYPHS[kind];
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "ui-queue-action ui-queue-action-" + kind;
+        btn.textContent = glyph.glyph;
+        btn.title = glyph.label;
+        btn.setAttribute("aria-label", glyph.label);
+        btn.addEventListener("click", () => void this.adapter.onAction(kind, item, btn));
+        actionsEl.appendChild(btn);
+      }
+    }
+    if (this.adapter.decorate) this.adapter.decorate(row, item, created);
+  }
+  list(section) {
+    return this.lists[section];
+  }
+  destroy() {
+    this.root.remove();
+  }
+};
 export {
   FileTree,
   HamburgerMenu,
+  QueuePanel,
   THEMES,
   ThemeManager,
   alertDialog,
   confirmDialog,
   copyText,
   createCopyButton,
+  effectiveStatus,
   openModal,
   openTreePicker,
+  patchList,
   promptDialog,
   setTheme,
-  showToast
+  showToast,
+  statusSymbol
 };

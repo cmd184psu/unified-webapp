@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type LaneConfig struct {
 	Name  string `json:"name"`
@@ -15,19 +18,25 @@ type Config struct {
 }
 
 type Task struct {
-	ID              int64     `json:"id"`
-	Name            string    `json:"name"`
-	LaneName        string    `json:"lane_name"`
-	Enabled         bool      `json:"enabled"`
-	Paused          bool      `json:"paused"`
-	CooldownSeconds int       `json:"cooldown_seconds"`
-	Repeat          bool      `json:"repeat"`
-	Command         string    `json:"command"`
-	Position        int       `json:"position"`
-	Sudo            bool      `json:"sudo"`
-	OutputFile      string    `json:"output_file,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID              int64  `json:"id"`
+	Name            string `json:"name"`
+	LaneName        string `json:"lane_name"`
+	Enabled         bool   `json:"enabled"`
+	Paused          bool   `json:"paused"`
+	CooldownSeconds int    `json:"cooldown_seconds"`
+	Repeat          bool   `json:"repeat"`
+	Command         string `json:"command"`
+	Position        int    `json:"position"`
+	Sudo            bool   `json:"sudo"`
+	OutputFile      string `json:"output_file,omitempty"`
+	// Kind, Label, Payload and PayloadVersion identify and drive a
+	// Go-function ("func") task (empty Kind = ordinary shell task).
+	Kind           string          `json:"kind,omitempty"`
+	Label          string          `json:"label,omitempty"`
+	Payload        json.RawMessage `json:"payload,omitempty"`
+	PayloadVersion int             `json:"payload_version,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
 }
 
 type TaskExecution struct {
@@ -47,6 +56,18 @@ type TaskExecution struct {
 	// since the process (and any suspended state) is gone on restart.
 	Pid       *int `json:"pid,omitempty"`
 	Suspended bool `json:"suspended,omitempty"`
+	// ProgressPct/ProgressLabel are the last persisted progress report for a
+	// func-task execution (nil = never reported or indeterminate). Result is
+	// the func callback's JSON result, set only on success.
+	ProgressPct   *int            `json:"progress_pct,omitempty"`
+	ProgressLabel string          `json:"progress_label,omitempty"`
+	Result        json.RawMessage `json:"result,omitempty"`
+}
+
+// Progress is a single progress report: Pct 0-100, or nil for indeterminate.
+type Progress struct {
+	Pct   *int
+	Label string
 }
 
 type Lane struct {
@@ -57,6 +78,13 @@ type Lane struct {
 	PausedBy  string     `json:"paused_by,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
+	// Owner, Hidden and RetentionDays support a module-owned lane (e.g.
+	// a module): Owner names the owning module ("" = a regular, config/UI-managed
+	// lane), Hidden excludes it from every TM HTTP route/board event, and
+	// RetentionDays (0 = never) drives the func-task pruner.
+	Owner         string `json:"owner,omitempty"`
+	Hidden        bool   `json:"-"`
+	RetentionDays int    `json:"retention_days,omitempty"`
 }
 
 type LaneStatus struct {
@@ -65,7 +93,11 @@ type LaneStatus struct {
 }
 
 type MetricSummary struct {
-	TaskName      string     `json:"task_name"`
+	TaskName string `json:"task_name"`
+	// Kind is set (and TaskName holds the kind, not the task name) when this
+	// row aggregates every func task of that kind in the lane (P17); empty
+	// for a shell task's per-task row.
+	Kind          string     `json:"kind,omitempty"`
 	GroupName     string     `json:"group_name"`
 	SuccessCount  int        `json:"success_count"`
 	FailedCount   int        `json:"failed_count"`

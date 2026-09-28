@@ -855,3 +855,18 @@ body {
   justify-content: flex-end;
   gap: 8px;
 }
+.cert-ca-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cert-ca-progress-bar {
+  width: 100%;
+  height: 10px;
+  accent-color: var(--color-primary);
+}
+.cert-ca-progress-status {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}

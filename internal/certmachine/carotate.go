@@ -483,9 +483,12 @@ const (
 	ReplacePhaseSaving ReplacePhase = "saving"
 )
 
-// ReplaceProgress is one event ReplaceCA's progress hook receives. Done and
-// Total are meaningful only for ReplacePhaseLeafKeys; they are zero
-// otherwise.
+// ReplaceProgress is one event ReplaceCA's progress hook receives. Total is
+// the overall leaf-key count (0 when none will be re-issued) and is sent on
+// every event, including ReplacePhaseCAKey and ReplacePhaseSaving, so a
+// client can compute an overall percentage from the very first event rather
+// than only once ReplacePhaseLeafKeys begins. Done is meaningful only for
+// ReplacePhaseLeafKeys; it is zero otherwise.
 type ReplaceProgress struct {
 	Phase ReplacePhase
 	Done  int
@@ -602,11 +605,26 @@ func (s *Store) ReplaceCA(ctx context.Context, name, existing string, previousSt
 		prevStale:  caRowKeysFromCerts(oldPreviousActive),
 	}
 
+	// leafKeyTotal is every leaf that will be re-issued in this call -- the
+	// P3 `existing` set plus the `previousStale` set. Computed here, before
+	// any crypto, from data already read during validation (p3Certs,
+	// oldPreviousActive), so every progress event -- including ca-key, the
+	// very first one -- can carry the overall size (the client's progress
+	// bar needs the total from the start to be determinate throughout, not
+	// just once leaf-keys begins).
+	var leafKeyTotal int
+	if existing == "reissue" {
+		leafKeyTotal += len(p3Certs)
+	}
+	if previousStale != nil && *previousStale == "reissue" {
+		leafKeyTotal += len(oldPreviousActive)
+	}
+
 	// 2. Crypto, outside the transaction (R2). Validation has fully passed
 	// by this point, so the progress hook (if any) may now fire -- never
 	// before (a validation/P4 error above is still returned with no event).
 	if opt.progress != nil {
-		opt.progress(ReplaceProgress{Phase: ReplacePhaseCAKey})
+		opt.progress(ReplaceProgress{Phase: ReplacePhaseCAKey, Total: leafKeyTotal})
 	}
 	if err := ctx.Err(); err != nil {
 		return ReplaceResult{}, err
@@ -630,17 +648,6 @@ func (s *Store) ReplaceCA(ctx context.Context, name, existing string, previousSt
 		Created:     time.Now().UTC().Format(time.RFC3339),
 	}
 
-	// leafKeyTotal is every leaf that will be re-issued in this call -- the
-	// P3 `existing` set plus the `previousStale` set -- computed before
-	// either loop runs so ReplacePhaseLeafKeys events carry the right Total
-	// from the very first one.
-	var leafKeyTotal int
-	if existing == "reissue" {
-		leafKeyTotal += len(p3Certs)
-	}
-	if previousStale != nil && *previousStale == "reissue" {
-		leafKeyTotal += len(oldPreviousActive)
-	}
 	var leafKeyDone int
 	onLeafKey := func() {
 		if opt.progress == nil {
@@ -695,7 +702,7 @@ func (s *Store) ReplaceCA(ctx context.Context, name, existing string, previousSt
 	// 3. WithTx: re-read the concurrency snapshot first, write nothing if it
 	// moved, otherwise run steps 1-6 in exactly this order.
 	if opt.progress != nil {
-		opt.progress(ReplaceProgress{Phase: ReplacePhaseSaving})
+		opt.progress(ReplaceProgress{Phase: ReplacePhaseSaving, Total: leafKeyTotal})
 	}
 	if err := ctx.Err(); err != nil {
 		return ReplaceResult{}, err

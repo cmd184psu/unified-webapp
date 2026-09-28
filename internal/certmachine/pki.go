@@ -412,6 +412,23 @@ func GenerateNamedCA(name string) (certPEM, keyPEM []byte, err error) {
 	return encodeCertPEM(der), encodeKeyPEM(key), nil
 }
 
+// genLeafKey is GenerateLeaf's leaf-key generation seam: production always
+// calls defaultGenLeafKey (a real RSA-2048 key, exactly as before this
+// seam existed). It exists only so the certmachine package's own test suite
+// can install a cheaper generator via TestMain (see main_test.go) -- RSA-2048
+// keygen is the single largest cost driver in this package's tests, one per
+// leaf certificate generated. It is a package var, not a Store field or
+// R7 test seam, because it must be installed once, in TestMain, before any
+// test runs, and never mutated again: TestMain runs sequentially before
+// m.Run() starts any test, so setting it there is race-free even though the
+// whole suite (including this var's use inside GenerateLeaf) then runs under
+// t.Parallel().
+var genLeafKey = defaultGenLeafKey
+
+func defaultGenLeafKey() (*rsa.PrivateKey, error) {
+	return rsa.GenerateKey(rand.Reader, 2048)
+}
+
 // GenerateLeaf issues a leaf certificate for req, signed by caCert/caKey,
 // valid for validityDays (default_validity_days for every caller except
 // Store.Edit, the CA-replacement plan's one FR-4 exception, which passes an
@@ -431,7 +448,7 @@ func GenerateNamedCA(name string) (certPEM, keyPEM []byte, err error) {
 // the existing root -- a deliberate deviation from parity (open question
 // CM-1), not an oversight.
 func GenerateLeaf(caCert *x509.Certificate, caKey *rsa.PrivateKey, req CertRequest, validityDays int) (LeafResult, error) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := genLeafKey()
 	if err != nil {
 		return LeafResult{}, fmt.Errorf("certmachine: generate leaf key: %w", err)
 	}

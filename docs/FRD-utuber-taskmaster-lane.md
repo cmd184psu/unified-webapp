@@ -11,6 +11,7 @@ Taskmaster gains the ability to run registered **Go functions** (not only
 shell commands) and to show an optional **progress bar**. Both modules
 render their queues with one **shared queue/lane panel**.
 
+
 Why: this is one binary by design (DRY, consistency, fewer bugs, lower
 CPU/memory on small hardware). A second queue engine is duplication, and
 the queue features utuber is missing are the ones taskmaster already has:
@@ -54,13 +55,30 @@ This is expected to be **destructive** to utuber's current queue code
 
 ## 4. Open questions (for planning)
 1. The exact Go interface between utuber and taskmaster: registration at build time vs. runtime; how the payload is typed and versioned.
+
+That will have be determined by the agent.  I would suggest creating a generic paylaod handler structure in taskmaster (or shared) and inheriting it in utuber.
+
 2. Where Go-task payloads are stored (a JSON column on the task/execution?) and how they are validated on restart.
+
+How about a break out badge that says 'payload' and when you click the badge, you get a modal dialog with pretty-printed json.  The utuber side would have to validate.  Perhaps there's a validate() function abstracted upstream and utuber must implement it.
+
 3. Progress update rate limiting (yt-dlp emits many lines).
+
+The progress update simply has to match what utuber does today.  it does not have to reinvent something new or better, necessarily.
+
 4. What "hidden" means for metrics: are utuber runs excluded from taskmaster's Metrics page too?
+
+Yes, otherwise it would be confusing.  Again, hidden is optional.. so there should be an option of including downloads in the metrics, when not hidden.
+
 5. Whether other modules should later get lanes the same way (a general "module lane" pattern).
+
+Yes, eventually, but not at this time.
 
 ## 5. Out of scope
 - Moving utuber's yt-dlp update into taskmaster.
+
+Disagree.. there's no reason why this couldn't be thrown at taskmaster as a run-once shell task.  Upgrading yt-dlp would use a generic shell-task lane, could use sudo optionally (if taskmaster currently permits it) and upgrading yt-dlp would be included in the metrics.
+
 - Hand brake integration for the utuber lane (not required; may fall out for free).
 - Importing utuber's current in-memory history.
 

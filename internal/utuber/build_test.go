@@ -34,7 +34,7 @@ func buildTestModule(t *testing.T) (http.Handler, config.UtuberConfig) {
 		Workers:     0,
 		PythonBin:   "python3.12",
 	}
-	h, err := Build(cfg)
+	h, err := Build(cfg, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestBuildFailsWhenDownloadDirCannotBeCreated(t *testing.T) {
 		DownloadDir: blocker,
 		Workers:     0,
 		PythonBin:   "python3.12",
-	})
+	}, nil)
 	if err == nil {
 		t.Fatal("Build succeeded with a file as DownloadDir, want error")
 	}

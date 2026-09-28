@@ -4,8 +4,10 @@ import type {
   CertListResponse,
   CertMutationResponse,
   ImportReport,
+  ReplaceProgressEvent,
   ReplaceResult,
 } from "./types";
+import { parseNDJSONChunk, parseNDJSONFinal } from "./ndjson";
 
 /** Config values used if `/api/config` cannot be reached, matching the server's own defaults. */
 const FALLBACK_CONFIG: AppConfig = {
@@ -246,6 +248,101 @@ export async function replaceCA(input: ReplaceCAInput): Promise<ReplaceResult> {
     throw new Error(await errorMessage(res, "failed to replace the certificate authority"));
   }
   return (await res.json()) as ReplaceResult;
+}
+
+/** One line of POST /api/ca/replace's NDJSON stream (handler.go's ndjson*Line types). */
+interface ndjsonLine {
+  type: "progress" | "result" | "error";
+  phase?: string;
+  done?: number;
+  total?: number;
+  status?: number;
+  error?: string;
+  ca?: unknown;
+  reissued?: number;
+  deleted?: number;
+  kept?: number;
+  clamped?: number;
+  previousDropped?: boolean;
+}
+
+function isReplaceProgressPhase(phase: string | undefined): phase is ReplaceProgressEvent["phase"] {
+  return phase === "ca-key" || phase === "leaf-keys" || phase === "saving";
+}
+
+/**
+ * Replace the current CA with a newly generated one, the same as `replaceCA`,
+ * but over the streaming NDJSON progress mode (`Accept: application/x-ndjson`)
+ * instead of a single JSON response: `onProgress` is called once per event as
+ * the server reports it (a new CA key, each re-issued leaf's key, then the
+ * short transaction that saves everything). Rejects with the same,
+ * client-safe message either path can produce -- a non-OK status before any
+ * streaming started, or the stream's own final `"error"` line once it did.
+ *
+ * A browser without streaming `Response.body` support (or a test
+ * environment) falls back to decoding the whole response as JSON, since a
+ * non-streaming client still receives the exact same bytes, just without
+ * incremental delivery -- `onProgress` simply never fires in that case.
+ */
+export async function replaceCAWithProgress(
+  input: ReplaceCAInput,
+  onProgress: (ev: ReplaceProgressEvent) => void,
+): Promise<ReplaceResult> {
+  const res = await fetch("/api/ca/replace", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/x-ndjson" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    throw new Error(await errorMessage(res, "failed to replace the certificate authority"));
+  }
+  let result: ReplaceResult | null = null;
+
+  const handleLine = (line: ndjsonLine): void => {
+    if (line.type === "progress") {
+      if (isReplaceProgressPhase(line.phase)) {
+        onProgress({ phase: line.phase, done: line.done, total: line.total });
+      }
+      return;
+    }
+    if (line.type === "error") {
+      throw new Error(line.error || "failed to replace the certificate authority");
+    }
+    // "result": every field but "type" is ReplaceResult's own shape.
+    const { type: _type, ...rest } = line;
+    result = rest as ReplaceResult;
+  };
+
+  if (res.body) {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let remainder = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = parseNDJSONChunk<ndjsonLine>(remainder, decoder.decode(value, { stream: true }));
+      remainder = chunk.remainder;
+      for (const line of chunk.values) handleLine(line);
+    }
+    const finalLine = parseNDJSONFinal<ndjsonLine>(remainder);
+    if (finalLine) handleLine(finalLine);
+  } else {
+    // No streaming `Response.body` support: the whole NDJSON body arrives as
+    // one string. It is still multiple `\n`-separated lines, so it goes
+    // through the exact same per-line handling as the streaming path above --
+    // NOT res.json(), which would throw a SyntaxError on anything but a
+    // single-line body.
+    const text = await res.text();
+    const chunk = parseNDJSONChunk<ndjsonLine>("", text);
+    for (const line of chunk.values) handleLine(line);
+    const finalLine = parseNDJSONFinal<ndjsonLine>(chunk.remainder);
+    if (finalLine) handleLine(finalLine);
+  }
+
+  if (result === null) {
+    throw new Error("failed to replace the certificate authority: the response stream ended with no result");
+  }
+  return result;
 }
 
 /**

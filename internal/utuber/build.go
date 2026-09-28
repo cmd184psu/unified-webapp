@@ -9,13 +9,21 @@ import (
 
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/platform/static"
+	"cmd184psu/unified-webapp/internal/taskmaster/golane"
 	"cmd184psu/unified-webapp/internal/utuber/history"
 	"cmd184psu/unified-webapp/internal/utuber/jobs"
 	"cmd184psu/unified-webapp/internal/utuber/media"
 )
 
-// Build returns a ready-to-use http.Handler for the utuber module.
-func Build(cfg config.UtuberConfig) (http.Handler, error) {
+// Build returns a ready-to-use http.Handler for the utuber module. host is
+// the shared taskmaster engine (plan §6 Phase 3 wiring); it is a required
+// parameter but is deliberately ignored here — utuber keeps its own
+// in-process worker pool and queue (internal/utuber/jobs) until Phase 5
+// rewires it onto host as a golane.Lane. This is the temporary,
+// intentionally-forgetful shim R5/§6 Phase 3 calls for, so the module
+// compiles against the new cmd/server wiring before its body changes.
+func Build(cfg config.UtuberConfig, host golane.Host) (http.Handler, error) {
+	_ = host
 	return buildWithExecutor(cfg, media.OSExecutor{})
 }
 

@@ -441,7 +441,25 @@ type TaskmasterConfig struct {
 	// SSEMaxSubscribers is the effective SSE subscriber cap, copied from
 	// Config.Server.SSEMaxSubscribers by Load. Not read from the config file.
 	SSEMaxSubscribers int `json:"-"`
+	// ProgressIntervalMs is the func-task progress persistence/board-event
+	// throttle (plan Q3/§4.8): taskmaster.Open uses it as given when > 0
+	// (falling back to a 2000ms default otherwise). Load normalizes and
+	// clamps it via normalizeTaskmaster to
+	// [MinTaskmasterProgressIntervalMs, MaxTaskmasterProgressIntervalMs],
+	// defaulting a zero value to DefaultTaskmasterProgressIntervalMs, so the
+	// 2s floor (owner decision, FRD Q3) can never be configured away.
+	ProgressIntervalMs int `json:"progress_interval_ms"`
 }
+
+// Taskmaster progress-interval bounds (plan Q3/§4.8). Default equals Max: the
+// floor is "never slower than today's 2000ms cadence", so the default and the
+// ceiling are the same value; only the minimum (a faster, still-safe cadence)
+// differs.
+const (
+	DefaultTaskmasterProgressIntervalMs = 2000
+	MinTaskmasterProgressIntervalMs     = 100
+	MaxTaskmasterProgressIntervalMs     = 2000
+)
 
 // UtuberConfig holds configuration specific to the utuber module.
 //
@@ -524,10 +542,11 @@ func DefaultConfig() *Config {
 			StrictHostKey:  false,
 		},
 		Taskmaster: TaskmasterConfig{
-			StaticDir: "./web/taskmaster",
-			DBPath:    "./data/taskmaster/taskmaster.db",
-			Lanes:     []TaskmasterLane{},
-			AllowSudo: false,
+			StaticDir:          "./web/taskmaster",
+			DBPath:             "./data/taskmaster/taskmaster.db",
+			Lanes:              []TaskmasterLane{},
+			AllowSudo:          false,
+			ProgressIntervalMs: DefaultTaskmasterProgressIntervalMs,
 		},
 		Certmachine: CertmachineConfig{
 			StaticDir:           "./web/certmachine",
@@ -649,6 +668,9 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	if err := expandTaskmasterPaths(&cfg.Taskmaster); err != nil {
+		return nil, err
+	}
+	if err := normalizeTaskmaster(&cfg.Taskmaster); err != nil {
 		return nil, err
 	}
 	if err := expandCertmachinePaths(&cfg.Certmachine); err != nil {
@@ -962,6 +984,29 @@ func normalizeMultissh(m *MultisshConfig) error {
 	case m.MaxSessions > MaxMaxSessions:
 		log.Printf("multissh: max_sessions %d exceeds the maximum of %d; clamping to %d", m.MaxSessions, MaxMaxSessions, MaxMaxSessions)
 		m.MaxSessions = MaxMaxSessions
+	}
+	return nil
+}
+
+// normalizeTaskmaster is the single validation point for
+// taskmaster.progress_interval_ms (plan Q3/§4.8). Zero means "unset" and
+// takes the 2000ms default (today's cadence); negative is an operator error
+// and is rejected; a value outside [MinTaskmasterProgressIntervalMs,
+// MaxTaskmasterProgressIntervalMs] is clamped with a log line rather than
+// refused, so the 2s floor can never be configured away. taskmaster.Open
+// trusts the resolved value and does not re-validate.
+func normalizeTaskmaster(t *TaskmasterConfig) error {
+	switch {
+	case t.ProgressIntervalMs < 0:
+		return fmt.Errorf("taskmaster: progress_interval_ms must be >= 0")
+	case t.ProgressIntervalMs == 0:
+		t.ProgressIntervalMs = DefaultTaskmasterProgressIntervalMs
+	case t.ProgressIntervalMs < MinTaskmasterProgressIntervalMs:
+		log.Printf("taskmaster: progress_interval_ms %d below minimum %d; clamping", t.ProgressIntervalMs, MinTaskmasterProgressIntervalMs)
+		t.ProgressIntervalMs = MinTaskmasterProgressIntervalMs
+	case t.ProgressIntervalMs > MaxTaskmasterProgressIntervalMs:
+		log.Printf("taskmaster: progress_interval_ms %d exceeds %d (progress must update at least every 2s); clamping", t.ProgressIntervalMs, MaxTaskmasterProgressIntervalMs)
+		t.ProgressIntervalMs = MaxTaskmasterProgressIntervalMs
 	}
 	return nil
 }

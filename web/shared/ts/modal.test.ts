@@ -10,6 +10,8 @@ import * as barrel from "./index";
 
 // --- a hand-rolled element stub, no jsdom ------------------------------------
 
+type FakeListener = (e: { key?: string; target?: unknown; preventDefault: () => void }) => void;
+
 class FakeElement {
   tagName: string;
   className = "";
@@ -17,6 +19,7 @@ class FakeElement {
   value = "";
   placeholder = "";
   children: FakeElement[] = [];
+  listeners: Record<string, FakeListener[]> = {};
   constructor(tagName: string) {
     this.tagName = tagName;
   }
@@ -25,8 +28,23 @@ class FakeElement {
     return child;
   }
   setAttribute(): void {}
-  addEventListener(): void {}
-  removeEventListener(): void {}
+  // Real listener storage (not a no-op) so tests can simulate a backdrop
+  // mousedown by calling dispatch() directly -- there is no real DOM here to
+  // fire an actual event on.
+  addEventListener(type: string, fn: FakeListener): void {
+    (this.listeners[type] ??= []).push(fn);
+  }
+  removeEventListener(type: string, fn: FakeListener): void {
+    const arr = this.listeners[type];
+    if (!arr) return;
+    const i = arr.indexOf(fn);
+    if (i >= 0) arr.splice(i, 1);
+  }
+  dispatch(type: string, e: { key?: string; target?: unknown }): void {
+    for (const fn of (this.listeners[type] ?? []).slice()) {
+      fn({ ...e, preventDefault: () => {} });
+    }
+  }
   querySelectorAll(): FakeElement[] {
     return [];
   }
@@ -42,13 +60,30 @@ fakeBody.appendChild = (child: FakeElement): FakeElement => {
   return child;
 };
 
+// document.addEventListener("keydown", ...) similarly needs to actually
+// store the handler (not be a no-op) so a test can simulate an Escape
+// keypress by calling dispatchDocumentKeydown() below.
+const documentListeners: Record<string, FakeListener[]> = {};
 (globalThis as unknown as { document: unknown }).document = {
   body: fakeBody,
   activeElement: null,
   createElement: (tag: string) => new FakeElement(tag),
-  addEventListener: () => {},
-  removeEventListener: () => {},
+  addEventListener: (type: string, fn: FakeListener) => {
+    (documentListeners[type] ??= []).push(fn);
+  },
+  removeEventListener: (type: string, fn: FakeListener) => {
+    const arr = documentListeners[type];
+    if (!arr) return;
+    const i = arr.indexOf(fn);
+    if (i >= 0) arr.splice(i, 1);
+  },
 };
+
+function dispatchDocumentKeydown(key: string): void {
+  for (const fn of (documentListeners["keydown"] ?? []).slice()) {
+    fn({ key, preventDefault: () => {} });
+  }
+}
 
 function check(name: string, cond: boolean, detail: string): void {
   if (!cond) throw new Error(`${name}: ${detail}`);
@@ -119,6 +154,71 @@ function check(name: string, cond: boolean, detail: string): void {
   const input = content.children[1];
   check("promptDialog carries the ui-modal-input class", input.className === "ui-modal-input", `got "${input.className}"`);
   check("promptDialog defaultValue is assigned verbatim via .value", input.value === "<i>x</i>", `got "${input.value}"`);
+}
+
+// --- setClosable restores the modal's own original options, rather than -----
+// forcing both true (certmachine's Replace-CA dialog toggles this while a
+// streamed request is in flight; a modal opened with closeOnEscape:false
+// must stay closed-to-Esc once the request settles, not become closable by
+// Esc just because setClosable(true) ran).
+
+{
+  let closedCount = 0;
+  const content = new FakeElement("div") as unknown as HTMLElement;
+  const handle = openModal(content, {
+    closeOnEscape: false,
+    onClose: () => {
+      closedCount++;
+    },
+  });
+  handle.setClosable(false);
+  handle.setClosable(true);
+  dispatchDocumentKeydown("Escape");
+  check(
+    "setClosable(true) restores closeOnEscape:false -- Esc still does not close",
+    closedCount === 0,
+    `closedCount=${closedCount}`,
+  );
+}
+
+{
+  let closedCount = 0;
+  const content = new FakeElement("div") as unknown as HTMLElement;
+  const handle = openModal(content, {
+    onClose: () => {
+      closedCount++;
+    },
+  });
+  handle.setClosable(false);
+  dispatchDocumentKeydown("Escape");
+  check("default options: setClosable(false) blocks Esc", closedCount === 0, `closedCount=${closedCount}`);
+
+  handle.setClosable(true);
+  dispatchDocumentKeydown("Escape");
+  check("default options: setClosable(true) re-enables Esc", closedCount === 1, `closedCount=${closedCount}`);
+}
+
+{
+  let closedCount = 0;
+  const content = new FakeElement("div") as unknown as HTMLElement;
+  const handle = openModal(content, {
+    onClose: () => {
+      closedCount++;
+    },
+  });
+  const overlay = handle.overlay as unknown as FakeElement;
+
+  handle.setClosable(false);
+  overlay.dispatch("mousedown", { target: handle.overlay });
+  check("default options: setClosable(false) blocks backdrop click", closedCount === 0, `closedCount=${closedCount}`);
+
+  handle.setClosable(true);
+  overlay.dispatch("mousedown", { target: handle.overlay });
+  check(
+    "default options: setClosable(true) re-enables backdrop click",
+    closedCount === 1,
+    `closedCount=${closedCount}`,
+  );
 }
 
 // --- the barrel's export shape (A5.2) ---------------------------------------

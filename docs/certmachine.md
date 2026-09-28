@@ -623,7 +623,7 @@ are the exception by design (generic to the client, detailed in the log).
 | `GET /api/ca` | Current CA status | `{"exists": false}` if none yet. Otherwise `id`, `subject`, `serial`, `notBefore`, `notAfter`, `fingerprint`, `importedFrom`, `unknownSignerActiveCount` (always present, even 0), and `previous` (omitted if there is no previous CA — see below) |
 | `POST /api/ca/init` | Initialize a new root CA | Optional body `{name}` (the CA's Common Name; blank = "CertMachine Root CA"); 201 with none stored, 409 if one exists, 409 `ErrImportPending` if an import is pending |
 | `GET /api/ca/root.crt` | Download the root CA certificate | `Content-Disposition: attachment; filename="<CA name>.crt"` |
-| `POST /api/ca/replace` | Replace the current CA (see [§10](#10-replacing-the-root-ca)) | Body `{"name", "existing": "reissue"\|"delete"\|"keep", "previousStale": "reissue"\|"delete"}` (`previousStale` omitted unless the previous CA still signs an active row). 200 `{"ca": <GET /api/ca shape>, "reissued", "deleted", "kept", "clamped", "previousDropped"}`. 400 on a bad `existing`/`previousStale` value or a name collision; 409 `ErrPreviousStaleChoiceRequired` if `previousStale` is required but missing, 409 `ErrConcurrentChange` if the certificate set moved between the read and the write |
+| `POST /api/ca/replace` | Replace the current CA (see [§10](#10-replacing-the-root-ca)) | Body `{"name", "existing": "reissue"\|"delete"\|"keep", "previousStale": "reissue"\|"delete"}` (`previousStale` omitted unless the previous CA still signs an active row). 200 `{"ca": <GET /api/ca shape>, "reissued", "deleted", "kept", "clamped", "previousDropped"}`. 400 on a bad `existing`/`previousStale` value or a name collision; 409 `ErrPreviousStaleChoiceRequired` if `previousStale` is required but missing, 409 `ErrConcurrentChange` if the certificate set moved between the read and the write. **Progress mode:** send `Accept: application/x-ndjson` to get a streamed alternative to the plain 200 above instead — see [below](#post-apicareplace-progress-mode-accept-applicationx-ndjson) |
 | `POST /api/ca/switch-back` | Swap the current and previous CA (see [§10](#10-replacing-the-root-ca)) | Empty body. 200 `{"ca": <GET /api/ca shape>}`. 409 `ErrNoPreviousCA` if there is none, or if the previous CA itself fails its own expiry check |
 | `POST /api/ca/trust` | Run this host's device-trust install (see [Automatic device trust](#automatic-device-trust)) | 409 if `trust_device_enabled` is false or no CA exists; body always carries `output` (the ran commands' combined stdout+stderr) alongside `platform` and, on failure, `error` |
 | `POST /api/ca/trust/remote` | Install the CA on another machine over SSH (see [above](#trusting-another-machine-over-ssh)) | `{host, port?, user, key \| password}`; 200 with `platform` and `output`; 400 bad request; 409 SSH unavailable, or the install failed on that machine (with `output`); 422 unsupported OS, nothing installed (with `output`); 502 couldn't connect |
@@ -652,3 +652,54 @@ database is migrated automatically, inside one transaction, the first time
 the server opens it — there is nothing to run by hand. Once a database has
 been migrated, it holds the version-2 shape permanently; going back to an
 older binary against that same file afterward is not a supported path.
+
+### `POST /api/ca/replace` progress mode (`Accept: application/x-ndjson`)
+
+A blanket re-issue of dozens of certificates has to generate a fresh RSA-4096
+CA key plus one fresh RSA-2048 key per re-issued certificate before the
+short database transaction that actually applies the change (R2 of the
+CA-replacement design: all crypto runs before the transaction opens) — real
+time an operator would otherwise wait through with no feedback at all. The
+UI's "Replace CA…" dialog now asks for this by sending
+`Accept: application/x-ndjson` on the same request; the request body and
+every other rule above is unchanged.
+
+- **Before any crypto runs** (a 400 validation failure, the 409
+  `ErrPreviousStaleChoiceRequired` check, a name collision, etc.), the
+  response is byte-for-byte the same plain JSON error envelope the
+  non-streaming path returns, at the same status code — no line has been
+  written yet, so nothing about the failure mode changes.
+- **Once the first event is ready to send**, the response commits to 200
+  with `Content-Type: application/x-ndjson` and `Cache-Control: no-store`,
+  and streams one JSON object per line (newline-delimited, not a JSON
+  array), flushed immediately as each one is produced:
+  - `{"type":"progress","phase":"ca-key","total":<n>}` — once, before the
+    new CA's key is generated.
+  - `{"type":"progress","phase":"leaf-keys","done":<i>,"total":<n>}` — once
+    per re-issued certificate's key, `done` running from 1 to `n`, where `n`
+    is every certificate being re-issued in this call (the outgoing
+    current CA's own set, plus the outgoing previous CA's set if that
+    choice is also "reissue").
+  - `{"type":"progress","phase":"saving","total":<n>}` — once, immediately
+    before the (short) database transaction opens.
+
+  `total` is `n` — the same overall leaf-key count as the `leaf-keys`
+  events, 0 when none will be re-issued — on *every* progress event,
+  including `ca-key` and `saving`, not only `leaf-keys` (`omitempty`, so it
+  is simply absent when 0). This lets a client compute an overall
+  percentage from the very first event, rather than only once `leaf-keys`
+  events begin: the UI's progress bar counts up from 0% to 100% across the
+  whole operation, never showing an indeterminate state.
+  - A final line, exactly one of:
+    - `{"type":"result", "ca": <GET /api/ca shape>, "reissued", "deleted", "kept", "clamped", "previousDropped"}` — the same fields `POST /api/ca/replace`'s plain 200 body carries, on success.
+    - `{"type":"error","status":<int>,"error":"<message>"}` — on a failure
+      that happened after streaming had already started (e.g. the request
+      context was canceled mid-run, or the transaction itself failed).
+      `status` and `error` are exactly what the non-streaming path's HTTP
+      status and body would have carried for the same failure; `error`
+      never leaks internal detail (SQL text, file paths, key material) any
+      more than a plain 500 body does.
+- If the request's context is canceled while certificate keys are still
+  being generated, no partial work is applied: the database transaction has
+  not opened yet (R2 again), so cancellation between keys is exactly as safe
+  as cancellation before the request started.

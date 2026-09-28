@@ -158,7 +158,10 @@ export async function openTaskDesigner(lanes: LaneStatus[], preselectLane: strin
   const laneLabel = document.createElement('label');
   laneLabel.textContent = 'Lane';
   const laneSelect = document.createElement('select');
-  for (const lane of lanes) {
+  // Module-owned lanes (e.g. utuber) manage their own tasks — a shell task
+  // created here would land in a lane whose scheduling assumptions (width,
+  // retention, func-only tasks) belong to that module, not the designer.
+  for (const lane of lanes.filter((l) => !l.owner)) {
     const opt = document.createElement('option');
     opt.value = lane.name;
     opt.textContent = lane.name;

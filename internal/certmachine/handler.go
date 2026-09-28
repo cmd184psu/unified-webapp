@@ -522,6 +522,12 @@ func (nw *ndjsonWriter) write(v any) {
 	if !nw.started {
 		nw.w.Header().Set("Content-Type", ndjsonAccept)
 		nw.w.Header().Set("Cache-Control", "no-store")
+		// nginx buffers proxied responses by default (docs/multissh.md:79-85
+		// notes the same nginx-fronts-this-app deployment), which would hold
+		// every line until the buffer fills or the response ends -- defeating
+		// the whole point of streaming progress. This tells nginx to pass
+		// each write straight through.
+		nw.w.Header().Set("X-Accel-Buffering", "no")
 		nw.w.WriteHeader(http.StatusOK)
 		nw.started = true
 	}

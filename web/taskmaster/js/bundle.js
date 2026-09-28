@@ -144,6 +144,12 @@ var api = {
   cancelExecution(id) {
     return apiFetch("/api/executions/" + id + "/cancel", { method: "POST" });
   },
+  // Creates a new pending execution of the finished execution's task (P18:
+  // 409 if a func task's latest execution already succeeded, or if the
+  // task already has a queued/running execution).
+  rerunExecution(id) {
+    return apiFetch("/api/executions/" + id + "/rerun", { method: "POST" });
+  },
   pauseExecution(id) {
     return apiFetch("/api/executions/" + id + "/pause", { method: "POST" });
   },
@@ -289,40 +295,6 @@ var LiveController = class {
     }
   }
 };
-var KEY_ATTR = "data-tm-key";
-function patchList(container, items, opts) {
-  const existingByKey = /* @__PURE__ */ new Map();
-  for (const child of Array.from(container.children)) {
-    const el = child;
-    const k = el.getAttribute(KEY_ATTR);
-    if (k !== null) existingByKey.set(k, el);
-  }
-  const seenKeys = /* @__PURE__ */ new Set();
-  let cursor = container.firstChild;
-  for (const item of items) {
-    const key = String(opts.key(item));
-    seenKeys.add(key);
-    let el = existingByKey.get(key);
-    if (el) {
-      opts.update(el, item);
-    } else {
-      el = opts.create(item);
-      el.setAttribute(KEY_ATTR, key);
-    }
-    if (cursor !== el) {
-      container.insertBefore(el, cursor);
-    } else {
-      cursor = cursor.nextSibling;
-      continue;
-    }
-    cursor = el.nextSibling;
-  }
-  for (const [key, el] of existingByKey) {
-    if (!seenKeys.has(key)) {
-      el.remove();
-    }
-  }
-}
 
 // web/taskmaster/js/ui/toggle.ts
 function createToggleHandle(opts) {
@@ -360,7 +332,7 @@ function createToggleHandle(opts) {
 import { confirmDialog as confirmDialog2, ThemeManager, HamburgerMenu } from "/shared/dist/shared.mjs";
 
 // web/taskmaster/js/board.ts
-import { openModal as openModal3, confirmDialog, alertDialog as alertDialog3 } from "/shared/dist/shared.mjs";
+import { openModal as openModal3, confirmDialog, alertDialog as alertDialog3, QueuePanel } from "/shared/dist/shared.mjs";
 
 // web/taskmaster/js/designer.ts
 import { openModal, alertDialog as alertDialog2, createCopyButton } from "/shared/dist/shared.mjs";
@@ -463,7 +435,7 @@ async function openTaskDesigner(lanes, preselectLane, caps3) {
   const laneLabel = document.createElement("label");
   laneLabel.textContent = "Lane";
   const laneSelect = document.createElement("select");
-  for (const lane of lanes) {
+  for (const lane of lanes.filter((l) => !l.owner)) {
     const opt = document.createElement("option");
     opt.value = lane.name;
     opt.textContent = lane.name;
@@ -658,6 +630,7 @@ function makeCloseSource(source) {
 }
 
 // web/taskmaster/js/status.ts
+import { statusSymbol, effectiveStatus } from "/shared/dist/shared.mjs";
 function statusBadgeClass(status) {
   if (status === "success") return "badge-green";
   if (status === "failed") return "badge-red";
@@ -665,18 +638,6 @@ function statusBadgeClass(status) {
   if (status === "suspended") return "badge-yellow";
   if (status === "running") return "badge-blue";
   return "badge-muted";
-}
-function statusSymbol(status) {
-  if (status === "success") return "\u2713";
-  if (status === "failed") return "\u2715";
-  if (status === "canceled") return "\u2298";
-  if (status === "suspended") return "\u23F8";
-  if (status === "running") return "\u25CF";
-  if (status === "pending") return "\u2026";
-  return "\u2022";
-}
-function effectiveStatus(status, suspended) {
-  return status === "running" && suspended ? "suspended" : status;
 }
 function renderStatusBadge(badge, status, suspended) {
   const eff = effectiveStatus(status, suspended);
@@ -722,6 +683,7 @@ var loadSeq = 0;
 var caps = { allow_sudo: false };
 var laneFilter;
 var brakeEngaged = false;
+var panels = /* @__PURE__ */ new WeakMap();
 function openTaskRoute(taskName) {
   window.location.hash = "#task/" + encodeURIComponent(taskName);
 }
@@ -764,6 +726,18 @@ async function handleBoardEvent(ev) {
   if (ev.type === "brake" && typeof ev.engaged === "boolean") {
     brakeEngaged = ev.engaged;
   }
+  if (ev.type === "task-progress" && ev.execution_id !== void 0) {
+    const idx = state.executions.findIndex((e) => e.id === ev.execution_id);
+    if (idx !== -1) {
+      state.executions[idx] = {
+        ...state.executions[idx],
+        progress_pct: ev.progress_pct ?? null,
+        progress_label: ev.progress_label ?? ""
+      };
+      render();
+    }
+    return;
+  }
   await refreshAll();
 }
 async function refreshAll() {
@@ -785,6 +759,10 @@ async function refreshAll() {
 function tasksByLane(laneName) {
   return state.tasks.filter((t) => t.lane_name === laneName).sort((a, b) => a.position - b.position);
 }
+function taskByName(name) {
+  if (!name) return void 0;
+  return state.tasks.find((t) => t.name === name);
+}
 function executionsByTask(taskName) {
   return state.executions.filter((e) => e.task_name === taskName);
 }
@@ -803,11 +781,36 @@ function render() {
   }
   boardEl.querySelector(".empty-state")?.remove();
   const sorted = [...visible].sort((a, b) => a.name.localeCompare(b.name));
-  patchList(boardEl, sorted, {
-    key: (l) => l.name,
-    create: (l) => createLaneEl(l),
-    update: (el, l) => updateLaneEl(el, l)
-  });
+  patchLanes(boardEl, sorted);
+}
+function patchLanes(container, lanes) {
+  const existingByName = /* @__PURE__ */ new Map();
+  for (const child of Array.from(container.children)) {
+    const el = child;
+    const name = el.getAttribute("data-lane");
+    if (name !== null) existingByName.set(name, el);
+  }
+  const seen = /* @__PURE__ */ new Set();
+  let cursor = container.firstChild;
+  for (const lane of lanes) {
+    seen.add(lane.name);
+    let el = existingByName.get(lane.name);
+    if (el) {
+      updateLaneEl(el, lane);
+    } else {
+      el = createLaneEl(lane);
+    }
+    if (cursor !== el) {
+      container.insertBefore(el, cursor);
+    } else {
+      cursor = cursor.nextSibling;
+      continue;
+    }
+    cursor = el.nextSibling;
+  }
+  for (const [name, el] of existingByName) {
+    if (!seen.has(name)) el.remove();
+  }
 }
 function createLaneEl(lane) {
   const el = document.createElement("section");
@@ -857,36 +860,16 @@ function createLaneEl(lane) {
   el.appendChild(addBtn);
   const body = document.createElement("div");
   body.className = "lane-body";
-  const runningSection = buildSection("running", "Running");
-  const upNextSection = buildSection("upnext", "Up next");
-  const ranSection = buildRanSection();
-  body.append(runningSection.wrap, upNextSection.wrap, ranSection.wrap);
   el.appendChild(body);
-  wireDropTarget(upNextSection.list, el);
+  const panel = new QueuePanel(body, tmQueueAdapter, {
+    recentLimit: RAN_PER_LANE,
+    titles: { recent: "Recent runs" },
+    emptyText: { running: "nothing running", upnext: "lane is empty", recent: "no history yet" }
+  });
+  panels.set(el, panel);
+  wireDropTarget(panel.list("upnext"), el);
   updateLaneEl(el, lane);
   return el;
-}
-function buildSection(kind, title) {
-  const wrap = document.createElement("div");
-  wrap.className = "lane-section lane-section-" + kind;
-  const h = document.createElement("div");
-  h.className = "lane-section-title";
-  h.textContent = title;
-  const list = document.createElement("div");
-  list.className = "lane-list lane-list-" + kind;
-  wrap.append(h, list);
-  return { wrap, list };
-}
-function buildRanSection() {
-  const wrap = document.createElement("details");
-  wrap.className = "lane-section lane-section-ran";
-  const summary = document.createElement("summary");
-  summary.className = "lane-section-title";
-  summary.textContent = "Recent runs";
-  const list = document.createElement("div");
-  list.className = "lane-list lane-list-ran";
-  wrap.append(summary, list);
-  return { wrap, list };
 }
 async function toggleLanePause(btn, lane) {
   if (lane.paused) {
@@ -963,7 +946,7 @@ function updateLaneEl(el, lane) {
   const laneTaskNames = new Set(laneTasks.map((t) => t.name));
   const laneExecs = state.executions.filter((e) => e.task_name && laneTaskNames.has(e.task_name));
   const runningExecs = laneExecs.filter((e) => e.status === "running").sort((a, b) => b.id - a.id);
-  const ranExecs = laneExecs.filter((e) => e.status === "success" || e.status === "failed" || e.status === "canceled").sort((a, b) => b.id - a.id).slice(0, RAN_PER_LANE);
+  const ranExecs = laneExecs.filter((e) => e.status === "success" || e.status === "failed" || e.status === "canceled").sort((a, b) => b.id - a.id);
   const runningTaskNames = new Set(runningExecs.map((e) => e.task_name));
   const pendingByTask = /* @__PURE__ */ new Map();
   for (const e of laneExecs) {
@@ -971,249 +954,189 @@ function updateLaneEl(el, lane) {
       pendingByTask.set(e.task_name, e);
     }
   }
-  const upNextTasks = laneTasks.filter((t) => !runningTaskNames.has(t.name));
-  const runningList = el.querySelector(".lane-list-running");
-  if (runningList) {
-    patchList(runningList, runningExecs, {
-      key: (e) => e.id,
-      create: (e) => createExecRow(e, "running"),
-      update: (row, e) => updateExecRow(row, e, "running")
-    });
-    toggleEmptyNote(runningList, runningExecs.length === 0, "nothing running");
-  }
-  const ranList = el.querySelector(".lane-list-ran");
-  if (ranList) {
-    patchList(ranList, ranExecs, {
-      key: (e) => e.id,
-      create: (e) => createExecRow(e, "ran"),
-      update: (row, e) => updateExecRow(row, e, "ran")
-    });
-    toggleEmptyNote(ranList, ranExecs.length === 0, "no history yet");
-  }
-  const upNextList = el.querySelector(".lane-list-upnext");
-  if (upNextList) {
-    patchList(upNextList, upNextTasks, {
-      key: (t) => t.name,
-      create: (t) => createTaskRow(t, pendingByTask.get(t.name) ?? null),
-      update: (row, t) => updateTaskRow(row, t, pendingByTask.get(t.name) ?? null)
-    });
-    toggleEmptyNote(upNextList, upNextTasks.length === 0, "lane is empty");
-  }
+  const upNextTasks = laneTasks.filter((t) => {
+    if (runningTaskNames.has(t.name)) return false;
+    if (t.kind && !pendingByTask.has(t.name)) return false;
+    return true;
+  });
+  const items = [
+    ...runningExecs.map((exec) => ({ t: "exec", exec, sec: "running" })),
+    ...upNextTasks.map((task) => ({ t: "task", task, pending: pendingByTask.get(task.name) ?? null })),
+    ...ranExecs.map((exec) => ({ t: "exec", exec, sec: "recent" }))
+  ];
+  panels.get(el)?.update(items);
 }
-function toggleEmptyNote(list, empty, text) {
-  let note = list.querySelector(".lane-empty-note");
-  if (empty) {
-    if (!note) {
-      note = document.createElement("div");
-      note.className = "lane-empty-note";
-      note.setAttribute("data-tm-key", "__empty__");
-      list.appendChild(note);
+function itemKey(item) {
+  return item.t === "exec" ? "exec:" + item.exec.id : "task:" + item.task.name;
+}
+function itemSection(item) {
+  return item.t === "exec" ? item.sec : "upnext";
+}
+function itemTitle(item) {
+  if (item.t === "task") return item.task.label || item.task.name;
+  const task = taskByName(item.exec.task_name);
+  return task && (task.label || task.name) || item.exec.task_name || "(unknown task)";
+}
+function itemStatus(item) {
+  if (item.t === "exec") return effectiveStatus(item.exec.status, item.exec.suspended);
+  if (item.pending) return "queued";
+  if (!item.task.enabled) return "disabled";
+  if (item.task.paused) return "paused";
+  return "ready";
+}
+function itemMeta(item) {
+  if (item.t === "exec") {
+    if (item.exec.duration_ms !== void 0 && item.exec.duration_ms !== null) {
+      return (item.exec.duration_ms / 1e3).toFixed(1) + "s";
     }
-    note.textContent = text;
-  } else {
-    note?.remove();
+    if (item.exec.suspended) {
+      return "paused";
+    }
+    if (item.exec.started_at) {
+      return fmtElapsed(item.exec.started_at);
+    }
+    return "";
+  }
+  const task = item.task;
+  if (!task.enabled) return "disabled";
+  if (task.paused) return "paused";
+  if (item.pending) return "queued";
+  if (task.repeat) {
+    return brakeEngaged ? "ready" : cooldownLabel(task);
+  }
+  return "ready";
+}
+function itemProgress(item) {
+  if (item.t !== "exec") return null;
+  const pct = item.exec.progress_pct;
+  const label = item.exec.progress_label;
+  if (pct === void 0 && !label) return null;
+  return { pct: pct === void 0 ? null : pct, label: label ?? "" };
+}
+function itemActions(item) {
+  if (item.t === "exec") {
+    if (item.sec === "running") {
+      const task2 = taskByName(item.exec.task_name);
+      if (task2?.kind) return ["cancel"];
+      return [item.exec.suspended ? "resume" : "pause", "cancel"];
+    }
+    const task = taskByName(item.exec.task_name);
+    return task?.kind ? ["rerun", "remove"] : ["rerun"];
+  }
+  if (item.task.kind && item.pending) return ["cancel"];
+  return [];
+}
+async function onBoardAction(action, item, btn) {
+  btn.disabled = true;
+  try {
+    if (item.t === "exec") {
+      if (action === "cancel") {
+        await api.cancelExecution(item.exec.id);
+      } else if (action === "pause") {
+        await api.pauseExecution(item.exec.id);
+      } else if (action === "resume") {
+        await api.resumeExecution(item.exec.id);
+      } else if (action === "rerun") {
+        await api.rerunExecution(item.exec.id);
+      } else if (action === "remove") {
+        const name = item.exec.task_name;
+        if (name) {
+          const ok = await confirmDialog('Remove task "' + name + '"? This deletes its run history too.', {
+            title: "Remove task",
+            confirmLabel: "Remove"
+          });
+          if (ok) await api.deleteTask(name);
+        }
+      }
+    } else if (action === "cancel" && item.pending) {
+      await api.cancelExecution(item.pending.id);
+    }
+  } catch {
+  } finally {
+    btn.disabled = false;
+    void refreshAll();
   }
 }
-function createExecRow(exec, kind) {
-  const row = document.createElement("div");
-  row.className = "exec-row exec-row-" + kind;
-  const name = document.createElement("span");
-  name.className = "exec-row-name exec-row-name-clickable";
-  name.setAttribute("role", "button");
-  name.tabIndex = 0;
-  const badge = document.createElement("span");
-  badge.className = "badge";
-  const meta = document.createElement("span");
-  meta.className = "exec-row-meta";
-  row.append(name, badge, meta);
-  if (kind === "running") {
-    const pidSeam = document.createElement("span");
-    pidSeam.className = "exec-row-pid-seam";
-    const pidLabel = document.createElement("span");
-    pidLabel.className = "exec-row-pid";
-    const outputBtn = document.createElement("button");
-    outputBtn.type = "button";
-    outputBtn.className = "btn-icon exec-row-output-btn";
-    outputBtn.textContent = "\u2197";
-    outputBtn.title = "View live output";
-    outputBtn.setAttribute("aria-label", "View live output");
-    const pauseBtn = document.createElement("button");
-    pauseBtn.type = "button";
-    pauseBtn.className = "btn-icon exec-row-pause-btn";
-    const cancelBtn = document.createElement("button");
-    cancelBtn.type = "button";
-    cancelBtn.className = "btn-icon exec-row-cancel-btn";
-    cancelBtn.textContent = "\u2716";
-    cancelBtn.title = "Cancel execution";
-    cancelBtn.setAttribute("aria-label", "Cancel execution");
-    pidSeam.append(pidLabel, outputBtn, pauseBtn, cancelBtn);
-    row.appendChild(pidSeam);
+function renderBoardBadge(badge, item) {
+  if (item.t === "exec") {
+    renderStatusBadge(badge, item.exec.status, item.exec.suspended);
+    return;
   }
-  updateExecRow(row, exec, kind);
-  return row;
+  badge.className = "ui-queue-badge";
+  badge.textContent = "";
+  badge.title = "";
+  badge.removeAttribute("aria-label");
 }
+function decorateBoardRow(row, item, created) {
+  if (item.t === "exec") {
+    const kindClass = item.sec === "running" ? "running" : "ran";
+    row.classList.add("exec-row", "exec-row-" + kindClass);
+    if (item.sec !== "running") return;
+    let pidSeam = row.querySelector(".exec-row-pid-seam");
+    if (!pidSeam) {
+      pidSeam = document.createElement("span");
+      pidSeam.className = "exec-row-pid-seam";
+      const pidLabel2 = document.createElement("span");
+      pidLabel2.className = "exec-row-pid";
+      const outputBtn2 = document.createElement("button");
+      outputBtn2.type = "button";
+      outputBtn2.className = "btn-icon exec-row-output-btn";
+      outputBtn2.textContent = "\u2197";
+      outputBtn2.title = "View live output";
+      outputBtn2.setAttribute("aria-label", "View live output");
+      pidSeam.append(pidLabel2, outputBtn2);
+      row.appendChild(pidSeam);
+    }
+    const pidLabel = row.querySelector(".exec-row-pid");
+    if (pidLabel) pidLabel.textContent = item.exec.pid !== void 0 ? "pid " + item.exec.pid : "";
+    const outputBtn = row.querySelector(".exec-row-output-btn");
+    if (outputBtn) outputBtn.onclick = () => openRunningOutput(item.exec);
+    return;
+  }
+  row.classList.add("task-row");
+  row.setAttribute("data-task", item.task.name);
+  row.classList.toggle("task-row-disabled", !item.task.enabled || item.task.paused);
+  if (item.task.kind) return;
+  if (created) {
+    const capturedName = item.task.name;
+    const capturedLane = item.task.lane_name;
+    row.draggable = true;
+    row.addEventListener("dragstart", (e) => {
+      if (!e.dataTransfer) return;
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", JSON.stringify({ task: capturedName, lane: capturedLane }));
+      row.classList.add("dragging");
+    });
+    row.addEventListener("dragend", () => row.classList.remove("dragging"));
+  }
+  let upNextBtn = row.querySelector(".task-row-upnext");
+  if (!upNextBtn) {
+    upNextBtn = document.createElement("button");
+    upNextBtn.type = "button";
+    upNextBtn.className = "btn btn-secondary btn-sm task-row-upnext";
+    upNextBtn.textContent = "Up next";
+    row.appendChild(upNextBtn);
+  }
+  upNextBtn.disabled = !item.task.enabled || item.task.paused;
+  const taskName = item.task.name;
+  upNextBtn.onclick = () => void api.upNext(taskName).then(() => refreshAll());
+}
+var tmQueueAdapter = {
+  key: itemKey,
+  section: itemSection,
+  title: itemTitle,
+  status: itemStatus,
+  meta: itemMeta,
+  progress: itemProgress,
+  actions: itemActions,
+  onAction: onBoardAction,
+  renderBadge: renderBoardBadge,
+  decorate: decorateBoardRow,
+  onTitleClick: (item) => openTaskRoute(item.t === "exec" ? item.exec.task_name ?? "" : item.task.name)
+};
 function openRunningOutput(exec) {
   const title = (exec.task_name ?? "task") + " \u2014 run #" + exec.id;
   openOutputModal(exec.id, title);
-}
-function requestProcessToggle(btn, execId, suspended) {
-  btn.disabled = true;
-  const request = suspended ? api.resumeExecution(execId) : api.pauseExecution(execId);
-  finishProcessToggle(request, btn);
-}
-function finishProcessToggle(request, btn) {
-  request.then(reenableProcessButton(btn), reenableProcessButton(btn));
-}
-function reenableProcessButton(btn) {
-  function reenable() {
-    btn.disabled = false;
-    void refreshAll();
-  }
-  return reenable;
-}
-function wireProcessToggle(btn, exec) {
-  const suspended = !!exec.suspended;
-  btn.textContent = suspended ? "\u25B6" : "\u23F8";
-  btn.title = suspended ? "Resume process" : "Pause process";
-  btn.setAttribute("aria-label", btn.title);
-  btn.onclick = makeProcessToggleHandler(btn, exec.id, suspended);
-}
-function makeProcessToggleHandler(btn, execId, suspended) {
-  function handleClick() {
-    requestProcessToggle(btn, execId, suspended);
-  }
-  return handleClick;
-}
-function requestCancel(btn, execId) {
-  btn.disabled = true;
-  api.cancelExecution(execId).then(reenableCancelButton(btn), reenableCancelButton(btn));
-}
-function reenableCancelButton(btn) {
-  function reenable() {
-    btn.disabled = false;
-    void refreshAll();
-  }
-  return reenable;
-}
-function wireCancelButton(btn, exec) {
-  btn.onclick = makeCancelHandler(btn, exec.id);
-}
-function makeCancelHandler(btn, execId) {
-  function handleClick() {
-    requestCancel(btn, execId);
-  }
-  return handleClick;
-}
-function wireOutputButton(btn, exec) {
-  btn.onclick = makeOutputHandler(exec);
-}
-function makeOutputHandler(exec) {
-  function handleClick() {
-    openRunningOutput(exec);
-  }
-  return handleClick;
-}
-function updateExecRow(row, exec, kind) {
-  const name = row.querySelector(".exec-row-name");
-  if (name) {
-    name.textContent = exec.task_name ?? "(unknown task)";
-    const taskName = exec.task_name;
-    const openDetail = () => {
-      if (!taskName) return;
-      openTaskRoute(taskName);
-    };
-    name.onclick = openDetail;
-    name.onkeydown = (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        openDetail();
-      }
-    };
-  }
-  const badge = row.querySelector(".badge");
-  if (badge) renderStatusBadge(badge, exec.status, exec.suspended);
-  const meta = row.querySelector(".exec-row-meta");
-  if (meta) {
-    if (exec.duration_ms !== void 0 && exec.duration_ms !== null) {
-      meta.textContent = (exec.duration_ms / 1e3).toFixed(1) + "s";
-    } else if (exec.suspended) {
-      meta.textContent = "paused";
-    } else if (exec.started_at) {
-      meta.textContent = fmtElapsed(exec.started_at);
-    } else {
-      meta.textContent = "";
-    }
-  }
-  if (kind === "running") {
-    const pidLabel = row.querySelector(".exec-row-pid");
-    if (pidLabel) pidLabel.textContent = exec.pid !== void 0 ? "pid " + exec.pid : "";
-    const outputBtn = row.querySelector(".exec-row-output-btn");
-    if (outputBtn) wireOutputButton(outputBtn, exec);
-    const pauseBtn = row.querySelector(".exec-row-pause-btn");
-    if (pauseBtn) wireProcessToggle(pauseBtn, exec);
-    const cancelBtn = row.querySelector(".exec-row-cancel-btn");
-    if (cancelBtn) wireCancelButton(cancelBtn, exec);
-  }
-}
-function createTaskRow(task, pending) {
-  const row = document.createElement("div");
-  row.className = "task-row";
-  row.draggable = true;
-  const name = document.createElement("span");
-  name.className = "task-row-name task-row-name-clickable";
-  name.setAttribute("role", "button");
-  name.tabIndex = 0;
-  const openDetail = () => {
-    openTaskRoute(task.name);
-  };
-  name.addEventListener("click", openDetail);
-  name.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      openDetail();
-    }
-  });
-  const status = document.createElement("span");
-  status.className = "task-row-status";
-  const upNextBtn = document.createElement("button");
-  upNextBtn.type = "button";
-  upNextBtn.className = "btn btn-secondary btn-sm task-row-upnext";
-  upNextBtn.textContent = "Up next";
-  row.append(name, status, upNextBtn);
-  row.addEventListener("dragstart", (e) => {
-    if (!e.dataTransfer) return;
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", JSON.stringify({ task: task.name, lane: task.lane_name }));
-    row.classList.add("dragging");
-  });
-  row.addEventListener("dragend", () => row.classList.remove("dragging"));
-  updateTaskRow(row, task, pending);
-  return row;
-}
-function updateTaskRow(row, task, pending) {
-  row.setAttribute("data-task", task.name);
-  row.classList.toggle("task-row-disabled", !task.enabled || task.paused);
-  const name = row.querySelector(".task-row-name");
-  if (name) name.textContent = task.name;
-  const status = row.querySelector(".task-row-status");
-  if (status) {
-    if (!task.enabled) {
-      status.textContent = "disabled";
-    } else if (task.paused) {
-      status.textContent = "paused";
-    } else if (pending) {
-      status.textContent = "queued";
-    } else if (task.repeat) {
-      status.textContent = brakeEngaged ? "ready" : cooldownLabel(task);
-    } else {
-      status.textContent = "ready";
-    }
-  }
-  const btn = row.querySelector(".task-row-upnext");
-  if (btn) {
-    btn.disabled = !task.enabled || task.paused;
-    btn.onclick = () => void api.upNext(task.name).then(() => refreshAll());
-  }
 }
 function cooldownLabel(task) {
   const execs = executionsByTask(task.name).filter((e) => e.finished_at).sort((a, b) => b.id - a.id);
@@ -1359,6 +1282,7 @@ async function openAddLaneModal() {
 }
 
 // web/taskmaster/js/metrics.ts
+import { patchList } from "/shared/dist/shared.mjs";
 function fmtMs2(ms) {
   if (ms === null || ms === void 0) return "\u2014";
   return (ms / 1e3).toFixed(2) + "s";
@@ -1413,12 +1337,15 @@ function render2(rows) {
     return;
   }
   gridEl.querySelector(".empty-state")?.remove();
-  const sorted = [...rows].sort((a, b) => a.task_name.localeCompare(b.task_name));
+  const sorted = [...rows].sort((a, b) => cardKey(a).localeCompare(cardKey(b)));
   patchList(gridEl, sorted, {
-    key: (m) => m.task_name,
+    key: cardKey,
     create: (m) => createCard(m),
     update: (el, m) => updateCard(el, m)
   });
+}
+function cardKey(m) {
+  return m.kind ? "k:" + m.group_name + "/" + m.kind : "n:" + m.task_name;
 }
 function createCard(m) {
   const card = document.createElement("div");
@@ -1469,6 +1396,7 @@ function updateCard(card, m) {
 }
 
 // web/taskmaster/js/taskdetail.ts
+import { patchList as patchList2 } from "/shared/dist/shared.mjs";
 function mountTaskDetail(container, live2, task, onBack) {
   container.textContent = "";
   container.className = "task-detail";
@@ -1486,10 +1414,27 @@ function mountTaskDetail(container, live2, task, onBack) {
   container.appendChild(header);
   const meta = document.createElement("div");
   meta.className = "task-detail-meta";
-  const cmdLine = document.createElement("code");
-  cmdLine.className = "task-detail-command";
-  cmdLine.textContent = task.command;
-  meta.appendChild(cmdLine);
+  if (task.kind) {
+    const kindLine = document.createElement("code");
+    kindLine.className = "task-detail-command";
+    kindLine.textContent = "kind: " + task.kind + (task.label ? " \xB7 " + task.label : "");
+    meta.appendChild(kindLine);
+    if (task.payload !== void 0 && task.payload !== null) {
+      const payloadPre = document.createElement("pre");
+      payloadPre.className = "task-detail-payload";
+      try {
+        payloadPre.textContent = JSON.stringify(task.payload, null, 2);
+      } catch {
+        payloadPre.textContent = String(task.payload);
+      }
+      meta.appendChild(payloadPre);
+    }
+  } else {
+    const cmdLine = document.createElement("code");
+    cmdLine.className = "task-detail-command";
+    cmdLine.textContent = task.command;
+    meta.appendChild(cmdLine);
+  }
   const laneLine = document.createElement("div");
   laneLine.className = "task-detail-sub";
   laneLine.textContent = "lane: " + task.lane_name + (task.repeat ? " \xB7 repeats, cooldown " + task.cooldown_seconds + "s" : " \xB7 one-shot") + (task.sudo ? " \xB7 sudo" : "");
@@ -1534,7 +1479,7 @@ function mountTaskDetail(container, live2, task, onBack) {
       return;
     }
     historyList.querySelector(".lane-empty-note")?.remove();
-    patchList(historyList, execs, {
+    patchList2(historyList, execs, {
       key: keyById,
       create: createHistoryRow,
       update: updateHistoryRow
@@ -1683,7 +1628,7 @@ function mountTaskView(container, live2, caps3, taskName) {
 }
 
 // web/taskmaster/js/buildinfo.ts
-var FRONTEND_BUILD_TIME = "a1608efcca5e";
+var FRONTEND_BUILD_TIME = "043849cd1a47";
 
 // web/taskmaster/js/main.ts
 var caps2 = { allow_sudo: false };

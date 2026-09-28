@@ -1,6 +1,54 @@
 // web/certmachine/js/main.ts
 import { ThemeManager, HamburgerMenu } from "/shared/dist/shared.mjs";
 
+// web/certmachine/js/ndjson.ts
+function parseNDJSONChunk(remainder, chunk) {
+  const buffer = remainder + chunk;
+  const pieces = buffer.split("\n");
+  const newRemainder = pieces.pop() ?? "";
+  const values = [];
+  for (const piece of pieces) {
+    if (piece.trim() === "") continue;
+    values.push(JSON.parse(piece));
+  }
+  return { values, remainder: newRemainder };
+}
+function parseNDJSONFinal(remainder) {
+  if (remainder.trim() === "") return null;
+  return JSON.parse(remainder);
+}
+var CA_KEY_WEIGHT = 4;
+var SAVE_WEIGHT = 1;
+function percentFor(phase, done, total, prevPercent) {
+  if (phase === "done") return 100;
+  const units = CA_KEY_WEIGHT + Math.max(total, 0) + SAVE_WEIGHT;
+  let raw;
+  switch (phase) {
+    case "ca-key":
+      raw = 0;
+      break;
+    case "leaf-keys":
+      raw = (CA_KEY_WEIGHT + Math.max(done, 0)) / units * 100;
+      break;
+    case "saving":
+      raw = (CA_KEY_WEIGHT + Math.max(total, 0)) / units * 100;
+      break;
+  }
+  const clamped = Math.min(100, Math.max(0, raw));
+  return Math.max(clamped, prevPercent);
+}
+function caKeySegmentCeiling(total) {
+  const units = CA_KEY_WEIGHT + Math.max(total, 0) + SAVE_WEIGHT;
+  const marginUnits = 0.5;
+  const ceiling = (CA_KEY_WEIGHT - marginUnits) / units * 100;
+  return Math.max(0, ceiling);
+}
+function creepToward(current, ceiling, step) {
+  const remaining = ceiling - current;
+  if (remaining <= 0) return current;
+  return current + Math.min(step, remaining / 2);
+}
+
 // web/certmachine/js/api.ts
 var FALLBACK_CONFIG = {
   defaultValidityDays: 365,
@@ -105,16 +153,56 @@ async function initCA(name = "") {
   }
   return await res.json();
 }
-async function replaceCA(input) {
+function isReplaceProgressPhase(phase) {
+  return phase === "ca-key" || phase === "leaf-keys" || phase === "saving";
+}
+async function replaceCAWithProgress(input, onProgress) {
   const res = await fetch("/api/ca/replace", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Accept: "application/x-ndjson" },
     body: JSON.stringify(input)
   });
   if (!res.ok) {
     throw new Error(await errorMessage(res, "failed to replace the certificate authority"));
   }
-  return await res.json();
+  let result = null;
+  const handleLine = (line) => {
+    if (line.type === "progress") {
+      if (isReplaceProgressPhase(line.phase)) {
+        onProgress({ phase: line.phase, done: line.done, total: line.total });
+      }
+      return;
+    }
+    if (line.type === "error") {
+      throw new Error(line.error || "failed to replace the certificate authority");
+    }
+    const { type: _type, ...rest } = line;
+    result = rest;
+  };
+  if (res.body) {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let remainder = "";
+    for (; ; ) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = parseNDJSONChunk(remainder, decoder.decode(value, { stream: true }));
+      remainder = chunk.remainder;
+      for (const line of chunk.values) handleLine(line);
+    }
+    const finalLine = parseNDJSONFinal(remainder);
+    if (finalLine) handleLine(finalLine);
+  } else {
+    const text = await res.text();
+    const chunk = parseNDJSONChunk("", text);
+    for (const line of chunk.values) handleLine(line);
+    const finalLine = parseNDJSONFinal(chunk.remainder);
+    if (finalLine) handleLine(finalLine);
+  }
+  if (result === null) {
+    throw new Error("failed to replace the certificate authority: the response stream ended with no result");
+  }
+  return result;
 }
 async function switchBackCA() {
   const res = await fetch("/api/ca/switch-back", { method: "POST" });
@@ -367,6 +455,8 @@ function openTrustDialog(config) {
 
 // web/certmachine/js/cadialog.ts
 import { openModal as openModal2, confirmDialog, showToast as showToast2 } from "/shared/dist/shared.mjs";
+var CA_KEY_CREEP_INTERVAL_MS = 200;
+var CA_KEY_CREEP_STEP = 2;
 function el2(tag, className) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -391,6 +481,19 @@ function radio2(name, value, text, checked) {
 }
 function errorText(err) {
   return err instanceof Error ? err.message : String(err);
+}
+function progressStatusText(ev, percent) {
+  const pct = `${Math.round(percent)}%`;
+  switch (ev.phase) {
+    case "ca-key":
+      return `Generating the new certificate authority key\u2026 ${pct}`;
+    case "leaf-keys":
+      return `Generating certificate keys ${ev.done ?? 0} / ${ev.total ?? 0} \u2014 ${pct}`;
+    case "saving":
+      return `Saving\u2026 ${pct}`;
+    default:
+      return pct;
+  }
 }
 function showD6Reminder(onOpenTrustDialog) {
   const content = el2("div", "cert-ca-reminder");
@@ -475,7 +578,18 @@ function openReplaceCADialog(ca, onReplaced, onOpenTrustDialog) {
     for (const r of [reissueR, deleteR, keepR]) r.input.addEventListener("change", syncWarning);
     const errorEl = el2("p", "cert-field-error");
     errorEl.hidden = true;
+    errorEl.tabIndex = -1;
     content.append(errorEl);
+    const progressWrap = el2("div", "cert-ca-progress");
+    progressWrap.hidden = true;
+    const progressBar = el2("progress", "cert-ca-progress-bar");
+    progressBar.setAttribute("aria-label", "Replace CA progress");
+    progressBar.max = 100;
+    progressBar.value = 0;
+    const statusEl = el2("p", "cert-ca-progress-status");
+    statusEl.setAttribute("aria-live", "polite");
+    progressWrap.append(progressBar, statusEl);
+    content.append(progressWrap);
     const actions = el2("div", "cert-trust-actions");
     const backBtn = el2("button", "cert-btn");
     backBtn.type = "button";
@@ -486,6 +600,48 @@ function openReplaceCADialog(ca, onReplaced, onOpenTrustDialog) {
     actions.append(backBtn, submitBtn);
     content.append(actions);
     backBtn.addEventListener("click", () => modal.close());
+    const controls = [
+      nameInput,
+      reissueR.input,
+      deleteR.input,
+      keepR.input,
+      backBtn,
+      submitBtn
+    ];
+    if (previousStaleReissue && previousStaleDelete) {
+      controls.push(previousStaleReissue.input, previousStaleDelete.input);
+    }
+    function setRunning(running) {
+      for (const c of controls) c.disabled = running;
+      progressWrap.hidden = !running;
+      modal.setClosable(!running);
+    }
+    let percent = 0;
+    let creepTimer = null;
+    function stopCreep() {
+      if (creepTimer !== null) {
+        clearInterval(creepTimer);
+        creepTimer = null;
+      }
+    }
+    function startCreep(total) {
+      stopCreep();
+      const ceiling = caKeySegmentCeiling(total);
+      creepTimer = setInterval(() => {
+        percent = creepToward(percent, ceiling, CA_KEY_CREEP_STEP);
+        progressBar.value = percent;
+        statusEl.textContent = `Generating the new certificate authority key\u2026 ${Math.round(percent)}%`;
+      }, CA_KEY_CREEP_INTERVAL_MS);
+    }
+    function onProgress(ev) {
+      stopCreep();
+      percent = percentFor(ev.phase, ev.done ?? 0, ev.total ?? 0, percent);
+      progressBar.value = percent;
+      statusEl.textContent = progressStatusText(ev, percent);
+      if (ev.phase === "ca-key") {
+        startCreep(ev.total ?? 0);
+      }
+    }
     submitBtn.addEventListener("click", () => {
       errorEl.hidden = true;
       const name = nameInput.value.trim();
@@ -496,8 +652,19 @@ function openReplaceCADialog(ca, onReplaced, onOpenTrustDialog) {
       }
       const existing = reissueR.input.checked && "reissue" || deleteR.input.checked && "delete" || "keep";
       const previousStale = previousActive ? previousStaleReissue?.input.checked ? "reissue" : "delete" : void 0;
-      submitBtn.disabled = true;
-      replaceCA({ name, existing, ...previousStale !== void 0 ? { previousStale } : {} }).then((result) => {
+      stopCreep();
+      percent = 0;
+      progressBar.value = 0;
+      setRunning(true);
+      statusEl.textContent = "Starting\u2026 0%";
+      replaceCAWithProgress(
+        { name, existing, ...previousStale !== void 0 ? { previousStale } : {} },
+        onProgress
+      ).then((result) => {
+        stopCreep();
+        percent = percentFor("done", 0, 0, percent);
+        progressBar.value = percent;
+        statusEl.textContent = `Done \u2014 ${Math.round(percent)}%`;
         modal.close();
         showToast2(
           `Replaced the certificate authority. Re-issued ${result.reissued}, deleted ${result.deleted}, kept ${result.kept}.`,
@@ -506,9 +673,11 @@ function openReplaceCADialog(ca, onReplaced, onOpenTrustDialog) {
         onReplaced();
         showD6Reminder(onOpenTrustDialog);
       }).catch((err) => {
-        submitBtn.disabled = false;
+        stopCreep();
+        setRunning(false);
         errorEl.textContent = errorText(err);
         errorEl.hidden = false;
+        errorEl.focus();
       });
     });
   }

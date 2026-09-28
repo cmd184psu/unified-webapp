@@ -1161,6 +1161,8 @@ func readNDJSONLines(t *testing.T, r io.Reader) []ndjsonLine {
 // is ca-key, one leaf-keys line per re-issued cert with Done/Total correct,
 // saving, then a result line matching the database's actual post-replace
 // state -- the same contract the plain (non-streaming) response carries.
+// Total is asserted on the ca-key and saving lines too (this follow-up's own
+// assertion), not just on leaf-keys.
 func TestCAReplace_NDJSON_Success(t *testing.T) {
 	t.Parallel()
 	srv, httpSrv := newHandlerTestHTTPServer(t)
@@ -1185,13 +1187,16 @@ func TestCAReplace_NDJSON_Success(t *testing.T) {
 	if cc := res.Header.Get("Cache-Control"); cc != "no-store" {
 		t.Fatalf("Cache-Control = %q, want %q", cc, "no-store")
 	}
+	if ab := res.Header.Get("X-Accel-Buffering"); ab != "no" {
+		t.Fatalf("X-Accel-Buffering = %q, want %q (nginx must not buffer this stream)", ab, "no")
+	}
 
 	lines := readNDJSONLines(t, res.Body)
 	if len(lines) != n+3 {
 		t.Fatalf("got %d lines, want %d (ca-key + %d leaf-keys + saving + result): %+v", len(lines), n+3, n, lines)
 	}
-	if lines[0].Type != "progress" || lines[0].Phase != "ca-key" {
-		t.Fatalf("lines[0] = %+v, want progress/ca-key", lines[0])
+	if lines[0].Type != "progress" || lines[0].Phase != "ca-key" || lines[0].Total != n {
+		t.Fatalf("lines[0] = %+v, want progress/ca-key total=%d", lines[0], n)
 	}
 	for i := 0; i < n; i++ {
 		l := lines[i+1]
@@ -1199,8 +1204,8 @@ func TestCAReplace_NDJSON_Success(t *testing.T) {
 			t.Fatalf("lines[%d] = %+v, want progress/leaf-keys done=%d total=%d", i+1, l, i+1, n)
 		}
 	}
-	if lines[n+1].Type != "progress" || lines[n+1].Phase != "saving" {
-		t.Fatalf("lines[%d] = %+v, want progress/saving", n+1, lines[n+1])
+	if lines[n+1].Type != "progress" || lines[n+1].Phase != "saving" || lines[n+1].Total != n {
+		t.Fatalf("lines[%d] = %+v, want progress/saving total=%d", n+1, lines[n+1], n)
 	}
 	result := lines[n+2]
 	if result.Type != "result" {

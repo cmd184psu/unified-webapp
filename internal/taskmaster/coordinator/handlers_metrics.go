@@ -8,6 +8,11 @@ import (
 	"cmd184psu/unified-webapp/internal/taskmaster/models"
 )
 
+// metricsIncludeHiddenLanes: owner decision 2026-09-27 (FRD Q4) — hidden
+// lanes are excluded from Metrics "for the time being". Flip to true (and
+// flip TestMetrics_HiddenLaneExcludedByPolicy) to include them.
+const metricsIncludeHiddenLanes = false
+
 func (c *Coordinator) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	laneFilter := r.URL.Query().Get("lane")
 	taskFilter := r.URL.Query().Get("task")
@@ -17,7 +22,11 @@ func (c *Coordinator) handleMetrics(w http.ResponseWriter, r *http.Request) {
 			hours = n
 		}
 	}
-	summaries, err := c.db.GetMetrics(laneFilter, taskFilter, hours)
+	var exclude []string
+	if !metricsIncludeHiddenLanes {
+		exclude = c.hidden.Names()
+	}
+	summaries, err := c.db.GetMetricsExcludingLanes(laneFilter, taskFilter, hours, exclude)
 	if err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return

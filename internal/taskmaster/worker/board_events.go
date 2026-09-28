@@ -18,13 +18,23 @@ type BoardEvent struct {
 	ExecutionID int64  `json:"execution_id,omitempty"`
 	Status      string `json:"status,omitempty"`
 	Engaged     *bool  `json:"engaged,omitempty"`
+	// ProgressPct/ProgressLabel carry a "task-progress" event's payload
+	// (func-task progress, plan §4.9); unset for every other event type.
+	ProgressPct   *int   `json:"progress_pct,omitempty"`
+	ProgressLabel string `json:"progress_label,omitempty"`
 }
 
-// PublishBoardEvent marshals ev and publishes it on b. A nil broker is a
-// no-op (tests that don't wire a board broker pass nil). Marshal errors are
-// dropped defensively; BoardEvent always marshals cleanly.
-func PublishBoardEvent(b *broker.Broker, ev BoardEvent) {
+// PublishBoardEvent marshals ev and publishes it on b, dropping it if ev.Lane
+// names a currently hidden lane (N4) — a hidden lane's tasks/executions are
+// invisible to the board, so its events must be too. A nil broker is a
+// no-op (tests that don't wire a board broker pass nil); a nil hidden set
+// hides nothing, same as HiddenLanes.Hidden's nil receiver. Marshal errors
+// are dropped defensively; BoardEvent always marshals cleanly.
+func PublishBoardEvent(b *broker.Broker, h *HiddenLanes, ev BoardEvent) {
 	if b == nil {
+		return
+	}
+	if ev.Lane != "" && h.Hidden(ev.Lane) {
 		return
 	}
 	data, err := json.Marshal(ev)

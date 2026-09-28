@@ -34,8 +34,13 @@ process.chdir(path.resolve(import.meta.dirname, ".."));
 
 const BARREL = "web/shared/ts/index.ts";
 
-const ALLOWED_VALUES = ["openModal", "confirmDialog", "alertDialog", "promptDialog", "THEMES", "setTheme", "ThemeManager", "showToast", "HamburgerMenu", "copyText", "createCopyButton", "FileTree", "openTreePicker"];
-const ALLOWED_TYPES = ["ModalOptions", "ModalHandle", "DialogOptions", "PromptOptions", "ThemeManagerOptions", "ToastTone", "ToastHandle", "HamburgerMenuOptions", "MenuItem", "CopyButtonOptions", "TreeEntry", "TreeSort", "FileTreeOptions", "TreePickerOptions"];
+// PLAN-utuber-taskmaster-lane.md §4.11 added the shared queue panel (D10,
+// first consumer taskmaster's board.ts): 4 values (QueuePanel, patchList,
+// statusSymbol, effectiveStatus) and 7 types (QueuePanelAdapter,
+// QueuePanelOptions, QueueSection, QueueActionKind, QueueProgress,
+// PatchListOptions, ExecStatus) — 13 -> 17 values, 14 -> 21 types.
+const ALLOWED_VALUES = ["openModal", "confirmDialog", "alertDialog", "promptDialog", "THEMES", "setTheme", "ThemeManager", "showToast", "HamburgerMenu", "copyText", "createCopyButton", "FileTree", "openTreePicker", "QueuePanel", "patchList", "statusSymbol", "effectiveStatus"];
+const ALLOWED_TYPES = ["ModalOptions", "ModalHandle", "DialogOptions", "PromptOptions", "ThemeManagerOptions", "ToastTone", "ToastHandle", "HamburgerMenuOptions", "MenuItem", "CopyButtonOptions", "TreeEntry", "TreeSort", "FileTreeOptions", "TreePickerOptions", "QueuePanelAdapter", "QueuePanelOptions", "QueueSection", "QueueActionKind", "QueueProgress", "PatchListOptions", "ExecStatus"];
 
 function fail(message) {
   process.stderr.write(`check-shared-barrel: FAIL ${message}\n`);

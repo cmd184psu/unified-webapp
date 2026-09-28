@@ -17,3 +17,15 @@ export type { CopyButtonOptions } from "./clipboard.js";
 export { FileTree, openTreePicker } from "./filetree.js";
 export type { TreeEntry, TreeSort, FileTreeOptions, TreePickerOptions } from "./filetree.js";
 export type { HamburgerMenuOptions, MenuItem } from "./menu.js";
+export { patchList } from "./patchlist.js";
+export type { PatchListOptions } from "./patchlist.js";
+export { statusSymbol, effectiveStatus } from "./status.js";
+export type { ExecStatus } from "./status.js";
+export { QueuePanel } from "./queuepanel.js";
+export type {
+  QueuePanelAdapter,
+  QueuePanelOptions,
+  QueueSection,
+  QueueActionKind,
+  QueueProgress,
+} from "./queuepanel.js";

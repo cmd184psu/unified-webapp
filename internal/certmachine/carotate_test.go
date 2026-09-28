@@ -1772,6 +1772,9 @@ func newProgressFixture(t *testing.T, n int) *Store {
 // ReplacePhaseLeafKeys event per re-issued leaf with Done running 1..n and
 // Total==n throughout, then one ReplacePhaseSaving event -- and nothing
 // after that (the hook is never called again once the transaction starts).
+// Total==n is carried on every event, including ca-key and saving, not just
+// leaf-keys (this follow-up's own assertion: the client needs the overall
+// size from the first event).
 func TestReplaceCA_Progress_Reissue(t *testing.T) {
 	t.Parallel()
 	const n = 3
@@ -1789,8 +1792,8 @@ func TestReplaceCA_Progress_Reissue(t *testing.T) {
 	if len(events) != n+2 {
 		t.Fatalf("got %d events, want %d (ca-key + %d leaf-keys + saving): %+v", len(events), n+2, n, events)
 	}
-	if events[0] != (ReplaceProgress{Phase: ReplacePhaseCAKey}) {
-		t.Fatalf("events[0] = %+v, want {Phase: ca-key}", events[0])
+	if events[0] != (ReplaceProgress{Phase: ReplacePhaseCAKey, Total: n}) {
+		t.Fatalf("events[0] = %+v, want {Phase: ca-key, Total: %d}", events[0], n)
 	}
 	for i := 0; i < n; i++ {
 		want := ReplaceProgress{Phase: ReplacePhaseLeafKeys, Done: i + 1, Total: n}
@@ -1798,14 +1801,15 @@ func TestReplaceCA_Progress_Reissue(t *testing.T) {
 			t.Fatalf("events[%d] = %+v, want %+v", i+1, events[i+1], want)
 		}
 	}
-	if events[n+1] != (ReplaceProgress{Phase: ReplacePhaseSaving}) {
-		t.Fatalf("events[%d] = %+v, want {Phase: saving}", n+1, events[n+1])
+	if events[n+1] != (ReplaceProgress{Phase: ReplacePhaseSaving, Total: n}) {
+		t.Fatalf("events[%d] = %+v, want {Phase: saving, Total: %d}", n+1, events[n+1], n)
 	}
 }
 
 // TestReplaceCA_Progress_KeepFiresNoLeafEvents covers existing="keep": the
 // ca-key and saving events still fire (crypto for the new CA always runs),
-// but no leaf is re-issued, so no ReplacePhaseLeafKeys event fires.
+// but no leaf is re-issued, so no ReplacePhaseLeafKeys event fires and Total
+// is 0 on both events.
 func TestReplaceCA_Progress_KeepFiresNoLeafEvents(t *testing.T) {
 	t.Parallel()
 	s := newProgressFixture(t, 2)
@@ -1818,7 +1822,7 @@ func TestReplaceCA_Progress_KeepFiresNoLeafEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReplaceCA: %v", err)
 	}
-	want := []ReplaceProgress{{Phase: ReplacePhaseCAKey}, {Phase: ReplacePhaseSaving}}
+	want := []ReplaceProgress{{Phase: ReplacePhaseCAKey, Total: 0}, {Phase: ReplacePhaseSaving, Total: 0}}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("events = %+v, want %+v", events, want)
 	}

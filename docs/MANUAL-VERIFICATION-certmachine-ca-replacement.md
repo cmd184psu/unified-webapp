@@ -56,6 +56,13 @@ With at least two active certificates signed by the current CA and no
 previous CA yet, **Replace CA…** → name the new CA → blanket choice
 **Re-issue under the new CA** → submit.
 
+While the request is in flight, required: the progress bar is a single
+determinate bar (not a spinner) that runs from 0% up to 100% over the whole
+operation, never jumping backwards or sitting indeterminate at any point;
+the status line next to it names the current phase and shows the percent
+(e.g. "Generating the new certificate authority key… 0%", "Generating
+certificate keys 3 / 12 — 34%", "Saving… 98%", "Done — 100%").
+
 Required: every previously-active certificate reappears in the list signed
 by the new CA (no **Stale** badge), the success toast reports the reissued
 count, and — because a blanket reissue leaves nothing signed by the outgoing
@@ -193,3 +200,6 @@ client:
 ---
 
 Record the results of all twelve items in the pull request before merging.
+
+all 12: Approved
+

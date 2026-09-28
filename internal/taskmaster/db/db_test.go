@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"database/sql"
+	"fmt"
 	"testing"
 	"time"
 
@@ -649,4 +650,546 @@ func TestMarkOrphanFailed_ClosesOutAndReleasesLock(t *testing.T) {
 	locked, err := d.AcquireLock(task.ID, "new-hostname", 10*time.Minute)
 	require.NoError(t, err)
 	require.True(t, locked, "lock should have been released by MarkOrphanFailed regardless of worker_id")
+}
+
+// ─── Migration 5 (owned lanes, func tasks, progress/result) ─────────────────
+
+// tableHasColumn reports whether table has a column named col, via a raw
+// (non-db.DB) connection's PRAGMA table_info — used to inspect the schema
+// independently of the scan/column-list code under test.
+func tableHasColumn(t *testing.T, raw *sql.DB, table, col string) bool {
+	t.Helper()
+	rows, err := raw.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	require.NoError(t, err)
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt any
+		require.NoError(t, rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk))
+		if name == col {
+			return true
+		}
+	}
+	require.NoError(t, rows.Err())
+	return false
+}
+
+func TestMigration5_FreshDBHasColumns(t *testing.T) {
+	path := t.TempDir() + "/fresh.db"
+	d, err := db.Open(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { d.Close() })
+
+	raw, err := sqlOpenLegacy(path)
+	require.NoError(t, err)
+	defer raw.Close()
+
+	for _, c := range []string{"owner", "hidden", "retention_days"} {
+		require.True(t, tableHasColumn(t, raw, "lanes", c), "lanes.%s", c)
+	}
+	for _, c := range []string{"kind", "label", "payload", "payload_version"} {
+		require.True(t, tableHasColumn(t, raw, "tasks", c), "tasks.%s", c)
+	}
+	for _, c := range []string{"progress_pct", "progress_label", "result"} {
+		require.True(t, tableHasColumn(t, raw, "task_executions", c), "task_executions.%s", c)
+	}
+
+	var version int
+	require.NoError(t, raw.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&version))
+	require.Equal(t, 5, version)
+}
+
+// TestMigration5_RollsBackAtomically manually undoes migration 5 EXCEPT the
+// task_executions.result column, then re-opens the DB. Migration 5 re-runs
+// from scratch (schema_version was rolled back to 4) and fails partway
+// through, on "ADD COLUMN result" (already present) — which must roll back
+// the entire migration transaction, not just that one statement, so an
+// earlier successful ALTER in the same migration (lanes.owner) must not
+// stick around either.
+func TestMigration5_RollsBackAtomically(t *testing.T) {
+	path := t.TempDir() + "/rollback.db"
+	d, err := db.Open(path)
+	require.NoError(t, err)
+	require.NoError(t, d.Close())
+
+	raw, err := sqlOpenLegacy(path)
+	require.NoError(t, err)
+	_, err = raw.Exec(`
+DROP INDEX idx_tasks_kind;
+ALTER TABLE lanes DROP COLUMN owner;
+ALTER TABLE lanes DROP COLUMN hidden;
+ALTER TABLE lanes DROP COLUMN retention_days;
+ALTER TABLE tasks DROP COLUMN kind;
+ALTER TABLE tasks DROP COLUMN label;
+ALTER TABLE tasks DROP COLUMN payload;
+ALTER TABLE tasks DROP COLUMN payload_version;
+ALTER TABLE task_executions DROP COLUMN progress_pct;
+ALTER TABLE task_executions DROP COLUMN progress_label;
+DELETE FROM schema_version WHERE version = 5;
+`)
+	require.NoError(t, err)
+	require.NoError(t, raw.Close())
+
+	_, err = db.Open(path)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "migration 5")
+
+	raw2, err := sqlOpenLegacy(path)
+	require.NoError(t, err)
+	defer raw2.Close()
+
+	require.False(t, tableHasColumn(t, raw2, "lanes", "owner"), "the rolled-back migration must not leave lanes.owner behind")
+
+	var version int
+	require.NoError(t, raw2.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&version))
+	require.Equal(t, 4, version)
+}
+
+// ─── Eligibility narrowing for func tasks (P3) ──────────────────────────────
+
+func TestGetEligibleTasks_FuncTaskOnlyWithPending(t *testing.T) {
+	d := newTestDB(t)
+	seedLane(t, d, "owned", 2)
+
+	_, execID, err := d.SubmitFuncTask(db.FuncTaskSpec{Name: "owned-abc123", Lane: "owned", Kind: "test.echo", PayloadVersion: 1})
+	require.NoError(t, err)
+
+	tasks, err := d.GetEligibleTasks()
+	require.NoError(t, err)
+	require.Len(t, tasks, 1, "the func task is eligible while its execution is pending")
+
+	canceled, _, err := d.CancelPendingFuncExecution(execID)
+	require.NoError(t, err)
+	require.True(t, canceled)
+
+	tasks, err = d.GetEligibleTasks()
+	require.NoError(t, err)
+	require.Empty(t, tasks, "a func task with no pending execution is not eligible")
+
+	// A never-run shell task in the same lane is unaffected (R3).
+	seedTask(t, d, "shell-task", "owned")
+	tasks, err = d.GetEligibleTasks()
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Equal(t, "shell-task", tasks[0].Name)
+}
+
+func TestGetEligibleTasks_ShellCanceledQuirkUnchanged(t *testing.T) {
+	d := newTestDB(t)
+	seedLane(t, d, "g", 2)
+	task := seedTask(t, d, "shell-once", "g")
+
+	execID, err := d.CreateExecution(task.ID, "w", time.Now())
+	require.NoError(t, err)
+	require.NoError(t, d.FinishExecution(execID, "canceled", nil, 0, 0))
+
+	tasks, err := d.GetEligibleTasks()
+	require.NoError(t, err)
+	require.Len(t, tasks, 1, "a shell one-shot whose only execution is canceled stays eligible today (P3 quirk, unchanged)")
+	require.Equal(t, "shell-once", tasks[0].Name)
+}
+
+// ─── AddTask / UpdateTask guards (N1) ───────────────────────────────────────
+
+func TestAddTask_DoesNotClobberFuncTask(t *testing.T) {
+	d := newTestDB(t)
+	seedLane(t, d, "owned", 2)
+	seedLane(t, d, "other", 1)
+
+	_, _, err := d.SubmitFuncTask(db.FuncTaskSpec{Name: "job-1", Lane: "owned", Kind: "test.echo", Label: "orig", PayloadVersion: 1})
+	require.NoError(t, err)
+
+	// An HTTP-style upsert must not clobber a func task's row.
+	_, err = d.AddTask(&models.Task{Name: "job-1", LaneName: "other", Enabled: true, Command: "echo hi"})
+	require.NoError(t, err)
+
+	got, err := d.GetTask("job-1")
+	require.NoError(t, err)
+	require.Equal(t, "owned", got.LaneName, "AddTask must not clobber a func task via ON CONFLICT")
+	require.Equal(t, "test.echo", got.Kind)
+}
+
+func TestUpdateTask_RejectsUnknownField(t *testing.T) {
+	d := newTestDB(t)
+	seedLane(t, d, "g", 1)
+	seedTask(t, d, "t", "g")
+
+	err := d.UpdateTask("t", map[string]any{"kind": "hacked"})
+	require.ErrorIs(t, err, db.ErrUnknownTaskField)
+}
+
+// ─── Func-task lifecycle primitives ─────────────────────────────────────────
+
+func TestSubmitFuncTask_FIFOPositionsAndPending(t *testing.T) {
+	d := newTestDB(t)
+	seedLane(t, d, "owned", 2)
+
+	taskID1, execID1, err := d.SubmitFuncTask(db.FuncTaskSpec{Name: "j1", Lane: "owned", Kind: "test.echo", PayloadVersion: 1})
+	require.NoError(t, err)
+	taskID2, execID2, err := d.SubmitFuncTask(db.FuncTaskSpec{Name: "j2", Lane: "owned", Kind: "test.echo", PayloadVersion: 1})
+	require.NoError(t, err)
+
+	t1, err := d.GetTask("j1")
+	require.NoError(t, err)
+	require.Equal(t, 0, t1.Position)
+
+	t2, err := d.GetTask("j2")
+	require.NoError(t, err)
+	require.Equal(t, 1, t2.Position, "second func task takes the next FIFO position")
+
+	pending1, err := d.GetPendingExecution(taskID1)
+	require.NoError(t, err)
+	require.NotNil(t, pending1)
+	require.Equal(t, execID1, pending1.ID)
+	require.Equal(t, "pending", pending1.Status)
+
+	pending2, err := d.GetPendingExecution(taskID2)
+	require.NoError(t, err)
+	require.NotNil(t, pending2)
+	require.Equal(t, execID2, pending2.ID)
+}
+
+func TestClaimFuncExecution_OnlyFromPending(t *testing.T) {
+	d := newTestDB(t)
+	seedLane(t, d, "owned", 2)
+	_, execID, err := d.SubmitFuncTask(db.FuncTaskSpec{Name: "j1", Lane: "owned", Kind: "test.echo", PayloadVersion: 1})
+	require.NoError(t, err)
+
+	claimed, err := d.ClaimFuncExecution(execID, "w1")
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	exec, err := d.GetExecution(execID)
+	require.NoError(t, err)
+	require.Equal(t, "running", exec.Status)
+	require.NotNil(t, exec.StartedAt)
+
+	claimed2, err := d.ClaimFuncExecution(execID, "w2")
+	require.NoError(t, err)
+	require.False(t, claimed2, "a second claim on an already-running execution affects nothing")
+}
+
+func TestCancelPendingFuncExecution_RecordsMetric_ShellIgnored(t *testing.T) {
+	d := newTestDB(t)
+	seedLane(t, d, "owned", 2)
+	taskID, execID, err := d.SubmitFuncTask(db.FuncTaskSpec{Name: "j1", Lane: "owned", Kind: "test.echo", PayloadVersion: 1})
+	require.NoError(t, err)
+
+	canceled, gotTaskID, err := d.CancelPendingFuncExecution(execID)
+	require.NoError(t, err)
+	require.True(t, canceled)
+	require.Equal(t, taskID, gotTaskID)
+
+	exec, err := d.GetExecution(execID)
+	require.NoError(t, err)
+	require.Equal(t, "canceled", exec.Status)
+
+	metrics, err := d.GetMetrics("", "", 24)
+	require.NoError(t, err)
+	require.Len(t, metrics, 1)
+	require.Equal(t, 1, metrics[0].CanceledCount)
+
+	canceled2, _, err := d.CancelPendingFuncExecution(execID)
+	require.NoError(t, err)
+	require.False(t, canceled2, "a second call on an already-terminal execution is a no-op")
+
+	// A pending SHELL execution is ignored entirely: not canceled, no metric.
+	seedLane(t, d, "shell-lane", 1)
+	shellTask := seedTask(t, d, "shell-t", "shell-lane")
+	shellExecID, err := d.EnqueueTask(shellTask.Name, time.Now())
+	require.NoError(t, err)
+
+	shellCanceled, _, err := d.CancelPendingFuncExecution(shellExecID)
+	require.NoError(t, err)
+	require.False(t, shellCanceled)
+
+	shellExec, err := d.GetExecution(shellExecID)
+	require.NoError(t, err)
+	require.Equal(t, "pending", shellExec.Status)
+}
+
+func TestRerunTask_BusyAndRequeuePosition(t *testing.T) {
+	d := newTestDB(t)
+	seedLane(t, d, "owned", 2)
+
+	taskID, execID, err := d.SubmitFuncTask(db.FuncTaskSpec{Name: "j1", Lane: "owned", Kind: "test.echo", PayloadVersion: 1})
+	require.NoError(t, err)
+	require.NoError(t, d.FinishExecution(execID, "failed", nil, 10, 0))
+
+	_, _, err = d.SubmitFuncTask(db.FuncTaskSpec{Name: "j2", Lane: "owned", Kind: "test.echo", PayloadVersion: 1})
+	require.NoError(t, err)
+
+	// Busy: a pending/running execution blocks rerun.
+	seedLane(t, d, "busy-lane", 1)
+	_, _, err = d.SubmitFuncTask(db.FuncTaskSpec{Name: "busy1", Lane: "busy-lane", Kind: "test.echo", PayloadVersion: 1})
+	require.NoError(t, err)
+	_, err = d.RerunTask("busy1")
+	require.ErrorIs(t, err, db.ErrTaskBusy)
+
+	newExecID, err := d.RerunTask("j1")
+	require.NoError(t, err)
+	require.NotZero(t, newExecID)
+
+	got, err := d.GetTask("j1")
+	require.NoError(t, err)
+	require.Equal(t, taskID, got.ID)
+	require.Equal(t, 2, got.Position, "func task requeues to the back of the lane (FIFO)")
+
+	// Shell task: position unchanged after rerun (R3).
+	seedLane(t, d, "shell-lane", 1)
+	shellID, err := d.AddTask(&models.Task{Name: "shell1", LaneName: "shell-lane", Enabled: true, Position: 5, Command: "echo hi"})
+	require.NoError(t, err)
+	shellExecID, err := d.CreateExecution(shellID, "w", time.Now())
+	require.NoError(t, err)
+	require.NoError(t, d.FinishExecution(shellExecID, "success", nil, 10, 0))
+
+	_, err = d.RerunTask("shell1")
+	require.NoError(t, err)
+	gotShell, err := d.GetTask("shell1")
+	require.NoError(t, err)
+	require.Equal(t, 5, gotShell.Position, "shell task position is left alone on rerun (R3)")
+}
+
+func TestRemoveIdleTask_RunningBusy_QueuedRemoved(t *testing.T) {
+	d := newTestDB(t)
+	seedLane(t, d, "owned", 2)
+
+	_, execID, err := d.SubmitFuncTask(db.FuncTaskSpec{Name: "running-job", Lane: "owned", Kind: "test.echo", PayloadVersion: 1})
+	require.NoError(t, err)
+	claimed, err := d.ClaimFuncExecution(execID, "w1")
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	require.ErrorIs(t, d.RemoveIdleTask("running-job"), db.ErrTaskBusy)
+
+	_, _, err = d.SubmitFuncTask(db.FuncTaskSpec{Name: "queued-job", Lane: "owned", Kind: "test.echo", PayloadVersion: 1})
+	require.NoError(t, err)
+
+	require.NoError(t, d.RemoveIdleTask("queued-job"))
+	got, err := d.GetTask("queued-job")
+	require.NoError(t, err)
+	require.Nil(t, got)
+
+	require.ErrorIs(t, d.RemoveIdleTask("does-not-exist"), db.ErrTaskNotFound)
+}
+
+func TestPruneOwnedLane_DeletesTaskExecsMetrics(t *testing.T) {
+	d := newTestDB(t)
+	seedLane(t, d, "owned", 2)
+
+	taskID, execID, err := d.SubmitFuncTask(db.FuncTaskSpec{Name: "finished-job", Lane: "owned", Kind: "test.echo", PayloadVersion: 1})
+	require.NoError(t, err)
+	claimed, err := d.ClaimFuncExecution(execID, "w1")
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NoError(t, d.FinishExecution(execID, "success", nil, 10, 0))
+	require.NoError(t, d.RecordMetric(taskID, execID, "success", 10, 0))
+
+	// A pending func task in the same lane must never be pruned.
+	pendingTaskID, _, err := d.SubmitFuncTask(db.FuncTaskSpec{Name: "pending-job", Lane: "owned", Kind: "test.echo", PayloadVersion: 1})
+	require.NoError(t, err)
+
+	// A shell task in the same lane must never be pruned.
+	seedTask(t, d, "shell-in-owned", "owned")
+
+	// A cutoff in the past keeps the finished job.
+	n, err := d.PruneOwnedLane("owned", time.Now().Add(-time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, 0, n)
+	got, err := d.GetTask("finished-job")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+
+	// A cutoff in the future removes the finished job, its execution and metric.
+	n, err = d.PruneOwnedLane("owned", time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	got, err = d.GetTask("finished-job")
+	require.NoError(t, err)
+	require.Nil(t, got)
+	exec, err := d.GetExecution(execID)
+	require.NoError(t, err)
+	require.Nil(t, exec)
+	metrics, err := d.GetMetrics("owned", "", 24*365)
+	require.NoError(t, err)
+	require.Empty(t, metrics)
+
+	pendingTask, err := d.GetTask("pending-job")
+	require.NoError(t, err)
+	require.NotNil(t, pendingTask)
+	require.Equal(t, pendingTaskID, pendingTask.ID)
+
+	shellStill, err := d.GetTask("shell-in-owned")
+	require.NoError(t, err)
+	require.NotNil(t, shellStill)
+}
+
+func TestEnsureOwnedLane_SeedOnceAndOwnerConflict(t *testing.T) {
+	d := newTestDB(t)
+
+	l, err := d.EnsureOwnedLane("owned", "acme-module", 3, 10, false)
+	require.NoError(t, err)
+	require.Equal(t, "owned", l.Name)
+	require.Equal(t, 3, l.Width)
+	require.Equal(t, "acme-module", l.Owner)
+	require.Equal(t, 10, l.RetentionDays)
+	require.False(t, l.Hidden)
+
+	// A second call with the same owner is a no-op, even with different
+	// seed values: the DB is authoritative once the lane exists (N7/P8).
+	l2, err := d.EnsureOwnedLane("owned", "acme-module", 99, 99, true)
+	require.NoError(t, err)
+	require.Equal(t, 3, l2.Width)
+	require.Equal(t, 10, l2.RetentionDays)
+	require.False(t, l2.Hidden)
+
+	// A different owner (including "") conflicts.
+	_, err = d.EnsureOwnedLane("owned", "other-module", 1, 0, false)
+	require.ErrorIs(t, err, db.ErrLaneOwnedByOther)
+
+	seedLane(t, d, "regular", 2) // owner == "" (a plain config/UI lane)
+	_, err = d.EnsureOwnedLane("regular", "acme-module", 1, 0, false)
+	require.ErrorIs(t, err, db.ErrLaneOwnedByOther)
+	require.Contains(t, err.Error(), "already exists")
+}
+
+// ─── Owned-lane visibility filters (N4) ─────────────────────────────────────
+
+func TestListExecutionsExcludingLanes_KeepsDeletedTaskRows(t *testing.T) {
+	path := t.TempDir() + "/exclude.db"
+	d, err := db.Open(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { d.Close() })
+
+	seedLane(t, d, "visible", 1)
+	seedLane(t, d, "hidden-lane", 1)
+
+	visTask := seedTask(t, d, "vis-task", "visible")
+	hidTask := seedTask(t, d, "hid-task", "hidden-lane")
+	goneTask := seedTask(t, d, "gone-task", "visible")
+
+	visExec, err := d.CreateExecution(visTask.ID, "w", time.Now())
+	require.NoError(t, err)
+	require.NoError(t, d.FinishExecution(visExec, "success", nil, 10, 0))
+
+	hidExec, err := d.CreateExecution(hidTask.ID, "w", time.Now())
+	require.NoError(t, err)
+	require.NoError(t, d.FinishExecution(hidExec, "success", nil, 10, 0))
+
+	goneExec, err := d.CreateExecution(goneTask.ID, "w", time.Now())
+	require.NoError(t, err)
+	require.NoError(t, d.FinishExecution(goneExec, "success", nil, 10, 0))
+
+	// Simulate a pre-existing orphaned execution row (task_id no longer
+	// resolves), by deleting the task directly with FK enforcement off on a
+	// second connection, bypassing the ON DELETE CASCADE the primary
+	// connection would otherwise apply.
+	raw, err := sqlOpenLegacy(path)
+	require.NoError(t, err)
+	_, err = raw.Exec(`PRAGMA foreign_keys = OFF`)
+	require.NoError(t, err)
+	_, err = raw.Exec(`DELETE FROM tasks WHERE name = 'gone-task'`)
+	require.NoError(t, err)
+	require.NoError(t, raw.Close())
+
+	all, err := d.ListExecutionsExcludingLanes("", 50, nil)
+	require.NoError(t, err)
+	require.Len(t, all, 3, "the orphaned execution is still returned when nothing is excluded")
+
+	filtered, err := d.ListExecutionsExcludingLanes("", 50, []string{"hidden-lane"})
+	require.NoError(t, err)
+	seen := make(map[int64]bool)
+	for _, e := range filtered {
+		seen[e.ID] = true
+	}
+	require.True(t, seen[visExec], "visible lane's execution stays")
+	require.True(t, seen[goneExec], "the orphaned execution (no lane) is never excluded")
+	require.False(t, seen[hidExec], "hidden lane's execution is excluded")
+}
+
+func TestGetMetricsExcludingLanes(t *testing.T) {
+	d := newTestDB(t)
+	seedLane(t, d, "visible", 1)
+	seedLane(t, d, "hidden-lane", 1)
+
+	visTask := seedTask(t, d, "vis-task", "visible")
+	hidTask := seedTask(t, d, "hid-task", "hidden-lane")
+
+	visExec, err := d.CreateExecution(visTask.ID, "w", time.Now())
+	require.NoError(t, err)
+	require.NoError(t, d.RecordMetric(visTask.ID, visExec, "success", 10, 0))
+
+	hidExec, err := d.CreateExecution(hidTask.ID, "w", time.Now())
+	require.NoError(t, err)
+	require.NoError(t, d.RecordMetric(hidTask.ID, hidExec, "success", 10, 0))
+
+	all, err := d.GetMetrics("", "", 24)
+	require.NoError(t, err)
+	require.Len(t, all, 2)
+
+	filtered, err := d.GetMetricsExcludingLanes("", "", 24, []string{"hidden-lane"})
+	require.NoError(t, err)
+	require.Len(t, filtered, 1)
+	require.Equal(t, "vis-task", filtered[0].TaskName)
+}
+
+// TestGetMetrics_FuncTasksAggregatedByKind pins P17: func-task metrics
+// aggregate per (lane, kind), not per task, so N one-shot downloads of the
+// same kind show as one card instead of flooding the metrics view.
+func TestGetMetrics_FuncTasksAggregatedByKind(t *testing.T) {
+	d := newTestDB(t)
+	seedLane(t, d, "owned", 3)
+	seedLane(t, d, "other", 1)
+
+	var funcTaskNames []string
+	for i := 0; i < 3; i++ {
+		name := fmt.Sprintf("owned-job-%d", i)
+		funcTaskNames = append(funcTaskNames, name)
+		taskID, execID, err := d.SubmitFuncTask(db.FuncTaskSpec{Name: name, Lane: "owned", Kind: "test.echo", PayloadVersion: 1})
+		require.NoError(t, err)
+		require.NoError(t, d.RecordMetric(taskID, execID, "success", 10, 0))
+	}
+
+	shellTask := seedTask(t, d, "shell-task", "other")
+	shellExec, err := d.CreateExecution(shellTask.ID, "w", time.Now())
+	require.NoError(t, err)
+	require.NoError(t, d.RecordMetric(shellTask.ID, shellExec, "success", 10, 0))
+
+	rows, err := d.GetMetrics("", "", 24)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+
+	var funcRow, shellRow *models.MetricSummary
+	for _, r := range rows {
+		if r.Kind == "test.echo" {
+			funcRow = r
+		} else {
+			shellRow = r
+		}
+	}
+	require.NotNil(t, funcRow, "func tasks of the same kind collapse into one aggregate row")
+	require.NotNil(t, shellRow)
+	require.Equal(t, "test.echo", funcRow.TaskName)
+	require.Equal(t, 3, funcRow.SuccessCount)
+	require.Equal(t, "shell-task", shellRow.TaskName)
+	require.Equal(t, 1, shellRow.SuccessCount)
+
+	// Excluding "owned" removes the func aggregate but keeps the shell row
+	// from "other": the hidden-lane exclusion still holds under kind
+	// aggregation.
+	excluded, err := d.GetMetricsExcludingLanes("", "", 24, []string{"owned"})
+	require.NoError(t, err)
+	require.Len(t, excluded, 1)
+	require.Equal(t, "shell-task", excluded[0].TaskName)
+
+	// Task-detail path: filtering by one func task's own name still
+	// resolves to the single aggregate row for its kind.
+	detail, err := d.GetMetrics("", funcTaskNames[0], 24)
+	require.NoError(t, err)
+	require.Len(t, detail, 1)
+	require.Equal(t, 1, detail[0].SuccessCount)
+	require.Equal(t, "test.echo", detail[0].Kind)
 }

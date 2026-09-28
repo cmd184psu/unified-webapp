@@ -110,6 +110,20 @@ export interface ReplaceResult {
   previousDropped: boolean;
 }
 
+/**
+ * One progress event from `replaceCAWithProgress`'s NDJSON stream (the
+ * CA-replacement plan's progress-bar feature). `total` -- the overall
+ * leaf-key count, 0 when none will be re-issued -- is present on every
+ * phase, so the client can compute an overall percentage from the very
+ * first event (see `percentFor` in `ndjson.ts`); `done` is present only for
+ * `"leaf-keys"`, matching the server's own `omitempty` there.
+ */
+export interface ReplaceProgressEvent {
+  phase: "ca-key" | "leaf-keys" | "saving";
+  done?: number;
+  total?: number;
+}
+
 /** One entry in an import preview/execute report. */
 export interface ImportItem {
   path: string;

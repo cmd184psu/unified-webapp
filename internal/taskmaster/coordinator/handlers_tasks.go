@@ -2,27 +2,38 @@ package coordinator
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"cmd184psu/unified-webapp/internal/platform/response"
+	"cmd184psu/unified-webapp/internal/taskmaster/db"
 	"cmd184psu/unified-webapp/internal/taskmaster/models"
 	"cmd184psu/unified-webapp/internal/taskmaster/worker"
 )
 
 func (c *Coordinator) handleListTasks(w http.ResponseWriter, r *http.Request) {
 	laneFilter := r.URL.Query().Get("lane")
+	if laneFilter != "" && c.laneHidden(laneFilter) {
+		response.WriteJSON(w, http.StatusOK, []*models.Task{})
+		return
+	}
 	tasks, err := c.db.ListTasks(laneFilter)
 	if err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if tasks == nil {
-		tasks = []*models.Task{}
+	visible := make([]*models.Task, 0, len(tasks))
+	for _, t := range tasks {
+		if c.laneHidden(t.LaneName) {
+			continue
+		}
+		visible = append(visible, t)
 	}
-	response.WriteJSON(w, http.StatusOK, tasks)
+	response.WriteJSON(w, http.StatusOK, visible)
 }
 
 // validateTaskPolicy enforces allow_sudo. The old allowed_types/task_type
@@ -45,8 +56,19 @@ func (c *Coordinator) handleAddTask(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, http.StatusBadRequest, "name and lane_name are required")
 		return
 	}
+	// kind/label/payload/payload_version are set only by a module through
+	// golane.Lane.Submit, never over HTTP (P2/D2).
+	if task.Kind != "" {
+		response.WriteError(w, http.StatusBadRequest, `"kind" cannot be set over HTTP`)
+		return
+	}
 
-	// validate lane exists
+	// A hidden lane is treated as if it doesn't exist (N4); an owned but
+	// visible lane exists but is off-limits to plain task creation (P7/P20).
+	if c.laneHidden(task.LaneName) {
+		response.WriteError(w, http.StatusBadRequest, "unknown lane: "+task.LaneName)
+		return
+	}
 	l, err := c.db.GetLane(task.LaneName)
 	if err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
@@ -54,6 +76,19 @@ func (c *Coordinator) handleAddTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if l == nil {
 		response.WriteError(w, http.StatusBadRequest, "unknown lane: "+task.LaneName)
+		return
+	}
+	if l.Owner != "" {
+		response.WriteError(w, http.StatusBadRequest, fmt.Sprintf("lane %q is managed by module %q", l.Name, l.Owner))
+		return
+	}
+
+	if existing, _ := c.db.GetTask(task.Name); existing != nil && existing.Kind != "" {
+		owner := ""
+		if el, _ := c.db.GetLane(existing.LaneName); el != nil {
+			owner = el.Owner
+		}
+		response.WriteError(w, http.StatusConflict, fmt.Sprintf("task %q is managed by module %q", task.Name, owner))
 		return
 	}
 
@@ -79,7 +114,7 @@ func (c *Coordinator) handleGetTask(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if task == nil {
+	if task == nil || c.laneHidden(task.LaneName) {
 		response.WriteError(w, http.StatusNotFound, "task not found: "+name)
 		return
 	}
@@ -93,8 +128,11 @@ func (c *Coordinator) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if existing == nil {
+	if existing == nil || c.laneHidden(existing.LaneName) {
 		response.WriteError(w, http.StatusNotFound, "task not found: "+name)
+		return
+	}
+	if c.funcTaskGuard(w, existing) {
 		return
 	}
 
@@ -107,6 +145,14 @@ func (c *Coordinator) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	delete(updates, "id")
 	delete(updates, "name")
 	delete(updates, "created_at")
+
+	if v, ok := updates["lane_name"]; ok {
+		laneName, _ := v.(string)
+		if l, _ := c.db.GetLane(laneName); l != nil && l.Owner != "" {
+			response.WriteError(w, http.StatusBadRequest, fmt.Sprintf("lane %q is managed by module %q", l.Name, l.Owner))
+			return
+		}
+	}
 
 	// Compute the effective post-merge sudo flag and validate it — covers
 	// flipping sudo on via update.
@@ -126,6 +172,10 @@ func (c *Coordinator) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := c.db.UpdateTask(name, updates); err != nil {
+		if errors.Is(err, db.ErrUnknownTaskField) {
+			response.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -139,54 +189,90 @@ func (c *Coordinator) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 func (c *Coordinator) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	existing, _ := c.db.GetTask(name)
+	if existing == nil || c.laneHidden(existing.LaneName) {
+		response.WriteError(w, http.StatusNotFound, "task not found: "+name)
+		return
+	}
+	if existing.Kind != "" {
+		// N3: a func task refuses deletion while it has a running
+		// execution; a shell task's delete stays unconditional (R3).
+		if err := c.db.RemoveIdleTask(name); err != nil {
+			if errors.Is(err, db.ErrTaskBusy) {
+				response.WriteError(w, http.StatusConflict, "task is running")
+				return
+			}
+			response.WriteError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		c.publishBoard(worker.BoardEvent{Type: "lane-updated", Lane: existing.LaneName, Task: name})
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if err := c.db.DeleteTask(name); err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if existing != nil {
-		c.publishBoard(worker.BoardEvent{Type: "lane-updated", Lane: existing.LaneName, Task: name})
-	}
+	c.publishBoard(worker.BoardEvent{Type: "lane-updated", Lane: existing.LaneName, Task: name})
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (c *Coordinator) handlePauseTask(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	existing, _ := c.db.GetTask(name)
+	if existing == nil || c.laneHidden(existing.LaneName) {
+		response.WriteError(w, http.StatusNotFound, "task not found: "+name)
+		return
+	}
+	if c.funcTaskGuard(w, existing) {
+		return
+	}
 	if err := c.db.SetTaskPaused(name, true); err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if existing != nil {
-		c.publishBoard(worker.BoardEvent{Type: "lane-updated", Lane: existing.LaneName, Task: name})
-	}
+	c.publishBoard(worker.BoardEvent{Type: "lane-updated", Lane: existing.LaneName, Task: name})
 	response.WriteJSON(w, http.StatusOK, map[string]string{"status": "paused"})
 }
 
 func (c *Coordinator) handleResumeTask(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	existing, _ := c.db.GetTask(name)
+	if existing == nil || c.laneHidden(existing.LaneName) {
+		response.WriteError(w, http.StatusNotFound, "task not found: "+name)
+		return
+	}
+	if c.funcTaskGuard(w, existing) {
+		return
+	}
 	if err := c.db.SetTaskPaused(name, false); err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if existing != nil {
-		c.publishBoard(worker.BoardEvent{Type: "lane-updated", Lane: existing.LaneName, Task: name})
-	}
+	c.publishBoard(worker.BoardEvent{Type: "lane-updated", Lane: existing.LaneName, Task: name})
 	response.WriteJSON(w, http.StatusOK, map[string]string{"status": "resumed"})
 }
 
 func (c *Coordinator) handleUpNext(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	task, err := c.db.GetTask(name)
+	if err != nil {
+		response.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if task == nil || c.laneHidden(task.LaneName) {
+		response.WriteError(w, http.StatusNotFound, "task not found: "+name)
+		return
+	}
+	if task.Kind != "" {
+		response.WriteError(w, http.StatusConflict, "use POST /api/executions/{id}/rerun for module-managed tasks")
+		return
+	}
 	execID, err := c.db.EnqueueTask(name, time.Now())
 	if err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	lane := ""
-	if task, _ := c.db.GetTask(name); task != nil {
-		lane = task.LaneName
-	}
-	c.publishBoard(worker.BoardEvent{Type: "task-enqueued", Lane: lane, Task: name, ExecutionID: execID})
+	c.publishBoard(worker.BoardEvent{Type: "task-enqueued", Lane: task.LaneName, Task: name, ExecutionID: execID})
 	response.WriteJSON(w, http.StatusCreated, map[string]int64{"execution_id": execID})
 }
 
@@ -199,8 +285,11 @@ func (c *Coordinator) handleMoveTask(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if existing == nil {
+	if existing == nil || c.laneHidden(existing.LaneName) {
 		response.WriteError(w, http.StatusNotFound, "task not found: "+name)
+		return
+	}
+	if c.funcTaskGuard(w, existing) {
 		return
 	}
 
@@ -216,6 +305,10 @@ func (c *Coordinator) handleMoveTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if c.laneHidden(req.LaneName) {
+		response.WriteError(w, http.StatusBadRequest, "unknown lane: "+req.LaneName)
+		return
+	}
 	lane, err := c.db.GetLane(req.LaneName)
 	if err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
@@ -223,6 +316,10 @@ func (c *Coordinator) handleMoveTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if lane == nil {
 		response.WriteError(w, http.StatusBadRequest, "unknown lane: "+req.LaneName)
+		return
+	}
+	if lane.Owner != "" {
+		response.WriteError(w, http.StatusBadRequest, fmt.Sprintf("lane %q is managed by module %q", lane.Name, lane.Owner))
 		return
 	}
 

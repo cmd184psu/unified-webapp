@@ -9,6 +9,7 @@ import (
 
 	"cmd184psu/unified-webapp/internal/platform/response"
 	"cmd184psu/unified-webapp/internal/taskmaster/db"
+	"cmd184psu/unified-webapp/internal/taskmaster/golane"
 	"cmd184psu/unified-webapp/internal/taskmaster/worker"
 )
 
@@ -33,10 +34,12 @@ func writeNotRunningResult(w http.ResponseWriter, database *db.DB, id int64) {
 	response.WriteJSON(w, http.StatusOK, map[string]string{"status": "not_running"})
 }
 
-// handleCancelExecution cancels a running execution by ID. The "canceled"
-// status itself is written by the worker's runTask once Execute unwinds —
-// this handler only signals the cancel and reports whether the execution
-// was actually running (registered) to cancel.
+// handleCancelExecution cancels an execution by ID, through the shared
+// DB-first cancel protocol (worker.CancelExecution, plan §4.4): a still-
+// pending func execution is canceled outright (P4); a running execution
+// (of any kind) is signaled to stop, with "canceled" written once Execute/
+// Run actually unwinds; anything else (unknown id, already finished, or a
+// pending shell execution — not offered, P4) reports not_running/404.
 func (c *Coordinator) handleCancelExecution(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -44,11 +47,20 @@ func (c *Coordinator) handleCancelExecution(w http.ResponseWriter, r *http.Reque
 		response.WriteError(w, http.StatusBadRequest, "invalid execution id: "+idStr)
 		return
 	}
-	if !c.cancels.Cancel(id) {
+	if lane, _, found, lerr := c.db.ExecutionLane(id); lerr == nil && found && c.laneHidden(lane) {
+		response.WriteError(w, http.StatusNotFound, "no such execution: "+idStr)
+		return
+	}
+	outcome, err := worker.CancelExecution(c.db, c.cancels, c.board, c.hidden, id)
+	if err != nil {
+		response.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if outcome == golane.CancelOutcome("not_running") {
 		writeNotRunningResult(w, c.db, id)
 		return
 	}
-	response.WriteJSON(w, http.StatusOK, map[string]string{"status": "canceling"})
+	response.WriteJSON(w, http.StatusOK, map[string]string{"status": string(outcome)})
 }
 
 // handlePauseExecution suspends (SIGSTOP, escalated via sudo when the task
@@ -60,6 +72,10 @@ func (c *Coordinator) handlePauseExecution(w http.ResponseWriter, r *http.Reques
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		response.WriteError(w, http.StatusBadRequest, "invalid execution id: "+idStr)
+		return
+	}
+	if lane, _, found, lerr := c.db.ExecutionLane(id); lerr == nil && found && c.laneHidden(lane) {
+		response.WriteError(w, http.StatusNotFound, "no such execution: "+idStr)
 		return
 	}
 	if err := c.procs.Suspend(id); err != nil {
@@ -80,6 +96,10 @@ func (c *Coordinator) handleResumeExecution(w http.ResponseWriter, r *http.Reque
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		response.WriteError(w, http.StatusBadRequest, "invalid execution id: "+idStr)
+		return
+	}
+	if lane, _, found, lerr := c.db.ExecutionLane(id); lerr == nil && found && c.laneHidden(lane) {
+		response.WriteError(w, http.StatusNotFound, "no such execution: "+idStr)
 		return
 	}
 	if err := c.procs.Resume(id); err != nil {
