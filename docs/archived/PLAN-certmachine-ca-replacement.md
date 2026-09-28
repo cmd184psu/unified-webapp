@@ -6,6 +6,9 @@ Status: **APPROVED by owner 2026-09-27**, queued for ralph (Sonnet builder) afte
 
 All paths are relative to `internal/certmachine/` unless otherwise stated. Line numbers were verified against the tree at commit `29ac6c7`.
 
+NOTICE: this plan may be carried out already.  Please verify that this plan was already done before touching code.  If so, just mark this plan complete near the top (remove this notice).
+
+
 ---
 
 ## 0. Binding rules for the executor (read first)
