@@ -201,5 +201,5 @@ client:
 
 Record the results of all twelve items in the pull request before merging.
 
-all 12: Approved
+all 12: Approved and VERIFIED! Stop asking about this!
 

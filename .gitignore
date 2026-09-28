@@ -69,3 +69,6 @@ reference/
 /.smbedit-base.sha
 # OMC session state (never committed)
 .omc/
+.omo/
+ca-verify-test/
+local-test/*.pin
