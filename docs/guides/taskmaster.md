@@ -5,9 +5,10 @@ in ordered, width-limited **lanes**; run them on demand or let them repeat
 after a cooldown *rest*; watch their output live over SSE; and drive
 everything from a live lane board. Ported from the standalone
 `continuous-task-runner-queue` reference project into unified-webapp's
-module contract (`docs/adding-a-module.md`); the object-model/UI rework
-described here is specced in `taskmaster-ui-FRD.md` and
-`taskmaster-ui-plan.md`.
+  module contract (`docs/guides/adding-a-module.md`); the object-model/UI
+  rework described here is specced in
+  `docs/archived/taskmaster-ui-FRD-14Sept2026.md` and
+  `docs/archived/taskmaster-ui-plan-26Sept2026.md`.
 
 **Read this before turning on `allow_sudo` or exposing this module beyond a
 trusted operator group** — see [Security](#security) below.
@@ -112,7 +113,7 @@ behind the platform login gate. With no entry, the module is open.
 
 All routes below live under the module's own hostname (`host_routing`
 target) and are wrapped by the platform gate/body-limit/origin-check
-middleware like any other module (`docs/adding-a-module.md`) — no
+  middleware like any other module (`docs/guides/adding-a-module.md`) — no
 taskmaster-specific auth code exists.
 
 | Method | Path | Purpose |
@@ -469,7 +470,8 @@ curated, separately-audited **setuid-root helper** that hard-codes a fixed
 allow-list of privileged operations (an "own sudo" taskmaster can call
 directly, dropping the `sudoers` dependency entirely), plus platform-level
 scoped/per-module API keys to close the flattening risk. See
-`taskmaster-ui-FRD.md` / `taskmaster-ui-plan.md` for the rationale.
+  `docs/archived/taskmaster-ui-FRD-14Sept2026.md` /
+  `docs/archived/taskmaster-ui-plan-26Sept2026.md` for the rationale.
 
 **Until that lands:** only enable `allow_sudo` on a deployment where every
 holder of a platform API key, and every user who can log into taskmaster at

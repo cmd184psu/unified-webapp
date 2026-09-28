@@ -21,7 +21,7 @@ rewrite files another section also edits.
 | 1 | **D0** | Tear down hamburger auto-detection; `side` comes from config only | — |
 | 2 | **D1** | Anchor the menuserver ☰ far right of the header | — |
 | 3 | **D2** | *No action.* certmachine is tested, verified, complete | — |
-| 4 | **D3** | multissh: move ☰ right, place logout beside it | D0 |
+| 4 | **D3** | multissh: move ☰ right; sign-out control already exists — verify | D0 |
 | 5 | **D4** | smbedit: stop scrolling below the footer | — |
 | 6 | **D7** | Login page wears the module's own theme — **verify before building** | — |
 | 7 | **D8** | Migrate utuber onto the taskmaster lane; delete `internal/utuber/jobs` | D0 |
@@ -88,56 +88,81 @@ close button and the title all shipped in `f7e9157` ("C0: HamburgerMenu side opt
 button + title"). The `side-wiring table` below confirms every module already passes `side`
 explicitly or accepts the deliberate `left` default.
 
-**The only live work in D0 is the teardown.** `"auto"` is still implemented and still reachable:
+**The only live work in D0 is the teardown.** `"auto"` is still implemented and still reachable.
+Measured from source, 2026-09-28 — every site below is real, but the teardown is **eight** edits
+across two files, not four:
 
-| Location | What it does | Action |
+| File:line | What it does | Action |
 |---|---|---|
+| `web/shared/ts/menu.ts:102` | doc comment: `"auto" defers the choice to the first open()` | rewrite to describe the configured edge |
 | `web/shared/ts/menu.ts:106` | `side?: "left" \| "right" \| "auto"` — the type still permits `"auto"` | narrow to `"left" \| "right"` |
-| `web/shared/ts/menu.ts:212` | `resolvedSide` cache field, "null until the first `open()`" | delete |
-| `web/shared/ts/menu.ts:230` | `else if (options.side === "auto")` branch in the resolver | delete |
-| `web/shared/ts/menu.ts:287-288` | `getBoundingClientRect()` midpoint test in `open()` | delete |
+| `web/shared/ts/menu.ts:212-213` | comment + `private resolvedSide: "left" \| "right" \| null` cache field | delete both |
+| `web/shared/ts/menu.ts:227-234` | the constructor resolver, **three** branches: `left`/`right` → set, `auto` → null, else → `left` | collapse to two: configured value, else `left` |
+| `web/shared/ts/menu.ts:287-292` | `open()`'s `side === "auto" && resolvedSide === null` guard, then `getBoundingClientRect()` midpoint and the `dataset.side` write | delete the whole block; `dataset.side` is already set in the constructor |
+| `web/shared/ts/menu.test.ts:77-82` | `getBoundingClientRect()` test double — its own comment reads *"Only side:\"auto\" ever calls this"* | delete the double |
+| `web/shared/ts/menu.test.ts:207` | `const fakeWindow = { innerWidth: 800 }` — *"Only side:\"auto\" ever reads this"* | delete |
+| `web/shared/ts/menu.test.ts:872-914` | the `side: "auto"` test block: 3 checks (no `data-side` before first open; resolves right on the right half; caches the resolution) | delete the block |
 
-Deleting these four is the whole fix. `getBoundingClientRect` is a layout-forcing call on a
-value the config already knows, which is why it is unreliable rather than merely unnecessary.
+Those last three are why this cannot be a pure "delete dead code" pass: three tests assert the
+behaviour being removed, and the two fakes exist only to feed it. **Delete the tests; do not
+re-point them at `left`/`right`.** They encode the guess the CMD> calls expensive and wrong, and
+keeping them would keep `getBoundingClientRect` alive in the test harness for no reason.
+
+`getBoundingClientRect` is a layout-forcing call on a value the config already knows, which is why
+it is unreliable rather than merely unnecessary.
 
 **Acceptance criteria:**
 - `side` is typed `"left" | "right"`; passing `"auto"` is a **compile-time** error, not a runtime
   fallthrough to the default
 - No `getBoundingClientRect` and no `resolvedSide` remain in `menu.ts`
   (`grep -nE 'getBoundingClientRect|resolvedSide|"auto"' web/shared/ts/menu.ts` → no output)
+- The same grep over `web/shared/ts/menu.test.ts` → no output; the two autodetection fakes and the
+  three `side: "auto"` checks are **gone**, not re-pointed at `left`/`right`
 - `side: "right"` still produces a right-anchored drawer with the correct animation direction
 - Close button (X) visible at top of drawer, closes on click
 - Title text visible in drawer header
 - A module that omits `side` still gets `left` — the default is unchanged
-- `npm run typecheck` and `npm run test:web` pass; every existing `menu.test.ts` test passes
+- `npm run typecheck` and `npm run test:web` pass; every *remaining* `menu.test.ts` test passes
 - `make web-verify` reports the committed `bundle.js`/`bundle.css` byte-identical after
   `npm run build` — D0 is shared code, so **every** module's artifact changes
 - CMD> position is decided on configuration; default is left side. NO AUTODETECTION
 
 **Side-wiring table — measured from source, 2026-09-28.** `side` is what each module's
-`new HamburgerMenu({...})` call passes today. Absent means the shared default `left` applies,
-which is a valid, deliberate answer — not a gap to fill.
+`new HamburgerMenu({...})` call passes today. Absent means the shared default `left` applies.
+Every module is therefore already **deterministic**; what varies is whether `left` was chosen
+deliberately or arrived by omission.
 
-| Module | `side` in `.ts` | Action |
-|--------|-----------------|--------|
-| todo | absent → `left` | none; default is correct |
-| grocery | absent → `left` | none; default is correct |
-| multissh | absent → `left` | none; default is correct |
-| obsidianoid | `"right"` | none; already explicit |
-| certmachine | `'right'` | none; already explicit |
-| taskmaster | `'right'` | none; already explicit |
-| menuserver | `"right"` | none; already explicit |
-| utuber | `'right'` | none; already explicit |
-| slideshow | `"right"` | none; already explicit |
-| admin | `"right"` | none; already explicit |
-| timetracker | `'right'` | none; already explicit |
-| smbedit | absent → `left` | review: trigger sits in a left-hand bar; confirm `left` reads correctly |
-| issuetracker | no `HamburgerMenu` call | none |
+| Module | call site | `side` passed | Note |
+|--------|-----------|---------------|------|
+| admin | `web/admin/js/main.ts:931` | `"right"` | explicit |
+| menuserver | `web/menuserver/js/main.ts:252` | `"right"` | explicit |
+| slideshow | `web/slideshow/js/app.ts:385` | `"right"` | explicit |
+| taskmaster | `web/taskmaster/js/main.ts:216` | `'right'` | explicit |
+| certmachine | `web/certmachine/js/main.ts:8` | `'right'` | explicit |
+| timetracker | `web/timetracker/js/main.ts:18` | `'right'` | explicit |
+| issuetracker | `web/issuetracker/src/main.tsx:15` | `"right"` | explicit; `.tsx` |
+| smbedit | `web/smbedit/src/main.tsx:29` | `'right'` | explicit; `.tsx` |
+| grocery | `web/grocery/js/main.ts:7` | *absent* → `left` | trigger `.prepend`ed into `.header-right` |
+| todo | `web/todo/js/shell.ts:55` | *absent* → `left` | passes `mountTrigger` |
+| multissh | `web/multissh/js/main.ts:32` | *absent* → `left` | **D3 adds `side: "right"`** |
+| obsidianoid | `web/obsidianoid/js/app.ts:856` | *absent* → `left` | needs a look |
+| utuber | `web/utuber/js/main.ts:6` | *absent* → `left` | needs a look |
+| sampler | `web/sampler/js/main.ts:428` | *absent* → `left` | needs a look |
 
-Every module is now deterministic in configuration, so this table is a **verification** table,
-not a work table. The only row still worth a human look is smbedit, where `left` is the default
-rather than a considered choice. `make web-verify` is green (22 artifacts, byte-identical), so
-the emitted `.js` matches every `.ts` and nothing here is drift.
+8 modules pass `side` explicitly; 6 take the default. The 6 default rows are the ones worth a
+human look, and D3 settles exactly one of them (multissh). CMD> is explicit that `left` can be the
+right answer for a page — the requirement is that it be **chosen**, so each of obsidianoid, utuber,
+sampler, grocery and todo should be eyeballed once and, if the default is not what looks right,
+given an explicit `side`.
+
+> The first version of this table was wrong in five places and has been replaced. It reported
+> `obsidianoid` and `utuber` as passing `"right"` when neither passes any `side` at all; it
+> reported `smbedit` as absent when `smbedit/src/main.tsx:29` passes `'right'`; it called
+> issuetracker "no `HamburgerMenu` call" when `issuetracker/src/main.tsx:15` constructs one with
+> `side: "right"`; it omitted `sampler` entirely; and it marked multissh "default is correct"
+> while **D3 changes it to `right`**. Every row now carries its call site so it can be re-checked
+> with one grep. `make web-verify` is green (22 artifacts, byte-identical), so the emitted `.js`
+> matches every `.ts` and none of this is build drift.
 
 CMD> The above table may be inaccurate; please double check it.  I'm looking for consistency, but some pages may look better with left instead of right, so it should be deterministic in the configuration.  Tear down the autodetection for this - it does not work.
 
@@ -196,37 +221,73 @@ CMD> no action items for this module; certmachine is tested, verified and comple
 recorded in that file: *"all 12: Approved and VERIFIED! Stop asking about this!"* The file's
 `PENDING OWNER SIGN-OFF` header is older than that line and has not been updated.
 
-### D3: Multissh — move ☰ right, and add the missing logout button (MS-1, MS-2)
-**Files:** `web/multissh/js/main.ts`, `web/multissh/src/` or `web/multissh/js/` CSS for the topnav
+### D3: Multissh — move ☰ right; the logout button already exists (MS-1, MS-2)
+**Files:** `web/multissh/js/main.ts`, plus `.app-header` in **both** `web/multissh/js/ssh.css:29`
+and `web/multissh/js/bundle.css:30`
 
 CMD> Once the hamburger placement bug is fixed in shared code, this should be simple enough to do in config.
 
-**MS-1 is a one-line config change. MS-2 is a new control, not a move.**
+**MS-1 is two edits, not one. MS-2 is already built — verify, do not rebuild.**
 
-- **MS-1** — multissh constructs `new HamburgerMenu({ title: "MultiSSH", items, themePicker: true, themes })`
-  at `main.ts:32` and passes **no `side`**, so it silently takes the `left` default while the
-  module's topnav runs to the right edge. Add `side: "right"` to that call. This is the "simple
-  enough to do in config" case, and it depends on nothing but D0 confirming the default is `left`.
-- **MS-2** — **the logout button does not exist.** A search for `logout`, `signout`, `sign-out`
-  and `log-out` across `web/multissh/**/*.{ts,html,css}` returns **zero** matches, so there is
-  nothing to reposition. "Move the logout button to the right, just left of the hamburger" can
-  only be executed by *creating* it.
+- **MS-1a (config)** — multissh constructs `new HamburgerMenu({ title: "MultiSSH", items, themePicker: true, themes, mountTrigger: trigger })`
+  at `main.ts:31-38` and passes **no `side`**, so it silently takes the `left` default. Add
+  `side: "right"` to that call. This is the "simple enough to do in config" half, and it depends
+  on nothing but D0 confirming the default is `left`.
+- **MS-1b (layout)** — **`side: "right"` alone does not move the trigger.** It only sets which edge
+  the *drawer* slides from (`data-side` on `.ui-menu-drawer`); it says nothing about where the ☰
+  sits. The trigger is built by multissh itself (`main.ts:20-23`, a hand-written `☰` SVG) and
+  placed with `header.append(trigger, title)` at `main.ts:29` — **trigger first**, so it renders at
+  the *leading* edge. `.app-header` is `display: flex; align-items: center; gap: …` with **no
+  `justify-content`**, so its children pack to the start. MS-1a on its own therefore leaves a
+  right-opening drawer behind a left-hand ☰, which is the same mismatch in a new place.
 
-  Build it as a sibling of the existing `☰` trigger in the same topnav, in this order:
-  `[ …nav items… ] [ Logout ] [ ☰ ]`. It must be a real control that ends the session: post to
-  **`POST /api/auth/logout`**, which is `handleLogout` in
-  `internal/platform/auth/handlers.go:217`. It always answers 200, and the handler's own comment
-  notes that with a shared `cookie_domain` the other modules stay signed in, so a logout from
-  multissh is not a global logout — label it accordingly. Hide it when the module is
-  unauthenticated, matching how the ☰ is shown unconditionally today.
+  Land the ☰ at the trailing edge by changing the flex behaviour, not by reordering the append:
+  either `justify-content: space-between` on `.app-header`, or `margin-inline-start: auto` on the
+  trigger. `.app-header` is declared **twice, identically** — `ssh.css:29` and `bundle.css:30` — and
+  both are tracked and hand-maintained (neither is generated), so **both must be edited or the
+  module will render differently depending on which stylesheet the page loads first.** There is no
+  `.topnav` in multissh; an earlier draft of this section said there was.
+
+  The sign-out rides along for free. `mountSignOut` wraps `[ Sign out ][ ☰ ]` into one
+  `.ui-menu-actions` group and inserts it *at the trigger's position*, so wherever MS-1b puts the ☰,
+  the sign-out lands immediately to its left — the order the CMD> asks for either way.
+- **MS-2** — **the logout button already exists, and multissh already has it.** It comes from
+  shared code, not from a multissh source file:
+
+  - `web/shared/ts/menu.ts:275` — `if (options.signOut !== false) this.unmountSignOut = mountSignOut(this.trigger)`.
+    The behaviour is **on by default**; a module opts out by passing `signOut: false`
+    (`menu.ts:112`). multissh passes no `signOut`, so it gets the button.
+  - `web/shared/ts/session.ts:201` `mountSignOut` places it in the required order,
+    `[ …nav items… ] [ Sign out ] [ ☰ ]`: it wraps both in one `.ui-menu-actions` group and calls
+    `trigger.before(group)`, then `group.append(buildSignOutButton(), trigger)`.
+  - `buildSignOutButton()` (`session.ts:47`) is a real control that posts to
+    **`POST /api/auth/logout`** — the same `handleLogout` at
+    `internal/platform/auth/handlers.go:217` — disables itself, then reloads onto the login page.
+
+  An earlier draft of this section claimed the button did not exist, on the strength of a grep for
+  `logout`/`signout`/`sign-out`/`log-out` across `web/multissh/**` that returned zero matches. That
+  grep only covered multissh's *own* files; the control lives in `web/shared/`, which is why it
+  found nothing. **Do not build a second logout control.** The correct work is to confirm the
+  shared one renders, and to confirm D0's teardown of `side: "auto"` does not disturb it.
+
+  It already handles the case the old draft got wrong: `mountSignOut` returns early unless
+  `GET /api/auth/session` reports `signed-in`, so an open multissh shows no sign-out control
+  rather than one that silently does nothing. An open module answers `unknown`, not `signed-in`,
+  because it has no auth routes at all.
 
 **Acceptance criteria:**
-- `new HamburgerMenu({ ... side: "right" })` at `main.ts:32`; the drawer opens from the right
-- multissh's ☰ sits flush at the trailing edge of its topnav
-- A visible **Logout** control sits immediately left of the ☰
-- Clicking Logout ends the session and returns to the login page; after logout, loading any
-  protected multissh URL does not return the session
-- No "not logged in" state exists in which Logout is offered but does nothing
+- `new HamburgerMenu({ …, side: "right" })` at `main.ts:31-38`; the drawer opens from the right
+- multissh's ☰ sits flush at the **trailing** edge of its `.app-header` (there is no `.topnav` in
+  this module) — and it is genuinely at that edge, not merely the last child of a left-packed flex row
+- `.app-header` carries the trailing-edge rule in **both** `ssh.css:29` and `bundle.css:30`, so the
+  page renders the same whichever stylesheet loads first
+- The ☰ and the drawer agree: a right-side `side` with a right-hand ☰, never one without the other
+- On a multissh listed in `auth.modules`, the shared **Sign out** control renders immediately left
+  of the ☰, inside a single `.ui-menu-actions` group
+- Clicking it ends this module's session and lands on the login page; after signing out, loading
+  any protected multissh URL does not restore the session
+- On an *open* multissh (not in `auth.modules`), no sign-out control renders — never one that
+  appears and does nothing
 - `npm run typecheck` and `npm run test:web` pass; `make web-verify` byte-identical after build
 
 ### D4: Smbedit — page scrolls below the footer

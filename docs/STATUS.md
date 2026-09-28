@@ -90,7 +90,7 @@ Full detail in `docs/plans/PLAN-ui-unification-phase7-punchlist.md`. In order:
 | 1 | **D0** hamburger `side` from config, **no auto-detection** | teardown is the only live work; the option itself shipped in `f7e9157` |
 | 2 | **D1** menuserver ☰ anchored far right | not started |
 | 3 | **D2** certmachine | **no action** — see §4 |
-| 4 | **D3** multissh ☰ right + **new** logout button | not started; MS-2 is a build, not a move |
+| 4 | **D3** multissh ☰ right; sign-out control already exists | not started; MS-2 is verify-only — a build would duplicate shared code |
 | 5 | **D4** smbedit scroll past footer | not started |
 | 6 | **D7** login page theme | **verify first** — the mechanism already exists |
 | 7 | **D8** utuber → taskmaster lane; delete `internal/utuber/jobs` | not started |
@@ -125,12 +125,16 @@ therefore a no-op.
 
 ---
 
-## 4. Two items only the owner can unblock
+## 4. Owner sign-off, and one abandoned item
 
-- **A-2 passkey registration** — untestable without an HTTPS host. Genuinely still open; it was
-  recorded on the post-phase-5 punch list, which is itself archived.
+- **A-2 passkey registration — abandoned, not pending.** It was untestable without an HTTPS host
+  to register against, and its only record is the post-phase-5 punch list, which is itself
+  archived. Under the rule below that makes it *abandoned*, not "still open": there is nothing
+  live tracking it. If passkey registration is wanted again it has to be re-raised against a
+  real HTTPS origin — it will not be picked up by re-reading the archive.
 - The lane plan's §7.3 **E1–E3** browser runs are owner sign-off (item A12) and must be listed
-  as pending, not self-certified.
+  as pending, not self-certified. These are genuinely live: they are carried by the current
+  Phase 7 plan, not by anything archived.
 
 ---
 
