@@ -31,6 +31,7 @@ type Config struct {
 	Smbedit      SmbeditConfig      `json:"smbedit"`
 	IssueTracker IssueTrackerConfig `json:"issuetracker"`
 	Timetracker  TimetrackerConfig  `json:"timetracker"`
+	Sampler      SamplerConfig      `json:"sampler"`
 
 	// configPath is the absolute path Load read this Config from (empty when
 	// built via DefaultConfig()/WriteDefault without going through Load, or
@@ -76,7 +77,16 @@ type AuthConfig struct {
 // non-empty, offers a per-module door-code PIN alongside LDAP/passkey.
 type ModuleAuthConfig struct {
 	PinFile string `json:"pin_file"`
+	// IdleMinutes signs a session out of this module after that long
+	// without real use (0 = the default, 60). See MaxIdleMinutes.
+	IdleMinutes int `json:"idle_minutes,omitempty"`
 }
+
+// DefaultIdleMinutes and MaxIdleMinutes bound auth.modules.<m>.idle_minutes.
+const (
+	DefaultIdleMinutes = 60
+	MaxIdleMinutes     = 7 * 24 * 60
+)
 
 // legacyModuleAuthError is returned when a module's auth.modules entry is a
 // legacy JSON array (the old accepted-methods list) rather than an object.
@@ -169,8 +179,13 @@ func (a *AuthConfig) UnmarshalJSON(data []byte) error {
 
 // SessionConfig controls session lifetime and sliding-refresh behavior.
 type SessionConfig struct {
-	TTLHours             int     `json:"ttl_hours"`              // default 720 (30d) applied downstream, 0 = default
-	RefreshAfterFraction float64 `json:"refresh_after_fraction"` // default 0.5, 0 = default
+	// TTLHours is the maximum session length: sign in again after this long
+	// even while active (default 720 = 30d, 0 = default). Idle sign-out is
+	// per module (ModuleAuthConfig.IdleMinutes).
+	TTLHours int `json:"ttl_hours"`
+	// RefreshAfterFraction is no longer used (sessions renew on real use,
+	// per module); kept so existing configs still load.
+	RefreshAfterFraction float64 `json:"refresh_after_fraction,omitempty"`
 }
 
 // NamedHash pairs an operator-facing name with a stored credential hash.
@@ -209,6 +224,9 @@ type ServerConfig struct {
 	// SSEMaxSubscribers caps concurrent SSE subscribers per broker across all
 	// modules. 0 (unset) takes DefaultSSEMaxSubscribers.
 	SSEMaxSubscribers int `json:"sse_max_subscribers"`
+	// SharedStaticDir is the directory holding the shared asset tree served at
+	// /shared/ on every module host. Empty disables the mount.
+	SharedStaticDir string `json:"shared_static_dir"`
 }
 
 // DefaultSSEMaxSubscribers is the SSE subscriber cap applied when
@@ -270,6 +288,18 @@ type TimetrackerConfig struct {
 	// ReportDB is the SQLite file holding per-customer per-day reports.
 	// Empty means "timetracker-reports.db" next to DataFile.
 	ReportDB string `json:"report_db"`
+}
+
+// SamplerConfig holds configuration specific to the sampler module -- the
+// shared-theme/shared-component demo page (FR-10).
+type SamplerConfig struct {
+	StaticDir string `json:"static_dir"` // e.g. ./web/sampler
+	// SharedStaticDir is the effective shared-asset directory, copied from
+	// Config.Server.SharedStaticDir by applyServerDefaults, mirroring the
+	// SSEMaxSubscribers copy-down pattern. Not read from the config file --
+	// sampler's build.go demonstrates the per-module static.MountShared path
+	// against this value (docs/adding-a-module.md).
+	SharedStaticDir string `json:"-"`
 }
 
 // MusicConfig holds music configuration. Collections are discovered automatically
@@ -392,8 +422,8 @@ type SmbeditConfig struct {
 // Multissh session-count bounds. MaxSessions is validated in exactly one place
 // (Load); Build trusts the resolved value and performs no re-validation.
 const (
-	DefaultMaxSessions = 3
-	MaxMaxSessions     = 16
+	DefaultMaxSessions = 10
+	MaxMaxSessions     = 10
 )
 
 // TaskmasterLane seeds one lane into the taskmaster DB at startup.
@@ -411,7 +441,25 @@ type TaskmasterConfig struct {
 	// SSEMaxSubscribers is the effective SSE subscriber cap, copied from
 	// Config.Server.SSEMaxSubscribers by Load. Not read from the config file.
 	SSEMaxSubscribers int `json:"-"`
+	// ProgressIntervalMs is the func-task progress persistence/board-event
+	// throttle (plan Q3/§4.8): taskmaster.Open uses it as given when > 0
+	// (falling back to a 2000ms default otherwise). Load normalizes and
+	// clamps it via normalizeTaskmaster to
+	// [MinTaskmasterProgressIntervalMs, MaxTaskmasterProgressIntervalMs],
+	// defaulting a zero value to DefaultTaskmasterProgressIntervalMs, so the
+	// 2s floor (owner decision, FRD Q3) can never be configured away.
+	ProgressIntervalMs int `json:"progress_interval_ms"`
 }
+
+// Taskmaster progress-interval bounds (plan Q3/§4.8). Default equals Max: the
+// floor is "never slower than today's 2000ms cadence", so the default and the
+// ceiling are the same value; only the minimum (a faster, still-safe cadence)
+// differs.
+const (
+	DefaultTaskmasterProgressIntervalMs = 2000
+	MinTaskmasterProgressIntervalMs     = 100
+	MaxTaskmasterProgressIntervalMs     = 2000
+)
 
 // UtuberConfig holds configuration specific to the utuber module.
 //
@@ -419,11 +467,21 @@ type TaskmasterConfig struct {
 // endpoint. It is a config-level default only: a value saved through the
 // module's UI settings menu overrides it at runtime. It is passed as argv[0]
 // to the executor, never through a shell.
+//
+// CookiesFile names the Netscape-format cookie jar yt-dlp uses to
+// authenticate age-restricted downloads (D5 Fix 2). Empty means "let utuber
+// pick a default location that is a sibling of download_dir, deliberately
+// NOT inside it" -- a cookie is a real credential, and /downloads/ serves
+// download_dir unauthenticated. Either way, the flag is only ever passed to
+// yt-dlp when the resolved file actually exists on disk, so an unconfigured
+// or deleted jar degrades to today's cookie-less behavior rather than an
+// error.
 type UtuberConfig struct {
 	StaticDir   string `json:"static_dir"`
 	DownloadDir string `json:"download_dir"`
 	Workers     int    `json:"workers"`
 	PythonBin   string `json:"python_bin"`
+	CookiesFile string `json:"cookies_file"`
 }
 
 // Utuber worker-count bounds and interpreter default. Workers is validated in
@@ -477,6 +535,9 @@ func DefaultConfig() *Config {
 			StaticDir: "./web/timetracker",
 			DataFile:  "./data/timetracker.json",
 		},
+		Sampler: SamplerConfig{
+			StaticDir: "./web/sampler",
+		},
 		Obsidianoid: ObsidianoidConfig{
 			StaticDir:     "./web/obsidianoid",
 			DataDir:       "./data/obsidianoid",
@@ -491,10 +552,11 @@ func DefaultConfig() *Config {
 			StrictHostKey:  false,
 		},
 		Taskmaster: TaskmasterConfig{
-			StaticDir: "./web/taskmaster",
-			DBPath:    "./data/taskmaster/taskmaster.db",
-			Lanes:     []TaskmasterLane{},
-			AllowSudo: false,
+			StaticDir:          "./web/taskmaster",
+			DBPath:             "./data/taskmaster/taskmaster.db",
+			Lanes:              []TaskmasterLane{},
+			AllowSudo:          false,
+			ProgressIntervalMs: DefaultTaskmasterProgressIntervalMs,
 		},
 		Certmachine: CertmachineConfig{
 			StaticDir:           "./web/certmachine",
@@ -603,6 +665,9 @@ func Load(path string) (*Config, error) {
 	if err := expandTimetrackerPaths(&cfg.Timetracker); err != nil {
 		return nil, err
 	}
+	if err := expandSamplerPaths(&cfg.Sampler); err != nil {
+		return nil, err
+	}
 	if err := expandObsidianoidPaths(&cfg.Obsidianoid); err != nil {
 		return nil, err
 	}
@@ -613,6 +678,9 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	if err := expandTaskmasterPaths(&cfg.Taskmaster); err != nil {
+		return nil, err
+	}
+	if err := normalizeTaskmaster(&cfg.Taskmaster); err != nil {
 		return nil, err
 	}
 	if err := expandCertmachinePaths(&cfg.Certmachine); err != nil {
@@ -666,6 +734,10 @@ func applyServerDefaults(cfg *Config) {
 	cfg.Slideshow.SSEMaxSubscribers = max
 	cfg.Obsidianoid.SSEMaxSubscribers = max
 	cfg.Taskmaster.SSEMaxSubscribers = max
+	if cfg.Server.SharedStaticDir == "" {
+		cfg.Server.SharedStaticDir = "./web/shared"
+	}
+	cfg.Sampler.SharedStaticDir = cfg.Server.SharedStaticDir
 }
 
 func expandMenuserverPaths(m *MenuserverConfig) error {
@@ -690,6 +762,16 @@ func expandTimetrackerPaths(t *TimetrackerConfig) error {
 		return err
 	}
 	if t.ReportDB, err = ExpandPath(t.ReportDB); err != nil {
+		return err
+	}
+	return nil
+}
+
+// expandSamplerPaths expands ~ in the sampler module's StaticDir, mirroring
+// expandTimetrackerPaths.
+func expandSamplerPaths(s *SamplerConfig) error {
+	var err error
+	if s.StaticDir, err = ExpandPath(s.StaticDir); err != nil {
 		return err
 	}
 	return nil
@@ -916,6 +998,29 @@ func normalizeMultissh(m *MultisshConfig) error {
 	return nil
 }
 
+// normalizeTaskmaster is the single validation point for
+// taskmaster.progress_interval_ms (plan Q3/§4.8). Zero means "unset" and
+// takes the 2000ms default (today's cadence); negative is an operator error
+// and is rejected; a value outside [MinTaskmasterProgressIntervalMs,
+// MaxTaskmasterProgressIntervalMs] is clamped with a log line rather than
+// refused, so the 2s floor can never be configured away. taskmaster.Open
+// trusts the resolved value and does not re-validate.
+func normalizeTaskmaster(t *TaskmasterConfig) error {
+	switch {
+	case t.ProgressIntervalMs < 0:
+		return fmt.Errorf("taskmaster: progress_interval_ms must be >= 0")
+	case t.ProgressIntervalMs == 0:
+		t.ProgressIntervalMs = DefaultTaskmasterProgressIntervalMs
+	case t.ProgressIntervalMs < MinTaskmasterProgressIntervalMs:
+		log.Printf("taskmaster: progress_interval_ms %d below minimum %d; clamping", t.ProgressIntervalMs, MinTaskmasterProgressIntervalMs)
+		t.ProgressIntervalMs = MinTaskmasterProgressIntervalMs
+	case t.ProgressIntervalMs > MaxTaskmasterProgressIntervalMs:
+		log.Printf("taskmaster: progress_interval_ms %d exceeds %d (progress must update at least every 2s); clamping", t.ProgressIntervalMs, MaxTaskmasterProgressIntervalMs)
+		t.ProgressIntervalMs = MaxTaskmasterProgressIntervalMs
+	}
+	return nil
+}
+
 // expandUtuberPaths expands ~ in the utuber directories. PythonBin is
 // deliberately not expanded: a ~-relative interpreter is not a supported
 // form, and expanding it would let the settings-menu validation regex pass a
@@ -927,6 +1032,11 @@ func expandUtuberPaths(u *UtuberConfig) error {
 	}
 	if u.DownloadDir, err = ExpandPath(u.DownloadDir); err != nil {
 		return err
+	}
+	if u.CookiesFile != "" {
+		if u.CookiesFile, err = ExpandPath(u.CookiesFile); err != nil {
+			return err
+		}
 	}
 	return nil
 }

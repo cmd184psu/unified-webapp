@@ -79,7 +79,8 @@ func (h *Handler) handleControl(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleSubjects(w http.ResponseWriter, r *http.Request) {
-	subjects, err := h.store.Subjects()
+	// A live scan, under the slideshow's current image age limit.
+	subjects, err := h.store.SubjectsWithin(h.conductor.MaxAgeDays())
 	if err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return

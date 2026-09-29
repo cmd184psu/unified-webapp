@@ -7,6 +7,7 @@
 package issuetracker
 
 import (
+	"database/sql"
 	"net/http"
 
 	"cmd184psu/unified-webapp/internal/issuetracker/api"
@@ -17,10 +18,24 @@ import (
 	"cmd184psu/unified-webapp/internal/platform/static"
 )
 
+// closer pairs the module's router with the database connection Build opens,
+// so the process owner can release it (io.Closer is the dispatcher's
+// optional shutdown hook). Mirrors the taskmaster closer pattern: db.Open
+// starts a database/sql connection-pool goroutine that only a Close call
+// stops.
+type closer struct {
+	http.Handler
+	db *sql.DB
+}
+
+func (c *closer) Close() error {
+	return c.db.Close()
+}
+
 // Build returns the issuetracker module handler. A non-nil error makes the
 // dispatcher serve this host a sanitized 503 (unavailableHandler) rather than
-// crashing the binary. Build starts no goroutines, so the handler needs no
-// io.Closer.
+// crashing the binary. The handler implements io.Closer to release the
+// database connection pool db.Open starts.
 func Build(cfg config.IssueTrackerConfig) (http.Handler, error) {
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {
@@ -44,5 +59,5 @@ func Build(cfg config.IssueTrackerConfig) (http.Handler, error) {
 	mux.Handle("/graphql", graphql.New(st, cfg.DefaultUser.Name, cfg.DefaultUser.Email))
 	mux.Handle("/", static.NewHandler(cfg.StaticDir))
 
-	return mux, nil
+	return &closer{Handler: mux, db: database}, nil
 }

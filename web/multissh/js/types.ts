@@ -13,6 +13,8 @@ export type AuthMethod = "key" | "password";
  * out of `hosts_path`: the persisted type simply has nowhere to put one.
  */
 export interface PersistedHost {
+  /** Display name for the rail card and terminal panel; empty means "Host N". */
+  name: string;
   ip: string;
   port: number;
   user: string;

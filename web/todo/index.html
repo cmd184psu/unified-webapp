@@ -5,19 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Tasks</title>
   <link rel="shortcut icon" href="images/fvw.png" type="image/x-icon">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/fontawsme.css">
-  <link rel="stylesheet" href="css/fontawall.css">
-  <link rel="stylesheet" href="css/todo.css?v=19">
+  <link rel="stylesheet" href="/shared/dist/shared.css">
+  <link rel="stylesheet" href="css/todo.css?v=20">
 
   <script src="js/jquery.js"></script>
   <script src="js/jquery-ui.js"></script>
   <script src="js/utils.js"></script>
   <script src="js/todo-utils.js?v=17"></script>
   <script src="js/todo.js?v=4"></script>
-  <script src="js/theme.js"></script>
+  <!-- theme-bootstrap:start -->
+  <script>(function(){var k=localStorage.getItem("todo-theme");
+  var t=(k==="dark"||k==="light")?k:matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";
+  document.documentElement.setAttribute("data-theme",t)})()</script>
+  <!-- theme-bootstrap:end -->
+  <script type="module" src="js/shell.js"></script>
   <script>
     // ── Settings (cooldown etc.) ───────────────────────────────────────────
     function loadSettings() {
@@ -75,14 +76,6 @@
         .then(function(data) { colConfig = data; applyColConfig(); });
     }
 
-    function toggleSidebar() {
-      document.getElementById('sidebar').classList.toggle('sidebar-open');
-      document.getElementById('sidebar-backdrop').classList.toggle('sidebar-open');
-    }
-    function closeSidebar() {
-      document.getElementById('sidebar').classList.remove('sidebar-open');
-      document.getElementById('sidebar-backdrop').classList.remove('sidebar-open');
-    }
 
     // ── Title editor ───────────────────────────────────────────────────────
     // ── New list (index mode) ──────────────────────────────────────────────
@@ -169,87 +162,31 @@
   <!-- ── Top Navigation Bar ─────────────────────────────────────────────── -->
   <nav class="topbar">
     <div class="topbar-left">
-      <button class="icon-btn" id="menu-toggle" title="Menu" onclick="toggleSidebar()">
-        <i class="fas fa-bars"></i>
+      <button class="icon-btn" id="menu-toggle" title="Menu">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="2.5" width="14" height="2" rx="0.5"/><rect x="1" y="7" width="14" height="2" rx="0.5"/><rect x="1" y="11.5" width="14" height="2" rx="0.5"/></svg>
       </button>
       <span class="topbar-brand" onclick="openTitleEditor()" title="Edit list title">Tasks</span>
       <div id="titleDiv" class="topbar-title" onclick="openTitleEditor()" title="Edit list title"></div>
     </div>
     <div class="topbar-right">
-      <button class="icon-btn" id="theme-toggle" title="Toggle dark / light mode" onclick="toggleTheme()">
-        <i class="fas fa-moon" id="theme-icon"></i>
+      <button class="icon-btn" id="theme-toggle" title="Toggle dark / light mode">
+        <span id="theme-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8.5 2a5.5 5.5 0 1 0 4.38 8.83A7 7 0 0 1 5.17 3.12 5.5 5.5 0 0 0 8.5 2z"/></svg></span>
       </button>
       <button class="icon-btn" id="copyLink" title="Copy link to clipboard" onclick="copyLink()">
-        <i class="far fa-copy"></i>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="5.5" y="5.5" width="8" height="9" rx="1"/><path d="M3.5 10.5h-1a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v1"/></svg>
       </button>
       <button class="icon-btn" title="Open in new tab" onclick="window.open(calcNewHREF(),'_blank')">
-        <i class="fas fa-external-link-alt"></i>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 8.5v4a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 2 12.5v-7A1.5 1.5 0 0 1 3.5 4H8"/><path d="M10 2h4v4"/><path d="M7 9L14 2"/></svg>
       </button>
       <button class="icon-btn" id="compareBtn" title="Compare two lists side by side" onclick="openCompare()">
-        <i class="fas fa-columns"></i>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="2.5" width="13" height="11" rx="1"/><line x1="8" y1="2.5" x2="8" y2="13.5"/></svg>
       </button>
     </div>
   </nav>
 
-  <!-- Sidebar backdrop (click to close) -->
-  <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="closeSidebar()"></div>
 
   <!-- ── Main Layout ────────────────────────────────────────────────────── -->
   <div class="app-layout">
-
-    <!-- Sidebar: slide-in panel -->
-    <aside class="sidebar" id="sidebar">
-
-      <div class="sidebar-section">
-        <label class="field-label" for="subject-list-selector">Subject</label>
-        <select id="subject-list-selector" class="select-input" onchange="changeSubject()"></select>
-      </div>
-
-      <div class="sidebar-section">
-        <label class="field-label" for="item-list-selector">List</label>
-        <select id="item-list-selector" class="select-input" onchange="changeItem()"></select>
-      </div>
-
-      <div class="sidebar-section">
-        <label class="field-label" for="new-subject-list-selector">Move to subject</label>
-        <select id="new-subject-list-selector" class="select-input"></select>
-        <button class="btn btn-outline mt-1" onclick="moveListToNewSubject()">Move List</button>
-      </div>
-
-      <div class="sidebar-divider"></div>
-
-      <div class="sidebar-section option-group">
-        <label class="field-label">Columns</label>
-        <label class="toggle-label">
-          <input type="checkbox" id="col-votes" onchange="setColVisible('votes', this.checked)">
-          <span class="toggle-text">Votes</span>
-        </label>
-        <label class="toggle-label">
-          <input type="checkbox" id="col-period" onchange="setColVisible('period', this.checked)">
-          <span class="toggle-text">Period</span>
-        </label>
-        <label class="toggle-label">
-          <input type="checkbox" id="col-next_due" onchange="setColVisible('next_due', this.checked)">
-          <span class="toggle-text">Next Due Date</span>
-        </label>
-        <label class="toggle-label">
-          <input type="checkbox" id="col-cooldown" onchange="setColVisible('cooldown', this.checked)">
-          <span class="toggle-text">Cooldown</span>
-        </label>
-      </div>
-
-      <div class="sidebar-divider"></div>
-
-      <div class="sidebar-section">
-        <label class="field-label" for="cooldown-input">Vote Cooldown</label>
-        <div class="cooldown-row">
-          <input type="number" id="cooldown-input" class="text-input" min="1" max="120" value="10"
-                 onchange="saveCooldown(this.value)">
-          <span class="cooldown-unit">min</span>
-        </div>
-      </div>
-
-    </aside>
 
     <!-- Main content: table + actions -->
     <main class="content-area">
@@ -267,27 +204,28 @@
       <!-- Action toolbar -->
       <div class="toolbar">
         <button class="icon-btn" id="backBTN" onclick="revertList()" title="Go Back">
-          <i class="fas fa-chevron-left"></i>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3L5 8l5 5"/></svg>
         </button>
         <button class="btn btn-outline" id="newListBtn" style="display:none"
                 onclick="openNewListDialog()" title="Create new list">
-          <i class="fas fa-plus-circle"></i> New List
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm3.5 7.5h-3v3h-1v-3h-3v-1h3v-3h1v3h3v1z"/></svg> New List
         </button>
         <button class="btn btn-primary" id="addButton" onclick="showAdd()">
-          <i class="fas fa-plus"></i> Add
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8.5 3v4.5H13v1H8.5V13h-1V8.5H3v-1h4.5V3h1z"/></svg> Add
         </button>
         <button class="btn btn-ghost" id="hideshowButton" onclick="hideShowCompleted()">
-          <i class="fas fa-eye-slash"></i> Completed
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4z"/><circle cx="8" cy="8" r="2"/><line x1="3" y1="13" x2="13" y2="3"/></svg> Completed
         </button>
         <button class="btn btn-ghost" id="hideshowBlockedButton" onclick="hideShowBlocked()">
-          <i class="fas fa-ban"></i> Blocked
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><line x1="3.8" y1="3.8" x2="12.2" y2="12.2"/></svg> Blocked
         </button>
-        <label class="toolbar-toggle">
+        <label class="ui-toggle toolbar-toggle">
           <input type="checkbox" id="roEnable" name="roEnable" onclick="roToggled()">
+          <span class="ui-toggle-track"></span>
           <span>Read-only</span>
         </label>
         <button class="btn btn-ghost" id="voteBtn" onclick="vote()">
-          <i class="fas fa-vote-yea"></i> Vote
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M3 8.5l3 3 7-7-1.4-1.4L6 8.7 4.4 7.1 3 8.5zM1 13h14v2H1v-2z"/></svg> Vote
         </button>
       </div>
 

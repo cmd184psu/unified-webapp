@@ -246,7 +246,7 @@ func TestBundleTGZContainsFourEntriesWithModesAndContent(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 	setupCA(t, s, time.Now().AddDate(10, 0, 0))
-	ca, err := s.GetCA(ctx)
+	ca, err := s.GetCurrentCA(ctx)
 	if err != nil {
 		t.Fatalf("GetCA: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestBundleTGZContainsFourEntriesWithModesAndContent(t *testing.T) {
 		t.Fatalf("getCertWithKey: %v", err)
 	}
 
-	gz, err := BundleTGZ(*cert, []byte(ca.CertPEM))
+	gz, err := BundleTGZ(*cert, []byte(ca.CertPEM), CAFileName(ca.Subject))
 	if err != nil {
 		t.Fatalf("BundleTGZ: %v", err)
 	}
@@ -281,7 +281,8 @@ func TestBundleTGZContainsFourEntriesWithModesAndContent(t *testing.T) {
 		"cert.pem":    {0o644, []byte(*cert.CertPEM)},
 		"key.pem":     {0o600, []byte(*cert.KeyPEM)},
 		"haproxy.pem": {0o600, HAProxyPEM([]byte(*cert.CertPEM), []byte(ca.CertPEM), []byte(*cert.KeyPEM))},
-		"rootCA.crt":  {0o644, []byte(ca.CertPEM)},
+		// Named after the CA (CAFileName of its Common Name).
+		CAFileName(ca.Subject): {0o644, []byte(ca.CertPEM)},
 	}
 	seen := map[string]bool{}
 	for _, e := range entries {
@@ -355,7 +356,7 @@ func TestRootMismatchRefusesHAProxyPEMAndBundle(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 	setupCA(t, s, time.Now().AddDate(10, 0, 0))
-	ca, err := s.GetCA(ctx)
+	ca, err := s.GetCurrentCA(ctx)
 	if err != nil {
 		t.Fatalf("GetCA: %v", err)
 	}
@@ -389,7 +390,7 @@ func TestRootMismatchRefusesHAProxyPEMAndBundle(t *testing.T) {
 		t.Errorf("AssembleHAProxyPEM error %q does not name the renew remedy", err.Error())
 	}
 
-	if _, err := BundleTGZ(cert, []byte(ca.CertPEM)); !errors.Is(err, ErrRootMismatch) {
+	if _, err := BundleTGZ(cert, []byte(ca.CertPEM), CAFileName(ca.Subject)); !errors.Is(err, ErrRootMismatch) {
 		t.Fatalf("BundleTGZ error = %v, want ErrRootMismatch", err)
 	} else if !strings.Contains(err.Error(), "renew it to re-issue under the stored root") {
 		t.Errorf("BundleTGZ error %q does not name the renew remedy", err.Error())
@@ -417,7 +418,7 @@ func TestQuarantinedRefusesHAProxyPEMAndBundleWithoutNilDeref(t *testing.T) {
 		t.Errorf("AssembleHAProxyPEM error %q does not quote quarantine_reason %q", err.Error(), reason)
 	}
 
-	if _, err := BundleTGZ(cert, nil); !errors.Is(err, ErrQuarantinedDownload) {
+	if _, err := BundleTGZ(cert, nil, "rootCA.crt"); !errors.Is(err, ErrQuarantinedDownload) {
 		t.Fatalf("BundleTGZ error = %v, want ErrQuarantinedDownload", err)
 	} else if !strings.Contains(err.Error(), reason) {
 		t.Errorf("BundleTGZ error %q does not quote quarantine_reason %q", err.Error(), reason)

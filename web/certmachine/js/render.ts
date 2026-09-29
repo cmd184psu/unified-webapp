@@ -1,7 +1,7 @@
 import type { Cert } from "./types";
 import { badgeFor, isDeemphasized, BADGE_LABEL } from "./status";
 import type { BadgeKind } from "./status";
-import { groupCerts } from "./listmodel";
+import { groupCerts, isUnknownSigner } from "./listmodel";
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -35,6 +35,19 @@ function badgeElement(kind: BadgeKind): HTMLSpanElement {
 }
 
 /**
+ * A second, independent badge (stale / unknown-signer) that can appear
+ * alongside `badgeElement`'s expiry-derived one. `kind` here is a plain
+ * string, not `BadgeKind` -- these two aren't part of that mutually
+ * exclusive precedence chain.
+ */
+function extraBadge(kind: "stale" | "unknown-signer", label: string): HTMLSpanElement {
+  const badge = el("span", "cert-badge");
+  badge.dataset.kind = kind;
+  badge.textContent = label;
+  return badge;
+}
+
+/**
  * Build one `<li>` for a single cert row, including its inline hot actions
  * and the "Details" action that opens the detail modal (`detail.ts`). The
  * detail entry point is a dedicated button here, not the `.cert-fqdn` span
@@ -53,6 +66,11 @@ export function buildCertRow(
   const fqdn = el("span", "cert-fqdn");
   fqdn.textContent = cert.fqdn;
   main.append(fqdn, badgeElement(kind));
+  // Stale and unknown-signer are independent of `kind` (CA-replacement plan
+  // FR-R4/P1): a row can be "valid" per its own expiry and still be stale,
+  // because staleness is about which CA signed it, not when it expires.
+  if (cert.stale) main.append(extraBadge("stale", "Stale"));
+  if (isUnknownSigner(cert)) main.append(extraBadge("unknown-signer", "Unknown signer"));
 
   const meta = el("div", "cert-row-meta");
   const expiry = el("span", "cert-meta-item");

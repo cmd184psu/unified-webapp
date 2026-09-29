@@ -30,6 +30,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"cmd184psu/unified-webapp/internal/platform/response"
 )
@@ -163,7 +164,13 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request, module str
 				return
 			}
 			if pinOK {
-				grant, ok = pinGrant(module), true
+				fp, fpOK := s.currentPINFingerprint(mp.PinFile)
+				if !fpOK {
+					logLoginAttempt(false, module, req.Method, "", reasonPinFileConfig)
+					response.WriteError(w, http.StatusInternalServerError, "unable to read the PIN file")
+					return
+				}
+				grant, ok = pinGrantFP(module, fp), true
 			}
 		}
 	case "ldap":
@@ -186,46 +193,92 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request, module str
 		return
 	}
 
-	existing, _ := s.sessionClaimsFromRequest(r, s.now())
+	now := s.now()
+	existing := s.existingForLogin(r, module, grant, now)
 	sub, grants := accumulate(existing, identity, grant)
-	tok, err := issueToken(s.key, sub, grants, p.SessionTTL, s.now())
+	tok, err := issueClaims(s.key, loginClaims(existing, sub, grants, grant, module, now), p.tokenLifetime(), now)
 	if err != nil {
 		response.WriteError(w, http.StatusInternalServerError, "unable to issue session")
 		return
 	}
-	setSessionCookie(w, tok, p.SessionTTL, p.CookieSecure, p.CookieDomain)
+	setSessionCookie(w, tok, p.tokenLifetime(), p.CookieSecure, p.CookieDomain)
 	s.throttle.success()
 	logLoginAttempt(true, module, grant, sub, "")
 	response.WriteJSON(w, http.StatusOK, map[string]any{"identity": sub, "methods": grants})
 }
 
-// handleLogout backs POST /api/auth/logout: clears the session cookie and
-// always answers 200, whether or not a session was present.
+// handleLogout backs POST /api/auth/logout and always answers 200, whether
+// or not a session was present. It signs out of this module only: the
+// grant that let the session in here is dropped (this module's door code,
+// or admin_pin on admin) and the session is reissued if anything remains,
+// so with a shared cookie_domain the other modules stay signed in. An
+// identity login (ldap/passkey) reaches every module, so signing out of it
+// clears the whole session.
 func (s *Service) handleLogout(w http.ResponseWriter, r *http.Request, module string) {
 	p := s.policy()
+	now := s.now()
 	identity := ""
-	if claims, ok := s.sessionClaimsFromRequest(r, s.now()); ok {
+	var remaining *sessionClaims
+	if claims, ok := s.sessionClaimsFromRequest(r, now); ok {
 		identity = claims.Subject
+		remaining = signedOutOf(claims, module)
 	}
-	clearSessionCookie(w, p.CookieSecure, p.CookieDomain)
+	if remaining != nil {
+		tok, err := issueClaims(s.key, *remaining, p.tokenLifetime(), now)
+		if err == nil {
+			setSessionCookie(w, tok, p.tokenLifetime(), p.CookieSecure, p.CookieDomain)
+		} else {
+			clearSessionCookie(w, p.CookieSecure, p.CookieDomain)
+		}
+	} else {
+		clearSessionCookie(w, p.CookieSecure, p.CookieDomain)
+	}
 	logIdentity := identity
 	if logIdentity == "" {
 		logIdentity = "unknown"
 	}
-	log.Printf("event=auth_logout identity=%q", logIdentity)
+	log.Printf("event=auth_logout module=%q identity=%q", module, logIdentity)
 	response.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // handleSession backs GET /api/auth/session: 200 with the session's
-// identity/methods when the cookie is present and valid, 401 otherwise.
+// identity/methods and idleSeconds (how long until this module signs out
+// without further use) when the cookie is valid for this module
+// (sessionAllows); 401 otherwise. It is not use, so it renews nothing.
 // Deliberately not logged (FR-A12b: "too chatty" for a read-only check).
 func (s *Service) handleSession(w http.ResponseWriter, r *http.Request, module string) {
-	claims, ok := s.sessionClaimsFromRequest(r, s.now())
-	if !ok {
+	now := s.now()
+	claims, ok := s.sessionClaimsFromRequest(r, now)
+	var left time.Duration
+	if ok {
+		left = s.idleRemaining(claims, module, s.policy(), now)
+	}
+	if left <= 0 {
 		response.WriteError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	response.WriteJSON(w, http.StatusOK, map[string]any{"identity": claims.Subject, "methods": claims.Grants})
+	response.WriteJSON(w, http.StatusOK, map[string]any{"identity": claims.Subject, "methods": claims.Grants, "idleSeconds": int(left.Seconds())})
+}
+
+// handleActivity backs POST /api/auth/activity: the shared page code's
+// report that a person is using this module (clicks, typing, scrolling).
+// Being a POST it is user activity, so the gate would renew the idle clock
+// anyway; this renews it and answers like GET /api/auth/session.
+func (s *Service) handleActivity(w http.ResponseWriter, r *http.Request, module string) {
+	p := s.policy()
+	now := s.now()
+	claims, ok := s.sessionClaimsFromRequest(r, now)
+	if !ok || !s.sessionAllows(claims, module, p, now) {
+		response.WriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if moduleNeedsRenewal(claims, module, now) {
+		s.renewModule(w, claims, module, p, now)
+		renewed := renewedModule(claims, module, now)
+		claims = &renewed
+	}
+	left := s.idleRemaining(claims, module, p, now)
+	response.WriteJSON(w, http.StatusOK, map[string]any{"identity": claims.Subject, "methods": claims.Grants, "idleSeconds": int(left.Seconds())})
 }
 
 // passkeyLoginBeginRequest is the POST /api/auth/passkey/login/begin body.
@@ -291,14 +344,15 @@ func (s *Service) handlePasskeyLoginFinish(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	existing, _ := s.sessionClaimsFromRequest(r, s.now())
+	now := s.now()
+	existing := s.existingForLogin(r, module, "passkey", now)
 	sub, methods := accumulate(existing, identity, "passkey")
-	tok, err := issueToken(s.key, sub, methods, p.SessionTTL, s.now())
+	tok, err := issueClaims(s.key, loginClaims(existing, sub, methods, "passkey", module, now), p.tokenLifetime(), now)
 	if err != nil {
 		response.WriteError(w, http.StatusInternalServerError, "unable to issue session")
 		return
 	}
-	setSessionCookie(w, tok, p.SessionTTL, p.CookieSecure, p.CookieDomain)
+	setSessionCookie(w, tok, p.tokenLifetime(), p.CookieSecure, p.CookieDomain)
 	logLoginAttempt(true, module, "passkey", sub, "")
 	response.WriteJSON(w, http.StatusOK, map[string]any{"identity": sub, "methods": methods})
 }

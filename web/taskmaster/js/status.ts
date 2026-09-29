@@ -1,12 +1,19 @@
-// status.ts — shared execution-status presentation helpers.
+// status.ts — taskmaster's execution-status presentation helpers.
 //
 // board.ts (the lane board) and taskdetail.ts (the per-task drill-in) both
 // need to turn an execution's status into a CSS class, a compact symbol, and
-// a rendered badge. This used to be defined twice — copy-pasted, not
-// shared — which is exactly how a fix lands in one copy and silently misses
-// the other. Defined once here instead (owner DRY policy).
+// a rendered badge. ExecStatus/statusSymbol/effectiveStatus moved to
+// web/shared/ts/status.ts (plan docs/PLAN-utuber-taskmaster-lane.md §4.11)
+// so utuber-on-a-lane's own queue panel can share the same status→symbol
+// mapping; re-exported here so this module's existing importers are
+// unchanged. statusBadgeClass/renderStatusBadge stay local: their CSS
+// classes (badge-green, badge-red, ...) carry color literals the shared CSS
+// gate forbids.
 
-export type ExecStatus = "success" | "failed" | "canceled" | "suspended" | "running" | "pending" | string;
+import { statusSymbol, effectiveStatus } from "@shared";
+export { statusSymbol, effectiveStatus };
+export type { ExecStatus } from "@shared";
+import type { ExecStatus } from "@shared";
 
 export function statusBadgeClass(status: ExecStatus): string {
   if (status === "success") return "badge-green";
@@ -15,27 +22,6 @@ export function statusBadgeClass(status: ExecStatus): string {
   if (status === "suspended") return "badge-yellow";
   if (status === "running") return "badge-blue";
   return "badge-muted";
-}
-
-// A word badge ("RUNNING", "SUCCESS"...) says less at a glance than a
-// symbol, and costs more row width — use symbols for this small, well-known
-// status set (owner UI policy: symbols over word badges where appropriate).
-// The full word survives as the badge's title/aria-label.
-export function statusSymbol(status: ExecStatus): string {
-  if (status === "success") return "✓";
-  if (status === "failed") return "✕";
-  if (status === "canceled") return "⊘";
-  if (status === "suspended") return "⏸";
-  if (status === "running") return "●";
-  if (status === "pending") return "…";
-  return "•";
-}
-
-// A suspended run is still status "running" server-side (suspension is an
-// in-memory overlay, not a DB status) — but it should read as one
-// "suspended" state, not "running" plus a second badge layered on top.
-export function effectiveStatus(status: string, suspended: boolean | undefined): ExecStatus {
-  return status === "running" && suspended ? "suspended" : status;
 }
 
 /** Sets an existing `.badge` element's class/text/title to show `status` (as a symbol). */

@@ -92,7 +92,7 @@ func (s *Store) SetAuthor(value string) (Data, error) {
 }
 
 // UpdateField updates a single field of the customer at index (in the
-// canonical sorted order) and persists it. Unknown fields (including slackChannelId and the removed legacy
+// canonical sorted order) and persists it. Unknown fields (including the removed legacy
 // remote-access field) return ErrInvalidField; an out-of-range index returns
 // ErrInvalidIndex (FR-F2). Neither error mutates the store.
 func (s *Store) UpdateField(index int, field, value string) (Data, error) {
@@ -107,6 +107,8 @@ func (s *Store) UpdateField(index int, field, value string) (Data, error) {
 		c.CustomerName = value
 	case "slackChannel":
 		c.SlackChannel = value
+	case "slackChannelId":
+		c.SlackChannelId = value
 	case "workLoadType":
 		c.WorkLoadType = value
 	case "cmsUrl":

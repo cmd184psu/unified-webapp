@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { createCopyButton } from "@shared";
 import {
   PRIORITY_LABELS,
   STATE_COLORS,
@@ -28,7 +29,7 @@ export function StateBadge({ state }: { state: State }) {
   return (
     <span className="state" style={{ color: STATE_COLORS[state] }}>
       <span className="ring" />
-      <span style={{ color: "var(--text-dim)" }}>{STATE_LABELS[state]}</span>
+      <span style={{ color: "var(--color-text-muted)" }}>{STATE_LABELS[state]}</span>
     </span>
   );
 }
@@ -38,7 +39,7 @@ export function Avatar({ user }: { user: User | null }) {
     return (
       <span
         className="avatar"
-        style={{ background: "transparent", border: "1px dashed var(--border-strong)" }}
+        style={{ background: "transparent", border: "1px dashed var(--color-border)" }}
         title="Unassigned"
       />
     );
@@ -78,4 +79,20 @@ export function Modal({
       </div>
     </div>
   );
+}
+
+/**
+ * The platform's shared copy button (icon, tooltip, toast, check mark),
+ * mounted into React. `text` is read at click time.
+ */
+export function CopyButton({ text, label, className = "btn" }: { text: () => string; label: string; className?: string }) {
+  const host = useRef<HTMLSpanElement>(null);
+  const read = useRef(text);
+  read.current = text;
+  useEffect(() => {
+    const btn = createCopyButton({ text: () => read.current(), label, className });
+    host.current?.replaceChildren(btn);
+    return () => btn.remove();
+  }, [label, className]);
+  return <span ref={host} style={{ display: "contents" }} />;
 }

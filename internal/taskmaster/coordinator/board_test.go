@@ -32,7 +32,7 @@ func TestHandleBoardEvents_ReceivesTaskEnqueued(t *testing.T) {
 	cancels := worker.NewCancelRegistry()
 	brake := worker.NewBrakeGate(false)
 	b := broker.NewBroker(0)
-	c := coordinator.New(d, registry, worker.NewSudoGate(false), cancels, brake, worker.NewProcessRegistry(), 0, b)
+	c := coordinator.New(d, registry, worker.NewSudoGate(false), cancels, brake, worker.NewProcessRegistry(), worker.NewSSECap(0), b, nil, nil)
 
 	srv := httptest.NewServer(coordinator.Routes(c))
 	defer srv.Close()
@@ -93,7 +93,7 @@ func TestHandleBoardEvents_SSECap(t *testing.T) {
 	brake := worker.NewBrakeGate(false)
 	b := broker.NewBroker(0)
 	b.SetMaxSubscribers(1)
-	c := coordinator.New(d, registry, worker.NewSudoGate(false), cancels, brake, worker.NewProcessRegistry(), 0, b)
+	c := coordinator.New(d, registry, worker.NewSudoGate(false), cancels, brake, worker.NewProcessRegistry(), worker.NewSSECap(0), b, nil, nil)
 
 	srv := httptest.NewServer(coordinator.Routes(c))
 	defer srv.Close()

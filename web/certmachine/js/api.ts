@@ -4,7 +4,10 @@ import type {
   CertListResponse,
   CertMutationResponse,
   ImportReport,
+  ReplaceProgressEvent,
+  ReplaceResult,
 } from "./types";
+import { parseNDJSONChunk, parseNDJSONFinal } from "./ndjson";
 
 /** Config values used if `/api/config` cannot be reached, matching the server's own defaults. */
 const FALLBACK_CONFIG: AppConfig = {
@@ -15,6 +18,7 @@ const FALLBACK_CONFIG: AppConfig = {
   legacyImportDir: "",
   legacyImportReason: "",
   trustDeviceAvailable: false,
+  trustRemoteAvailable: false,
 };
 
 /**
@@ -113,28 +117,82 @@ export async function renewCert(id: number): Promise<CertMutationResponse> {
  * server independently re-checks it case-insensitively against the row's
  * real FQDN, so a stale/mismatched value fails server-side even if the UI's
  * own gating (see `detail.ts`) is somehow bypassed.
+ *
+ * The server answers 200 with `{previousDropped}` (CA-replacement plan §4:
+ * delete used to be a bare 204, but deleting a row can itself trigger the
+ * auto-drop of a previous CA that no longer signs anything active).
  */
-export async function deleteCert(id: number, confirmFqdn: string): Promise<void> {
+export async function deleteCert(id: number, confirmFqdn: string): Promise<{ previousDropped: boolean }> {
   const res = await fetch(`/api/certs/${id}?confirm=${encodeURIComponent(confirmFqdn)}`, {
     method: "DELETE",
   });
-  if (!res.ok && res.status !== 204) {
+  if (!res.ok) {
     throw new Error(await errorMessage(res, "failed to delete certificate"));
   }
+  return (await res.json()) as { previousDropped: boolean };
 }
 
-/** GET/POST /api/ca response shape. Every field but `exists` is absent when no CA exists. */
+/** Request body for `POST /api/certs/{id}/edit` (CA-replacement plan P5). */
+export interface EditInput {
+  fqdn: string;
+  dnsSans: string[];
+  ipSans: string[];
+  validityDays: number;
+}
+
+/**
+ * Edit an existing cert row: re-issue it (possibly under a new FQDN and/or a
+ * requested validity) rather than just renewing with the default validity.
+ * Rejects with the server's own message -- e.g. `ErrQuarantined`,
+ * `ErrDuplicateActive` on an FQDN collision, or `ErrNewerActiveExists`.
+ */
+export async function editCert(id: number, input: EditInput): Promise<CertMutationResponse> {
+  const res = await fetch(`/api/certs/${id}/edit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    throw new Error(await errorMessage(res, "failed to edit certificate"));
+  }
+  return (await res.json()) as CertMutationResponse;
+}
+
+/**
+ * The previous CA's identity plus how many active rows still depend on it
+ * (CA-replacement plan FR-R7/D7). `activeCount` drives both the panel's
+ * display and the forced `previousStale` choice in the Replace dialog.
+ */
+export interface PreviousCA {
+  id: number;
+  subject: string;
+  notBefore: string;
+  notAfter: string;
+  fingerprint: string;
+  activeCount: number;
+}
+
+/**
+ * GET/POST /api/ca response shape. Every field but `exists` (and, once a CA
+ * exists, `unknownSignerActiveCount`) is absent when no CA exists.
+ * `previous` is present only when there is a previous CA; `id` and
+ * `unknownSignerActiveCount` are the CA-replacement plan's additions.
+ */
 export interface CAStatus {
   exists: boolean;
+  id?: number;
   subject?: string;
   serial?: string;
   notBefore?: string;
   notAfter?: string;
   fingerprint?: string;
   importedFrom?: string;
+  previous?: PreviousCA;
+  /** Always present, even 0 and even when no CA exists yet -- the server never omits it. */
+  unknownSignerActiveCount: number;
 }
 
-const FALLBACK_CA_STATUS: CAStatus = { exists: false };
+const FALLBACK_CA_STATUS: CAStatus = { exists: false, unknownSignerActiveCount: 0 };
 
 /**
  * Fetch CA status. Never rejects -- like `fetchConfig`, a transient boot
@@ -154,12 +212,150 @@ export async function fetchCA(): Promise<CAStatus> {
 }
 
 /** Initialize a new root CA. Rejects with the server's message (e.g. `ErrImportPending`) on failure. */
-export async function initCA(): Promise<CAStatus> {
-  const res = await fetch("/api/ca/init", { method: "POST" });
+/** Create the root CA, optionally named (its Common Name; blank = the default). */
+export async function initCA(name = ""): Promise<CAStatus> {
+  const res = await fetch("/api/ca/init", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
   if (!res.ok) {
     throw new Error(await errorMessage(res, "failed to initialize the certificate authority"));
   }
   return (await res.json()) as CAStatus;
+}
+
+/** Request body for `POST /api/ca/replace` (CA-replacement plan §4, D1/D2/D7). */
+export interface ReplaceCAInput {
+  name: string;
+  existing: "reissue" | "delete" | "keep";
+  /** Required only when the outgoing previous CA still signs an active row (409 `ErrPreviousStaleChoiceRequired` otherwise). */
+  previousStale?: "reissue" | "delete";
+}
+
+/**
+ * Replace the current CA with a newly generated one. Rejects with the
+ * server's own message on failure -- a name collision (400), a required but
+ * omitted `previousStale` choice (409), or a concurrent-change conflict (409).
+ */
+export async function replaceCA(input: ReplaceCAInput): Promise<ReplaceResult> {
+  const res = await fetch("/api/ca/replace", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    throw new Error(await errorMessage(res, "failed to replace the certificate authority"));
+  }
+  return (await res.json()) as ReplaceResult;
+}
+
+/** One line of POST /api/ca/replace's NDJSON stream (handler.go's ndjson*Line types). */
+interface ndjsonLine {
+  type: "progress" | "result" | "error";
+  phase?: string;
+  done?: number;
+  total?: number;
+  status?: number;
+  error?: string;
+  ca?: unknown;
+  reissued?: number;
+  deleted?: number;
+  kept?: number;
+  clamped?: number;
+  previousDropped?: boolean;
+}
+
+function isReplaceProgressPhase(phase: string | undefined): phase is ReplaceProgressEvent["phase"] {
+  return phase === "ca-key" || phase === "leaf-keys" || phase === "saving";
+}
+
+/**
+ * Replace the current CA with a newly generated one, the same as `replaceCA`,
+ * but over the streaming NDJSON progress mode (`Accept: application/x-ndjson`)
+ * instead of a single JSON response: `onProgress` is called once per event as
+ * the server reports it (a new CA key, each re-issued leaf's key, then the
+ * short transaction that saves everything). Rejects with the same,
+ * client-safe message either path can produce -- a non-OK status before any
+ * streaming started, or the stream's own final `"error"` line once it did.
+ *
+ * A browser without streaming `Response.body` support (or a test
+ * environment) falls back to decoding the whole response as JSON, since a
+ * non-streaming client still receives the exact same bytes, just without
+ * incremental delivery -- `onProgress` simply never fires in that case.
+ */
+export async function replaceCAWithProgress(
+  input: ReplaceCAInput,
+  onProgress: (ev: ReplaceProgressEvent) => void,
+): Promise<ReplaceResult> {
+  const res = await fetch("/api/ca/replace", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/x-ndjson" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    throw new Error(await errorMessage(res, "failed to replace the certificate authority"));
+  }
+  let result: ReplaceResult | null = null;
+
+  const handleLine = (line: ndjsonLine): void => {
+    if (line.type === "progress") {
+      if (isReplaceProgressPhase(line.phase)) {
+        onProgress({ phase: line.phase, done: line.done, total: line.total });
+      }
+      return;
+    }
+    if (line.type === "error") {
+      throw new Error(line.error || "failed to replace the certificate authority");
+    }
+    // "result": every field but "type" is ReplaceResult's own shape.
+    const { type: _type, ...rest } = line;
+    result = rest as ReplaceResult;
+  };
+
+  if (res.body) {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let remainder = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = parseNDJSONChunk<ndjsonLine>(remainder, decoder.decode(value, { stream: true }));
+      remainder = chunk.remainder;
+      for (const line of chunk.values) handleLine(line);
+    }
+    const finalLine = parseNDJSONFinal<ndjsonLine>(remainder);
+    if (finalLine) handleLine(finalLine);
+  } else {
+    // No streaming `Response.body` support: the whole NDJSON body arrives as
+    // one string. It is still multiple `\n`-separated lines, so it goes
+    // through the exact same per-line handling as the streaming path above --
+    // NOT res.json(), which would throw a SyntaxError on anything but a
+    // single-line body.
+    const text = await res.text();
+    const chunk = parseNDJSONChunk<ndjsonLine>("", text);
+    for (const line of chunk.values) handleLine(line);
+    const finalLine = parseNDJSONFinal<ndjsonLine>(chunk.remainder);
+    if (finalLine) handleLine(finalLine);
+  }
+
+  if (result === null) {
+    throw new Error("failed to replace the certificate authority: the response stream ended with no result");
+  }
+  return result;
+}
+
+/**
+ * Swap the previous CA back to being current (CA-replacement plan D9).
+ * Rejects with the server's own message -- e.g. `ErrNoPreviousCA` or an
+ * expiring/expired previous CA (both 409).
+ */
+export async function switchBackCA(): Promise<{ ca: CAStatus }> {
+  const res = await fetch("/api/ca/switch-back", { method: "POST" });
+  if (!res.ok) {
+    throw new Error(await errorMessage(res, "failed to switch back to the previous certificate authority"));
+  }
+  return (await res.json()) as { ca: CAStatus };
 }
 
 /** Step 1 of the import wizard: a dry-run scan of the legacy directory. Writes nothing. */
@@ -251,6 +447,51 @@ export class TrustFailedError extends Error {
  * 409 otherwise, surfaced here the same way any other disabled-feature
  * refusal is. Rejects with `TrustFailedError` on failure.
  */
+/** Inputs for POST /api/ca/trust/remote: a key name OR a password, not both. */
+export interface RemoteTrustRequest {
+  host: string;
+  port: number;
+  user: string;
+  key?: string;
+  password?: string;
+}
+
+/**
+ * Trust the root CA on another machine over SSH. The server detects the OS
+ * and installs only on macOS, Windows, Rocky/RHEL or Ubuntu/Debian; anything
+ * else installs nothing. Rejects with `TrustFailedError` (carrying the
+ * commands' output, when any ran) on failure.
+ */
+export async function trustRemote(req: RemoteTrustRequest): Promise<TrustResult> {
+  const res = await fetch("/api/ca/trust/remote", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  let body: TrustResult & { error?: string } = {};
+  try {
+    body = (await res.json()) as TrustResult & { error?: string };
+  } catch {
+    /* non-JSON error body */
+  }
+  if (!res.ok) {
+    throw new TrustFailedError(body.error ?? `remote trust failed: ${res.status}`, body.output ?? "");
+  }
+  return body;
+}
+
+/** GET /api/ssh/keys: the server's SSH key folder, names only. */
+export async function fetchSSHKeys(): Promise<Array<{ name: string; isDir: boolean }>> {
+  try {
+    const res = await fetch("/api/ssh/keys");
+    if (!res.ok) return [];
+    const body = (await res.json()) as { keys?: Array<{ name: string; isDir: boolean }> };
+    return body.keys ?? [];
+  } catch {
+    return []; // unreachable server: the picker just shows "No keys found"
+  }
+}
+
 export async function trustDevice(): Promise<TrustResult> {
   const res = await fetch("/api/ca/trust", { method: "POST" });
   let body: TrustResult & { error?: string } = {};

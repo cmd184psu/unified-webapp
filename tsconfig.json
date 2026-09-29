@@ -6,7 +6,13 @@
     "jsx": "react-jsx",
     "strict": true,
     "noEmit": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "paths": {
+      "@shared": ["./web/shared/ts/index.ts"],
+      "@shared/*": ["./web/shared/ts/*"],
+      "/shared/dist/shared.mjs": ["./web/shared/ts/index.ts"]
+    }
   },
-  "include": ["web/obsidianoid/js/*.ts", "web/slideshow/js/*.ts", "web/multissh/js/*.ts", "web/certmachine/js/*.ts", "web/taskmaster/js/**/*.ts", "web/smbedit/src/**/*.ts", "web/smbedit/src/**/*.tsx", "web/issuetracker/src/**/*.ts", "web/issuetracker/src/**/*.tsx"]
+  "include": ["web/obsidianoid/js/*.ts", "web/slideshow/js/*.ts", "web/multissh/js/*.ts", "web/certmachine/js/*.ts", "web/taskmaster/js/**/*.ts", "web/smbedit/src/**/*.ts", "web/smbedit/src/**/*.tsx", "web/issuetracker/src/**/*.ts", "web/issuetracker/src/**/*.tsx", "web/shared/**/*.ts", "web/sampler/js/*.ts", "web/todo/js/*.ts", "web/admin/js/**/*.ts", "web/timetracker/js/**/*.ts", "web/grocery/js/**/*.ts", "web/utuber/js/*.ts", "web/menuserver/js/*.ts"],
+  "exclude": ["web/shared/dist"]
 }

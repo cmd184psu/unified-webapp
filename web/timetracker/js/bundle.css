@@ -1,0 +1,360 @@
+/* web/timetracker/js/time-selector.css */
+.time-selector-container {
+  width: 20%;
+  padding: 20px;
+}
+.time-selector-table {
+  width: 100%;
+  border-collapse: collapse;
+  user-select: none;
+}
+.time-selector-table th,
+.time-selector-table td {
+  border: 1px solid var(--color-border);
+  text-align: center;
+  padding: 5px;
+}
+.time-block {
+  cursor: pointer;
+  background-color: var(--color-surface-1);
+  transition: background-color 0.2s;
+}
+.time-block:hover {
+  background-color: var(--color-surface-2);
+}
+.time-block.selected {
+  background-color: var(--color-primary-tint);
+}
+.time-buttons {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+#clearTimeSelectionBtn {
+  padding: 5px 10px;
+  background-color: var(--color-danger);
+  color: white;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#clearTimeSelectionBtn:hover {
+  filter: brightness(0.85);
+}
+#totalTimeInput {
+  width: 120px;
+  padding: 5px;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  background-color: var(--color-surface-1);
+}
+
+/* web/timetracker/js/main.css */
+body {
+  font-family: var(--font-body);
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+input,
+select,
+textarea {
+  background: var(--color-surface-1);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  font: inherit;
+}
+a {
+  color: var(--color-primary);
+}
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.header {
+  text-align: center;
+  margin-bottom: var(--space-5);
+}
+.content {
+  display: flex;
+  width: 100%;
+}
+.left-panel,
+.right-panel {
+  padding: var(--space-5);
+}
+.left-panel {
+  width: 30%;
+}
+.right-panel {
+  width: 50%;
+}
+.time-selector-container {
+  width: 20%;
+  padding: var(--space-5);
+}
+.form-group {
+  margin-bottom: var(--space-4);
+}
+.hidden {
+  display: none !important;
+}
+.app-menu-corner {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.time-selector-table {
+  width: 100%;
+  border-collapse: collapse;
+  user-select: none;
+}
+.time-selector-table th,
+.time-selector-table td {
+  border: 1px solid var(--color-border);
+  text-align: center;
+  padding: var(--space-1);
+}
+.time-block {
+  cursor: pointer;
+  background-color: var(--color-surface-1);
+}
+.customer-list {
+  list-style-type: none;
+  padding: 0;
+}
+.customer-item {
+  background-color: var(--color-surface-2);
+  margin-bottom: var(--space-1);
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+}
+.customer-item.selected {
+  background-color: var(--color-success);
+}
+.time-buttons {
+  display: flex;
+  gap: var(--space-2);
+}
+#clearTimeSelectionBtn {
+  margin-top: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  background-color: var(--color-danger);
+  color: var(--color-on-danger, white);
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#clearTimeSelectionBtn:hover {
+  filter: brightness(0.85);
+}
+#copyReportBtn {
+  background-color: var(--color-danger);
+  color: var(--color-on-danger, white);
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1) var(--space-2);
+}
+#copyReportBtn:hover {
+  filter: brightness(0.85);
+}
+.report-container {
+  display: flex;
+  justify-content: space-between;
+}
+.report-editor,
+.report-preview {
+  width: 48%;
+}
+#reportInput {
+  width: 100%;
+  height: 331px;
+}
+#processedReport {
+  width: 100%;
+  height: 331px;
+  border: 1px solid var(--color-border);
+  padding: var(--space-2);
+  overflow-y: auto;
+}
+.footer {
+  position: fixed;
+  bottom: 0;
+  width: 100%;
+  text-align: center;
+  background-color: var(--color-surface-2);
+  color: var(--color-text);
+  padding: var(--space-2) 0;
+}
+.message-bar {
+  display: none;
+}
+.message-bar.hidden {
+  display: none;
+}
+.message-bar:not(.hidden) {
+  display: block;
+}
+.delete-btn,
+.add-btn {
+  min-width: 250px;
+  color: #fff;
+  padding: var(--space-2) var(--space-5);
+  border: none;
+  cursor: pointer;
+}
+.delete-btn {
+  background-color: var(--color-danger);
+}
+.add-btn {
+  background-color: var(--color-success);
+}
+.delete-btn:hover,
+.add-btn:hover {
+  filter: brightness(1.1);
+}
+[data-theme=light] .delete-btn {
+  background-color: red;
+}
+[data-theme=light] .add-btn {
+  background-color: darkgreen;
+}
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.modal-content {
+  background-color: var(--color-surface-1);
+  padding: var(--space-5);
+  border-radius: var(--radius-md);
+  text-align: center;
+}
+.modal-content button {
+  margin: var(--space-2);
+  padding: var(--space-2) var(--space-5);
+  font-size: var(--text-base);
+  cursor: pointer;
+}
+.date-selector {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.date-selector button {
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+}
+.date-selector button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.edit-btn {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  color: var(--color-primary);
+}
+.edit-btn:hover {
+  color: var(--color-primary-hover);
+}
+[data-theme=light] body {
+  font-family:
+    "Times New Roman",
+    Times,
+    serif;
+  background: #fff;
+  color: #000;
+}
+[data-theme=light] input,
+[data-theme=light] select,
+[data-theme=light] textarea,
+[data-theme=light] a {
+  all: revert;
+}
+[data-theme=light] .edit-btn,
+[data-theme=light] .edit-btn:hover {
+  color: #000;
+}
+[data-theme=light] .customer-item {
+  background-color: lightgray;
+  margin-bottom: 5px;
+  padding: 10px;
+  border-radius: 5px;
+}
+[data-theme=light] .customer-item.selected {
+  background-color: lightgreen;
+}
+[data-theme=light] #clearTimeSelectionBtn,
+[data-theme=light] #copyReportBtn {
+  background-color: #f44336;
+  border-radius: 5px;
+  padding: 5px 10px;
+  filter: none;
+}
+[data-theme=light] #clearTimeSelectionBtn:hover,
+[data-theme=light] #copyReportBtn:hover {
+  background-color: #d32f2f;
+}
+[data-theme=light] #processedReport {
+  border-color: #ccc;
+  padding: 10px;
+}
+[data-theme=light] .footer {
+  background-color: #333;
+  color: #fff;
+  padding: 10px 0;
+}
+[data-theme=light] .delete-btn,
+[data-theme=light] .add-btn {
+  padding: 10px 20px;
+  filter: none;
+}
+[data-theme=light] .modal-content {
+  background-color: #fff;
+  border-radius: 5px;
+  padding: 20px;
+}
+[data-theme=light] .modal-content button {
+  margin: 10px;
+  padding: 10px 20px;
+  font-size: 16px;
+}
+[data-theme=light] .time-selector-table th,
+[data-theme=light] .time-selector-table td {
+  border-color: #000;
+}
+[data-theme=light] .time-block {
+  background-color: #fff;
+}
+[data-theme=light] .time-block:hover {
+  background-color: #f0f0f0;
+}
+[data-theme=light] .time-block.selected {
+  background-color: lightblue;
+}
+[data-theme=light] #totalTimeInput {
+  border: 1px solid #ccc;
+  background-color: #f9f9f9;
+}

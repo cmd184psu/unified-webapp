@@ -1,0 +1,43 @@
+/* tokens.css — structural tokens (Table T2, 27 names).
+   Structural donor of record: web/obsidianoid/css/themes.css:20-36.
+   Documented exceptions: --shadow-md and --overlay-scrim take
+   web/taskmaster/js/ui/modal.ts's literals (:44, :28) so the donor modal stays
+   reproducible; --space-5 comes from web/grocery/style.css:12; --space-7 and
+   --text-xl are authored (FRD :171-174 mandates the complete scales).
+   themes.css may override only --font-body, --font-mono, --overlay-scrim. */
+
+:root {
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-full: 9999px;
+
+  --shadow-sm: 0 1px 3px oklch(0 0 0 / 0.3);
+  --shadow-md: 0 8px 32px rgba(0, 0, 0, 0.4);
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 1.75rem;
+  --space-8: 2rem;
+
+  --text-xs: clamp(0.75rem, 0.7rem + 0.25vw, 0.875rem);
+  --text-sm: clamp(0.875rem, 0.8rem + 0.35vw, 1rem);
+  --text-base: clamp(1rem, 0.95rem + 0.25vw, 1.125rem);
+  --text-lg: clamp(1.125rem, 1rem + 0.75vw, 1.5rem);
+  --text-xl: clamp(1.5rem, 1.32rem + 0.75vw, 2rem);
+
+  --font-body: "Inter", var(--font-body-fallback);
+  --font-mono: "JetBrains Mono", var(--font-mono-fallback);
+  --font-body-fallback: "Segoe UI", system-ui, sans-serif;
+  --font-mono-fallback: "Fira Code", ui-monospace, monospace;
+
+  --sidebar-width: 280px;
+  --topbar-height: 48px;
+  --transition: 160ms cubic-bezier(0.16, 1, 0.3, 1);
+
+  --overlay-scrim: rgba(0, 0, 0, 0.55);
+}

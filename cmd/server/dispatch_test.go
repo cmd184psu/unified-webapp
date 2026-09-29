@@ -325,6 +325,14 @@ func utuberTestConfig(t *testing.T, routing map[string]string) *config.Config {
 		Workers:     0,
 		PythonBin:   "python3.12",
 	}
+	// utuber's build now always goes through buildModule's shared
+	// moduleDeps.taskmasterEngine() (plan A1), even though the current
+	// utuber.Build shim ignores the host it is handed (Phase 5 wires the
+	// real body): the "taskmaster" case in buildModule opens
+	// taskmaster.Open(cfg.Taskmaster, ...) before "utuber" ever runs, so
+	// cfg.Taskmaster.DBPath and StaticDir must resolve to a real path.
+	cfg.Taskmaster.DBPath = filepath.Join(root, "taskmaster.db")
+	cfg.Taskmaster.StaticDir = staticDir
 	return cfg
 }
 
@@ -398,6 +406,146 @@ func TestUtuberTwoHostnamesShareOneInstance(t *testing.T) {
 	}
 	if decoded[0].Status != "queued" {
 		t.Errorf("job status = %q, want queued (no worker should run with Workers: 0)", decoded[0].Status)
+	}
+}
+
+// TestDispatcher_TaskmasterAndUtuberShareOneEngine pins the A1 wiring
+// decision (plan §4.7): both the "taskmaster" and "utuber" buildModule cases
+// go through the same moduleDeps.taskmasterEngine(), so routing both to one
+// dispatcher opens exactly one *taskmaster.Engine (one entry in
+// dispatch.closers) no matter which module's host buildDispatcher happens to
+// build first -- and build order is a random Go map iteration
+// (cfg.Routing), which is why this loops several times rather than trusting
+// one lucky ordering.
+//
+// The utuber module's Build still ignores the golane.Host it is handed
+// (build.go's temporary Phase 3 shim -- Phase 5 rewires its body onto the
+// shared engine), so this test does not yet assert that an /enqueue'd job
+// shows up as a taskmaster func task; it pins the sharing property that
+// Phase 3 is actually responsible for: one engine, one closer, both hosts
+// serving.
+func TestDispatcher_TaskmasterAndUtuberShareOneEngine(t *testing.T) {
+	for i := 0; i < 5; i++ {
+		cfg := utuberTestConfig(t, map[string]string{
+			"tm.example":     "taskmaster",
+			"utuber.example": "utuber",
+		})
+		dispatch := buildDispatcher(cfg, noAuthService(t))
+
+		if len(dispatch.closers) != 1 {
+			t.Fatalf("iteration %d: len(dispatch.closers) = %d, want 1 (one shared engine)", i, len(dispatch.closers))
+		}
+
+		tmRes := doDispatchHost(t, dispatch, http.MethodGet, "tm.example", "/api/tasks")
+		if tmRes.StatusCode != http.StatusOK {
+			t.Errorf("iteration %d: GET /api/tasks via taskmaster host: status %d, want 200", i, tmRes.StatusCode)
+		}
+		tmRes.Body.Close()
+
+		utRes := doDispatchHost(t, dispatch, http.MethodGet, "utuber.example", "/jobs.json")
+		if utRes.StatusCode != http.StatusOK {
+			t.Errorf("iteration %d: GET /jobs.json via utuber host: status %d, want 200", i, utRes.StatusCode)
+		}
+		utRes.Body.Close()
+
+		dispatch.Close()
+	}
+}
+
+// doDispatchHost serves a request against a Dispatcher directly (no
+// httptest.Server), for tests that only care about status codes/bodies and
+// want to Close the dispatcher deterministically per iteration rather than
+// via t.Cleanup on a server (doHost, above, is the httptest.Server variant
+// used by the rest of this file).
+func doDispatchHost(t *testing.T, h http.Handler, method, host, path string) *http.Response {
+	t.Helper()
+	req := httptest.NewRequest(method, path, nil)
+	req.Host = host
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec.Result()
+}
+
+// TestDispatcher_UtuberWithoutTaskmasterRoute_Headless pins P16: routing
+// utuber alone still opens the shared taskmaster engine (utuber's Build
+// needs it, even though Phase 3's temporary shim ignores it), but headless
+// (OpenOptions{OwnedLanesOnly: true}) -- no taskmaster HTTP surface exists,
+// and there is still exactly one closer to shut it down.
+func TestDispatcher_UtuberWithoutTaskmasterRoute_Headless(t *testing.T) {
+	cfg := utuberTestConfig(t, map[string]string{"utuber.example": "utuber"})
+	dispatch := buildDispatcher(cfg, noAuthService(t))
+	defer dispatch.Close()
+
+	if len(dispatch.closers) != 1 {
+		t.Fatalf("len(dispatch.closers) = %d, want 1 (headless engine)", len(dispatch.closers))
+	}
+
+	res := doDispatchHost(t, dispatch, http.MethodGet, "utuber.example", "/jobs.json")
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("GET /jobs.json: status %d, want 200", res.StatusCode)
+	}
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if got := strings.TrimSpace(string(body)); got != "[]" {
+		t.Errorf("GET /jobs.json = %q, want []", got)
+	}
+}
+
+// TestDispatcher_EngineOpenFailure_BothModules503 pins that a shared-engine
+// open failure 503s both modules that depend on it (each naming itself, not
+// the other, and not the filesystem cause), while a third, unrelated module
+// keeps serving.
+func TestDispatcher_EngineOpenFailure_BothModules503(t *testing.T) {
+	cfg := utuberTestConfig(t, map[string]string{
+		"tm.example":      "taskmaster",
+		"utuber.example":  "utuber",
+		"grocery.example": "grocery",
+	})
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write blocker file: %v", err)
+	}
+	// taskmaster.Open's os.MkdirAll(filepath.Dir(cfg.DBPath), ...) fails
+	// because the parent itself is a regular file, not a directory.
+	cfg.Taskmaster.DBPath = filepath.Join(blocker, "taskmaster.db")
+	groceryDir := t.TempDir()
+	cfg.Grocery.StaticDir = groceryDir
+	cfg.Grocery.DataFile = filepath.Join(groceryDir, "grocery.json")
+
+	dispatch := buildDispatcher(cfg, noAuthService(t))
+	defer dispatch.Close()
+
+	if len(dispatch.closers) != 0 {
+		t.Fatalf("len(dispatch.closers) = %d, want 0 (the engine never opened)", len(dispatch.closers))
+	}
+
+	tmRes := doDispatchHost(t, dispatch, http.MethodGet, "tm.example", "/api/tasks")
+	defer tmRes.Body.Close()
+	if tmRes.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("taskmaster host status = %d, want 503", tmRes.StatusCode)
+	}
+	tmBody, _ := io.ReadAll(tmRes.Body)
+	if !strings.Contains(string(tmBody), "taskmaster") {
+		t.Errorf("taskmaster 503 body does not name the module: %s", tmBody)
+	}
+
+	utRes := doDispatchHost(t, dispatch, http.MethodGet, "utuber.example", "/jobs.json")
+	defer utRes.Body.Close()
+	if utRes.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("utuber host status = %d, want 503", utRes.StatusCode)
+	}
+	utBody, _ := io.ReadAll(utRes.Body)
+	if !strings.Contains(string(utBody), "utuber") {
+		t.Errorf("utuber 503 body does not name the module: %s", utBody)
+	}
+
+	healthy := doDispatchHost(t, dispatch, http.MethodGet, "grocery.example", "/config")
+	defer healthy.Body.Close()
+	if healthy.StatusCode == http.StatusServiceUnavailable {
+		t.Fatalf("a shared-engine open failure took grocery offline (status %d)", healthy.StatusCode)
 	}
 }
 

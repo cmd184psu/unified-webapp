@@ -1,12 +1,14 @@
-import { fetchConfig, fetchCerts, fetchCA, initCA, trustDevice, TrustFailedError } from "./api";
+import { fetchConfig, fetchCerts, fetchCA, initCA } from "./api";
+import { openTrustDialog } from "./trustdialog";
+import { openReplaceCADialog, confirmSwitchBackCA } from "./cadialog";
 import type { CAStatus } from "./api";
 import { renderCertList } from "./render";
-import { filterCerts, sortCerts } from "./listmodel";
+import { filterCerts, filterStale, sortCerts } from "./listmodel";
 import type { SortKey, SortDir } from "./listmodel";
 import { openCertDetail } from "./detail";
 import { openGenerateForm } from "./generate";
 import { openImportWizard } from "./wizard";
-import { showToast } from "./toast";
+import { showToast, promptDialog } from "@shared";
 import type { AppConfig, Cert } from "./types";
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -16,10 +18,6 @@ function el<K extends keyof HTMLElementTagNameMap>(
   const node = document.createElement(tag);
   if (className) node.className = className;
   return node;
-}
-
-function countLabel(count: number): string {
-  return `${count} certificate${count === 1 ? "" : "s"}`;
 }
 
 function errorText(err: unknown): string {
@@ -44,9 +42,18 @@ function addMetaRow(dl: HTMLDListElement, label: string, value: string): void {
   dl.append(dt, dd);
 }
 
-function handleInitCA(button: HTMLButtonElement, onCAChanged: () => void): void {
+// Initializing asks for the CA's name: it becomes the certificate's Common
+// Name (what trust stores show) and names its files, e.g. "Home Lab CA 2026"
+// downloads as Home-Lab-CA-2026.crt.
+async function handleInitCA(button: HTMLButtonElement, onCAChanged: () => void): Promise<void> {
+  const name = await promptDialog("Name for the new certificate authority:", {
+    title: "Initialize CA",
+    defaultValue: "CertMachine Root CA",
+    confirmLabel: "Initialize",
+  });
+  if (name === null) return;
   button.disabled = true;
-  initCA()
+  initCA(name.trim())
     .then(() => {
       showToast("Certificate authority initialized.", "success");
       onCAChanged();
@@ -58,38 +65,8 @@ function handleInitCA(button: HTMLButtonElement, onCAChanged: () => void): void 
 }
 
 /**
- * Run the device-trust install and reflect the result: a toast for the
- * headline outcome, plus the ran commands' full output in `output` (kept
- * visible until the next click) since a sudo permission refusal or a missing
- * update-ca-trust binary is exactly the kind of thing "alert-and-hope" would
- * hide.
- */
-function handleTrustDevice(button: HTMLButtonElement, output: HTMLElement): void {
-  button.disabled = true;
-  output.hidden = true;
-  output.textContent = "";
-  trustDevice()
-    .then((result) => {
-      button.disabled = false;
-      showToast(`Trusted on this device${result.platform ? ` (${result.platform})` : ""}.`, "success");
-      if (result.output) {
-        output.textContent = result.output;
-        output.hidden = false;
-      }
-    })
-    .catch((err: unknown) => {
-      button.disabled = false;
-      showToast(errorText(err), "error");
-      if (err instanceof TrustFailedError && err.output) {
-        output.textContent = err.output;
-        output.hidden = false;
-      }
-    });
-}
-
-/**
- * CA status panel: root CA metadata + download + (when
- * `trustDeviceAvailable`) the one-click device-trust button, when a CA
+ * CA status panel: root CA metadata + download + (when this server or SSH
+ * trust is available) the "Trust this CA…" dialog button, when a CA
  * exists; the init/import choice when it doesn't. Manual per-OS trust
  * instructions for platforms this app cannot automate live in the README /
  * docs/certmachine.md, not here -- keeping them out of the bundle avoids
@@ -110,6 +87,8 @@ function renderCAPanel(
   heading.textContent = "Certificate authority";
   panel.append(heading);
 
+  const openTrust = (): void => openTrustDialog(config);
+
   if (ca.exists) {
     const meta = el("dl", "cert-detail-meta");
     addMetaRow(meta, "Subject", ca.subject ?? "unknown");
@@ -119,26 +98,56 @@ function renderCAPanel(
     if (ca.importedFrom !== undefined) addMetaRow(meta, "Imported from", ca.importedFrom);
     panel.append(meta);
 
+    // The previous CA (CA-replacement plan FR-R7): shown only when one
+    // exists, with the active-cert count that also drives the Replace
+    // dialog's forced previousStale choice (D7).
+    if (ca.previous !== undefined) {
+      const prevHeading = el("p", "cert-field-label");
+      prevHeading.textContent = "Previous certificate authority";
+      panel.append(prevHeading);
+      const prevMeta = el("dl", "cert-detail-meta");
+      addMetaRow(prevMeta, "Subject", ca.previous.subject);
+      addMetaRow(prevMeta, "Valid", `${formatCADate(ca.previous.notBefore)} – ${formatCADate(ca.previous.notAfter)}`);
+      addMetaRow(
+        prevMeta,
+        "Signs",
+        `${ca.previous.activeCount} active certificate${ca.previous.activeCount === 1 ? "" : "s"}`,
+      );
+      panel.append(prevMeta);
+    }
+
     const actions = el("div", "cert-ca-actions");
     const download = el("a", "cert-btn");
     download.href = "/api/ca/root.crt";
     download.textContent = "Download root CA";
     actions.append(download);
 
-    if (config.trustDeviceAvailable) {
+    // One entry point for trusting the CA, here or on another machine.
+    if (config.trustDeviceAvailable || config.trustRemoteAvailable) {
       const trustBtn = el("button", "cert-btn cert-btn-secondary");
       trustBtn.type = "button";
-      trustBtn.textContent = config.trustPlatform
-        ? `Trust this CA on this device (${config.trustPlatform})`
-        : "Trust this CA on this device";
-      const trustOutput = el("pre", "cert-trust-output");
-      trustOutput.hidden = true;
-      trustBtn.addEventListener("click", () => handleTrustDevice(trustBtn, trustOutput));
+      trustBtn.textContent = "Trust this CA…";
+      trustBtn.addEventListener("click", openTrust);
       actions.append(trustBtn);
-      panel.append(actions, trustOutput);
-    } else {
-      panel.append(actions);
     }
+
+    const replaceBtn = el("button", "cert-btn cert-btn-secondary");
+    replaceBtn.type = "button";
+    replaceBtn.textContent = "Replace CA…";
+    replaceBtn.addEventListener("click", () => openReplaceCADialog(ca, onCAChanged, openTrust));
+    actions.append(replaceBtn);
+
+    if (ca.previous !== undefined) {
+      const switchBackBtn = el("button", "cert-btn cert-btn-secondary");
+      switchBackBtn.type = "button";
+      switchBackBtn.textContent = "Switch back to previous CA";
+      switchBackBtn.addEventListener("click", () => {
+        void confirmSwitchBackCA(onCAChanged, openTrust);
+      });
+      actions.append(switchBackBtn);
+    }
+
+    panel.append(actions);
 
     const trustNote = el("p", "cert-ca-note");
     trustNote.textContent =
@@ -161,13 +170,13 @@ function renderCAPanel(
       const initBtn = el("button", "cert-btn cert-btn-secondary");
       initBtn.type = "button";
       initBtn.textContent = "Initialize a new CA instead";
-      initBtn.addEventListener("click", () => handleInitCA(initBtn, onCAChanged));
+      initBtn.addEventListener("click", () => void handleInitCA(initBtn, onCAChanged));
       actions.append(importBtn, initBtn);
     } else {
       const initBtn = el("button", "cert-btn cert-btn-primary");
       initBtn.type = "button";
       initBtn.textContent = "Initialize root CA";
-      initBtn.addEventListener("click", () => handleInitCA(initBtn, onCAChanged));
+      initBtn.addEventListener("click", () => void handleInitCA(initBtn, onCAChanged));
       actions.append(initBtn);
     }
     panel.append(actions);
@@ -183,54 +192,29 @@ function renderCAPanel(
 }
 
 /**
- * The Tools menu (a native `<details>`, no custom dropdown logic needed):
- * always reachable, so a declined first import is never a dead end. When
- * `legacyImportAvailable` is false but `legacyImportDir` is set, the entry
- * shows `legacyImportReason` as disabled text rather than vanishing.
+ * The Import button: the one action the old Tools menu held that isn't
+ * elsewhere (the CA panel already offers "Download root CA"). Disabled, with
+ * the reason as its tooltip, when there's nothing to import.
  */
-function buildToolsMenu(config: AppConfig, ca: CAStatus, onOpenWizard: () => void): HTMLDetailsElement {
-  const details = el("details", "cert-tools");
-  const summary = el("summary", "cert-tools-summary");
-  summary.textContent = "Tools";
-  details.append(summary);
-
-  const menu = el("div", "cert-tools-menu");
-
-  if (ca.exists) {
-    const download = el("a", "cert-tools-item");
-    download.href = "/api/ca/root.crt";
-    download.textContent = "Download root CA";
-    menu.append(download);
-  }
-
+function buildImportButton(config: AppConfig, onOpenWizard: () => void): HTMLButtonElement {
+  const btn = el("button", "cert-btn");
+  btn.type = "button";
+  btn.textContent = "Import";
   if (config.legacyImportAvailable) {
-    const importItem = el("button", "cert-tools-item");
-    importItem.type = "button";
-    importItem.textContent = "Re-import legacy certificates";
-    importItem.addEventListener("click", () => {
-      details.open = false;
-      onOpenWizard();
-    });
-    menu.append(importItem);
-  } else if (config.legacyImportDir !== "") {
-    const reason = el("p", "cert-tools-item cert-tools-disabled");
-    reason.textContent = `Legacy import unavailable: ${config.legacyImportReason}`;
-    menu.append(reason);
+    btn.title = "Import the legacy certificates";
+    btn.addEventListener("click", onOpenWizard);
+  } else {
+    btn.disabled = true;
+    btn.title = config.legacyImportDir !== ""
+      ? `Nothing to import: ${config.legacyImportReason}`
+      : "Nothing to import: no legacy import directory is configured.";
   }
-
-  if (menu.childElementCount === 0) {
-    const empty = el("p", "cert-tools-item cert-tools-disabled");
-    empty.textContent = "No tools available.";
-    menu.append(empty);
-  }
-
-  details.append(menu);
-  return details;
+  return btn;
 }
 
 /**
  * Mount the certmachine shell: CA panel, toolbar (search/sort/group/new
- * certificate/tools), and the cert list. Fetches config+certs+CA once per
+ * certificate/import), and the cert list. Fetches config+certs+CA once per
  * `refresh()` call; search/sort/group changes never re-fetch, they just
  * re-run the pure `listmodel.ts` pipeline over the already-fetched `certs`
  * array and re-render.
@@ -239,20 +223,13 @@ export async function mountCertApp(root: HTMLElement): Promise<void> {
   root.textContent = "";
   root.classList.add("cert-app");
 
-  const header = el("header", "cert-header");
-  const title = el("h1", "cert-title");
-  title.textContent = "CertMachine";
-  const subtitle = el("p", "cert-subtitle");
-  subtitle.textContent = "Loading certificates…";
-  header.append(title, subtitle);
-
   const main = el("main", "cert-main");
   const caPanelWrap = el("div", "cert-ca-panel-wrap");
   const toolbar = el("div", "cert-toolbar");
   const listWrap = el("div", "cert-list-wrap");
   main.append(caPanelWrap, toolbar, listWrap);
 
-  root.append(header, main);
+  root.append(main);
 
   let config: AppConfig;
   let certs: Cert[];
@@ -262,9 +239,10 @@ export async function mountCertApp(root: HTMLElement): Promise<void> {
   let sortKey: SortKey = "name";
   let sortDir: SortDir = "asc";
   let groupByDomain = false;
+  let staleOnly = false;
 
   function renderList(): void {
-    const filtered = filterCerts(certs, query);
+    const filtered = filterStale(filterCerts(certs, query), staleOnly);
     const sorted = sortCerts(filtered, sortKey, sortDir);
     renderCertList(listWrap, sorted, config.expiryWarnDays, new Date(), {
       groupByDomain,
@@ -277,7 +255,6 @@ export async function mountCertApp(root: HTMLElement): Promise<void> {
         });
       },
     });
-    subtitle.textContent = countLabel(certs.length);
   }
 
   function renderChrome(): void {
@@ -328,7 +305,7 @@ export async function mountCertApp(root: HTMLElement): Promise<void> {
       renderList();
     });
 
-    const groupToggle = el("label", "cert-group-toggle");
+    const groupToggle = el("label", "ui-toggle cert-group-toggle");
     const groupCheckbox = el("input");
     groupCheckbox.type = "checkbox";
     groupCheckbox.checked = groupByDomain;
@@ -336,7 +313,20 @@ export async function mountCertApp(root: HTMLElement): Promise<void> {
       groupByDomain = groupCheckbox.checked;
       renderList();
     });
-    groupToggle.append(groupCheckbox, document.createTextNode(" Group by domain"));
+    groupToggle.append(groupCheckbox, el("span", "ui-toggle-track"), document.createTextNode("Group by domain"));
+
+    // "Stale only" (CA-replacement plan FR-R4): same toggle pattern as
+    // "Group by domain" above -- a pure client-side filter over the
+    // already-fetched `certs` array, no re-fetch.
+    const staleToggle = el("label", "ui-toggle cert-group-toggle");
+    const staleCheckbox = el("input");
+    staleCheckbox.type = "checkbox";
+    staleCheckbox.checked = staleOnly;
+    staleCheckbox.addEventListener("change", () => {
+      staleOnly = staleCheckbox.checked;
+      renderList();
+    });
+    staleToggle.append(staleCheckbox, el("span", "ui-toggle-track"), document.createTextNode("Stale only"));
 
     const newBtn = el("button", "cert-btn cert-btn-primary");
     newBtn.type = "button";
@@ -347,9 +337,9 @@ export async function mountCertApp(root: HTMLElement): Promise<void> {
       openGenerateForm(config.defaultValidityDays, () => void refresh());
     });
 
-    const tools = buildToolsMenu(config, ca, () => openImportWizard(config.certCount, () => void refresh()));
+    const importBtn = buildImportButton(config, () => openImportWizard(config.certCount, () => void refresh()));
 
-    toolbar.append(search, sortSelect, dirBtn, groupToggle, newBtn, tools);
+    toolbar.append(search, sortSelect, dirBtn, groupToggle, staleToggle, newBtn, importBtn);
   }
 
   // Every mutating action (generate, renew, delete, import) fires its own
@@ -368,7 +358,6 @@ export async function mountCertApp(root: HTMLElement): Promise<void> {
       loaded = await Promise.all([fetchConfig(), fetchCerts(), fetchCA()]);
     } catch (err) {
       if (generation !== refreshGeneration) return;
-      subtitle.textContent = "";
       toolbar.textContent = "";
       caPanelWrap.textContent = "";
       listWrap.textContent = "";

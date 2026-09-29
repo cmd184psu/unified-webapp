@@ -9,7 +9,7 @@ import (
 )
 
 // configureProcessGroup arranges full teardown of a streaming command and its
-// descendants (D-6). "sudo tail -F" is two processes: cancelling the context
+// descendants (D-6). "sudo tail -F" is two processes: canceling the context
 // with the default Cancel kills only sudo, orphaning tail against the log
 // file forever. Setpgid puts both in a fresh process group; Cancel signals
 // the negative PID, which addresses the whole group; WaitDelay bounds the

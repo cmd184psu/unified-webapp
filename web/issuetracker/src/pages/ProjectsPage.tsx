@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { confirmDialog } from "@shared";
 import { api } from "../api";
 import { useData } from "../DataContext";
 import type { Team } from "../types";
@@ -68,7 +69,7 @@ export function ProjectsPage() {
 
   const remove = async (t: Team) => {
     if (
-      confirm(
+      await confirmDialog(
         `Delete project "${t.name}" (${t.key})? This removes all of its issues, stories and epics.`
       )
     ) {
@@ -139,7 +140,7 @@ export function ProjectsPage() {
                   alignItems: "center",
                   gap: 12,
                   padding: "12px 0",
-                  borderBottom: "1px solid var(--border)",
+                  borderBottom: "1px solid var(--color-border)",
                 }}
               >
                 <span
@@ -203,7 +204,7 @@ function ProjectEditRow({
         gap: 8,
         alignItems: "center",
         padding: "12px 0",
-        borderBottom: "1px solid var(--border)",
+        borderBottom: "1px solid var(--color-border)",
         flexWrap: "wrap",
       }}
     >

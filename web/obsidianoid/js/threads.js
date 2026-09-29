@@ -1,4 +1,5 @@
-"use strict";
+// web/obsidianoid/js/threads.ts
+import { showToast, promptDialog } from "/shared/dist/shared.mjs";
 window.ThreadsView = /* @__PURE__ */ (function() {
   let threads = [];
   let editingIndex = null;
@@ -36,7 +37,7 @@ window.ThreadsView = /* @__PURE__ */ (function() {
       renderCache.set(content, html);
       return html;
     } catch {
-      return '<em style="color:var(--color-error)">Render failed</em>';
+      return '<em style="color:var(--color-danger)">Render failed</em>';
     }
   }
   function escapeHtml(str) {
@@ -46,7 +47,8 @@ window.ThreadsView = /* @__PURE__ */ (function() {
     const thread = threads[index];
     const isEditing = editingIndex === index;
     const isDisabled = thread.disabled;
-    const label = `THREAD_${String(index + 1).padStart(2, "0")}`;
+    const defaultLabel = `THREAD_${String(index + 1).padStart(2, "0")}`;
+    const title = (thread.title ?? "").trim();
     const editButtons = isEditing ? `<button class="card-btn btn-save" data-action="save" data-index="${index}">Save</button>
          <button class="card-btn btn-cancel" data-action="cancel" data-index="${index}">Cancel</button>` : `<button class="card-btn btn-edit" data-action="edit" data-index="${index}"${isDisabled ? " disabled" : ""}>Edit</button>`;
     const body = isEditing ? `<textarea class="card-editor" id="thread-editor-${index}" data-index="${index}">${escapeHtml(draftContent)}</textarea>` : `<div class="md-render">${bodyHtml}</div>
@@ -54,15 +56,17 @@ window.ThreadsView = /* @__PURE__ */ (function() {
     return `
       <div class="thread-card${isDisabled ? " disabled" : ""}" data-card="${index}">
         <div class="card-header">
-          <span class="card-label">${label}</span>
+          <span class="card-label${title ? " card-label-titled" : ""}" title="${escapeHtml(title || defaultLabel)}">${escapeHtml(title || defaultLabel)}</span>
+          <button class="card-title-edit" data-action="rename" data-index="${index}" title="Rename thread" aria-label="Rename ${escapeHtml(title || defaultLabel)}">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+          </button>
           <div class="card-header-spacer"></div>
           ${editButtons}
           <div class="toggle-wrap">
             <span class="toggle-label">${isDisabled ? "OFF" : "ON"}</span>
-            <label class="toggle">
+            <label class="ui-toggle">
               <input type="checkbox"${!isDisabled ? " checked" : ""} data-action="toggle" data-index="${index}" />
-              <span class="toggle-track"></span>
-              <span class="toggle-thumb"></span>
+              <span class="ui-toggle-track"></span>
             </label>
           </div>
         </div>
@@ -123,6 +127,10 @@ window.ThreadsView = /* @__PURE__ */ (function() {
       saveThreads(threads).then(() => showToast("Saved")).catch(() => showToast("Save failed", "error"));
       return;
     }
+    if (action === "rename") {
+      void renameThread(index);
+      return;
+    }
     if (action === "cancel") {
       editingIndex = null;
       draftContent = "";
@@ -141,6 +149,20 @@ window.ThreadsView = /* @__PURE__ */ (function() {
     threads[index].disabled = !target.checked;
     renderApp();
     saveThreads(threads).then(() => showToast(threads[index].disabled ? "Thread disabled" : "Thread enabled")).catch(() => showToast("Save failed", "error"));
+  }
+  async function renameThread(index) {
+    const current = threads[index].title ?? "";
+    const next = await promptDialog("Thread title (leave empty for the default):", {
+      title: "Rename thread",
+      defaultValue: current,
+      placeholder: `THREAD_${String(index + 1).padStart(2, "0")}`,
+      confirmLabel: "Save"
+    });
+    if (next === null || next.trim() === current.trim()) return;
+    captureDraft();
+    threads[index].title = next.trim();
+    renderApp();
+    saveThreads(threads).then(() => showToast(next.trim() ? "Thread renamed" : "Thread title cleared")).catch(() => showToast("Save failed", "error"));
   }
   function init() {
     document.addEventListener("click", handleClick);

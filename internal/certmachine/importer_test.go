@@ -83,7 +83,7 @@ func TestImportRootCAIsByteForByte(t *testing.T) {
 		t.Fatal("ImportCA imported = false, want true on first import")
 	}
 
-	ca, err := s.GetCA(ctx)
+	ca, err := s.GetCurrentCA(ctx)
 	if err != nil {
 		t.Fatalf("GetCA: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestImportCASkipsOnFingerprintMatch(t *testing.T) {
 	if err != nil || !imported1 {
 		t.Fatalf("first ImportCA: imported=%v err=%v, want true, nil", imported1, err)
 	}
-	before, err := s.GetCA(ctx)
+	before, err := s.GetCurrentCA(ctx)
 	if err != nil {
 		t.Fatalf("GetCA after first import: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestImportCASkipsOnFingerprintMatch(t *testing.T) {
 		t.Error("second ImportCA imported = true, want false (fingerprint match should skip)")
 	}
 
-	after, err := s.GetCA(ctx)
+	after, err := s.GetCurrentCA(ctx)
 	if err != nil {
 		t.Fatalf("GetCA after second import: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestImportCARefusesOnFingerprintMismatch(t *testing.T) {
 	if _, err := s.ImportCA(ctx, dirA); err != nil {
 		t.Fatalf("ImportCA(dirA): %v", err)
 	}
-	before, err := s.GetCA(ctx)
+	before, err := s.GetCurrentCA(ctx)
 	if err != nil {
 		t.Fatalf("GetCA after first import: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestImportCARefusesOnFingerprintMismatch(t *testing.T) {
 		t.Fatal("mismatch error has empty message")
 	}
 
-	after, err := s.GetCA(ctx)
+	after, err := s.GetCurrentCA(ctx)
 	if err != nil {
 		t.Fatalf("GetCA after mismatch: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestImportCARefusesKeyMismatch(t *testing.T) {
 		t.Fatalf("ImportCA error = %v, want ErrCAKeyMismatch", err)
 	}
 
-	if _, err := s.GetCA(ctx); !errors.Is(err, ErrCANotFound) {
+	if _, err := s.GetCurrentCA(ctx); !errors.Is(err, ErrCANotFound) {
 		t.Errorf("GetCA after refused key-mismatch import = %v, want ErrCANotFound (nothing stored)", err)
 	}
 }
@@ -234,7 +234,7 @@ func TestImportCAMissingRootFiles(t *testing.T) {
 	if _, err := s.ImportCA(ctx, dir); err == nil {
 		t.Fatal("ImportCA on a directory with no rootCA.crt/rootCA.key = nil error, want error")
 	}
-	if _, err := s.GetCA(ctx); !errors.Is(err, ErrCANotFound) {
+	if _, err := s.GetCurrentCA(ctx); !errors.Is(err, ErrCANotFound) {
 		t.Errorf("GetCA after failed import = %v, want ErrCANotFound", err)
 	}
 }
@@ -647,6 +647,51 @@ func containsPrefix(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
 
+// TestQuarantinedLeafWithParseableCertGetsNoCAID is D1's regression test
+// (architect review of the ca-replacement plan): "mismatched-key" is a
+// quarantined leaf whose certificate parses and is genuinely signed by the
+// legacy root -- l.cert is non-nil, so resolveImportCAID would happily
+// resolve a signer for it. Quarantined rows must keep ca_id NULL regardless
+// (P1), or a later drop of that CA (which only sweeps archived rows, never
+// quarantined ones) leaves this row's ca_id dangling and fails structural
+// invariant 3 on the next boot.
+func TestQuarantinedLeafWithParseableCertGetsNoCAID(t *testing.T) {
+	dir, _, _ := writeLegacyTree(t)
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	if _, err := s.Execute(ctx, dir, false); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	certs, err := s.ListCerts(ctx)
+	if err != nil {
+		t.Fatalf("ListCerts: %v", err)
+	}
+	var found bool
+	for _, c := range certs {
+		if c.FQDN != "mismatched-key.example.local" {
+			continue
+		}
+		found = true
+		if c.Status != StatusQuarantined {
+			t.Fatalf("mismatched-key.example.local status = %s, want quarantined", c.Status)
+		}
+		if c.CAID != nil {
+			t.Errorf("mismatched-key.example.local caId = %d, want nil (quarantined rows never get a signer)", *c.CAID)
+		}
+	}
+	if !found {
+		t.Fatal("no row with fqdn mismatched-key.example.local")
+	}
+
+	// checkInvariants must also pass: no dangling ca_id, and Open must
+	// succeed on reopen.
+	if err := s.checkInvariants(ctx); err != nil {
+		t.Fatalf("checkInvariants: %v", err)
+	}
+}
+
 func TestWildcardCNImports(t *testing.T) {
 	dir, _, _ := writeLegacyTree(t)
 	ctx := context.Background()
@@ -1045,7 +1090,7 @@ func TestDeletingAnImportedRowLeavesTheLegacyTreeUntouched(t *testing.T) {
 	}
 	// The wildcard leaf, deliberately: it is the tree's one importable leaf with
 	// neither a duplicate-serial sibling (valid.example.local.bak) nor a
-	// duplicate CN, so deleting it isolates the skip-set behaviour being tested
+	// duplicate CN, so deleting it isolates the skip-set behavior being tested
 	// from the duplicate-resolution rules.
 	var target *Cert
 	for i := range certs {
@@ -1059,7 +1104,7 @@ func TestDeletingAnImportedRowLeavesTheLegacyTreeUntouched(t *testing.T) {
 	}
 	importedFrom := *target.ImportedFrom
 
-	if err := s.Delete(ctx, target.ID, target.FQDN); err != nil {
+	if _, err := s.Delete(ctx, target.ID, target.FQDN); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 	if _, err := s.GetCert(ctx, target.ID); !errors.Is(err, ErrNotFound) {

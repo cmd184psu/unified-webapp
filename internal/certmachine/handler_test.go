@@ -1,12 +1,14 @@
 package certmachine
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"database/sql"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,7 +32,7 @@ func newHandlerTestServer(t *testing.T) *Server {
 }
 
 // newHandlerTestServerWithLegacyDir is newHandlerTestServer with
-// legacy_import_dir set, for the import routes -- whose behaviour differs by
+// legacy_import_dir set, for the import routes -- whose behavior differs by
 // design between "unconfigured", "configured but unusable", and "usable".
 func newHandlerTestServerWithLegacyDir(t *testing.T, legacyDir string) *Server {
 	t.Helper()
@@ -169,9 +171,13 @@ func TestAllowHeadersMatchRegisteredRoutes(t *testing.T) {
 	}{
 		{"/api/ca/init", "POST"},
 		{"/api/ca/trust", "POST"},
+		{"/api/ca/trust/remote", "POST"},
+		{"/api/ca/replace", "POST"},
+		{"/api/ca/switch-back", "POST"},
 		{"/api/certs", "GET, POST"},
 		{"/api/certs/1", "GET, DELETE"},
 		{"/api/certs/1/renew", "POST"},
+		{"/api/certs/1/edit", "POST"},
 		{"/api/import", "POST"},
 	}
 	allMethods := []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch}
@@ -359,7 +365,7 @@ func TestCAInitAndGetRoundTrip(t *testing.T) {
 		t.Fatalf("GET /api/ca/root.crt = %d, want 200", root.StatusCode)
 	}
 	cd := root.Header.Get("Content-Disposition")
-	if !strings.Contains(cd, `filename="rootCA.crt"`) {
+	if !strings.Contains(cd, `filename="CertMachine-Root-CA.crt"`) {
 		t.Errorf("root.crt Content-Disposition = %q", cd)
 	}
 }
@@ -436,11 +442,17 @@ func TestGenerateGetRenewDelete(t *testing.T) {
 	}
 	newID := strconv.FormatInt(renewed.Cert.ID, 10)
 
-	// DELETE with correct confirm (case-insensitive) succeeds with 204.
+	// DELETE with correct confirm (case-insensitive) succeeds with 200 and a
+	// previousDropped body (the CA-replacement plan, §4, US-005: 204 with no
+	// body became 200 since Delete can trigger dropPreviousIfUnusedTx).
 	delRes := doJSON(t, http.MethodDelete, httpSrv.URL+"/api/certs/"+newID+"?confirm=GEN.EXAMPLE.LOCAL", "")
-	delRes.Body.Close()
-	if delRes.StatusCode != http.StatusNoContent {
-		t.Fatalf("DELETE with correct confirm = %d, want 204", delRes.StatusCode)
+	defer delRes.Body.Close()
+	if delRes.StatusCode != http.StatusOK {
+		t.Fatalf("DELETE with correct confirm = %d, want 200", delRes.StatusCode)
+	}
+	var delBody deleteResponse
+	if err := json.NewDecoder(delRes.Body).Decode(&delBody); err != nil {
+		t.Fatalf("decode delete response: %v", err)
 	}
 
 	// GET after delete is 404.
@@ -935,5 +947,736 @@ func TestInternalErrorBodyNeverLeaksDetail(t *testing.T) {
 		if strings.Contains(lower, leak) {
 			t.Errorf("500 body leaked internal detail %q: %v", leak, body)
 		}
+	}
+}
+
+func TestCAInitWithName(t *testing.T) {
+	_, httpSrv := newHandlerTestHTTPServer(t)
+	if res := doJSON(t, http.MethodPost, httpSrv.URL+"/api/ca/init", `{"name":"bad\u0007name"}`); res.StatusCode != http.StatusBadRequest {
+		t.Errorf("control character in name: %d, want 400", res.StatusCode)
+	}
+	res := doJSON(t, http.MethodPost, httpSrv.URL+"/api/ca/init", `{"name":"Home Lab CA 2026"}`)
+	res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("init with name: %d", res.StatusCode)
+	}
+	root := doJSON(t, http.MethodGet, httpSrv.URL+"/api/ca/root.crt", "")
+	defer root.Body.Close()
+	if cd := root.Header.Get("Content-Disposition"); !strings.Contains(cd, `filename="Home-Lab-CA-2026.crt"`) {
+		t.Errorf("download should be named after the CA: %q", cd)
+	}
+	ca := doJSON(t, http.MethodGet, httpSrv.URL+"/api/ca", "")
+	defer ca.Body.Close()
+	var body struct {
+		Subject string `json:"subject"`
+	}
+	_ = json.NewDecoder(ca.Body).Decode(&body)
+	if body.Subject != "Home Lab CA 2026" {
+		t.Errorf("CA subject = %q", body.Subject)
+	}
+}
+
+// --- US-005: POST /api/ca/replace, POST /api/ca/switch-back,
+// POST /api/certs/{id}/edit (the CA-replacement plan, §4) ---
+
+// caReplace posts to /api/ca/replace and decodes the response, failing the
+// test on anything but the wanted status.
+func caReplace(t *testing.T, httpSrv *httptest.Server, body string, wantStatus int) caReplaceResponse {
+	t.Helper()
+	res := doJSON(t, http.MethodPost, httpSrv.URL+"/api/ca/replace", body)
+	defer res.Body.Close()
+	if res.StatusCode != wantStatus {
+		b := mustReadAll(t, res.Body)
+		t.Fatalf("POST /api/ca/replace(%s) = %d, want %d; body=%s", body, res.StatusCode, wantStatus, b)
+	}
+	var decoded caReplaceResponse
+	if wantStatus == http.StatusOK {
+		if err := json.NewDecoder(res.Body).Decode(&decoded); err != nil {
+			t.Fatalf("decode replace response: %v", err)
+		}
+	}
+	return decoded
+}
+
+func getCA(t *testing.T, httpSrv *httptest.Server) caResponse {
+	t.Helper()
+	res := doJSON(t, http.MethodGet, httpSrv.URL+"/api/ca", "")
+	defer res.Body.Close()
+	var decoded caResponse
+	if err := json.NewDecoder(res.Body).Decode(&decoded); err != nil {
+		t.Fatalf("decode GET /api/ca: %v", err)
+	}
+	return decoded
+}
+
+// TestCAReplace_RoundTrip exercises the full Replace/previousStale contract
+// end to end over HTTP: existing="keep" first leaves the outgoing CA as
+// "previous" with its one active row (PreviousDropped=false); a second
+// Replace then requires previousStale (P4, 409) because that previous CA
+// still signs an active row; supplying previousStale="delete" both deletes
+// that row and drops its CA (PreviousDropped=true, since the newly-demoted
+// CA -- which never signed anything -- is also unused).
+func TestCAReplace_RoundTrip(t *testing.T) {
+	t.Parallel()
+	srv, httpSrv := newHandlerTestHTTPServer(t)
+	srv.db.genCA = throwawayGenCA
+	ctx := context.Background()
+	if err := srv.db.InitCA(ctx, ""); err != nil {
+		t.Fatalf("InitCA: %v", err)
+	}
+	generateTestCert(t, srv.db, "replace-keep.example.local")
+
+	first := caReplace(t, httpSrv, `{"name":"CA Two","existing":"keep"}`, http.StatusOK)
+	if first.Kept != 1 || first.Reissued != 0 || first.Deleted != 0 {
+		t.Fatalf("first replace result = %+v, want Kept=1", first)
+	}
+	if first.PreviousDropped {
+		t.Fatal("first replace: PreviousDropped = true, want false (the demoted CA still signs the kept cert)")
+	}
+	if first.CA.Subject != "CA Two" {
+		t.Fatalf("first replace: ca.subject = %q, want %q", first.CA.Subject, "CA Two")
+	}
+	if first.CA.Previous == nil || first.CA.Previous.ActiveCount != 1 {
+		t.Fatalf("first replace: ca.previous = %+v, want ActiveCount=1", first.CA.Previous)
+	}
+
+	// A second replace with no previousStale is a 409: the outgoing previous
+	// CA (the original default CA) still signs the kept-stale cert.
+	res := doJSON(t, http.MethodPost, httpSrv.URL+"/api/ca/replace", `{"name":"CA Three","existing":"keep"}`)
+	res.Body.Close()
+	if res.StatusCode != http.StatusConflict {
+		t.Fatalf("replace without previousStale = %d, want 409", res.StatusCode)
+	}
+
+	second := caReplace(t, httpSrv, `{"name":"CA Three","existing":"keep","previousStale":"delete"}`, http.StatusOK)
+	if second.Deleted != 1 {
+		t.Fatalf("second replace: Deleted = %d, want 1 (previousStale=delete)", second.Deleted)
+	}
+	if !second.PreviousDropped {
+		t.Fatal("second replace: PreviousDropped = false, want true (the just-demoted CA, CA Two, signs nothing)")
+	}
+	if second.CA.Previous != nil {
+		t.Fatalf("second replace: ca.previous = %+v, want nil (nothing was demoted into a still-signing role)", second.CA.Previous)
+	}
+}
+
+// TestCAReplace_BadEnum covers the 400-class request errors: an unrecognized
+// `existing` value, and previousStale="keep" (P4: that enum has no "keep",
+// unlike `existing`'s own).
+func TestCAReplace_BadEnum(t *testing.T) {
+	t.Parallel()
+	srv, httpSrv := newHandlerTestHTTPServer(t)
+	srv.db.genCA = throwawayGenCA
+	if err := srv.db.InitCA(context.Background(), ""); err != nil {
+		t.Fatalf("InitCA: %v", err)
+	}
+
+	res := doJSON(t, http.MethodPost, httpSrv.URL+"/api/ca/replace", `{"name":"Bad Enum CA","existing":"bogus"}`)
+	res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad existing enum = %d, want 400", res.StatusCode)
+	}
+
+	res2 := doJSON(t, http.MethodPost, httpSrv.URL+"/api/ca/replace", `{"name":"Bad Stale CA","existing":"keep","previousStale":"keep"}`)
+	res2.Body.Close()
+	if res2.StatusCode != http.StatusBadRequest {
+		t.Fatalf("previousStale=keep = %d, want 400", res2.StatusCode)
+	}
+}
+
+// TestCAReplace_NameCollision is P6: the new CA's file stem may not collide,
+// case-insensitively, with the current CA's.
+func TestCAReplace_NameCollision(t *testing.T) {
+	t.Parallel()
+	srv, httpSrv := newHandlerTestHTTPServer(t)
+	srv.db.genCA = throwawayGenCA
+	if err := srv.db.InitCA(context.Background(), ""); err != nil {
+		t.Fatalf("InitCA: %v", err)
+	}
+
+	res := doJSON(t, http.MethodPost, httpSrv.URL+"/api/ca/replace", `{"name":"certmachine root ca","existing":"keep"}`)
+	res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("name collision with current CA = %d, want 400", res.StatusCode)
+	}
+}
+
+// doNDJSONReplace posts to /api/ca/replace with Accept: application/x-ndjson
+// and returns the raw response, without decoding it -- callers read the
+// stream themselves via json.NewDecoder(res.Body), which handles NDJSON's
+// one-value-per-line shape naturally.
+func doNDJSONReplace(t *testing.T, httpSrv *httptest.Server, body string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, httpSrv.URL+"/api/ca/replace", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", ndjsonAccept)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+	return res
+}
+
+// ndjsonLine is a loosely-typed decode target covering every line shape the
+// stream can send (progress/result/error) -- tests inspect only the fields
+// relevant to what they assert.
+type ndjsonLine struct {
+	Type            string     `json:"type"`
+	Phase           string     `json:"phase"`
+	Done            int        `json:"done"`
+	Total           int        `json:"total"`
+	Status          int        `json:"status"`
+	Error           string     `json:"error"`
+	Reissued        int        `json:"reissued"`
+	Deleted         int        `json:"deleted"`
+	Kept            int        `json:"kept"`
+	PreviousDropped bool       `json:"previousDropped"`
+	CA              caResponse `json:"ca"`
+}
+
+// readNDJSONLines decodes every line of an NDJSON response body in order.
+func readNDJSONLines(t *testing.T, r io.Reader) []ndjsonLine {
+	t.Helper()
+	var lines []ndjsonLine
+	dec := json.NewDecoder(r)
+	for {
+		var line ndjsonLine
+		if err := dec.Decode(&line); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			t.Fatalf("decode ndjson line: %v", err)
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// TestCAReplace_NDJSON_Success exercises the streaming progress mode end to
+// end over a real HTTP connection (httptest.NewServer, not a Recorder):
+// Content-Type/Cache-Control are set once, on the first line; the sequence
+// is ca-key, one leaf-keys line per re-issued cert with Done/Total correct,
+// saving, then a result line matching the database's actual post-replace
+// state -- the same contract the plain (non-streaming) response carries.
+// Total is asserted on the ca-key and saving lines too (this follow-up's own
+// assertion), not just on leaf-keys.
+func TestCAReplace_NDJSON_Success(t *testing.T) {
+	t.Parallel()
+	srv, httpSrv := newHandlerTestHTTPServer(t)
+	srv.db.genCA = throwawayGenCA
+	ctx := context.Background()
+	if err := srv.db.InitCA(ctx, ""); err != nil {
+		t.Fatalf("InitCA: %v", err)
+	}
+	const n = 3
+	for i := 0; i < n; i++ {
+		generateTestCert(t, srv.db, fmt.Sprintf("ndjson-%d.example.local", i))
+	}
+
+	res := doNDJSONReplace(t, httpSrv, `{"name":"NDJSON CA","existing":"reissue"}`)
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	if ct := res.Header.Get("Content-Type"); ct != ndjsonAccept {
+		t.Fatalf("Content-Type = %q, want %q", ct, ndjsonAccept)
+	}
+	if cc := res.Header.Get("Cache-Control"); cc != "no-store" {
+		t.Fatalf("Cache-Control = %q, want %q", cc, "no-store")
+	}
+	if ab := res.Header.Get("X-Accel-Buffering"); ab != "no" {
+		t.Fatalf("X-Accel-Buffering = %q, want %q (nginx must not buffer this stream)", ab, "no")
+	}
+
+	lines := readNDJSONLines(t, res.Body)
+	if len(lines) != n+3 {
+		t.Fatalf("got %d lines, want %d (ca-key + %d leaf-keys + saving + result): %+v", len(lines), n+3, n, lines)
+	}
+	if lines[0].Type != "progress" || lines[0].Phase != "ca-key" || lines[0].Total != n {
+		t.Fatalf("lines[0] = %+v, want progress/ca-key total=%d", lines[0], n)
+	}
+	for i := 0; i < n; i++ {
+		l := lines[i+1]
+		if l.Type != "progress" || l.Phase != "leaf-keys" || l.Done != i+1 || l.Total != n {
+			t.Fatalf("lines[%d] = %+v, want progress/leaf-keys done=%d total=%d", i+1, l, i+1, n)
+		}
+	}
+	if lines[n+1].Type != "progress" || lines[n+1].Phase != "saving" || lines[n+1].Total != n {
+		t.Fatalf("lines[%d] = %+v, want progress/saving total=%d", n+1, lines[n+1], n)
+	}
+	result := lines[n+2]
+	if result.Type != "result" {
+		t.Fatalf("last line type = %q, want result: %+v", result.Type, result)
+	}
+	if result.Reissued != n {
+		t.Fatalf("result.Reissued = %d, want %d", result.Reissued, n)
+	}
+	if result.CA.Subject != "NDJSON CA" {
+		t.Fatalf("result.CA.Subject = %q, want %q", result.CA.Subject, "NDJSON CA")
+	}
+
+	// The result line's CA block must match the database's actual
+	// post-replace state, not just echo the request.
+	current, err := srv.db.GetCurrentCA(ctx)
+	if err != nil {
+		t.Fatalf("GetCurrentCA: %v", err)
+	}
+	if result.CA.Fingerprint != current.Fingerprint {
+		t.Fatalf("result.CA.Fingerprint = %q, want %q (the DB's actual current CA)", result.CA.Fingerprint, current.Fingerprint)
+	}
+}
+
+// TestCAReplace_NDJSON_ValidationErrorUnchanged: a validation failure (bad
+// `existing` enum) happens before ReplaceCA ever calls the progress hook, so
+// even with the ndjson Accept header the response must be the exact same
+// plain JSON 400 the non-streaming path returns -- no stream ever starts.
+func TestCAReplace_NDJSON_ValidationErrorUnchanged(t *testing.T) {
+	t.Parallel()
+	srv, httpSrv := newHandlerTestHTTPServer(t)
+	srv.db.genCA = throwawayGenCA
+	if err := srv.db.InitCA(context.Background(), ""); err != nil {
+		t.Fatalf("InitCA: %v", err)
+	}
+
+	res := doNDJSONReplace(t, httpSrv, `{"name":"Bad Enum CA","existing":"bogus"}`)
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", res.StatusCode)
+	}
+	if ct := res.Header.Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json (no stream was ever started)", ct)
+	}
+	body := decodeErrorBody(t, res)
+	if body["error"] == "" {
+		t.Fatalf("body = %+v, want a non-empty error message", body)
+	}
+}
+
+// TestCAReplace_NDJSON_ErrorAfterStreamStarted injects a failure (via the
+// Store.hook seam) at "insert-ca", a step inside ReplaceCA's transaction --
+// well after the ca-key/leaf-keys/saving progress events have already
+// flushed headers to the client, so the failure must surface as the
+// stream's own final "error" line (never a second, un-streamable HTTP
+// status), with a generic client-safe message (the injected error text
+// itself must never leak, matching storeErrorStatus's default 500 branch),
+// and the database left exactly as it was (R2/atomicity: the transaction
+// that would have written the change never committed).
+func TestCAReplace_NDJSON_ErrorAfterStreamStarted(t *testing.T) {
+	t.Parallel()
+	srv, httpSrv := newHandlerTestHTTPServer(t)
+	srv.db.genCA = throwawayGenCA
+	ctx := context.Background()
+	if err := srv.db.InitCA(ctx, ""); err != nil {
+		t.Fatalf("InitCA: %v", err)
+	}
+	generateTestCert(t, srv.db, "ndjson-err.example.local")
+
+	before, err := srv.db.GetCurrentCA(ctx)
+	if err != nil {
+		t.Fatalf("GetCurrentCA before: %v", err)
+	}
+
+	injected := errors.New("injected insert-ca failure")
+	srv.db.hook = func(step string) error {
+		if step == "insert-ca" {
+			return injected
+		}
+		return nil
+	}
+
+	res := doNDJSONReplace(t, httpSrv, `{"name":"NDJSON Err CA","existing":"reissue"}`)
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (the stream started before the injected failure)", res.StatusCode)
+	}
+	if ct := res.Header.Get("Content-Type"); ct != ndjsonAccept {
+		t.Fatalf("Content-Type = %q, want %q", ct, ndjsonAccept)
+	}
+
+	lines := readNDJSONLines(t, res.Body)
+	if len(lines) == 0 {
+		t.Fatal("got no lines, want at least the progress events plus a final error line")
+	}
+	last := lines[len(lines)-1]
+	if last.Type != "error" {
+		t.Fatalf("last line type = %q, want error: %+v", last.Type, last)
+	}
+	if last.Status < 400 {
+		t.Fatalf("last.Status = %d, want a 4xx/5xx status", last.Status)
+	}
+	if last.Error == "" || strings.Contains(last.Error, "injected") {
+		t.Fatalf("last.Error = %q, want a generic client-safe message, never the injected error text", last.Error)
+	}
+
+	srv.db.hook = nil
+	after, err := srv.db.GetCurrentCA(ctx)
+	if err != nil {
+		t.Fatalf("GetCurrentCA after: %v", err)
+	}
+	if after.Fingerprint != before.Fingerprint {
+		t.Fatalf("current CA changed despite the injected mid-transaction failure: before=%s after=%s", before.Fingerprint, after.Fingerprint)
+	}
+}
+
+// TestCASwitchBack_RoundTrip: after a Replace(keep), the demoted CA is still
+// present as "previous" and switch-back promotes it back to current.
+func TestCASwitchBack_RoundTrip(t *testing.T) {
+	t.Parallel()
+	srv, httpSrv := newHandlerTestHTTPServer(t)
+	srv.db.genCA = throwawayGenCA
+	ctx := context.Background()
+	if err := srv.db.InitCA(ctx, ""); err != nil {
+		t.Fatalf("InitCA: %v", err)
+	}
+	original := getCA(t, httpSrv)
+	// The original CA must sign an active cert, or replace(keep) drops it at
+	// once (D5/P2) and there is nothing to switch back to.
+	generateTestCert(t, srv.db, "switchback.example.local")
+
+	caReplace(t, httpSrv, `{"name":"Switchback Target CA","existing":"keep"}`, http.StatusOK)
+	replaced := getCA(t, httpSrv)
+	if replaced.Subject != "Switchback Target CA" {
+		t.Fatalf("after replace: subject = %q", replaced.Subject)
+	}
+
+	res := doJSON(t, http.MethodPost, httpSrv.URL+"/api/ca/switch-back", "")
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		b := mustReadAll(t, res.Body)
+		t.Fatalf("POST /api/ca/switch-back = %d, want 200; body=%s", res.StatusCode, b)
+	}
+	var swBody caSwitchBackResponse
+	if err := json.NewDecoder(res.Body).Decode(&swBody); err != nil {
+		t.Fatalf("decode switch-back response: %v", err)
+	}
+	if swBody.CA.Subject != original.Subject || swBody.CA.Fingerprint != original.Fingerprint {
+		t.Fatalf("switch-back ca = %+v, want the original CA %+v", swBody.CA, original)
+	}
+
+	// The demoted target CA signs no active cert, so the swap drops it (D9
+	// follows the n-1 rules).
+	after := getCA(t, httpSrv)
+	if after.Previous != nil {
+		t.Fatalf("after switch-back: previous = %+v, want none (target CA signed nothing)", after.Previous)
+	}
+}
+
+// TestCASwitchBack_NoPrevious409 covers the 409 when there is nothing to
+// switch back to.
+func TestCASwitchBack_NoPrevious409(t *testing.T) {
+	t.Parallel()
+	srv, httpSrv := newHandlerTestHTTPServer(t)
+	if err := srv.db.InitCA(context.Background(), ""); err != nil {
+		t.Fatalf("InitCA: %v", err)
+	}
+
+	res := doJSON(t, http.MethodPost, httpSrv.URL+"/api/ca/switch-back", "")
+	res.Body.Close()
+	if res.StatusCode != http.StatusConflict {
+		t.Fatalf("switch-back with no previous CA = %d, want 409", res.StatusCode)
+	}
+}
+
+// TestCertEdit_RoundTrip covers P5's fqdn-changed branch over HTTP: the
+// response carries previousDropped (always present, false here since there
+// is no previous CA), the new fqdn is active, and the old fqdn's row is
+// archived rather than deleted.
+func TestCertEdit_RoundTrip(t *testing.T) {
+	t.Parallel()
+	srv, httpSrv := newHandlerTestHTTPServer(t)
+	if err := srv.db.InitCA(context.Background(), ""); err != nil {
+		t.Fatalf("InitCA: %v", err)
+	}
+	issued := generateTestCert(t, srv.db, "edit-before.example.local")
+	id := strconv.FormatInt(issued.Cert.ID, 10)
+
+	editBody := `{"fqdn":"edit-after.example.local","dnsSans":["edit-after.example.local"],"ipSans":[],"validityDays":200}`
+	res := doJSON(t, http.MethodPost, httpSrv.URL+"/api/certs/"+id+"/edit", editBody)
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		b := mustReadAll(t, res.Body)
+		t.Fatalf("POST /api/certs/%s/edit = %d, want 201; body=%s", id, res.StatusCode, b)
+	}
+	var edited issueResponse
+	if err := json.NewDecoder(res.Body).Decode(&edited); err != nil {
+		t.Fatalf("decode edit response: %v", err)
+	}
+	if edited.Cert.FQDN != "edit-after.example.local" {
+		t.Fatalf("edited cert fqdn = %q", edited.Cert.FQDN)
+	}
+	if edited.PreviousDropped {
+		t.Fatal("edited.PreviousDropped = true, want false (no previous CA)")
+	}
+
+	// The old row is archived (still present), not deleted.
+	oldRes := doJSON(t, http.MethodGet, httpSrv.URL+"/api/certs/"+id, "")
+	defer oldRes.Body.Close()
+	if oldRes.StatusCode != http.StatusOK {
+		t.Fatalf("GET old cert after edit = %d, want 200 (archived, not deleted)", oldRes.StatusCode)
+	}
+	var oldCert Cert
+	if err := json.NewDecoder(oldRes.Body).Decode(&oldCert); err != nil {
+		t.Fatalf("decode old cert: %v", err)
+	}
+	if oldCert.Status != StatusArchived {
+		t.Fatalf("old cert status = %q, want archived", oldCert.Status)
+	}
+}
+
+// TestCertEdit_ValidityOutOfRange covers P5's validityDays bound (1..3650),
+// checked before any store access.
+func TestCertEdit_ValidityOutOfRange(t *testing.T) {
+	t.Parallel()
+	srv, httpSrv := newHandlerTestHTTPServer(t)
+	if err := srv.db.InitCA(context.Background(), ""); err != nil {
+		t.Fatalf("InitCA: %v", err)
+	}
+	issued := generateTestCert(t, srv.db, "edit-badvalidity.example.local")
+	id := strconv.FormatInt(issued.Cert.ID, 10)
+
+	res := doJSON(t, http.MethodPost, httpSrv.URL+"/api/certs/"+id+"/edit",
+		`{"fqdn":"edit-badvalidity.example.local","validityDays":0}`)
+	res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("validityDays=0 = %d, want 400", res.StatusCode)
+	}
+}
+
+// TestGetCA_PreviousBlockAndUnknownSignerCount covers §4's GET /api/ca
+// extensions: the `previous` block (with its own activeCount) and the
+// top-level unknownSignerActiveCount, which counts active rows with no
+// recorded signer (P1) regardless of which CA is current.
+func TestGetCA_PreviousBlockAndUnknownSignerCount(t *testing.T) {
+	t.Parallel()
+	srv, httpSrv := newHandlerTestHTTPServer(t)
+	srv.db.genCA = throwawayGenCA
+	ctx := context.Background()
+	if err := srv.db.InitCA(ctx, ""); err != nil {
+		t.Fatalf("InitCA: %v", err)
+	}
+	generateTestCert(t, srv.db, "getca-stale.example.local")
+	caReplace(t, httpSrv, `{"name":"GetCA Target CA","existing":"keep"}`, http.StatusOK)
+
+	before := getCA(t, httpSrv)
+	if before.Previous == nil || before.Previous.ActiveCount != 1 {
+		t.Fatalf("previous = %+v, want ActiveCount=1", before.Previous)
+	}
+	if before.UnknownSignerActiveCount != 0 {
+		t.Fatalf("unknownSignerActiveCount = %d, want 0", before.UnknownSignerActiveCount)
+	}
+
+	// A hand-inserted active row with no recorded signer (P1) counts toward
+	// unknownSignerActiveCount regardless of the current/previous CA state.
+	unknown := Cert{
+		FQDN:    "getca-unknown-signer.example.local",
+		Status:  StatusActive,
+		SANs:    SANs{DNS: []string{}, IP: []string{}},
+		Created: time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := srv.db.WithTx(ctx, func(tx *sql.Tx) error {
+		_, err := srv.db.InsertCert(ctx, tx, unknown)
+		return err
+	}); err != nil {
+		t.Fatalf("insert unknown-signer cert: %v", err)
+	}
+
+	after := getCA(t, httpSrv)
+	if after.UnknownSignerActiveCount != 1 {
+		t.Fatalf("unknownSignerActiveCount after insert = %d, want 1", after.UnknownSignerActiveCount)
+	}
+}
+
+// TestReplaceKeep_StaleCertDownloadsChainToOwnCA is FR-R3: after
+// Replace(keep), a stale cert's cert.pem, haproxy.pem, and bundle CA entry
+// must all chain to the CA that actually signed it (the now-previous CA),
+// never the new current CA -- exactly certAndCA's contract (handler.go).
+// Both a production-style CheckSignatureFrom check (R6) and the test-only
+// pinned x509.Verify helper (carotate_test.go) are asserted.
+func TestReplaceKeep_StaleCertDownloadsChainToOwnCA(t *testing.T) {
+	t.Parallel()
+	srv, httpSrv := newHandlerTestHTTPServer(t)
+	srv.db.genCA = throwawayGenCA
+	ctx := context.Background()
+	if err := srv.db.InitCA(ctx, ""); err != nil {
+		t.Fatalf("InitCA: %v", err)
+	}
+	issued := generateTestCert(t, srv.db, "frr3-stale.example.local")
+	id := strconv.FormatInt(issued.Cert.ID, 10)
+
+	caReplace(t, httpSrv, `{"name":"FR-R3 New CA","existing":"keep"}`, http.StatusOK)
+
+	oldCA, err := srv.db.GetPreviousCA(ctx)
+	if err != nil || oldCA == nil {
+		t.Fatalf("GetPreviousCA: %v, %+v", err, oldCA)
+	}
+	newCA, err := srv.db.GetCurrentCA(ctx)
+	if err != nil {
+		t.Fatalf("GetCurrentCA: %v", err)
+	}
+	oldCACert, err := ParseCert([]byte(oldCA.CertPEM))
+	if err != nil {
+		t.Fatalf("ParseCert(old): %v", err)
+	}
+	newCACert, err := ParseCert([]byte(newCA.CertPEM))
+	if err != nil {
+		t.Fatalf("ParseCert(new): %v", err)
+	}
+
+	// cert.pem
+	certRes := doJSON(t, http.MethodGet, httpSrv.URL+"/api/certs/"+id+"/files/cert.pem", "")
+	certBody := mustReadAll(t, certRes.Body)
+	certRes.Body.Close()
+	leafCert, err := ParseCert(certBody)
+	if err != nil {
+		t.Fatalf("ParseCert(downloaded leaf): %v", err)
+	}
+	if err := leafCert.CheckSignatureFrom(oldCACert); err != nil {
+		t.Errorf("stale leaf does not chain to its own (old) CA: %v", err)
+	}
+	if err := leafCert.CheckSignatureFrom(newCACert); err == nil {
+		t.Error("stale leaf chains to the new CA, want it to chain only to its own old CA")
+	}
+	assertVerifiesAgainstCA(t, leafCert, oldCACert)
+
+	// haproxy.pem: block 1 is the leaf, block 2 is the embedded CA.
+	hapRes := doJSON(t, http.MethodGet, httpSrv.URL+"/api/certs/"+id+"/files/haproxy.pem", "")
+	hapBody := mustReadAll(t, hapRes.Body)
+	hapRes.Body.Close()
+	block1, rest := pem.Decode(hapBody)
+	if block1 == nil || block1.Type != pemTypeCertificate {
+		t.Fatalf("haproxy.pem block 1 missing or wrong type: %+v", block1)
+	}
+	block2, _ := pem.Decode(rest)
+	if block2 == nil || block2.Type != pemTypeCertificate {
+		t.Fatalf("haproxy.pem block 2 missing or wrong type: %+v", block2)
+	}
+	if !bytes.Equal(block2.Bytes, oldCACert.Raw) {
+		t.Error("haproxy.pem's embedded CA is not the stale cert's own (old) CA")
+	}
+	if bytes.Equal(block2.Bytes, newCACert.Raw) {
+		t.Error("haproxy.pem's embedded CA is the new CA, want the old one")
+	}
+
+	// bundle: the CA entry is named after, and contains, the old CA.
+	bundleRes := doJSON(t, http.MethodGet, httpSrv.URL+"/api/certs/"+id+"/bundle", "")
+	bundleBody := mustReadAll(t, bundleRes.Body)
+	bundleRes.Body.Close()
+	entries := untarBundle(t, bundleBody)
+	caEntryName := CAFileName(oldCACert.Subject.CommonName)
+	found := false
+	for _, e := range entries {
+		if e.name == caEntryName {
+			found = true
+			if !bytes.Equal(e.data, []byte(oldCA.CertPEM)) {
+				t.Error("bundle CA entry does not match the stale cert's own (old) CA")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("bundle missing the old CA's entry %q; entries: %+v", caEntryName, entries)
+	}
+}
+
+// TestCertAndCAUnknownSigner409 covers certAndCA's FR-R3 refusal: a NULL
+// ca_id (P1) makes haproxy.pem and the bundle answer 409, since there is no
+// signer to embed.
+func TestCertAndCAUnknownSigner409(t *testing.T) {
+	t.Parallel()
+	srv, httpSrv := newHandlerTestHTTPServer(t)
+	ctx := context.Background()
+	if err := srv.db.InitCA(ctx, ""); err != nil {
+		t.Fatalf("InitCA: %v", err)
+	}
+	// A hand-inserted active row whose issuance never went through
+	// Generate/Renew (neither can leave ca_id NULL), matching how a legacy
+	// import row that didn't chain would look (P1).
+	unknown := Cert{
+		FQDN:    "unknown-signer.example.local",
+		Status:  StatusActive,
+		SANs:    SANs{DNS: []string{}, IP: []string{}},
+		Created: time.Now().UTC().Format(time.RFC3339),
+	}
+	var id int64
+	if err := srv.db.WithTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		id, err = srv.db.InsertCert(ctx, tx, unknown)
+		return err
+	}); err != nil {
+		t.Fatalf("insert unknown-signer cert: %v", err)
+	}
+	idStr := strconv.FormatInt(id, 10)
+
+	hapRes := doJSON(t, http.MethodGet, httpSrv.URL+"/api/certs/"+idStr+"/files/haproxy.pem", "")
+	hapRes.Body.Close()
+	if hapRes.StatusCode != http.StatusConflict {
+		t.Fatalf("haproxy.pem for unknown-signer cert = %d, want 409", hapRes.StatusCode)
+	}
+
+	bundleRes := doJSON(t, http.MethodGet, httpSrv.URL+"/api/certs/"+idStr+"/bundle", "")
+	bundleRes.Body.Close()
+	if bundleRes.StatusCode != http.StatusConflict {
+		t.Fatalf("bundle for unknown-signer cert = %d, want 409", bundleRes.StatusCode)
+	}
+}
+
+// TestCertDelete_PreviousDropped and TestCertRenew_PreviousDropped cover §4's
+// added previousDropped field over HTTP, using the same fixture shape as
+// carotate_test.go's TestAutoDrop_ArchivedRowsDeleted: a previous CA whose
+// only active row is the one this call removes/replaces.
+
+func TestCertDelete_PreviousDropped(t *testing.T) {
+	t.Parallel()
+	srv, httpSrv := newHandlerTestHTTPServer(t)
+	ctx := context.Background()
+	setupCA(t, srv.db, time.Now().AddDate(5, 0, 0))
+	previousID := insertPreviousCA(t, srv.db, "previous-http-delete")
+	active := fixtureCert("http-delete-active.example.local", StatusActive, "2030-01-01T00:00:00Z")
+	active.CAID = &previousID
+	activeID := mustInsertCert(t, srv.db, active)
+
+	res := doJSON(t, http.MethodDelete, httpSrv.URL+"/api/certs/"+strconv.FormatInt(activeID, 10)+"?confirm=http-delete-active.example.local", "")
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("DELETE = %d, want 200", res.StatusCode)
+	}
+	var body deleteResponse
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("decode delete response: %v", err)
+	}
+	if !body.PreviousDropped {
+		t.Fatal("PreviousDropped = false, want true")
+	}
+	if got, err := srv.db.GetPreviousCA(ctx); err != nil || got != nil {
+		t.Fatalf("GetPreviousCA after delete = (%+v, %v), want (nil, nil)", got, err)
+	}
+}
+
+func TestCertRenew_PreviousDropped(t *testing.T) {
+	t.Parallel()
+	srv, httpSrv := newHandlerTestHTTPServer(t)
+	ctx := context.Background()
+	setupCA(t, srv.db, time.Now().AddDate(5, 0, 0))
+	previousID := insertPreviousCA(t, srv.db, "previous-http-renew")
+	active := fixtureCert("http-renew-active.example.local", StatusActive, "2030-01-01T00:00:00Z")
+	active.CAID = &previousID
+	activeID := mustInsertCert(t, srv.db, active)
+
+	res := doJSON(t, http.MethodPost, httpSrv.URL+"/api/certs/"+strconv.FormatInt(activeID, 10)+"/renew", "")
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("POST renew = %d, want 201", res.StatusCode)
+	}
+	var body issueResponse
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("decode renew response: %v", err)
+	}
+	if !body.PreviousDropped {
+		t.Fatal("PreviousDropped = false, want true")
+	}
+	if got, err := srv.db.GetPreviousCA(ctx); err != nil || got != nil {
+		t.Fatalf("GetPreviousCA after renew = (%+v, %v), want (nil, nil)", got, err)
 	}
 }

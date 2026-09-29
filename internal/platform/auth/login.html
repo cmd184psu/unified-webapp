@@ -1,63 +1,274 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sign in</title>
+<title>Sign in · __UW_MODULE_NAME__</title>
+<link rel="stylesheet" href="/shared/dist/shared.css">
+<script>
+// Wear the module's own theme. The page is served on the module's host, so
+// the module's saved choice is right here in localStorage: the shared
+// ThemeManager's key (ui-theme:<module>) or a module's own (todo-theme,
+// obsidianoid-theme-<vault>). Nothing saved: follow the system, as modules do.
+(function () {
+  var m = "__UW_MODULE__", t = null;
+  try {
+    t = localStorage.getItem("ui-theme:" + m) || localStorage.getItem(m + "-theme");
+    for (var i = 0; !t && i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if (k && k.indexOf(m + "-theme-") === 0) t = localStorage.getItem(k);
+    }
+  } catch (e) { /* storage blocked: fall through to the system theme */ }
+  if (!t || t === "system") {
+    t = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  document.documentElement.dataset.theme = t;
+})();
+</script>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 320px; margin: 4rem auto; padding: 0 1rem; color: #222; }
-  h1 { font-size: 1.25rem; }
-  form { display: none; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem; }
+  * { box-sizing: border-box; }
+
+  html, body { height: 100%; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-6, 24px) var(--space-4, 16px);
+    font-family: var(--font-body, system-ui, sans-serif);
+    background:
+      radial-gradient(ellipse at top, var(--color-primary-tint, rgba(91, 141, 239, 0.12)), transparent 60%),
+      var(--color-bg, #14161a);
+    color: var(--color-text, #e8e9ec);
+  }
+
+  .login-card {
+    width: 100%;
+    max-width: 380px;
+    background: var(--color-surface-1, #1d2025);
+    border: 1px solid var(--color-border, #33383f);
+    border-top: 3px solid var(--color-primary, #5b8def);
+    border-radius: var(--radius-lg, 14px);
+    padding: var(--space-6, 24px);
+    box-shadow: var(--shadow-md, 0 8px 30px rgba(0, 0, 0, 0.25));
+  }
+
+  /* ── Which module this is ── */
+  .login-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3, 12px);
+    margin-bottom: var(--space-6, 24px);
+  }
+  .login-badge {
+    flex: none;
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-primary-tint, rgba(91, 141, 239, 0.12));
+    color: var(--color-primary, #5b8def);
+  }
+  .login-badge svg { width: 1.4rem; height: 1.4rem; }
+  .login-kicker {
+    margin: 0;
+    font-size: var(--text-sm, 0.85rem);
+    color: var(--color-text-muted, #9298a3);
+  }
+  h1 {
+    margin: 0;
+    font-size: var(--text-xl, 1.5rem);
+    font-weight: 600;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+  }
+  .login-host {
+    margin: 0;
+    font-size: var(--text-xs, 0.75rem);
+    color: var(--color-text-faint, var(--color-text-muted, #9298a3));
+    font-family: var(--font-mono, ui-monospace, monospace);
+    overflow-wrap: anywhere;
+  }
+
+  /* ── Tabs: Account | PIN ── */
+  .login-tabs {
+    display: none;
+    gap: var(--space-1, 4px);
+    padding: var(--space-1, 4px);
+    margin-bottom: var(--space-5, 20px);
+    background: var(--color-surface-2, #262a30);
+    border: 1px solid var(--color-border, #33383f);
+    border-radius: var(--radius-md, 8px);
+  }
+  .login-tabs.visible { display: flex; }
+  .login-tab {
+    flex: 1;
+    padding: 0.5rem;
+    border: none;
+    border-radius: var(--radius-sm, 6px);
+    background: none;
+    color: var(--color-text-muted, #9298a3);
+    font-weight: 500;
+  }
+  .login-tab:hover { color: var(--color-text, #e8e9ec); }
+  .login-tab[aria-selected="true"] {
+    background: var(--color-surface-1, #1d2025);
+    color: var(--color-text, #e8e9ec);
+    box-shadow: var(--shadow-sm, 0 1px 3px rgba(0, 0, 0, 0.25));
+  }
+  .login-tab:focus-visible {
+    outline: 2px solid var(--color-primary, #5b8def);
+    outline-offset: 1px;
+  }
+
+  #error {
+    color: var(--color-danger, #e5484d);
+    min-height: 1.2em;
+    font-size: var(--text-sm, 0.85rem);
+    text-align: center;
+    margin-bottom: var(--space-2, 8px);
+  }
+
+  form {
+    display: none;
+    flex-direction: column;
+    gap: var(--space-2, 8px);
+  }
   form.visible { display: flex; }
-  input, button { font-size: 1rem; padding: 0.4rem; }
-  button { cursor: pointer; }
+
+  label {
+    font-size: var(--text-sm, 0.85rem);
+    color: var(--color-text-muted, #9298a3);
+  }
+  label + input, label + .secret-row { margin-bottom: var(--space-2, 8px); }
+
+  input {
+    font: inherit;
+    font-size: var(--text-base, 1rem);
+    padding: 0.6rem 0.7rem;
+    background: var(--color-surface-2, #262a30);
+    border: 1px solid var(--color-border, #33383f);
+    border-radius: var(--radius-sm, 4px);
+    color: var(--color-text, #e8e9ec);
+    width: 100%;
+  }
+  input:focus {
+    outline: none;
+    border-color: var(--color-primary, #5b8def);
+    box-shadow: 0 0 0 3px var(--color-primary-tint, rgba(91, 141, 239, 0.12));
+  }
+
+  #pin-input {
+    font-size: var(--text-xl, 1.5rem);
+    letter-spacing: 0.3em;
+    text-align: center;
+    padding: 0.7rem;
+  }
+
+  button {
+    cursor: pointer;
+    font-size: var(--text-base, 1rem);
+    font-family: inherit;
+  }
+
+  .btn-primary {
+    background: var(--color-primary, #5b8def);
+    color: var(--color-primary-fg, #ffffff);
+    border: none;
+    border-radius: var(--radius-md, 8px);
+    padding: 0.7rem;
+    font-weight: 600;
+  }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .btn-primary:disabled { opacity: 0.6; cursor: progress; }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--color-text-muted, #9298a3);
+    border: 1px solid var(--color-border, #33383f);
+    border-radius: var(--radius-md, 8px);
+    padding: 0.6rem;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2, 8px);
+  }
+  .btn-ghost:hover {
+    color: var(--color-text, #e8e9ec);
+    border-color: var(--color-text-muted, #9298a3);
+  }
+  .btn-ghost svg { width: 1.1rem; height: 1.1rem; }
+
   .secret-row { position: relative; display: flex; }
   .secret-row input { flex: 1; min-width: 0; padding-right: 2.4rem; }
   .reveal {
     position: absolute; right: 0; top: 0; bottom: 0; width: 2.4rem;
     display: flex; align-items: center; justify-content: center;
-    background: none; border: none; padding: 0; color: #777;
+    background: none; border: none; padding: 0; color: var(--color-text-muted, #9298a3);
   }
-  .reveal:hover, .reveal:focus-visible { color: #222; }
+  .reveal:hover, .reveal:focus-visible { color: var(--color-text, #e8e9ec); }
   .reveal svg { width: 1.15rem; height: 1.15rem; }
   .reveal .eye-closed { display: none; }
   .reveal.showing .eye-open { display: none; }
   .reveal.showing .eye-closed { display: block; }
-  #passkey-btn { display: none; }
-  #error { color: #b00020; min-height: 1.2em; }
+
+  #passkey-btn { width: 100%; margin-top: var(--space-2, 8px); }
 </style>
 </head>
-<body>
-<h1>Sign in</h1>
-<div id="error"></div>
+<body data-module="__UW_MODULE__">
+<main class="login-card">
+  <header class="login-head">
+    <div class="login-badge" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+    </div>
+    <div>
+      <p class="login-kicker">Sign in to</p>
+      <h1>__UW_MODULE_NAME__</h1>
+      <p class="login-host" id="login-host"></p>
+    </div>
+  </header>
 
-<form id="pin-form">
-  <label for="pin-input">PIN</label>
-  <div class="secret-row">
-    <input id="pin-input" type="password" inputmode="numeric" autocomplete="off" required>
-    <button type="button" class="reveal" data-target="pin-input" aria-label="Show PIN">
-      <svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
-      <svg class="eye-closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 7 11 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-    </button>
+  <div class="login-tabs" id="login-tabs" role="tablist" aria-label="Sign-in method">
+    <button type="button" class="login-tab" role="tab" id="tab-account" aria-controls="ldap-form" aria-selected="true">Account</button>
+    <button type="button" class="login-tab" role="tab" id="tab-pin" aria-controls="pin-form" aria-selected="false" tabindex="-1">PIN</button>
   </div>
-  <button type="submit">Sign in with PIN</button>
-</form>
 
-<form id="ldap-form">
-  <label for="ldap-username">Username</label>
-  <input id="ldap-username" type="text" autocomplete="username" required>
-  <label for="ldap-password">Password</label>
-  <div class="secret-row">
-    <input id="ldap-password" type="password" autocomplete="current-password" required>
-    <button type="button" class="reveal" data-target="ldap-password" aria-label="Show password">
-      <svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
-      <svg class="eye-closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 7 11 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+  <div id="error" role="alert"></div>
+
+  <form id="ldap-form" role="tabpanel" aria-labelledby="tab-account">
+    <label for="ldap-username">Username</label>
+    <input id="ldap-username" type="text" autocomplete="username" autocapitalize="off" spellcheck="false" required>
+    <label for="ldap-password">Password</label>
+    <div class="secret-row">
+      <input id="ldap-password" type="password" autocomplete="current-password" required>
+      <button type="button" class="reveal" data-target="ldap-password" aria-label="Show password">
+        <svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+        <svg class="eye-closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 7 11 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+      </button>
+    </div>
+    <button type="submit" class="btn-primary">Sign in</button>
+    <button id="passkey-btn" type="button" class="btn-ghost">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M10.85 12.15 19 4"/><path d="m18 5 2 2"/><path d="m15 8 2 2"/></svg>
+      Sign in with a passkey
     </button>
-  </div>
-  <button type="submit">Sign in</button>
-</form>
+  </form>
 
-<button id="passkey-btn" type="button">Sign in with passkey</button>
+  <form id="pin-form" role="tabpanel" aria-labelledby="tab-pin">
+    <label for="pin-input">PIN</label>
+    <div class="secret-row">
+      <input id="pin-input" type="password" inputmode="numeric" autocomplete="off" required>
+      <button type="button" class="reveal" data-target="pin-input" aria-label="Show PIN">
+        <svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+        <svg class="eye-closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 7 11 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+      </button>
+    </div>
+    <button type="submit" class="btn-primary">Sign in with PIN</button>
+  </form>
+</main>
 
 <script>
 (function () {
@@ -67,9 +278,18 @@
   var pinForm = document.getElementById("pin-form");
   var ldapForm = document.getElementById("ldap-form");
   var passkeyBtn = document.getElementById("passkey-btn");
+  var tabs = document.getElementById("login-tabs");
+  var tabAccount = document.getElementById("tab-account");
+  var tabPin = document.getElementById("tab-pin");
+
+  document.getElementById("login-host").textContent = location.host;
 
   function showError(msg) {
     errorEl.textContent = msg;
+  }
+
+  function busy(form, on) {
+    Array.prototype.forEach.call(form.querySelectorAll("button[type=submit]"), function (b) { b.disabled = on; });
   }
 
   function handleLoginResponse(res) {
@@ -77,15 +297,11 @@
       location.reload();
       return;
     }
-    if (res.status === 401) {
-      showError("login failed");
-      return;
-    }
     if (res.status === 429) {
-      showError("too many attempts, wait a moment");
+      showError("Too many attempts. Wait a moment and try again.");
       return;
     }
-    showError("login failed");
+    showError(res.status === 401 ? "That didn't work. Check it and try again." : "Sign-in failed.");
   }
 
   // --- base64url helpers (WebAuthn ceremony encode/decode) ---
@@ -147,30 +363,56 @@
     });
   });
 
+  // --- tabs: Account (username/password, passkey) | PIN ---
+
+  function select(which, focus) {
+    var pin = which === "pin";
+    tabAccount.setAttribute("aria-selected", String(!pin));
+    tabPin.setAttribute("aria-selected", String(pin));
+    tabAccount.tabIndex = pin ? -1 : 0;
+    tabPin.tabIndex = pin ? 0 : -1;
+    ldapForm.classList.toggle("visible", !pin);
+    pinForm.classList.toggle("visible", pin);
+    showError("");
+    if (focus) document.getElementById(pin ? "pin-input" : "ldap-username").focus();
+  }
+
+  tabAccount.addEventListener("click", function () { select("account", true); });
+  tabPin.addEventListener("click", function () { select("pin", true); });
+  tabs.addEventListener("keydown", function (ev) {
+    if (ev.key !== "ArrowLeft" && ev.key !== "ArrowRight") return;
+    ev.preventDefault();
+    var toPin = tabAccount.getAttribute("aria-selected") === "true";
+    select(toPin ? "pin" : "account", false);
+    (toPin ? tabPin : tabAccount).focus();
+  });
+
   // --- form wiring ---
 
-  pinForm.addEventListener("submit", function (ev) {
-    ev.preventDefault();
+  function post(form, body) {
     showError("");
+    busy(form, true);
     fetch("/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ method: "pin", pin: document.getElementById("pin-input").value })
-    }).then(handleLoginResponse).catch(function () { showError("login failed"); });
+      body: JSON.stringify(body)
+    }).then(handleLoginResponse)
+      .catch(function () { showError("Sign-in failed."); })
+      .then(function () { busy(form, false); });
+  }
+
+  pinForm.addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    post(pinForm, { method: "pin", pin: document.getElementById("pin-input").value });
   });
 
   ldapForm.addEventListener("submit", function (ev) {
     ev.preventDefault();
-    showError("");
-    fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        method: "ldap",
-        username: document.getElementById("ldap-username").value,
-        password: document.getElementById("ldap-password").value
-      })
-    }).then(handleLoginResponse).catch(function () { showError("login failed"); });
+    post(ldapForm, {
+      method: "ldap",
+      username: document.getElementById("ldap-username").value,
+      password: document.getElementById("ldap-password").value
+    });
   });
 
   passkeyBtn.addEventListener("click", function () {
@@ -180,13 +422,13 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({})
     }).then(function (res) {
-      if (!res.ok) { showError("login failed"); return null; }
+      if (!res.ok) { showError("Passkey sign-in isn't available."); return null; }
       return res.json();
     }).then(function (ceremony) {
       if (!ceremony) return;
       return navigator.credentials.get({ publicKey: assertionOptions(ceremony.options) })
         .then(function (credential) {
-          if (!credential) throw new Error("cancelled");
+          if (!credential) throw new Error("canceled");
           return fetch("/api/auth/passkey/login/finish", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -197,23 +439,29 @@
           });
         })
         .then(handleLoginResponse);
-    }).catch(function () { showError("login failed"); });
+    }).catch(function () { showError("Passkey sign-in failed or was canceled."); });
   });
 
-  // --- mode-driven form selection ---
+  // --- mode-driven selection: Account first; a PIN tab when there's a PIN ---
 
   fetch("/api/auth/mode").then(function (res) { return res.json(); }).then(function (body) {
     var methods = body.methods || [];
     var hasPin = methods.indexOf("pin") !== -1 || methods.indexOf("admin_pin") !== -1;
     var hasLdap = methods.indexOf("ldap") !== -1;
-    var hasPasskey = methods.indexOf("passkey") !== -1;
+    var hasPasskey = methods.indexOf("passkey") !== -1 && !!(window.PublicKeyCredential && navigator.credentials);
 
-    if (hasPin) pinForm.classList.add("visible");
-    if (hasLdap) ldapForm.classList.add("visible");
-    if (hasPasskey && window.PublicKeyCredential && navigator.credentials) {
-      passkeyBtn.style.display = "block";
+    if (hasPasskey) passkeyBtn.style.display = "flex";
+    if (hasLdap && hasPin) {
+      tabs.classList.add("visible");
+      select("account", true);
+    } else if (hasPin) {
+      select("pin", true);
+    } else if (hasLdap) {
+      select("account", true);
+    } else {
+      showError("No sign-in method is set up for this module.");
     }
-  }).catch(function () { showError("unable to load sign-in options"); });
+  }).catch(function () { showError("Unable to load sign-in options."); });
 })();
 </script>
 </body>

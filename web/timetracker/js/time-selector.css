@@ -1,0 +1,61 @@
+.time-selector-container {
+    width: 20%;
+    padding: 20px;
+}
+
+.time-selector-table {
+    width: 100%;
+    border-collapse: collapse;
+    user-select: none;
+}
+
+.time-selector-table th,
+.time-selector-table td {
+    border: 1px solid var(--color-border);
+    text-align: center;
+    padding: 5px;
+}
+
+.time-block {
+    cursor: pointer;
+    background-color: var(--color-surface-1);
+    transition: background-color 0.2s;
+}
+
+.time-block:hover {
+    background-color: var(--color-surface-2);
+}
+
+.time-block.selected {
+    background-color: var(--color-primary-tint);
+}
+
+.time-buttons {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+#clearTimeSelectionBtn {
+    padding: 5px 10px;
+    background-color: var(--color-danger);
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#clearTimeSelectionBtn:hover {
+    filter: brightness(0.85);
+}
+
+#totalTimeInput {
+    width: 120px;
+    padding: 5px;
+    border: 1px solid var(--color-border);
+    border-radius: 3px;
+    background-color: var(--color-surface-1);
+}

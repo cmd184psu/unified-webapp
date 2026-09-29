@@ -1,13 +1,15 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Multi-System SSH</title>
+    <script>(function(){var t=localStorage.getItem('ui-theme:multissh');if(t)document.documentElement.dataset.theme=t})()</script>
+    <link rel="stylesheet" href="/shared/dist/shared.css" />
     <link rel="stylesheet" href="js/bundle.css" />
   </head>
   <body>
     <div id="ssh-app"></div>
-    <script src="js/bundle.js"></script>
+    <script type="module" src="js/bundle.js"></script>
   </body>
 </html>

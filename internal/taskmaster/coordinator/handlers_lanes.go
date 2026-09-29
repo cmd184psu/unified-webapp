@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -19,6 +20,9 @@ func (c *Coordinator) handleListLanes(w http.ResponseWriter, r *http.Request) {
 	}
 	statuses := make([]models.LaneStatus, 0, len(lanes))
 	for _, l := range lanes {
+		if c.laneHidden(l.Name) {
+			continue
+		}
 		count, _ := c.db.CountRunningInLane(l.Name)
 		statuses = append(statuses, models.LaneStatus{Lane: *l, RunningCount: count})
 	}
@@ -32,7 +36,7 @@ func (c *Coordinator) handleGetLane(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if l == nil {
+	if l == nil || c.laneHidden(name) {
 		response.WriteError(w, http.StatusNotFound, "lane not found: "+name)
 		return
 	}
@@ -53,6 +57,10 @@ func (c *Coordinator) handleCreateLane(w http.ResponseWriter, r *http.Request) {
 	if l.Width <= 0 {
 		l.Width = 1
 	}
+	if existing, _ := c.db.GetLane(l.Name); existing != nil && existing.Owner != "" {
+		response.WriteError(w, http.StatusConflict, fmt.Sprintf("lane %q is managed by module %q", existing.Name, existing.Owner))
+		return
+	}
 	if err := c.db.UpsertLane(&l); err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -69,7 +77,7 @@ func (c *Coordinator) handleUpdateLane(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if existing == nil {
+	if existing == nil || c.laneHidden(name) {
 		response.WriteError(w, http.StatusNotFound, "lane not found: "+name)
 		return
 	}
@@ -94,6 +102,19 @@ func (c *Coordinator) handleUpdateLane(w http.ResponseWriter, r *http.Request) {
 
 func (c *Coordinator) handleDeleteLane(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	existing, err := c.db.GetLane(name)
+	if err != nil {
+		response.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if existing == nil || c.laneHidden(name) {
+		response.WriteError(w, http.StatusNotFound, "lane not found: "+name)
+		return
+	}
+	if existing.Owner != "" {
+		response.WriteError(w, http.StatusConflict, fmt.Sprintf("lane %q is managed by module %q", name, existing.Owner))
+		return
+	}
 	if err := c.db.DeleteLane(name); err != nil {
 		response.WriteError(w, http.StatusConflict, err.Error())
 		return
@@ -104,6 +125,13 @@ func (c *Coordinator) handleDeleteLane(w http.ResponseWriter, r *http.Request) {
 
 func (c *Coordinator) handlePauseLane(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	if existing, err := c.db.GetLane(name); err != nil {
+		response.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if existing == nil || c.laneHidden(name) {
+		response.WriteError(w, http.StatusNotFound, "lane not found: "+name)
+		return
+	}
 	by := r.URL.Query().Get("by")
 	if by == "" {
 		by = "api"
@@ -118,6 +146,13 @@ func (c *Coordinator) handlePauseLane(w http.ResponseWriter, r *http.Request) {
 
 func (c *Coordinator) handleResumeLane(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	if existing, err := c.db.GetLane(name); err != nil {
+		response.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if existing == nil || c.laneHidden(name) {
+		response.WriteError(w, http.StatusNotFound, "lane not found: "+name)
+		return
+	}
 	if err := c.db.SetLanePaused(name, false, ""); err != nil {
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -127,7 +162,8 @@ func (c *Coordinator) handleResumeLane(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSetLaneWidth updates only a lane's width, leaving its paused state
-// untouched.
+// untouched. Allowed on an owned (but visible) lane — width is the single
+// source of truth regardless of who owns the lane (P7).
 func (c *Coordinator) handleSetLaneWidth(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	existing, err := c.db.GetLane(name)
@@ -135,7 +171,7 @@ func (c *Coordinator) handleSetLaneWidth(w http.ResponseWriter, r *http.Request)
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if existing == nil {
+	if existing == nil || c.laneHidden(name) {
 		response.WriteError(w, http.StatusNotFound, "lane not found: "+name)
 		return
 	}
@@ -172,7 +208,7 @@ func (c *Coordinator) handleSetLaneOrder(w http.ResponseWriter, r *http.Request)
 		response.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if existing == nil {
+	if existing == nil || c.laneHidden(name) {
 		response.WriteError(w, http.StatusNotFound, "lane not found: "+name)
 		return
 	}

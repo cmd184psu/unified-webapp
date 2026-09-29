@@ -82,9 +82,6 @@ func TestGetAPIState_Empty(t *testing.T) {
 	if state["theme"] != "dark" {
 		t.Errorf("want theme=dark, got %v", state["theme"])
 	}
-	if state["controls_position"] != "bottom" {
-		t.Errorf("want controls_position=bottom, got %v", state["controls_position"])
-	}
 	if state["music_enabled"].(bool) {
 		t.Error("want music_enabled=false when no audio dir")
 	}
@@ -197,22 +194,22 @@ func TestPostAPIControl_SetShuffle(t *testing.T) {
 	}
 }
 
-func TestPostAPIControl_SetControlsPosition(t *testing.T) {
+func TestPostAPIControl_SetCardPosition(t *testing.T) {
 	h, _ := newTestHarness(t)
-	serve(t, h, "POST", "/api/control", `{"action":"set-controls-position","value":"top"}`)
+	serve(t, h, "POST", "/api/control", `{"action":"set-card-position","value":{"card":"visual","position":"top-left"}}`)
 	w := serve(t, h, "GET", "/api/state", "")
 	var state map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &state)
-	if state["controls_position"] != "top" {
-		t.Errorf("want controls_position=top, got %v", state["controls_position"])
+	if pos := state["visual_card"].(map[string]interface{})["position"]; pos != "top-left" {
+		t.Errorf("want visual card at top-left, got %v", pos)
 	}
 }
 
-func TestPostAPIControl_BadControlsPosition(t *testing.T) {
+func TestPostAPIControl_BadCardPosition(t *testing.T) {
 	h, _ := newTestHarness(t)
-	w := serve(t, h, "POST", "/api/control", `{"action":"set-controls-position","value":"left"}`)
+	w := serve(t, h, "POST", "/api/control", `{"action":"set-card-position","value":{"card":"visual","position":"center"}}`)
 	if w.Code != http.StatusBadRequest {
-		t.Errorf("want 400 for invalid position, got %d", w.Code)
+		t.Errorf("want 400 for the center position, got %d", w.Code)
 	}
 }
 

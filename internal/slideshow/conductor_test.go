@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"cmd184psu/unified-webapp/internal/platform/broker"
 	"cmd184psu/unified-webapp/internal/platform/config"
@@ -121,9 +122,6 @@ func TestConductor_InitialState_Defaults(t *testing.T) {
 	}
 	if stringField(t, s, "theme") != "dark" {
 		t.Errorf("theme: got %q, want dark", s["theme"])
-	}
-	if stringField(t, s, "controls_position") != "bottom" {
-		t.Errorf("controls_position: got %q, want bottom", s["controls_position"])
 	}
 	if intField(t, s, "interval_seconds") != 8 {
 		t.Errorf("interval_seconds: got %d, want 8", intField(t, s, "interval_seconds"))
@@ -426,40 +424,95 @@ func TestConductor_SetTheme(t *testing.T) {
 	}
 }
 
-// ── Controls position ─────────────────────────────────────────────────────────
+// ── Control cards ─────────────────────────────────────────────────────────────
 
-func TestConductor_SetControlsPosition_Top(t *testing.T) {
-	dir := t.TempDir()
-	c := newConductorFromDir(t, dir)
-	if err := control(t, c, "set-controls-position", "top"); err != nil {
-		t.Fatalf("set-controls-position: %v", err)
+// card returns the named card object from a state snapshot.
+func card(t *testing.T, m map[string]any, name string) map[string]any {
+	t.Helper()
+	v, ok := m[name].(map[string]any)
+	if !ok {
+		t.Fatalf("missing card %q in state", name)
 	}
-	if got := stringField(t, stateJSON(t, c), "controls_position"); got != "top" {
-		t.Errorf("controls_position: want top, got %q", got)
+	return v
+}
+
+func TestConductor_CardDefaults(t *testing.T) {
+	c := newConductorFromDir(t, t.TempDir())
+	s := stateJSON(t, c)
+	if p := card(t, s, "visual_card")["position"]; p != "bottom" {
+		t.Errorf("visual card position: %v, want bottom", p)
+	}
+	if p := card(t, s, "audio_card")["position"]; p != "bottom-right" {
+		t.Errorf("audio card position: %v, want bottom-right", p)
+	}
+	if card(t, s, "visual_card")["minimized"] != false {
+		t.Error("cards start expanded")
 	}
 }
 
-func TestConductor_SetControlsPosition_Bottom(t *testing.T) {
-	dir := t.TempDir()
-	c := newConductorFromDir(t, dir)
-	control(t, c, "set-controls-position", "top")
-	if err := control(t, c, "set-controls-position", "bottom"); err != nil {
-		t.Fatalf("set-controls-position: %v", err)
+func TestConductor_SetCardPosition_AllEightAndClearsDrag(t *testing.T) {
+	c := newConductorFromDir(t, t.TempDir())
+	for pos := range slideshow.CardPositions {
+		if err := control(t, c, "set-card-position", map[string]any{"card": "audio", "position": pos}); err != nil {
+			t.Fatalf("position %q: %v", pos, err)
+		}
+		if got := card(t, stateJSON(t, c), "audio_card")["position"]; got != pos {
+			t.Errorf("position: got %v, want %q", got, pos)
+		}
 	}
-	if got := stringField(t, stateJSON(t, c), "controls_position"); got != "bottom" {
-		t.Errorf("controls_position: want bottom, got %q", got)
+	// A drag overrides; picking a square snaps back and clears it.
+	control(t, c, "set-card-drag", map[string]any{"card": "audio", "x": 0.3, "y": 0.4})
+	if card(t, stateJSON(t, c), "audio_card")["drag"] == nil {
+		t.Fatal("drag should be recorded")
+	}
+	control(t, c, "set-card-position", map[string]any{"card": "audio", "position": "top"})
+	if d, ok := card(t, stateJSON(t, c), "audio_card")["drag"]; ok && d != nil {
+		t.Errorf("picking a position should clear the drag, got %v", d)
 	}
 }
 
-func TestConductor_SetControlsPosition_InvalidReturnsError(t *testing.T) {
-	dir := t.TempDir()
-	c := newConductorFromDir(t, dir)
-	if err := control(t, c, "set-controls-position", "left"); err == nil {
-		t.Error("want error for invalid controls_position, got nil")
+func TestConductor_SetCardDrag_ClampsToScreen(t *testing.T) {
+	c := newConductorFromDir(t, t.TempDir())
+	if err := control(t, c, "set-card-drag", map[string]any{"card": "visual", "x": 1.7, "y": -0.2}); err != nil {
+		t.Fatalf("drag: %v", err)
 	}
-	// State must not change on error
-	if got := stringField(t, stateJSON(t, c), "controls_position"); got != "bottom" {
-		t.Errorf("controls_position unchanged after error: want bottom, got %q", got)
+	d := card(t, stateJSON(t, c), "visual_card")["drag"].(map[string]any)
+	if d["x"] != 1.0 || d["y"] != 0.0 {
+		t.Errorf("drag should clamp to 0..1, got %v", d)
+	}
+}
+
+func TestConductor_SetCardMinimized(t *testing.T) {
+	c := newConductorFromDir(t, t.TempDir())
+	if err := control(t, c, "set-card-minimized", map[string]any{"card": "visual", "minimized": true}); err != nil {
+		t.Fatalf("minimize: %v", err)
+	}
+	if card(t, stateJSON(t, c), "visual_card")["minimized"] != true {
+		t.Error("visual card should be minimized")
+	}
+	if card(t, stateJSON(t, c), "audio_card")["minimized"] != false {
+		t.Error("minimizing one card must not touch the other")
+	}
+}
+
+func TestConductor_CardControls_InvalidLeaveStateUnchanged(t *testing.T) {
+	c := newConductorFromDir(t, t.TempDir())
+	for _, bad := range []struct {
+		action string
+		value  any
+	}{
+		{"set-card-position", map[string]any{"card": "visual", "position": "center"}},
+		{"set-card-position", map[string]any{"card": "nope", "position": "top"}},
+		{"set-card-drag", map[string]any{"card": "visual", "x": 0.5}},
+		{"set-card-minimized", map[string]any{"card": "audio"}},
+		{"set-card-position", "top"},
+	} {
+		if err := control(t, c, bad.action, bad.value); err == nil {
+			t.Errorf("%s %v: want error", bad.action, bad.value)
+		}
+	}
+	if got := card(t, stateJSON(t, c), "visual_card")["position"]; got != "bottom" {
+		t.Errorf("state must not change on error, visual position = %v", got)
 	}
 }
 
@@ -516,7 +569,7 @@ func TestConductor_Snapshot_IsValidJSON(t *testing.T) {
 		t.Fatalf("Snapshot is not valid JSON: %v\n%s", err, snap)
 	}
 	for _, key := range []string{"mode", "theme", "playing", "shuffle", "interval_seconds",
-		"subject", "image_path", "image_index", "total_images", "total_subjects", "controls_position"} {
+		"subject", "image_path", "image_index", "total_images", "total_subjects", "visual_card", "audio_card"} {
 		if _, ok := m[key]; !ok {
 			t.Errorf("Snapshot missing field %q", key)
 		}
@@ -557,5 +610,80 @@ func TestConductor_MusicNext_WrapsAround(t *testing.T) {
 		if got := intField(t, stateJSON(t, c), "music_collection"); got != want {
 			t.Errorf("music-next #%d: want collection %d, got %d", i+1, want, got)
 		}
+	}
+}
+
+// ── Image age limit ───────────────────────────────────────────────────────────
+
+func ageImage(t *testing.T, root, subject, name string, daysAgo int) {
+	t.Helper()
+	p := filepath.Join(root, subject, name)
+	when := time.Now().AddDate(0, 0, -daysAgo)
+	if err := os.Chtimes(p, when, when); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestConductor_SetMaxAge_SkipsOldImagesAndZeroRestores(t *testing.T) {
+	dir := t.TempDir()
+	makeSubject(t, dir, "fresh", 2)
+	makeSubject(t, dir, "stale", 2)
+	ageImage(t, dir, "stale", "img00.jpg", 40)
+	ageImage(t, dir, "stale", "img01.jpg", 40)
+	ageImage(t, dir, "fresh", "img01.jpg", 40)
+	c := newConductorFromDir(t, dir)
+
+	if got := intField(t, stateJSON(t, c), "max_age_days"); got != 0 {
+		t.Fatalf("default max_age_days = %d, want 0 (config default)", got)
+	}
+	if n := intField(t, stateJSON(t, c), "total_subjects"); n != 2 {
+		t.Fatalf("no limit: %d subjects, want 2", n)
+	}
+
+	if err := control(t, c, "set-max-age", 30); err != nil {
+		t.Fatalf("set-max-age: %v", err)
+	}
+	s := stateJSON(t, c)
+	if n := intField(t, s, "total_subjects"); n != 1 {
+		t.Errorf("30-day limit: %d subjects, want 1 (stale has only old images)", n)
+	}
+	if stringField(t, s, "subject") != "fresh" || intField(t, s, "total_images") != 1 {
+		t.Errorf("30-day limit: want fresh with 1 image, got %v / %v", s["subject"], s["total_images"])
+	}
+
+	if err := control(t, c, "set-max-age", 0); err != nil {
+		t.Fatalf("set-max-age 0: %v", err)
+	}
+	if n := intField(t, stateJSON(t, c), "total_subjects"); n != 2 {
+		t.Errorf("back to no limit: %d subjects, want 2", n)
+	}
+}
+
+func TestConductor_SetMaxAge_KeepsCurrentSubjectWhenAllowed(t *testing.T) {
+	dir := t.TempDir()
+	makeSubject(t, dir, "alpha", 3)
+	makeSubject(t, dir, "beta", 3)
+	c := newConductorFromDir(t, dir)
+	control(t, c, "next") // move to image 2 of the first subject
+	before := stateJSON(t, c)
+
+	if err := control(t, c, "set-max-age", 7); err != nil { // everything is new
+		t.Fatalf("set-max-age: %v", err)
+	}
+	after := stateJSON(t, c)
+	if stringField(t, after, "subject") != stringField(t, before, "subject") ||
+		stringField(t, after, "image_path") != stringField(t, before, "image_path") {
+		t.Errorf("an age change that removes nothing should keep the place: before %v/%v, after %v/%v",
+			before["subject"], before["image_path"], after["subject"], after["image_path"])
+	}
+}
+
+func TestConductor_SetMaxAge_RejectsNegative(t *testing.T) {
+	c := newConductorFromDir(t, t.TempDir())
+	if err := control(t, c, "set-max-age", -1); err == nil {
+		t.Error("want an error for a negative age")
+	}
+	if got := intField(t, stateJSON(t, c), "max_age_days"); got != 0 {
+		t.Errorf("state must not change on error, got %d", got)
 	}
 }

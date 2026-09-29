@@ -3,6 +3,7 @@ package media
 import (
 	"context"
 	"log"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -43,11 +44,28 @@ const videoFormatSort = "res:720,vcodec:h264,acodec:aac,channels:2"
 // entry, which could latch onto a transient post-processing file or a leftover
 // download and rename that instead of the real video. The caller passes a
 // unique stem (the job ID) and renames the result to its final name.
+//
+// Three callbacks feed the caller (D8 design decision): onStdoutLine receives
+// every raw yt-dlp stdout line and onStderrLine every raw stderr line (the
+// caller threads these to the task's separate SSE stdout/stderr streams, which
+// is what D5 later parses for the real failure reason), while onProgress
+// receives only the parsed percentage ("45.2", "100.0") on stdout lines the
+// download regex matches (yt-dlp's "[download] N%" progress is stdout). Any of
+// the three may be nil.
+//
+// cookiesFile, when non-empty and present on disk, is passed to yt-dlp as
+// "--cookies <cookiesFile>" so age-restricted content can authenticate (D5
+// Fix 2). An empty path, or a configured path that does not currently exist
+// (e.g. the jar was deleted), is silently treated as "no cookies" -- today's
+// behavior -- rather than an error: yt-dlp's own default is --no-cookies, so
+// omitting the flag changes nothing.
 func Download(
 	ctx context.Context,
 	exec Executor,
-	url, dir, stem string,
+	url, dir, stem, cookiesFile string,
 	onProgress func(string),
+	onStdoutLine func(string),
+	onStderrLine func(string),
 ) (string, error) {
 
 	outPath := filepath.Join(dir, stem+".mp4")
@@ -68,16 +86,31 @@ func Download(
 		"--no-warnings",
 		"--newline",
 		"-o", filepath.Join(dir, stem+".%(ext)s"),
-		url,
 	}
-	progressCallback := func(line string) {
-		if matches := progressRegex.FindStringSubmatch(line); len(matches) > 1 {
-			onProgress(matches[1]) // Sends "45.2", "100.0"
+	if cookiesFile != "" {
+		if _, err := os.Stat(cookiesFile); err == nil {
+			args = append(args, "--cookies", cookiesFile)
+		}
+	}
+	args = append(args, url)
+	stdoutCallback := func(line string) {
+		if onStdoutLine != nil {
+			onStdoutLine(line)
+		}
+		if onProgress != nil {
+			if matches := progressRegex.FindStringSubmatch(line); len(matches) > 1 {
+				onProgress(matches[1]) // Sends "45.2", "100.0"
+			}
+		}
+	}
+	stderrCallback := func(line string) {
+		if onStderrLine != nil {
+			onStderrLine(line)
 		}
 	}
 
 	log.Printf("downloading using cli: %s\n", "yt-dlp "+strings.Join(args, " "))
-	if err := exec.Run(ctx, "yt-dlp", args, progressCallback); err != nil {
+	if err := exec.Run(ctx, "yt-dlp", args, stdoutCallback, stderrCallback); err != nil {
 		return "", err
 	}
 

@@ -9,6 +9,9 @@
     "menuserver.cmdhome.net": "menuserver",
     "obsidianoid.cmdhome.net": "obsidianoid"
   },
+  "server": {
+    "shared_static_dir": "./web/shared"
+  },
   "grocery": {
     "static_dir": "./web/grocery",
     "data_file": "./data/grocery.json",
@@ -47,7 +50,7 @@
     "data_dir": "./data/obsidianoid",
     "vaults": [
       { "path": "/opt/Vaults/Work", "name": "Cloudian", "theme": "forest" },
-      { "path": "/opt/Vaults/Personal", "name": "Personal", "theme": "dark" }
+      { "path": "/opt/Vaults/Personal", "name": "Personal", "theme": "obsidian" }
     ],
     "threads_folder": "Threads",
     "thread_count": 4,

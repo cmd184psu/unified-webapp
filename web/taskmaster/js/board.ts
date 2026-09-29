@@ -4,12 +4,14 @@
 // in the order things happen: Running (now) / Up next (in the order they'll
 // run) / Recent runs (below, de-emphasized and collapsible, most-recent
 // first). Live updates arrive via the shared LiveController (ui/live.ts)
-// subscribed to GET /api/board/events; every re-render goes through
-// patchList so the DOM is patched surgically (no full repaint, no
-// scroll/focus loss — FRD §8a). Drag-and-drop reorders within a lane (PUT
-// .../order) and moves a task between lanes (POST .../move). Each lane
-// header also carries its own pause/resume toggle (api.pauseLane /
-// api.resumeLane) independent of the global hand brake.
+// subscribed to GET /api/board/events; each lane's Running/Up next/Recent
+// runs list is rendered by the shared QueuePanel (@shared, plan
+// docs/PLAN-utuber-taskmaster-lane.md §4.11, decision D10 — taskmaster is
+// its first adopter, utuber's queue page is the second), which patches its
+// rows surgically (no full repaint, no scroll/focus loss — FRD §8a).
+// Drag-and-drop reorders within a lane (PUT .../order) and moves a task
+// between lanes (POST .../move); that stays board-specific and is wired
+// directly onto the panel's "upnext" list.
 //
 // Task creation opens the full Task Designer (designer.ts): name/command/
 // lane, Repeat + Cooldown, an Advanced section (output_file/sudo), and live
@@ -23,11 +25,10 @@
 // toolbar.
 
 import { api, Capabilities, Lane, LaneStatus, Task, TaskExecution } from './api.js';
-import { LiveController, BoardEvent, patchList } from './ui/live.js';
-import { openModal, confirmDialog, alertDialog } from './ui/modal.js';
+import { LiveController, BoardEvent } from './ui/live.js';
+import { openModal, confirmDialog, alertDialog, openOutputModal, QueuePanel, QueuePanelAdapter, QueueActionKind, QueueProgress } from '@shared';
 import { openTaskDesigner } from './designer.js';
-import { openOutputModal } from './outputmodal.js';
-import { fmtElapsed, renderStatusBadge } from './status.js';
+import { fmtElapsed, renderStatusBadge, effectiveStatus } from './status.js';
 
 const RAN_PER_LANE = 5;
 
@@ -42,6 +43,13 @@ interface BoardState {
   executions: TaskExecution[];
 }
 
+// A running/recent row wraps an execution; an up-next row wraps a task (plus
+// its pending execution, if any — a func task is only "up next" while one
+// exists, P3).
+type BoardItem =
+  | { t: 'exec'; exec: TaskExecution; sec: 'running' | 'recent' }
+  | { t: 'task'; task: Task; pending: TaskExecution | null };
+
 const state: BoardState = { lanes: [], tasks: [], executions: [] };
 
 let boardEl: HTMLElement | null = null;
@@ -50,6 +58,9 @@ let countdownTimer: number | undefined;
 let loadSeq = 0;
 let caps: Capabilities = { allow_sudo: false };
 let laneFilter: string | undefined;
+let brakeEngaged = false;
+
+const panels = new WeakMap<HTMLElement, QueuePanel<BoardItem>>();
 
 function openTaskRoute(taskName: string): void {
   window.location.hash = '#task/' + encodeURIComponent(taskName);
@@ -81,6 +92,8 @@ export function mountBoard(
   boardEl.className = 'board-lanes' + (laneFilter ? ' board-lanes-single' : '');
   container.appendChild(boardEl);
 
+  void api.getBrake().then((b) => { brakeEngaged = b.engaged; render(); }).catch(() => {});
+
   void refreshAll();
 
   unsubscribeEvent = live.onEvent((ev) => void handleBoardEvent(ev));
@@ -98,13 +111,26 @@ export function mountBoard(
 }
 
 async function handleBoardEvent(ev: BoardEvent): Promise<void> {
-  // Board events are compact change notifications, not full snapshots
-  // (D7). Any event type means "something on the board changed" — refetch
-  // the current snapshot and let patchList reconcile the DOM surgically.
-  // (Coalescing per-lane refetches is a nice-to-have; a full snapshot
-  // refetch keeps this slice simple while patchList still guarantees no
-  // full-DOM repaint / no jitter.)
-  void ev;
+  if (ev.type === 'brake' && typeof ev.engaged === 'boolean') {
+    brakeEngaged = ev.engaged;
+  }
+  // task-progress is a high-frequency, small event: patch the one
+  // execution's progress fields in place and re-render, without a full
+  // refetch (that would storm the server on a small poll interval). Every
+  // other event type still means "something on the board changed" and gets
+  // the ordinary refetch-and-let-patchList-reconcile treatment.
+  if (ev.type === 'task-progress' && ev.execution_id !== undefined) {
+    const idx = state.executions.findIndex((e) => e.id === ev.execution_id);
+    if (idx !== -1) {
+      state.executions[idx] = {
+        ...state.executions[idx],
+        progress_pct: ev.progress_pct ?? null,
+        progress_label: ev.progress_label ?? '',
+      };
+      render();
+    }
+    return;
+  }
   await refreshAll();
 }
 
@@ -132,6 +158,11 @@ function tasksByLane(laneName: string): Task[] {
     .sort((a, b) => a.position - b.position);
 }
 
+function taskByName(name: string | undefined): Task | undefined {
+  if (!name) return undefined;
+  return state.tasks.find((t) => t.name === name);
+}
+
 function executionsByTask(taskName: string): TaskExecution[] {
   return state.executions.filter((e) => e.task_name === taskName);
 }
@@ -152,11 +183,40 @@ function render(): void {
   boardEl.querySelector('.empty-state')?.remove();
 
   const sorted = [...visible].sort((a, b) => a.name.localeCompare(b.name));
-  patchList(boardEl, sorted, {
-    key: (l) => l.name,
-    create: (l) => createLaneEl(l),
-    update: (el, l) => updateLaneEl(el, l),
-  });
+  patchLanes(boardEl, sorted);
+}
+
+// A tiny lane-level patcher (lanes are few and keyed by name; the shared
+// patchList primitive is reserved for the item lists inside each lane,
+// which is where the row volume — and the anti-jitter need — actually is).
+function patchLanes(container: HTMLElement, lanes: LaneStatus[]): void {
+  const existingByName = new Map<string, HTMLElement>();
+  for (const child of Array.from(container.children)) {
+    const el = child as HTMLElement;
+    const name = el.getAttribute('data-lane');
+    if (name !== null) existingByName.set(name, el);
+  }
+  const seen = new Set<string>();
+  let cursor: ChildNode | null = container.firstChild;
+  for (const lane of lanes) {
+    seen.add(lane.name);
+    let el = existingByName.get(lane.name);
+    if (el) {
+      updateLaneEl(el, lane);
+    } else {
+      el = createLaneEl(lane);
+    }
+    if (cursor !== el) {
+      container.insertBefore(el, cursor);
+    } else {
+      cursor = cursor.nextSibling;
+      continue;
+    }
+    cursor = el.nextSibling;
+  }
+  for (const [name, el] of existingByName) {
+    if (!seen.has(name)) el.remove();
+  }
 }
 
 // ─── Lane column ─────────────────────────────────────────────────────────
@@ -221,45 +281,72 @@ function createLaneEl(lane: LaneStatus): HTMLElement {
 
   const body = document.createElement('div');
   body.className = 'lane-body';
+  el.appendChild(body);
 
   // Playlist order, top → bottom: what's running now, what's up next (in
   // the order it will run), then recent runs — de-emphasized and
-  // collapsible since they're history, not what's about to happen.
-  const runningSection = buildSection('running', 'Running');
-  const upNextSection = buildSection('upnext', 'Up next');
-  const ranSection = buildRanSection();
-  body.append(runningSection.wrap, upNextSection.wrap, ranSection.wrap);
-  el.appendChild(body);
+  // collapsible since they're history, not what's about to happen. The
+  // shared QueuePanel owns that structure; board.ts supplies only the
+  // adapter (tmQueueAdapter) and the module-specific extras (decorate).
+  const panel = new QueuePanel<BoardItem>(body, tmQueueAdapter, {
+    recentLimit: RAN_PER_LANE,
+    titles: { recent: 'Recent runs' },
+    emptyText: { running: 'nothing running', upnext: 'lane is empty', recent: 'no history yet' },
+  });
+  panels.set(el, panel);
 
-  wireDropTarget(upNextSection.list, el);
+  wireDropTarget(panel.list('upnext'), el);
 
   updateLaneEl(el, lane);
   return el;
 }
 
-function buildSection(kind: string, title: string): { wrap: HTMLElement; list: HTMLElement } {
-  const wrap = document.createElement('div');
-  wrap.className = 'lane-section lane-section-' + kind;
-  const h = document.createElement('div');
-  h.className = 'lane-section-title';
-  h.textContent = title;
-  const list = document.createElement('div');
-  list.className = 'lane-list lane-list-' + kind;
-  wrap.append(h, list);
-  return { wrap, list };
-}
+/**
+ * Stopping a lane lets its current run finish by default. When something is
+ * running, ask whether to cancel it too; dismissing the dialog keeps the
+ * default. The lane is paused first so nothing new starts, then the running
+ * executions are canceled.
+ */
+async function toggleLanePause(btn: HTMLButtonElement, lane: LaneStatus): Promise<void> {
+  if (lane.paused) {
+    btn.disabled = true;
+    await api.resumeLane(lane.name).catch(() => undefined);
+    btn.disabled = false;
+    void refreshAll();
+    return;
+  }
 
-/** "Recent runs" — de-emphasized and collapsible (native <details>), most-recent first. */
-function buildRanSection(): { wrap: HTMLElement; list: HTMLElement } {
-  const wrap = document.createElement('details');
-  wrap.className = 'lane-section lane-section-ran';
-  const summary = document.createElement('summary');
-  summary.className = 'lane-section-title';
-  summary.textContent = 'Recent runs';
-  const list = document.createElement('div');
-  list.className = 'lane-list lane-list-ran';
-  wrap.append(summary, list);
-  return { wrap, list };
+  const laneTaskNames = new Set(tasksByLane(lane.name).map((t) => t.name));
+  const running = state.executions.filter(
+    (e) => e.status === 'running' && !!e.task_name && laneTaskNames.has(e.task_name),
+  );
+  let cancelToo = false;
+  if (running.length > 0) {
+    const names = running.map((e) => e.task_name).join(', ');
+    cancelToo = await confirmDialog(
+      running.length === 1
+        ? `"${names}" is still running in this lane. Let it finish, or cancel it now?`
+        : `${running.length} tasks are still running in this lane (${names}). Let them finish, or cancel them now?`,
+      {
+        title: `Stop lane "${lane.name}"`,
+        confirmLabel: running.length === 1 ? 'Cancel it too' : 'Cancel them too',
+        cancelLabel: running.length === 1 ? 'Let it finish' : 'Let them finish',
+      },
+    );
+  }
+
+  btn.disabled = true;
+  try {
+    await api.pauseLane(lane.name);
+    if (cancelToo) {
+      await Promise.all(running.map((e) => api.cancelExecution(e.id).catch(() => undefined)));
+    }
+  } catch {
+    // refreshAll() below shows the lane's actual state either way.
+  } finally {
+    btn.disabled = false;
+    void refreshAll();
+  }
 }
 
 function updateLaneEl(el: HTMLElement, lane: LaneStatus): void {
@@ -274,16 +361,9 @@ function updateLaneEl(el: HTMLElement, lane: LaneStatus): void {
   const pauseBtn = el.querySelector<HTMLButtonElement>('.lane-pause-btn');
   if (pauseBtn) {
     pauseBtn.textContent = lane.paused ? '▶' : '⏹';
-    pauseBtn.title = lane.paused ? 'Resume lane' : 'Stop lane (finish current run, start nothing new)';
+    pauseBtn.title = lane.paused ? 'Resume lane' : 'Stop lane (start nothing new; asks about a running task)';
     pauseBtn.setAttribute('aria-label', pauseBtn.title);
-    pauseBtn.onclick = () => {
-      pauseBtn.disabled = true;
-      const req = lane.paused ? api.resumeLane(lane.name) : api.pauseLane(lane.name);
-      void req.finally(() => {
-        pauseBtn.disabled = false;
-        void refreshAll();
-      });
-    };
+    pauseBtn.onclick = () => void toggleLanePause(pauseBtn, lane);
   }
   const pauseLabel = el.querySelector<HTMLElement>('.lane-pause-label');
   if (pauseLabel) pauseLabel.style.display = lane.paused ? '' : 'none';
@@ -320,8 +400,7 @@ function updateLaneEl(el: HTMLElement, lane: LaneStatus): void {
     .sort((a, b) => b.id - a.id);
   const ranExecs = laneExecs
     .filter((e) => e.status === 'success' || e.status === 'failed' || e.status === 'canceled')
-    .sort((a, b) => b.id - a.id)
-    .slice(0, RAN_PER_LANE);
+    .sort((a, b) => b.id - a.id);
 
   const runningTaskNames = new Set(runningExecs.map((e) => e.task_name));
   const pendingByTask = new Map<string, TaskExecution>();
@@ -331,302 +410,234 @@ function updateLaneEl(el: HTMLElement, lane: LaneStatus): void {
     }
   }
 
-  const upNextTasks = laneTasks.filter((t) => !runningTaskNames.has(t.name));
+  // A func task is only ever "up next" while a pending execution exists —
+  // once it finishes it drops out of Up next entirely (P3's eligibility
+  // narrowing means a finished one-shot func task never gets re-picked).
+  // Shell tasks keep their existing always-listed behaviour.
+  const upNextTasks = laneTasks.filter((t) => {
+    if (runningTaskNames.has(t.name)) return false;
+    if (t.kind && !pendingByTask.has(t.name)) return false;
+    return true;
+  });
 
-  const runningList = el.querySelector<HTMLElement>('.lane-list-running');
-  if (runningList) {
-    patchList(runningList, runningExecs, {
-      key: (e) => e.id,
-      create: (e) => createExecRow(e, 'running'),
-      update: (row, e) => updateExecRow(row, e, 'running'),
-    });
-    toggleEmptyNote(runningList, runningExecs.length === 0, 'nothing running');
-  }
+  const items: BoardItem[] = [
+    ...runningExecs.map((exec): BoardItem => ({ t: 'exec', exec, sec: 'running' })),
+    ...upNextTasks.map((task): BoardItem => ({ t: 'task', task, pending: pendingByTask.get(task.name) ?? null })),
+    ...ranExecs.map((exec): BoardItem => ({ t: 'exec', exec, sec: 'recent' })),
+  ];
 
-  const ranList = el.querySelector<HTMLElement>('.lane-list-ran');
-  if (ranList) {
-    patchList(ranList, ranExecs, {
-      key: (e) => e.id,
-      create: (e) => createExecRow(e, 'ran'),
-      update: (row, e) => updateExecRow(row, e, 'ran'),
-    });
-    toggleEmptyNote(ranList, ranExecs.length === 0, 'no history yet');
-  }
-
-  const upNextList = el.querySelector<HTMLElement>('.lane-list-upnext');
-  if (upNextList) {
-    patchList(upNextList, upNextTasks, {
-      key: (t) => t.name,
-      create: (t) => createTaskRow(t, pendingByTask.get(t.name) ?? null),
-      update: (row, t) => updateTaskRow(row, t, pendingByTask.get(t.name) ?? null),
-    });
-    toggleEmptyNote(upNextList, upNextTasks.length === 0, 'lane is empty');
-  }
+  panels.get(el)?.update(items);
 }
 
-function toggleEmptyNote(list: HTMLElement, empty: boolean, text: string): void {
-  let note = list.querySelector<HTMLElement>('.lane-empty-note');
-  if (empty) {
-    if (!note) {
-      note = document.createElement('div');
-      note.className = 'lane-empty-note';
-      note.setAttribute('data-tm-key', '__empty__');
-      list.appendChild(note);
+// ─── Shared queue panel adapter (BoardItem) ────────────────────────────────
+
+function itemKey(item: BoardItem): string {
+  return item.t === 'exec' ? 'exec:' + item.exec.id : 'task:' + item.task.name;
+}
+
+function itemSection(item: BoardItem): 'running' | 'upnext' | 'recent' {
+  return item.t === 'exec' ? item.sec : 'upnext';
+}
+
+function itemTitle(item: BoardItem): string {
+  if (item.t === 'task') return item.task.label || item.task.name;
+  const task = taskByName(item.exec.task_name);
+  return (task && (task.label || task.name)) || item.exec.task_name || '(unknown task)';
+}
+
+function itemStatus(item: BoardItem): string {
+  if (item.t === 'exec') return effectiveStatus(item.exec.status, item.exec.suspended);
+  if (item.pending) return 'queued';
+  if (!item.task.enabled) return 'disabled';
+  if (item.task.paused) return 'paused';
+  return 'ready';
+}
+
+function itemMeta(item: BoardItem): string {
+  if (item.t === 'exec') {
+    if (item.exec.duration_ms !== undefined && item.exec.duration_ms !== null) {
+      return (item.exec.duration_ms / 1000).toFixed(1) + 's';
     }
-    note.textContent = text;
-  } else {
-    note?.remove();
-  }
-}
-
-// ─── Rows ────────────────────────────────────────────────────────────────
-
-function createExecRow(exec: TaskExecution, kind: 'running' | 'ran'): HTMLElement {
-  const row = document.createElement('div');
-  row.className = 'exec-row exec-row-' + kind;
-  const name = document.createElement('span');
-  name.className = 'exec-row-name exec-row-name-clickable';
-  name.setAttribute('role', 'button');
-  name.tabIndex = 0;
-  const badge = document.createElement('span');
-  badge.className = 'badge';
-  const meta = document.createElement('span');
-  meta.className = 'exec-row-meta';
-  row.append(name, badge, meta);
-  if (kind === 'running') {
-    // The running instance lives ONLY in the lane card — the task-detail
-    // split view no longer lists it (that would be the same process shown
-    // twice, disagreeing whenever one side updated and the other didn't).
-    // So every control for a running execution belongs here: PID, process
-    // pause/resume (SIGSTOP/SIGCONT), cancel, and viewing its live output.
-    const pidSeam = document.createElement('span');
-    pidSeam.className = 'exec-row-pid-seam';
-
-    const pidLabel = document.createElement('span');
-    pidLabel.className = 'exec-row-pid';
-
-    const outputBtn = document.createElement('button');
-    outputBtn.type = 'button';
-    outputBtn.className = 'btn-icon exec-row-output-btn';
-    // Not ⏹ (that means Stop) or any other square — a square already means
-    // something else in this app. ↗ reads as "open in a window", matching
-    // what the button actually does.
-    outputBtn.textContent = '↗';
-    outputBtn.title = 'View live output';
-    outputBtn.setAttribute('aria-label', 'View live output');
-
-    const pauseBtn = document.createElement('button');
-    pauseBtn.type = 'button';
-    pauseBtn.className = 'btn-icon exec-row-pause-btn';
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.type = 'button';
-    cancelBtn.className = 'btn-icon exec-row-cancel-btn';
-    cancelBtn.textContent = '✖';
-    cancelBtn.title = 'Cancel execution';
-    cancelBtn.setAttribute('aria-label', 'Cancel execution');
-
-    pidSeam.append(pidLabel, outputBtn, pauseBtn, cancelBtn);
-    row.appendChild(pidSeam);
-  }
-  updateExecRow(row, exec, kind);
-  return row;
-}
-
-function openRunningOutput(exec: TaskExecution): void {
-  const title = (exec.task_name ?? 'task') + ' — run #' + exec.id;
-  openOutputModal(exec.id, title);
-}
-
-function requestProcessToggle(btn: HTMLButtonElement, execId: number, suspended: boolean): void {
-  btn.disabled = true;
-  const request = suspended ? api.resumeExecution(execId) : api.pauseExecution(execId);
-  finishProcessToggle(request, btn);
-}
-
-function finishProcessToggle(request: Promise<unknown>, btn: HTMLButtonElement): void {
-  request.then(reenableProcessButton(btn), reenableProcessButton(btn));
-}
-
-function reenableProcessButton(btn: HTMLButtonElement): () => void {
-  function reenable(): void {
-    btn.disabled = false;
-    void refreshAll();
-  }
-  return reenable;
-}
-
-function wireProcessToggle(btn: HTMLButtonElement, exec: TaskExecution): void {
-  const suspended = !!exec.suspended;
-  btn.textContent = suspended ? '▶' : '⏸';
-  btn.title = suspended ? 'Resume process' : 'Pause process';
-  btn.setAttribute('aria-label', btn.title);
-  btn.onclick = makeProcessToggleHandler(btn, exec.id, suspended);
-}
-
-function makeProcessToggleHandler(btn: HTMLButtonElement, execId: number, suspended: boolean): () => void {
-  function handleClick(): void {
-    requestProcessToggle(btn, execId, suspended);
-  }
-  return handleClick;
-}
-
-function requestCancel(btn: HTMLButtonElement, execId: number): void {
-  btn.disabled = true;
-  api.cancelExecution(execId).then(reenableCancelButton(btn), reenableCancelButton(btn));
-}
-
-function reenableCancelButton(btn: HTMLButtonElement): () => void {
-  function reenable(): void {
-    btn.disabled = false;
-    void refreshAll();
-  }
-  return reenable;
-}
-
-function wireCancelButton(btn: HTMLButtonElement, exec: TaskExecution): void {
-  btn.onclick = makeCancelHandler(btn, exec.id);
-}
-
-function makeCancelHandler(btn: HTMLButtonElement, execId: number): () => void {
-  function handleClick(): void {
-    requestCancel(btn, execId);
-  }
-  return handleClick;
-}
-
-function wireOutputButton(btn: HTMLButtonElement, exec: TaskExecution): void {
-  btn.onclick = makeOutputHandler(exec);
-}
-
-function makeOutputHandler(exec: TaskExecution): () => void {
-  function handleClick(): void {
-    openRunningOutput(exec);
-  }
-  return handleClick;
-}
-
-function updateExecRow(row: HTMLElement, exec: TaskExecution, kind: 'running' | 'ran'): void {
-  const name = row.querySelector<HTMLElement>('.exec-row-name');
-  if (name) {
-    name.textContent = exec.task_name ?? '(unknown task)';
-    const taskName = exec.task_name;
-    const openDetail = (): void => {
-      if (!taskName) return;
-      openTaskRoute(taskName);
-    };
-    name.onclick = openDetail;
-    name.onkeydown = (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        openDetail();
-      }
-    };
-  }
-  const badge = row.querySelector<HTMLElement>('.badge');
-  if (badge) renderStatusBadge(badge, exec.status, exec.suspended);
-  const meta = row.querySelector<HTMLElement>('.exec-row-meta');
-  if (meta) {
-    if (exec.duration_ms !== undefined && exec.duration_ms !== null) {
-      meta.textContent = (exec.duration_ms / 1000).toFixed(1) + 's';
-    } else if (exec.suspended) {
+    if (item.exec.suspended) {
       // A paused process's wall-clock time keeps passing even though it's
       // doing nothing — a ticking counter here would make a genuinely
       // frozen process look like pause had no effect. Say so plainly
       // instead (the badge already shows ⏸ too).
-      meta.textContent = 'paused';
-    } else if (exec.started_at) {
+      return 'paused';
+    }
+    if (item.exec.started_at) {
       // "running…" said nothing useful — show live elapsed time instead.
-      // The board's 1s tick (render()) re-runs this via patchList's update
+      // The board's 1s tick (render()) re-runs this via the panel's update
       // callback, so this counts up on its own.
-      meta.textContent = fmtElapsed(exec.started_at);
-    } else {
-      meta.textContent = '';
+      return fmtElapsed(item.exec.started_at);
     }
+    return '';
   }
+  const task = item.task;
+  if (!task.enabled) return 'disabled';
+  if (task.paused) return 'paused';
+  if (item.pending) return 'queued';
+  if (task.repeat) {
+    // No "again in X" countdown while the hand brake is engaged — it would
+    // imply the task might still fire on its own, which the brake
+    // explicitly prevents.
+    return brakeEngaged ? 'ready' : cooldownLabel(task);
+  }
+  return 'ready';
+}
 
-  if (kind === 'running') {
+function itemProgress(item: BoardItem): QueueProgress | null {
+  if (item.t !== 'exec') return null;
+  const pct = item.exec.progress_pct;
+  const label = item.exec.progress_label;
+  if (pct === undefined && !label) return null;
+  return { pct: pct === undefined ? null : pct, label: label ?? '' };
+}
+
+function itemActions(item: BoardItem): QueueActionKind[] {
+  if (item.t === 'exec') {
+    if (item.sec === 'running') {
+      const task = taskByName(item.exec.task_name);
+      if (task?.kind) return ['cancel']; // func tasks have no per-execution SIGSTOP (P5/G2)
+      return [item.exec.suspended ? 'resume' : 'pause', 'cancel'];
+    }
+    const task = taskByName(item.exec.task_name);
+    return task?.kind ? ['rerun', 'remove'] : ['rerun'];
+  }
+  // Up-next: only a func task with a pending execution offers a generic
+  // action (cancel-while-queued, P4); a shell up-next task's "Up next"
+  // button is a module extra added by decorate(), not a QueuePanel action.
+  if (item.task.kind && item.pending) return ['cancel'];
+  return [];
+}
+
+async function onBoardAction(action: QueueActionKind, item: BoardItem, btn: HTMLButtonElement): Promise<void> {
+  btn.disabled = true;
+  try {
+    if (item.t === 'exec') {
+      if (action === 'cancel') {
+        await api.cancelExecution(item.exec.id);
+      } else if (action === 'pause') {
+        await api.pauseExecution(item.exec.id);
+      } else if (action === 'resume') {
+        await api.resumeExecution(item.exec.id);
+      } else if (action === 'rerun') {
+        await api.rerunExecution(item.exec.id);
+      } else if (action === 'remove') {
+        const name = item.exec.task_name;
+        if (name) {
+          const ok = await confirmDialog('Remove task "' + name + '"? This deletes its run history too.', {
+            title: 'Remove task',
+            confirmLabel: 'Remove',
+          });
+          if (ok) await api.deleteTask(name);
+        }
+      }
+    } else if (action === 'cancel' && item.pending) {
+      await api.cancelExecution(item.pending.id);
+    }
+  } catch {
+    // api.ts already surfaced the error via alertDialog.
+  } finally {
+    btn.disabled = false;
+    void refreshAll();
+  }
+}
+
+function renderBoardBadge(badge: HTMLElement, item: BoardItem): void {
+  if (item.t === 'exec') {
+    renderStatusBadge(badge, item.exec.status, item.exec.suspended);
+    return;
+  }
+  // An up-next task row shows its state as plain text (itemMeta), the way
+  // the legacy task row did — no colored status dot for "not running yet".
+  badge.className = 'ui-queue-badge';
+  badge.textContent = '';
+  badge.title = '';
+  badge.removeAttribute('aria-label');
+}
+
+/** Module-specific extras the generic QueuePanel row doesn't know about: pid, live output, drag, Up next, and the legacy CSS classes style.css still targets. */
+function decorateBoardRow(row: HTMLElement, item: BoardItem, created: boolean): void {
+  if (item.t === 'exec') {
+    const kindClass = item.sec === 'running' ? 'running' : 'ran';
+    row.classList.add('exec-row', 'exec-row-' + kindClass);
+    if (item.sec !== 'running') return;
+
+    let pidSeam = row.querySelector<HTMLElement>('.exec-row-pid-seam');
+    if (!pidSeam) {
+      pidSeam = document.createElement('span');
+      pidSeam.className = 'exec-row-pid-seam';
+      const pidLabel = document.createElement('span');
+      pidLabel.className = 'exec-row-pid';
+      const outputBtn = document.createElement('button');
+      outputBtn.type = 'button';
+      outputBtn.className = 'btn-icon exec-row-output-btn';
+      // Not ⏹ (that means Stop) or any other square — a square already
+      // means something else in this app. ↗ reads as "open in a window",
+      // matching what the button actually does.
+      outputBtn.textContent = '↗';
+      outputBtn.title = 'View live output';
+      outputBtn.setAttribute('aria-label', 'View live output');
+      pidSeam.append(pidLabel, outputBtn);
+      row.appendChild(pidSeam);
+    }
     const pidLabel = row.querySelector<HTMLElement>('.exec-row-pid');
-    if (pidLabel) pidLabel.textContent = exec.pid !== undefined ? 'pid ' + exec.pid : '';
-
+    if (pidLabel) pidLabel.textContent = item.exec.pid !== undefined ? 'pid ' + item.exec.pid : '';
     const outputBtn = row.querySelector<HTMLButtonElement>('.exec-row-output-btn');
-    if (outputBtn) wireOutputButton(outputBtn, exec);
-
-    const pauseBtn = row.querySelector<HTMLButtonElement>('.exec-row-pause-btn');
-    if (pauseBtn) wireProcessToggle(pauseBtn, exec);
-
-    const cancelBtn = row.querySelector<HTMLButtonElement>('.exec-row-cancel-btn');
-    if (cancelBtn) wireCancelButton(cancelBtn, exec);
+    if (outputBtn) outputBtn.onclick = () => openRunningOutput(item.exec);
+    return;
   }
+
+  row.classList.add('task-row');
+  row.setAttribute('data-task', item.task.name);
+  row.classList.toggle('task-row-disabled', !item.task.enabled || item.task.paused);
+
+  if (item.task.kind) return; // func tasks: no drag, no "Up next" button
+
+  if (created) {
+    const capturedName = item.task.name;
+    const capturedLane = item.task.lane_name;
+    row.draggable = true;
+    row.addEventListener('dragstart', (e) => {
+      if (!e.dataTransfer) return;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', JSON.stringify({ task: capturedName, lane: capturedLane }));
+      row.classList.add('dragging');
+    });
+    row.addEventListener('dragend', () => row.classList.remove('dragging'));
+  }
+
+  let upNextBtn = row.querySelector<HTMLButtonElement>('.task-row-upnext');
+  if (!upNextBtn) {
+    upNextBtn = document.createElement('button');
+    upNextBtn.type = 'button';
+    upNextBtn.className = 'btn btn-secondary btn-sm task-row-upnext';
+    upNextBtn.textContent = 'Up next';
+    row.appendChild(upNextBtn);
+  }
+  upNextBtn.disabled = !item.task.enabled || item.task.paused;
+  const taskName = item.task.name;
+  upNextBtn.onclick = () => void api.upNext(taskName).then(() => refreshAll());
 }
 
-function createTaskRow(task: Task, pending: TaskExecution | null): HTMLElement {
-  const row = document.createElement('div');
-  row.className = 'task-row';
-  row.draggable = true;
+const tmQueueAdapter: QueuePanelAdapter<BoardItem> = {
+  key: itemKey,
+  section: itemSection,
+  title: itemTitle,
+  status: itemStatus,
+  meta: itemMeta,
+  progress: itemProgress,
+  actions: itemActions,
+  onAction: onBoardAction,
+  renderBadge: renderBoardBadge,
+  decorate: decorateBoardRow,
+  onTitleClick: (item) => openTaskRoute(item.t === 'exec' ? item.exec.task_name ?? '' : item.task.name),
+};
 
-  const name = document.createElement('span');
-  name.className = 'task-row-name task-row-name-clickable';
-  name.setAttribute('role', 'button');
-  name.tabIndex = 0;
-  const openDetail = (): void => {
-    openTaskRoute(task.name);
-  };
-  name.addEventListener('click', openDetail);
-  name.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      openDetail();
-    }
-  });
-  const status = document.createElement('span');
-  status.className = 'task-row-status';
-  const upNextBtn = document.createElement('button');
-  upNextBtn.type = 'button';
-  upNextBtn.className = 'btn btn-secondary btn-sm task-row-upnext';
-  upNextBtn.textContent = 'Up next';
-
-  row.append(name, status, upNextBtn);
-
-  row.addEventListener('dragstart', (e) => {
-    if (!e.dataTransfer) return;
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', JSON.stringify({ task: task.name, lane: task.lane_name }));
-    row.classList.add('dragging');
-  });
-  row.addEventListener('dragend', () => row.classList.remove('dragging'));
-
-  updateTaskRow(row, task, pending);
-  return row;
-}
-
-function updateTaskRow(row: HTMLElement, task: Task, pending: TaskExecution | null): void {
-  row.setAttribute('data-task', task.name);
-  row.classList.toggle('task-row-disabled', !task.enabled || task.paused);
-
-  const name = row.querySelector<HTMLElement>('.task-row-name');
-  if (name) name.textContent = task.name;
-
-  const status = row.querySelector<HTMLElement>('.task-row-status');
-  if (status) {
-    if (!task.enabled) {
-      status.textContent = 'disabled';
-    } else if (task.paused) {
-      status.textContent = 'paused';
-    } else if (pending) {
-      status.textContent = 'queued';
-    } else if (task.repeat) {
-      status.textContent = cooldownLabel(task);
-    } else {
-      status.textContent = 'ready';
-    }
-  }
-
-  const btn = row.querySelector<HTMLButtonElement>('.task-row-upnext');
-  if (btn) {
-    btn.disabled = !task.enabled || task.paused;
-    btn.onclick = () => void api.upNext(task.name).then(() => refreshAll());
-  }
+function openRunningOutput(exec: TaskExecution): void {
+  const title = (exec.task_name ?? 'task') + ' — run #' + exec.id;
+  openOutputModal(api.openExecutionOutput(exec.id), title);
 }
 
 function cooldownLabel(task: Task): string {

@@ -16,11 +16,14 @@ type SANs struct {
 	IP  []string `json:"ip"`
 }
 
-// CA is the singleton certificate authority row (ca.id = 1, FR-3). All fields
-// are derived by parsing cert_pem at insert time; nothing here is read back
-// from a legacy meta.json.
+// CA is a certificate authority row. Since schema v2 (the CA-replacement
+// plan) ca can hold up to two rows, distinguished by Role ("current" or
+// "previous"); FR-3's original singleton is now "at most one current". All
+// fields but Role are derived by parsing cert_pem at insert time; nothing
+// here is read back from a legacy meta.json.
 type CA struct {
 	ID           int64   `json:"id"`
+	Role         string  `json:"role"`
 	CertPEM      string  `json:"certPem"`
 	KeyPEM       string  `json:"-"`
 	Subject      string  `json:"subject"`
@@ -40,6 +43,11 @@ type CA struct {
 // serialized to JSON; CertPEM is included only where a slice-later handler
 // explicitly opts in (GetCert), which is why it carries omitempty rather than
 // being unconditionally present.
+//
+// CAID, CASubject and Stale are the CA-replacement plan's additions (§3.2).
+// CAID is nil when the signer is unknown (P1); CASubject is filled only
+// where a caller joins against ca; Stale holds exactly when CAID is non-nil
+// and differs from the current CA's id (§3.3, invariant 5).
 type Cert struct {
 	ID               int64   `json:"id"`
 	FQDN             string  `json:"fqdn"`
@@ -54,5 +62,8 @@ type Cert struct {
 	ImportedFrom     *string `json:"importedFrom,omitempty"`
 	QuarantineReason *string `json:"quarantineReason,omitempty"`
 	ImportWarning    *string `json:"importWarning,omitempty"`
+	CAID             *int64  `json:"caId"`
+	CASubject        *string `json:"caSubject,omitempty"`
+	Stale            bool    `json:"stale"`
 	Created          string  `json:"created"`
 }

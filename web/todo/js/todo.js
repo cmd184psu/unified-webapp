@@ -87,14 +87,14 @@ function SaveList(content, filename, sb) {
             $('#saveButton').prop('disabled', false);
             console.log("success in saving content for filename: " + this.url)
             if (showsavealert || savebutton) {
-                alert(data.msg)
+                showToast(data.msg, 'success')
                 savebutton = false;
             }
         },
         data: JSON.stringify(content), // content to send; has to be stringified, even though it's application/json
         error: function (err) {   //something bad happened and ajax is unhappy
             console.log(JSON.stringify(err, null, 3));
-            if (showsavealert) alert(err.responseJSON.error);
+            if (showsavealert) showToast(err.responseJSON.error, 'error');
         }
 
     }).done(function (data) {
@@ -375,7 +375,8 @@ async function reduceCountDown() {
             arrayOfContent = await loadList('items/' + currentFilename)
             render()
             $(".completeClass").hide()
-            alert("This instance has gone stale, reloading...")
+            showToast('Instance stale, reloading…', 'notice')
+            setTimeout(function() { location.reload() }, 1500)
             countTimeout = countTimeoutDefault
         }
         setTimeout(reduceCountDown, 1000)
@@ -467,7 +468,7 @@ function moveListToNewSubject() {
             $('#saveButton').prop('disabled', false);
             console.log("success in saving content for filename: " + this.url)
             if (showsavealert || savebutton) {
-                alert(data.msg)
+                showToast(data.msg, 'success')
                 savebutton = false;
             }
 
@@ -488,7 +489,7 @@ function moveListToNewSubject() {
         //data: JSON.stringify(content), // content to send; has to be stringified, even though it's application/json
         error: function (err) {   //something bad happened and ajax is unhappy
             console.log(JSON.stringify(err, null, 3));
-            if (showsavealert) alert(err.responseJSON.error);
+            if (showsavealert) showToast(err.responseJSON.error, 'error');
         }
 
     }).done(function (data) {

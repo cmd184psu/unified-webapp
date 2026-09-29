@@ -33,6 +33,9 @@ import (
 	"cmd184psu/unified-webapp/internal/platform/auth"
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/platform/middleware"
+	"cmd184psu/unified-webapp/internal/platform/sshclient"
+	"cmd184psu/unified-webapp/internal/platform/static"
+	"cmd184psu/unified-webapp/internal/sampler"
 	"cmd184psu/unified-webapp/internal/slideshow"
 	"cmd184psu/unified-webapp/internal/smbedit"
 	"cmd184psu/unified-webapp/internal/taskmaster"
@@ -123,6 +126,8 @@ func main() {
 	if *flagKey != "" {
 		cfg.TLSKey = *flagKey
 	}
+
+	warnSharedStaticDir(cfg.Server.SharedStaticDir)
 
 	adminRouted := adminIsRouted(cfg.Routing)
 	svc, err := auth.FromConfig(cfg.Auth, knownModules, adminRouted)
@@ -286,13 +291,33 @@ func newServer(addr string, handler http.Handler) *http.Server {
 // The same table records failures. A module that cannot build gets a handler
 // that 503s with the reason, so one bad path takes down that module's
 // hostnames and leaves the rest of the binary serving.
+// warnSharedStaticDir logs a warning (not a failure) when dir does not stat
+// as a readable directory, matching the posture of the per-module
+// checkStaticDir helpers (internal/certmachine/build.go, internal/multissh,
+// internal/smbedit) while staying non-fatal: an operator who has not yet
+// deployed web/shared/ should still get a running binary.
+func warnSharedStaticDir(dir string) {
+	if dir == "" {
+		return
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		log.Printf("WARNING: server.shared_static_dir %q: %v; /shared/ will 404 on every request", dir, err)
+		return
+	}
+	if !info.IsDir() {
+		log.Printf("WARNING: server.shared_static_dir %q is not a directory; /shared/ will 404 on every request", dir)
+	}
+}
+
 func buildDispatcher(cfg *config.Config, svc *auth.Service) *Dispatcher {
 	dispatch := newDispatcher()
 	built := make(map[string]http.Handler, len(cfg.Routing))
+	deps := &moduleDeps{cfg: cfg, closers: &dispatch.closers}
 	for host, module := range cfg.Routing {
 		h, ok := built[module]
 		if !ok {
-			hh, err := buildModule(module, cfg, svc)
+			hh, err := buildModule(module, cfg, svc, deps)
 			if err != nil {
 				log.Printf("ERROR: module %q failed to build and will return 503 on every request: %v", module, err)
 				h = unavailableHandler(module, err)
@@ -300,7 +325,7 @@ func buildDispatcher(cfg *config.Config, svc *auth.Service) *Dispatcher {
 				if c, ok := hh.(io.Closer); ok {
 					dispatch.closers = append(dispatch.closers, c)
 				}
-				h = middleware.BodyLimit(limitFor(module, cfg), svc.Gate(module, hh))
+				h = middleware.BodyLimit(limitFor(module, cfg), svc.Gate(module, static.WithShared(hh, cfg.Server.SharedStaticDir)))
 			}
 			built[module] = h
 		}
@@ -334,22 +359,65 @@ func limitFor(module string, cfg *config.Config) int64 {
 // knownModules is the buildModule universe -- exactly the module names the
 // switch below handles. auth.FromConfig uses it to validate that every
 // module named in auth.modules is one buildDispatcher can actually build.
-var knownModules = []string{"grocery", "todo", "slideshow", "menuserver", "obsidianoid", "multissh", "certmachine", "taskmaster", "admin", "utuber", "smbedit", "issuetracker", "timetracker"}
+var knownModules = []string{"grocery", "todo", "slideshow", "menuserver", "obsidianoid", "multissh", "certmachine", "taskmaster", "admin", "utuber", "smbedit", "issuetracker", "timetracker", "sampler"}
 
 // adminIsRouted reports whether "admin" appears among routing's module
 // values (config.Config.Routing / host_routing). Both main's boot-time
 // auth.FromConfig call and buildModule's "admin" case need this, and they
 // must agree, so it lives in one place.
 func adminIsRouted(routing map[string]string) bool {
-	for _, module := range routing {
-		if module == "admin" {
+	return moduleIsRouted(routing, "admin")
+}
+
+// moduleIsRouted reports whether module appears among routing's module
+// values (config.Config.Routing / host_routing). It generalises
+// adminIsRouted so taskmasterEngine can decide OwnedLanesOnly (plan P16):
+// a module (e.g. utuber) can be routed while taskmaster itself is not.
+func moduleIsRouted(routing map[string]string, module string) bool {
+	for _, m := range routing {
+		if m == module {
 			return true
 		}
 	}
 	return false
 }
 
-func buildModule(module string, cfg *config.Config, svc *auth.Service) (http.Handler, error) {
+// moduleDeps carries per-dispatcher-build state that buildModule needs
+// beyond cfg and svc. Today it exists solely to memoise the one shared
+// *taskmaster.Engine that both the "taskmaster" and "utuber" cases open
+// through (plan A1): whichever of them builds first opens the engine, and
+// the other reuses it, so build-order (a random map iteration,
+// buildDispatcher's `for host, module := range cfg.Routing`) never matters
+// and the engine is registered as a closer exactly once.
+type moduleDeps struct {
+	cfg     *config.Config
+	tm      *taskmaster.Engine
+	tmErr   error
+	tmTried bool
+	closers *[]io.Closer
+}
+
+// taskmasterEngine opens the shared engine exactly once per dispatcher (a
+// fresh moduleDeps per buildDispatcher/buildControlDispatcher call, so tests
+// that build many dispatchers each get their own engine); on success it
+// appends e to *closers so dispatch.Close stops it exactly once. Every
+// later call in the same dispatcher build returns the memoised
+// engine/error without re-opening.
+func (d *moduleDeps) taskmasterEngine() (*taskmaster.Engine, error) {
+	if d.tmTried {
+		return d.tm, d.tmErr
+	}
+	d.tmTried = true
+	d.tm, d.tmErr = taskmaster.Open(d.cfg.Taskmaster, taskmaster.OpenOptions{
+		OwnedLanesOnly: !moduleIsRouted(d.cfg.Routing, "taskmaster"),
+	})
+	if d.tmErr == nil {
+		*d.closers = append(*d.closers, d.tm)
+	}
+	return d.tm, d.tmErr
+}
+
+func buildModule(module string, cfg *config.Config, svc *auth.Service, deps *moduleDeps) (http.Handler, error) {
 	switch module {
 	case "grocery":
 		return grocery.Build(cfg.Grocery)
@@ -364,13 +432,29 @@ func buildModule(module string, cfg *config.Config, svc *auth.Service) (http.Han
 	case "multissh":
 		return multissh.Build(cfg.Multissh)
 	case "taskmaster":
-		return taskmaster.Build(cfg.Taskmaster)
+		e, err := deps.taskmasterEngine()
+		if err != nil {
+			return nil, err
+		}
+		return e.Handler(), nil
 	case "timetracker":
 		return timetracker.Build(cfg.Timetracker)
+	case "sampler":
+		return sampler.Build(cfg.Sampler)
 	case "certmachine":
-		return certmachine.Build(cfg.Certmachine)
+		// Remote CA trust shares multissh's SSH settings: one key folder and
+		// one host-key policy for every SSH connection the app makes.
+		return certmachine.Build(cfg.Certmachine, sshclient.Settings{
+			SSHDir:         cfg.Multissh.SSHDir,
+			KnownHostsPath: cfg.Multissh.KnownHostsPath,
+			StrictHostKey:  cfg.Multissh.StrictHostKey,
+		})
 	case "utuber":
-		return utuber.Build(cfg.Utuber)
+		e, err := deps.taskmasterEngine()
+		if err != nil {
+			return nil, fmt.Errorf("utuber needs the taskmaster engine: %w", err)
+		}
+		return utuber.Build(cfg.Utuber, e)
 	case "admin":
 		return admin.Build(cfg, admin.Deps{
 			Service:      svc,

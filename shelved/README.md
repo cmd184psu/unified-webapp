@@ -1,6 +1,6 @@
 # Round two — auth, passkeys, and cross-module origin control
 
-Split out on 2026-09-10 so round one is just the multissh port. **This is scheduled work, not cancelled work** — the operator will pick up auth, crypto and security as the next round.
+Split out on 2026-09-10 so round one is just the multissh port. **This is scheduled work, not canceled work** — the operator will pick up auth, crypto and security as the next round.
 
 The active plan (`../plan.md`) ports the module and leaves this untouched.
 
@@ -35,4 +35,4 @@ The design in here is expensive and mostly correct. Five iterations of Architect
 
 ## Known open items at time of shelving
 
-The v8 plan was `pending approval` and had completed four of five permitted consensus iterations. Iteration 5 (Architect on v8) was launched and cancelled when scope was cut, so **v8 itself is unreviewed**. Its status line describes iteration 4's findings, which it applied. Treat v8 as "synthesis complete, verification not done".
+The v8 plan was `pending approval` and had completed four of five permitted consensus iterations. Iteration 5 (Architect on v8) was launched and canceled when scope was cut, so **v8 itself is unreviewed**. Its status line describes iteration 4's findings, which it applied. Treat v8 as "synthesis complete, verification not done".

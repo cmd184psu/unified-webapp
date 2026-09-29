@@ -51,7 +51,7 @@ export function IssuesPage({
     <>
       <div className="topbar">
         <h1>{title}</h1>
-        <span style={{ color: "var(--text-faint)" }}>{issues.length}</span>
+        <span style={{ color: "var(--color-text-faint)" }}>{issues.length}</span>
         <div className="spacer" />
         <button className="btn primary" onClick={() => setShowModal(true)}>
           + New issue

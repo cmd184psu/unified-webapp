@@ -1,49 +1,46 @@
 import { useState, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { api, AppConfig, Share, GlobalEntry } from './api'
-import { ThemeProvider } from './theme'
-import { ToastProvider, useToast } from './Toast'
+import { showToast, confirmDialog } from '@shared'
 import { SharesPage } from './SharesPage'
 import { GlobalsPage } from './GlobalsPage'
 import { SettingsPage } from './SettingsPage'
 import { PreviewPage } from './PreviewPage'
 import { LogsPage } from './LogsPage'
+import { setPersistTheme, initHamburger } from './main'
 import './styles.css'
 
 type Page = 'shares' | 'globals' | 'preview' | 'logs'
 
 const NAV: { id: Page; label: string; icon: string }[] = [
   { id: 'shares',   label: 'Shares',   icon: '🗂' },
-  { id: 'globals',  label: 'Globals',  icon: '⚙️' },
+  { id: 'globals',  label: 'Globals',  icon: '📋' },
   { id: 'preview',  label: 'Preview',  icon: '📄' },
   { id: 'logs',     label: 'Logs',     icon: '📜' },
 ]
 
-// warnAutoDisabled toasts a warning when the server has flipped a share to
-// disabled because its path no longer exists on disk.
-function warnAutoDisabled(before: Share[], after: Share[], toast: ReturnType<typeof useToast>['toast']) {
+function warnAutoDisabled(before: Share[], after: Share[]) {
   const names = after
     .filter((s, i) => before[i]?.enabled && !s.enabled)
     .map(s => s.name || '(unnamed)')
   if (names.length > 0) {
-    toast(
-      'Share(s) auto-disabled',
-      `Path no longer exists for: ${names.join(', ')}`,
-      'warning'
+    showToast(
+      `Share(s) auto-disabled — path no longer exists for: ${names.join(', ')}`,
+      'notice'
     )
   }
 }
 
-function AppInner() {
-  const { toast } = useToast()
+export default function App() {
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [page, setPage] = useState<Page>('shares')
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [importing, setImporting] = useState(false)
   const [restartOutput, setRestartOutput] = useState<{ success: boolean; output: string } | null>(null)
   const [version, setVersion] = useState('')
+  const [settingsHost, setSettingsHost] = useState<HTMLElement | null>(null)
 
   // ── Load initial config ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -52,8 +49,25 @@ function AppInner() {
         setConfig(cfg)
         setVersion(ver.version)
       })
-      .catch(e => toast('Failed to load config', String(e), 'error'))
-  }, [toast])
+      .catch(e => showToast(`Failed to load config: ${String(e)}`, 'error'))
+  }, [])
+
+  // ── Mount the shared hamburger onto the topbar trigger button ───────────────
+  // Deferred until `config` is loaded, since the trigger button only exists
+  // in the DOM once the topbar (gated on `config`) renders.
+  useEffect(() => {
+    if (config) setSettingsHost(initHamburger())
+  }, [config])
+
+  // ── Wire ThemeManager persistence into React ────────────────────────────────
+  const patchConfig = useCallback((patch: Partial<AppConfig>) => {
+    setConfig(c => c ? { ...c, ...patch } : c)
+    setDirty(true)
+  }, [])
+
+  useEffect(() => {
+    setPersistTheme((t: string) => patchConfig({ theme: t as AppConfig['theme'] }))
+  }, [patchConfig])
 
   // ── Patch helpers ───────────────────────────────────────────────────────────
   const patchShares = useCallback((shares: Share[]) => {
@@ -63,11 +77,6 @@ function AppInner() {
 
   const patchGlobals = useCallback((globals: GlobalEntry[]) => {
     setConfig(c => c ? { ...c, globals } : c)
-    setDirty(true)
-  }, [])
-
-  const patchConfig = useCallback((patch: Partial<AppConfig>) => {
-    setConfig(c => c ? { ...c, ...patch } : c)
     setDirty(true)
   }, [])
 
@@ -85,16 +94,16 @@ function AppInner() {
           theme: config.theme,
         }),
       ])
-      warnAutoDisabled(config.shares, savedShares, toast)
+      warnAutoDisabled(config.shares, savedShares)
       setConfig(c => c ? { ...c, shares: savedShares } : c)
       setDirty(false)
-      toast('Saved', 'Configuration written to state.json', 'success')
+      showToast('Configuration written to state.json', 'success')
     } catch (e) {
-      toast('Save failed', String(e), 'error')
+      showToast(`Save failed: ${String(e)}`, 'error')
     } finally {
       setSaving(false)
     }
-  }, [config, saving, toast])
+  }, [config, saving])
 
   // ── Import existing smb.conf ─────────────────────────────────────────────────
   const importConf = useCallback(async (path: string) => {
@@ -109,17 +118,16 @@ function AppInner() {
         ...(result.share_owner ? { share_owner: result.share_owner } : {}),
       } : c)
       setDirty(true)
-      toast(
-        'Imported',
-        `Loaded ${result.shares.length} share(s) and ${result.globals.length} global(s) from ${path}. Review, then click Save to persist.`,
+      showToast(
+        `Imported ${result.shares.length} share(s) and ${result.globals.length} global(s) from ${path}. Review, then click Save to persist.`,
         'success'
       )
     } catch (e) {
-      toast('Import failed', String(e), 'error')
+      showToast(`Import failed: ${String(e)}`, 'error')
     } finally {
       setImporting(false)
     }
-  }, [importing, toast])
+  }, [importing])
 
   // ── Save + write smb.conf + restart Samba ────────────────────────────────────
   const saveAndRestart = useCallback(async () => {
@@ -127,7 +135,6 @@ function AppInner() {
     setRestarting(true)
     setRestartOutput(null)
     try {
-      // Persist config first.
       const [savedShares] = await Promise.all([
         api.putShares(config.shares),
         api.putGlobals(config.globals),
@@ -137,152 +144,126 @@ function AppInner() {
           theme: config.theme,
         }),
       ])
-      warnAutoDisabled(config.shares, savedShares, toast)
+      warnAutoDisabled(config.shares, savedShares)
       setConfig(c => c ? { ...c, shares: savedShares } : c)
       setDirty(false)
-      // Then write smb.conf and restart.
       const result = await api.saveAndRestart()
       setRestartOutput(result.restart)
       if (result.restart.success) {
-        toast('Saved & restarted', `smb.conf written to ${result.path}`, 'success')
+        showToast(`Saved & restarted — smb.conf written to ${result.path}`, 'success')
       } else {
-        toast('Samba restart failed', result.restart.output || 'Unknown error', 'warning')
+        showToast(`Samba restart failed: ${result.restart.output || 'Unknown error'}`, 'notice')
       }
     } catch (e) {
-      toast('Save & restart failed', String(e), 'error')
+      showToast(`Save & restart failed: ${String(e)}`, 'error')
     } finally {
       setRestarting(false)
     }
-  }, [config, restarting, toast])
+  }, [config, restarting])
 
   if (!config) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: 'var(--text-muted)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: 'var(--color-text-muted)' }}>
         Loading smbed…
       </div>
     )
   }
 
   return (
-    <ThemeProvider initial={config.theme} onChange={theme => patchConfig({ theme })}>
-      <div className="layout">
-        {/* ── Topbar ─────────────────────────────────────────────────── */}
-        <header className="topbar">
-          <span className="topbar-logo">smbed<span> — Samba Mini-editor</span></span>
-          <span className="topbar-spacer" />
-          <span className="topbar-status">
-            <span className={`status-dot${saving || restarting ? ' saving' : ''}`} />
-            {saving ? 'Saving…' : restarting ? 'Restarting Samba…' : dirty ? 'Unsaved changes' : 'Saved'}
-          </span>
-          {version && <span className="text-muted" style={{ fontSize: 10 }}>v{version}</span>}
-          <button
-            className="hamburger-btn"
-            onClick={() => setSettingsOpen(true)}
-            title="Settings"
-            aria-label="Open settings"
+    <div className="layout">
+      {/* ── Topbar ─────────────────────────────────────────────────── */}
+      <header className="topbar">
+        <span className="topbar-logo">smbed<span> — Samba Mini-editor</span></span>
+        <span className="topbar-spacer" />
+        <span className="topbar-status">
+          <span className={`status-dot${saving || restarting ? ' saving' : ''}`} />
+          {saving ? 'Saving…' : restarting ? 'Restarting Samba…' : dirty ? 'Unsaved changes' : 'Saved'}
+        </span>
+        {version && <span className="text-muted" style={{ fontSize: 10 }}>v{version}</span>}
+        <button
+          id="hamburger-trigger"
+          className="hamburger-btn"
+          title="Menu"
+          aria-label="Open menu"
+        >
+          ☰
+        </button>
+      </header>
+
+      {/* ── Sidebar ────────────────────────────────────────────────── */}
+      <nav className="sidebar">
+        <div className="sidebar-section-label">Navigation</div>
+        {NAV.map(n => (
+          <div
+            key={n.id}
+            className={`nav-item${page === n.id ? ' active' : ''}`}
+            onClick={() => setPage(n.id)}
           >
-            ☰
-          </button>
-        </header>
-
-        {/* ── Sidebar ────────────────────────────────────────────────── */}
-        <nav className="sidebar">
-          <div className="sidebar-section-label">Navigation</div>
-          {NAV.map(n => (
-            <div
-              key={n.id}
-              className={`nav-item${page === n.id ? ' active' : ''}`}
-              onClick={() => setPage(n.id)}
-            >
-              <span className="nav-icon">{n.icon}</span>
-              {n.label}
-            </div>
-          ))}
-
-          <div className="divider" style={{ margin: '12px 16px' }} />
-          <div className="sidebar-section-label">Share owner</div>
-          <div style={{ padding: '4px 16px' }}>
-            <input
-              className="input input-sm"
-              value={config.share_owner}
-              onChange={e => patchConfig({ share_owner: e.target.value })}
-              title="Linux user that owns all shares"
-            />
+            <span className="nav-icon">{n.icon}</span>
+            {n.label}
           </div>
-        </nav>
+        ))}
 
-        {/* ── Main ───────────────────────────────────────────────────── */}
-        <main className="main-content">
-          {page === 'shares'   && <SharesPage shares={config.shares} onChange={patchShares} />}
-          {page === 'globals'  && <GlobalsPage globals={config.globals} onChange={patchGlobals} />}
-          {page === 'preview'  && <PreviewPage globals={config.globals} shares={config.shares} shareOwner={config.share_owner} />}
-          {page === 'logs'     && <LogsPage />}
-
-          {/* ── Restart output ──────────────────────────────────────── */}
-          {restartOutput && (
-            <div className="card mt-16" style={{ borderColor: restartOutput.success ? 'var(--green)' : 'var(--red)' }}>
-              <div className="card-title">
-                {restartOutput.success ? '✅' : '❌'} Samba restart output
-              </div>
-              <div className="restart-output">
-                {restartOutput.output || '(no output)'}
-              </div>
-            </div>
-          )}
-        </main>
-
-        {/* ── Action bar (persistent footer) ────────────────────────── */}
-        <footer className="action-bar">
-          <span className="action-bar-hint">
-            {dirty
-              ? '⚠️ You have unsaved changes.'
-              : '✓ All changes saved to state.json.'}
-          </span>
-          <button
-            className="btn btn-ghost"
-            onClick={save}
-            disabled={!dirty || saving || restarting}
-          >
-            💾 Save
-          </button>
-          <button
-            className="btn btn-success"
-            onClick={saveAndRestart}
-            disabled={saving || restarting}
-          >
-            {restarting ? '⟳ Restarting…' : '🚀 Save & Restart Samba'}
-          </button>
-        </footer>
-
-        {/* ── Settings drawer ────────────────────────────────────────── */}
-        <div
-          className={`settings-backdrop${settingsOpen ? ' open' : ''}`}
-          onClick={() => setSettingsOpen(false)}
-        />
-        <div className={`settings-drawer${settingsOpen ? ' open' : ''}`}>
-          <div className="settings-drawer-header">
-            <span className="settings-drawer-title">🔧 Settings</span>
-            <button
-              className="btn-icon"
-              onClick={() => setSettingsOpen(false)}
-              aria-label="Close settings"
-            >
-              ✕
-            </button>
-          </div>
-          <div className="settings-drawer-body">
-            <SettingsPage config={config} onChange={patchConfig} importing={importing} onImport={importConf} />
-          </div>
+        <div className="divider" style={{ margin: '12px 16px' }} />
+        <div className="sidebar-section-label">Share owner</div>
+        <div style={{ padding: '4px 16px' }}>
+          <input
+            className="input input-sm"
+            value={config.share_owner}
+            onChange={e => patchConfig({ share_owner: e.target.value })}
+            title="Linux user that owns all shares"
+          />
         </div>
-      </div>
-    </ThemeProvider>
-  )
-}
+      </nav>
 
-export default function App() {
-  return (
-    <ToastProvider>
-      <AppInner />
-    </ToastProvider>
+      {/* ── Main ───────────────────────────────────────────────────── */}
+      <main className="main-content">
+        {page === 'shares'   && <SharesPage shares={config.shares} onChange={patchShares} shareOwner={config.share_owner} />}
+        {page === 'globals'  && <GlobalsPage globals={config.globals} onChange={patchGlobals} />}
+        {page === 'preview'  && <PreviewPage globals={config.globals} shares={config.shares} shareOwner={config.share_owner} />}
+        {page === 'logs'     && <LogsPage />}
+
+        {/* ── Restart output ──────────────────────────────────────── */}
+        {restartOutput && (
+          <div className="card mt-16" style={{ borderColor: restartOutput.success ? 'var(--color-success)' : 'var(--color-danger)' }}>
+            <div className="card-title">
+              {restartOutput.success ? '✅' : '❌'} Samba restart output
+            </div>
+            <div className="restart-output">
+              {restartOutput.output || '(no output)'}
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* ── Settings, rendered inside the hamburger drawer ───────────── */}
+      {settingsHost && createPortal(
+        <SettingsPage config={config} onChange={patchConfig} importing={importing} onImport={importConf} />,
+        settingsHost,
+      )}
+
+      {/* ── Action bar (persistent footer) ────────────────────────── */}
+      <footer className="action-bar">
+        <span className="action-bar-hint">
+          {dirty
+            ? '⚠️ You have unsaved changes.'
+            : '✓ All changes saved to state.json.'}
+        </span>
+        <button
+          className="btn btn-ghost"
+          onClick={save}
+          disabled={!dirty || saving || restarting}
+        >
+          💾 Save
+        </button>
+        <button
+          className="btn btn-success"
+          onClick={saveAndRestart}
+          disabled={saving || restarting}
+        >
+          {restarting ? '⟳ Restarting…' : '🚀 Save & Restart Samba'}
+        </button>
+      </footer>
+    </div>
   )
 }

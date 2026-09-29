@@ -11,11 +11,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestPythonBinFallsBackToConfigDefault(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
-	s := newSettingsStore(path, "python3.11")
+	s := newSettingsStore(path, "python3.11", "")
 	if got := s.PythonBin(); got != "python3.11" {
 		t.Fatalf("PythonBin() = %q, want config default python3.11", got)
 	}
@@ -23,7 +25,7 @@ func TestPythonBinFallsBackToConfigDefault(t *testing.T) {
 
 func TestPythonBinFallsBackToPackageDefault(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
-	s := newSettingsStore(path, "")
+	s := newSettingsStore(path, "", "")
 	if got := s.PythonBin(); got != "python3.12" {
 		t.Fatalf("PythonBin() = %q, want python3.12", got)
 	}
@@ -31,7 +33,7 @@ func TestPythonBinFallsBackToPackageDefault(t *testing.T) {
 
 func TestSetPythonBinPersistsAcrossRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
-	s := newSettingsStore(path, "python3.12")
+	s := newSettingsStore(path, "python3.12", "")
 	if err := s.SetPythonBin("python3"); err != nil {
 		t.Fatalf("SetPythonBin: %v", err)
 	}
@@ -46,7 +48,7 @@ func TestSetPythonBinPersistsAcrossRestart(t *testing.T) {
 		t.Errorf("settings file does not hold the saved value: %s", data)
 	}
 	// AC-6: a second store on the same path — the restart — reads it back.
-	restarted := newSettingsStore(path, "python3.12")
+	restarted := newSettingsStore(path, "python3.12", "")
 	if got := restarted.PythonBin(); got != "python3" {
 		t.Fatalf("PythonBin() after restart = %q, want python3", got)
 	}
@@ -54,7 +56,7 @@ func TestSetPythonBinPersistsAcrossRestart(t *testing.T) {
 
 func TestSetPythonBinRejectsShellMetacharacters(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
-	s := newSettingsStore(path, "python3.12")
+	s := newSettingsStore(path, "python3.12", "")
 	for _, bad := range []string{"rm -rf /", "py;ls", "$(id)", "py thon", "py|x"} {
 		if err := s.SetPythonBin(bad); err == nil {
 			t.Errorf("SetPythonBin(%q) accepted, want rejection", bad)
@@ -73,7 +75,7 @@ func TestSetPythonBinRejectsShellMetacharacters(t *testing.T) {
 // would leave settings.json in the download dir's newest-file scan.
 func TestBlankSaveClearsOverrideAndPersists(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
-	s := newSettingsStore(path, "python3.12")
+	s := newSettingsStore(path, "python3.12", "")
 	if err := s.SetPythonBin("python3"); err != nil {
 		t.Fatalf("SetPythonBin: %v", err)
 	}
@@ -88,7 +90,7 @@ func TestBlankSaveClearsOverrideAndPersists(t *testing.T) {
 	}
 	// The clear survives a restart: an in-memory-only clear would resurrect
 	// the old override here.
-	restarted := newSettingsStore(path, "python3.12")
+	restarted := newSettingsStore(path, "python3.12", "")
 	if got := restarted.PythonBin(); got != "python3.12" {
 		t.Fatalf("PythonBin() after clear+restart = %q, want python3.12", got)
 	}
@@ -96,7 +98,7 @@ func TestBlankSaveClearsOverrideAndPersists(t *testing.T) {
 
 func TestBlankSaveWithNoFileSucceeds(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
-	s := newSettingsStore(path, "python3.12")
+	s := newSettingsStore(path, "python3.12", "")
 	if err := s.SetPythonBin(""); err != nil {
 		t.Fatalf("blank save with no file: %v", err)
 	}
@@ -107,61 +109,123 @@ func TestCorruptSettingsFileIsIgnored(t *testing.T) {
 	if err := os.WriteFile(path, []byte("{not json"), 0o644); err != nil {
 		t.Fatalf("write corrupt file: %v", err)
 	}
-	s := newSettingsStore(path, "python3.11")
+	s := newSettingsStore(path, "python3.11", "")
 	if got := s.PythonBin(); got != "python3.11" {
 		t.Fatalf("PythonBin() with corrupt file = %q, want config default", got)
 	}
 }
 
+// ── cookies (D5 Fix 2) ──────────────────────────────────────────────────────
+
+const validNetscapeCookies = "# Netscape HTTP Cookie File\n" +
+	".youtube.com\tTRUE\t/\tTRUE\t1999999999\tCONSENT\tYES+1\n"
+
+func TestCookiesNotConfiguredInitially(t *testing.T) {
+	dir := t.TempDir()
+	s := newSettingsStore(filepath.Join(dir, "settings.json"), "", filepath.Join(dir, "cookies.txt"))
+	configured, mtime := s.cookiesInfo()
+	if configured || mtime != nil {
+		t.Fatalf("cookiesInfo() = (%v, %v), want (false, nil) before any save", configured, mtime)
+	}
+}
+
+func TestSetCookiesTextWritesFileMode0600(t *testing.T) {
+	dir := t.TempDir()
+	cookiesPath := filepath.Join(dir, "cookies.txt")
+	s := newSettingsStore(filepath.Join(dir, "settings.json"), "", cookiesPath)
+
+	if err := s.SetCookiesText(validNetscapeCookies); err != nil {
+		t.Fatalf("SetCookiesText: %v", err)
+	}
+	fi, err := os.Stat(cookiesPath)
+	if err != nil {
+		t.Fatalf("stat cookie file: %v", err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Errorf("cookie file mode = %v, want 0600", fi.Mode().Perm())
+	}
+	configured, mtime := s.cookiesInfo()
+	if !configured || mtime == nil {
+		t.Fatalf("cookiesInfo() = (%v, %v), want (true, non-nil) after a save", configured, mtime)
+	}
+}
+
+func TestSetCookiesTextRejectsUnparseableTextAndLeavesFileUntouched(t *testing.T) {
+	dir := t.TempDir()
+	cookiesPath := filepath.Join(dir, "cookies.txt")
+	s := newSettingsStore(filepath.Join(dir, "settings.json"), "", cookiesPath)
+
+	if err := s.SetCookiesText(validNetscapeCookies); err != nil {
+		t.Fatalf("SetCookiesText: %v", err)
+	}
+	before, err := os.ReadFile(cookiesPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.SetCookiesText("this is not a cookie file"); err == nil {
+		t.Fatal("SetCookiesText accepted unparseable text, want rejection")
+	}
+
+	after, err := os.ReadFile(cookiesPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Errorf("existing cookie file was modified by a rejected save: before=%q after=%q", before, after)
+	}
+}
+
+func TestSetCookiesTextBlankClearsFile(t *testing.T) {
+	dir := t.TempDir()
+	cookiesPath := filepath.Join(dir, "cookies.txt")
+	s := newSettingsStore(filepath.Join(dir, "settings.json"), "", cookiesPath)
+
+	if err := s.SetCookiesText(validNetscapeCookies); err != nil {
+		t.Fatalf("SetCookiesText: %v", err)
+	}
+	if err := s.SetCookiesText(""); err != nil {
+		t.Fatalf("clearing SetCookiesText: %v", err)
+	}
+	if _, err := os.Stat(cookiesPath); !os.IsNotExist(err) {
+		t.Fatalf("cookie file should have been removed, stat err = %v", err)
+	}
+	configured, mtime := s.cookiesInfo()
+	if configured || mtime != nil {
+		t.Fatalf("cookiesInfo() after clear = (%v, %v), want (false, nil)", configured, mtime)
+	}
+}
+
+// TestHandleSettingsHTTP exercises the /settings.json handler over a real
+// engine-backed module (6d harness): the 9-key GET shape (D8's 7 plus D5's
+// cookies_configured/cookies_updated_at), a python_bin POST, rejection of a
+// shell-metacharacter python_bin and malformed JSON, and the 405 + Allow
+// header on an unsupported method.
 func TestHandleSettingsHTTP(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	h := handleSettings(newSettingsStore(path, "python3.12"))
+	h, _ := buildTestModule(t)
 
-	get := httptest.NewRecorder()
-	h(get, httptest.NewRequest(http.MethodGet, "/settings.json", nil))
-	if get.Code != http.StatusOK {
-		t.Fatalf("GET status = %d, want 200", get.Code)
-	}
-	var f settingsFile
-	if err := json.Unmarshal(get.Body.Bytes(), &f); err != nil {
-		t.Fatalf("GET body decode: %v", err)
-	}
-	if f.PythonBin != "python3.12" {
-		t.Errorf("GET python_bin = %q, want python3.12", f.PythonBin)
-	}
+	get := req(h, http.MethodGet, "/settings.json", nil)
+	require.Equal(t, http.StatusOK, get.Code)
+	var m map[string]any
+	require.NoError(t, json.Unmarshal(get.Body.Bytes(), &m))
+	require.Len(t, m, 9, "GET returns exactly 9 keys")
+	require.Equal(t, "python3.12", m["python_bin"])
+	require.Equal(t, false, m["cookies_configured"])
+	require.Nil(t, m["cookies_updated_at"])
 
-	post := httptest.NewRecorder()
-	h(post, httptest.NewRequest(http.MethodPost, "/settings.json",
-		strings.NewReader(`{"python_bin":"python3"}`)))
-	if post.Code != http.StatusOK {
-		t.Fatalf("POST valid status = %d, want 200 (body %s)", post.Code, post.Body)
-	}
-	if !strings.Contains(post.Body.String(), `"python_bin":"python3"`) {
-		t.Errorf("POST valid does not echo the effective value: %s", post.Body)
-	}
+	post := req(h, http.MethodPost, "/settings.json", strings.NewReader(`{"python_bin":"python3"}`))
+	require.Equal(t, http.StatusOK, post.Code, post.Body.String())
+	require.Contains(t, post.Body.String(), `"python_bin":"python3"`)
 
-	bad := httptest.NewRecorder()
-	h(bad, httptest.NewRequest(http.MethodPost, "/settings.json",
-		strings.NewReader(`{"python_bin":"rm -rf /"}`)))
-	if bad.Code != http.StatusBadRequest {
-		t.Fatalf("POST invalid status = %d, want 400", bad.Code)
-	}
+	bad := req(h, http.MethodPost, "/settings.json", strings.NewReader(`{"python_bin":"rm -rf /"}`))
+	require.Equal(t, http.StatusBadRequest, bad.Code)
 
-	malformed := httptest.NewRecorder()
-	h(malformed, httptest.NewRequest(http.MethodPost, "/settings.json",
-		strings.NewReader(`{not json`)))
-	if malformed.Code != http.StatusBadRequest {
-		t.Fatalf("POST malformed JSON status = %d, want 400", malformed.Code)
-	}
+	malformed := req(h, http.MethodPost, "/settings.json", strings.NewReader(`{not json`))
+	require.Equal(t, http.StatusBadRequest, malformed.Code)
 
-	put := httptest.NewRecorder()
-	h(put, httptest.NewRequest(http.MethodPut, "/settings.json", nil))
-	if put.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("PUT status = %d, want 405", put.Code)
-	}
-	if allow := put.Header().Get("Allow"); allow != "GET, POST" {
-		t.Errorf("PUT Allow header = %q, want \"GET, POST\"", allow)
-	}
+	put := req(h, http.MethodPut, "/settings.json", nil)
+	require.Equal(t, http.StatusMethodNotAllowed, put.Code)
+	require.Equal(t, "GET, POST", put.Header().Get("Allow"))
 }
 
 // capturingExec records the command it was asked to run. (fakeExec is taken
@@ -173,18 +237,18 @@ type capturingExec struct {
 	err  error
 }
 
-func (c *capturingExec) Run(_ context.Context, name string, args []string, onLine func(string)) error {
+func (c *capturingExec) Run(_ context.Context, name string, args []string, onStdout, onStderr func(string)) error {
 	c.mu.Lock()
 	c.name = name
 	c.args = append([]string(nil), args...)
 	c.mu.Unlock()
-	onLine("Collecting yt-dlp")
+	onStdout("Collecting yt-dlp")
 	return c.err
 }
 
 func TestYtdlpUpdateUsesResolvedInterpreter(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
-	s := newSettingsStore(path, "python3.12")
+	s := newSettingsStore(path, "python3.12", "")
 	if err := s.SetPythonBin("python3"); err != nil {
 		t.Fatalf("SetPythonBin: %v", err)
 	}
@@ -211,7 +275,7 @@ func TestYtdlpUpdateUsesResolvedInterpreter(t *testing.T) {
 
 func TestYtdlpUpdateStreamsError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
-	s := newSettingsStore(path, "python3.12")
+	s := newSettingsStore(path, "python3.12", "")
 	exec := &capturingExec{err: errors.New("pip exploded")}
 	rec := httptest.NewRecorder()
 	handleYtdlpUpdate(exec, s)(rec, httptest.NewRequest(http.MethodGet, "/ytdlp-update", nil))

@@ -38,7 +38,7 @@ function saveSide(side) {
         data: JSON.stringify(body),
         error: function (err) {
             console.log(JSON.stringify(err, null, 3));
-            alert('Failed to save ' + side + ' list.');
+            showToast('Failed to save ' + side + ' list.', 'error');
         }
     });
 }
@@ -90,8 +90,8 @@ function renderRow(side, item, idx) {
     sendBtn.className = 'icon-btn cmp-send-btn';
     sendBtn.title = side === 'left' ? 'Send to right' : 'Send to left';
     sendBtn.innerHTML = side === 'left'
-        ? '<i class="fas fa-arrow-right"></i>'
-        : '<i class="fas fa-arrow-left"></i>';
+        ? '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8h12m0 0l-4-4m4 4l-4 4"/></svg>'
+        : '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 8H2m0 0l4-4M2 8l4 4"/></svg>';
     sendBtn.onclick = function () { sendItem(side, idx); };
     tdSend.appendChild(sendBtn);
 
@@ -100,7 +100,7 @@ function renderRow(side, item, idx) {
     var delBtn = document.createElement('button');
     delBtn.className = 'icon-btn cmp-delete-btn';
     delBtn.title = 'Delete';
-    delBtn.innerHTML = '<i class="fa fa-trash"></i>';
+    delBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 1h5l.5.5V3h4v1h-1.5l-1 10.5-.5.5h-8l-.5-.5L2.5 4H1V3h4V1.5l.5-.5zM6 3h4V2H6v1z"/></svg>';
     delBtn.onclick = function () { deleteItem(side, idx); };
     tdDelete.appendChild(delBtn);
 
@@ -261,7 +261,7 @@ function applyDupHighlights() {
             var badge = tr.querySelector('.cmp-badge');
             var hasMatch = !!dupMatches[key];
             tr.classList.toggle('cmp-dup', hasMatch);
-            badge.innerHTML = hasMatch ? '<i class="fas fa-exclamation-triangle" title="Possible duplicate"></i>' : '';
+            badge.innerHTML = hasMatch ? '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" title="Possible duplicate"><path d="M8 1L1 14h14L8 1zm-.75 5h1.5v4h-1.5V6zm0 5h1.5v1.5h-1.5V11z"/></svg>' : '';
             badge.onclick = hasMatch ? function () { jumpToMatch(key); } : null;
         });
     });

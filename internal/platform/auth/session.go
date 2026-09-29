@@ -13,12 +13,9 @@ import (
 // sessionCookieName is the name of the cookie carrying the session JWT.
 const sessionCookieName = "uw_session"
 
-// Default session lifetime and sliding-refresh fraction, applied when the
-// corresponding config.SessionConfig field is left at its zero value.
-const (
-	defaultSessionTTL      = 720 * time.Hour
-	defaultRefreshFraction = 0.5
-)
+// defaultSessionTTL is the maximum session length when
+// config.SessionConfig.TTLHours is left at zero.
+const defaultSessionTTL = 720 * time.Hour
 
 // sessionClaims is the JWT claim set for a unified-webapp session token.
 // Grants records the session's scoped grant strings: "ldap", "passkey", and
@@ -34,11 +31,17 @@ const (
 // no runtime token-version checking code required.
 type sessionClaims struct {
 	Grants []string `json:"grants"`
+	// GrantTimes records when each grant was established (unix seconds),
+	// and ModuleSeen when each module was last used; see session_scope.go.
+	// Both are absent on tokens from before per-module idle clocks, which
+	// then fall back to IssuedAt.
+	GrantTimes map[string]int64 `json:"gt,omitempty"`
+	ModuleSeen map[string]int64 `json:"ma,omitempty"`
 	jwt.RegisteredClaims
 }
 
-// sessionTTL returns the configured session TTL, or the default (720h)
-// when unset.
+// sessionTTL returns the configured maximum session length, or the default
+// (720h) when unset.
 func sessionTTL(cfg config.SessionConfig) time.Duration {
 	if cfg.TTLHours == 0 {
 		return defaultSessionTTL
@@ -46,18 +49,17 @@ func sessionTTL(cfg config.SessionConfig) time.Duration {
 	return time.Duration(cfg.TTLHours) * time.Hour
 }
 
-// refreshFraction returns the configured sliding-refresh fraction, or the
-// default (0.5) when unset.
-func refreshFraction(cfg config.SessionConfig) float64 {
-	if cfg.RefreshAfterFraction == 0 {
-		return defaultRefreshFraction
-	}
-	return cfg.RefreshAfterFraction
-}
-
 // issueToken creates and signs an HS256 session JWT for sub, recording
 // grants, with iat=now and exp=now+ttl.
 func issueToken(key []byte, sub string, grants []string, ttl time.Duration, now time.Time) (string, error) {
+	c := sessionClaims{Grants: grants}
+	c.Subject = sub
+	return issueClaims(key, c, ttl, now)
+}
+
+// issueClaims signs c as a session JWT, stamping iat=now and exp=now+ttl
+// (c's subject, grants and per-module clocks are kept as given).
+func issueClaims(key []byte, c sessionClaims, ttl time.Duration, now time.Time) (string, error) {
 	if len(key) == 0 {
 		// HMAC-SHA256 signs "successfully" with an empty key, producing
 		// trivially forgeable tokens. A Service whose policy protects
@@ -67,13 +69,11 @@ func issueToken(key []byte, sub string, grants []string, ttl time.Duration, now 
 		// is a wiring bug, and refusing beats signing.
 		return "", fmt.Errorf("auth: refusing to sign a session token with an empty key")
 	}
-	claims := sessionClaims{
-		Grants: grants,
-		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   sub,
-			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
-		},
+	claims := c
+	claims.RegisteredClaims = jwt.RegisteredClaims{
+		Subject:   c.Subject,
+		IssuedAt:  jwt.NewNumericDate(now),
+		ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := token.SignedString(key)
@@ -105,17 +105,6 @@ func parseToken(key []byte, tokenString string, now time.Time) (*sessionClaims, 
 		return nil, fmt.Errorf("auth: invalid session token")
 	}
 	return claims, nil
-}
-
-// needsRefresh reports whether a session established with claims should be
-// reissued with a fresh iat/exp: true once more than fraction*ttl has
-// elapsed since the token was issued (sliding-window refresh).
-func needsRefresh(claims *sessionClaims, ttl time.Duration, fraction float64, now time.Time) bool {
-	if claims == nil || claims.IssuedAt == nil {
-		return true
-	}
-	elapsed := now.Sub(claims.IssuedAt.Time)
-	return elapsed > time.Duration(fraction*float64(ttl))
 }
 
 // pinGrant returns the scoped door-code grant string for module -- the
@@ -155,8 +144,9 @@ func hasGrant(grants []string, grant string) bool {
 //     admin.
 //   - any other module: an identity grant ("ldap" or "passkey") reaches
 //     every protected non-admin module, or the module's own scoped
-//     door-code grant ("pin:"+module, see pinGrant) reaches that module
-//     alone.
+//     door-code grant ("pin:"+module+":"+fingerprint, see pinGrantFP)
+//     reaches that module alone. A bare "pin:"+module (tokens from before
+//     PIN fingerprints) is refused, so those sessions must log in again.
 //
 // This is a total function over any string content claims.Grants might
 // carry. claims == nil is a safe deny, never a panic; a legacy or garbage
@@ -174,7 +164,8 @@ func grantsAllow(claims *sessionClaims, module string) bool {
 			return true
 		}
 	}
-	return hasGrant(claims.Grants, pinGrant(module))
+	_, ok := modulePINGrant(claims.Grants, module)
+	return ok
 }
 
 // accumulate computes the (subject, grants) pair for a freshly issued

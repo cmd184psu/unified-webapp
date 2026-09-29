@@ -21,6 +21,7 @@ import (
 // disk (FR-H3, FR-N4): there is nothing to strip because there is nowhere to
 // put one. Do not add a credential field here; see hostRequest.
 type hostConfig struct {
+	Name      string `json:"name"`
 	IP        string `json:"ip"`
 	Port      int    `json:"port"`
 	User      string `json:"user"`
@@ -32,6 +33,7 @@ type hostConfig struct {
 // carries a password, it is never written anywhere, and it never appears on the
 // read-from-disk path.
 type hostRequest struct {
+	Name      string          `json:"name"`
 	IP        string          `json:"ip"`
 	Port      int             `json:"port"`
 	User      string          `json:"user"`
@@ -39,6 +41,10 @@ type hostRequest struct {
 	Password  sshproxy.Secret `json:"password"`
 	RemoteDir string          `json:"remoteDir"`
 }
+
+// maxHostNameLen caps a host's display name, which labels its rail card and
+// terminal panel.
+const maxHostNameLen = 64
 
 type hostStore struct {
 	mu          sync.Mutex
@@ -149,7 +155,7 @@ func normalizeHostRequests(hosts []hostRequest, maxSessions int) ([]hostConfig, 
 	}
 	out := make([]hostConfig, 0, len(hosts))
 	for _, h := range hosts {
-		cfg, err := normalizeHostFields(h.IP, h.Port, h.User, h.Key, h.RemoteDir)
+		cfg, err := normalizeHostFields(h.Name, h.IP, h.Port, h.User, h.Key, h.RemoteDir)
 		if err != nil {
 			return nil, err
 		}
@@ -165,7 +171,7 @@ func normalizeHostRequests(hosts []hostRequest, maxSessions int) ([]hostConfig, 
 func normalizeHostConfigs(hosts []hostConfig) ([]hostConfig, error) {
 	out := make([]hostConfig, 0, len(hosts))
 	for _, h := range hosts {
-		cfg, err := normalizeHostFields(h.IP, h.Port, h.User, h.Key, h.RemoteDir)
+		cfg, err := normalizeHostFields(h.Name, h.IP, h.Port, h.User, h.Key, h.RemoteDir)
 		if err != nil {
 			return nil, err
 		}
@@ -174,10 +180,14 @@ func normalizeHostConfigs(hosts []hostConfig) ([]hostConfig, error) {
 	return out, nil
 }
 
-// normalizeHostFields validates the key name and applies the port and
-// remoteDir defaults. It is the only place a hostConfig is constructed, so both
+// normalizeHostFields validates the key name, trims and caps the display name
+// at maxHostNameLen runes, and applies the port and remoteDir defaults. It is the only place a hostConfig is constructed, so both
 // entry points above cannot drift apart.
-func normalizeHostFields(ip string, port int, user, key, remoteDir string) (hostConfig, error) {
+func normalizeHostFields(name, ip string, port int, user, key, remoteDir string) (hostConfig, error) {
+	name = strings.TrimSpace(name)
+	if r := []rune(name); len(r) > maxHostNameLen {
+		name = string(r[:maxHostNameLen])
+	}
 	key = strings.TrimSpace(key)
 	if key != "" {
 		if key == "." || key == ".." || key != filepath.Base(key) || strings.ContainsRune(key, '/') || strings.ContainsRune(key, filepath.Separator) {
@@ -192,6 +202,7 @@ func normalizeHostFields(ip string, port int, user, key, remoteDir string) (host
 		port = 22
 	}
 	return hostConfig{
+		Name:      name,
 		IP:        ip,
 		Port:      port,
 		User:      user,

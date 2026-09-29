@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Legacy root CA filenames inside legacy_import_dir
@@ -317,7 +318,68 @@ func encodeKeyPEM(key *rsa.PrivateKey) []byte {
 // "CertMachine Root CA", and a random 128-bit serial -- not legacy's
 // big.NewInt(1) (reference/certmachine/main.go:79); this only affects roots
 // this code creates, never an imported one.
-func GenerateCA() (certPEM, keyPEM []byte, err error) {
+// DefaultCAName is the root CA's Common Name when none is given.
+const DefaultCAName = "CertMachine Root CA"
+
+// maxCANameLen caps a CA name (its Common Name), in runes.
+const maxCANameLen = 64
+
+// ErrInvalidCAName means a proposed CA name is empty, too long, or contains
+// control characters.
+var ErrInvalidCAName = errors.New("certmachine: the CA name must be 1-64 printable characters")
+
+// NormalizeCAName trims name and checks it's usable as a Common Name; empty
+// means DefaultCAName.
+func NormalizeCAName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return DefaultCAName, nil
+	}
+	if utf8.RuneCountInString(name) > maxCANameLen {
+		return "", ErrInvalidCAName
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return "", ErrInvalidCAName
+		}
+	}
+	return name, nil
+}
+
+// CAFileStem turns a CA's Common Name into a safe file-name stem, so a CA
+// is recognizable by name wherever its file lands (the root download, each
+// certificate bundle, a machine's trust store) and different CAs don't
+// overwrite each other: "Home Lab CA 2026" becomes "Home-Lab-CA-2026".
+// Anything outside letters, digits, '.', '_' and '-' becomes '-'.
+func CAFileStem(commonName string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.TrimSpace(commonName) {
+		ok := r < utf8.RuneSelf && (unicode.IsLetter(r) || unicode.IsDigit(r) || r == '.' || r == '_' || r == '-')
+		if ok {
+			b.WriteRune(r)
+			dash = false
+		} else if !dash && b.Len() > 0 {
+			b.WriteByte('-')
+			dash = true
+		}
+	}
+	stem := strings.Trim(b.String(), "-.")
+	if stem == "" {
+		return "rootCA"
+	}
+	return stem
+}
+
+// CAFileName is the root CA's download / bundle file name: "<stem>.crt".
+func CAFileName(commonName string) string { return CAFileStem(commonName) + ".crt" }
+
+// GenerateCA creates a root CA named DefaultCAName.
+func GenerateCA() (certPEM, keyPEM []byte, err error) { return GenerateNamedCA(DefaultCAName) }
+
+// GenerateNamedCA creates a root CA whose Common Name is name (already
+// normalized with NormalizeCAName).
+func GenerateNamedCA(name string) (certPEM, keyPEM []byte, err error) {
 	key, err := rsa.GenerateKey(rand.Reader, 4096)
 	if err != nil {
 		return nil, nil, fmt.Errorf("certmachine: generate ca key: %w", err)
@@ -334,7 +396,7 @@ func GenerateCA() (certPEM, keyPEM []byte, err error) {
 	now := time.Now().UTC()
 	tpl := &x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: "CertMachine Root CA"},
+		Subject:               pkix.Name{CommonName: name},
 		NotBefore:             now,
 		NotAfter:              now.AddDate(10, 0, 0),
 		IsCA:                  true,
@@ -350,12 +412,31 @@ func GenerateCA() (certPEM, keyPEM []byte, err error) {
 	return encodeCertPEM(der), encodeKeyPEM(key), nil
 }
 
+// genLeafKey is GenerateLeaf's leaf-key generation seam: production always
+// calls defaultGenLeafKey (a real RSA-2048 key, exactly as before this
+// seam existed). It exists only so the certmachine package's own test suite
+// can install a cheaper generator via TestMain (see main_test.go) -- RSA-2048
+// keygen is the single largest cost driver in this package's tests, one per
+// leaf certificate generated. It is a package var, not a Store field or
+// R7 test seam, because it must be installed once, in TestMain, before any
+// test runs, and never mutated again: TestMain runs sequentially before
+// m.Run() starts any test, so setting it there is race-free even though the
+// whole suite (including this var's use inside GenerateLeaf) then runs under
+// t.Parallel().
+var genLeafKey = defaultGenLeafKey
+
+func defaultGenLeafKey() (*rsa.PrivateKey, error) {
+	return rsa.GenerateKey(rand.Reader, 2048)
+}
+
 // GenerateLeaf issues a leaf certificate for req, signed by caCert/caKey,
-// valid for validityDays (always default_validity_days -- FR-4 forbids a
-// per-cert override) unless that would outlive the CA, in which case the
-// leaf's NotAfter is clamped to caCert.NotAfter and LeafResult.Clamped is
-// set. The clamp is owned here, not by a validator: it is not a rejection,
-// and two owners could disagree about the resulting NotAfter.
+// valid for validityDays (default_validity_days for every caller except
+// Store.Edit, the CA-replacement plan's one FR-4 exception, which passes an
+// operator-chosen validity -- see Edit's own doc comment for its bounds)
+// unless that would outlive the CA, in which case the leaf's NotAfter is
+// clamped to caCert.NotAfter and LeafResult.Clamped is set regardless of
+// which caller asked. The clamp is owned here, not by a validator: it is not
+// a rejection, and two owners could disagree about the resulting NotAfter.
 //
 // req.FQDN is always the certificate's CN and its first DNS SAN
 // (deduplicated against req.DNSSans), so a generated leaf always validates
@@ -367,7 +448,7 @@ func GenerateCA() (certPEM, keyPEM []byte, err error) {
 // the existing root -- a deliberate deviation from parity (open question
 // CM-1), not an oversight.
 func GenerateLeaf(caCert *x509.Certificate, caKey *rsa.PrivateKey, req CertRequest, validityDays int) (LeafResult, error) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := genLeafKey()
 	if err != nil {
 		return LeafResult{}, fmt.Errorf("certmachine: generate leaf key: %w", err)
 	}

@@ -66,11 +66,10 @@ type Policy struct {
 	// touches the filesystem), never rebuilt per request.
 	passkeys *passkeyService
 
-	// SessionTTL and RefreshFraction are the resolved (default-applied)
-	// session lifetime and sliding-refresh fraction -- see session.go's
-	// sessionTTL/refreshFraction.
-	SessionTTL      time.Duration
-	RefreshFraction float64
+	// SessionTTL is the resolved (default-applied) maximum session length:
+	// how long a login lasts however active it is (session.go's sessionTTL).
+	// Idle sign-out is per module (ModulePolicy.Idle).
+	SessionTTL time.Duration
 
 	// CookieSecure and CookieDomain mirror config.AuthConfig's cookie
 	// attributes.
@@ -86,6 +85,9 @@ type ModulePolicy struct {
 	// relative to the config file's directory before it ever reaches here),
 	// or "" when the module has no door code (LDAP/passkey only).
 	PinFile string
+	// Idle is how long a session stays signed in to this module without
+	// real use (resolved: config.DefaultIdleMinutes when unset).
+	Idle time.Duration
 }
 
 // OfferedMethods returns the auth methods module should present on
@@ -144,16 +146,15 @@ func BuildPolicy(a config.AuthConfig) (*Policy, error) {
 	}
 
 	p := &Policy{
-		Modules:         copyModules(a.Modules),
-		APIKeys:         append([]config.NamedHash(nil), a.APIKeys...),
-		AdminPIN:        a.AdminPIN,
-		AdminPINFile:    adminPINFile,
-		LDAP:            a.LDAP,
-		Passkey:         a.Passkey,
-		SessionTTL:      sessionTTL(a.Session),
-		RefreshFraction: refreshFraction(a.Session),
-		CookieSecure:    a.CookieSecure,
-		CookieDomain:    a.CookieDomain,
+		Modules:      copyModules(a.Modules),
+		APIKeys:      append([]config.NamedHash(nil), a.APIKeys...),
+		AdminPIN:     a.AdminPIN,
+		AdminPINFile: adminPINFile,
+		LDAP:         a.LDAP,
+		Passkey:      a.Passkey,
+		SessionTTL:   sessionTTL(a.Session),
+		CookieSecure: a.CookieSecure,
+		CookieDomain: a.CookieDomain,
 	}
 
 	if a.Passkey.RPID != "" && hasProtectedNonAdminModule(a.Modules) {
@@ -176,9 +177,39 @@ func copyModules(m map[string]config.ModuleAuthConfig) map[string]ModulePolicy {
 	}
 	out := make(map[string]ModulePolicy, len(m))
 	for k, v := range m {
-		out[k] = ModulePolicy{PinFile: v.PinFile}
+		out[k] = ModulePolicy{PinFile: v.PinFile, Idle: idleFor(v.IdleMinutes)}
 	}
 	return out
+}
+
+// idleFor resolves a module's idle_minutes (0 = default).
+func idleFor(minutes int) time.Duration {
+	if minutes <= 0 {
+		minutes = config.DefaultIdleMinutes
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
+// moduleIdle is module's idle limit; a module with no policy entry (admin
+// configured only through admin_pin/admin_pin_file) gets the default.
+func (p *Policy) moduleIdle(module string) time.Duration {
+	if m, ok := p.Modules[module]; ok && m.Idle > 0 {
+		return m.Idle
+	}
+	return idleFor(0)
+}
+
+// tokenLifetime is how long an issued session token stays valid: the
+// longest idle limit of any module, so the token never outlives the check
+// that matters (each module's own idle clock, session_scope.go).
+func (p *Policy) tokenLifetime() time.Duration {
+	longest := idleFor(0)
+	for _, m := range p.Modules {
+		if m.Idle > longest {
+			longest = m.Idle
+		}
+	}
+	return longest
 }
 
 // hasProtectedNonAdminModule reports whether modules has at least one entry
@@ -220,6 +251,9 @@ type Service struct {
 	// handler test can exercise the ldap method without a network,
 	// mirroring ldap_test.go's clientWithConn seam.
 	ldapDialer ldapDialer
+
+	// pinFP caches each PIN file's fingerprint (session_scope.go).
+	pinFP pinFPCache
 }
 
 // ldapClient builds an *LDAPClient from cfg, the current policy's LDAP

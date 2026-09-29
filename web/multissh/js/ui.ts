@@ -1,6 +1,6 @@
 import { TerminalSession } from "./terminal";
 import type { HostConfig, SessionStatus } from "./types";
-import { hostHasCredential } from "./hosts";
+import { hostHasCredential, hostDisplayName } from "./hosts";
 import type { HostStore } from "./hosts";
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -12,24 +12,26 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-function emptyHost(): HostConfig {
-  return {
-    ip: "",
-    port: 22,
-    user: "",
-    key: "",
-    remoteDir: "/tmp",
-    authMethod: "key",
-    password: "",
-  };
-}
-
 interface Panel {
-  updateConfig(config: HostConfig): void;
+  el: HTMLElement;
+  updateConfig(config: HostConfig, index: number): void;
   session: TerminalSession;
+  readonly collapsed: boolean;
+  setCollapsed(collapsed: boolean): void;
+  /** Logical time of the last click, focus, connect or expand; 0 = never. */
+  touched: number;
 }
 
-/** Mount the SSH console tab: master broadcast bar + `maxSessions` terminal panels. */
+/** Hooks the console gives each panel so the open-panel policy lives in one place. */
+interface PanelControl {
+  toggle(panel: Panel): void;
+  touch(panel: Panel): void;
+}
+
+/** Most terminal panels expanded at once; expanding another collapses one. */
+const MAX_OPEN_PANELS = 4;
+
+/** Mount the SSH console tab: master broadcast bar + one terminal panel per host. */
 export function mountSSHApp(
   root: HTMLElement,
   store: HostStore,
@@ -41,26 +43,80 @@ export function mountSSHApp(
   const terminals = el("section", "ssh-terminals");
   const master = buildMasterBar();
   const grid = el("div", "term-grid");
-  grid.dataset.panelCount = String(maxSessions);
   terminals.append(master.bar, grid);
 
-  const hosts = store.getHosts();
-  const panels: Panel[] = [];
+  // One panel per host object, so adding, removing or reordering hosts in the
+  // rail keeps every surviving panel's connection and scrollback.
+  const panels = new Map<HostConfig, Panel>();
+  let clock = 0;
 
-  for (let i = 0; i < maxSessions; i++) {
-    const cfg: HostConfig = hosts[i] ?? emptyHost();
-    const panel = buildPanel(i, cfg, grid);
-    panels.push(panel);
-  }
+  const openPanels = (): Panel[] =>
+    [...panels.values()].filter((p) => !p.collapsed);
 
-  store.onChange((updated) => {
-    for (let i = 0; i < maxSessions; i++) {
-      panels[i]?.updateConfig(updated[i] ?? emptyHost());
+  // Three or more open panels go two across; collapsed bars stay compact.
+  const layout = (): void => {
+    const open = openPanels().length;
+    grid.classList.toggle("two-up", open >= 3);
+    grid.dataset.openCount = String(open);
+  };
+
+  const expand = (panel: Panel): void => {
+    const others = openPanels().filter((p) => p !== panel);
+    if (others.length >= MAX_OPEN_PANELS) {
+      // Collapse the least recently used open panel; untouched ones count as
+      // oldest, and ties go to the first in rail order.
+      let victim = others[0] as Panel;
+      for (const p of others) if (p.touched < victim.touched) victim = p;
+      victim.setCollapsed(true);
     }
-  });
+    panel.setCollapsed(false);
+    panel.touched = ++clock;
+    layout();
+  };
+
+  const control: PanelControl = {
+    toggle(panel) {
+      if (panel.collapsed) {
+        expand(panel);
+      } else {
+        panel.setCollapsed(true);
+        layout();
+      }
+    },
+    touch(panel) {
+      panel.touched = ++clock;
+    },
+  };
+
+  const sync = (hosts: HostConfig[]): void => {
+    const live = new Set(hosts);
+    for (const [host, panel] of panels) {
+      if (live.has(host)) continue;
+      panel.session.dispose();
+      panel.el.remove();
+      panels.delete(host);
+    }
+    hosts.forEach((host, i) => {
+      let panel = panels.get(host);
+      if (!panel) {
+        panel = buildPanel(i, host, grid, control);
+        // New panels open while there is room under the cap.
+        if (openPanels().length >= MAX_OPEN_PANELS) panel.setCollapsed(true);
+        panels.set(host, panel);
+      } else {
+        panel.updateConfig(host, i);
+      }
+      // append() moves an existing node, so this also applies the rail order.
+      grid.append(panel.el);
+    });
+    layout();
+  };
+
+  sync(store.getHosts());
+  store.onChange(sync);
 
   master.onSend = (text: string) => {
-    for (const p of panels) {
+    for (const p of panels.values()) {
       p.session.broadcast(text);
     }
   };
@@ -68,10 +124,7 @@ export function mountSSHApp(
   root.append(terminals);
 
   requestAnimationFrame(() => {
-    for (const p of panels) p.session.resize();
-  });
-  window.addEventListener("resize", () => {
-    for (const p of panels) p.session.resize();
+    for (const p of panels.values()) p.session.resize();
   });
 }
 
@@ -206,9 +259,9 @@ function buildPanel(
   index: number,
   initialConfig: HostConfig,
   container: HTMLElement,
+  control: PanelControl,
 ): Panel {
   let config: HostConfig = { ...initialConfig };
-  const hostLabel = `Host ${index + 1}`;
 
   const panelEl = el("div", "term-panel");
   const header = el("div", "term-header");
@@ -221,18 +274,19 @@ function buildPanel(
 
   const dot = el("span", "status-dot");
   const titleEl = el("span", "term-title");
-  titleEl.textContent = hostLabel;
+  titleEl.textContent = hostDisplayName(config, index);
   const statusText = el("span", "status-text");
   statusText.textContent = "disconnected";
 
   const spacer = el("span", "term-spacer");
 
-  const pauseLabel = el("label", "pause-toggle");
+  const pauseLabel = el("label", "ui-toggle pause-toggle");
   const pause = el("input");
   pause.type = "checkbox";
+  const pauseTrack = el("span", "ui-toggle-track");
   const pauseText = el("span");
   pauseText.textContent = "Pause";
-  pauseLabel.append(pause, pauseText);
+  pauseLabel.append(pause, pauseTrack, pauseText);
 
   const interruptBtn = el("button", "btn btn-interrupt");
   interruptBtn.type = "button";
@@ -262,6 +316,7 @@ function buildPanel(
 
   const body = el("div", "term-body");
   panelEl.append(header, body);
+  // Attach before the terminal opens so xterm measures a laid-out element.
   container.append(panelEl);
 
   const session = new TerminalSession(body);
@@ -280,8 +335,8 @@ function buildPanel(
   // Collapsing is CSS only: the WebSocket stays open, the xterm instance is
   // never disposed, and pause state is untouched -- so output keeps arriving
   // and is there on expand. Re-fit after the panel is laid out again.
-  collapseBtn.addEventListener("click", () => {
-    const collapsed = panelEl.classList.toggle("is-collapsed");
+  const setCollapsed = (collapsed: boolean): void => {
+    panelEl.classList.toggle("is-collapsed", collapsed);
     collapseBtn.textContent = collapsed ? "\u25b8" : "\u25be";
     collapseBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
     collapseBtn.title = collapsed
@@ -290,7 +345,7 @@ function buildPanel(
     if (!collapsed) {
       requestAnimationFrame(() => session.resize());
     }
-  });
+  };
 
   pause.addEventListener("change", () => {
     session.paused = pause.checked;
@@ -311,15 +366,31 @@ function buildPanel(
       );
       return;
     }
+    control.touch(api);
     session.connect(config);
   });
   disconnectBtn.addEventListener("click", () => session.disconnect());
   interruptBtn.addEventListener("click", () => session.interrupt());
 
-  return {
-    updateConfig(updated: HostConfig): void {
+  const api: Panel = {
+    el: panelEl,
+    updateConfig(updated: HostConfig, i: number): void {
       config = { ...updated };
+      titleEl.textContent = hostDisplayName(config, i);
     },
     session,
+    get collapsed() {
+      return panelEl.classList.contains("is-collapsed");
+    },
+    setCollapsed,
+    touched: 0,
   };
+
+  collapseBtn.addEventListener("click", () => control.toggle(api));
+  // Using a terminal (click or keyboard focus) marks it recently used; the
+  // collapse button is excluded so toggling doesn't count as use.
+  body.addEventListener("pointerdown", () => control.touch(api));
+  body.addEventListener("focusin", () => control.touch(api));
+
+  return api;
 }

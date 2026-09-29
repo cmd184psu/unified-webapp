@@ -1,8 +1,9 @@
 "use strict";
+import { ThemeManager, HamburgerMenu } from "/shared/dist/shared.mjs";
 export {};
 class PanScan {
   // incremented on every activate(); guards stale load events
-  constructor(el) {
+  constructor(el2) {
     this.raf = 0;
     this.t0 = 0;
     // performance.now() when current run started
@@ -14,8 +15,8 @@ class PanScan {
     this.on = false;
     this.playing = false;
     this.generation = 0;
-    this.el = el;
-    el.addEventListener("load", () => this.onLoad());
+    this.el = el2;
+    el2.addEventListener("load", () => this.onLoad());
     window.addEventListener("resize", () => this.onResize());
   }
   // Called when entering panscan mode or when the image changes in panscan mode.
@@ -124,7 +125,7 @@ function cubicEaseInOut(t) {
   return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
 }
 class DebugTimer {
-  constructor(el) {
+  constructor(el2) {
     this.raf = 0;
     this.elapsed = 0;
     // ms spent playing since last image
@@ -148,7 +149,7 @@ class DebugTimer {
       this.el.textContent = text;
       this.raf = requestAnimationFrame(this.tick);
     };
-    this.el = el;
+    this.el = el2;
   }
   // Called when a new image arrives.
   resetImage(intervalSecs, mode) {
@@ -191,23 +192,146 @@ const btnNext = document.getElementById("btn-next");
 const btnPrevSubj = document.getElementById("btn-prev-subject");
 const btnNextSubj = document.getElementById("btn-next-subject");
 const btnHamburger = document.getElementById("btn-hamburger");
-const settingsPanel = document.getElementById("settings-panel");
-const btnCloseSettings = document.getElementById("btn-close-settings");
-const settingsScrim = document.getElementById("settings-scrim");
-const selMode = document.getElementById("sel-mode");
-const inpInterval = document.getElementById("inp-interval");
-const chkShuffle = document.getElementById("chk-shuffle");
-const selTheme = document.getElementById("sel-theme");
-const selControlsPos = document.getElementById("sel-controls-pos");
-const musicControls = document.getElementById("music-controls");
+const cardVisual = document.getElementById("card-visual");
+const cardAudio = document.getElementById("card-audio");
 const musicLabel = document.getElementById("music-label");
 const btnMusicStop = document.getElementById("btn-music-stop");
 const btnMusicPlay = document.getElementById("btn-music-play");
 const btnMusicNext = document.getElementById("btn-music-next");
 const audioEl = document.getElementById("audio-player");
 const debugDisplayEl = document.getElementById("debug-display");
-const serverStampEl = document.getElementById("server-stamp");
-const chkDebug = document.getElementById("chk-debug");
+function el(tag, className) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  return node;
+}
+function settingRow(label, control2) {
+  const row = el("label", "setting-row");
+  row.append(label, control2);
+  return row;
+}
+function settingToggle(label, input) {
+  input.type = "checkbox";
+  const row = el("label", "ui-toggle");
+  row.append(input, el("span", "ui-toggle-track"), label);
+  return row;
+}
+const selMode = el("select");
+for (const [value, text] of [["kenburns", "Ken Burns"], ["panscan", "Pan & Scan"], ["static", "Static"]]) {
+  const opt = el("option");
+  opt.value = value;
+  opt.textContent = text;
+  selMode.append(opt);
+}
+const inpInterval = el("input");
+inpInterval.type = "number";
+inpInterval.min = "1";
+inpInterval.max = "300";
+const inpMaxAge = el("input");
+inpMaxAge.type = "number";
+inpMaxAge.min = "0";
+inpMaxAge.max = "36500";
+inpMaxAge.title = "Skip images whose file is older than this many days. 0 = no limit.";
+const ageHint = el("p", "setting-hint");
+ageHint.textContent = "Skips images whose file is older than this. 0 = no limit.";
+const chkShuffle = el("input");
+const chkDebug = el("input");
+const serverStampEl = el("div", "server-stamp");
+const CARD_POSITIONS = ["top-left", "top", "top-right", "left", "right", "bottom-left", "bottom", "bottom-right"];
+const GRID_CELLS = ["top-left", "top", "top-right", "left", "", "right", "bottom-left", "bottom", "bottom-right"];
+function positionPicker(card, label) {
+  const root = el("div", "pos-picker");
+  const title = el("span", "pos-picker-label");
+  title.textContent = label;
+  const grid = el("div", "pos-grid");
+  grid.setAttribute("role", "radiogroup");
+  grid.setAttribute("aria-label", label);
+  const cells = [];
+  for (const pos of GRID_CELLS) {
+    const cell = el("button", "pos-cell");
+    cell.type = "button";
+    if (!pos) {
+      cell.disabled = true;
+      cell.classList.add("pos-center");
+      cell.setAttribute("aria-hidden", "true");
+    } else {
+      cell.dataset.pos = pos;
+      cell.title = pos.replace("-", " ");
+      cell.setAttribute("role", "radio");
+      cell.setAttribute("aria-label", pos.replace("-", " "));
+      cell.addEventListener("click", () => {
+        const el2 = card === "visual" ? cardVisual : cardAudio;
+        expectLayout(el2, (l) => !l.drag && l.position === pos);
+        el2.dataset.pos = pos;
+        el2.style.left = "";
+        el2.style.top = "";
+        control("set-card-position", { card, position: pos });
+      });
+    }
+    cells.push(cell);
+    grid.append(cell);
+  }
+  root.append(title, grid);
+  return {
+    root,
+    sync: (pos) => {
+      for (const c of cells) {
+        const on = c.dataset.pos === pos;
+        c.classList.toggle("is-active", on);
+        if (c.dataset.pos) c.setAttribute("aria-checked", on ? "true" : "false");
+      }
+    }
+  };
+}
+const visualPicker = positionPicker("visual", "Image controls position");
+const audioPicker = positionPicker("audio", "Audio controls position");
+const themes = new ThemeManager({
+  module: "slideshow",
+  default: "dark",
+  onChange: (name) => {
+    control("set-theme", name);
+  }
+});
+themes.apply();
+new HamburgerMenu({
+  title: "Settings",
+  side: "right",
+  mountTrigger: btnHamburger,
+  themePicker: true,
+  themes,
+  items: [
+    {
+      id: "playback",
+      render: (host) => {
+        host.append(
+          settingRow("Mode", selMode),
+          settingRow("Seconds per image", inpInterval),
+          settingRow("Image age limit (days)", inpMaxAge),
+          ageHint,
+          settingToggle("Shuffle subjects", chkShuffle)
+        );
+      }
+    },
+    { section: "Controls" },
+    {
+      id: "positions",
+      render: (host) => {
+        const hint = el("p", "setting-hint");
+        hint.textContent = "Pick a square to snap a card there; drag a card by its grip to place it anywhere.";
+        host.append(visualPicker.root, audioPicker.root, hint);
+      }
+    },
+    { section: "Other" },
+    {
+      id: "misc",
+      render: (host) => {
+        const help = el("div", "shortcuts-help");
+        help.innerHTML = "<h4>Keyboard shortcuts</h4><dl><dt><kbd>&#8592;</kbd> <kbd>&#8594;</kbd></dt><dd>Prev / next image</dd><dt>Click the image</dt><dd>Next image</dd><dt><kbd>Space</kbd></dt><dd>Play / pause slideshow</dd><dt><kbd>Enter</kbd></dt><dd>Play / stop music</dd><dt><kbd>Esc</kbd></dt><dd>Close this menu</dd></dl>";
+        host.append(settingToggle("Debug timer", chkDebug), serverStampEl, help);
+      }
+    }
+  ]
+});
 const panScan = new PanScan(img);
 const debugTimer = new DebugTimer(debugDisplayEl);
 let currentState = null;
@@ -231,8 +355,11 @@ function connectSSE() {
 function applyState(state) {
   const prev = currentState;
   currentState = state;
-  document.documentElement.dataset["theme"] = state.theme;
-  display.dataset["controlsPos"] = state.controls_position || "bottom";
+  if (state.theme) themes.adopt(state.theme);
+  layoutCard(cardVisual, state.visual_card);
+  layoutCard(cardAudio, state.audio_card);
+  visualPicker.sync(state.visual_card?.drag ? "" : state.visual_card?.position ?? "");
+  audioPicker.sync(state.audio_card?.drag ? "" : state.audio_card?.position ?? "");
   const imageChanged = !prev || prev.image_path !== state.image_path;
   const modeChanged = !prev || prev.mode !== state.mode;
   const intervalChanged = !prev || prev.interval_seconds !== state.interval_seconds;
@@ -253,9 +380,8 @@ function applyState(state) {
   btnPlayPause.title = state.playing ? "Pause" : "Play";
   selMode.value = state.mode;
   inpInterval.value = String(state.interval_seconds);
+  if (document.activeElement !== inpMaxAge) inpMaxAge.value = String(state.max_age_days ?? 0);
   chkShuffle.checked = state.shuffle;
-  selTheme.value = state.theme;
-  selControlsPos.value = state.controls_position || "bottom";
   applyMusicState(state);
   if (state.server_started && serverStampEl.textContent !== state.server_started) {
     serverStampEl.textContent = `started ${state.server_started}`;
@@ -289,10 +415,10 @@ audioEl.addEventListener("ended", () => {
 function applyMusicState(state) {
   const colls = state.music_collections ?? [];
   const hasMusic = state.music_enabled && colls.length > 0;
-  musicControls.hidden = !hasMusic;
+  cardAudio.hidden = !hasMusic;
   if (!hasMusic) return;
   const coll = colls[state.music_collection];
-  musicLabel.textContent = coll?.name ?? "";
+  musicLabel.textContent = coll?.name || "Audio";
   if (state.music_collection !== prevMusicCollection) {
     prevMusicCollection = state.music_collection;
     currentTrackIndex = 0;
@@ -339,26 +465,113 @@ btnPrev.addEventListener("click", () => control("prev"));
 btnNext.addEventListener("click", () => control("next"));
 btnPrevSubj.addEventListener("click", () => control("prev-subject"));
 btnNextSubj.addEventListener("click", () => control("next-subject"));
-function openSettings() {
-  settingsPanel.hidden = false;
-  settingsScrim.hidden = false;
-}
-function closeSettings() {
-  settingsPanel.hidden = true;
-  settingsScrim.hidden = true;
-}
-btnHamburger.addEventListener("click", () => settingsPanel.hidden ? openSettings() : closeSettings());
-btnCloseSettings.addEventListener("click", closeSettings);
-settingsScrim.addEventListener("click", closeSettings);
 chkDebug.addEventListener("change", () => debugTimer.show(chkDebug.checked));
 selMode.addEventListener("change", () => control("set-mode", selMode.value));
-selTheme.addEventListener("change", () => control("set-theme", selTheme.value));
 chkShuffle.addEventListener("change", () => control("set-shuffle", chkShuffle.checked));
-selControlsPos.addEventListener("change", () => control("set-controls-position", selControlsPos.value));
+inpMaxAge.addEventListener("change", () => {
+  const v = parseInt(inpMaxAge.value, 10);
+  if (!isNaN(v) && v >= 0) control("set-max-age", v);
+});
 inpInterval.addEventListener("change", () => {
   const v = parseInt(inpInterval.value, 10);
   if (!isNaN(v) && v >= 1) control("set-interval", v);
 });
+const cardLayouts = /* @__PURE__ */ new Map();
+let draggingCard = null;
+const pendingLayout = /* @__PURE__ */ new Map();
+function expectLayout(card, matches) {
+  pendingLayout.set(card, { matches, until: Date.now() + 3e3 });
+}
+const near = (a, b) => Math.abs(a - b) < 1e-6;
+function clamp(v, lo, hi) {
+  return Math.min(Math.max(v, lo), Math.max(lo, hi));
+}
+function placeFree(card, x, y) {
+  const W = display.clientWidth;
+  const H = display.clientHeight;
+  const w = card.offsetWidth;
+  const h = card.offsetHeight;
+  card.style.left = `${clamp(x * W - w / 2, 0, W - w)}px`;
+  card.style.top = `${clamp(y * H - h / 2, 0, H - h)}px`;
+}
+function layoutCard(card, layout) {
+  if (!layout || card === draggingCard) return;
+  const pending = pendingLayout.get(card);
+  if (pending) {
+    if (!pending.matches(layout) && Date.now() < pending.until) return;
+    pendingLayout.delete(card);
+  }
+  cardLayouts.set(card, layout);
+  card.classList.toggle("minimized", layout.minimized);
+  if (layout.drag) {
+    card.dataset.pos = "free";
+    placeFree(card, layout.drag.x, layout.drag.y);
+  } else {
+    card.dataset.pos = CARD_POSITIONS.includes(layout.position) ? layout.position : "bottom";
+    card.style.left = "";
+    card.style.top = "";
+  }
+}
+window.addEventListener("resize", () => {
+  for (const [card, layout] of cardLayouts) {
+    if (layout.drag) placeFree(card, layout.drag.x, layout.drag.y);
+  }
+});
+function setupCard(card) {
+  const name = card.dataset.card;
+  const grip = card.querySelector(".card-grip");
+  grip.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    draggingCard = card;
+    card.classList.add("dragging");
+    const dRect = display.getBoundingClientRect();
+    const cRect = card.getBoundingClientRect();
+    const offX = e.clientX - cRect.left;
+    const offY = e.clientY - cRect.top;
+    card.style.left = `${cRect.left - dRect.left}px`;
+    card.style.top = `${cRect.top - dRect.top}px`;
+    card.dataset.pos = "free";
+    const onMove = (ev) => {
+      const W = display.clientWidth;
+      const H = display.clientHeight;
+      card.style.left = `${clamp(ev.clientX - dRect.left - offX, 0, W - card.offsetWidth)}px`;
+      card.style.top = `${clamp(ev.clientY - dRect.top - offY, 0, H - card.offsetHeight)}px`;
+    };
+    const onEnd = () => {
+      grip.removeEventListener("pointermove", onMove);
+      grip.removeEventListener("pointerup", onEnd);
+      grip.removeEventListener("pointercancel", onEnd);
+      card.classList.remove("dragging");
+      draggingCard = null;
+      const x = (card.offsetLeft + card.offsetWidth / 2) / display.clientWidth;
+      const y = (card.offsetTop + card.offsetHeight / 2) / display.clientHeight;
+      const prev = cardLayouts.get(card);
+      if (prev) cardLayouts.set(card, { ...prev, drag: { x, y } });
+      expectLayout(card, (l) => !!l.drag && near(l.drag.x, x) && near(l.drag.y, y));
+      control("set-card-drag", { card: name, x, y });
+    };
+    grip.addEventListener("pointermove", onMove);
+    grip.addEventListener("pointerup", onEnd);
+    grip.addEventListener("pointercancel", onEnd);
+  });
+  const setMinimized = (minimized) => {
+    card.classList.toggle("minimized", minimized);
+    const prev = cardLayouts.get(card);
+    if (prev) {
+      cardLayouts.set(card, { ...prev, minimized });
+      if (prev.drag) placeFree(card, prev.drag.x, prev.drag.y);
+    }
+    expectLayout(card, (l) => l.minimized === minimized);
+    control("set-card-minimized", { card: name, minimized });
+  };
+  card.querySelector(".card-min").addEventListener("click", () => setMinimized(true));
+  card.querySelector(".card-icon").addEventListener("click", () => setMinimized(!card.classList.contains("minimized")));
+}
+setupCard(cardVisual);
+setupCard(cardAudio);
+img.addEventListener("click", () => control("next"));
 document.addEventListener("keydown", (e) => {
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
   switch (e.key) {
@@ -384,9 +597,6 @@ document.addEventListener("keydown", (e) => {
         }
         e.preventDefault();
       }
-      break;
-    case "Escape":
-      closeSettings();
       break;
   }
 });

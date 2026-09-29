@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { confirmDialog } from "@shared";
 import { api } from "../api";
 import { useData } from "../DataContext";
 import { IssueModal } from "../components/IssueModal";
-import { Avatar, StateBadge, TagPill } from "../components/common";
+import { Avatar, CopyButton, StateBadge, TagPill } from "../components/common";
 import {
   RELATION_LABELS,
   RELATION_TYPES,
@@ -21,7 +22,6 @@ export function IssueDetailPage() {
   const [issue, setIssue] = useState<Issue | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [toast, setToast] = useState("");
 
   const load = () => {
     if (!ident) return;
@@ -39,16 +39,6 @@ export function IssueDetailPage() {
     if (!issue) return;
     const updated = await api.updateIssue(issue.id, body);
     setIssue(updated);
-  };
-
-  const flash = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(""), 1800);
-  };
-
-  const copyLink = () => {
-    navigator.clipboard.writeText(window.location.href);
-    flash("Link copied to clipboard");
   };
 
   if (notFound) return <div className="empty">Issue “{ident}” not found.</div>;
@@ -74,16 +64,14 @@ export function IssueDetailPage() {
         </span>
         <h1>{issue.identifier}</h1>
         <div className="spacer" />
-        <button className="btn" onClick={copyLink}>
-          🔗 Copy link
-        </button>
+        <CopyButton text={() => window.location.href} label="link to this issue" />
         <button className="btn" onClick={() => setEditing(true)}>
           Edit
         </button>
         <button
           className="btn danger"
           onClick={async () => {
-            if (confirm("Delete this issue?")) {
+            if (await confirmDialog("Delete this issue?")) {
               await api.deleteIssue(issue.id);
               nav("/issues");
             }
@@ -102,7 +90,7 @@ export function IssueDetailPage() {
           {issue.description ? (
             <div className="detail-desc">{issue.description}</div>
           ) : (
-            <div className="detail-desc" style={{ color: "var(--text-faint)" }}>
+            <div className="detail-desc" style={{ color: "var(--color-text-faint)" }}>
               No description.
             </div>
           )}
@@ -180,7 +168,7 @@ export function IssueDetailPage() {
             <div className="side-field">
               <label>Story</label>
               <span
-                style={{ color: "var(--accent)", cursor: "pointer" }}
+                style={{ color: "var(--color-primary)", cursor: "pointer" }}
                 onClick={() => nav(`/stories/${issue.storyId}`)}
               >
                 Open story →
@@ -197,7 +185,6 @@ export function IssueDetailPage() {
           onSaved={(i) => setIssue(i)}
         />
       )}
-      {toast && <div className="toast">{toast}</div>}
     </>
   );
 }
@@ -232,7 +219,7 @@ function RelationsEditor({
   return (
     <div>
       {issue.relations.length === 0 && (
-        <div style={{ color: "var(--text-faint)", padding: "6px 0" }}>
+        <div style={{ color: "var(--color-text-faint)", padding: "6px 0" }}>
           No related issues.
         </div>
       )}
@@ -240,7 +227,7 @@ function RelationsEditor({
         <div className="relation-row" key={r.id}>
           <span className="rtype">{RELATION_LABELS[r.type] ?? r.type}</span>
           <span
-            style={{ color: "var(--text-faint)", cursor: "pointer" }}
+            style={{ color: "var(--color-text-faint)", cursor: "pointer" }}
             onClick={() => nav(`/issue/${r.identifier}`)}
           >
             {r.identifier}

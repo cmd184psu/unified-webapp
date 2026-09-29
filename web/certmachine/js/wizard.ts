@@ -13,7 +13,7 @@
 
 import { fetchImportPreview, runImport, fetchCA, ImportFailedError } from "./api";
 import type { ImportItem, ImportReport } from "./types";
-import { showToast } from "./toast";
+import { showToast } from "@shared";
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,

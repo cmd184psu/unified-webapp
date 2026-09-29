@@ -2,6 +2,7 @@ package taskmaster_test
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -319,4 +320,83 @@ func TestBuild_ErrorPath_UnwritableDBPath(t *testing.T) {
 	h, err := taskmaster.Build(cfg)
 	require.Error(t, err)
 	require.Nil(t, h)
+}
+
+// TestBuild_TaskOutlivesItsViewer: a running task belongs to the server, not
+// to whoever is watching it. When a session ends (idle sign-out, sign-out,
+// closed tab), the browser's requests stop and its live output stream is
+// cut -- and the task must carry on to completion regardless.
+func TestBuild_TaskOutlivesItsViewer(t *testing.T) {
+	staticDir := t.TempDir()
+	writeIndexHTML(t, staticDir)
+	h, err := taskmaster.Build(config.TaskmasterConfig{
+		StaticDir: staticDir,
+		DBPath:    filepath.Join(t.TempDir(), "taskmaster.db"),
+		Lanes:     []config.TaskmasterLane{{Name: "bg", Width: 1}},
+	})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, h.(interface{ Close() error }).Close()) }()
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	marker := filepath.Join(t.TempDir(), "finished")
+	body := `{"name":"slow","lane_name":"bg","command":"sleep 1; echo ok > ` + marker + `","enabled":true}`
+	resp, err := http.Post(srv.URL+"/api/tasks", "application/json", strings.NewReader(body))
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	// Wait for it to start, then open its live output as a viewer would.
+	var execID int64
+	require.Eventually(t, func() bool {
+		resp, err := http.Get(srv.URL + "/api/executions")
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		var execs []map[string]any
+		if json.NewDecoder(resp.Body).Decode(&execs) != nil {
+			return false
+		}
+		for _, e := range execs {
+			if e["status"] == "running" {
+				execID = int64(e["id"].(float64))
+				return true
+			}
+		}
+		return false
+	}, 10*time.Second, 25*time.Millisecond, "task never started")
+
+	ctx, cut := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/api/executions/"+strconv.FormatInt(execID, 10)+"/output", nil)
+	require.NoError(t, err)
+	stream, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+
+	// The viewer goes away mid-run and makes no further requests.
+	cut()
+	stream.Body.Close()
+
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(marker)
+		return err == nil
+	}, 10*time.Second, 50*time.Millisecond, "the task stopped when its viewer left")
+
+	require.Eventually(t, func() bool {
+		resp, err := http.Get(srv.URL + "/api/executions")
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		var execs []map[string]any
+		if json.NewDecoder(resp.Body).Decode(&execs) != nil {
+			return false
+		}
+		for _, e := range execs {
+			if int64(e["id"].(float64)) == execID {
+				return e["status"] == "success"
+			}
+		}
+		return false
+	}, 10*time.Second, 50*time.Millisecond, "the execution should end in success")
 }

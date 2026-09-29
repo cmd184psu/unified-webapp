@@ -2,15 +2,16 @@ package coordinator
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync"
-	"sync/atomic"
 
 	"github.com/go-chi/chi/v5"
 
 	"cmd184psu/unified-webapp/internal/platform/broker"
 	"cmd184psu/unified-webapp/internal/platform/response"
 	"cmd184psu/unified-webapp/internal/taskmaster/db"
+	"cmd184psu/unified-webapp/internal/taskmaster/models"
 	"cmd184psu/unified-webapp/internal/taskmaster/worker"
 )
 
@@ -22,9 +23,16 @@ type Coordinator struct {
 	brake    *worker.BrakeGate
 	procs    *worker.ProcessRegistry
 	brakeMu  sync.Mutex // serializes engage/release read-modify-write of the brake + SettingBrakePausedLanes
-	sseMax   int
-	sseSubs  atomic.Int64
+	sseCap   *worker.SSECap
 	board    *broker.Broker
+	// hidden and progress support module-owned lanes (plan §4.6): hidden
+	// filters every route/board event (N4), progress overlays the
+	// unthrottled in-memory value onto running func executions. Both are
+	// nil-safe (see worker.HiddenLanes/worker.ProgressRegistry), so a
+	// Coordinator built with nil,nil (every pre-existing test call site)
+	// behaves exactly as before — nothing is hidden, no progress overlay.
+	hidden   *worker.HiddenLanes
+	progress *worker.ProgressRegistry
 }
 
 // New builds a Coordinator. procs is the shared per-execution process
@@ -34,15 +42,38 @@ type Coordinator struct {
 // /api/board/events streams what it publishes, respecting the same
 // SSEMaxSubscribers cap as the per-execution output SSE (enforced by the
 // broker itself via SetMaxSubscribers). board may be nil in tests that don't
-// exercise /api/board/events.
-func New(database *db.DB, registry *worker.OutputRegistry, sudo *worker.SudoGate, cancels *worker.CancelRegistry, brake *worker.BrakeGate, procs *worker.ProcessRegistry, sseMax int, board *broker.Broker) *Coordinator {
-	return &Coordinator{db: database, registry: registry, sudo: sudo, cancels: cancels, brake: brake, procs: procs, sseMax: sseMax, board: board}
+// exercise /api/board/events. hidden and progress are the shared
+// module-owned-lane visibility set and progress registry (also wired into
+// the worker); both nil-safe.
+func New(database *db.DB, registry *worker.OutputRegistry, sudo *worker.SudoGate, cancels *worker.CancelRegistry, brake *worker.BrakeGate, procs *worker.ProcessRegistry, sseCap *worker.SSECap, board *broker.Broker, hidden *worker.HiddenLanes, progress *worker.ProgressRegistry) *Coordinator {
+	return &Coordinator{db: database, registry: registry, sudo: sudo, cancels: cancels, brake: brake, procs: procs, sseCap: sseCap, board: board, hidden: hidden, progress: progress}
 }
 
 // publishBoard is a thin wrapper around worker.PublishBoardEvent so handlers
 // don't need to import the broker package directly.
 func (c *Coordinator) publishBoard(ev worker.BoardEvent) {
-	worker.PublishBoardEvent(c.board, ev)
+	worker.PublishBoardEvent(c.board, c.hidden, ev)
+}
+
+// laneHidden reports whether lane is currently hidden (N4).
+func (c *Coordinator) laneHidden(lane string) bool {
+	return c.hidden.Hidden(lane)
+}
+
+// funcTaskGuard writes a 409 and returns true if t is a func task (P20):
+// every mutation route that would otherwise let an HTTP caller bypass a
+// module's own management of its one-shot jobs goes through this one
+// helper.
+func (c *Coordinator) funcTaskGuard(w http.ResponseWriter, t *models.Task) bool {
+	if t.Kind == "" {
+		return false
+	}
+	owner := ""
+	if l, _ := c.db.GetLane(t.LaneName); l != nil {
+		owner = l.Owner
+	}
+	response.WriteError(w, http.StatusConflict, fmt.Sprintf("task %q is managed by module %q", t.Name, owner))
+	return true
 }
 
 // Routes returns the HTTP handler (exported for testing).
@@ -80,6 +111,7 @@ func (c *Coordinator) routes() *chi.Mux {
 	r.Post("/api/executions/{id}/cancel", c.handleCancelExecution)
 	r.Post("/api/executions/{id}/pause", c.handlePauseExecution)
 	r.Post("/api/executions/{id}/resume", c.handleResumeExecution)
+	r.Post("/api/executions/{id}/rerun", c.handleRerunExecution)
 
 	r.Get("/api/metrics", c.handleMetrics)
 

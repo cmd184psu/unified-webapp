@@ -8,7 +8,8 @@
 // patchList so re-renders never repaint the whole page.
 
 import { api, MetricSummary } from './api.js';
-import { LiveController, patchList } from './ui/live.js';
+import { LiveController } from './ui/live.js';
+import { patchList } from '@shared';
 
 function fmtMs(ms: number | null | undefined): string {
   if (ms === null || ms === undefined) return '—';
@@ -75,12 +76,19 @@ function render(rows: MetricSummary[]): void {
   }
   gridEl.querySelector('.empty-state')?.remove();
 
-  const sorted = [...rows].sort((a, b) => a.task_name.localeCompare(b.task_name));
+  // P17: func-task metrics are aggregated per (lane, kind), so task_name
+  // alone is not a stable identity across lanes — a shell task and a func
+  // kind could share a name. cardKey disambiguates the two.
+  const sorted = [...rows].sort((a, b) => cardKey(a).localeCompare(cardKey(b)));
   patchList(gridEl, sorted, {
-    key: (m) => m.task_name,
+    key: cardKey,
     create: (m) => createCard(m),
     update: (el, m) => updateCard(el, m),
   });
+}
+
+function cardKey(m: MetricSummary): string {
+  return m.kind ? 'k:' + m.group_name + '/' + m.kind : 'n:' + m.task_name;
 }
 
 function createCard(m: MetricSummary): HTMLElement {

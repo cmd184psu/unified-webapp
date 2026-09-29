@@ -112,14 +112,15 @@ type bundleEntry struct {
 }
 
 // BundleTGZ builds the gzipped tar download for cert (FR-7): cert.pem
-// (0644), key.pem (0600), haproxy.pem (0600), rootCA.crt (0644). caCertPEM
-// is the stored ca row's cert_pem, embedded verbatim as rootCA.crt and used
+// (0644), key.pem (0600), haproxy.pem (0600), and the root CA (0644) named
+// caFileName (CAFileName of the CA's name, e.g. Home-Lab-CA-2026.crt). caCertPEM
+// is the stored ca row's cert_pem, embedded verbatim as that file and used
 // to assemble haproxy.pem. The root-match guard (checkDownloadable) runs
 // before any entry is written, so a leaf that does not chain to caCertPEM,
 // or a quarantined row, never produces a partial or wrong archive -- it
 // returns an error instead. cert must carry both cert_pem and key_pem
 // (getCertWithKey).
-func BundleTGZ(cert Cert, caCertPEM []byte) ([]byte, error) {
+func BundleTGZ(cert Cert, caCertPEM []byte, caFileName string) ([]byte, error) {
 	if err := checkDownloadable(cert, caCertPEM); err != nil {
 		return nil, err
 	}
@@ -132,7 +133,7 @@ func BundleTGZ(cert Cert, caCertPEM []byte) ([]byte, error) {
 		{name: "cert.pem", mode: 0o644, data: certPEM},
 		{name: "key.pem", mode: 0o600, data: keyPEM},
 		{name: "haproxy.pem", mode: 0o600, data: haproxyPEM},
-		{name: "rootCA.crt", mode: 0o644, data: caCertPEM},
+		{name: caFileName, mode: 0o644, data: caCertPEM},
 	}
 
 	var buf bytes.Buffer

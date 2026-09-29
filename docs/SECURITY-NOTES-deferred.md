@@ -126,7 +126,7 @@ after `1040bfe` pointed the local profile's `ssh_dir` at `~/.ssh`.
 
 `GET /api/ssh/keys` (`internal/multissh/server.go:54` → `handleSSHKeys` →
 `sshproxy.ListKeys`, `internal/multissh/sshproxy/keys.go:32`) returns ALL regular files
-in `ssh_dir`, sorted by name — subdirectories are greyed out, nothing else is filtered.
+in `ssh_dir`, sorted by name — subdirectories are grayed out, nothing else is filtered.
 Against a real `~/.ssh` the picker therefore offers `authorized_keys`, `config`,
 `known_hosts`, `known_hosts.old`, and `*.pub` alongside the actual private keys.
 Selecting a non-key file just fails at connect time; the harm is confusion, not exposure

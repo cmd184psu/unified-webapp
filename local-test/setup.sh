@@ -34,7 +34,7 @@ mkdir -p "$LT/data/todo/home" \
          "$LT/data/multissh/uploads" \
          "$LT/data/certmachine" \
          "$LT/data/auth" \
-         "$LT/data/taskmaster"
+         "$LT/data/taskmaster" \
          "$LT/data/smbedit"
 
 echo "== admin PIN file (plaintext PIN, must be chmod 0400) =="

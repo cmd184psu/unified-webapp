@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { alertDialog } from "@shared";
 import { api } from "../api";
 import { useData } from "../DataContext";
 import {
@@ -69,7 +70,7 @@ export function IssueModal({
       onSaved(saved);
       onClose();
     } catch (e) {
-      alert(String(e));
+      alertDialog(String(e));
     } finally {
       setSaving(false);
     }
@@ -181,7 +182,7 @@ export function IssueModal({
             </span>
           ))}
           {tags.length === 0 && (
-            <span style={{ color: "var(--text-faint)" }}>
+            <span style={{ color: "var(--color-text-faint)" }}>
               No tags yet — create some from the Tags page.
             </span>
           )}

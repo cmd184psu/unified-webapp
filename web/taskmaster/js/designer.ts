@@ -20,7 +20,7 @@
 // only dialog used for validation errors is ui/modal.ts's alertDialog.
 
 import { api, Capabilities, LaneStatus } from './api.js';
-import { openModal, alertDialog } from './ui/modal.js';
+import { openModal, alertDialog, createCopyButton } from '@shared';
 import { createToggleHandle } from './ui/toggle.js';
 
 /** Shell-quotes a single argument the way a POSIX sh would need it quoted. */
@@ -99,21 +99,10 @@ function buildExportPanel(title: string, render: () => string): { el: HTMLElemen
   const pre = document.createElement('pre');
   pre.className = 'export-panel-code';
 
-  const copyBtn = document.createElement('button');
-  copyBtn.type = 'button';
-  copyBtn.className = 'btn btn-secondary btn-sm export-panel-copy';
-  copyBtn.textContent = 'Copy';
-  copyBtn.addEventListener('click', () => {
-    void navigator.clipboard.writeText(pre.textContent ?? '').then(
-      () => {
-        copyBtn.textContent = 'Copied';
-        setTimeout(() => (copyBtn.textContent = 'Copy'), 1200);
-      },
-      () => {
-        copyBtn.textContent = 'Copy failed';
-        setTimeout(() => (copyBtn.textContent = 'Copy'), 1200);
-      }
-    );
+  const copyBtn = createCopyButton({
+    text: () => pre.textContent ?? '',
+    label: title,
+    className: 'btn btn-secondary btn-sm export-panel-copy',
   });
 
   body.append(pre, copyBtn);
@@ -169,7 +158,10 @@ export async function openTaskDesigner(lanes: LaneStatus[], preselectLane: strin
   const laneLabel = document.createElement('label');
   laneLabel.textContent = 'Lane';
   const laneSelect = document.createElement('select');
-  for (const lane of lanes) {
+  // Module-owned lanes (e.g. utuber) manage their own tasks — a shell task
+  // created here would land in a lane whose scheduling assumptions (width,
+  // retention, func-only tasks) belong to that module, not the designer.
+  for (const lane of lanes.filter((l) => !l.owner)) {
     const opt = document.createElement('option');
     opt.value = lane.name;
     opt.textContent = lane.name;

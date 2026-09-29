@@ -26,6 +26,7 @@ Open `~/.unified-webapp.json` and fill in:
 
 - `host_routing` — map hostname → module name
 - Module `static_dir` and `data_dir` / `data_file` paths (use absolute paths in production)
+- `server.shared_static_dir` — directory holding the shared asset tree served at `/shared/` on every module host (defaults to `./web/shared`; must contain `dist/` and/or `public/` subdirectories)
 
 Minimal example with all seven modules. Multiple hostnames can map to the same module — useful for adding `-test` aliases that won't collide with live services on your network:
 
@@ -84,7 +85,7 @@ Minimal example with all seven modules. Multiple hostnames can map to the same m
     "static_dir": "/opt/unified-webapp/web/obsidianoid",
     "data_dir":   "/data/obsidianoid",
     "vaults": [
-      { "path": "/path/to/vault", "name": "My Vault", "theme": "dark" }
+      { "path": "/path/to/vault", "name": "My Vault", "theme": "obsidian" }
     ],
     "threads_folder": "Threads",
     "thread_count": 4,
@@ -142,7 +143,7 @@ Minimal example with all seven modules. Multiple hostnames can map to the same m
 | `strict_host_key` | `true` verifies SSH host keys against `known_hosts_path` and fails closed if that file is missing. |
 | `known_hosts_path` | Empty resolves to `<ssh_dir>/known_hosts`. |
 
-Running and using the module — host cards, terminals, broadcasts, the proxy requirements, and the audit log — is documented separately in **[docs/multissh.md](docs/multissh.md)**. Read the [proxy section](docs/multissh.md#3-putting-it-behind-a-proxy) before putting it behind nginx: a front end that rewrites the `Host` header breaks every terminal while leaving the page looking fine. Note also that this module has **no login** — reaching its hostname is the whole access boundary.
+Running and using the module — host cards, terminals, broadcasts, the proxy requirements, and the audit log — is documented separately in **[docs/guides/multissh.md](docs/guides/multissh.md)**. Read the [proxy section](docs/guides/multissh.md#3-putting-it-behind-a-proxy) before putting it behind nginx: a front end that rewrites the `Host` header breaks every terminal while leaving the page looking fine. This module can be given a login like any other — see [Authentication](#authentication-optional). It stays open unless you list it in `auth.modules`.
 
 #### The `smbedit` section
 
@@ -152,7 +153,7 @@ Running and using the module — host cards, terminals, broadcasts, the proxy re
 | `data_dir` | Where `state.json` lives (created on first boot, mode 0600). Must be set; created if absent. |
 | `picker_root` | Root directory the share folder picker lists, one level deep. Empty resolves to `/opt`. |
 
-Running and operating the module — the sudoers grants for writing `/etc/samba/smb.conf` and restarting smbd, the SSE/proxy caveats, and migration from standalone smbed — is documented separately in **[docs/smbedit.md](docs/smbedit.md)**. Like multissh, this module has **no login**: anyone who reaches the smbedit hostname can rewrite this host's Samba configuration and restart the service, so treat the hostname as the access boundary.
+Running and operating the module — the sudoers grants for writing `/etc/samba/smb.conf` and restarting smbd, the SSE/proxy caveats, and migration from standalone smbed — is documented separately in **[docs/guides/smbedit.md](docs/guides/smbedit.md)**. This module can be given a login like any other — see [Authentication](#authentication-optional). Until you list it in `auth.modules`, anyone reaching the smbedit hostname can rewrite this host's Samba configuration and restart the service.
 
 **Empty strings are meaningful, not omissions.** `ssh_dir`, `upload_dir`, `browse_root` and `known_hosts_path` are resolved at startup from the environment, so `make init-config` writes them as present-but-empty strings. An empty value reads as "resolve this for me"; leaving the key out entirely would be indistinguishable from a typo'd key name. Keep them present.
 
@@ -165,9 +166,9 @@ Running and operating the module — the sudoers grants for writing `/etc/samba/
 | `legacy_import_dir` | Directory holding a standalone `certmachine` installation's PKI (`rootCA.crt`, `rootCA.key`, `certs/`). Empty means no import is offered. If set but unreadable, the module still builds and serves — the UI shows the reason instead of the import wizard. |
 | `default_validity_days` | Validity period for newly generated and renewed leaf certificates, in days. `0` means "unset" and takes the default of **365**. |
 | `expiry_warn_days` | How many days before a certificate's (or the CA's own) expiry the UI shows an "expiring soon" badge, and the threshold below which `POST /api/certs` and renew refuse with 409 rather than mint something a client would soon distrust along with its issuer. `0` means "unset" and takes the default of **30** — **`expiry_warn_days` cannot express "never warn."** Following `max_sessions`'s convention above, `0` normalizes to the default rather than disabling the check, so the smallest effective warning horizon is `1` day, not `0`. Set it to `1` if you want the closest thing to "only warn when it's actually about to expire," never `0` expecting silence — you'll get the 30-day default instead, and since this same value also gates the CA's own expiring-CA 409, the surprise would not be confined to badge colors. |
-| `trust_device_enabled` | Default `false`. When `true`, the CA panel gets a **Trust this CA on this device** button that runs `sudo` on this host to add the root CA to its system trust store (macOS Keychain, RHEL `update-ca-trust`, or Debian/Ubuntu `update-ca-certificates`, auto-detected). Requires a passwordless-sudo entry for the specific commands involved — see [docs/certmachine.md § Automatic device trust](docs/certmachine.md#automatic-device-trust) before turning this on; it is meant for a single-operator lab host, not a shared deployment. |
+| `trust_device_enabled` | Default `false`. When `true`, the CA panel gets a **Trust this CA on this device** button that runs `sudo` on this host to add the root CA to its system trust store (macOS Keychain, RHEL `update-ca-trust`, or Debian/Ubuntu `update-ca-certificates`, auto-detected). Requires a passwordless-sudo entry for the specific commands involved — see [docs/guides/certmachine.md § Automatic device trust](docs/guides/certmachine.md#automatic-device-trust) before turning this on; it is meant for a single-operator lab host, not a shared deployment. |
 
-Running and using the module — the download-to-HAProxy workflow, the import wizard, trusting the root CA, the status badge vocabulary, backup, and the manual procedure for replacing the root CA — is documented separately in **[docs/certmachine.md](docs/certmachine.md)**. Note also that this module has **no login** — reaching its hostname is the whole access boundary, same as multissh above.
+Running and using the module — the download-to-HAProxy workflow, the import wizard, trusting the root CA, the status badge vocabulary, backup, and the manual procedure for replacing the root CA — is documented separately in **[docs/guides/certmachine.md](docs/guides/certmachine.md)**. This module can be given a login like any other — see [Authentication](#authentication-optional). It stays open unless you list it in `auth.modules`.
 
 #### The `utuber` section
 
@@ -178,13 +179,32 @@ Running and using the module — the download-to-HAProxy workflow, the import wi
 | `workers` | Concurrent download workers. `0` means "unset" and takes the default of 1; values above 8 are clamped with a warning; negative values are a config error. |
 | `python_bin` | Python interpreter used by the "Update yt-dlp" button. Default `python3.12`. Can be overridden from the UI's ☰ settings menu, which persists the override in `settings.json`. |
 
-Running and using the module — endpoints, runtime dependencies (`yt-dlp`, `ffmpeg`), the settings menu, and shutdown behavior — is documented separately in **[docs/utuber.md](docs/utuber.md)**. Like multissh, this module has **no login** — reaching its hostname is the whole access boundary.
+Running and using the module — endpoints, runtime dependencies (`yt-dlp`, `ffmpeg`), the settings menu, and shutdown behavior — is documented separately in **[docs/guides/utuber.md](docs/guides/utuber.md)**. This module can be given a login like any other — see [Authentication](#authentication-optional). It stays open unless you list it in `auth.modules`.
 
 ### 3. Run
 
 ```bash
 make run
 ```
+
+---
+
+## Before Committing
+
+There is no CI on this repository; the gate suite only runs when you run it.
+
+```bash
+make check
+```
+
+`make check` is the required pre-commit gate. It composes `web-verify`
+(committed web artifacts byte-identical to a fresh build), `test-web`
+(all web test suites), `gates` (the `scripts/gates/*.mjs` +
+`scripts/check-shared-*.mjs` invariant scripts), and `test` (Go tests).
+
+Go source hygiene is mandated separately and deliberately **not** folded
+into `check`: run `gofmt -l .` (must print nothing) and `go vet ./...`
+before committing Go changes.
 
 ---
 
@@ -241,8 +261,8 @@ Only one module can be the `localhost` fallback at a time. Change it to switch w
 
 ## Grocery: the Recipes tab
 
-The Grocery module has two tabs over one shared list. **Grocery** organises food by where it
-sits in the store; **Recipes** organises the same food by the meal it belongs to. There is one
+The Grocery module has two tabs over one shared list. **Grocery** organizes food by where it
+sits in the store; **Recipes** organizes the same food by the meal it belongs to. There is one
 set of items underneath — a recipe ingredient *is* a grocery item, not a copy of one.
 
 ### Enabling a recipe
@@ -383,7 +403,7 @@ A single SQLite database, created (with its parent directory at `0700`) on first
 /data/certmachine/certmachine.db
 ```
 
-There is no `meta.json` and no other on-disk state — the certificate authority row, every leaf certificate row, and everything the UI displays about them (CN, SANs, serial, fingerprint, validity window) live in this one file and are derived from the stored PEM data, not a sidecar. See [docs/certmachine.md](docs/certmachine.md#9-backup) for the backup story: stop the binary and copy this file.
+There is no `meta.json` and no other on-disk state — the certificate authority row, every leaf certificate row, and everything the UI displays about them (CN, SANs, serial, fingerprint, validity window) live in this one file and are derived from the stored PEM data, not a sidecar. See [docs/guides/certmachine.md](docs/guides/certmachine.md#9-backup) for the backup story: stop the binary and copy this file.
 
 ### Utuber
 
@@ -428,7 +448,7 @@ chmod 600 /etc/haproxy/certs/*.pem
 
 If your CA provides a single combined file (cert + chain + key), you can use it directly.
 
-**If certs come from the certmachine module**, skip the `cat`/`chmod` steps above entirely: download `haproxy.pem` straight from a cert's row (or extract it from the `.tgz` bundle) and drop it into `/etc/haproxy/certs/` as-is. It is already the correct combined-PEM shape, and the file already carries mode `0600` — the tar archive preserves that bit, so nothing needs re-chmodding after extraction. See [docs/certmachine.md § Downloads and the HAProxy workflow](docs/certmachine.md#7-downloads-and-the-haproxy-workflow).
+**If certs come from the certmachine module**, skip the `cat`/`chmod` steps above entirely: download `haproxy.pem` straight from a cert's row (or extract it from the `.tgz` bundle) and drop it into `/etc/haproxy/certs/` as-is. It is already the correct combined-PEM shape, and the file already carries mode `0600` — the tar archive preserves that bit, so nothing needs re-chmodding after extraction. See [docs/guides/certmachine.md § Downloads and the HAProxy workflow](docs/guides/certmachine.md#7-downloads-and-the-haproxy-workflow).
 
 ### /etc/haproxy/haproxy.cfg
 
@@ -517,13 +537,41 @@ echo | openssl s_client -connect <haproxy-ip>:443 -servername grocery.cmdhome.ne
 
 ## Authentication (optional)
 
-Auth is off by default: a config with no `auth` section, or an empty one (what `make init-config` writes), behaves exactly like the server did before auth existed — every module wide open, no login, no cookies. Everything below only matters once you start filling in `auth` in your config. See `unified-webapp-example.json` for a fully-populated example (per-module matrix, PINs, an API key, LDAP, and passkeys).
+Auth is off by default: a config with no `auth` section, or an empty one (what `make init-config` writes), behaves exactly like the server did before auth existed — every module wide open, no login, no cookies. Everything below only matters once you start filling in `auth` in your config. See `unified-webapp-example.json` for a fully-populated example (per-module PINs, an API key, LDAP, and passkeys).
 
-### The model: per-module method lists are literal
+### The model: protection is per-module; the doors are shared
 
-`auth.modules` maps a module name to the list of methods that unlock it — `"pin"`, `"key"`, `"ldap"`, `"passkey"`. There is no strength ranking between them: listing `["pin", "ldap"]` on a module means *either* a matching PIN *or* a successful LDAP bind opens it, full stop. If you want a module protected only by something strong, only list that one method — don't rely on the list being read as "at least this secure."
+**Any module can have a login, and none is required to.** `auth.modules` decides *whether* a
+module is protected, not *how*. A module name appearing as a key in `auth.modules` — even as an
+empty `{}` — puts a login in front of it. A module absent from `auth.modules` is open, exactly
+as if `auth` weren't configured at all.
 
-A module with no entry in `auth.modules` at all is unprotected, same as if `auth` weren't configured. The one exception is `admin`: when it's routed (appears in `host_routing`), it is *always* protected — with or without a matrix entry — using the operator PIN described below. A live matrix save can add methods to `admin`'s entry, or even delete the entry outright, but it can never remove the operator PIN, because the operator PIN isn't a member of the matrix in the first place.
+Which doors a protected module offers follows from what you configured globally, not from a
+per-module choice:
+
+| Door | Enabled by |
+|------|-----------|
+| LDAP username + password | `auth.ldap` |
+| Passkey (WebAuthn) | `auth.passkey`, with `rp_id` and the module's origin in `rp_origins` |
+| Door-code PIN | `auth.modules.<module>.pin_file` |
+| API key (non-browser clients) | `auth.api_keys` |
+
+So a module with an empty entry (`{}`) is still protected — it simply has no PIN, and opens to
+LDAP, a passkey, or an API key. Setting `pin_file` *adds* a door rather than replacing the
+others. There is no per-module method list to get wrong: if `auth.ldap` is configured, every
+protected module accepts an LDAP bind. This is what lets you PIN-gate the one module on your
+LAN that can restart a daemon while leaving a read-only list open.
+
+**PIN files are optional, and are yours to keep out of git.** Every `pin_file` and
+`admin_pin_file` is a plaintext secret you create; none is checked in (`*.pin` is gitignored and
+no PIN file is tracked). Permissions are enforced on every read, not just at startup — anything
+with a group or other bit set is refused with a message telling you to `chmod 0400` it. Omit
+`pin_file` entirely and that module is protected by the shared doors instead.
+
+The one exception is `admin`: when it's routed (appears in `host_routing`), it is *always*
+protected — with or without an `auth.modules` entry — using the operator PIN described below.
+You can add the shared doors to it, and you can delete its `auth.modules` entry outright, but
+you can never remove the operator PIN, because the operator PIN isn't one of the shared doors.
 
 ### `origin_check`: `enforce` is the default, `log` is the escape hatch
 
@@ -569,7 +617,7 @@ Scripts and other non-browser clients can authenticate with an API key instead o
 go run ./cmd/server -gen-api-key
 ```
 
-which prints the key once (put it wherever your script reads secrets from) and its `sha256:...` hash (paste that into `auth.api_keys`). Send the key as either header — `Authorization: Bearer <key>` is checked first, falling back to `X-API-Key: <key>` if `Authorization` is absent or isn't `Bearer`-shaped. A module only accepts API keys if `"key"` appears in its `auth.modules` entry.
+which prints the key once (put it wherever your script reads secrets from) and its `sha256:...` hash (paste that into `auth.api_keys`). Send the key as either header — `Authorization: Bearer <key>` is checked first, falling back to `X-API-Key: <key>` if `Authorization` is absent or isn't `Bearer`-shaped. Any protected module accepts a valid API key, and a module you haven't listed in `auth.modules` doesn't require one.
 
 ---
 

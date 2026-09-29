@@ -1,14 +1,7 @@
-import { useState } from "react";
+import { CopyButton } from "../components/common";
 
 export function ApiPage() {
-  const [copied, setCopied] = useState(false);
   const origin = window.location.origin;
-
-  const copy = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
 
   const curlExample = `curl -X POST ${origin}/graphql \\
   -H "Authorization: Bearer <api-key>" \\
@@ -16,8 +9,8 @@ export function ApiPage() {
   -d '{"query":"query { issues { nodes { identifier title state { name } } } }"}'`;
 
   const box: React.CSSProperties = {
-    background: "var(--bg-input)",
-    border: "1px solid var(--border)",
+    background: "var(--color-surface-1)",
+    border: "1px solid var(--color-border)",
     borderRadius: 6,
     padding: 12,
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
@@ -36,7 +29,7 @@ export function ApiPage() {
         className="content"
         style={{ padding: 24, maxWidth: 760, lineHeight: 1.6 }}
       >
-        <p style={{ color: "var(--text-dim)" }}>
+        <p style={{ color: "var(--color-text-muted)" }}>
           This module exposes a Linear-compatible GraphQL endpoint at{" "}
           <code>{origin}/graphql</code>. Access is controlled by the platform:
           a request must carry a platform API key, either as{" "}
@@ -48,16 +41,12 @@ export function ApiPage() {
 
         <h3>Example request</h3>
         <div style={box}>{curlExample}</div>
-        <button
-          className="btn"
-          style={{ marginTop: 10 }}
-          onClick={() => copy(curlExample)}
-        >
-          {copied ? "Copied" : "Copy curl"}
-        </button>
+        <div style={{ marginTop: 10 }}>
+          <CopyButton text={() => curlExample} label="curl example" />
+        </div>
 
         <h3 style={{ marginTop: 24 }}>Supported operations</h3>
-        <ul style={{ color: "var(--text-dim)" }}>
+        <ul style={{ color: "var(--color-text-muted)" }}>
           <li>
             <code>viewer</code>, <code>teams</code>,{" "}
             <code>workflowStates</code>, <code>issueLabels</code>
@@ -73,7 +62,7 @@ export function ApiPage() {
         </ul>
 
         <h3 style={{ marginTop: 24 }}>REST API</h3>
-        <p style={{ color: "var(--text-dim)" }}>
+        <p style={{ color: "var(--color-text-muted)" }}>
           A plain REST API is also available under <code>{origin}/api</code>{" "}
           (e.g. <code>GET /api/issues?state=in_progress&amp;tagId=…</code>),
           subject to the same platform authentication.

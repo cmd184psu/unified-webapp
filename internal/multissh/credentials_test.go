@@ -79,7 +79,7 @@ func TestPutHostsWritesNoPasswordKey(t *testing.T) {
 		t.Fatalf("hosts file contains a password key: %s", raw)
 	}
 	for _, record := range decodeHostRecords(t, raw) {
-		want := map[string]bool{"ip": true, "port": true, "user": true, "key": true, "remoteDir": true}
+		want := map[string]bool{"name": true, "ip": true, "port": true, "user": true, "key": true, "remoteDir": true}
 		if len(record) != len(want) {
 			t.Fatalf("record has %d fields, want %d: %#v", len(record), len(want), record)
 		}

@@ -1,0 +1,85 @@
+Phase 3 UI Unification — Progress
+
+C1: taskmaster (commit 73936e7) — DONE
+  - 141 var() refs renamed from local tokens to shared tokens
+  - :root block deleted (kept --status-blue only)
+  - ThemeManager(module:'taskmaster', default:'obsidian') + HamburgerMenu with all controls migrated
+  - buildMenu() + ICON_MENU + closeMenu() + document listeners deleted
+  - Modal imports consolidated: 4 files changed from ./ui/modal.js to @shared; modal.ts shim deleted
+  - Theme bootstrap inline script added to index.html
+  - token-overlap gate EXPECTED changed from ["--font-mono"] to []
+  - All gates passed: build(16), typecheck, test:web(9/189), make test, gofmt, go vet, bundle-shape, token-overlap
+
+C2: certmachine (commit 08d93b6) — DONE
+  - Descriptor: format iife→esm, added sharedConsumer:true
+  - 125+ var() refs renamed from 11 local tokens to shared tokens; :root block deleted (kept --purple)
+  - Hex literal #0b0f1a replaced with var(--color-bg)
+  - toast.ts deleted, 4 files changed import from "./toast" to "@shared"
+  - ThemeManager(module:'certmachine', default:'dark') + HamburgerMenu with theme picker
+  - index.html: shared.css link, data-theme="dark", theme bootstrap, type="module"
+  - Makefile: certmachine appended to --require
+  - bundle-shape gate fix: A9.1 check now skips .css artifacts (CSS can't contain JS imports)
+  - All gates passed: build(11 descriptors), typecheck, test:web, bundle-shape, token-overlap
+
+C3: multissh (commit 7d2e662) — DONE
+  - Descriptor: format iife→esm, added sharedConsumer:true
+  - 127 var() refs renamed from 11 local tokens to shared tokens; :root block deleted
+  - Hex literal #0b0f17 replaced with var(--color-bg)
+  - resolveXtermTheme() helper reads computed style for xterm colors
+  - reThemeAll() + applyTheme() wired to ThemeManager onChange for live xterm theme switching
+  - ThemeManager(module:'multissh', default:'dark') + HamburgerMenu with theme picker
+  - index.html: shared.css link, data-theme="dark", theme bootstrap, type="module"
+  - Makefile: multissh appended to --require
+  - All gates passed: build(11 descriptors), typecheck, test:web(9/189), bundle-shape(9 sharedConsumer)
+
+C4: admin (commit 1106f45) — DONE
+  - app.js deleted, js/main.ts created (TS conversion with minimal typing)
+  - New build descriptor added: format:esm, sharedConsumer:true
+  - EXPECTED_ARTIFACT_COUNT → 17
+  - 24 hex literals replaced with shared token vars in style.css
+  - ThemeManager(module:'admin', default:'dark') + HamburgerMenu with sign-out + theme picker
+  - index.html: shared.css link, data-theme="dark", theme bootstrap, type="module"
+  - tsconfig.json: added web/admin/js/**/*.ts
+  - Makefile: admin appended to --require
+  - All gates passed: build(12 descriptors, 17 artifacts), typecheck, test:web(9), bundle-shape(10 sharedConsumer)
+
+C5: timetracker (commit c345824) — DONE
+  - index.js → js/main.ts, TimeSelector.js → js/time-selector.ts (TS conversion)
+  - index.css → js/main.css, TimeSelector.css → js/time-selector.css
+  - FontAwesome deleted: fontawesome.min.css + webfonts/fa-solid-900.ttf
+  - FA icons (fa-edit, fa-download, fa-copy) replaced with inline SVGs
+  - ThemeManager(module:'timetracker', default:'dark') + HamburgerMenu with theme picker
+  - index.html: shared.css link, data-theme="dark", theme bootstrap, type="module", FA CSS link removed
+  - New build descriptor, EXPECTED_ARTIFACT_COUNT → 18
+  - tsconfig.json: added web/timetracker/js/**/*.ts
+  - Makefile: timetracker appended to --require
+  - All gates passed: build(13 descriptors, 18 artifacts), typecheck, test:web(9), bundle-shape(12 sharedConsumer)
+
+C6: grocery (commit ed03294) — DONE
+  - app.js → js/main.ts (IIFE unwrapped, @ts-nocheck, ThemeManager + HamburgerMenu)
+  - app.test.js → js/main.test.ts (paths updated, norm() type-stripping regex per ADR-017)
+  - Body-extraction regexes fixed for column-0 declarations after IIFE unwrap
+  - style.css: 31 shared-matching :root defs deleted, 19 module-specific kept
+  - 4 token renames: --color-surface→-1, --color-surface-off→-2, --color-primary-hov→-hover, --color-primary-lite→-tint
+  - Google Fonts CDN removed from index.html
+  - New build descriptor, EXPECTED_ARTIFACT_COUNT → 19
+  - All gates passed: build(14 descriptors, 19 artifacts), typecheck, test:web(9/189), bundle-shape(13 sharedConsumer)
+
+C7: D-5 fix (commit e31b793) — DONE
+  - #btn-hamburger moved from inside #topbar-actions to direct child of #topbar in index.html
+  - Stale comment at app.ts:490 corrected to reflect new trigger position
+  - All gates passed: build, typecheck, test:web
+
+C8: deslop (commit 31935dd) — DONE
+  - Plan-provenance comments removed from 8 files in web/shared/ts/
+  - B-criteria, S-sections, ADR numbers, FRD refs, Phase mentions stripped
+  - Architectural intent preserved where comments remain useful
+  - 10 files changed, -139 lines net
+  - All gates passed: build, typecheck, test:web, bundle-shape(13 sharedConsumer)
+
+STATUS: All 8 commits landed (C1-C8). Architect reviewer verification in progress.
+
+Learnings:
+  - When changing modal imports, grep all files — not just the main entry point
+  - token-overlap gate must be updated when retiring the last overlapping token
+  - Go test TestProcessRegistry_SuspendResume_RealProcess is flaky (timing), pre-existing

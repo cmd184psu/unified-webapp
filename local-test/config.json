@@ -3,24 +3,26 @@
   "tls_cert": "",
   "tls_key": "",
   "host_routing": {
-    "localhost":         "grocery",
-    "grocery.test":     "grocery",
-    "todo.test":        "todo",
-    "slideshow.test":   "slideshow",
-    "menu.test":        "menuserver",
-    "menuserver.test":  "menuserver",
-    "obsidianoid.test": "obsidianoid",
-    "multissh.test":    "multissh",
-    "certmachine-test.cmdhome.net": "certmachine",
-    "admin.test":       "admin",
-    "taskmaster-test.cmdhome.net":  "taskmaster",
-    "smbedit-test.cmdhome.net":     "smbedit",
-    "issues-test.cmdhome.net": "issuetracker",
-    "timetracker.test": "timetracker"
+    "localhost":            "grocery",
+    "grocery.test":         "grocery",
+    "todo.test":            "todo",
+    "slideshow.test":       "slideshow",
+    "menuserver.test":      "menuserver",
+    "obsidianoid.test":     "obsidianoid",
+    "multissh.test":        "multissh",
+    "certmachine.test":     "certmachine",
+    "admin.test":           "admin",
+    "taskmaster.test":      "taskmaster",
+    "smbedit.test":         "smbedit",
+    "issuetracker.test":    "issuetracker",
+    "timetracker.test":     "timetracker",
+    "sampler.test":         "sampler",
+    "utuber.test":          "utuber"
   },
   "server": {
     "origin_check": "enforce",
-    "sse_max_subscribers": 64
+    "sse_max_subscribers": 64,
+    "shared_static_dir": "./web/shared"
   },
   "grocery": {
     "static_dir": "./web/grocery",
@@ -48,7 +50,10 @@
     "static_dir": "./web/slideshow",
     "image_dir": "./local-test/data/slideshow",
     "prefix": "slides",
-    "default_subject": ""
+    "default_subject": "",
+    "music": {
+      "audio_dir": "./local-test/data/slideshow-audio"
+    }
   },
   "menuserver": {
     "static_dir": "./web/menuserver",
@@ -59,7 +64,7 @@
     "static_dir": "./web/obsidianoid",
     "data_dir": "./local-test/data/obsidianoid",
     "vaults": [
-      { "path": "./local-test/data/vault", "name": "Test Vault", "theme": "dark" }
+      { "path": "./local-test/data/vault", "name": "Test Vault", "theme": "obsidian" }
     ],
     "threads_folder": "Threads",
     "thread_count": 4,
@@ -71,7 +76,7 @@
     "upload_dir": "./local-test/data/multissh/uploads",
     "hosts_path": "./local-test/data/multissh/hosts.json",
     "browse_root": "",
-    "max_sessions": 3,
+    "max_sessions": 10,
     "max_upload_bytes": 8589934592,
     "strict_host_key": false,
     "known_hosts_path": ""
@@ -111,38 +116,64 @@
     "static_dir": "./web/timetracker",
     "data_file": "./local-test/data/timetracker.json"
   },
+  "utuber": {
+    "static_dir": "./web/utuber",
+    "download_dir": "./local-test/data/utuber/downloads",
+    "workers": 1,
+    "python_bin": "python3.12"
+  },
+  "sampler": {
+    "static_dir": "./web/sampler"
+  },
   "auth": {
     "modules": {
       "admin": {
-        "pin_file": "/opt/unified-webapp-issues/local-test/admin.pin"
+        "pin_file": "/opt/unified-webapp-ui-upgrade/local-test/admin.pin"
       },
       "certmachine": {
-        "pin_file": "/opt/unified-webapp-issues/local-test/certmachine.pin"
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
+      },
+      "grocery": {
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
+      },
+      "issuetracker": {
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
       },
       "menuserver": {
-        "pin_file": ""
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
       },
       "multissh": {
-        "pin_file": ""
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
       },
       "obsidianoid": {
-        "pin_file": ""
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
       },
       "slideshow": {
-        "pin_file": "/opt/unified-webapp-issues/local-test/slideshow.pin"
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
+      },
+      "smbedit": {
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
+      },
+      "taskmaster": {
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
+      },
+      "timetracker": {
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
       },
       "todo": {
-        "pin_file": "/opt/unified-webapp-issues/local-test/todo.pin"
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
+      },
+      "utuber": {
+        "pin_file": "/opt/unified-webapp/local-test/test.pin"
       }
     },
     "admin_pin": "",
     "admin_pin_file": "",
-    "data_dir": "/opt/unified-webapp-issues/local-test/data/auth",
+    "data_dir": "/opt/unified-webapp-ui-upgrade/local-test/data/auth",
     "cookie_secure": false,
     "cookie_domain": "",
     "session": {
-      "ttl_hours": 720,
-      "refresh_after_fraction": 0.5
+      "ttl_hours": 720
     },
     "ldap": {
       "url": "ldap://127.0.0.1:3893",
@@ -161,6 +192,14 @@
       {
         "name": "local-test",
         "hash": "sha256:c7fa7e4500e52a9c89f647736a72b39aaed9bcf4c3b2327c2b228adb9c7c10c3"
+      },
+      {
+        "name": "asdfaf",
+        "hash": "sha256:d6d631ce648ceb69a5633855a08cfe06f584b0890b24283efb49d74a38487630"
+      },
+      {
+        "name": "asfafafasfa",
+        "hash": "sha256:e5d4c6a3b954229334941f624fc7f424bb75d60fddeef6b900b8e46b61794fc8"
       }
     ],
     "passkey": {

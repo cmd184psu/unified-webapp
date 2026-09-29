@@ -21,7 +21,7 @@ export function EpicsPage() {
     <>
       <div className="topbar">
         <h1>Epics</h1>
-        <span style={{ color: "var(--text-faint)" }}>{epics.length}</span>
+        <span style={{ color: "var(--color-text-faint)" }}>{epics.length}</span>
         <div className="spacer" />
         <button className="btn primary" onClick={() => setCreating(true)}>
           + New epic

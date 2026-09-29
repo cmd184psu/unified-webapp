@@ -32,11 +32,11 @@ export function StoryDetailPage() {
         </button>
       </div>
       <div className="content">
-        <div style={{ padding: "16px 18px", color: "var(--text-dim)" }}>
+        <div style={{ padding: "16px 18px", color: "var(--color-text-muted)" }}>
           <span className="detail-ident">{STATE_LABELS[story.state]}</span>
           {story.epicId && (
             <span
-              style={{ marginLeft: 12, color: "var(--accent)", cursor: "pointer" }}
+              style={{ marginLeft: 12, color: "var(--color-primary)", cursor: "pointer" }}
               onClick={() => nav(`/epics/${story.epicId}`)}
             >
               · In epic →

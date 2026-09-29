@@ -1,11 +1,16 @@
 import { useState } from 'react'
-import { Share } from './api'
-import { FolderPicker } from './FolderPicker'
+import { showToast } from '@shared'
+import { api, Share } from './api'
+import { pickFolder } from './FolderPicker'
 
 interface Props {
   shares: Share[]
   onChange: (shares: Share[]) => void
+  /** The Linux user all shares belong to; its home dir backs the "home" share. */
+  shareOwner: string
 }
+
+const HOME_SHARE = 'home'
 
 function emptyShare(): Share {
   return {
@@ -21,9 +26,9 @@ function emptyShare(): Share {
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <label className="toggle">
+    <label className="ui-toggle">
       <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} />
-      <span className="toggle-track" />
+      <span className="ui-toggle-track" />
     </label>
   )
 }
@@ -142,8 +147,48 @@ function ShareEditor({
   )
 }
 
-export function SharesPage({ shares, onChange }: Props) {
-  const [pickerIdx, setPickerIdx] = useState<number | null>(null)
+export function SharesPage({ shares, onChange, shareOwner }: Props) {
+  const [findingHome, setFindingHome] = useState(false)
+
+  // The share owner's home directory lives outside /opt, where the folder
+  // picker cannot go, so the server resolves it. An existing "home" share is
+  // re-pointed rather than duplicated, keeping its other settings.
+  const pickFor = async (i: number) => {
+    const folder = await pickFolder()
+    if (!folder) return
+    const share = shares[i]
+    // Default the name from the folder if share has no name yet.
+    update(i, { ...share, path: folder.path, name: share.name || folder.name })
+  }
+
+  const shareHome = async () => {
+    const owner = shareOwner.trim()
+    if (!owner) {
+      showToast('Set the share owner first.', 'notice')
+      return
+    }
+    setFindingHome(true)
+    try {
+      const { path } = await api.home(owner)
+      const at = shares.findIndex(s => s.name === HOME_SHARE)
+      if (at >= 0) {
+        update(at, { ...shares[at], path })
+        showToast(`Share "${HOME_SHARE}" now points at ${path}. Save to apply.`, 'success')
+      } else {
+        onChange([...shares, {
+          ...emptyShare(),
+          name: HOME_SHARE,
+          path,
+          comment: `${owner}'s home directory`,
+        }])
+        showToast(`Added share "${HOME_SHARE}" for ${path}. Save to apply.`, 'success')
+      }
+    } catch {
+      showToast(`Couldn't find a home directory for user "${owner}".`, 'error')
+    } finally {
+      setFindingHome(false)
+    }
+  }
 
   const update = (i: number, s: Share) => {
     const next = [...shares]
@@ -169,7 +214,17 @@ export function SharesPage({ shares, onChange }: Props) {
               Editable list of Samba share definitions. All shares are owned by the configured user.
             </div>
           </div>
-          <button className="btn btn-primary" onClick={add}>+ Add share</button>
+          <div className="row">
+            <button
+              className="btn btn-ghost"
+              onClick={shareHome}
+              disabled={findingHome}
+              title={`Share ${shareOwner || 'the share owner'}'s home directory as "${HOME_SHARE}"`}
+            >
+              {findingHome ? '⟳ Finding home…' : '🏠 Share home'}
+            </button>
+            <button className="btn btn-primary" onClick={add}>+ Add share</button>
+          </div>
         </div>
       </div>
 
@@ -187,26 +242,12 @@ export function SharesPage({ shares, onChange }: Props) {
               share={s}
               onChange={updated => update(i, updated)}
               onDelete={() => remove(i)}
-              onPickFolder={() => setPickerIdx(i)}
+              onPickFolder={() => void pickFor(i)}
             />
           ))}
         </div>
       )}
 
-      {pickerIdx !== null && (
-        <FolderPicker
-          onSelect={folder => {
-            const share = shares[pickerIdx]
-            // Default the name from the folder if share has no name yet.
-            update(pickerIdx, {
-              ...share,
-              path: folder.path,
-              name: share.name || folder.name,
-            })
-          }}
-          onClose={() => setPickerIdx(null)}
-        />
-      )}
     </div>
   )
 }

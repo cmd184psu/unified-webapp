@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -43,6 +44,36 @@ func TestHostStore_SaveReloadRoundTripWithNormalizedDefaults(t *testing.T) {
 	}
 	if hosts[0].RemoteDir != "/tmp" {
 		t.Fatalf("remoteDir = %q, want /tmp", hosts[0].RemoteDir)
+	}
+}
+
+func TestHostStore_NameRoundTripsTrimmedAndCapped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hosts.json")
+	store, err := newHostStore(path, 3)
+	if err != nil {
+		t.Fatalf("newHostStore: %v", err)
+	}
+	long := strings.Repeat("n", maxHostNameLen+10)
+	if err := store.set([]hostRequest{
+		{Name: "  web-01  ", IP: "10.0.0.1"},
+		{Name: long, IP: "10.0.0.2"},
+		{IP: "10.0.0.3"},
+	}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	reloaded, err := newHostStore(path, 3)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	hosts := reloaded.list()
+	if hosts[0].Name != "web-01" {
+		t.Errorf("name = %q, want web-01", hosts[0].Name)
+	}
+	if len([]rune(hosts[1].Name)) != maxHostNameLen {
+		t.Errorf("long name kept %d runes, want %d", len([]rune(hosts[1].Name)), maxHostNameLen)
+	}
+	if hosts[2].Name != "" {
+		t.Errorf("unset name = %q, want empty", hosts[2].Name)
 	}
 }
 
@@ -113,7 +144,7 @@ func TestHostStore_SerializesOnlyContractFields(t *testing.T) {
 	if !ok {
 		t.Fatalf("unexpected host payload: %#v", hostsRaw[0])
 	}
-	if len(hostMap) != 5 {
-		t.Fatalf("expected exactly 5 fields, got %#v", hostMap)
+	if len(hostMap) != 6 {
+		t.Fatalf("expected exactly 6 fields, got %#v", hostMap)
 	}
 }

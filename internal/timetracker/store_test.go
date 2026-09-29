@@ -296,6 +296,7 @@ func TestUpdateFieldEveryField(t *testing.T) {
 	}{
 		{"customerName", func(c timetracker.Customer) string { return c.CustomerName }},
 		{"slackChannel", func(c timetracker.Customer) string { return c.SlackChannel }},
+		{"slackChannelId", func(c timetracker.Customer) string { return c.SlackChannelId }},
 		{"workLoadType", func(c timetracker.Customer) string { return c.WorkLoadType }},
 		{"cmsUrl", func(c timetracker.Customer) string { return c.CmsUrl }},
 		{"supportBucket", func(c timetracker.Customer) string { return c.SupportBucket }},
@@ -320,8 +321,8 @@ func TestUpdateFieldEveryField(t *testing.T) {
 	}
 }
 
-func TestUpdateFieldRejectsSlackChannelIdAndUnknown(t *testing.T) {
-	for _, field := range []string{"slackChannelId", "supportTunnel", "bogus"} {
+func TestUpdateFieldRejectsUnknown(t *testing.T) {
+	for _, field := range []string{"supportTunnel", "bogus"} {
 		t.Run(field, func(t *testing.T) {
 			s, _ := newTempStore(t)
 			if _, err := s.AppendCustomer(timetracker.Customer{}); err != nil {

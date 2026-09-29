@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UI Sampler</title>
+    <link rel="stylesheet" href="/shared/dist/shared.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="sampler-header">
+      <!-- The HamburgerMenu trigger is appended here by js/main.ts (Step 4.5),
+           first in the header so the drawer's button sits at the left edge the
+           way FR-4 describes. The drawer and its backdrop are position: fixed
+           and are appended to <body> by the class itself, so nothing else in
+           this file has to make room for them. -->
+      <div id="menu-mount"></div>
+      <h1 class="sampler-title">UI Sampler</h1>
+      <label class="sampler-theme-picker">
+        Theme
+        <select id="theme-select"></select>
+      </label>
+    </header>
+
+    <main class="sampler-main">
+      <section class="sampler-section" aria-labelledby="swatches-heading">
+        <h2 id="swatches-heading">Color tokens</h2>
+        <div id="swatch-grid" class="sampler-swatch-grid"></div>
+      </section>
+
+      <section class="sampler-section" aria-labelledby="specimens-heading">
+        <h2 id="specimens-heading">Structural tokens</h2>
+        <div id="specimen-list" class="sampler-specimen-list"></div>
+      </section>
+
+      <section class="sampler-section" aria-labelledby="modals-heading">
+        <h2 id="modals-heading">Modals &amp; dialogs</h2>
+        <div id="modal-demos" class="sampler-modal-demos"></div>
+      </section>
+
+      <section class="sampler-section" aria-labelledby="toasts-heading">
+        <h2 id="toasts-heading">Toasts</h2>
+        <div id="toast-demos" class="sampler-modal-demos"></div>
+      </section>
+
+      <section class="sampler-section" aria-labelledby="toggles-heading">
+        <h2 id="toggles-heading">Toggles</h2>
+        <div id="toggle-demos" class="sampler-modal-demos"></div>
+      </section>
+
+      <section class="sampler-section" aria-labelledby="theme-picker-heading">
+        <h2 id="theme-picker-heading">Theme picker</h2>
+        <div class="sampler-picker-variants">
+          <div>
+            <p class="sampler-variant-caption">List — the picker alone in a drawer</p>
+            <div id="theme-picker"></div>
+          </div>
+          <div>
+            <p class="sampler-variant-caption">Dropdown — the picker sharing a drawer with other settings</p>
+            <div id="theme-picker-select"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sampler-section" aria-labelledby="menu-heading">
+        <h2 id="menu-heading">Hamburger menu</h2>
+        <div id="menu-demos" class="sampler-modal-demos"></div>
+      </section>
+    </main>
+
+    <script type="module" src="js/bundle.js"></script>
+  </body>
+</html>

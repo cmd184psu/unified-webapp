@@ -160,7 +160,7 @@ func TestMultisshMaxSessionsValidation(t *testing.T) {
 		{"zero means unset", `{"multissh":{"max_sessions":0}}`, config.DefaultMaxSessions, false},
 		{"one is the floor", `{"multissh":{"max_sessions":1}}`, 1, false},
 		{"negative is rejected", `{"multissh":{"max_sessions":-1}}`, 0, true},
-		{"at the ceiling", `{"multissh":{"max_sessions":16}}`, config.MaxMaxSessions, false},
+		{"at the ceiling", `{"multissh":{"max_sessions":10}}`, config.MaxMaxSessions, false},
 		{"above the ceiling clamps", `{"multissh":{"max_sessions":64}}`, config.MaxMaxSessions, false},
 	}
 	for _, tc := range cases {

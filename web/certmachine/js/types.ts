@@ -38,6 +38,18 @@ export interface Cert {
   quarantineReason?: string;
   /** Absent unless the cert does not chain to the stored CA. */
   importWarning?: string;
+  /**
+   * The CA row that signed this cert (`certs.ca_id`, CA-replacement plan
+   * P1). `null` means "unknown signer" -- neither stale nor current -- which
+   * covers quarantined rows and rows whose stored certificate does not chain
+   * to any recorded CA. Always present (never absent), unlike the optional
+   * fields above.
+   */
+  caId: number | null;
+  /** The signing CA's subject. Present only where the server joins against `ca` (list/detail). */
+  caSubject?: string;
+  /** True exactly when `caId` is non-null and differs from the current CA's id. */
+  stale: boolean;
   created: string;
 }
 
@@ -58,6 +70,10 @@ export interface AppConfig {
   trustDeviceAvailable: boolean;
   /** The detected platform ("darwin" / "rhel" / "debian"). Absent unless `trustDeviceAvailable` is true. */
   trustPlatform?: string;
+  /** True when the CA can be trusted on another machine over SSH. */
+  trustRemoteAvailable: boolean;
+  /** Why remote trust is unavailable, when it is. */
+  trustRemoteReason?: string;
 }
 
 /**
@@ -71,6 +87,41 @@ export interface CertMutationResponse {
   validityClamped: boolean;
   /** Present only when `validityClamped` is true. */
   requestedNotAfter?: string;
+  /**
+   * True when this mutation (renew/edit/delete can all trigger it) caused
+   * the previous CA to drop -- it no longer signed any active certificate,
+   * so it and its archived rows were removed (CA-replacement plan P2).
+   * Always present -- the server never omits it (`issueResponse`, handler.go).
+   */
+  previousDropped: boolean;
+}
+
+/**
+ * POST /api/ca/replace's 200 body (CA-replacement plan §4). `ca` is the
+ * post-replace `GET /api/ca` shape, defined in `api.ts` as `CAStatus` --
+ * imported here rather than re-declared, so the two never drift apart.
+ */
+export interface ReplaceResult {
+  ca: import("./api").CAStatus;
+  reissued: number;
+  deleted: number;
+  kept: number;
+  clamped: number;
+  previousDropped: boolean;
+}
+
+/**
+ * One progress event from `replaceCAWithProgress`'s NDJSON stream (the
+ * CA-replacement plan's progress-bar feature). `total` -- the overall
+ * leaf-key count, 0 when none will be re-issued -- is present on every
+ * phase, so the client can compute an overall percentage from the very
+ * first event (see `percentFor` in `ndjson.ts`); `done` is present only for
+ * `"leaf-keys"`, matching the server's own `omitempty` there.
+ */
+export interface ReplaceProgressEvent {
+  phase: "ca-key" | "leaf-keys" | "saving";
+  done?: number;
+  total?: number;
 }
 
 /** One entry in an import preview/execute report. */

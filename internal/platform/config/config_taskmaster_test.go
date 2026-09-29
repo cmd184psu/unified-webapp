@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -132,4 +133,52 @@ func TestTaskmasterSSEMaxSubscribers(t *testing.T) {
 			t.Errorf("SSEMaxSubscribers = %d, want %d", c.Taskmaster.SSEMaxSubscribers, config.DefaultSSEMaxSubscribers)
 		}
 	})
+}
+
+// TestTaskmasterProgressIntervalNormalization pins normalizeTaskmaster's
+// clamp table (plan Q3/§4.8): 0 takes the 2000ms default (today's cadence),
+// a value below the 100ms floor or above the 2000ms ceiling clamps with a
+// log line, a value inside the range passes through unchanged, and a
+// negative value is a hard config error.
+func TestTaskmasterProgressIntervalNormalization(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      int
+		want    int
+		wantErr bool
+	}{
+		{name: "zero takes default", in: 0, want: 2000},
+		{name: "below minimum clamps up", in: 50, want: 100},
+		{name: "above maximum clamps down", in: 5000, want: 2000},
+		{name: "in range passes through", in: 500, want: 500},
+		{name: "negative is an error", in: -1, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeCfg(t, fmt.Sprintf(`{"taskmaster":{"progress_interval_ms":%d}}`, tc.in))
+			c, err := config.Load(path)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("Load(progress_interval_ms=%d) succeeded, want error", tc.in)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load(progress_interval_ms=%d): %v", tc.in, err)
+			}
+			if c.Taskmaster.ProgressIntervalMs != tc.want {
+				t.Errorf("progress_interval_ms = %d, want %d", c.Taskmaster.ProgressIntervalMs, tc.want)
+			}
+		})
+	}
+}
+
+// TestTaskmasterDefaultConfigProgressInterval pins DefaultConfig's
+// progress_interval_ms (the value a fresh config file is written with) to
+// the same 2000ms floor normalizeTaskmaster falls back to.
+func TestTaskmasterDefaultConfigProgressInterval(t *testing.T) {
+	c := config.DefaultConfig()
+	if c.Taskmaster.ProgressIntervalMs != config.DefaultTaskmasterProgressIntervalMs {
+		t.Errorf("DefaultConfig progress_interval_ms = %d, want %d", c.Taskmaster.ProgressIntervalMs, config.DefaultTaskmasterProgressIntervalMs)
+	}
 }

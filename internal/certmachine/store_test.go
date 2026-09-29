@@ -39,8 +39,8 @@ func TestOpenIsIdempotentOnReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Open: %v", err)
 	}
-	if _, err := s1.db.Exec(`INSERT INTO ca(id, cert_pem, key_pem, subject, serial, not_before, not_after, fingerprint, created)
-		VALUES (1, 'CERT', 'KEY', 'CN=test', '1', '2024-01-01T00:00:00Z', '2034-01-01T00:00:00Z', 'FP', '2024-01-01T00:00:00Z')`); err != nil {
+	if _, err := s1.db.Exec(`INSERT INTO ca(id, role, cert_pem, key_pem, subject, serial, not_before, not_after, fingerprint, created)
+		VALUES (1, 'current', 'CERT', 'KEY', 'CN=test', '1', '2024-01-01T00:00:00Z', '2034-01-01T00:00:00Z', 'FP', '2024-01-01T00:00:00Z')`); err != nil {
 		t.Fatalf("insert ca row: %v", err)
 	}
 	if err := s1.Close(); err != nil {
@@ -547,7 +547,7 @@ func TestInsertCASecondReturnsErrCAExistsFirstUnchanged(t *testing.T) {
 		t.Fatalf("second InsertCA error = %v, want ErrCAExists", err)
 	}
 
-	ca, err := s.GetCA(ctx)
+	ca, err := s.GetCurrentCA(ctx)
 	if err != nil {
 		t.Fatalf("GetCA: %v", err)
 	}
@@ -559,7 +559,7 @@ func TestInsertCASecondReturnsErrCAExistsFirstUnchanged(t *testing.T) {
 func TestGetCANotFound(t *testing.T) {
 	s := openTestStore(t)
 
-	if _, err := s.GetCA(context.Background()); !errors.Is(err, ErrCANotFound) {
-		t.Fatalf("GetCA(empty) error = %v, want ErrCANotFound", err)
+	if _, err := s.GetCurrentCA(context.Background()); !errors.Is(err, ErrCANotFound) {
+		t.Fatalf("GetCurrentCA(empty) error = %v, want ErrCANotFound", err)
 	}
 }

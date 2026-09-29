@@ -32,8 +32,8 @@ type Store struct {
 }
 
 // NewStore creates a Store backed by imageDir, creating it if necessary.
-// ageCutoffDays filters out subjects whose directory mtime is older than that
-// many days; 0 disables the filter.
+// ageCutoffDays is the default image age limit (see SubjectsWithin); 0
+// means no limit.
 func NewStore(imageDir string, ageCutoffDays int) (*Store, error) {
 	if err := os.MkdirAll(imageDir, 0750); err != nil {
 		return nil, err
@@ -41,18 +41,26 @@ func NewStore(imageDir string, ageCutoffDays int) (*Store, error) {
 	return &Store{imageDir: imageDir, ageCutoffDays: ageCutoffDays}, nil
 }
 
-// Subjects lists all subject directories and their image file entries, applying
-// blacklist (_-prefix) and age cutoff filters.
-// Entries are formatted as "{subject}/{filename}" to match the image URL pattern.
-func (s *Store) Subjects() ([]Subject, error) {
+// DefaultMaxAgeDays is the configured starting value for the image age limit.
+func (s *Store) DefaultMaxAgeDays() int { return s.ageCutoffDays }
+
+// Subjects is SubjectsWithin the configured default age limit.
+func (s *Store) Subjects() ([]Subject, error) { return s.SubjectsWithin(s.ageCutoffDays) }
+
+// SubjectsWithin lists all subject directories and their image entries,
+// skipping _-prefixed subjects and any image whose file was last modified
+// more than maxAgeDays days ago (0 = no age limit). A subject left with no
+// images is skipped entirely. Entries are "{subject}/{filename}" to match
+// the image URL pattern.
+func (s *Store) SubjectsWithin(maxAgeDays int) ([]Subject, error) {
 	dirs, err := os.ReadDir(s.imageDir)
 	if err != nil {
 		return nil, err
 	}
 
 	var cutoff time.Time
-	if s.ageCutoffDays > 0 {
-		cutoff = time.Now().AddDate(0, 0, -s.ageCutoffDays)
+	if maxAgeDays > 0 {
+		cutoff = time.Now().AddDate(0, 0, -maxAgeDays)
 	}
 
 	var subjects []Subject
@@ -67,29 +75,23 @@ func (s *Store) Subjects() ([]Subject, error) {
 			continue
 		}
 
-		// Age filter: skip directories older than cutoff.
-		if !cutoff.IsZero() {
-			info, err := d.Info()
-			if err != nil {
-				continue
-			}
-			if info.ModTime().Before(cutoff) {
-				continue
-			}
-		}
-
 		files, err := os.ReadDir(filepath.Join(s.imageDir, name))
 		if err != nil {
 			continue
 		}
 		var entries []string
 		for _, f := range files {
-			if f.IsDir() {
+			if f.IsDir() || !imageExts[strings.ToLower(filepath.Ext(f.Name()))] {
 				continue
 			}
-			if imageExts[strings.ToLower(filepath.Ext(f.Name()))] {
-				entries = append(entries, name+"/"+f.Name())
+			// Age limit: by each image's own modified time.
+			if !cutoff.IsZero() {
+				info, err := f.Info()
+				if err != nil || info.ModTime().Before(cutoff) {
+					continue
+				}
 			}
+			entries = append(entries, name+"/"+f.Name())
 		}
 		if len(entries) == 0 {
 			continue

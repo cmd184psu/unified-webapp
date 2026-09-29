@@ -52,6 +52,7 @@ import (
 	"cmd184psu/unified-webapp/internal/platform/auth"
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/platform/middleware"
+	"cmd184psu/unified-webapp/internal/platform/static"
 )
 
 // modulePinFile writes pin to a fresh 0400 file under a new t.TempDir() and
@@ -87,17 +88,18 @@ func apiKeyHash(key string) string {
 func buildControlDispatcher(cfg *config.Config) *Dispatcher {
 	dispatch := newDispatcher()
 	built := make(map[string]http.Handler, len(cfg.Routing))
+	deps := &moduleDeps{cfg: cfg, closers: &dispatch.closers}
 	for host, module := range cfg.Routing {
 		h, ok := built[module]
 		if !ok {
-			hh, err := buildModule(module, cfg, nil)
+			hh, err := buildModule(module, cfg, nil, deps)
 			if err != nil {
 				h = unavailableHandler(module, err)
 			} else {
 				if c, ok := hh.(io.Closer); ok {
 					dispatch.closers = append(dispatch.closers, c)
 				}
-				h = middleware.BodyLimit(limitFor(module, cfg), hh)
+				h = middleware.BodyLimit(limitFor(module, cfg), static.WithShared(hh, cfg.Server.SharedStaticDir))
 			}
 			built[module] = h
 		}
@@ -490,7 +492,7 @@ func TestAC4_TokenLifecycle(t *testing.T) {
 		Modules: map[string]config.ModuleAuthConfig{"slideshow": {PinFile: modulePinFile(t, "4242")}},
 		LDAP:    config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
 		DataDir: authDataDir,
-		Session: config.SessionConfig{TTLHours: 1}, // 1h TTL, default 0.5 refresh fraction.
+		Session: config.SessionConfig{TTLHours: 1}, // 1h maximum session length; default 60-minute idle.
 	}
 	svc, err := auth.FromConfig(cfg.Auth, knownModules, false)
 	if err != nil {
@@ -509,8 +511,12 @@ func TestAC4_TokenLifecycle(t *testing.T) {
 
 	now := time.Now()
 
+	// The forged tokens carry an LDAP identity grant: a door-code grant also
+	// carries a keyed fingerprint of the PIN (auth/session_scope.go), which
+	// is out of reach from here.
+
 	t.Run("expired token", func(t *testing.T) {
-		tok := signSessionToken(t, realKey, "carol", []string{"pin:slideshow"}, now.Add(-2*time.Hour), now.Add(-time.Hour))
+		tok := signSessionToken(t, realKey, "carol", []string{"ldap"}, now.Add(-2*time.Hour), now.Add(-time.Hour))
 		res := doHostWithCookie(t, srv, http.MethodGet, "slideshow.example", "/", &http.Cookie{Name: "uw_session", Value: tok})
 		defer res.Body.Close()
 		if res.StatusCode != http.StatusUnauthorized {
@@ -531,7 +537,7 @@ func TestAC4_TokenLifecycle(t *testing.T) {
 		if _, err := rand.Read(otherKey); err != nil {
 			t.Fatalf("generate other key: %v", err)
 		}
-		tok := signSessionToken(t, otherKey, "carol", []string{"pin:slideshow"}, now.Add(-time.Minute), now.Add(time.Hour))
+		tok := signSessionToken(t, otherKey, "carol", []string{"ldap"}, now.Add(-time.Minute), now.Add(time.Hour))
 		res := doHostWithCookie(t, srv, http.MethodGet, "slideshow.example", "/", &http.Cookie{Name: "uw_session", Value: tok})
 		defer res.Body.Close()
 		if res.StatusCode != http.StatusUnauthorized {
@@ -539,11 +545,12 @@ func TestAC4_TokenLifecycle(t *testing.T) {
 		}
 	})
 
-	t.Run("near-expiry refreshes the cookie", func(t *testing.T) {
-		iat := now.Add(-40 * time.Minute) // > 50% of the 1h TTL has elapsed.
+	t.Run("use renews the cookie", func(t *testing.T) {
+		iat := now.Add(-40 * time.Minute) // within the default 60-minute idle limit.
 		exp := iat.Add(time.Hour)         // still valid: 20 minutes remain.
-		tok := signSessionToken(t, realKey, "carol", []string{"pin:slideshow"}, iat, exp)
-		res := doHostWithCookie(t, srv, http.MethodGet, "slideshow.example", "/", &http.Cookie{Name: "uw_session", Value: tok})
+		tok := signSessionToken(t, realKey, "carol", []string{"ldap"}, iat, exp)
+		// A click or keypress, as reported by the shared page code.
+		res := doHostWithCookie(t, srv, http.MethodPost, "slideshow.example", "/api/auth/activity", &http.Cookie{Name: "uw_session", Value: tok})
 		defer res.Body.Close()
 		if res.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(res.Body)
@@ -1224,6 +1231,307 @@ func TestT5_6_RestartEquivalence(t *testing.T) {
 			t.Errorf("non-auth config sections differ after config.Load:\n got: %s\nwant: %s", gotJSON, wantJSON)
 		}
 	})
+}
+
+// ---------------------------------------------------------------------
+// A8.2 / A8.3: /shared/ wired on every module host (C3, FR-8).
+// ---------------------------------------------------------------------
+
+// allModulesRouteConfig builds a config that routes every module in
+// knownModules to its own hostname (module name + ".example"), each
+// buildable from scratch under t.TempDir(), with server.shared_static_dir
+// pointing at a fixture carrying dist/shared.css -- /shared/dist/shared.css
+// does not exist in the repo tree until C4, so this test drives its own
+// fixture rather than the real web/shared tree. Returns cfg and the admin
+// operator PIN the caller needs to log in on the admin host (admin is always
+// protected, matrix or not).
+func allModulesRouteConfig(t *testing.T) (cfg *config.Config, adminPIN string) {
+	t.Helper()
+	cfg = config.DefaultConfig()
+	cfg.Routing = map[string]string{}
+	for _, module := range knownModules {
+		cfg.Routing[module+".example"] = module
+	}
+
+	sharedDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(sharedDir, "dist"), 0o755); err != nil {
+		t.Fatalf("mkdir shared dist: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedDir, "dist", "shared.css"), []byte("body{}"), 0o644); err != nil {
+		t.Fatalf("write shared.css: %v", err)
+	}
+	cfg.Server.SharedStaticDir = sharedDir
+
+	cfg.Grocery.StaticDir = mkStaticDir(t)
+	cfg.Grocery.DataFile = filepath.Join(t.TempDir(), "grocery.json")
+
+	cfg.Todo.StaticDir = mkStaticDir(t)
+	cfg.Todo.DataDir = t.TempDir()
+
+	cfg.Slideshow.StaticDir = mkStaticDir(t)
+	cfg.Slideshow.ImageDir = t.TempDir()
+
+	cfg.Obsidianoid.StaticDir = mkStaticDir(t)
+	cfg.Obsidianoid.DataDir = t.TempDir()
+	cfg.Obsidianoid.Vaults = []config.ObsidianoidVault{{Path: t.TempDir(), Name: "test"}}
+
+	cfg.Menuserver.StaticDir = mkStaticDir(t)
+	cfg.Menuserver.DataDir = t.TempDir()
+
+	sshRoot := t.TempDir()
+	sshDir := filepath.Join(sshRoot, "ssh")
+	if err := os.MkdirAll(sshDir, 0o755); err != nil {
+		t.Fatalf("mkdir ssh: %v", err)
+	}
+	cfg.Multissh.StaticDir = mkStaticDir(t)
+	cfg.Multissh.SSHDir = sshDir
+	cfg.Multissh.UploadDir = filepath.Join(sshRoot, "uploads")
+	cfg.Multissh.HostsPath = filepath.Join(sshRoot, "data", "hosts.json")
+	cfg.Multissh.BrowseRoot = filepath.Join(sshRoot, "uploads")
+	cfg.Multissh.MaxSessions = 3
+	cfg.Multissh.MaxUploadBytes = 1 << 20
+
+	cfg.Certmachine.StaticDir = mkStaticDir(t)
+	cfg.Certmachine.DBPath = filepath.Join(t.TempDir(), "certmachine.db")
+
+	cfg.Taskmaster.StaticDir = mkStaticDir(t)
+	cfg.Taskmaster.DBPath = filepath.Join(t.TempDir(), "taskmaster.db")
+
+	cfg.Admin.StaticDir = mkStaticDir(t)
+
+	cfg.Utuber.StaticDir = mkStaticDir(t)
+	cfg.Utuber.DownloadDir = t.TempDir()
+	cfg.Utuber.Workers = 0
+	cfg.Utuber.PythonBin = "python3.12"
+
+	cfg.Smbedit.StaticDir = mkStaticDir(t)
+	cfg.Smbedit.DataDir = t.TempDir()
+
+	cfg.IssueTracker.StaticDir = mkStaticDir(t)
+	cfg.IssueTracker.DBPath = filepath.Join(t.TempDir(), "issuetracker.db")
+	cfg.IssueTracker.DefaultUser = config.IssueTrackerDefaultUser{Name: "Default", Email: "default@example.com"}
+
+	cfg.Timetracker.StaticDir = mkStaticDir(t)
+	cfg.Timetracker.DataFile = filepath.Join(t.TempDir(), "timetracker.json")
+
+	adminPIN = "9999"
+	cfg.Auth = config.AuthConfig{
+		AdminPINFile: modulePinFile(t, adminPIN),
+		DataDir:      t.TempDir(),
+	}
+	return cfg, adminPIN
+}
+
+// TestSharedRouteMatrixNeverServesA404 is the A8.2 table-driven test: for
+// every module in knownModules, /shared/dist/shared.css on that module's
+// host is 200 (module built) or 503 (unavailableHandler -- module.Build
+// failed, or admin without a session, so the request never reaches
+// static.WithShared), NEVER 404, and /shared/ts/modal.ts -- a real file
+// outside the dist/public allowlist -- 404s whenever the route was actually
+// reachable (i.e. whenever shared.css was 200). This is the direct
+// regression guard for /shared/ silently falling through to a module's own
+// catch-all handler instead of static.WithShared intercepting it first.
+func TestSharedRouteMatrixNeverServesA404(t *testing.T) {
+	cfg, adminPIN := allModulesRouteConfig(t)
+	adminRouted := adminIsRouted(cfg.Routing)
+	svc, err := auth.FromConfig(cfg.Auth, knownModules, adminRouted)
+	if err != nil {
+		t.Fatalf("auth.FromConfig: %v", err)
+	}
+	srv := newGateServer(t, cfg, svc)
+	defer srv.Close()
+
+	loginRes := doHost(t, srv, http.MethodPost, "admin.example", "/api/auth/login", `{"method":"pin","pin":"`+adminPIN+`"}`)
+	loginBody, _ := io.ReadAll(loginRes.Body)
+	loginRes.Body.Close()
+	if loginRes.StatusCode != http.StatusOK {
+		t.Fatalf("admin operator PIN login: status = %d, want 200 (body %q)", loginRes.StatusCode, loginBody)
+	}
+	adminCookie, ok := firstSetCookie(loginRes)
+	if !ok {
+		t.Fatal("admin operator PIN login: expected a Set-Cookie")
+	}
+
+	for _, module := range knownModules {
+		t.Run(module, func(t *testing.T) {
+			host := module + ".example"
+			var cssRes *http.Response
+			if module == "admin" {
+				cssRes = doHostWithCookie(t, srv, http.MethodGet, host, "/shared/dist/shared.css", adminCookie)
+			} else {
+				cssRes = doHostWithCookie(t, srv, http.MethodGet, host, "/shared/dist/shared.css", nil)
+			}
+			cssBody, _ := io.ReadAll(cssRes.Body)
+			cssRes.Body.Close()
+			if cssRes.StatusCode != http.StatusOK && cssRes.StatusCode != http.StatusServiceUnavailable {
+				t.Fatalf("GET %s/shared/dist/shared.css: status = %d, want 200 or 503 (body %q)", host, cssRes.StatusCode, cssBody)
+			}
+			if cssRes.StatusCode == http.StatusNotFound {
+				t.Fatalf("GET %s/shared/dist/shared.css: got 404, never allowed", host)
+			}
+
+			var tsRes *http.Response
+			if module == "admin" {
+				tsRes = doHostWithCookie(t, srv, http.MethodGet, host, "/shared/ts/modal.ts", adminCookie)
+			} else {
+				tsRes = doHostWithCookie(t, srv, http.MethodGet, host, "/shared/ts/modal.ts", nil)
+			}
+			tsBody, _ := io.ReadAll(tsRes.Body)
+			tsRes.Body.Close()
+			if cssRes.StatusCode == http.StatusOK {
+				// Route was actually reachable through static.WithShared:
+				// the first-segment allowlist must reject ts/.
+				if tsRes.StatusCode != http.StatusNotFound {
+					t.Fatalf("GET %s/shared/ts/modal.ts: status = %d, want 404 (body %q)", host, tsRes.StatusCode, tsBody)
+				}
+			} else {
+				// The module never built (503): the request never reached
+				// static.WithShared at all, so the same 503 is expected here
+				// too, and it must still never be 404.
+				if tsRes.StatusCode != cssRes.StatusCode {
+					t.Fatalf("GET %s/shared/ts/modal.ts: status = %d, want %d (unavailable, matching shared.css)", host, tsRes.StatusCode, cssRes.StatusCode)
+				}
+			}
+		})
+	}
+}
+
+// TestC8_SharedAssetCarveOut is the Q8(a) gate probe: seven paths tested
+// both without and with a valid session, verifying the auth gate admits
+// exactly the three shared asset path shapes (two exact dist files and the
+// public/fonts/**/*.woff2 glob) for unauthenticated GET requests and blocks
+// everything else (wrong method, wrong extension, wrong subtree).
+func TestC8_SharedAssetCarveOut(t *testing.T) {
+	cfg, _ := allModulesRouteConfig(t)
+
+	// Protect slideshow with a PIN so we have a non-admin protected module.
+	slideshowPIN := "1234"
+	cfg.Auth.Modules = map[string]config.ModuleAuthConfig{
+		"slideshow": {PinFile: modulePinFile(t, slideshowPIN)},
+	}
+	cfg.Auth.LDAP = config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"}
+
+	// Extend the shared fixture with the extra files C8 probes need.
+	sd := cfg.Server.SharedStaticDir
+	if err := os.WriteFile(filepath.Join(sd, "dist", "shared.mjs"), []byte("export default{}"), 0o644); err != nil {
+		t.Fatalf("write shared.mjs: %v", err)
+	}
+	fontDir := filepath.Join(sd, "public", "fonts", "inter")
+	if err := os.MkdirAll(fontDir, 0o755); err != nil {
+		t.Fatalf("mkdir fonts/inter: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(fontDir, "InterVariable.woff2"), []byte("woff2-stub"), 0o644); err != nil {
+		t.Fatalf("write InterVariable.woff2: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(fontDir, "OFL.txt"), []byte("OFL license"), 0o644); err != nil {
+		t.Fatalf("write OFL.txt: %v", err)
+	}
+	// ts/ subtree for the reject probe — create a file there.
+	tsDir := filepath.Join(sd, "ts")
+	if err := os.MkdirAll(tsDir, 0o755); err != nil {
+		t.Fatalf("mkdir ts: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tsDir, "theme.ts"), []byte("// ts"), 0o644); err != nil {
+		t.Fatalf("write theme.ts: %v", err)
+	}
+
+	svc, err := auth.FromConfig(cfg.Auth, knownModules, adminIsRouted(cfg.Routing))
+	if err != nil {
+		t.Fatalf("auth.FromConfig: %v", err)
+	}
+	srv := newGateServer(t, cfg, svc)
+	defer srv.Close()
+
+	host := "slideshow.example"
+
+	// Obtain a valid session cookie for the with-session half.
+	loginRes := doHost(t, srv, http.MethodPost, host, "/api/auth/login",
+		fmt.Sprintf(`{"method":"pin","pin":"%s"}`, slideshowPIN))
+	loginBody, _ := io.ReadAll(loginRes.Body)
+	loginRes.Body.Close()
+	if loginRes.StatusCode != http.StatusOK {
+		t.Fatalf("slideshow PIN login: status=%d body=%q", loginRes.StatusCode, loginBody)
+	}
+	cookie, ok := firstSetCookie(loginRes)
+	if !ok {
+		t.Fatal("slideshow PIN login: expected Set-Cookie")
+	}
+
+	type probe struct {
+		name            string
+		method          string
+		path            string
+		wantNoSession   int
+		wantWithSession int
+		// Optional content-type prefix check (no-session side only, since
+		// the carve-out passes to next which serves the file).
+		wantCT string
+	}
+
+	probes := []probe{
+		{name: "css-exact", method: http.MethodGet, path: "/shared/dist/shared.css",
+			wantNoSession: 200, wantWithSession: 200, wantCT: "text/css"},
+		{name: "woff2-glob", method: http.MethodGet, path: "/shared/public/fonts/inter/InterVariable.woff2",
+			wantNoSession: 200, wantWithSession: 200},
+		{name: "mjs-exact", method: http.MethodGet, path: "/shared/dist/shared.mjs",
+			wantNoSession: 200, wantWithSession: 200, wantCT: "text/javascript"},
+		{name: "ts-reject", method: http.MethodGet, path: "/shared/ts/theme.ts",
+			wantNoSession: 401, wantWithSession: 404},
+		{name: "post-css", method: http.MethodPost, path: "/shared/dist/shared.css",
+			wantNoSession: 401, wantWithSession: 405},
+		{name: "post-mjs", method: http.MethodPost, path: "/shared/dist/shared.mjs",
+			wantNoSession: 401, wantWithSession: 405},
+		{name: "ofl-reject", method: http.MethodGet, path: "/shared/public/fonts/inter/OFL.txt",
+			wantNoSession: 401, wantWithSession: 200},
+	}
+
+	for _, pr := range probes {
+		t.Run(pr.name+"/no-session", func(t *testing.T) {
+			res := doHostWithCookie(t, srv, pr.method, host, pr.path, nil)
+			body, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != pr.wantNoSession {
+				t.Fatalf("%s %s (no session): status=%d, want %d (body %q)",
+					pr.method, pr.path, res.StatusCode, pr.wantNoSession, body)
+			}
+			if pr.wantCT != "" && res.StatusCode == 200 {
+				ct := res.Header.Get("Content-Type")
+				if !strings.HasPrefix(ct, pr.wantCT) {
+					t.Fatalf("Content-Type = %q, want prefix %q", ct, pr.wantCT)
+				}
+			}
+		})
+
+		t.Run(pr.name+"/with-session", func(t *testing.T) {
+			res := doHostWithCookie(t, srv, pr.method, host, pr.path, cookie)
+			body, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != pr.wantWithSession {
+				t.Fatalf("%s %s (with session): status=%d, want %d (body %q)",
+					pr.method, pr.path, res.StatusCode, pr.wantWithSession, body)
+			}
+		})
+	}
+}
+
+// TestCertmachineRouteHasNonEmptyClosers is the A8.3 companion: a
+// certmachine-routed dispatcher's closers slice is non-empty, the direct
+// regression guard for iteration-2's blocker 1 (static.WithShared sits
+// inside svc.Gate and after the io.Closer append in buildDispatcher, so no
+// module's closer -- certmachine's today, or a future module's -- is
+// erased by the /shared/ wiring).
+func TestCertmachineRouteHasNonEmptyClosers(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Certmachine.StaticDir = mkStaticDir(t)
+	cfg.Certmachine.DBPath = filepath.Join(t.TempDir(), "certmachine.db")
+	cfg.Routing = map[string]string{"certmachine.example": "certmachine"}
+
+	dispatch := buildDispatcher(cfg, noAuthService(t))
+	defer dispatch.Close()
+
+	if len(dispatch.closers) == 0 {
+		t.Fatal("expected dispatch.closers to be non-empty for a certmachine route")
+	}
 }
 
 // ---------------------------------------------------------------------

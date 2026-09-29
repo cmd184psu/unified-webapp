@@ -13,21 +13,51 @@ import (
 
 var serverStarted = time.Now().UTC().Format("2006-01-02 15:04 UTC")
 
+// CardPositions are the 8 places a control card can be snapped to: the
+// edges and corners of the screen (the center is deliberately not one).
+var CardPositions = map[string]bool{
+	"top-left": true, "top": true, "top-right": true,
+	"left": true, "right": true,
+	"bottom-left": true, "bottom": true, "bottom-right": true,
+}
+
+// CardPoint is where a dragged card sits, as fractions (0..1) of the screen's
+// width and height, so the same layout lands in the same relative place on
+// every screen showing the slideshow.
+type CardPoint struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+}
+
+// CardLayout is one control card's placement. Drag, when set, overrides
+// Position; picking a Position clears it.
+type CardLayout struct {
+	Position  string     `json:"position"`
+	Drag      *CardPoint `json:"drag,omitempty"`
+	Minimized bool       `json:"minimized"`
+}
+
 // ConductorState is the full state broadcast to every SSE client.
 type ConductorState struct {
-	Subject          string `json:"subject"`
-	ImagePath        string `json:"image_path"`
-	ImageIndex       int    `json:"image_index"`
-	SubjectIndex     int    `json:"subject_index"`
-	TotalImages      int    `json:"total_images"`
-	TotalSubjects    int    `json:"total_subjects"`
-	Mode             string `json:"mode"`
-	Playing          bool   `json:"playing"`
-	Shuffle          bool   `json:"shuffle"`
-	IntervalSeconds  int    `json:"interval_seconds"`
-	Theme            string `json:"theme"`
-	ControlsPosition string `json:"controls_position"` // "top" or "bottom"
-	ServerStarted    string `json:"server_started"`    // ISO-8601 UTC; set once at startup
+	Subject         string `json:"subject"`
+	ImagePath       string `json:"image_path"`
+	ImageIndex      int    `json:"image_index"`
+	SubjectIndex    int    `json:"subject_index"`
+	TotalImages     int    `json:"total_images"`
+	TotalSubjects   int    `json:"total_subjects"`
+	Mode            string `json:"mode"`
+	Playing         bool   `json:"playing"`
+	Shuffle         bool   `json:"shuffle"`
+	IntervalSeconds int    `json:"interval_seconds"`
+	// MaxAgeDays skips images whose file is older than this many days;
+	// 0 means no limit. Starts at the config's age_cutoff_days.
+	MaxAgeDays int    `json:"max_age_days"`
+	Theme      string `json:"theme"`
+	// The two translucent control cards (visual: image/subject controls;
+	// audio: music controls). Shared by every screen, like the rest of the state.
+	VisualCard    CardLayout `json:"visual_card"`
+	AudioCard     CardLayout `json:"audio_card"`
+	ServerStarted string     `json:"server_started"` // ISO-8601 UTC; set once at startup
 	// Music (phase 2)
 	MusicEnabled     bool        `json:"music_enabled"`
 	MusicCollection  int         `json:"music_collection"`
@@ -41,9 +71,10 @@ type Conductor struct {
 	mu         sync.Mutex
 	state      ConductorState
 	subjects   []Subject
-	playlist   []int         // subject indices in current play order
-	playPos    int           // index into playlist (current subject)
+	playlist   []int              // subject indices in current play order
+	playPos    int                // index into playlist (current subject)
 	resetCh    chan time.Duration // send new duration to reset the ticker
+	store      *Store
 	broker     *broker.Broker
 	musicStore *MusicStore
 
@@ -51,10 +82,11 @@ type Conductor struct {
 	stopOnce sync.Once
 }
 
-// NewConductor creates a Conductor initialised from cfg and the subjects in store.
+// NewConductor creates a Conductor initialized from cfg and the subjects in store.
 // It does not start the background goroutine; call Run() for that.
 func NewConductor(store *Store, music *MusicStore, b *broker.Broker, cfg config.SlideshowConfig) *Conductor {
-	subjects, _ := store.Subjects()
+	maxAge := store.DefaultMaxAgeDays()
+	subjects, _ := store.SubjectsWithin(maxAge)
 
 	interval := cfg.IntervalSeconds
 	if interval <= 0 {
@@ -73,6 +105,7 @@ func NewConductor(store *Store, music *MusicStore, b *broker.Broker, cfg config.
 
 	c := &Conductor{
 		subjects:   subjects,
+		store:      store,
 		resetCh:    make(chan time.Duration, 1),
 		done:       make(chan struct{}),
 		broker:     b,
@@ -82,8 +115,10 @@ func NewConductor(store *Store, music *MusicStore, b *broker.Broker, cfg config.
 			Playing:          false,
 			Shuffle:          cfg.DefaultShuffle,
 			IntervalSeconds:  interval,
+			MaxAgeDays:       maxAge,
 			Theme:            theme,
-			ControlsPosition: "bottom",
+			VisualCard:       CardLayout{Position: "bottom"},
+			AudioCard:        CardLayout{Position: "bottom-right"},
 			ServerStarted:    serverStarted,
 			TotalSubjects:    len(subjects),
 			MusicEnabled:     len(colls) > 0,
@@ -101,10 +136,20 @@ func NewConductor(store *Store, music *MusicStore, b *broker.Broker, cfg config.
 func (c *Conductor) Run() {
 	ticker := time.NewTicker(c.duration())
 	defer ticker.Stop()
+	// Re-scan the image folders periodically, so images age out (and new
+	// ones appear) during a long-running slideshow.
+	rescan := time.NewTicker(rescanInterval)
+	defer rescan.Stop()
 	for {
 		select {
 		case <-c.done:
 			return
+		case <-rescan.C:
+			c.mu.Lock()
+			c.refreshSubjectsLocked()
+			snap := c.snapshotLocked()
+			c.mu.Unlock()
+			c.broker.Publish(snap)
 		case <-ticker.C:
 			c.mu.Lock()
 			if c.state.Playing && len(c.subjects) > 0 {
@@ -220,17 +265,24 @@ func (c *Conductor) ApplyControl(action string, value json.RawMessage) error {
 			return fmt.Errorf("set-theme: %w", err)
 		}
 		c.state.Theme = v
-	case "set-controls-position":
-		var v string
+	case "set-max-age":
+		var v int
 		if err := json.Unmarshal(value, &v); err != nil {
 			c.mu.Unlock()
-			return fmt.Errorf("set-controls-position: %w", err)
+			return fmt.Errorf("set-max-age: %w", err)
 		}
-		if v != "top" && v != "bottom" {
+		if v < 0 || v > maxAgeDaysLimit {
 			c.mu.Unlock()
-			return fmt.Errorf("set-controls-position: must be top or bottom")
+			return fmt.Errorf("set-max-age: must be 0 (no limit) to %d days", maxAgeDaysLimit)
 		}
-		c.state.ControlsPosition = v
+		c.state.MaxAgeDays = v
+		c.refreshSubjectsLocked()
+		return c.resetTickerAndPublish()
+	case "set-card-position", "set-card-drag", "set-card-minimized":
+		if err := c.applyCardControlLocked(action, value); err != nil {
+			c.mu.Unlock()
+			return err
+		}
 	case "music-next":
 		if len(c.state.MusicCollections) > 0 {
 			c.state.MusicCollection = (c.state.MusicCollection + 1) % len(c.state.MusicCollections)
@@ -244,6 +296,107 @@ func (c *Conductor) ApplyControl(action string, value json.RawMessage) error {
 	c.mu.Unlock()
 	c.broker.Publish(snap)
 	return nil
+}
+
+// cardControl is the value of the three card actions. Card names which card;
+// the other fields apply to one action each.
+type cardControl struct {
+	Card      string   `json:"card"`
+	Position  string   `json:"position"`
+	X         *float64 `json:"x"`
+	Y         *float64 `json:"y"`
+	Minimized *bool    `json:"minimized"`
+}
+
+// applyCardControlLocked handles set-card-position (snap to one of the 8
+// positions, clearing any drag), set-card-drag (free placement as screen
+// fractions, clamped to 0..1) and set-card-minimized. Called with mu held;
+// on error nothing changes.
+func (c *Conductor) applyCardControlLocked(action string, value json.RawMessage) error {
+	var v cardControl
+	if err := json.Unmarshal(value, &v); err != nil {
+		return fmt.Errorf("%s: %w", action, err)
+	}
+	var card *CardLayout
+	switch v.Card {
+	case "visual":
+		card = &c.state.VisualCard
+	case "audio":
+		card = &c.state.AudioCard
+	default:
+		return fmt.Errorf("%s: card must be visual or audio", action)
+	}
+	switch action {
+	case "set-card-position":
+		if !CardPositions[v.Position] {
+			return fmt.Errorf("set-card-position: unknown position %q", v.Position)
+		}
+		card.Position = v.Position
+		card.Drag = nil
+	case "set-card-drag":
+		if v.X == nil || v.Y == nil {
+			return fmt.Errorf("set-card-drag: x and y are required")
+		}
+		card.Drag = &CardPoint{X: clamp01(*v.X), Y: clamp01(*v.Y)}
+	case "set-card-minimized":
+		if v.Minimized == nil {
+			return fmt.Errorf("set-card-minimized: minimized is required")
+		}
+		card.Minimized = *v.Minimized
+	}
+	return nil
+}
+
+func clamp01(f float64) float64 {
+	switch {
+	case f != f, f < 0: // NaN or negative
+		return 0
+	case f > 1:
+		return 1
+	}
+	return f
+}
+
+// rescanInterval is how often Run re-scans the image folders.
+const rescanInterval = time.Hour
+
+// maxAgeDaysLimit bounds the image age setting (about 100 years).
+const maxAgeDaysLimit = 36500
+
+// MaxAgeDays returns the current image age limit (0 = none).
+func (c *Conductor) MaxAgeDays() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.state.MaxAgeDays
+}
+
+// refreshSubjectsLocked re-scans the image folders under the current age
+// limit and rebuilds the playlist, staying on the current subject and image
+// when they're still in rotation (otherwise starting that subject, or the
+// playlist, from the top). Called with mu held.
+func (c *Conductor) refreshSubjectsLocked() {
+	subjects, err := c.store.SubjectsWithin(c.state.MaxAgeDays)
+	if err != nil {
+		return // keep what we have; a transient read error shouldn't blank the show
+	}
+	curSubject, curImage := c.state.Subject, c.state.ImagePath
+	c.subjects = subjects
+	c.rebuildPlaylist() // resets to the start of the (possibly reshuffled) playlist
+	for pos, idx := range c.playlist {
+		if c.subjects[idx].Subject != curSubject {
+			continue
+		}
+		c.playPos = pos
+		c.state.ImageIndex = 0
+		for i, e := range c.subjects[idx].Entries {
+			if e == curImage {
+				c.state.ImageIndex = i
+				break
+			}
+		}
+		break
+	}
+	c.syncStateFromPosition()
 }
 
 // ── internal helpers (all called with mu held unless noted) ──────────────────

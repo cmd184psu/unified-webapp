@@ -2,34 +2,24 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:          #111;
-  --fg:          #eee;
   --overlay-bg:  rgba(0, 0, 0, 0.45);
   --btn-bg:      rgba(255, 255, 255, 0.14);
   --btn-border:  rgba(255, 255, 255, 0.28);
   --btn-hover:   rgba(255, 255, 255, 0.28);
-  --panel-bg:    rgba(18, 18, 18, 0.88);
-  --panel-border: rgba(255,255,255,0.1);
-  --label-fg:    rgba(255,255,255,0.55);
 }
 
 [data-theme="light"] {
-  --bg:          #f5f5f5;
-  --fg:          #111;
   --overlay-bg:  rgba(255, 255, 255, 0.45);
   --btn-bg:      rgba(0, 0, 0, 0.12);
   --btn-border:  rgba(0, 0, 0, 0.20);
   --btn-hover:   rgba(0, 0, 0, 0.22);
-  --panel-bg:    rgba(240, 240, 240, 0.92);
-  --panel-border: rgba(0,0,0,0.12);
-  --label-fg:    rgba(0,0,0,0.50);
 }
 
 html, body {
   width: 100%;
   height: 100%;
-  background: var(--bg);
-  color: var(--fg);
+  background: var(--color-bg);
+  color: var(--color-text);
   font-family: system-ui, sans-serif;
   overflow: hidden;
 }
@@ -52,7 +42,7 @@ html, body {
   width: 100%;
   height: 100%;
   object-fit: contain; /* always show the full image — no cropping */
-  background: var(--bg);
+  background: var(--color-bg);
 }
 
 /* ── Slideshow mode animations ────────────────────────────────────────────── */
@@ -82,20 +72,17 @@ html, body {
   animation: kenburns-b var(--interval, 8s) ease-in-out forwards;
 }
 
-
 /* Pause all animations when the slideshow is paused */
 #display.paused #slide-img {
   animation-play-state: paused;
 }
 
 /* ── Overlay ──────────────────────────────────────────────────────────────── */
-/* Two children only: #top-bar and #controls-bar → space-between is correct. */
 #overlay {
   position: absolute;
   inset: 0;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
   pointer-events: none;
 }
 
@@ -136,31 +123,6 @@ html, body {
   letter-spacing: 0.03em;
 }
 
-/* ── Controls bar ─────────────────────────────────────────────────────────── */
-/* Flex column: ctrl-row on top, image-counter below.                         */
-#controls-bar {
-  pointer-events: all;
-  display: flex;
-  flex-direction: column;
-  padding: 1.5rem 0.9rem 0.5rem;
-  background: linear-gradient(transparent, var(--overlay-bg));
-}
-
-.ctrl-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.ctrl-group {
-  display: flex;
-  gap: 0.35rem;
-}
-.ctrl-group.center {
-  flex: 1;
-  justify-content: center;
-}
-
 #image-counter {
   font-size: 0.75rem;
   opacity: 0.55;
@@ -171,7 +133,7 @@ html, body {
 button {
   background: var(--btn-bg);
   border: 1px solid var(--btn-border);
-  color: var(--fg);
+  color: var(--color-text);
   border-radius: 6px;
   padding: 0.4rem 0.7rem;
   font-size: 1rem;
@@ -188,112 +150,9 @@ button:active { opacity: 0.7; }
   padding: 0.3rem 0.6rem;
 }
 
-#music-controls {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  margin-left: auto;
-}
-.music-icon {
-  font-size: 1rem;
-  opacity: 0.7;
-  margin-right: 0.1rem;
-  pointer-events: none;
-}
 #music-label {
   font-size: 0.8rem;
   opacity: 0.8;
-}
-
-/* ── Controls position: top ───────────────────────────────────────────────── */
-#display[data-controls-pos="top"] #controls-bar {
-  order: -1;
-  background: linear-gradient(var(--overlay-bg), transparent);
-  padding: 0.5rem 0.9rem 1.5rem;
-  flex-direction: column-reverse; /* counter above buttons when flipped */
-}
-#display[data-controls-pos="top"] #top-bar {
-  order: 1;
-  background: linear-gradient(transparent, var(--overlay-bg));
-  padding: 1.5rem 0.9rem 0.5rem;
-}
-
-/* ── Scrim + settings panel ───────────────────────────────────────────────── */
-#settings-scrim {
-  position: absolute;
-  inset: 0;
-  z-index: 20;
-  /* no background — transparent dismiss target; panel sits on top */
-}
-
-#settings-panel {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 300px;
-  background: var(--panel-bg);
-  backdrop-filter: blur(10px);
-  border-left: 1px solid var(--panel-border);
-  padding: 1.5rem 1.2rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1.1rem;
-  color: var(--fg);
-  z-index: 30;   /* above scrim */
-  overflow-y: auto;
-}
-
-.panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.panel-header h3 {
-  font-size: 1rem;
-  font-weight: 600;
-  opacity: 0.9;
-}
-.panel-header button {
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  font-size: 1.1rem;
-  padding: 0.2rem 0.4rem;
-  opacity: 0.55;
-  backdrop-filter: none;
-}
-.panel-header button:hover { background: transparent; opacity: 1; }
-
-#settings-panel label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  font-size: 0.85rem;
-  color: var(--label-fg);
-}
-
-#settings-panel label.checkbox-label {
-  flex-direction: row;
-  align-items: center;
-  gap: 0.5rem;
-  color: var(--fg);
-}
-
-#settings-panel select,
-#settings-panel input[type="number"] {
-  background: var(--btn-bg);
-  border: 1px solid var(--btn-border);
-  color: var(--fg);
-  border-radius: 5px;
-  padding: 0.35rem 0.5rem;
-  font-size: 0.9rem;
-}
-
-.panel-divider {
-  border: none;
-  border-top: 1px solid var(--panel-border);
-  margin: 0.2rem 0;
 }
 
 .server-stamp {
@@ -351,35 +210,172 @@ kbd {
   }
   #btn-hamburger { font-size: 1.4rem; }
 
-  .ctrl-group { gap: 0.6rem; }
-
   /* Respect safe-area insets (notched iPads) */
   #top-bar {
     padding-top:   max(0.6rem, env(safe-area-inset-top));
     padding-left:  max(0.9rem, env(safe-area-inset-left));
     padding-right: max(0.9rem, env(safe-area-inset-right));
   }
-  #controls-bar {
-    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
-  }
-  #display[data-controls-pos="top"] #controls-bar {
-    padding-top: max(0.5rem, env(safe-area-inset-top));
-  }
-  #display[data-controls-pos="top"] #top-bar {
-    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
-  }
 
-  .panel-header button { min-width: 44px; min-height: 44px; }
-
-  /* Wider settings panel on tablet */
-  #settings-panel { width: 320px; }
-
-  #settings-panel select,
-  #settings-panel input[type="number"] {
-    padding: 0.5rem 0.6rem;
-    font-size: 1rem;
+  /* Keep the control cards clear of notches and the home indicator. */
+  .ctrl-card {
+    --edge: max(1rem, env(safe-area-inset-left), env(safe-area-inset-right), env(safe-area-inset-bottom));
   }
+}
+
+/* ── Control cards ─────────────────────────────────────────────────────────── */
+/* Translucent floating cards (image controls, audio controls). data-pos is
+   one of the 8 snap positions, or "free" when dragged (left/top set in JS). */
+.ctrl-card {
+  --edge: 1rem;
+  --below-top-bar: 4.2rem;
+  pointer-events: all;
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.4rem 0.55rem 0.55rem;
+  background: var(--overlay-bg);
+  border: 1px solid var(--btn-border);
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+  max-width: calc(100% - 2 * var(--edge));
+}
+
+.ctrl-card[data-pos="top-left"]     { top: var(--below-top-bar); left: var(--edge); }
+.ctrl-card[data-pos="top"]          { top: var(--below-top-bar); left: 50%; transform: translateX(-50%); }
+.ctrl-card[data-pos="top-right"]    { top: var(--below-top-bar); right: var(--edge); }
+.ctrl-card[data-pos="left"]         { top: 50%; left: var(--edge); transform: translateY(-50%); }
+.ctrl-card[data-pos="right"]        { top: 50%; right: var(--edge); transform: translateY(-50%); }
+.ctrl-card[data-pos="bottom-left"]  { bottom: var(--edge); left: var(--edge); }
+.ctrl-card[data-pos="bottom"]       { bottom: var(--edge); left: 50%; transform: translateX(-50%); }
+.ctrl-card[data-pos="bottom-right"] { bottom: var(--edge); right: var(--edge); }
+
+.ctrl-card.dragging { opacity: 0.85; }
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 1.1rem;
+}
+
+.card-grip {
+  display: inline-flex;
+  opacity: 0.6;
+  cursor: grab;
+  touch-action: none;
+  padding: 2px;
+}
+.card-grip:active { cursor: grabbing; }
+
+.card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
+  background: transparent;
+  border-color: transparent;
+  opacity: 0.85;
+}
+
+.card-title {
+  font-size: 0.8rem;
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 14rem;
+}
+
+.card-head .card-min {
+  margin-left: auto;
+  padding: 0 0.45rem;
+  font-size: 0.9rem;
+  line-height: 1.2;
+  background: transparent;
+  border-color: transparent;
+}
+
+.card-body {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* Minimized: just the grip (still draggable) and the icon (click to expand). */
+.ctrl-card.minimized { padding: 0.25rem 0.35rem; gap: 0; }
+.ctrl-card.minimized .card-body,
+.ctrl-card.minimized .card-title,
+.ctrl-card.minimized .card-min { display: none; }
+
+/* ── Settings drawer contents ──────────────────────────────────────────────── */
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  white-space: nowrap;
+}
+
+.setting-row select,
+.setting-row input[type="number"] {
+  width: auto;
+  flex: 0 0 auto;
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 0.25rem 0.4rem;
+  font: inherit;
+}
+.setting-row input[type="number"] { width: 5rem; }
+
+.pos-picker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.pos-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1.6rem);
+  gap: 3px;
+}
+
+.pos-cell {
+  width: 1.6rem;
+  height: 1.1rem;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border-radius: 3px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-2);
+  backdrop-filter: none;
+}
+.pos-cell:hover:not(:disabled) { border-color: var(--color-primary); background: var(--color-surface-3); }
+.pos-cell.is-active { background: var(--color-primary); border-color: var(--color-primary); }
+.pos-cell.pos-center { visibility: hidden; }
+
+.setting-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  white-space: normal;
 }
 
 /* ── Utility ──────────────────────────────────────────────────────────────── */
 [hidden] { display: none !important; }
+
+/* The shared sign-out icon sits just left of ☰, dressed like the other
+   top-bar buttons. */
+#top-bar .ui-signout {
+  padding: 0.3rem 0.6rem;
+  background: var(--btn-bg);
+  border-color: var(--btn-border);
+}

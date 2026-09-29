@@ -15,6 +15,7 @@ import (
 
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/platform/response"
+	"cmd184psu/unified-webapp/internal/platform/sshclient"
 )
 
 // Options configures a Server.
@@ -25,6 +26,10 @@ type Options struct {
 	DefaultValidityDays int
 	ExpiryWarnDays      int
 	TrustDeviceEnabled  bool
+	// SSH is the shared SSH setup (key folder, host-key policy) for trusting
+	// the CA on another machine. Nil disables remote trust; SSHReason says why.
+	SSH       *sshclient.Resolved
+	SSHReason string
 }
 
 // Server holds the resolved dependencies and the routing mux.
@@ -147,7 +152,21 @@ func (c closableHandler) Close() error { return c.srv.Close() }
 // caller is responsible for wrapping it with middleware. The returned handler
 // implements io.Closer (releasing the DB handle) for the dispatcher's
 // module-shutdown hook.
-func Build(cfg config.CertmachineConfig) (http.Handler, error) {
+//
+// sshSettings are the app's shared SSH settings (multissh's ssh_dir,
+// known_hosts and strict_host_key), so trusting the CA on another machine
+// follows the same host-key policy as every other SSH connection. If they
+// can't be resolved (e.g. strict mode without a readable known_hosts),
+// certmachine still starts, with remote trust unavailable and the reason
+// reported in /api/config.
+func Build(cfg config.CertmachineConfig, sshSettings sshclient.Settings) (http.Handler, error) {
+	var ssh *sshclient.Resolved
+	var sshReason string
+	if r, err := sshSettings.Resolve(); err != nil {
+		sshReason = err.Error()
+	} else {
+		ssh = &r
+	}
 	srv, err := New(Options{
 		StaticDir:           cfg.StaticDir,
 		DBPath:              cfg.DBPath,
@@ -155,6 +174,8 @@ func Build(cfg config.CertmachineConfig) (http.Handler, error) {
 		DefaultValidityDays: cfg.DefaultValidityDays,
 		ExpiryWarnDays:      cfg.ExpiryWarnDays,
 		TrustDeviceEnabled:  cfg.TrustDeviceEnabled,
+		SSH:                 ssh,
+		SSHReason:           sshReason,
 	})
 	if err != nil {
 		return nil, err

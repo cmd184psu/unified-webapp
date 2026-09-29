@@ -10,8 +10,9 @@ import type {
   BroadcastTarget,
   BroadcastProgress,
   BroadcastComplete,
+  HostConfig,
 } from "./types";
-import { hostHasCredential } from "./hosts";
+import { hostHasCredential, hostDisplayName } from "./hosts";
 import type { HostStore } from "./hosts";
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -108,8 +109,10 @@ export function mountUploadApp(root: HTMLElement, store: HostStore): void {
 
   scroll.append(stageB);
 
-  // ---- checked state (parallel to store hosts) ----
-  const checked: boolean[] = [];
+  // ---- checked state ----
+  // Keyed by host object, not position, so a removal or reorder in the rail
+  // never shifts a tick onto a neighbouring host.
+  const checked = new WeakMap<HostConfig, boolean>();
 
   const renderHostChecks = (): void => {
     hostChecksEl.innerHTML = "";
@@ -125,14 +128,14 @@ export function mountUploadApp(root: HTMLElement, store: HostStore): void {
       const cb = el("input");
       cb.type = "checkbox";
       cb.disabled = !selectable;
-      cb.checked = selectable && (checked[i] ?? false);
+      cb.checked = selectable && (checked.get(h) ?? false);
       cb.addEventListener("change", () => {
-        checked[i] = cb.checked;
+        checked.set(h, cb.checked);
       });
       const text = el("span", "host-check-label");
       text.textContent = h.ip
-        ? `Host ${i + 1} — ${h.ip}`
-        : `Host ${i + 1} (not configured)`;
+        ? `${hostDisplayName(h, i)} — ${h.ip}`
+        : `${hostDisplayName(h, i)} (not configured)`;
       row.append(cb, text);
       hostChecksEl.append(row);
     }
@@ -249,9 +252,8 @@ export function mountUploadApp(root: HTMLElement, store: HostStore): void {
     const hosts = store.getHosts();
     const activeTargets: BroadcastTarget[] = [];
     for (let i = 0; i < hosts.length; i++) {
-      if (!checked[i]) continue;
       const h = hosts[i];
-      if (!h || !h.ip || !h.user || !hostHasCredential(h)) continue;
+      if (!h || !checked.get(h) || !h.ip || !h.user || !hostHasCredential(h)) continue;
       const usesPassword = h.authMethod === "password";
       activeTargets.push({
         host: h.ip,

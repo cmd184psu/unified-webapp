@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { confirmDialog } from "@shared";
 import { api } from "../api";
 import { useData } from "../DataContext";
 import { TagPill } from "../components/common";
@@ -28,7 +29,7 @@ export function TagsPage() {
   };
 
   const remove = async (id: string) => {
-    if (confirm("Delete this tag?")) {
+    if (await confirmDialog("Delete this tag?")) {
       await api.deleteTag(id);
       await reloadTags();
     }
@@ -90,7 +91,7 @@ export function TagsPage() {
                 alignItems: "center",
                 gap: 12,
                 padding: "10px 0",
-                borderBottom: "1px solid var(--border)",
+                borderBottom: "1px solid var(--color-border)",
               }}
             >
               <TagPill tag={t} />

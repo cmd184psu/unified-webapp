@@ -1,17 +1,16 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Admin</title>
+  <script>(function(){var t=localStorage.getItem('ui-theme:admin');if(t)document.documentElement.dataset.theme=t})()</script>
+  <link rel="stylesheet" href="/shared/dist/shared.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="topbar">
     <h1>Admin</h1>
-    <button id="logout-btn" class="btn-link icon-btn" type="button" title="Sign out" aria-label="Sign out">
-      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-    </button>
   </header>
   <main id="app">
     <p id="status">Loading&hellip;</p>
@@ -20,8 +19,9 @@
       <h2>Module Access</h2>
       <p class="hint">A module is either open or protected. Protected modules always accept an LDAP (or passkey) sign-in; giving a module a pin file also lets it accept a standalone door-code PIN. Admin's PIN source is shown read-only below (see Operator PIN).</p>
       <div id="matrix-table"></div>
+      <p class="hint">Settings save automatically a moment after each change; use Save matrix to apply immediately.</p>
       <div class="panel-actions">
-        <button id="matrix-save" type="button">Save matrix</button>
+        <button id="matrix-save" type="button" class="btn btn-primary">Save matrix</button>
         <span id="matrix-status" class="status"></span>
       </div>
       <p id="matrix-error" class="error"></p>
@@ -32,7 +32,7 @@
       <ul id="keys-list" class="named-list"></ul>
       <form id="key-form" class="inline-form">
         <input id="key-name" placeholder="name" autocomplete="off" required>
-        <button type="submit">Generate key</button>
+        <button type="submit" class="btn btn-primary">Generate key</button>
       </form>
       <p id="key-error" class="error"></p>
     </section>
@@ -61,15 +61,17 @@
         <label>Timeout (seconds)
           <input id="ldap-timeout" type="number" min="0" step="1">
         </label>
-        <label class="checkbox-label">
+        <label class="ui-toggle">
           <input id="ldap-start-tls" type="checkbox">
+          <span class="ui-toggle-track"></span>
           Start TLS
         </label>
-        <label class="checkbox-label">
+        <label class="ui-toggle">
           <input id="ldap-insecure-tls" type="checkbox">
+          <span class="ui-toggle-track"></span>
           Insecure TLS
         </label>
-        <button type="submit">Save</button>
+        <button type="submit" class="btn btn-primary">Save</button>
       </form>
       <p id="ldap-status" class="status"></p>
       <p id="ldap-error" class="error"></p>
@@ -77,7 +79,7 @@
       <form id="ldap-test-form" class="inline-form">
         <input id="ldap-test-username" placeholder="username" autocomplete="off" required>
         <input id="ldap-test-password" type="password" placeholder="password" autocomplete="off" required>
-        <button type="submit">Test</button>
+        <button type="submit" class="btn btn-outline">Test</button>
       </form>
       <p id="ldap-test-result" class="status"></p>
     </section>
@@ -85,44 +87,48 @@
     <section class="panel hidden" id="panel-session">
       <h2>Session</h2>
       <form id="session-form" class="settings-form">
-        <label>TTL (hours)
+        <label title="Sign in again after this long, however active. 0 = 720 (30 days). Idle sign-out is per module, in Module Access.">Maximum session length (hours)
           <input id="session-ttl" type="number" min="0" step="1">
         </label>
         <label>Cookie domain
-          <input id="session-cookie-domain" type="text" autocomplete="off">
+          <input id="session-cookie-domain" type="text" autocomplete="off"
+            title="Sets the Domain attribute on the session cookie. Leave blank for the current hostname. Use a leading dot (e.g., .example.com) to share sessions across subdomains.">
         </label>
-        <label class="checkbox-label">
+        <label class="ui-toggle">
           <input id="session-cookie-secure" type="checkbox">
+          <span class="ui-toggle-track"></span>
           Cookie secure
         </label>
-        <button type="submit">Save</button>
+        <button type="submit" class="btn btn-primary">Save</button>
       </form>
+      <p class="hint">Settings save automatically a moment after each change; use Save to apply immediately.</p>
       <p id="session-status" class="status"></p>
     </section>
 
     <section class="panel hidden" id="panel-passkeys">
       <h2>Passkeys</h2>
+      <p id="passkey-https-note" class="hint warn hidden"></p>
       <ul id="passkeys-list" class="named-list"></ul>
       <form id="passkey-form" class="inline-form">
         <input id="passkey-name" placeholder="name (optional)" autocomplete="off">
-        <button type="submit">Register new passkey</button>
+        <button type="submit" class="btn btn-primary">Register new passkey</button>
       </form>
       <p id="passkey-error" class="error"></p>
     </section>
 
     <section class="panel hidden" id="panel-operator-pin">
       <h2>Operator PIN (admin door-code)</h2>
-      <p class="hint">The Operator PIN is the door-code that unlocks this admin panel. It is read from a pin file on the server; the file's current location is shown below.</p>
+      <p class="hint">The Operator PIN is the door-code that unlocks this admin panel itself. It has its own PIN file, separate from the per-module PINs configured above -- changing a module's PIN in Module Access does not affect this one.</p>
       <p id="operator-pin-status" class="hint"></p>
       <div class="inline-form">
         <select id="operator-pin-file-select"></select>
-        <button id="operator-pin-change-file" type="button">Change file</button>
-        <button id="operator-pin-set-btn" type="button">Set PIN&hellip;</button>
+        <button id="operator-pin-change-file" type="button" class="btn btn-outline">Change file</button>
+        <button id="operator-pin-set-btn" type="button" class="btn btn-outline">Set PIN&hellip;</button>
       </div>
       <form id="operator-pin-form" class="inline-form hidden">
         <input id="operator-pin-value" type="password" placeholder="new PIN" autocomplete="off" required>
-        <button type="submit">Save</button>
-        <button id="operator-pin-cancel" type="button">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+        <button id="operator-pin-cancel" type="button" class="btn btn-ghost">Cancel</button>
       </form>
       <p id="operator-pin-file-status" class="status"></p>
       <p id="operator-pin-error" class="error"></p>
@@ -136,13 +142,12 @@
       <p class="warn">This key will not be shown again. Copy it now.</p>
       <div class="key-display">
         <code id="key-modal-value"></code>
-        <button id="key-modal-copy" type="button">Copy</button>
+        <span id="key-modal-copy"></span>
       </div>
-      <p id="key-modal-copied" class="status"></p>
-      <button id="key-modal-close" type="button">Close</button>
+      <button id="key-modal-close" type="button" class="btn btn-ghost">Close</button>
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <script type="module" src="js/bundle.js"></script>
 </body>
 </html>

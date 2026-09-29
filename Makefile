@@ -9,7 +9,7 @@ CONFIG    := ~/.unified-webapp.json
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS    := -X cmd184psu/unified-webapp/internal/taskmaster/coordinator.BuildTime=$(BUILD_TIME)
 
-.PHONY: run build build-rpi test clean clean-local-test-db init-config web typecheck
+.PHONY: run build build-rpi test clean clean-local-test-db init-config web typecheck web-verify gates test-web check
 
 run:
 	go run $(CMD) -config $(CONFIG)
@@ -40,8 +40,32 @@ clean-local-test-db:
 	rm -f local-test/data/taskmaster/taskmaster.db local-test/data/taskmaster/taskmaster.db-wal local-test/data/taskmaster/taskmaster.db-shm
 
 web:
-	@if [ ! -d node_modules ]; then npm install; fi
+	npm ci
 	npm run build
 
 typecheck:
 	npm run typecheck
+
+# Every gate below is a script file invoked as ONE process, so its exit code is
+# the gate, and no recipe here contains a make substitution. Two reasons, both
+# observed: make expands a substitution inside a recipe as a make variable, so
+# a shell test wrapped around one sees an empty string and passes whatever the
+# tree contains; and a shell-function substitution discards the child's exit
+# status, so a crashed generator reads as an empty list. The gate scripts carry
+# the details. (docs/PLAN-ui-unification-phase1.md §1 G11, §5 A7.17.)
+
+web-verify:
+	node scripts/gates/artifacts.mjs
+
+gates:
+	node scripts/check-shared-css.mjs
+	node scripts/gates/bundle-shape.mjs --require=sampler,taskmaster,obsidianoid,todo,certmachine,multissh,admin,timetracker,grocery,smbedit,issuetracker,utuber,menuserver
+	node scripts/gates/token-overlap.mjs
+	node scripts/check-shared-barrel.mjs
+
+test-web:
+	npm ci
+	npm run typecheck
+	npm run test:web
+
+check: web-verify test-web gates test

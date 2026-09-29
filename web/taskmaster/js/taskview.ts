@@ -36,7 +36,7 @@ export function mountTaskView(
 
   let unmountLeft: (() => void) | null = null;
   let unmountRight: (() => void) | null = null;
-  let cancelled = false;
+  let canceled = false;
 
   const goBack = (): void => {
     window.location.hash = '#board';
@@ -45,13 +45,13 @@ export function mountTaskView(
   void api
     .getTask(taskName)
     .then((task) => {
-      if (cancelled) return;
+      if (canceled) return;
       unmountLeft = mountBoard(left, live, caps, { laneFilter: task.lane_name });
       right.textContent = '';
       unmountRight = mountTaskDetail(right, live, task, goBack);
     })
     .catch(() => {
-      if (cancelled) return;
+      if (canceled) return;
       right.textContent = '';
       const err = document.createElement('div');
       err.className = 'empty-state';
@@ -66,7 +66,7 @@ export function mountTaskView(
     });
 
   return () => {
-    cancelled = true;
+    canceled = true;
     if (unmountLeft) unmountLeft();
     if (unmountRight) unmountRight();
   };

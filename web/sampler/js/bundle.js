@@ -1,0 +1,417 @@
+// web/sampler/js/main.ts
+import * as shared from "/shared/dist/shared.mjs";
+var { THEMES, ThemeManager, HamburgerMenu, openModal, confirmDialog, alertDialog, promptDialog, showToast } = shared;
+var themes = new ThemeManager({
+  module: "sampler",
+  default: "dark",
+  onChange: (name) => {
+    const select = document.getElementById("theme-select");
+    if (select instanceof HTMLSelectElement) select.value = name;
+  }
+});
+var COLOR_TOKENS = [
+  "--color-bg",
+  "--color-surface-1",
+  "--color-surface-2",
+  "--color-surface-3",
+  "--color-surface-dynamic",
+  "--color-border",
+  "--color-divider",
+  "--color-text",
+  "--color-text-muted",
+  "--color-text-faint",
+  "--color-primary",
+  "--color-primary-hover",
+  "--color-primary-active",
+  "--color-primary-tint",
+  "--color-primary-fg",
+  "--color-danger",
+  "--color-success",
+  "--color-warning"
+];
+var STRUCTURAL_TOKENS = [
+  "--radius-sm",
+  "--radius-md",
+  "--radius-lg",
+  "--radius-full",
+  "--shadow-sm",
+  "--shadow-md",
+  "--space-1",
+  "--space-2",
+  "--space-3",
+  "--space-4",
+  "--space-5",
+  "--space-6",
+  "--space-7",
+  "--space-8",
+  "--text-xs",
+  "--text-sm",
+  "--text-base",
+  "--text-lg",
+  "--text-xl",
+  "--font-body",
+  "--font-mono",
+  "--font-body-fallback",
+  "--font-mono-fallback",
+  "--sidebar-width",
+  "--topbar-height",
+  "--transition",
+  "--overlay-scrim"
+];
+function buildThemeSelect() {
+  const select = document.getElementById("theme-select");
+  if (!(select instanceof HTMLSelectElement)) return;
+  for (const theme of themes.list) {
+    const option = document.createElement("option");
+    option.value = theme;
+    option.textContent = theme;
+    select.appendChild(option);
+  }
+  select.value = document.documentElement.dataset.theme ?? THEMES[0];
+  select.addEventListener("change", () => themes.set(select.value));
+}
+function buildThemePicker() {
+  const host = document.getElementById("theme-picker");
+  if (host) themes.renderPicker(host);
+  const selectHost = document.getElementById("theme-picker-select");
+  if (selectHost) themes.renderPicker(selectHost, "select");
+}
+function buildToggle(text, opts = {}) {
+  const label = document.createElement("label");
+  label.className = "ui-toggle";
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.checked = opts.checked ?? false;
+  input.disabled = opts.disabled ?? false;
+  if (!text) input.setAttribute("aria-label", "Unlabeled toggle");
+  const track = document.createElement("span");
+  track.className = "ui-toggle-track";
+  label.append(input, track);
+  if (text) label.append(text);
+  return label;
+}
+function buildToggleDemos() {
+  const container = document.getElementById("toggle-demos");
+  if (!container) return;
+  const markup = (text, attrs = "") => `<label class="ui-toggle">
+  <input type="checkbox"${attrs}>
+  <span class="ui-toggle-track"></span>${text ? `
+  ${text}` : ""}
+</label>`;
+  const demos = [
+    {
+      title: "off / on (click to flip)",
+      build: () => {
+        const row = document.createElement("div");
+        row.className = "sampler-toggle-row";
+        const off = buildToggle("Off");
+        const on = buildToggle("On", { checked: true });
+        for (const t of [off, on]) {
+          const input = t.querySelector("input");
+          input.addEventListener("change", () => {
+            t.lastChild.textContent = input.checked ? "On" : "Off";
+          });
+        }
+        row.append(off, on);
+        return row;
+      },
+      source: markup("On", " checked")
+    },
+    {
+      title: "disabled",
+      build: () => {
+        const row = document.createElement("div");
+        row.className = "sampler-toggle-row";
+        row.append(buildToggle("Disabled, off", { disabled: true }), buildToggle("Disabled, on", { checked: true, disabled: true }));
+        return row;
+      },
+      source: markup("Disabled", " disabled")
+    },
+    {
+      title: "no visible label",
+      build: () => buildToggle(""),
+      source: markup("", ' aria-label="What it switches"')
+    },
+    {
+      title: "in a stacked settings form (label stays beside the toggle)",
+      build: () => {
+        const form = document.createElement("div");
+        form.className = "sampler-stacked-form";
+        const field = document.createElement("label");
+        field.append("Cookie domain");
+        const text = document.createElement("input");
+        text.type = "text";
+        text.placeholder = ".example.com";
+        field.append(text);
+        form.append(
+          field,
+          buildToggle("Start TLS"),
+          buildToggle("Cookie secure", { checked: true }),
+          buildToggle("A longer label wraps onto a second line but stays beside its toggle")
+        );
+        return form;
+      },
+      source: ".form label:not(.ui-toggle) { flex-direction: column; }"
+    }
+  ];
+  for (const demo of demos) {
+    const row = document.createElement("div");
+    row.className = "sampler-modal-demo";
+    const caption = document.createElement("p");
+    caption.className = "sampler-variant-caption";
+    caption.textContent = demo.title;
+    const pre = document.createElement("pre");
+    pre.className = "sampler-modal-source";
+    pre.textContent = demo.source;
+    row.append(caption, demo.build(), pre);
+    container.appendChild(row);
+  }
+}
+function buildSwatches() {
+  const grid = document.getElementById("swatch-grid");
+  if (!grid) return;
+  for (const token of COLOR_TOKENS) {
+    const swatch = document.createElement("div");
+    swatch.className = "sampler-swatch";
+    const chip = document.createElement("div");
+    chip.className = "sampler-swatch-chip";
+    chip.style.background = `var(${token})`;
+    swatch.appendChild(chip);
+    const label = document.createElement("code");
+    label.className = "sampler-swatch-label";
+    label.textContent = token;
+    swatch.appendChild(label);
+    grid.appendChild(swatch);
+  }
+}
+function buildSpecimens() {
+  const list = document.getElementById("specimen-list");
+  if (!list) return;
+  const computed = getComputedStyle(document.documentElement);
+  for (const token of STRUCTURAL_TOKENS) {
+    const row = document.createElement("div");
+    row.className = "sampler-specimen";
+    const label = document.createElement("code");
+    label.className = "sampler-specimen-label";
+    label.textContent = token;
+    row.appendChild(label);
+    const value = document.createElement("code");
+    value.className = "sampler-specimen-value";
+    value.textContent = computed.getPropertyValue(token).trim();
+    row.appendChild(value);
+    list.appendChild(row);
+  }
+}
+function buildModalDemos() {
+  const container = document.getElementById("modal-demos");
+  if (!container) return;
+  const demos = [
+    {
+      label: "openModal",
+      source: 'const content = document.createElement("div");\nconst p = document.createElement("p");\np.textContent = "Hello from openModal.";\ncontent.appendChild(p);\nconst close = document.createElement("button");\nclose.type = "button";\nclose.className = "ui-modal-btn";\nclose.textContent = "Close";\ncontent.appendChild(close);\nconst handle = openModal(content, { title: "openModal" });\nclose.addEventListener("click", () => handle.close());',
+      run: () => {
+        const content = document.createElement("div");
+        const p = document.createElement("p");
+        p.textContent = "Hello from openModal.";
+        content.appendChild(p);
+        const close = document.createElement("button");
+        close.type = "button";
+        close.className = "ui-modal-btn";
+        close.textContent = "Close";
+        content.appendChild(close);
+        const handle = openModal(content, { title: "openModal" });
+        close.addEventListener("click", () => handle.close());
+      }
+    },
+    {
+      label: "confirmDialog",
+      source: 'const ok = await confirmDialog("Proceed?");',
+      run: () => confirmDialog("Proceed?")
+    },
+    {
+      label: "alertDialog",
+      source: 'await alertDialog("Something happened.");',
+      run: () => alertDialog("Something happened.")
+    },
+    {
+      label: "promptDialog",
+      source: 'const name = await promptDialog("Your name:", { defaultValue: "" });',
+      run: () => promptDialog("Your name:", { defaultValue: "" })
+    }
+  ];
+  for (const demo of demos) {
+    const row = document.createElement("div");
+    row.className = "sampler-modal-demo";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ui-modal-btn ui-modal-btn-primary";
+    button.textContent = demo.label;
+    button.addEventListener("click", () => {
+      void demo.run();
+    });
+    row.appendChild(button);
+    const pre = document.createElement("pre");
+    pre.className = "sampler-modal-source";
+    pre.textContent = demo.source;
+    row.appendChild(pre);
+    container.appendChild(row);
+  }
+}
+function buildToastDemos() {
+  const container = document.getElementById("toast-demos");
+  if (!container) return;
+  const demos = [
+    {
+      label: "success",
+      source: 'showToast("Saved.", "success");',
+      run: () => showToast("Saved.", "success")
+    },
+    {
+      label: "error (sticky)",
+      source: 'showToast("Could not save: disk full.", "error");',
+      run: () => showToast("Could not save: disk full.", "error")
+    },
+    {
+      label: "notice",
+      source: 'showToast("Nothing to do.", "notice");',
+      run: () => showToast("Nothing to do.", "notice")
+    },
+    {
+      label: "3 at once",
+      source: 'showToast("First.", "success");\nshowToast("Second.", "notice");\nshowToast("Third.", "error");',
+      run: () => {
+        showToast("First.", "success");
+        showToast("Second.", "notice");
+        showToast("Third.", "error");
+      }
+    }
+  ];
+  for (const demo of demos) {
+    const row = document.createElement("div");
+    row.className = "sampler-modal-demo";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ui-modal-btn ui-modal-btn-primary";
+    button.textContent = demo.label;
+    button.addEventListener("click", () => {
+      void demo.run();
+    });
+    row.appendChild(button);
+    const pre = document.createElement("pre");
+    pre.className = "sampler-modal-source";
+    pre.textContent = demo.source;
+    row.appendChild(pre);
+    container.appendChild(row);
+  }
+}
+function buildMenu() {
+  const mount = document.getElementById("menu-mount");
+  const container = document.getElementById("menu-demos");
+  if (!mount || !container) return;
+  const guard = { visible: true };
+  const menu = new HamburgerMenu({
+    title: "Sampler menu",
+    themePicker: true,
+    themes,
+    items: [
+      {
+        id: "menu-toast",
+        label: "Show a toast",
+        onSelect: () => showToast("Picked from the drawer.", "success")
+      },
+      {
+        id: "menu-dialog",
+        label: "Open a dialog",
+        onSelect: () => {
+          void alertDialog("Opened from the drawer.");
+        }
+      },
+      { id: "menu-tokens", label: "Jump to color tokens", href: "#swatches-heading" },
+      { separator: true },
+      { section: "Density" },
+      {
+        // The verbatim-mount proof. The <select> is built HERE, by the
+        // sampler, handed to the class once, and never rebuilt: the same node
+        // answers document.getElementById("menu-density") after any number of
+        // close/open cycles, and its selected value survives them (B4.3).
+        id: "menu-density-slot",
+        render: (host) => {
+          const select = document.createElement("select");
+          select.id = "menu-density";
+          for (const density of ["comfortable", "cosy", "compact"]) {
+            const option = document.createElement("option");
+            option.value = density;
+            option.textContent = density;
+            select.appendChild(option);
+          }
+          select.addEventListener("change", () => {
+            showToast(`Density: ${select.value}`, "notice");
+          });
+          host.appendChild(select);
+        }
+      },
+      {
+        id: "menu-guarded",
+        label: "Guarded item",
+        onSelect: () => showToast("The guarded item is still wired up.", "notice"),
+        when: () => guard.visible
+      }
+    ]
+  });
+  mount.appendChild(menu.trigger);
+  const demos = [
+    {
+      label: "open()",
+      source: "menu.open();",
+      run: () => menu.open()
+    },
+    {
+      label: "toggle()",
+      source: "menu.toggle();",
+      run: () => menu.toggle()
+    },
+    {
+      label: "flip the when() guard",
+      source: 'guard.visible = !guard.visible;\n// "Guarded item" appears or disappears on the NEXT open --\n// no addItem() or removeItem() call is involved.',
+      run: () => {
+        guard.visible = !guard.visible;
+        const verb = guard.visible ? "back on the next open" : "gone on the next open";
+        showToast(`Guard flipped: "Guarded item" is ${verb}.`, "notice");
+      }
+    },
+    {
+      label: "updateItem()",
+      source: 'menu.updateItem("menu-toast", { label: "Show a toast (renamed)" });',
+      run: () => {
+        menu.updateItem("menu-toast", { label: "Show a toast (renamed)" });
+        showToast("Renamed by id; the drawer was not rebuilt.", "success");
+      }
+    }
+  ];
+  for (const demo of demos) {
+    const row = document.createElement("div");
+    row.className = "sampler-modal-demo";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ui-modal-btn ui-modal-btn-primary";
+    button.textContent = demo.label;
+    button.addEventListener("click", () => {
+      void demo.run();
+    });
+    row.appendChild(button);
+    const pre = document.createElement("pre");
+    pre.className = "sampler-modal-source";
+    pre.textContent = demo.source;
+    row.appendChild(pre);
+    container.appendChild(row);
+  }
+}
+themes.apply();
+buildThemeSelect();
+buildThemePicker();
+buildSwatches();
+buildSpecimens();
+buildModalDemos();
+buildToastDemos();
+buildToggleDemos();
+buildMenu();

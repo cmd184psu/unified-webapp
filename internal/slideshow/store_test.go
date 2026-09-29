@@ -116,53 +116,70 @@ func TestSubjects_BlacklistPrefix(t *testing.T) {
 	}
 }
 
-// ── Age cutoff filter ─────────────────────────────────────────────────────────
+// ── Age limit (by each image's own modified time) ──────────────────────────
 
-func TestSubjects_AgeCutoff_ExcludesOld(t *testing.T) {
-	_, dir := newTempStore(t)
-	// Create a subject directory.
-	subjDir := filepath.Join(dir, "old")
-	os.MkdirAll(subjDir, 0755)
-	os.WriteFile(filepath.Join(subjDir, "a.jpg"), []byte("img"), 0644)
-	// Wind back its mtime to 10 days ago.
-	past := time.Now().AddDate(0, 0, -10)
-	os.Chtimes(subjDir, past, past)
-
-	// Cutoff of 5 days: the 10-day-old directory should be excluded.
-	s, _ := slideshow.NewStore(dir, 5)
-	subs, _ := s.Subjects()
-	if len(subs) != 0 {
-		t.Errorf("want 0 subjects (old excluded), got %d", len(subs))
+// writeImage creates subject/name with its mtime set daysAgo days in the past.
+func writeImage(t *testing.T, dir, subject, name string, daysAgo int) {
+	t.Helper()
+	sd := filepath.Join(dir, subject)
+	if err := os.MkdirAll(sd, 0755); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(sd, name)
+	if err := os.WriteFile(p, []byte("img"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	when := time.Now().AddDate(0, 0, -daysAgo)
+	if err := os.Chtimes(p, when, when); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestSubjects_AgeCutoff_IncludesRecent(t *testing.T) {
+func TestSubjects_AgeCutoff_SkipsOldImagesKeepsNew(t *testing.T) {
 	_, dir := newTempStore(t)
-	subjDir := filepath.Join(dir, "recent")
-	os.MkdirAll(subjDir, 0755)
-	os.WriteFile(filepath.Join(subjDir, "a.jpg"), []byte("img"), 0644)
-	// mtime is now — within any reasonable cutoff.
+	writeImage(t, dir, "mixed", "old.jpg", 10)
+	writeImage(t, dir, "mixed", "new.jpg", 1)
 
 	s, _ := slideshow.NewStore(dir, 5)
 	subs, _ := s.Subjects()
-	if len(subs) != 1 {
-		t.Errorf("want 1 subject, got %d", len(subs))
+	if len(subs) != 1 || len(subs[0].Entries) != 1 || subs[0].Entries[0] != "mixed/new.jpg" {
+		t.Errorf("want only mixed/new.jpg, got %+v", subs)
+	}
+}
+
+func TestSubjects_AgeCutoff_SkipsSubjectWithOnlyOldImages(t *testing.T) {
+	_, dir := newTempStore(t)
+	writeImage(t, dir, "old", "a.jpg", 10)
+	writeImage(t, dir, "recent", "b.jpg", 0)
+
+	s, _ := slideshow.NewStore(dir, 5)
+	subs, _ := s.Subjects()
+	if len(subs) != 1 || subs[0].Subject != "recent" {
+		t.Errorf("want only the recent subject, got %+v", subs)
 	}
 }
 
 func TestSubjects_ZeroCutoff_IncludesAll(t *testing.T) {
 	_, dir := newTempStore(t)
-	subjDir := filepath.Join(dir, "ancient")
-	os.MkdirAll(subjDir, 0755)
-	os.WriteFile(filepath.Join(subjDir, "a.jpg"), []byte("img"), 0644)
-	// Set mtime 1000 days ago.
-	past := time.Now().AddDate(0, 0, -1000)
-	os.Chtimes(subjDir, past, past)
+	writeImage(t, dir, "ancient", "a.jpg", 1000)
 
-	s, _ := slideshow.NewStore(dir, 0) // 0 = no cutoff
+	s, _ := slideshow.NewStore(dir, 0) // 0 = no limit
 	subs, _ := s.Subjects()
 	if len(subs) != 1 {
-		t.Errorf("with zero cutoff want 1 subject, got %d", len(subs))
+		t.Errorf("with no limit want 1 subject, got %d", len(subs))
+	}
+}
+
+func TestSubjectsWithin_OverridesDefault(t *testing.T) {
+	_, dir := newTempStore(t)
+	writeImage(t, dir, "s", "a.jpg", 10)
+
+	s, _ := slideshow.NewStore(dir, 5)
+	if subs, _ := s.SubjectsWithin(30); len(subs) != 1 {
+		t.Errorf("a 30-day limit should include a 10-day-old image, got %d subjects", len(subs))
+	}
+	if subs, _ := s.SubjectsWithin(0); len(subs) != 1 {
+		t.Errorf("0 should mean no limit, got %d subjects", len(subs))
 	}
 }
 

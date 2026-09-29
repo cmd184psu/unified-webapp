@@ -4,14 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>Slideshow</title>
+  <script>
+    try { const t = localStorage.getItem('ui-theme:slideshow'); if (t) document.documentElement.dataset.theme = t; } catch {}
+  </script>
+  <link rel="stylesheet" href="/shared/dist/shared.css" />
   <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
-  <div id="display" data-controls-pos="bottom">
+  <div id="display">
     <!-- Image layer -->
     <img id="slide-img" alt="">
 
-    <!-- Semi-translucent overlay: two children → space-between works correctly -->
+    <!-- Overlay: the top bar plus the two floating control cards -->
     <div id="overlay">
 
       <!-- Top bar: subject label + image counter + debug readout + hamburger -->
@@ -24,101 +28,42 @@
         <button id="btn-hamburger" aria-label="Settings">&#9776;</button>
       </div>
 
-      <!-- Controls bar: nav buttons + image counter stacked vertically -->
-      <div id="controls-bar">
-        <div class="ctrl-row">
-          <div class="ctrl-group">
-            <button id="btn-prev-subject" title="Previous subject">&#9198;</button>
-            <button id="btn-prev" title="Previous image">&#8249;</button>
-          </div>
-
-          <div class="ctrl-group center">
-            <button id="btn-play-pause" title="Play / Pause">&#9646;&#9646;</button>
-          </div>
-
-          <div class="ctrl-group">
-            <button id="btn-next" title="Next image">&#8250;</button>
-            <button id="btn-next-subject" title="Next subject">&#9197;</button>
-          </div>
-
-          <!-- Music controls: hidden until collections available -->
-          <div id="music-controls" hidden>
-            <span class="music-icon" title="Audio">&#9835;</span>
-            <button id="btn-music-stop" title="Stop audio">&#9632;</button>
-            <button id="btn-music-play" title="Play audio">&#9654;</button>
-            <button id="btn-music-next" title="Next collection">&gt;&gt;</button>
-            <span id="music-label"></span>
-          </div>
+      <!-- Control cards: translucent overlays, snapped to one of 8 positions
+           (set in the ☰ menu) or dragged anywhere by their grip, and
+           minimizable down to just the grip and icon (click the icon to
+           expand). Layout is shared server state. -->
+      <div id="card-visual" class="ctrl-card" data-card="visual" data-pos="bottom">
+        <div class="card-head">
+          <span class="card-grip" title="Drag to move"><svg viewBox="0 0 14 14" fill="currentColor" width="12" height="12" aria-hidden="true"><circle cx="4" cy="3" r="1.2"/><circle cx="10" cy="3" r="1.2"/><circle cx="4" cy="7" r="1.2"/><circle cx="10" cy="7" r="1.2"/><circle cx="4" cy="11" r="1.2"/><circle cx="10" cy="11" r="1.2"/></svg></span>
+          <button type="button" class="card-icon" title="Image controls (click to minimize or expand)" aria-label="Minimize or expand image controls"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="9.5" cy="9" r="1.8"/><path d="M20 16l-4.5-4.5L7 20"/></svg></button>
+          <span class="card-title">Images</span>
+          <button type="button" class="card-min" title="Minimize" aria-label="Minimize image controls">&#8211;</button>
         </div>
-      </div><!-- /controls-bar -->
+        <div class="card-body">
+          <button id="btn-prev-subject" title="Previous subject">&#9198;</button>
+          <button id="btn-prev" title="Previous image">&#8249;</button>
+          <button id="btn-play-pause" title="Play / Pause">&#9646;&#9646;</button>
+          <button id="btn-next" title="Next image">&#8250;</button>
+          <button id="btn-next-subject" title="Next subject">&#9197;</button>
+        </div>
+      </div>
+
+      <!-- Audio card: hidden until music collections are available -->
+      <div id="card-audio" class="ctrl-card" data-card="audio" data-pos="bottom-right" hidden>
+        <div class="card-head">
+          <span class="card-grip" title="Drag to move"><svg viewBox="0 0 14 14" fill="currentColor" width="12" height="12" aria-hidden="true"><circle cx="4" cy="3" r="1.2"/><circle cx="10" cy="3" r="1.2"/><circle cx="4" cy="7" r="1.2"/><circle cx="10" cy="7" r="1.2"/><circle cx="4" cy="11" r="1.2"/><circle cx="10" cy="11" r="1.2"/></svg></span>
+          <button type="button" class="card-icon" title="Audio controls (click to minimize or expand)" aria-label="Minimize or expand audio controls"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></button>
+          <span id="music-label" class="card-title">Audio</span>
+          <button type="button" class="card-min" title="Minimize" aria-label="Minimize audio controls">&#8211;</button>
+        </div>
+        <div class="card-body">
+          <button id="btn-music-stop" title="Stop audio">&#9632;</button>
+          <button id="btn-music-play" title="Play audio">&#9654;</button>
+          <button id="btn-music-next" title="Next collection">&gt;&gt;</button>
+        </div>
+      </div>
 
     </div><!-- /overlay -->
-
-    <!-- Scrim: closes settings panel when tapped outside it -->
-    <div id="settings-scrim" hidden></div>
-
-    <!-- Settings panel -->
-    <div id="settings-panel" hidden>
-      <div class="panel-header">
-        <h3>Settings</h3>
-        <button id="btn-close-settings" aria-label="Close settings">&#10005;</button>
-      </div>
-
-      <label>
-        Mode
-        <select id="sel-mode">
-          <option value="kenburns">Ken Burns</option>
-          <option value="panscan">Pan &amp; Scan</option>
-          <option value="static">Static</option>
-        </select>
-      </label>
-
-      <label>
-        Seconds per image
-        <input id="inp-interval" type="number" min="1" max="300">
-      </label>
-
-      <label class="checkbox-label">
-        <input id="chk-shuffle" type="checkbox"> Shuffle subjects
-      </label>
-
-      <label>
-        Theme
-        <select id="sel-theme">
-          <option value="dark">Dark</option>
-          <option value="light">Light</option>
-        </select>
-      </label>
-
-      <label>
-        Controls position
-        <select id="sel-controls-pos">
-          <option value="bottom">Bottom</option>
-          <option value="top">Top</option>
-        </select>
-      </label>
-
-      <label class="checkbox-label">
-        <input id="chk-debug" type="checkbox"> Debug timer
-      </label>
-
-      <hr class="panel-divider">
-
-      <div id="server-stamp" class="server-stamp"></div>
-
-      <hr class="panel-divider">
-
-      <div class="shortcuts-help">
-        <h4>Keyboard shortcuts</h4>
-        <dl>
-          <dt><kbd>&#8592;</kbd> <kbd>&#8594;</kbd></dt><dd>Prev / next image</dd>
-          <dt><kbd>Space</kbd></dt><dd>Play / pause slideshow</dd>
-          <dt><kbd>Enter</kbd></dt><dd>Play / stop music</dd>
-          <dt><kbd>Esc</kbd></dt><dd>Close this menu</dd>
-        </dl>
-      </div>
-
-    </div>
 
   </div><!-- /display -->
 

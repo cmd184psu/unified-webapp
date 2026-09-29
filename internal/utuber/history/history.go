@@ -14,8 +14,8 @@ type Entry struct {
 }
 
 type Log struct {
-	path string
-	mu   sync.Mutex
+	path  string
+	mu    sync.Mutex
 	byURL map[string]*Entry
 }
 

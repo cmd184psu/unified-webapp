@@ -29,9 +29,9 @@ function copyToClipBoard(text){
     try {
         var successful = document.execCommand('copy')
         var msg = successful ? 'successfully' : 'unsuccessfully'
-        alert('Copied!');
+        showToast('Copied!', 'success');
     } catch(err) {
-        alert('Falied to copy.');
+        showToast('Failed to copy.', 'error');
     }
     x.style.display="none";
 }

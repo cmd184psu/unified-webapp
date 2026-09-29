@@ -655,3 +655,41 @@ func TestPutConfigLdapClearingUrlWithProtectedModuleRejected400NamingModule(t *t
 // strPtr returns a pointer to s, for populating putLDAPRequest-shaped test
 // bodies where nil must be distinguishable from an empty string.
 func strPtr(s string) *string { return &s }
+
+// --- PUT /api/config/modules: per-module idle sign-out ---
+
+func TestPutConfigModulesIdleMinutes(t *testing.T) {
+	pinPath := pinFileFixture(t, "1234")
+	initial := config.AuthConfig{
+		DataDir: t.TempDir(),
+		Modules: map[string]config.ModuleAuthConfig{"todo": {PinFile: pinPath}},
+		LDAP:    config.LDAPConfig{URL: "ldaps://ldap.example.com"},
+	}
+	_, mux, path := newAdminTestHandler(t, initial, []string{"todo"}, false)
+
+	rec := doAdmin(t, mux, http.MethodPut, "/api/config/modules", map[string]config.ModuleAuthConfig{"todo": {PinFile: pinPath, IdleMinutes: 15}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT idle 15 = %d; body: %s", rec.Code, rec.Body.String())
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(saved, []byte(`"idle_minutes": 15`)) {
+		t.Errorf("idle_minutes not saved to the config file: %s", saved)
+	}
+	var view authConfigView
+	if err := json.Unmarshal(doAdmin(t, mux, http.MethodGet, "/api/config/auth", nil).Body.Bytes(), &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.Modules["todo"].IdleMinutes != 15 {
+		t.Errorf("GET shows idle %d, want 15", view.Modules["todo"].IdleMinutes)
+	}
+
+	for _, bad := range []int{-1, config.MaxIdleMinutes + 1} {
+		rec := doAdmin(t, mux, http.MethodPut, "/api/config/modules", map[string]config.ModuleAuthConfig{"todo": {PinFile: pinPath, IdleMinutes: bad}})
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("idle %d: status %d, want 400", bad, rec.Code)
+		}
+	}
+}
