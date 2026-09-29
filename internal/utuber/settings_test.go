@@ -237,12 +237,12 @@ type capturingExec struct {
 	err  error
 }
 
-func (c *capturingExec) Run(_ context.Context, name string, args []string, onLine func(string)) error {
+func (c *capturingExec) Run(_ context.Context, name string, args []string, onStdout, onStderr func(string)) error {
 	c.mu.Lock()
 	c.name = name
 	c.args = append([]string(nil), args...)
 	c.mu.Unlock()
-	onLine("Collecting yt-dlp")
+	onStdout("Collecting yt-dlp")
 	return c.err
 }
 

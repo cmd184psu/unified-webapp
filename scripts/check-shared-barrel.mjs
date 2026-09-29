@@ -39,8 +39,8 @@ const BARREL = "web/shared/ts/index.ts";
 // statusSymbol, effectiveStatus) and 7 types (QueuePanelAdapter,
 // QueuePanelOptions, QueueSection, QueueActionKind, QueueProgress,
 // PatchListOptions, ExecStatus) — 13 -> 17 values, 14 -> 21 types.
-const ALLOWED_VALUES = ["openModal", "confirmDialog", "alertDialog", "promptDialog", "THEMES", "setTheme", "ThemeManager", "showToast", "HamburgerMenu", "copyText", "createCopyButton", "FileTree", "openTreePicker", "QueuePanel", "patchList", "statusSymbol", "effectiveStatus"];
-const ALLOWED_TYPES = ["ModalOptions", "ModalHandle", "DialogOptions", "PromptOptions", "ThemeManagerOptions", "ToastTone", "ToastHandle", "HamburgerMenuOptions", "MenuItem", "CopyButtonOptions", "TreeEntry", "TreeSort", "FileTreeOptions", "TreePickerOptions", "QueuePanelAdapter", "QueuePanelOptions", "QueueSection", "QueueActionKind", "QueueProgress", "PatchListOptions", "ExecStatus"];
+const ALLOWED_VALUES = ["openModal", "confirmDialog", "alertDialog", "promptDialog", "THEMES", "setTheme", "ThemeManager", "showToast", "HamburgerMenu", "copyText", "createCopyButton", "FileTree", "openTreePicker", "QueuePanel", "patchList", "statusSymbol", "effectiveStatus", "openOutputModal", "createToggle"];
+const ALLOWED_TYPES = ["ModalOptions", "ModalHandle", "DialogOptions", "PromptOptions", "ThemeManagerOptions", "ToastTone", "ToastHandle", "HamburgerMenuOptions", "MenuItem", "CopyButtonOptions", "TreeEntry", "TreeSort", "FileTreeOptions", "TreePickerOptions", "QueuePanelAdapter", "QueuePanelOptions", "QueueSection", "QueueActionKind", "QueueProgress", "PatchListOptions", "ExecStatus", "ToggleOptions"];
 
 function fail(message) {
   process.stderr.write(`check-shared-barrel: FAIL ${message}\n`);

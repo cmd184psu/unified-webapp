@@ -167,6 +167,7 @@ type runContext struct {
 	db       *db.DB
 	reporter *progressReporter
 	logw     io.Writer
+	logwErr  io.Writer
 	closed   atomic.Bool
 }
 
@@ -196,6 +197,13 @@ func (rc *runContext) Log() io.Writer {
 		return io.Discard
 	}
 	return rc.logw
+}
+
+func (rc *runContext) Stderr() io.Writer {
+	if rc.closed.Load() {
+		return io.Discard
+	}
+	return rc.logwErr
 }
 
 func truncateRunes(s string, n int) string {

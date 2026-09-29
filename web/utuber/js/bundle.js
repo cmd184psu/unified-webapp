@@ -1,5 +1,5 @@
 // web/utuber/js/main.ts
-import { ThemeManager, HamburgerMenu, confirmDialog, showToast, QueuePanel } from "/shared/dist/shared.mjs";
+import { ThemeManager, HamburgerMenu, confirmDialog, showToast, QueuePanel, openOutputModal, createToggle } from "/shared/dist/shared.mjs";
 var themes = new ThemeManager({ module: "utuber", default: "dark" });
 themes.apply();
 var hamburger = new HamburgerMenu({
@@ -23,22 +23,34 @@ var hamburger = new HamburgerMenu({
           8,
           (v) => saveQueueSetting({ concurrent_downloads: v })
         ));
-        const showField = document.createElement("label");
-        showField.className = "field field-check";
-        const cb = document.createElement("input");
-        cb.type = "checkbox";
-        cb.id = "show-in-taskmaster";
-        cb.addEventListener("change", () => void saveQueueSetting({ show_in_taskmaster: cb.checked }));
-        const cbText = document.createElement("span");
-        cbText.textContent = "Show in taskmaster";
-        showField.append(cb, cbText);
-        host.appendChild(showField);
+        host.appendChild(createToggle({
+          id: "show-in-taskmaster",
+          checked: false,
+          label: "Show in taskmaster",
+          onChange: (checked) => void saveQueueSetting({ show_in_taskmaster: checked })
+        }));
         const status = document.createElement("span");
         status.id = "queue-settings-status";
         status.style.fontSize = "0.75rem";
         status.style.color = "var(--color-text-faint)";
         host.appendChild(status);
         void loadQueueSettings();
+      }
+    },
+    { separator: true },
+    { section: "Testing" },
+    {
+      id: "simulate-download",
+      render(host) {
+        const hint = document.createElement("p");
+        hint.className = "optional-hint";
+        hint.textContent = "Runs a ~30s fake download through the real queue \u2014 no network, no YouTube \u2014 for testing progress bars, cancel, rerun, and the output modal without touching real videos.";
+        hint.style.whiteSpace = "pre-wrap";
+        const btn = document.createElement("button");
+        btn.className = "btn btn-ghost btn-sm";
+        btn.textContent = "Simulate download";
+        btn.addEventListener("click", () => void submitSimulatedDownload());
+        host.append(hint, btn);
       }
     },
     { separator: true },
@@ -80,10 +92,11 @@ var hamburger = new HamburgerMenu({
     {
       id: "cookies-setting",
       render(host) {
-        const heading = document.createElement("div");
-        heading.textContent = "Age-restricted cookies";
-        heading.style.fontWeight = "600";
-        heading.style.marginBottom = "0.25rem";
+        const details = document.createElement("details");
+        details.className = "cookies-card";
+        const summary = document.createElement("summary");
+        summary.textContent = "Cookie";
+        details.appendChild(summary);
         const hint = document.createElement("p");
         hint.className = "optional-hint";
         hint.textContent = 'yt-dlp cannot sign in on its own. Export a Netscape-format cookie file from a browser that is already signed into YouTube \u2014 either the "Get cookies.txt LOCALLY" extension, or on that machine: yt-dlp --cookies-from-browser chrome --cookies cookies.txt --skip-download <any-url> \u2014 then paste its contents below.';
@@ -117,7 +130,8 @@ var hamburger = new HamburgerMenu({
         saveStatus.style.fontSize = "0.75rem";
         saveStatus.style.color = "var(--color-text-faint)";
         submitRow.append(saveBtn, clearBtn, saveStatus);
-        host.append(heading, hint, status, textarea, submitRow);
+        details.append(hint, status, textarea, submitRow);
+        host.appendChild(details);
         loadCookiesStatus();
       }
     },
@@ -244,6 +258,15 @@ document.getElementById("enqueue-form").addEventListener("submit", async (e) => 
   hideDupBanner();
   await submitForm(new FormData(e.target));
 });
+async function submitSimulatedDownload() {
+  const formData = new FormData();
+  const uniqueID = Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
+  formData.set("url", "test://simulate/" + uniqueID);
+  formData.set("show_name", "Simulated");
+  formData.set("episode_title", "Download Test");
+  formData.set("mode", "video");
+  await submitForm(formData);
+}
 function jobSection(j) {
   if (j.status === "queued") return "upnext";
   if (j.status === "running") return "running";
@@ -327,9 +350,15 @@ function decorateJobRow(row, j) {
     wrap.append(play, dl);
     row.appendChild(wrap);
   } else if (j.status === "failed" && j.error) {
-    const err = document.createElement("div");
-    err.className = "utuber-error";
-    err.textContent = "\u26A0 " + j.error;
+    const err = document.createElement("button");
+    err.type = "button";
+    err.className = "utuber-error-icon";
+    err.textContent = "\u26A0";
+    err.title = j.error;
+    err.setAttribute("aria-label", "Failure reason: " + j.error);
+    err.addEventListener("click", () => {
+      openOutputModal(new EventSource("/jobs/output?id=" + encodeURIComponent(j.id)), j.label);
+    });
     row.appendChild(err);
   }
 }
@@ -347,8 +376,20 @@ var jobsAdapter = {
 var jobsHost = document.getElementById("jobs-list");
 jobsHost.innerHTML = "";
 var jobsPanel = new QueuePanel(jobsHost, jobsAdapter, {
-  header: { paused: false, onTogglePause: togglePause }
+  // Open by default (recentCollapsible only controls whether it CAN
+  // collapse, not its initial state -- that's recentOpen): a finished
+  // download moving into "Recent" behind a closed disclosure looked like
+  // it had vanished. Still collapsible by the user; just starts open.
+  // Scrollable once open (#jobs-list .ui-queue-list-recent in style.css)
+  // rather than letting the card grow without bound.
+  recentOpen: true
 });
+function sortForDisplay(jobs) {
+  const active = jobs.filter((j) => j.status === "queued" || j.status === "running");
+  const recent = jobs.filter((j) => j.status !== "queued" && j.status !== "running");
+  recent.sort((a, b) => (b.finished_at ?? b.created_at).localeCompare(a.finished_at ?? a.created_at));
+  return [...active, ...recent];
+}
 async function refreshJobs() {
   let jobs;
   try {
@@ -358,9 +399,19 @@ async function refreshJobs() {
     return;
   }
   jobs = jobs || [];
-  jobsPanel.update(jobs);
+  jobsPanel.update(sortForDisplay(jobs));
   const countEl = document.getElementById("jobs-count");
   countEl.textContent = jobs.length ? jobs.length + (jobs.length === 1 ? " job" : " jobs") : "";
+}
+var pauseToggleBtn = document.getElementById("queue-pause-toggle");
+var pauseNoteEl = document.getElementById("queue-pause-note");
+function applyPauseState(paused, note) {
+  pauseToggleBtn.textContent = paused ? "\u25B6" : "\u23F8";
+  pauseToggleBtn.title = note || (paused ? "Resume queue" : "Pause queue");
+  pauseToggleBtn.setAttribute("aria-label", pauseToggleBtn.title);
+  pauseToggleBtn.disabled = !!note;
+  pauseNoteEl.textContent = note ?? "";
+  pauseNoteEl.hidden = !note;
 }
 async function refreshQueueState() {
   let s;
@@ -372,7 +423,7 @@ async function refreshQueueState() {
   }
   const braked = s.brake_engaged === true || s.queue_paused_by === "brake";
   const note = braked ? "Paused by the taskmaster hand brake" : void 0;
-  jobsPanel.setPaused(!!s.queue_paused, note);
+  applyPauseState(!!s.queue_paused, note);
   syncQueueMenu(s);
 }
 async function togglePause() {
@@ -561,6 +612,30 @@ async function clearCookies() {
 document.querySelectorAll(".mode-tab").forEach((tab) => {
   tab.addEventListener("click", () => setMode(tab.dataset.mode));
 });
+pauseToggleBtn.addEventListener("click", () => void togglePause());
+document.getElementById("clear-recents-btn").addEventListener("click", () => void clearRecents());
+async function clearRecents() {
+  let jobs;
+  try {
+    const res = await fetch("/jobs.json");
+    jobs = await res.json();
+  } catch {
+    showToast("Could not reach the server.", "error");
+    return;
+  }
+  const recents = jobs.filter((j) => j.status !== "queued" && j.status !== "running");
+  if (recents.length === 0) {
+    showToast("Nothing to clear.", "notice");
+    return;
+  }
+  const ok = await confirmDialog(
+    `Remove all ${recents.length} finished download${recents.length === 1 ? "" : "s"} from the list? Downloaded files on disk are kept -- this only clears the list.`,
+    { title: "Clear recent downloads", confirmLabel: "Clear" }
+  );
+  if (!ok) return;
+  await Promise.all(recents.map((j) => fetch("/jobs/delete?id=" + encodeURIComponent(j.id), { method: "POST" })));
+  void refreshJobs();
+}
 setInterval(() => {
   void refreshJobs();
   void refreshQueueState();

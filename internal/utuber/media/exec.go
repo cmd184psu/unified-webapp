@@ -10,16 +10,16 @@ import (
 )
 
 type Executor interface {
-	Run(ctx context.Context, name string, args []string, onLine func(string)) error
+	Run(ctx context.Context, name string, args []string, onStdout, onStderr func(string)) error
 }
 
 type OSExecutor struct{}
 
 // lineWriter is an io.Writer that splits the bytes written to it into complete
-// lines and calls onLine synchronously (under its own lock) for each one. A
-// single lineWriter is shared by a command's stdout and stderr, so onLine is
-// serialized across both streams and never runs concurrently — the callback
-// needs no locking of its own, and every line it emits has been delivered by
+// lines and calls onLine synchronously (under its own lock) for each one. Run
+// creates two independent lineWriters, one per stream (stdout and stderr), so
+// each stream's onLine is serialized within that stream and the callback needs
+// no locking of its own. Every line each writer emits has been delivered by
 // the time Run returns (P15: no scanner goroutines to join). flush emits any
 // trailing partial line after the process has exited.
 type lineWriter struct {
@@ -58,19 +58,28 @@ func (w *lineWriter) emit(line []byte) {
 	w.onLine(string(bytes.TrimSuffix(line, []byte("\r"))))
 }
 
-func (OSExecutor) Run(ctx context.Context, name string, args []string, onLine func(string)) error {
-	if onLine == nil {
-		onLine = func(string) {}
+func (OSExecutor) Run(ctx context.Context, name string, args []string, onStdout, onStderr func(string)) error {
+	if onStdout == nil {
+		onStdout = func(string) {}
+	}
+	if onStderr == nil {
+		onStderr = func(string) {}
 	}
 	cmd := exec.CommandContext(ctx, name, args...)
 
-	// One shared lineWriter for both streams: stdout and stderr merge through a
-	// single serialized onLine. Because Stdout/Stderr are io.Writers (not
-	// pipes), cmd.Wait only returns after all output has been copied into the
-	// writer, so there are no scanner goroutines to join (P15).
-	lw := &lineWriter{onLine: onLine}
-	cmd.Stdout = lw
-	cmd.Stderr = lw
+	// Two independent lineWriters, one per stream: stdout and stderr are
+	// captured separately, each serialized within its own stream. Because
+	// Stdout/Stderr are io.Writers (not pipes), cmd.Run internally starts one
+	// copy-goroutine per distinct writer and joins ALL of them before it
+	// returns, so all output has been copied into the writers by the time Run
+	// returns — there are no scanner goroutines of our own to join (P15). Two
+	// writers instead of one does not reintroduce the pre-P15 goroutine leak:
+	// that bug was manual StdoutPipe() + unjoined scanner goroutines, which
+	// this still avoids.
+	stdoutLW := &lineWriter{onLine: onStdout}
+	stderrLW := &lineWriter{onLine: onStderr}
+	cmd.Stdout = stdoutLW
+	cmd.Stderr = stderrLW
 
 	// Put the child in its own process group and, on context cancel, SIGKILL
 	// the whole group so yt-dlp's ffmpeg grandchildren die too. WaitDelay caps
@@ -80,6 +89,7 @@ func (OSExecutor) Run(ctx context.Context, name string, args []string, onLine fu
 	cmd.WaitDelay = 10 * time.Second
 
 	err := cmd.Run()
-	lw.flush()
+	stdoutLW.flush()
+	stderrLW.flush()
 	return err
 }

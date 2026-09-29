@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"regexp"
 	"time"
 )
@@ -42,6 +43,7 @@ type RunContext interface {
 	Progress(pct int, label string) // pct 0..100; pct < 0 = indeterminate; values > 100 clamp to 100
 	SetLabel(label string)          // retitle the job (db.UpdateTaskLabel, immediately; <= 200 runes)
 	Log() io.Writer                 // lines appear in TM's per-execution output (SSE replay)
+	Stderr() io.Writer              // the execution's stderr stream, captured separately from Log()/stdout
 }
 
 // Kind is one registrable Go-function task kind. Build one with NewKind.
@@ -154,6 +156,12 @@ type Lane interface {
 	Remove(id string) error       // ErrRunning if running; queued removal is allowed
 	Settings() (LaneSettings, error)
 	UpdateSettings(p SettingsPatch) (LaneSettings, error) // width >= 1, retention >= 0 -> else ErrInvalidSettings
+	// StreamOutput streams the job's latest execution's stdout+stderr as SSE;
+	// ErrNotFound if jobID doesn't exist. This is the one deliberate exception
+	// to golane being transport-agnostic: SSE streaming fundamentally requires
+	// direct access to the http.ResponseWriter/Flusher, so it cannot be hidden
+	// behind a transport-neutral return value.
+	StreamOutput(w http.ResponseWriter, r *http.Request, jobID string) error
 }
 
 // Host registers a module-owned lane with its kinds. Implemented by

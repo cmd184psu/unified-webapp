@@ -33,6 +33,7 @@ type fakeRunContext struct {
 	progress []progressCall
 	labels   []string
 	log      bytes.Buffer
+	errLog   bytes.Buffer
 }
 
 func (rc *fakeRunContext) JobID() string { return rc.jobID }
@@ -58,6 +59,22 @@ func (w *rcLogWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.log.Write(p)
+}
+
+func (rc *fakeRunContext) Stderr() io.Writer { return (*rcErrWriter)(rc) }
+
+type rcErrWriter fakeRunContext
+
+func (w *rcErrWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.errLog.Write(p)
+}
+
+func (rc *fakeRunContext) errString() string {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	return rc.errLog.String()
 }
 
 func (rc *fakeRunContext) lastLabel() string {
@@ -102,7 +119,7 @@ func simulateDownload(args []string) {
 // and does nothing else.
 type downloadOnlyExec struct{}
 
-func (downloadOnlyExec) Run(_ context.Context, _ string, args []string, _ func(string)) error {
+func (downloadOnlyExec) Run(_ context.Context, _ string, args []string, _, _ func(string)) error {
 	simulateDownload(args)
 	return nil
 }
@@ -112,9 +129,9 @@ func (downloadOnlyExec) Run(_ context.Context, _ string, args []string, _ func(s
 // the yt-dlp call.
 type metaAndDownloadExec struct{ metaLine string }
 
-func (e metaAndDownloadExec) Run(_ context.Context, _ string, args []string, onLine func(string)) error {
+func (e metaAndDownloadExec) Run(_ context.Context, _ string, args []string, onStdout, onStderr func(string)) error {
 	if hasArg(args, "--print") {
-		onLine(e.metaLine)
+		onStdout(e.metaLine)
 		return nil
 	}
 	simulateDownload(args)
@@ -124,14 +141,14 @@ func (e metaAndDownloadExec) Run(_ context.Context, _ string, args []string, onL
 // errorExec fails every call.
 type errorExec struct{ err error }
 
-func (e errorExec) Run(_ context.Context, _ string, _ []string, _ func(string)) error {
+func (e errorExec) Run(_ context.Context, _ string, _ []string, _, _ func(string)) error {
 	return e.err
 }
 
 // audioExtractErrorExec downloads fine but fails the ffmpeg extraction.
 type audioExtractErrorExec struct{ err error }
 
-func (e audioExtractErrorExec) Run(_ context.Context, name string, args []string, _ func(string)) error {
+func (e audioExtractErrorExec) Run(_ context.Context, name string, args []string, _, _ func(string)) error {
 	if name == "ffmpeg" {
 		return e.err
 	}
@@ -143,10 +160,10 @@ func (e audioExtractErrorExec) Run(_ context.Context, name string, args []string
 // the raw-line-to-Log() + parsed-progress path) then creates the output file.
 type lineEmittingExec struct{ downloadLine string }
 
-func (e lineEmittingExec) Run(_ context.Context, _ string, args []string, onLine func(string)) error {
+func (e lineEmittingExec) Run(_ context.Context, _ string, args []string, onStdout, onStderr func(string)) error {
 	if hasArg(args, "-o") {
-		if onLine != nil && e.downloadLine != "" {
-			onLine(e.downloadLine)
+		if onStdout != nil && e.downloadLine != "" {
+			onStdout(e.downloadLine)
 		}
 		simulateDownload(args)
 	}
@@ -161,31 +178,53 @@ type lineThenFailExec struct {
 	err  error
 }
 
-func (e lineThenFailExec) Run(_ context.Context, _ string, args []string, onLine func(string)) error {
+func (e lineThenFailExec) Run(_ context.Context, _ string, args []string, onStdout, onStderr func(string)) error {
 	if hasArg(args, "-o") {
-		if onLine != nil && e.line != "" {
-			onLine(e.line)
+		if onStdout != nil && e.line != "" {
+			onStdout(e.line)
 		}
 		return e.err
 	}
 	return nil
 }
 
-// ageRestrictedExec simulates yt-dlp's real age-restriction failure: it
-// emits the informational lines plus a final "ERROR:" line on stderr (both
-// arrive through the same onLine callback, matching lineWriter's merged
-// stdout/stderr), then returns a generic non-zero-exit error — exactly what
-// OSExecutor.Run returns from cmd.Run() on a real failure (D5 Fix 1's target
-// case: "exit status 1" must not be the job's recorded error).
+// ageRestrictedExec simulates yt-dlp's real age-restriction failure: it emits
+// an informational line on stdout and the final "ERROR:" line on stderr (where
+// yt-dlp actually writes it), then returns a generic non-zero-exit error —
+// exactly what OSExecutor.Run returns from cmd.Run() on a real failure (D5 Fix
+// 1's target case: "exit status 1" must not be the job's recorded error). It
+// deliberately puts the ERROR: line on stderr to prove lastErrorLine capture
+// works via the onStderrLine closure now that streams are captured separately.
 type ageRestrictedExec struct{}
 
-func (ageRestrictedExec) Run(_ context.Context, _ string, args []string, onLine func(string)) error {
+func (ageRestrictedExec) Run(_ context.Context, _ string, args []string, onStdout, onStderr func(string)) error {
 	if hasArg(args, "-o") {
-		if onLine != nil {
-			onLine("[youtube] Extracting URL")
-			onLine("ERROR: [youtube] abc123: Sign in to confirm your age. This video may be inappropriate for some users. Use --cookies-from-browser or --cookies")
+		if onStdout != nil {
+			onStdout("[youtube] Extracting URL")
+		}
+		if onStderr != nil {
+			onStderr("ERROR: [youtube] abc123: Sign in to confirm your age. This video may be inappropriate for some users. Use --cookies-from-browser or --cookies")
 		}
 		return errors.New("exit status 1")
+	}
+	return nil
+}
+
+// stdoutStderrExec emits one distinguishable line on each of stdout and stderr
+// during the yt-dlp download call, then creates the deterministic output file.
+// It proves separate-stream capture end-to-end: the stdout line must reach the
+// execution's stdout capture and the stderr line its stderr capture.
+type stdoutStderrExec struct{}
+
+func (stdoutStderrExec) Run(_ context.Context, _ string, args []string, onStdout, onStderr func(string)) error {
+	if hasArg(args, "-o") {
+		if onStdout != nil {
+			onStdout("hello-from-stdout")
+		}
+		if onStderr != nil {
+			onStderr("hello-from-stderr")
+		}
+		simulateDownload(args)
 	}
 	return nil
 }
@@ -195,7 +234,7 @@ func (ageRestrictedExec) Run(_ context.Context, _ string, args []string, onLine 
 // layer (D5 Fix 2).
 type cookiesRecordingExec struct{ args []string }
 
-func (e *cookiesRecordingExec) Run(_ context.Context, _ string, args []string, _ func(string)) error {
+func (e *cookiesRecordingExec) Run(_ context.Context, _ string, args []string, _, _ func(string)) error {
 	if hasArg(args, "-o") {
 		e.args = append([]string(nil), args...)
 		simulateDownload(args)
@@ -207,7 +246,7 @@ func (e *cookiesRecordingExec) Run(_ context.Context, _ string, args []string, _
 // context is canceled), so a test can observe a job in the "running" state.
 type blockingExec struct{ release chan struct{} }
 
-func (e blockingExec) Run(ctx context.Context, _ string, args []string, _ func(string)) error {
+func (e blockingExec) Run(ctx context.Context, _ string, args []string, _, _ func(string)) error {
 	if hasArg(args, "-o") {
 		select {
 		case <-e.release:
@@ -398,10 +437,16 @@ func TestRunSurfacesYtdlpErrorReason(t *testing.T) {
 	if err.Error() == "exit status 1" {
 		t.Error("job error is still the generic exec error, not yt-dlp's ERROR: line")
 	}
-	// The raw ERROR: line still reached rc.Log() too (D8's contract, confirmed
-	// not broken by Fix 1's additional capture).
-	if !strings.Contains(rc.logString(), "Sign in to confirm your age") {
-		t.Errorf("rc.Log() is missing the raw ERROR: line: %q", rc.logString())
+	// yt-dlp writes the ERROR: line to stderr, so it lands in rc.Stderr()
+	// (streams are now captured separately). lastErrorLine capture works across
+	// either stream, which is why the surfaced error above still names the
+	// reason even though it arrived on stderr.
+	if !strings.Contains(rc.errString(), "Sign in to confirm your age") {
+		t.Errorf("rc.Stderr() is missing the raw ERROR: line: %q", rc.errString())
+	}
+	// The informational stdout line reached rc.Log() (D8's contract).
+	if !strings.Contains(rc.logString(), "[youtube] Extracting URL") {
+		t.Errorf("rc.Log() is missing the raw stdout line: %q", rc.logString())
 	}
 }
 

@@ -17,11 +17,11 @@ type captureExec struct {
 	err   error
 }
 
-func (c *captureExec) Run(_ context.Context, name string, args []string, onLine func(string)) error {
+func (c *captureExec) Run(_ context.Context, name string, args []string, onStdout, onStderr func(string)) error {
 	c.name = name
 	c.args = args
 	for _, l := range c.lines {
-		onLine(l)
+		onStdout(l)
 	}
 	return c.err
 }
@@ -64,7 +64,7 @@ func TestDownloadInvokesYtDlp(t *testing.T) {
 	dir := t.TempDir()
 	exec := &captureExec{}
 
-	got, _ := Download(context.Background(), exec, "http://example.com", dir, "out", "", func(string) {}, nil)
+	got, _ := Download(context.Background(), exec, "http://example.com", dir, "out", "", func(string) {}, nil, nil)
 
 	if exec.name != "yt-dlp" {
 		t.Errorf("expected yt-dlp, got %q", exec.name)
@@ -126,7 +126,7 @@ func TestDownloadProgressCallback(t *testing.T) {
 	var got []string
 	Download(context.Background(), exec, "http://x.com", dir, "out", "", func(s string) {
 		got = append(got, s)
-	}, nil)
+	}, nil, nil)
 
 	want := []string{"10.0", "55.5", "100.0"}
 	if len(got) != len(want) {
@@ -139,12 +139,58 @@ func TestDownloadProgressCallback(t *testing.T) {
 	}
 }
 
+// twoStreamExec emits stdoutLines through onStdout and stderrLines through
+// onStderr so a test can assert Download routes each stream to its own
+// callback.
+type twoStreamExec struct {
+	stdoutLines []string
+	stderrLines []string
+}
+
+func (e twoStreamExec) Run(_ context.Context, _ string, _ []string, onStdout, onStderr func(string)) error {
+	for _, l := range e.stdoutLines {
+		onStdout(l)
+	}
+	for _, l := range e.stderrLines {
+		onStderr(l)
+	}
+	return nil
+}
+
+func TestDownloadRoutesStdoutAndStderr(t *testing.T) {
+	dir := t.TempDir()
+	exec := twoStreamExec{
+		stdoutLines: []string{"[download]  10.0% of 50MiB", "out-plain"},
+		stderrLines: []string{"WARNING: something", "ERROR: boom"},
+	}
+
+	var progress, out, errs []string
+	Download(context.Background(), exec, "http://x.com", dir, "out", "",
+		func(s string) { progress = append(progress, s) },
+		func(s string) { out = append(out, s) },
+		func(s string) { errs = append(errs, s) },
+	)
+
+	wantOut := []string{"[download]  10.0% of 50MiB", "out-plain"}
+	if len(out) != len(wantOut) || out[0] != wantOut[0] || out[1] != wantOut[1] {
+		t.Errorf("onStdoutLine got %v, want %v", out, wantOut)
+	}
+	wantErr := []string{"WARNING: something", "ERROR: boom"}
+	if len(errs) != len(wantErr) || errs[0] != wantErr[0] || errs[1] != wantErr[1] {
+		t.Errorf("onStderrLine got %v, want %v", errs, wantErr)
+	}
+	// Progress parses only the stdout "[download] N%" line, never stderr.
+	if len(progress) != 1 || progress[0] != "10.0" {
+		t.Errorf("onProgress got %v, want [10.0] (stdout only)", progress)
+	}
+}
+
 func TestDownloadReturnsExecError(t *testing.T) {
 	dir := t.TempDir()
 	boom := errors.New("yt-dlp failed")
 	exec := &captureExec{err: boom}
 
-	_, err := Download(context.Background(), exec, "http://x.com", dir, "out", "", func(string) {}, nil)
+	_, err := Download(context.Background(), exec, "http://x.com", dir, "out", "", func(string) {}, nil, nil)
 	if !errors.Is(err, boom) {
 		t.Errorf("got %v, want %v", err, boom)
 	}
@@ -157,7 +203,7 @@ func TestDownloadOmitsCookiesFlagWhenFileMissing(t *testing.T) {
 	exec := &captureExec{}
 
 	missing := filepath.Join(dir, "does-not-exist.txt")
-	Download(context.Background(), exec, "http://x.com", dir, "out", missing, func(string) {}, nil)
+	Download(context.Background(), exec, "http://x.com", dir, "out", missing, func(string) {}, nil, nil)
 
 	if strings.Contains(strings.Join(exec.args, " "), "--cookies") {
 		t.Errorf("--cookies must be absent when the configured file does not exist: %v", exec.args)
@@ -172,7 +218,7 @@ func TestDownloadAddsCookiesFlagWhenFileExists(t *testing.T) {
 	if err := os.WriteFile(cookiesFile, []byte("# Netscape HTTP Cookie File\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	Download(context.Background(), exec, "http://x.com", dir, "out", cookiesFile, func(string) {}, nil)
+	Download(context.Background(), exec, "http://x.com", dir, "out", cookiesFile, func(string) {}, nil, nil)
 
 	joined := strings.Join(exec.args, " ")
 	if !strings.Contains(joined, "--cookies "+cookiesFile) {

@@ -81,6 +81,7 @@ func buildWith(cfg config.UtuberConfig, host golane.Host, exec media.Executor) (
 	mux.HandleFunc("/jobs/cancel", handleJobCancel(lane))
 	mux.HandleFunc("/jobs/rerun", handleJobRerun(lane))
 	mux.HandleFunc("/jobs/delete", handleJobDelete(lane))
+	mux.HandleFunc("/jobs/output", handleJobOutput(lane))
 	mux.HandleFunc("/ytdlp-update", handleYtdlpUpdate(exec, settings))
 	mux.HandleFunc("/settings.json", handleSettings(settings, lane))
 	mux.Handle(

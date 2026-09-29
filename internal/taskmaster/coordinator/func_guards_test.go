@@ -40,7 +40,7 @@ func newFuncTestServer(t *testing.T) (*httptest.Server, *db.DB, *worker.HiddenLa
 	board := broker.NewBroker(0)
 	hidden := worker.NewHiddenLanes(nil)
 	progress := worker.NewProgressRegistry()
-	c := coordinator.New(d, registry, worker.NewSudoGate(false), cancels, brake, procs, 0, board, hidden, progress)
+	c := coordinator.New(d, registry, worker.NewSudoGate(false), cancels, brake, procs, worker.NewSSECap(0), board, hidden, progress)
 	srv := httptest.NewServer(coordinator.Routes(c))
 	t.Cleanup(func() {
 		srv.Close()

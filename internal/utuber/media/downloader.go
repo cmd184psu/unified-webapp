@@ -45,11 +45,13 @@ const videoFormatSort = "res:720,vcodec:h264,acodec:aac,channels:2"
 // download and rename that instead of the real video. The caller passes a
 // unique stem (the job ID) and renames the result to its final name.
 //
-// Two callbacks feed the caller (D8 design decision): onLine receives every
-// raw yt-dlp output line (the caller threads these to the task's SSE log,
-// which is what D5 later parses for the real failure reason), while onProgress
-// receives only the parsed percentage ("45.2", "100.0") on lines the download
-// regex matches. Either may be nil.
+// Three callbacks feed the caller (D8 design decision): onStdoutLine receives
+// every raw yt-dlp stdout line and onStderrLine every raw stderr line (the
+// caller threads these to the task's separate SSE stdout/stderr streams, which
+// is what D5 later parses for the real failure reason), while onProgress
+// receives only the parsed percentage ("45.2", "100.0") on stdout lines the
+// download regex matches (yt-dlp's "[download] N%" progress is stdout). Any of
+// the three may be nil.
 //
 // cookiesFile, when non-empty and present on disk, is passed to yt-dlp as
 // "--cookies <cookiesFile>" so age-restricted content can authenticate (D5
@@ -62,7 +64,8 @@ func Download(
 	exec Executor,
 	url, dir, stem, cookiesFile string,
 	onProgress func(string),
-	onLine func(string),
+	onStdoutLine func(string),
+	onStderrLine func(string),
 ) (string, error) {
 
 	outPath := filepath.Join(dir, stem+".mp4")
@@ -90,9 +93,9 @@ func Download(
 		}
 	}
 	args = append(args, url)
-	callback := func(line string) {
-		if onLine != nil {
-			onLine(line)
+	stdoutCallback := func(line string) {
+		if onStdoutLine != nil {
+			onStdoutLine(line)
 		}
 		if onProgress != nil {
 			if matches := progressRegex.FindStringSubmatch(line); len(matches) > 1 {
@@ -100,9 +103,14 @@ func Download(
 			}
 		}
 	}
+	stderrCallback := func(line string) {
+		if onStderrLine != nil {
+			onStderrLine(line)
+		}
+	}
 
 	log.Printf("downloading using cli: %s\n", "yt-dlp "+strings.Join(args, " "))
-	if err := exec.Run(ctx, "yt-dlp", args, callback); err != nil {
+	if err := exec.Run(ctx, "yt-dlp", args, stdoutCallback, stderrCallback); err != nil {
 		return "", err
 	}
 

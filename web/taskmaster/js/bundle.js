@@ -332,7 +332,7 @@ function createToggleHandle(opts) {
 import { confirmDialog as confirmDialog2, ThemeManager, HamburgerMenu } from "/shared/dist/shared.mjs";
 
 // web/taskmaster/js/board.ts
-import { openModal as openModal3, confirmDialog, alertDialog as alertDialog3, QueuePanel } from "/shared/dist/shared.mjs";
+import { openModal as openModal2, confirmDialog, alertDialog as alertDialog3, openOutputModal, QueuePanel } from "/shared/dist/shared.mjs";
 
 // web/taskmaster/js/designer.ts
 import { openModal, alertDialog as alertDialog2, createCopyButton } from "/shared/dist/shared.mjs";
@@ -555,78 +555,6 @@ async function openTaskDesigner(lanes, preselectLane, caps3) {
     });
     nameInput.focus();
   });
-}
-
-// web/taskmaster/js/outputmodal.ts
-import { openModal as openModal2 } from "/shared/dist/shared.mjs";
-var STYLE_ATTR = "data-tm-output-modal-styles";
-function ensureStyles() {
-  if (document.head.querySelector("style[" + STYLE_ATTR + "]")) return;
-  const style = document.createElement("style");
-  style.setAttribute(STYLE_ATTR, "");
-  style.textContent = ".output-modal-panel { max-width: min(90vw, 900px); width: 90vw; }\n.output-modal-box { height: 70vh; max-height: 70vh; overflow: auto; margin: 0; white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono, monospace); font-size: 13px; }\n";
-  document.head.appendChild(style);
-}
-function parseOutputLine(raw) {
-  try {
-    const data = JSON.parse(raw);
-    return data.line ?? "";
-  } catch {
-    return null;
-  }
-}
-function appendOutputLine(box, ev) {
-  const line = parseOutputLine(ev.data);
-  if (line === null) return;
-  box.textContent += line + "\n";
-  box.scrollTop = box.scrollHeight;
-}
-function showStatusIfEmpty(box, statusText) {
-  if (box.textContent === "") box.textContent = "(execution " + statusText + ")";
-}
-function markDoneIfEmpty(box) {
-  if (box.textContent === "") box.textContent = "(no output captured for this run)";
-}
-function openOutputModal(execId, title) {
-  ensureStyles();
-  const box = document.createElement("pre");
-  box.className = "output-modal-box";
-  box.textContent = "";
-  const source = api.openExecutionOutput(execId);
-  wireOutputSource(source, box);
-  const handle = openModal2(box, { title, onClose: makeCloseSource(source) });
-  handle.panel.classList.add("output-modal-panel");
-  return handle;
-}
-function wireOutputSource(source, box) {
-  source.addEventListener("output", makeAppendHandler(box));
-  source.addEventListener("status", makeStatusHandler(box));
-  source.addEventListener("done", makeDoneHandler(box, source));
-}
-function makeAppendHandler(box) {
-  function onOutput(ev) {
-    appendOutputLine(box, ev);
-  }
-  return onOutput;
-}
-function makeStatusHandler(box) {
-  function onStatus(ev) {
-    showStatusIfEmpty(box, ev.data);
-  }
-  return onStatus;
-}
-function makeDoneHandler(box, source) {
-  function onDone() {
-    markDoneIfEmpty(box);
-    source.close();
-  }
-  return onDone;
-}
-function makeCloseSource(source) {
-  function closeSource() {
-    source.close();
-  }
-  return closeSource;
 }
 
 // web/taskmaster/js/status.ts
@@ -1136,7 +1064,7 @@ var tmQueueAdapter = {
 };
 function openRunningOutput(exec) {
   const title = (exec.task_name ?? "task") + " \u2014 run #" + exec.id;
-  openOutputModal(exec.id, title);
+  openOutputModal(api.openExecutionOutput(exec.id), title);
 }
 function cooldownLabel(task) {
   const execs = executionsByTask(task.name).filter((e) => e.finished_at).sort((a, b) => b.id - a.id);
@@ -1260,7 +1188,7 @@ async function openAddLaneModal() {
   createBtn.textContent = "Create lane";
   actions.append(cancelBtn, createBtn);
   content.append(nameGroup, widthGroup, actions);
-  const handle = openModal3(content, { title: "New lane" });
+  const handle = openModal2(content, { title: "New lane" });
   cancelBtn.addEventListener("click", () => handle.close());
   createBtn.addEventListener("click", () => {
     void (async () => {
@@ -1396,7 +1324,7 @@ function updateCard(card, m) {
 }
 
 // web/taskmaster/js/taskdetail.ts
-import { patchList as patchList2 } from "/shared/dist/shared.mjs";
+import { patchList as patchList2, openOutputModal as openOutputModal2 } from "/shared/dist/shared.mjs";
 function mountTaskDetail(container, live2, task, onBack) {
   container.textContent = "";
   container.className = "task-detail";
@@ -1514,7 +1442,7 @@ function mountTaskDetail(container, live2, task, onBack) {
   }
   function makeViewOutputHandler(exec) {
     function handleClick() {
-      openOutputModal(exec.id, task.name + " \u2014 run #" + exec.id);
+      openOutputModal2(api.openExecutionOutput(exec.id), task.name + " \u2014 run #" + exec.id);
     }
     return handleClick;
   }
@@ -1628,7 +1556,7 @@ function mountTaskView(container, live2, caps3, taskName) {
 }
 
 // web/taskmaster/js/buildinfo.ts
-var FRONTEND_BUILD_TIME = "7601a7a777a7";
+var FRONTEND_BUILD_TIME = "2f4a285d47b8";
 
 // web/taskmaster/js/main.ts
 var caps2 = { allow_sudo: false };

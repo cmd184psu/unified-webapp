@@ -57,7 +57,7 @@ func TestBoardEvents_TaskProgressShape(t *testing.T) {
 	w := worker.New(d, registry, "w", worker.NewSudoGate(false), cancels, brake, procs, board)
 	w.EnableFuncTasks(worker.FuncOptions{Funcs: funcs, Progress: progress, Hidden: hidden, ProgressInterval: 10 * time.Millisecond})
 
-	c := coordinator.New(d, registry, worker.NewSudoGate(false), cancels, brake, procs, 0, board, hidden, progress)
+	c := coordinator.New(d, registry, worker.NewSudoGate(false), cancels, brake, procs, worker.NewSSECap(0), board, hidden, progress)
 	srv := httptest.NewServer(coordinator.Routes(c))
 	defer srv.Close()
 

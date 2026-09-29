@@ -1484,6 +1484,86 @@ function openTreePicker(options) {
   });
 }
 
+// web/shared/ts/outputmodal.ts
+var STYLE_ATTR = "data-tm-output-modal-styles";
+function ensureStyles() {
+  if (document.head.querySelector("style[" + STYLE_ATTR + "]")) return;
+  const style = document.createElement("style");
+  style.setAttribute(STYLE_ATTR, "");
+  style.textContent = ".output-modal-panel { max-width: min(90vw, 900px); width: 90vw; }\n.output-modal-box { height: 70vh; max-height: 70vh; overflow: auto; margin: 0; white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono, monospace); font-size: 13px; }\n";
+  document.head.appendChild(style);
+}
+function parseOutputLine(raw) {
+  try {
+    const data = JSON.parse(raw);
+    return data.line ?? "";
+  } catch {
+    return null;
+  }
+}
+function appendOutputLine(box, ev) {
+  const line = parseOutputLine(ev.data);
+  if (line === null) return;
+  box.textContent += line + "\n";
+  box.scrollTop = box.scrollHeight;
+}
+function showStatusIfEmpty(box, statusText) {
+  if (box.textContent === "") box.textContent = "(execution " + statusText + ")";
+}
+function markDoneIfEmpty(box) {
+  if (box.textContent === "") box.textContent = "(no output captured for this run)";
+}
+function markErrorIfEmpty(box) {
+  if (box.textContent === "") box.textContent = "(could not load output \u2014 the job may have been removed)";
+}
+function openOutputModal(source, title) {
+  ensureStyles();
+  const box = document.createElement("pre");
+  box.className = "output-modal-box";
+  box.textContent = "";
+  wireOutputSource(source, box);
+  const handle = openModal(box, { title, onClose: makeCloseSource(source) });
+  handle.panel.classList.add("output-modal-panel");
+  return handle;
+}
+function wireOutputSource(source, box) {
+  source.addEventListener("output", makeAppendHandler(box));
+  source.addEventListener("status", makeStatusHandler(box));
+  source.addEventListener("done", makeDoneHandler(box, source));
+  source.addEventListener("error", makeErrorHandler(box, source));
+}
+function makeAppendHandler(box) {
+  function onOutput(ev) {
+    appendOutputLine(box, ev);
+  }
+  return onOutput;
+}
+function makeStatusHandler(box) {
+  function onStatus(ev) {
+    showStatusIfEmpty(box, ev.data);
+  }
+  return onStatus;
+}
+function makeDoneHandler(box, source) {
+  function onDone() {
+    markDoneIfEmpty(box);
+    source.close();
+  }
+  return onDone;
+}
+function makeErrorHandler(box, source) {
+  function onError() {
+    if (source.readyState === EventSource.CLOSED) markErrorIfEmpty(box);
+  }
+  return onError;
+}
+function makeCloseSource(source) {
+  function closeSource() {
+    source.close();
+  }
+  return closeSource;
+}
+
 // web/shared/ts/patchlist.ts
 var KEY_ATTR = "data-ui-key";
 function patchList(container, items, opts) {
@@ -1532,6 +1612,29 @@ function statusSymbol(status) {
 }
 function effectiveStatus(status, suspended) {
   return status === "running" && suspended ? "suspended" : status;
+}
+
+// web/shared/ts/toggle.ts
+function createToggle(options) {
+  const wrap = document.createElement("label");
+  wrap.className = "ui-toggle";
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.className = "ui-toggle-input";
+  if (options.id) input.id = options.id;
+  input.checked = options.checked;
+  input.addEventListener("change", () => void options.onChange(input.checked));
+  const track = document.createElement("span");
+  track.className = "ui-toggle-track";
+  track.setAttribute("aria-hidden", "true");
+  wrap.append(input, track);
+  if (options.label) {
+    const text = document.createElement("span");
+    text.className = "ui-toggle-label";
+    text.textContent = options.label;
+    wrap.append(text);
+  }
+  return wrap;
 }
 
 // web/shared/ts/queuepanel.ts
@@ -1779,8 +1882,10 @@ export {
   confirmDialog,
   copyText,
   createCopyButton,
+  createToggle,
   effectiveStatus,
   openModal,
+  openOutputModal,
   openTreePicker,
   patchList,
   promptDialog,

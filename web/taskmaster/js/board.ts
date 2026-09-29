@@ -26,9 +26,8 @@
 
 import { api, Capabilities, Lane, LaneStatus, Task, TaskExecution } from './api.js';
 import { LiveController, BoardEvent } from './ui/live.js';
-import { openModal, confirmDialog, alertDialog, QueuePanel, QueuePanelAdapter, QueueActionKind, QueueProgress } from '@shared';
+import { openModal, confirmDialog, alertDialog, openOutputModal, QueuePanel, QueuePanelAdapter, QueueActionKind, QueueProgress } from '@shared';
 import { openTaskDesigner } from './designer.js';
-import { openOutputModal } from './outputmodal.js';
 import { fmtElapsed, renderStatusBadge, effectiveStatus } from './status.js';
 
 const RAN_PER_LANE = 5;
@@ -638,7 +637,7 @@ const tmQueueAdapter: QueuePanelAdapter<BoardItem> = {
 
 function openRunningOutput(exec: TaskExecution): void {
   const title = (exec.task_name ?? 'task') + ' — run #' + exec.id;
-  openOutputModal(exec.id, title);
+  openOutputModal(api.openExecutionOutput(exec.id), title);
 }
 
 function cooldownLabel(task: Task): string {

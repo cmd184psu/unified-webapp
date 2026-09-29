@@ -569,7 +569,7 @@ func (w *Worker) runFunc(task *models.Task, execID int64, scheduledAt time.Time,
 
 	// Step 6: build RunContext.
 	reporter := newProgressReporter(execID, task.LaneName, task.Name, w.db, w.progress, w.board, w.hidden, w.progressInterval)
-	rc := &runContext{jobID: task.Name, execID: execID, db: w.db, reporter: reporter, logw: stdout}
+	rc := &runContext{jobID: task.Name, execID: execID, db: w.db, reporter: reporter, logw: stdout, logwErr: stderr}
 
 	// Step 7: run (panic-safe).
 	res, runErr := safeRun(k.Run, execCtx, rc, p)

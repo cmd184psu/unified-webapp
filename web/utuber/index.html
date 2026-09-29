@@ -84,8 +84,15 @@
   <!-- ── Jobs card ── -->
   <div class="card" id="jobs-card">
     <div class="jobs-header">
-      <h2>Queue</h2>
-      <span class="jobs-count" id="jobs-count"></span>
+      <div class="jobs-header-title">
+        <h2>Queue</h2>
+        <button type="button" id="queue-pause-toggle" class="icon-btn" title="Pause queue" aria-label="Pause queue"></button>
+        <span class="jobs-header-note" id="queue-pause-note" hidden></span>
+      </div>
+      <div class="jobs-header-right">
+        <button type="button" id="clear-recents-btn" class="btn btn-ghost btn-sm">Clear Recents</button>
+        <span class="jobs-count" id="jobs-count"></span>
+      </div>
     </div>
     <div id="jobs-list" class="jobs-list">
       <div class="empty-state">No jobs yet — add one above.</div>

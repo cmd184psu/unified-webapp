@@ -329,6 +329,69 @@ func TestDeleteRunningJobRefused(t *testing.T) {
 	require.Contains(t, del.Body.String(), "running")
 }
 
+// ── output streaming (SSE) ──────────────────────────────────────────────────
+
+// TestJobOutputStreamsSeparateStreams pins Feature 2 end-to-end: a func job's
+// stdout and stderr are captured separately (Feature 1) and GET
+// /jobs/output?id=… replays both over the shared taskmaster streaming path
+// (Feature 2), each SSE "output" event tagged with the stream it came from.
+// This exercises the whole chain — processor.run's onStdout/onStderr closures,
+// runContext.Log()/Stderr(), the OutputRegistry captures, and
+// worker.StreamExecutionOutput via lane.StreamOutput — with no coordinator
+// route mounted (utuber runs headless).
+func TestJobOutputStreamsSeparateStreams(t *testing.T) {
+	root := t.TempDir()
+	cfg := utuberCfg(t, root, 1) // width 1 so the fake job runs
+	e := openEngine(t, filepath.Join(root, "taskmaster.db"))
+	h, err := buildWith(cfg, e, stdoutStderrExec{})
+	require.NoError(t, err)
+
+	require.Equal(t, http.StatusNoContent,
+		req(h, http.MethodPost, "/enqueue?url=http%3A%2F%2Fexample.com%2Fout&show=S&title=E&mode=video", nil).Code)
+	require.Eventually(t, func() bool {
+		jobs := jobsJSON(t, h)
+		return len(jobs) == 1 && jobs[0]["status"] == "success"
+	}, 10*time.Second, 20*time.Millisecond)
+
+	id := jobsJSON(t, h)[0]["id"].(string)
+
+	// Unknown id -> 404 (job not found).
+	require.Equal(t, http.StatusNotFound, req(h, http.MethodGet, "/jobs/output?id=does-not-exist", nil).Code)
+
+	// The finished execution's captured lines are still in the registry's
+	// replay window, so the stream replays both and then closes.
+	rr := req(h, http.MethodGet, "/jobs/output?id="+id, nil)
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	streams := parseSSEOutput(t, rr.Body.String())
+	require.Equal(t, "hello-from-stdout", streams["stdout"], "stdout line must be captured and tagged stdout")
+	require.Equal(t, "hello-from-stderr", streams["stderr"], "stderr line must be captured and tagged stderr")
+	require.Contains(t, rr.Body.String(), "event: done", "the stream must close with a done event once both streams are finished")
+}
+
+// parseSSEOutput collects the last "line" seen per stream from an SSE body's
+// `event: output` frames.
+func parseSSEOutput(t *testing.T, body string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, raw := range strings.Split(body, "\n") {
+		if !strings.HasPrefix(raw, "data: {") {
+			continue
+		}
+		var payload struct {
+			Stream string `json:"stream"`
+			Line   string `json:"line"`
+		}
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(raw, "data: ")), &payload); err != nil {
+			continue
+		}
+		if payload.Stream != "" {
+			out[payload.Stream] = payload.Line
+		}
+	}
+	return out
+}
+
 // ── settings ────────────────────────────────────────────────────────────────
 
 func decodeSettings(t *testing.T, rr *httptest.ResponseRecorder) map[string]any {

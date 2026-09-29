@@ -1,17 +1,18 @@
 // outputmodal.ts — the shared "View output" modal: a large, scrollable,
 // live-streaming view of one execution's stdout/stderr.
 //
-// Used from two call sites — the lane board's running-row log control, and
-// the task detail's history rows — so there is exactly one place that knows
-// how to open and stream an execution's output, instead of two similar
-// copies drifting apart (owner DRY policy).
+// Promoted to @shared so every module that has a per-execution output SSE
+// endpoint (taskmaster's board/task-detail, utuber's failed-job icon) opens
+// the literal same modal instead of drifting copies (owner DRY policy). The
+// caller constructs the EventSource for its own endpoint and passes it in —
+// this file knows how to stream and render, not how any one module builds its
+// request URLs.
 //
 // No lambdas/inline callbacks: every EventSource listener is a small named
 // function (owner code policy — short, named, readable, testable).
 
-import { api } from "./api.js";
-import { openModal } from "@shared";
-import type { ModalHandle } from "@shared";
+import { openModal } from "./modal.js";
+import type { ModalHandle } from "./modal.js";
 
 const STYLE_ATTR = "data-tm-output-modal-styles";
 
@@ -55,19 +56,29 @@ function markDoneIfEmpty(box: HTMLElement): void {
   if (box.textContent === "") box.textContent = "(no output captured for this run)";
 }
 
+function markErrorIfEmpty(box: HTMLElement): void {
+  // EventSource fires a plain "error" event (no message, no status code
+  // surfaced to JS) both for a fatal connection failure (e.g. the endpoint
+  // returned 404 — the job was removed) and, harmlessly, for a transient
+  // network blip it will retry on its own. Without this, the first case
+  // leaves the modal open and permanently empty with no feedback at all —
+  // indistinguishable from the click having done nothing.
+  if (box.textContent === "") box.textContent = "(could not load output — the job may have been removed)";
+}
+
 /**
- * Opens a large scrollable modal streaming `execId`'s stdout/stderr live
+ * Opens a large scrollable modal streaming `source`'s stdout/stderr live
  * (replaying already-captured lines first, same as the underlying SSE
- * endpoint). Closes the stream when the modal closes, however it closes.
+ * endpoint). The caller builds `source` for its own module's output endpoint.
+ * Closes the stream when the modal closes, however it closes.
  */
-export function openOutputModal(execId: number, title: string): ModalHandle {
+export function openOutputModal(source: EventSource, title: string): ModalHandle {
   ensureStyles();
 
   const box = document.createElement("pre");
   box.className = "output-modal-box";
   box.textContent = "";
 
-  const source = api.openExecutionOutput(execId);
   wireOutputSource(source, box);
 
   const handle = openModal(box, { title, onClose: makeCloseSource(source) });
@@ -79,6 +90,7 @@ function wireOutputSource(source: EventSource, box: HTMLElement): void {
   source.addEventListener("output", makeAppendHandler(box));
   source.addEventListener("status", makeStatusHandler(box));
   source.addEventListener("done", makeDoneHandler(box, source));
+  source.addEventListener("error", makeErrorHandler(box, source));
 }
 
 function makeAppendHandler(box: HTMLElement): (ev: MessageEvent) => void {
@@ -101,6 +113,17 @@ function makeDoneHandler(box: HTMLElement, source: EventSource): () => void {
     source.close();
   }
   return onDone;
+}
+
+function makeErrorHandler(box: HTMLElement, source: EventSource): () => void {
+  function onError(): void {
+    // A transient network hiccup leaves the browser retrying (readyState
+    // CONNECTING) — say nothing and let it reconnect. A non-2xx/non-SSE
+    // response (404: job removed, 500, etc.) leaves it CLOSED for good —
+    // that's the case with no other feedback path, so report it here.
+    if (source.readyState === EventSource.CLOSED) markErrorIfEmpty(box);
+  }
+  return onError;
 }
 
 function makeCloseSource(source: EventSource): () => void {

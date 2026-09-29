@@ -60,12 +60,23 @@ type downloadResult struct {
 	EpisodeTitle string `json:"episode_title"`
 }
 
+// simulateURLPrefix marks a job submitted by the Queue menu's "Simulate
+// download" button (handleEnqueueSimulated) rather than a real URL. run
+// branches on it before ever touching yt-dlp, so simulated jobs exercise the
+// exact real taskmaster lane / progress / SSE / QueuePanel path with zero
+// network calls -- useful for testing the UI without depending on YouTube's
+// cooperation (or risking more bot-detection during testing).
+const simulateURLPrefix = "test://simulate"
+
 // run is the "utuber.download" kind's Run. It does exactly what the old
 // jobs-queue Process did, but reports through the RunContext instead of a
 // jobs.Queue: rc.Progress for the progress bar, rc.SetLabel for the title, and
 // rc.Log for every raw yt-dlp/ffmpeg line (which taskmaster replays over SSE
 // and D5 later mines for the real failure reason).
 func (p processor) run(ctx context.Context, rc golane.RunContext, job downloadPayload) (any, error) {
+	if strings.HasPrefix(job.URL, simulateURLPrefix) {
+		return p.runSimulated(ctx, rc, job)
+	}
 	show, title := job.ShowName, job.EpisodeTitle
 	if show == "" || title == "" {
 		rc.Progress(-1, "Fetching metadata")
@@ -84,16 +95,29 @@ func (p processor) run(ctx context.Context, rc golane.RunContext, job downloadPa
 	rc.Progress(-1, "Downloading")
 
 	// lastErrorLine tracks the most recent non-empty yt-dlp/ffmpeg output line
-	// containing "ERROR:" (D5 Fix 1). Every raw line still reaches rc.Log()
-	// unconditionally -- this only additionally remembers the best candidate
-	// for the execution's actual failure reason, since a bare exec error like
-	// "exit status 1" names nothing an operator can act on.
+	// containing "ERROR:" (D5 Fix 1). Every raw line still reaches the task's
+	// output unconditionally -- this only additionally remembers the best
+	// candidate for the execution's actual failure reason, since a bare exec
+	// error like "exit status 1" names nothing an operator can act on.
+	//
+	// stdout and stderr are now captured separately, so there are two closures:
+	// onStdoutLine writes to rc.Log(), onStderrLine to rc.Stderr(). Because
+	// yt-dlp can emit its "ERROR:" line on either stream, BOTH scan for it and
+	// update the same lastErrorLine, preserving D5's exact error-surfacing
+	// behavior regardless of which stream carried the ERROR: line.
 	var lastErrorLine string
-	logLine := func(line string) {
-		fmt.Fprintln(rc.Log(), line)
+	trackError := func(line string) {
 		if trimmed := strings.TrimSpace(line); trimmed != "" && strings.Contains(trimmed, "ERROR:") {
 			lastErrorLine = trimmed
 		}
+	}
+	onStdoutLine := func(line string) {
+		fmt.Fprintln(rc.Log(), line)
+		trackError(line)
+	}
+	onStderrLine := func(line string) {
+		fmt.Fprintln(rc.Stderr(), line)
+		trackError(line)
 	}
 
 	// The download filename stem is "<job ID>-<exec ID>": unique per execution
@@ -112,7 +136,8 @@ func (p processor) run(ctx context.Context, rc golane.RunContext, job downloadPa
 				rc.Progress(int(pct), "Downloading")
 			}
 		},
-		logLine,
+		onStdoutLine,
+		onStderrLine,
 	)
 	if err != nil {
 		return nil, ytdlpError(err, lastErrorLine)
@@ -124,7 +149,7 @@ func (p processor) run(ctx context.Context, rc golane.RunContext, job downloadPa
 		outPath := p.cfg.DownloadDir + "/" + out
 
 		rc.Progress(-1, "Converting")
-		err = media.ExtractAudio(ctx, p.exec, src, outPath, logLine)
+		err = media.ExtractAudio(ctx, p.exec, src, outPath, onStdoutLine)
 		_ = os.Remove(src)
 		if err != nil {
 			return nil, ytdlpError(err, lastErrorLine)
@@ -149,6 +174,60 @@ func (p processor) run(ctx context.Context, rc golane.RunContext, job downloadPa
 	})
 
 	return downloadResult{OutputFile: outputFile, ShowName: show, EpisodeTitle: title}, nil
+}
+
+// simulateSteps/simulateStepDelay give a ~30s run: long enough to watch
+// several progress polls land smoothly (the UI's 2000ms poll floor), short
+// enough not to be annoying to run repeatedly while testing.
+const simulateSteps = 20
+const simulateStepDelay = 1500 * time.Millisecond
+
+// runSimulated services a "test://simulate..." job (only ever submitted by
+// the Queue menu's Simulate button): no network, no yt-dlp, no real video —
+// just a synthetic progress ramp through the exact same taskmaster lane /
+// SSE / QueuePanel path a real download uses. Ends by writing a tiny real
+// (placeholder, not a playable video) file so the success-state Play/
+// Download links and history recording are exercised too, not just the
+// running state. Honors cancellation exactly like a real job: canceling
+// mid-ramp returns ctx.Err(), which the worker records as "canceled".
+func (p processor) runSimulated(ctx context.Context, rc golane.RunContext, job downloadPayload) (any, error) {
+	show, title := job.ShowName, job.EpisodeTitle
+	if show == "" {
+		show = "Simulated"
+	}
+	if title == "" {
+		title = "Download Test"
+	}
+	rc.SetLabel(show + " — " + title)
+
+	for i := 0; i <= simulateSteps; i++ {
+		rc.Progress(i*100/simulateSteps, "Downloading (simulated)")
+		if i == simulateSteps {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(simulateStepDelay):
+		}
+	}
+
+	out := outputName(show, job.Season, job.Episode, title, "mp4")
+	outPath := p.cfg.DownloadDir + "/" + out
+	placeholder := "This is a placeholder file from utuber's Simulate-download testing " +
+		"feature -- not a real video. See processor.runSimulated in internal/utuber/handler.go.\n"
+	if err := os.WriteFile(outPath, []byte(placeholder), 0o644); err != nil {
+		return nil, err
+	}
+
+	_ = p.hist.Record(history.Entry{
+		URL:        job.URL,
+		OutputFile: out,
+		ShowName:   show,
+		Mode:       job.Mode,
+	})
+
+	return downloadResult{OutputFile: out, ShowName: show, EpisodeTitle: title}, nil
 }
 
 // ytdlpError returns the execution error the worker records (D5 Fix 1): when
@@ -233,7 +312,7 @@ func handleYtdlpUpdate(exec media.Executor, s *settingsStore) http.HandlerFunc {
 		}
 
 		send("Starting yt-dlp update...")
-		err := exec.Run(r.Context(), s.PythonBin(), []string{"-m", "pip", "install", "-U", "yt-dlp"}, send)
+		err := exec.Run(r.Context(), s.PythonBin(), []string{"-m", "pip", "install", "-U", "yt-dlp"}, send, send)
 		if err != nil {
 			send("ERROR: " + err.Error())
 		} else {
@@ -361,6 +440,28 @@ func handleJobRerun(lane golane.Lane) http.HandlerFunc {
 			http.Error(w, "that download is queued or running", http.StatusConflict)
 		case errors.Is(err, golane.ErrSucceeded):
 			http.Error(w, "that download already succeeded", http.StatusConflict)
+		default:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	}
+}
+
+// handleJobOutput streams a job's latest execution's stdout+stderr as SSE:
+// GET /jobs/output?id=… . It mirrors the taskmaster coordinator's per-
+// execution output stream, but reachable even when utuber runs headless (P16,
+// taskmaster's own routes not mounted), since lane.StreamOutput calls the same
+// shared worker streaming code. lane.StreamOutput writes the SSE stream (and
+// any inline error, e.g. the 503 subscriber-limit) directly to w on success;
+// only a non-nil returned error (job not found) needs an HTTP status mapped
+// here, and it is returned before anything is written to w.
+func handleJobOutput(lane golane.Lane) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		err := lane.StreamOutput(w, r, r.URL.Query().Get("id"))
+		switch {
+		case err == nil:
+			// StreamOutput already wrote the response (SSE stream or inline error).
+		case errors.Is(err, golane.ErrNotFound):
+			http.Error(w, "job not found", http.StatusNotFound)
 		default:
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}

@@ -24,8 +24,7 @@
 
 import { api, MetricSummary, Task, TaskExecution } from './api.js';
 import { LiveController } from './ui/live.js';
-import { patchList } from '@shared';
-import { openOutputModal } from './outputmodal.js';
+import { patchList, openOutputModal } from '@shared';
 import { fmtDate, fmtMs, renderStatusBadge } from './status.js';
 
 /**
@@ -177,7 +176,7 @@ export function mountTaskDetail(container: HTMLElement, live: LiveController, ta
 
   function makeViewOutputHandler(exec: TaskExecution): () => void {
     function handleClick(): void {
-      openOutputModal(exec.id, task.name + ' — run #' + exec.id);
+      openOutputModal(api.openExecutionOutput(exec.id), task.name + ' — run #' + exec.id);
     }
     return handleClick;
   }

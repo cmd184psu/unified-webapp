@@ -57,6 +57,7 @@ type Engine struct {
 	procs    *worker.ProcessRegistry
 	board    *broker.Broker
 	registry *worker.OutputRegistry
+	sseCap   *worker.SSECap
 	router   http.Handler
 
 	stopGC      func()
@@ -145,6 +146,12 @@ func Open(cfg config.TaskmasterConfig, opts OpenOptions) (*Engine, error) {
 	outputRegistry := worker.NewRegistry()
 	stopGC := outputRegistry.StartGC(time.Hour)
 
+	// One shared SSE subscriber budget for every per-execution output stream,
+	// whether reached via the coordinator's route or a module lane's own route
+	// (StreamOutput). Both draw on this single cap object, so the
+	// SSEMaxSubscribers limit is a process-wide budget, not one-per-entrypoint.
+	sseCap := worker.NewSSECap(cfg.SSEMaxSubscribers)
+
 	funcs := worker.NewFuncRegistry()
 	progress := worker.NewProgressRegistry()
 
@@ -174,6 +181,7 @@ func Open(cfg config.TaskmasterConfig, opts OpenOptions) (*Engine, error) {
 		procs:    procs,
 		board:    boardBroker,
 		registry: outputRegistry,
+		sseCap:   sseCap,
 		stopGC:   stopGC,
 		lanes:    make(map[string]bool),
 	}
@@ -209,7 +217,7 @@ func Open(cfg config.TaskmasterConfig, opts OpenOptions) (*Engine, error) {
 	e.workerDone = workerDone
 
 	if !opts.OwnedLanesOnly {
-		c := coordinator.New(database, outputRegistry, sudoGate, cancels, brakeGate, procs, cfg.SSEMaxSubscribers, boardBroker, hidden, progress)
+		c := coordinator.New(database, outputRegistry, sudoGate, cancels, brakeGate, procs, sseCap, boardBroker, hidden, progress)
 		r := coordinator.Routes(c)
 		r.Handle("/*", static.NewHandler(cfg.StaticDir))
 		e.router = r

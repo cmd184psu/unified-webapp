@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 
 	"cmd184psu/unified-webapp/internal/taskmaster/db"
 	"cmd184psu/unified-webapp/internal/taskmaster/golane"
@@ -259,6 +260,36 @@ func (l *laneHandle) UpdateSettings(p golane.SettingsPatch) (golane.LaneSettings
 		worker.PublishBoardEvent(l.engine.board, l.engine.hidden, worker.BoardEvent{Type: "lane-updated", Lane: l.name})
 	}
 	return l.Settings()
+}
+
+// StreamOutput resolves jobID to its latest execution and streams that
+// execution's stdout+stderr as SSE via the shared worker.StreamExecutionOutput
+// (the same code the coordinator's route uses, so a headless module — one
+// where taskmaster's own coordinator routes are not mounted — gets the exact
+// same streaming behavior). It draws on the engine's shared SSECap so this
+// route and the coordinator's share one process-wide subscriber budget.
+//
+// On an unknown jobID it returns golane.ErrNotFound (the caller maps it to
+// 404). When the subscriber cap is already reached it writes a 503 directly
+// and returns nil: there is no golane sentinel that maps cleanly to that HTTP
+// status (ErrBusy means "queued/running", ErrRunning likewise), and inventing
+// one would leak an SSE-transport concern into golane's generic error set;
+// writing the 503 here also mirrors the coordinator's own inline cap handling
+// and guarantees the request never hangs. worker.StreamExecutionOutput writes
+// all its own responses, so its return is ignored (as the coordinator does).
+func (l *laneHandle) StreamOutput(w http.ResponseWriter, r *http.Request, jobID string) error {
+	job, err := l.Get(jobID)
+	if err != nil {
+		return err
+	}
+	release, ok := l.engine.sseCap.Acquire()
+	if !ok {
+		http.Error(w, "output stream subscriber limit reached", http.StatusServiceUnavailable)
+		return nil
+	}
+	defer release()
+	_ = worker.StreamExecutionOutput(w, r, job.ExecID, l.engine.registry, l.engine.db)
+	return nil
 }
 
 // generateJobName returns "<lane>-<12 lowercase hex chars>" (P1).

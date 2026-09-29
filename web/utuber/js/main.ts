@@ -1,4 +1,4 @@
-import { ThemeManager, HamburgerMenu, confirmDialog, showToast, QueuePanel } from '@shared';
+import { ThemeManager, HamburgerMenu, confirmDialog, showToast, QueuePanel, openOutputModal, createToggle } from '@shared';
 import type { QueuePanelAdapter, QueueActionKind, QueueSection, QueueProgress } from '@shared';
 
 const themes = new ThemeManager({ module: 'utuber', default: 'dark' });
@@ -16,16 +16,12 @@ const hamburger = new HamburgerMenu({
         host.appendChild(numberField('concurrent-downloads', 'Concurrent downloads', 1, 8,
           v => saveQueueSetting({ concurrent_downloads: v })));
 
-        const showField = document.createElement('label');
-        showField.className = 'field field-check';
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.id = 'show-in-taskmaster';
-        cb.addEventListener('change', () => void saveQueueSetting({ show_in_taskmaster: cb.checked }));
-        const cbText = document.createElement('span');
-        cbText.textContent = 'Show in taskmaster';
-        showField.append(cb, cbText);
-        host.appendChild(showField);
+        host.appendChild(createToggle({
+          id: 'show-in-taskmaster',
+          checked: false,
+          label: 'Show in taskmaster',
+          onChange: checked => void saveQueueSetting({ show_in_taskmaster: checked }),
+        }));
 
         const status = document.createElement('span');
         status.id = 'queue-settings-status';
@@ -34,6 +30,27 @@ const hamburger = new HamburgerMenu({
         host.appendChild(status);
 
         void loadQueueSettings();
+      },
+    },
+    { separator: true as const },
+    { section: 'Testing' },
+    {
+      id: 'simulate-download',
+      render(host: HTMLElement) {
+        const hint = document.createElement('p');
+        hint.className = 'optional-hint';
+        hint.textContent =
+          'Runs a ~30s fake download through the real queue — no network, ' +
+          'no YouTube — for testing progress bars, cancel, rerun, and the ' +
+          'output modal without touching real videos.';
+        hint.style.whiteSpace = 'pre-wrap';
+
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-ghost btn-sm';
+        btn.textContent = 'Simulate download';
+        btn.addEventListener('click', () => void submitSimulatedDownload());
+
+        host.append(hint, btn);
       },
     },
     { separator: true as const },
@@ -75,10 +92,17 @@ const hamburger = new HamburgerMenu({
     {
       id: 'cookies-setting',
       render(host: HTMLElement) {
-        const heading = document.createElement('div');
-        heading.textContent = 'Age-restricted cookies';
-        heading.style.fontWeight = '600';
-        heading.style.marginBottom = '0.25rem';
+        // Collapsed by default (owner request): this is a rarely-needed,
+        // easy-to-misuse escape hatch (D5/Phase 8: a stale cookie file
+        // actively breaks downloads that would otherwise succeed anonymously)
+        // — it should take a deliberate click to even see, not sit open and
+        // inviting by default in a menu used for routine settings.
+        const details = document.createElement('details');
+        details.className = 'cookies-card';
+
+        const summary = document.createElement('summary');
+        summary.textContent = 'Cookie';
+        details.appendChild(summary);
 
         const hint = document.createElement('p');
         hint.className = 'optional-hint';
@@ -122,7 +146,8 @@ const hamburger = new HamburgerMenu({
         saveStatus.style.color = 'var(--color-text-faint)';
         submitRow.append(saveBtn, clearBtn, saveStatus);
 
-        host.append(heading, hint, status, textarea, submitRow);
+        details.append(hint, status, textarea, submitRow);
+        host.appendChild(details);
         loadCookiesStatus();
       },
     },
@@ -267,6 +292,26 @@ document.getElementById('enqueue-form')!.addEventListener('submit', async (e: Ev
   await submitForm(new FormData(e.target as HTMLFormElement));
 });
 
+// submitSimulatedDownload posts a "test://simulate/..." job (see
+// processor.runSimulated in internal/utuber/handler.go) — a unique URL per
+// click so repeated clicks each go straight through instead of tripping the
+// real duplicate-download banner. Not crypto.randomUUID(): that throws
+// outside a browser "secure context", which a plain-HTTP custom hostname
+// (e.g. utuber.test over LAN, as opposed to literal localhost) does not
+// qualify for — silently, since an uncaught exception in a click handler
+// produces no visible UI feedback at all. Date.now() + Math.random() needs
+// no such context and is more than sufficient uniqueness for a manual test
+// button a human is clicking one at a time.
+async function submitSimulatedDownload(): Promise<void> {
+  const formData = new FormData();
+  const uniqueID = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+  formData.set('url', 'test://simulate/' + uniqueID);
+  formData.set('show_name', 'Simulated');
+  formData.set('episode_title', 'Download Test');
+  formData.set('mode', 'video');
+  await submitForm(formData);
+}
+
 // ── Jobs queue (shared QueuePanel) ──────────────────────────────────────────
 
 // UJob mirrors utuber's /jobs.json 15-key shape.
@@ -384,9 +429,18 @@ function decorateJobRow(row: HTMLElement, j: UJob): void {
     wrap.append(play, dl);
     row.appendChild(wrap);
   } else if (j.status === 'failed' && j.error) {
-    const err = document.createElement('div');
-    err.className = 'utuber-error';
-    err.textContent = '⚠ ' + j.error;
+    const err = document.createElement('button');
+    err.type = 'button';
+    err.className = 'utuber-error-icon';
+    err.textContent = '⚠';
+    err.title = j.error;
+    err.setAttribute('aria-label', 'Failure reason: ' + j.error);
+    // Hover still shows the short reason (title); a click opens the full
+    // "View output" modal streaming this job's complete stdout+stderr, backed
+    // by taskmaster's shared streaming path via /jobs/output.
+    err.addEventListener('click', () => {
+      openOutputModal(new EventSource('/jobs/output?id=' + encodeURIComponent(j.id)), j.label);
+    });
     row.appendChild(err);
   }
 }
@@ -405,9 +459,29 @@ const jobsAdapter: QueuePanelAdapter<UJob> = {
 
 const jobsHost = document.getElementById('jobs-list')!;
 jobsHost.innerHTML = '';
+// No `header` option here -- the pause toggle lives next to the "Queue"
+// heading in .jobs-header instead (wired by refreshQueueState/togglePause
+// below), not inside the panel itself.
 const jobsPanel = new QueuePanel<UJob>(jobsHost, jobsAdapter, {
-  header: { paused: false, onTogglePause: togglePause },
+  // Open by default (recentCollapsible only controls whether it CAN
+  // collapse, not its initial state -- that's recentOpen): a finished
+  // download moving into "Recent" behind a closed disclosure looked like
+  // it had vanished. Still collapsible by the user; just starts open.
+  // Scrollable once open (#jobs-list .ui-queue-list-recent in style.css)
+  // rather than letting the card grow without bound.
+  recentOpen: true,
 });
+
+// sortForDisplay puts "Recent" newest-finished-first (matching
+// web/taskmaster/js/board.ts's own ran-execs sort) while leaving queued/
+// running jobs in their existing FIFO order, which reflects actual run
+// sequence and shouldn't be reordered.
+function sortForDisplay(jobs: UJob[]): UJob[] {
+  const active = jobs.filter(j => j.status === 'queued' || j.status === 'running');
+  const recent = jobs.filter(j => j.status !== 'queued' && j.status !== 'running');
+  recent.sort((a, b) => (b.finished_at ?? b.created_at).localeCompare(a.finished_at ?? a.created_at));
+  return [...active, ...recent];
+}
 
 async function refreshJobs(): Promise<void> {
   let jobs: UJob[];
@@ -418,13 +492,25 @@ async function refreshJobs(): Promise<void> {
     return;
   }
   jobs = jobs || [];
-  jobsPanel.update(jobs);
+  jobsPanel.update(sortForDisplay(jobs));
 
   const countEl = document.getElementById('jobs-count')!;
   countEl.textContent = jobs.length ? jobs.length + (jobs.length === 1 ? ' job' : ' jobs') : '';
 }
 
-// ── Queue pause / settings header ────────────────────────────────────────────
+// ── Queue pause toggle, next to the "Queue" heading ─────────────────────────
+
+const pauseToggleBtn = document.getElementById('queue-pause-toggle') as HTMLButtonElement;
+const pauseNoteEl = document.getElementById('queue-pause-note')!;
+
+function applyPauseState(paused: boolean, note?: string): void {
+  pauseToggleBtn.textContent = paused ? '▶' : '⏸';
+  pauseToggleBtn.title = note || (paused ? 'Resume queue' : 'Pause queue');
+  pauseToggleBtn.setAttribute('aria-label', pauseToggleBtn.title);
+  pauseToggleBtn.disabled = !!note;
+  pauseNoteEl.textContent = note ?? '';
+  pauseNoteEl.hidden = !note;
+}
 
 async function refreshQueueState(): Promise<void> {
   let s: SettingsShape;
@@ -436,7 +522,7 @@ async function refreshQueueState(): Promise<void> {
   }
   const braked = s.brake_engaged === true || s.queue_paused_by === 'brake';
   const note = braked ? 'Paused by the taskmaster hand brake' : undefined;
-  jobsPanel.setPaused(!!s.queue_paused, note);
+  applyPauseState(!!s.queue_paused, note);
   syncQueueMenu(s);
 }
 
@@ -651,6 +737,39 @@ async function clearCookies(): Promise<void> {
 document.querySelectorAll<HTMLButtonElement>('.mode-tab').forEach(tab => {
   tab.addEventListener('click', () => setMode(tab.dataset.mode!));
 });
+
+pauseToggleBtn.addEventListener('click', () => void togglePause());
+
+// clearRecents removes every finished (success/failed/canceled) job from
+// the list in one go. Reuses the existing single-job /jobs/delete route --
+// no new backend endpoint -- since a running/queued job is never eligible
+// (mirrors handleJobDelete's own 409-on-running guard, so this never
+// touches anything in progress).
+document.getElementById('clear-recents-btn')!.addEventListener('click', () => void clearRecents());
+
+async function clearRecents(): Promise<void> {
+  let jobs: UJob[];
+  try {
+    const res = await fetch('/jobs.json');
+    jobs = await res.json();
+  } catch {
+    showToast('Could not reach the server.', 'error');
+    return;
+  }
+  const recents = jobs.filter(j => j.status !== 'queued' && j.status !== 'running');
+  if (recents.length === 0) {
+    showToast('Nothing to clear.', 'notice');
+    return;
+  }
+  const ok = await confirmDialog(
+    `Remove all ${recents.length} finished download${recents.length === 1 ? '' : 's'} from the list? ` +
+    'Downloaded files on disk are kept -- this only clears the list.',
+    { title: 'Clear recent downloads', confirmLabel: 'Clear' },
+  );
+  if (!ok) return;
+  await Promise.all(recents.map(j => fetch('/jobs/delete?id=' + encodeURIComponent(j.id), { method: 'POST' })));
+  void refreshJobs();
+}
 
 // Poll at the 2000ms floor (Q3).
 setInterval(() => { void refreshJobs(); void refreshQueueState(); }, 2000);

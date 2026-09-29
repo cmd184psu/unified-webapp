@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
-	"sync/atomic"
 
 	"github.com/go-chi/chi/v5"
 
@@ -24,8 +23,7 @@ type Coordinator struct {
 	brake    *worker.BrakeGate
 	procs    *worker.ProcessRegistry
 	brakeMu  sync.Mutex // serializes engage/release read-modify-write of the brake + SettingBrakePausedLanes
-	sseMax   int
-	sseSubs  atomic.Int64
+	sseCap   *worker.SSECap
 	board    *broker.Broker
 	// hidden and progress support module-owned lanes (plan §4.6): hidden
 	// filters every route/board event (N4), progress overlays the
@@ -47,8 +45,8 @@ type Coordinator struct {
 // exercise /api/board/events. hidden and progress are the shared
 // module-owned-lane visibility set and progress registry (also wired into
 // the worker); both nil-safe.
-func New(database *db.DB, registry *worker.OutputRegistry, sudo *worker.SudoGate, cancels *worker.CancelRegistry, brake *worker.BrakeGate, procs *worker.ProcessRegistry, sseMax int, board *broker.Broker, hidden *worker.HiddenLanes, progress *worker.ProgressRegistry) *Coordinator {
-	return &Coordinator{db: database, registry: registry, sudo: sudo, cancels: cancels, brake: brake, procs: procs, sseMax: sseMax, board: board, hidden: hidden, progress: progress}
+func New(database *db.DB, registry *worker.OutputRegistry, sudo *worker.SudoGate, cancels *worker.CancelRegistry, brake *worker.BrakeGate, procs *worker.ProcessRegistry, sseCap *worker.SSECap, board *broker.Broker, hidden *worker.HiddenLanes, progress *worker.ProgressRegistry) *Coordinator {
+	return &Coordinator{db: database, registry: registry, sudo: sudo, cancels: cancels, brake: brake, procs: procs, sseCap: sseCap, board: board, hidden: hidden, progress: progress}
 }
 
 // publishBoard is a thin wrapper around worker.PublishBoardEvent so handlers
