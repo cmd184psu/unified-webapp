@@ -1396,6 +1396,7 @@ function openCertDetail(id, config, now, callbacks) {
     body.textContent = "";
     footer.textContent = "";
     const form = el5("form", "cert-form");
+    form.id = "cert-edit-form";
     const fqdnField = el5("div", "cert-field");
     const fqdnLabel = el5("label", "cert-field-label");
     fqdnLabel.textContent = "FQDN";
@@ -1439,6 +1440,7 @@ function openCertDetail(id, config, now, callbacks) {
     cancelBtn.addEventListener("click", () => renderDetail(cert));
     const submitBtn = el5("button", "cert-btn cert-btn-primary");
     submitBtn.type = "submit";
+    submitBtn.setAttribute("form", form.id);
     submitBtn.textContent = "Save";
     footer.append(cancelBtn, submitBtn);
     function showError(message) {

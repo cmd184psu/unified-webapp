@@ -321,6 +321,9 @@ export function openCertDetail(
     footer.textContent = "";
 
     const form = el("form", "cert-form");
+    // The Save button lives in the modal footer, outside this form, so it must
+    // name its form owner explicitly or it submits nothing.
+    form.id = "cert-edit-form";
 
     const fqdnField = el("div", "cert-field");
     const fqdnLabel = el("label", "cert-field-label");
@@ -374,6 +377,7 @@ export function openCertDetail(
     cancelBtn.addEventListener("click", () => renderDetail(cert));
     const submitBtn = el("button", "cert-btn cert-btn-primary");
     submitBtn.type = "submit";
+    submitBtn.setAttribute("form", form.id);
     submitBtn.textContent = "Save";
     footer.append(cancelBtn, submitBtn);
 
