@@ -72,6 +72,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/keys", h.handlePostKey)
 	mux.HandleFunc("DELETE /api/keys/{name}", h.handleDeleteKey)
 	mux.HandleFunc("POST /api/ldap/test", h.handlePostLDAPTest)
+	mux.HandleFunc("POST /api/ldap/check", h.handlePostLDAPCheck)
 	mux.HandleFunc("PUT /api/config/session", h.handlePutConfigSession)
 	mux.HandleFunc("GET /api/config/pin-files", h.handleGetPinFiles)
 	mux.HandleFunc("POST /api/config/pin-files", h.handlePostPinFile)
@@ -419,6 +420,47 @@ func (h *Handler) handlePostLDAPTest(w http.ResponseWriter, r *http.Request) {
 	_, bindErr := client.Authenticate(r.Context(), req.Username, req.Password)
 
 	response.WriteJSON(w, http.StatusOK, map[string]string{"result": classifyLDAPTestError(bindErr)})
+}
+
+// --- POST /api/ldap/check ---
+
+// handlePostLDAPCheck verifies the *currently saved* auth.ldap config with
+// no user account: connect, service bind, base-DN search, required groups.
+// It reports an outcome class ("ok", "unreachable", "tls_error",
+// "bind_failed", "search_failed"), plus the number of users matched and any
+// required groups not found. Nothing secret is returned or logged.
+func (h *Handler) handlePostLDAPCheck(w http.ResponseWriter, r *http.Request) {
+	h.mu.Lock()
+	ldapCfg := h.authConfig.LDAP
+	h.mu.Unlock()
+
+	check, err := auth.NewLDAPClient(ldapCfg).CheckConfig(r.Context())
+	body := map[string]any{"result": classifyLDAPCheckError(err), "users": check.Users, "missingGroups": check.MissingGroups}
+	var ldapErr *ldap.Error
+	if errors.As(err, &ldapErr) {
+		body["detail"] = ldap.LDAPResultCodeMap[ldapErr.ResultCode]
+	}
+	response.WriteJSON(w, http.StatusOK, body)
+}
+
+func classifyLDAPCheckError(err error) string {
+	if err == nil {
+		return "ok"
+	}
+	if errors.Is(err, auth.ErrLDAPSearch) {
+		return "search_failed"
+	}
+	if isLDAPTLSError(err) {
+		return "tls_error"
+	}
+	var ldapErr *ldap.Error
+	if errors.As(err, &ldapErr) {
+		switch ldapErr.ResultCode {
+		case ldap.LDAPResultInvalidCredentials, ldap.LDAPResultInappropriateAuthentication, ldap.LDAPResultInsufficientAccessRights, ldap.LDAPResultNoSuchObject:
+			return "bind_failed"
+		}
+	}
+	return "unreachable"
 }
 
 // classifyLDAPTestError maps an error from auth.LDAPClient.Authenticate to

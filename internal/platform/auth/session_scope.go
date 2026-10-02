@@ -72,14 +72,16 @@ func withoutModulePIN(grants []string, module string) []string {
 	return out
 }
 
-// identityGrantIn returns the session's identity grant ("ldap"/"passkey").
-func identityGrantIn(grants []string) (string, bool) {
+// withoutModuleIdentity returns grants minus module's own ldap/passkey grants.
+func withoutModuleIdentity(grants []string, module string) []string {
+	out := make([]string, 0, len(grants))
 	for _, g := range grants {
-		if isIdentityGrant(g) {
-			return g, true
+		if g == identityGrant("ldap", module) || g == identityGrant("passkey", module) {
+			continue
 		}
+		out = append(out, g)
 	}
-	return "", false
+	return out
 }
 
 // pinFPCache memoizes each PIN file's fingerprint, recomputed only when the
@@ -122,7 +124,7 @@ func (s *Service) currentPINFingerprint(path string) (string, bool) {
 }
 
 // authorizingGrant is the grant that lets claims into module: admin_pin for
-// admin, else an identity grant, else module's own pin grant.
+// admin, else module's own identity grant, else module's own pin grant.
 func authorizingGrant(claims *sessionClaims, module string) (string, bool) {
 	if module == "admin" {
 		if hasGrant(claims.Grants, adminPINMethod) {
@@ -130,7 +132,7 @@ func authorizingGrant(claims *sessionClaims, module string) (string, bool) {
 		}
 		return "", false
 	}
-	if g, ok := identityGrantIn(claims.Grants); ok {
+	if g, ok := identityGrantFor(claims.Grants, module); ok {
 		return g, true
 	}
 	return modulePINGrant(claims.Grants, module)
@@ -292,14 +294,10 @@ func (s *Service) existingForLogin(r *http.Request, module, newGrant string, now
 }
 
 // signedOutOf returns what's left of claims after signing out of module, or
-// nil when nothing is (the cookie should be cleared). An identity session
-// (ldap/passkey) is cleared entirely: it reaches every module, so it can't
-// be signed out of just one.
+// nil when nothing is (the cookie should be cleared). Every grant belongs to
+// one module, so signing out of a module drops only that module's grants.
 func signedOutOf(claims *sessionClaims, module string) *sessionClaims {
-	if _, ok := identityGrantIn(claims.Grants); ok {
-		return nil
-	}
-	grants := withoutModulePIN(claims.Grants, module)
+	grants := withoutModuleIdentity(withoutModulePIN(claims.Grants, module), module)
 	if module == "admin" {
 		grants = withoutGrant(grants, adminPINMethod)
 	}
@@ -316,7 +314,9 @@ func signedOutOf(claims *sessionClaims, module string) *sessionClaims {
 	}
 	next.ModuleSeen = copyTimes(claims.ModuleSeen)
 	delete(next.ModuleSeen, module)
-	if !hasGrant(grants, adminPINMethod) && next.Subject == adminIdentity {
+	if identityGrantOf(grants) == "" {
+		// No login left that names a person, so the session is anonymous
+		// (door codes only) again.
 		next.Subject = ""
 	}
 	return &next

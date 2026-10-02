@@ -9,7 +9,7 @@ CONFIG    := ~/.unified-webapp.json
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS    := -X cmd184psu/unified-webapp/internal/taskmaster/coordinator.BuildTime=$(BUILD_TIME)
 
-.PHONY: run build build-rpi test clean clean-local-test-db init-config web typecheck web-verify gates test-web check
+.PHONY: run build build-rpi test clean clean-local-test-db init-config web typecheck web-verify gates test-web check install
 
 run:
 	go run $(CMD) -config $(CONFIG)
@@ -59,7 +59,7 @@ web-verify:
 
 gates:
 	node scripts/check-shared-css.mjs
-	node scripts/gates/bundle-shape.mjs --require=sampler,taskmaster,obsidianoid,todo,certmachine,multissh,admin,timetracker,grocery,smbedit,issuetracker,utuber,menuserver
+	node scripts/gates/bundle-shape.mjs --require=sampler,taskmaster,obsidianoid,todo,certmachine,multissh,admin,timetracker,grocery,smbedit,issuetracker,utuber,menuserver,haproxy
 	node scripts/gates/token-overlap.mjs
 	node scripts/check-shared-barrel.mjs
 
@@ -69,3 +69,12 @@ test-web:
 	npm run test:web
 
 check: web-verify test-web gates test
+
+# Installs the systemd unit, reloads systemd, and (re)starts the service.
+# Needs root: run as `sudo make install` or as a user with sudo rights.
+# Does not build the binary; run `make build` first.
+install:
+	sudo install -m 644 unified.service /etc/systemd/system/unified.service
+	sudo systemctl daemon-reload
+	sudo systemctl enable unified.service
+	sudo systemctl restart unified.service

@@ -402,9 +402,10 @@ func TestGatePinGrantScopedToItsModule(t *testing.T) {
 	})
 }
 
-// TestGateLDAPGrantReachesEveryProtectedNonAdminModule proves an "ldap"
-// identity grant authorizes every protected non-admin module.
-func TestGateLDAPGrantReachesEveryProtectedNonAdminModule(t *testing.T) {
+// TestGateLDAPGrantReachesOnlyItsOwnModule proves an "ldap:<module>" identity
+// grant authorizes that module. (That it authorizes no other module is
+// pinned in session_isolation_test.go.)
+func TestGateLDAPGrantReachesOnlyItsOwnModule(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	p := &Policy{
 		Modules: map[string]ModulePolicy{
@@ -416,10 +417,10 @@ func TestGateLDAPGrantReachesEveryProtectedNonAdminModule(t *testing.T) {
 		SessionTTL: time.Hour,
 	}
 	svc := newGateService(t, now, p)
-	tok := sessionCookieToken(t, "alice", []string{"ldap"}, time.Hour, now)
 
 	for _, module := range []string{"menuserver", "obsidianoid", "multissh"} {
 		t.Run(module, func(t *testing.T) {
+			tok := sessionCookieToken(t, "alice", []string{"ldap:" + module}, time.Hour, now)
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, "/api/items", nil)
 			req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
@@ -570,7 +571,7 @@ func TestGateRenewsOnlyOnUserActivity(t *testing.T) {
 		LDAP:       config.LDAPConfig{URL: "ldap://fake"},
 		SessionTTL: 720 * time.Hour,
 	}
-	tok := sessionCookieToken(t, "alice", []string{"ldap"}, time.Hour, issuedAt)
+	tok := sessionCookieToken(t, "alice", []string{"ldap:grocery"}, time.Hour, issuedAt)
 
 	send := func(at time.Duration, method, path, accept string) *httptest.ResponseRecorder {
 		t.Helper()
@@ -626,7 +627,7 @@ func TestGateHijackerSurvivesUpgradeRequest(t *testing.T) {
 	}
 	svc := newGateService(t, now, p)
 
-	tok := sessionCookieToken(t, "alice", []string{"ldap"}, time.Hour, now)
+	tok := sessionCookieToken(t, "alice", []string{"ldap:multissh"}, time.Hour, now)
 
 	var sawHijacker bool
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -687,7 +688,7 @@ func TestGateSessionRequiredPasskeyRoutes(t *testing.T) {
 	})
 
 	t.Run("ldap session -> handler reached (no passkey service configured in this policy)", func(t *testing.T) {
-		tok := sessionCookieToken(t, "alice", []string{"ldap"}, time.Hour, now)
+		tok := sessionCookieToken(t, "alice", []string{"ldap:grocery"}, time.Hour, now)
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/api/auth/passkeys", nil)
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
@@ -1005,7 +1006,7 @@ func TestGatePrincipalOnSessionPath(t *testing.T) {
 		SessionTTL: time.Hour,
 	}
 	svc := newGateService(t, now, p)
-	tok := sessionCookieToken(t, "alice", []string{"ldap"}, time.Hour, now)
+	tok := sessionCookieToken(t, "alice", []string{"ldap:grocery"}, time.Hour, now)
 
 	next, got, ok := principalCapturingHandler()
 	rec := httptest.NewRecorder()
@@ -1064,7 +1065,7 @@ func TestGateWhoamiSession(t *testing.T) {
 		SessionTTL: time.Hour,
 	}
 	svc := newGateService(t, now, p)
-	tok := sessionCookieToken(t, "alice", []string{"ldap"}, time.Hour, now)
+	tok := sessionCookieToken(t, "alice", []string{"ldap:grocery"}, time.Hour, now)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/whoami", nil)

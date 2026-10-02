@@ -591,9 +591,9 @@ nginx's default `Host` behavior varies by version/config, so set this explicitly
 
 Sessions are signed JWTs (HMAC-SHA256) using a key generated on first boot and stored at `<auth.data_dir>/session.key`. Every currently-issued session is validated against that one key. If you ever need to invalidate every session at once — a suspected leak, or just "log everyone out" — stop the server, delete (or move aside) `session.key`, and restart; a fresh key is generated and every existing session cookie stops verifying. There's no per-session revocation list; this file is the only lever.
 
-### `cookie_domain` and `passkey.rp_id`: share them across modules on a common parent domain
+### Sessions are per module: leave `cookie_domain` empty
 
-If your modules live under a shared parent domain (e.g. `grocery.cmdhome.net`, `todo.cmdhome.net`), set `auth.cookie_domain` to the parent (`.cmdhome.net`) so one login session is valid across all of them — no separate login per module. Passkeys work the same way via `auth.passkey.rp_id`: set it to the shared parent domain and a passkey registered on one module's hostname is usable to log into any other module under that same `rp_id`, as long as each module's origin is also listed in `auth.passkey.rp_origins`. Leave `cookie_domain` empty (host-only cookie) and set `rp_id` per-hostname if you'd rather keep each module's login fully separate.
+Every module has its own login, session and timeout cycle. Logging into `todo` does not grant `grocery`, or any other module: each session grant (an LDAP login, a passkey, a door-code PIN) is scoped to the one module it was made on, and the gate refuses it everywhere else, whatever cookie carries it. Leave `auth.cookie_domain` empty (a host-only cookie per module host). Do not set it to a shared parent domain: it is one global value for every module, it would put one session cookie on every host, and a module on a different domain (e.g. `certmachine.cmdhome.net`) would have its cookie rejected by the browser. `auth.passkey.rp_id` is set per hostname for the same reason. Passkeys are not yet a finished feature; see `docs/plans/PLAN-phase8-punchlist.md` (P8-3).
 
 ### First-run bootstrap for the admin operator PIN
 

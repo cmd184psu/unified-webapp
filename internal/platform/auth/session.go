@@ -18,10 +18,11 @@ const sessionCookieName = "uw_session"
 const defaultSessionTTL = 720 * time.Hour
 
 // sessionClaims is the JWT claim set for a unified-webapp session token.
-// Grants records the session's scoped grant strings: "ldap", "passkey", and
-// "admin_pin" are identity-wide (they reach every protected non-admin
-// module, or admin itself for admin_pin); "pin:<module>" is a module-scoped
-// door-code grant reaching that module alone (see pinGrant/grantsAllow).
+// Grants records the session's scoped grant strings. Every grant reaches
+// exactly one module: "ldap:<module>" and "passkey:<module>" are identity
+// logins made on that module, "pin:<module>:<fp>" is that module's door
+// code, and "admin_pin" is admin's operator PIN. Logging into one module
+// never grants another (see identityGrant/grantsAllow).
 //
 // The claim's JSON key is deliberately "grants", not the pre-cutover
 // "methods" (PLAN-auth-two-state.md, Decision B1): every session token
@@ -113,15 +114,49 @@ func pinGrant(module string) string {
 	return pinMethod + ":" + module
 }
 
-// isIdentityGrant reports whether g is one of the identity-wide login
-// grants ("ldap"/"passkey") that reach every protected non-admin module.
-// Deliberately narrow: a total function over an open string space, not a
-// membership check against a mutable table, so an unrecognized grant
-// (legacy bare "pin", legacy "key", garbage) is never mistaken for an
-// identity. admin_pin is its own identity and is handled separately by
+// identityGrant is the grant an ldap or passkey login on module produces.
+// It is scoped to that module: it authorizes module and nothing else.
+func identityGrant(kind, module string) string {
+	return kind + ":" + module
+}
+
+// identityGrantFor returns the identity grant (ldap or passkey) the session
+// holds for module, if any.
+func identityGrantFor(grants []string, module string) (string, bool) {
+	for _, kind := range []string{"ldap", "passkey"} {
+		g := identityGrant(kind, module)
+		if hasGrant(grants, g) {
+			return g, true
+		}
+	}
+	return "", false
+}
+
+// isIdentityGrant reports whether g is a module-scoped ldap or passkey
+// login grant ("ldap:<module>" / "passkey:<module>"). A total function over
+// an open string space: the bare "ldap"/"passkey" that tokens carried before
+// grants were module-scoped, the legacy "pin"/"key", and garbage are never
+// mistaken for an identity, so those sessions authorize nothing and must
+// log in again. admin_pin is its own identity, handled separately by
 // grantsAllow/accumulate -- it is not an isIdentityGrant.
 func isIdentityGrant(g string) bool {
-	return g == "ldap" || g == "passkey"
+	for _, kind := range []string{"ldap:", "passkey:"} {
+		if len(g) > len(kind) && g[:len(kind)] == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// grantKind is the login method behind an identity grant: "ldap:todo" ->
+// "ldap". Anything without a scope (admin_pin) is returned unchanged.
+func grantKind(g string) string {
+	for i := 0; i < len(g); i++ {
+		if g[i] == ':' {
+			return g[:i]
+		}
+	}
+	return g
 }
 
 // hasGrant reports whether grant appears verbatim in grants.
@@ -142,11 +177,11 @@ func hasGrant(grants []string, grant string) bool {
 //   - module == "admin": claims must carry the "admin_pin" grant. Nothing
 //     else -- not "ldap", not a module door-code grant -- ever satisfies
 //     admin.
-//   - any other module: an identity grant ("ldap" or "passkey") reaches
-//     every protected non-admin module, or the module's own scoped
-//     door-code grant ("pin:"+module+":"+fingerprint, see pinGrantFP)
-//     reaches that module alone. A bare "pin:"+module (tokens from before
-//     PIN fingerprints) is refused, so those sessions must log in again.
+//   - any other module: that module's own identity grant
+//     ("ldap:"+module or "passkey:"+module) or its own door-code grant
+//     ("pin:"+module+":"+fingerprint, see pinGrantFP). A grant for another
+//     module never counts, and neither does the bare "ldap"/"passkey" or
+//     "pin:"+module that older tokens carry, so those sessions log in again.
 //
 // This is a total function over any string content claims.Grants might
 // carry. claims == nil is a safe deny, never a panic; a legacy or garbage
@@ -159,10 +194,8 @@ func grantsAllow(claims *sessionClaims, module string) bool {
 	if module == "admin" {
 		return hasGrant(claims.Grants, adminPINMethod)
 	}
-	for _, g := range claims.Grants {
-		if isIdentityGrant(g) {
-			return true
-		}
+	if _, ok := identityGrantFor(claims.Grants, module); ok {
+		return true
 	}
 	_, ok := modulePINGrant(claims.Grants, module)
 	return ok
@@ -171,7 +204,8 @@ func grantsAllow(claims *sessionClaims, module string) bool {
 // accumulate computes the (subject, grants) pair for a freshly issued
 // session token, given the caller's existing valid session (if any) and the
 // single grant a just-completed login established. Callers pass exactly one
-// of "ldap", "passkey", "admin_pin", or pinGrant(module) as newGrant.
+// of identityGrant("ldap"|"passkey", module), "admin_pin", or
+// pinGrant(module) as newGrant.
 //
 // A door-code grant (pinGrant(module)) is never an identity: it folds into
 // *any* existing valid session without touching that session's subject
@@ -179,7 +213,7 @@ func grantsAllow(claims *sessionClaims, module string) bool {
 // with no prior session it creates a fresh anonymous session (Subject == "")
 // holding just that grant.
 //
-// An identity grant ("ldap", "passkey", or "admin_pin" -- admin_pin
+// An identity grant (ldap:<m>, passkey:<m>, or "admin_pin" -- admin_pin
 // authenticates as the fixed subject "admin" and is its own identity, never
 // a door code, so it never folds the way a pin grant does) follows identity
 // rules:

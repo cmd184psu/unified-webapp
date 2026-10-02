@@ -250,7 +250,7 @@ func TestHandleLoginPinSuccessThenLDAPAccumulates(t *testing.T) {
 	if body2["identity"] != "carol" {
 		t.Fatalf("identity = %v, want carol", body2["identity"])
 	}
-	mustEqualStrings(t, methodsOf(t, body2), []string{pinGrant("multissh"), "ldap"})
+	mustEqualStrings(t, methodsOf(t, body2), []string{pinGrant("multissh"), "ldap:multissh"})
 }
 
 func TestHandleLoginLDAPFakeDialer(t *testing.T) {
@@ -278,7 +278,7 @@ func TestHandleLoginLDAPFakeDialer(t *testing.T) {
 	if body["identity"] != "dana" {
 		t.Fatalf("identity = %v, want dana", body["identity"])
 	}
-	mustEqualStrings(t, methodsOf(t, body), []string{"ldap"})
+	mustEqualStrings(t, methodsOf(t, body), []string{"ldap:multissh"})
 }
 
 // TestCrossModuleAccumulationPINThenLDAP proves the LDAP half of AC-3
@@ -350,7 +350,7 @@ func TestCrossModuleAccumulationPINThenLDAP(t *testing.T) {
 	if body2["identity"] != "carol" {
 		t.Fatalf("identity = %v, want carol", body2["identity"])
 	}
-	mustEqualStrings(t, methodsOf(t, body2), []string{pinGrant("slideshow"), "ldap"})
+	mustEqualStrings(t, methodsOf(t, body2), []string{pinGrant("slideshow"), "ldap:multissh"})
 	tok2, ok := setCookieValue(rec2)
 	if !ok || tok2 == "" {
 		t.Fatal("expected Set-Cookie after the accumulating ldap login")
@@ -983,5 +983,52 @@ func TestAuthEventLogPasskeyManagementDeniedWithoutLDAP(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, `event=auth_passkey_denied`) || !strings.Contains(out, `module="grocery"`) || !strings.Contains(out, `reason="requires_ldap"`) {
 		t.Fatalf("expected an auth_passkey_denied log line for module grocery, reason requires_ldap; got:\n%s", out)
+	}
+}
+
+// TestHandleLoginLDAPStepUpOnAdminKeepsAdminPIN proves an operator already in
+// on the admin PIN can add an LDAP identity to the same session: admin_pin is
+// kept (or the operator would be locked out of admin) and ldap is added under
+// the LDAP user's identity, which is what passkey management needs.
+func TestHandleLoginLDAPStepUpOnAdminKeepsAdminPIN(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	conn := scriptedUserConn("uid=carol,ou=people,dc=example,dc=com", []string{"users"}, nil)
+	p := &Policy{
+		Modules:    map[string]ModulePolicy{},
+		AdminPIN:   hashFor(t, "9999"),
+		LDAP:       config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com"},
+		SessionTTL: time.Hour,
+	}
+	svc := newGateService(t, now, p)
+	svc.ldapDialer = func(ctx context.Context, opts ldapDialOptions) (ldapConn, error) { return conn, nil }
+
+	rec1 := httptest.NewRecorder()
+	svc.Gate("admin", echoHandler()).ServeHTTP(rec1, httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody(t, "pin", "9999", "", "")))
+	tok, ok := setCookieValue(rec1)
+	if rec1.Code != http.StatusOK || !ok {
+		t.Fatalf("admin pin login status = %d, cookie=%v", rec1.Code, ok)
+	}
+
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/login", loginBody(t, "ldap", "", "carol", "correct-horse"))
+	req2.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
+	svc.Gate("admin", echoHandler()).ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("step-up status = %d, want 200, body=%s", rec2.Code, rec2.Body.String())
+	}
+	body := decodeJSON(t, rec2)
+	if body["identity"] != "carol" {
+		t.Fatalf("identity = %v, want carol", body["identity"])
+	}
+	mustEqualStrings(t, methodsOf(t, body), []string{adminPINMethod, "ldap:admin"})
+
+	// The upgraded session still opens admin (admin_pin kept).
+	tok2, _ := setCookieValue(rec2)
+	rec3 := httptest.NewRecorder()
+	req3 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req3.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok2})
+	svc.Gate("admin", echoHandler()).ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusOK {
+		t.Fatalf("admin after step-up = %d, want 200", rec3.Code)
 	}
 }

@@ -270,6 +270,17 @@ button:disabled:hover {
   color: var(--color-text-faint);
 }
 
+/* The LDAP DNs, URL and filter routinely run 50+ characters; the default
+   content-sized inputs cut them off. */
+#ldap-form label:not(.ui-toggle) {
+  width: min(100%, 52rem);
+}
+
+#ldap-form input:not([type="checkbox"]):not([type="number"]) {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .settings-form .ui-toggle {
   font-size: 0.85rem;
   color: var(--color-text-faint);

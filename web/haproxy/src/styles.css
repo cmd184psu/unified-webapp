@@ -1,0 +1,118 @@
+/* Minimal B1 scaffold styling. The full editor UI arrives in later tasks;
+   this only lays out the topbar and the status block, leaning on the shared
+   theme tokens from /shared/dist/shared.css. */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+body {
+  background: var(--bg, #15151c);
+  color: var(--fg, #e6e6ef);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border, #2a2a38);
+}
+
+.topbar h1 {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.hamburger-trigger {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 1.25rem;
+  cursor: pointer;
+}
+
+.content {
+  padding: 1rem;
+  max-width: 48rem;
+}
+
+.status {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+}
+
+.status dt { opacity: 0.7; }
+
+.error { color: var(--danger, #e06c6c); }
+.diag-notice { color: var(--warning, #e0af68); }
+
+.content { max-width: 64rem; }
+.statusline { padding: 0.4rem 1rem; font-size: 0.85rem; opacity: 0.8; border-bottom: 1px solid var(--border, #2a2a38); }
+.tabs { display: flex; gap: 0.25rem; padding: 0.5rem 1rem 0; border-bottom: 1px solid var(--border, #2a2a38); overflow-x: auto; }
+.tab { background: none; border: none; border-bottom: 2px solid transparent; color: inherit; padding: 0.4rem 0.9rem; cursor: pointer; font: inherit; opacity: 0.7; }
+.tab.active { border-bottom-color: var(--accent, #7aa2f7); opacity: 1; }
+.savebar { display: flex; align-items: center; gap: 0.75rem; position: sticky; top: 0; z-index: 5; padding: 0.5rem 0; background: var(--bg, #15151c); }
+.unsaved { color: var(--warning, #e0af68); font-weight: 600; }
+.card { border: 1px solid var(--border, #2a2a38); border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 1rem; }
+.card-title { font-weight: 600; margin-bottom: 0.5rem; }
+.muted { opacity: 0.7; }
+.small { font-size: 0.85rem; }
+.row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.stack { display: flex; flex-direction: column; gap: 0.5rem; }
+.grow { flex: 1; }
+.input { width: 100%; padding: 0.35rem 0.5rem; background: transparent; color: inherit; border: 1px solid var(--border, #2a2a38); border-radius: 4px; font: inherit; }
+.input.port { width: 7rem; }
+.input.extra { font-family: inherit; }
+.issues { list-style: none; margin: 0.4rem 0; }
+.issue-error { color: var(--danger, #e06c6c); }
+.issue-warning { color: var(--warning, #e0af68); }
+.issue-tag { font-weight: 600; }
+.dir-row { display: flex; gap: 0.5rem; margin-bottom: 0.35rem; }
+.dir-key { flex: 0 0 16rem; }
+.dir-value { flex: 1; }
+.svc { border: 1px solid var(--border, #2a2a38); border-radius: 6px; margin-bottom: 0.5rem; }
+.svc-head { display: flex; align-items: center; gap: 0.6rem; padding: 0.4rem 0.75rem; cursor: pointer; }
+.svc-body { padding: 0.5rem 0.75rem 0.75rem; display: flex; flex-direction: column; gap: 0.6rem; }
+.field { display: flex; flex-direction: column; gap: 0.2rem; }
+.field-label { font-size: 0.8rem; opacity: 0.7; }
+.badge { font-size: 0.75rem; padding: 0 0.4rem; border: 1px solid var(--border, #2a2a38); border-radius: 4px; }
+.divider { border-top: 1px solid var(--border, #2a2a38); margin: 0.5rem 0; }
+.btn { padding: 0.35rem 0.8rem; border-radius: 4px; border: 1px solid var(--border, #2a2a38); background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-primary { background: var(--accent, #7aa2f7); color: #101018; border-color: transparent; }
+.btn-danger { color: var(--danger, #e06c6c); }
+.btn-ghost { background: transparent; }
+.btn-sm { padding: 0.15rem 0.5rem; font-size: 0.85rem; }
+
+/* B6b: pending bar, diffs, badges, picker */
+.pendingbar { padding: 0.5rem 1rem; border-bottom: 1px solid var(--border, #2a2a38); display: flex; flex-direction: column; gap: 0.4rem; }
+.pending-label { font-weight: 600; }
+.statuspanel { font-size: 0.85rem; }
+.review { max-height: 24rem; overflow: auto; }
+.diff, .rawpre { font-family: inherit; font-size: 0.85rem; overflow-x: auto; margin: 0; }
+.rawpre { white-space: pre; max-height: 32rem; overflow: auto; }
+.logpre { min-height: 12rem; }
+.diff-added { background: rgba(80, 200, 120, 0.15); color: var(--success, #7fd48f); }
+.diff-removed { background: rgba(224, 108, 108, 0.15); color: var(--danger, #e06c6c); }
+.diff-hunk { color: var(--accent, #7aa2f7); }
+.diff-meta { opacity: 0.7; font-weight: 600; }
+.badge-ok { color: var(--success, #7fd48f); }
+.badge-error { color: var(--danger, #e06c6c); }
+.badge-warning { color: var(--warning, #e0af68); }
+.badge-muted { opacity: 0.7; }
+.svc-off { opacity: 0.7; }
+.picker { width: min(42rem, 92vw); }
+.pick-row { padding: 0.25rem 0; border-top: 1px solid var(--border, #2a2a38); }
+
+.stats-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.stats-table th, .stats-table td { text-align: left; padding: 0.25rem 0.5rem; border-bottom: 1px solid var(--border, #2a2a38); }
+.stat-up { color: var(--success, #7fd48f); }
+.stat-down { color: var(--danger, #e06c6c); font-weight: 600; border-color: var(--danger, #e06c6c); }
+.stat-maint { color: var(--warning, #e0af68); }
+.stat-nocheck, .stat-other { opacity: 0.7; }

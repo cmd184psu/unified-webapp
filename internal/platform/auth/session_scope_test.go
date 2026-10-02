@@ -196,8 +196,9 @@ func TestModulesHaveTheirOwnIdleClock(t *testing.T) {
 func TestIdentityIdleClockIsPerModule(t *testing.T) {
 	h := newLDAPScopeHarness(t)
 	h.login("todo", "ldap", "", "carol", "correct-horse")
-	if !h.allowed("grocery") {
-		t.Fatal("an LDAP login reaches every protected module")
+	h.login("grocery", "ldap", "", "carol", "correct-horse")
+	if !h.allowed("todo") || !h.allowed("grocery") {
+		t.Fatal("each module accepts the LDAP login made on it")
 	}
 	for i := 0; i < 4; i++ {
 		h.now = h.now.Add(35 * time.Minute)
@@ -231,12 +232,20 @@ func TestLogoutSignsOutOfThisModuleOnly(t *testing.T) {
 	}
 }
 
-func TestLogoutOfIdentityClearsEverything(t *testing.T) {
+func TestLogoutOfIdentitySignsOutOfThatModuleOnly(t *testing.T) {
 	h := newLDAPScopeHarness(t)
 	h.login("todo", "ldap", "", "carol", "correct-horse")
+	h.login("grocery", "ldap", "", "carol", "correct-horse")
 	h.logout("todo")
-	if h.cookie != "" || h.allowed("grocery") {
-		t.Fatal("signing out of an LDAP identity clears the whole session")
+	if h.allowed("todo") {
+		t.Fatal("todo should be signed out")
+	}
+	if !h.allowed("grocery") {
+		t.Fatal("signing out of todo must not sign out of grocery")
+	}
+	h.logout("grocery")
+	if h.cookie != "" {
+		t.Error("with nothing left, the cookie should be cleared")
 	}
 }
 

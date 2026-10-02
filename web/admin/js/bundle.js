@@ -1,5 +1,5 @@
 // web/admin/js/main.ts
-import { ThemeManager, HamburgerMenu, createCopyButton } from "/shared/dist/shared.mjs";
+import { ThemeManager, HamburgerMenu, createCopyButton, openModal, showToast } from "/shared/dist/shared.mjs";
 function debounce(fn, ms) {
   let timer = null;
   return (...args) => {
@@ -23,6 +23,7 @@ var panels = [
 var authConfig = null;
 var matrix = {};
 var passkeys = [];
+var passkeysLocked = false;
 var pinFiles = [];
 async function api(method, path, body) {
   const opts = { method, headers: {} };
@@ -115,6 +116,7 @@ async function loadAll() {
     matrix[m] = { protected: true, pinFile: entry.pin_file || "", idle: entry.idle_minutes || 0 };
   });
   passkeys = passkeysRes.ok && passkeysRes.data && passkeysRes.data.passkeys || [];
+  passkeysLocked = passkeysRes.status === 403;
   statusEl.classList.add("hidden");
   panels.forEach((p) => p.classList.remove("hidden"));
   renderMatrix();
@@ -406,12 +408,37 @@ document.getElementById("ldap-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   await saveLdap();
 });
-var autoSaveLdap = debounce(() => {
-  void saveLdap();
-}, 500);
-document.querySelectorAll("#ldap-form input").forEach((el) => {
-  const eventName = el instanceof HTMLInputElement && el.type === "checkbox" ? "change" : "input";
-  el.addEventListener(eventName, autoSaveLdap);
+document.getElementById("ldap-check-btn").addEventListener("click", async () => {
+  const resultEl = document.getElementById("ldap-check-result");
+  resultEl.textContent = "Testing\u2026";
+  resultEl.className = "status";
+  const res = await api(
+    "POST",
+    "/api/ldap/check"
+  );
+  if (!res.ok) {
+    resultEl.textContent = errorText(res, "Test failed.");
+    resultEl.className = "status status-bad";
+    return;
+  }
+  const d = res.data;
+  const labels = {
+    unreachable: "LDAP server unreachable.",
+    tls_error: "TLS error (certificate not trusted, or wrong host).",
+    bind_failed: "Service bind failed \u2014 check Bind DN and password." + (d.detail ? " (" + d.detail + ")" : ""),
+    search_failed: "Connected, but the search failed \u2014 check Base DN and User filter." + (d.detail ? " (" + d.detail + ")" : "")
+  };
+  if (d.result !== "ok") {
+    resultEl.textContent = labels[d.result] || d.result;
+    resultEl.className = "status status-bad";
+    return;
+  }
+  const missing = d.missingGroups || [];
+  let msg = "Connected and bound. " + d.users + " user" + (d.users === 1 ? "" : "s") + " match the filter.";
+  if (d.users === 0) msg += " (Nothing matches \u2014 check Base DN and User filter.)";
+  if (missing.length > 0) msg += " Required group(s) not found: " + missing.join(", ") + ".";
+  resultEl.textContent = msg;
+  resultEl.className = "status " + (d.users === 0 || missing.length > 0 ? "status-bad" : "status-good");
 });
 document.getElementById("ldap-test-form").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -488,9 +515,98 @@ function formatTimestamp(sec) {
   if (!sec) return "";
   return new Date(sec * 1e3).toLocaleString();
 }
+function askLdapLogin() {
+  return new Promise((resolve) => {
+    const form = document.createElement("form");
+    form.className = "settings-form ldap-login-form";
+    const hint = document.createElement("p");
+    hint.className = "hint";
+    hint.textContent = "Passkeys belong to a person. Sign in with your LDAP account to manage yours; you stay signed in to admin.";
+    const userLabel = document.createElement("label");
+    userLabel.textContent = "Username";
+    const user = document.createElement("input");
+    user.type = "text";
+    user.autocomplete = "username";
+    user.required = true;
+    userLabel.append(user);
+    const passLabel = document.createElement("label");
+    passLabel.textContent = "Password";
+    const pass = document.createElement("input");
+    pass.type = "password";
+    pass.autocomplete = "current-password";
+    pass.required = true;
+    passLabel.append(pass);
+    const err = document.createElement("p");
+    err.className = "error";
+    const buttons = document.createElement("div");
+    buttons.className = "inline-form";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "btn btn-outline";
+    cancel.textContent = "Cancel";
+    const submit = document.createElement("button");
+    submit.type = "submit";
+    submit.className = "btn btn-primary";
+    submit.textContent = "Sign in";
+    buttons.append(cancel, submit);
+    form.append(hint, userLabel, passLabel, err, buttons);
+    let settled = false;
+    const finish = (identity) => {
+      if (settled) return;
+      settled = true;
+      resolve(identity);
+    };
+    const modal = openModal(form, { title: "Sign in with LDAP", onClose: () => finish(null) });
+    cancel.addEventListener("click", () => modal.close());
+    user.focus();
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      err.textContent = "";
+      submit.disabled = true;
+      try {
+        const res = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ method: "ldap", username: user.value.trim(), password: pass.value })
+        });
+        pass.value = "";
+        if (res.ok) {
+          const body = await res.json().catch(() => null);
+          finish(body?.identity || user.value.trim());
+          modal.close();
+          return;
+        }
+        err.textContent = res.status === 401 ? "Invalid username or password, or that account isn't in an allowed group." : res.status === 429 ? "Too many attempts. Wait a moment and try again." : res.status === 400 ? "LDAP sign-in isn't available for this session. Sign in to admin again." : "Sign-in failed (" + res.status + ").";
+      } catch {
+        err.textContent = "Couldn't reach the server.";
+      }
+      submit.disabled = false;
+    });
+  });
+}
+async function unlockPasskeys() {
+  const identity = await askLdapLogin();
+  if (identity === null) return false;
+  const res = await api("GET", "/api/auth/passkeys");
+  passkeysLocked = !res.ok;
+  passkeys = res.ok && res.data && res.data.passkeys || [];
+  renderPasskeys();
+  if (passkeysLocked) {
+    showToast("Signed in as " + identity + ", but passkeys are still unavailable (HTTP " + res.status + ").", "error");
+    return false;
+  }
+  showToast("Signed in as " + identity + ".", "success");
+  return true;
+}
 function renderPasskeys() {
   const list = document.getElementById("passkeys-list");
   list.innerHTML = "";
+  const submitBtn = document.getElementById("passkey-submit");
+  if (submitBtn) submitBtn.textContent = passkeysLocked ? "Sign in with LDAP\u2026" : "Register new passkey";
+  if (passkeysLocked) {
+    list.innerHTML = '<li class="named-list-empty">Sign in with LDAP to view and manage your passkeys.</li>';
+    return;
+  }
   if (passkeys.length === 0) {
     list.innerHTML = '<li class="named-list-empty">No passkeys registered.</li>';
     return;
@@ -574,21 +690,26 @@ if (!passkeySupported) {
   note.textContent = why;
   note.classList.remove("hidden");
 }
-document.getElementById("passkey-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  if (!passkeySupported) return;
+async function registerPasskey(friendlyName, retried = false) {
   const errorEl = document.getElementById("passkey-error");
-  errorEl.textContent = "";
-  const nameInput = document.getElementById("passkey-name");
-  const friendlyName = nameInput.value.trim();
+  const fail = (msg) => {
+    errorEl.textContent = msg;
+    showToast(msg, "error");
+    return false;
+  };
+  if (passkeysLocked && !await unlockPasskeys()) return false;
   const beginRes = await api(
     "POST",
     "/api/auth/passkey/register/begin",
     { friendlyName }
   );
   if (!beginRes.ok) {
-    errorEl.textContent = errorText(beginRes, "Unable to begin passkey registration.");
-    return;
+    if (beginRes.status === 403 && !retried) {
+      passkeysLocked = true;
+      renderPasskeys();
+      return registerPasskey(friendlyName, true);
+    }
+    return fail(errorText(beginRes, "Unable to begin passkey registration."));
   }
   const ceremony = beginRes.data;
   let credential;
@@ -597,25 +718,26 @@ document.getElementById("passkey-form").addEventListener("submit", async (e) => 
       publicKey: creationOptions(ceremony.options)
     });
   } catch {
-    errorEl.textContent = "Passkey registration canceled.";
-    return;
+    return fail("Passkey registration canceled.");
   }
-  if (!credential) {
-    errorEl.textContent = "Passkey registration canceled.";
-    return;
-  }
+  if (!credential) return fail("Passkey registration canceled.");
   const finishRes = await api("POST", "/api/auth/passkey/register/finish", {
     challengeId: ceremony.challengeId,
     friendlyName,
     credential: attestationToJSON(credential)
   });
-  if (!finishRes.ok) {
-    errorEl.textContent = errorText(finishRes, "Passkey registration failed.");
-    return;
-  }
+  if (!finishRes.ok) return fail(errorText(finishRes, "Passkey registration failed."));
   passkeys.push(finishRes.data);
-  nameInput.value = "";
   renderPasskeys();
+  showToast('Passkey "' + (finishRes.data.friendlyName || friendlyName || "unnamed") + '" registered.', "success");
+  return true;
+}
+document.getElementById("passkey-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!passkeySupported) return;
+  document.getElementById("passkey-error").textContent = "";
+  const nameInput = document.getElementById("passkey-name");
+  if (await registerPasskey(nameInput.value.trim())) nameInput.value = "";
 });
 function renderOperatorPin() {
   const el = document.getElementById("operator-pin-status");

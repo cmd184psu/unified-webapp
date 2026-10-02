@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 #Environment=
-ExecStart=/opt/unified-webapp/unified-server -config /opt/unified-webapp/unified-webapp.json
+ExecStart=/opt/unified-webapp/unified-webapp -config /opt/unified-webapp/unified-webapp.json
 WorkingDirectory=/opt/unified-webapp
 StandardOutput=inherit
 StandardError=inherit

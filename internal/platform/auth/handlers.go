@@ -97,6 +97,8 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request, module str
 	p := s.policy()
 	offered := p.OfferedMethods(module)
 
+	stepUp := false
+
 	// Method enforcement (FR-A10b): before any credential is examined.
 	// login.html posts method "pin" on every module including admin, while
 	// OfferedMethods("admin") is ["admin_pin"] -- so posted "pin" is
@@ -111,7 +113,13 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request, module str
 			return
 		}
 	case "ldap":
-		if !containsMethod(offered, "ldap") {
+		// Admin never offers ldap as a way in, but an operator already
+		// inside on the admin PIN may add an LDAP identity to that same
+		// session (step-up): passkeys belong to a person, and the admin PIN
+		// has none. The PIN session is the precondition, so LDAP alone still
+		// cannot open admin.
+		stepUp = module == "admin" && p.LDAP.URL != "" && s.hasAdminPINSession(r, p)
+		if !containsMethod(offered, "ldap") && !stepUp {
 			logLoginAttempt(false, module, req.Method, "", reasonDisallowedMethod)
 			response.WriteError(w, http.StatusBadRequest, "method not accepted for this module")
 			return
@@ -177,7 +185,7 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request, module str
 		client := s.ldapClient(p.LDAP)
 		name, err := client.Authenticate(r.Context(), req.Username, req.Password)
 		if err == nil {
-			identity, grant, ok = name, "ldap", true
+			identity, grant, ok = name, identityGrant("ldap", module), true
 		} else if !errors.Is(err, ErrLDAPAuth) && !errors.Is(err, ErrLDAPForbidden) {
 			// Connection-level failure (directory down, unreachable, TLS),
 			// not a credential problem. The client still gets the uniform
@@ -196,6 +204,12 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request, module str
 	now := s.now()
 	existing := s.existingForLogin(r, module, grant, now)
 	sub, grants := accumulate(existing, identity, grant)
+	if stepUp {
+		// accumulate would replace the admin session ("admin" != the LDAP
+		// user) and drop admin_pin, locking the operator out of admin. Keep
+		// every existing grant and add ldap under the LDAP identity.
+		sub, grants = identity, appendGrant(existing.Grants, grant)
+	}
 	tok, err := issueClaims(s.key, loginClaims(existing, sub, grants, grant, module, now), p.tokenLifetime(), now)
 	if err != nil {
 		response.WriteError(w, http.StatusInternalServerError, "unable to issue session")
@@ -203,7 +217,11 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request, module str
 	}
 	setSessionCookie(w, tok, p.tokenLifetime(), p.CookieSecure, p.CookieDomain)
 	s.throttle.success()
-	logLoginAttempt(true, module, grant, sub, "")
+	logMethod := grant
+	if isIdentityGrant(grant) {
+		logMethod = grantKind(grant)
+	}
+	logLoginAttempt(true, module, logMethod, sub, "")
 	response.WriteJSON(w, http.StatusOK, map[string]any{"identity": sub, "methods": grants})
 }
 
@@ -211,9 +229,8 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request, module str
 // or not a session was present. It signs out of this module only: the
 // grant that let the session in here is dropped (this module's door code,
 // or admin_pin on admin) and the session is reissued if anything remains,
-// so with a shared cookie_domain the other modules stay signed in. An
-// identity login (ldap/passkey) reaches every module, so signing out of it
-// clears the whole session.
+// so the other modules stay signed in (each module's login, ldap and
+// passkey included, belongs to that module alone).
 func (s *Service) handleLogout(w http.ResponseWriter, r *http.Request, module string) {
 	p := s.policy()
 	now := s.now()
@@ -346,8 +363,9 @@ func (s *Service) handlePasskeyLoginFinish(w http.ResponseWriter, r *http.Reques
 
 	now := s.now()
 	existing := s.existingForLogin(r, module, "passkey", now)
-	sub, methods := accumulate(existing, identity, "passkey")
-	tok, err := issueClaims(s.key, loginClaims(existing, sub, methods, "passkey", module, now), p.tokenLifetime(), now)
+	grant := identityGrant("passkey", module)
+	sub, methods := accumulate(existing, identity, grant)
+	tok, err := issueClaims(s.key, loginClaims(existing, sub, methods, grant, module, now), p.tokenLifetime(), now)
 	if err != nil {
 		response.WriteError(w, http.StatusInternalServerError, "unable to issue session")
 		return
@@ -473,4 +491,12 @@ func passkeyResponseFrom(p PasskeyInfo) passkeyResponse {
 // back.
 func writePasskeyCeremony(w http.ResponseWriter, c PasskeyCeremony) {
 	response.WriteJSON(w, http.StatusOK, map[string]any{"challengeId": c.ChallengeID, "options": c.Options})
+}
+
+// hasAdminPINSession reports whether r carries a live session that the admin
+// module currently accepts on the strength of the operator PIN.
+func (s *Service) hasAdminPINSession(r *http.Request, p *Policy) bool {
+	now := s.now()
+	claims, ok := s.sessionClaimsFromRequest(r, now)
+	return ok && hasGrant(claims.Grants, adminPINMethod) && s.sessionAllows(claims, "admin", p, now)
 }

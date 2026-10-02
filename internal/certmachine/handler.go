@@ -15,6 +15,8 @@ package certmachine
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -748,6 +750,27 @@ func (s *Server) handleCertsGet(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	q := r.URL.Query()
+	fqdn, status := q.Get("fqdn"), q.Get("status")
+	switch status {
+	case "", "active", "archived", "quarantined":
+	default:
+		response.WriteError(w, http.StatusBadRequest, "status must be one of active, archived, quarantined")
+		return
+	}
+	if fqdn != "" || status != "" {
+		filtered := make([]Cert, 0, len(certs))
+		for _, c := range certs {
+			if fqdn != "" && !strings.EqualFold(c.FQDN, fqdn) {
+				continue
+			}
+			if status != "" && c.Status != status {
+				continue
+			}
+			filtered = append(filtered, c)
+		}
+		certs = filtered
+	}
 	response.WriteJSON(w, http.StatusOK, map[string]any{"certs": certs})
 }
 
@@ -910,6 +933,44 @@ func writeDownload(w http.ResponseWriter, filename, contentType string, data []b
 	_, _ = w.Write(data)
 }
 
+// writeVerifiedDownload is writeDownload plus the integrity contract of the
+// three per-cert file downloads: a strong ETag of the exact body and the
+// X-Cert-Id / X-Cert-Fingerprint identity headers. It is local to
+// handleCertFileGet on purpose -- the shared writeDownload also serves the
+// CA root (no cert id) and the tgz bundle (embeds time.Now, so no stable
+// ETag).
+func (s *Server) writeVerifiedDownload(w http.ResponseWriter, r *http.Request, c *Cert, filename string, data []byte) {
+	if c.Fingerprint == nil || *c.Fingerprint == "" {
+		log.Printf("certmachine: cert %d has no fingerprint; refusing download", c.ID)
+		response.WriteError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	sum := sha256.Sum256(data)
+	etag := `"sha256-` + hex.EncodeToString(sum[:]) + `"`
+	w.Header().Set("ETag", etag)
+	w.Header().Set("X-Cert-Id", strconv.FormatInt(c.ID, 10))
+	w.Header().Set("X-Cert-Fingerprint", *c.Fingerprint)
+	if ifNoneMatchHits(r.Header.Get("If-None-Match"), etag) {
+		w.Header().Set("Cache-Control", "no-store, max-age=0")
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	writeDownload(w, filename, pemContentType, data)
+}
+
+// ifNoneMatchHits reports whether an If-None-Match header value matches
+// etag: "*", or any entry of a comma-separated list, compared weakly (a
+// W/ prefix is ignored, RFC 9110 13.1.2).
+func ifNoneMatchHits(header, etag string) bool {
+	for _, part := range strings.Split(header, ",") {
+		part = strings.TrimSpace(part)
+		if part == "*" || strings.TrimPrefix(part, "W/") == etag {
+			return true
+		}
+	}
+	return false
+}
+
 // handleCertFileGet serves GET /api/certs/{id}/files/{name}. {name} is a
 // closed three-entry lookup (cert.pem, key.pem, haproxy.pem) -- anything
 // else, including a traversal attempt or "rootCA.key", is a 404: this is a
@@ -935,7 +996,7 @@ func (s *Server) handleCertFileGet(w http.ResponseWriter, r *http.Request) {
 			response.WriteError(w, http.StatusNotFound, "not found")
 			return
 		}
-		writeDownload(w, SafeFilename(c.FQDN)+".cert.pem", pemContentType, []byte(*c.CertPEM))
+		s.writeVerifiedDownload(w, r, c, SafeFilename(c.FQDN)+".cert.pem", []byte(*c.CertPEM))
 	case "key.pem":
 		c, err := s.db.getCertWithKey(ctx, id)
 		if err != nil {
@@ -946,7 +1007,7 @@ func (s *Server) handleCertFileGet(w http.ResponseWriter, r *http.Request) {
 			response.WriteError(w, http.StatusNotFound, "not found")
 			return
 		}
-		writeDownload(w, SafeFilename(c.FQDN)+".key.pem", pemContentType, []byte(*c.KeyPEM))
+		s.writeVerifiedDownload(w, r, c, SafeFilename(c.FQDN)+".key.pem", []byte(*c.KeyPEM))
 	case "haproxy.pem":
 		c, ca, err := s.certAndCA(ctx, id)
 		if err != nil {
@@ -958,7 +1019,7 @@ func (s *Server) handleCertFileGet(w http.ResponseWriter, r *http.Request) {
 			writeStoreError(w, err)
 			return
 		}
-		writeDownload(w, SafeFilename(c.FQDN)+".haproxy.pem", pemContentType, data)
+		s.writeVerifiedDownload(w, r, c, SafeFilename(c.FQDN)+".haproxy.pem", data)
 	default:
 		response.WriteError(w, http.StatusNotFound, "not found")
 	}

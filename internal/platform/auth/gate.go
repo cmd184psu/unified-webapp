@@ -186,7 +186,7 @@ func (s *Service) Gate(module string, next http.Handler) http.Handler {
 					response.WriteError(w, http.StatusUnauthorized, "unauthorized")
 					return
 				}
-				if rt.requiredGrant != "" && !hasGrant(claims.Grants, rt.requiredGrant) {
+				if rt.requiredGrant != "" && !hasGrant(claims.Grants, identityGrant(rt.requiredGrant, module)) {
 					log.Printf("event=auth_passkey_denied module=%q reason=%q", module, "requires_ldap")
 					response.WriteError(w, http.StatusForbidden, "passkey management requires a full (LDAP) login")
 					return

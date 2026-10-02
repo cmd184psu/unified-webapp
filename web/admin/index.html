@@ -75,7 +75,11 @@
       </form>
       <p id="ldap-status" class="status"></p>
       <p id="ldap-error" class="error"></p>
-      <h3>Test bind</h3>
+      <h3>Test configuration</h3>
+      <p class="hint">Checks the saved settings only — connects, binds as the service account, searches the base DN and looks up the required groups. No user account needed.</p>
+      <button id="ldap-check-btn" type="button" class="btn btn-outline">Test configuration</button>
+      <p id="ldap-check-result" class="status"></p>
+      <h3>Test user login</h3>
       <form id="ldap-test-form" class="inline-form">
         <input id="ldap-test-username" placeholder="username" autocomplete="off" required>
         <input id="ldap-test-password" type="password" placeholder="password" autocomplete="off" required>
@@ -111,7 +115,7 @@
       <ul id="passkeys-list" class="named-list"></ul>
       <form id="passkey-form" class="inline-form">
         <input id="passkey-name" placeholder="name (optional)" autocomplete="off">
-        <button type="submit" class="btn btn-primary">Register new passkey</button>
+        <button id="passkey-submit" type="submit" class="btn btn-primary">Register new passkey</button>
       </form>
       <p id="passkey-error" class="error"></p>
     </section>

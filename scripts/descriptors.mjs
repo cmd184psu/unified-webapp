@@ -145,6 +145,20 @@ export const descriptors = [
     sharedConsumer: true,
   },
   {
+    name: "haproxy",
+    entry: ["web/haproxy/src/main.tsx"],
+    mode: "bundle",
+    out: "web/haproxy/js/bundle.js",
+    bundle: true,
+    format: "esm",
+    target: "es2020",
+    jsx: "automatic",
+    logLevel: "warning",
+    define: { "process.env.NODE_ENV": '"production"' },
+    emitsCss: true,
+    sharedConsumer: true,
+  },
+  {
     name: "issuetracker",
     entry: ["web/issuetracker/src/main.tsx"],
     mode: "bundle",
@@ -228,4 +242,4 @@ export const descriptors = [
 // failure rather than a silent pass (A7.3). The value moves during the
 // sequence — 12 through C3, 14 after C4, 15 after C5 — and each move is an
 // edit to this one line.
-export const EXPECTED_ARTIFACT_COUNT = 22;
+export const EXPECTED_ARTIFACT_COUNT = 24;

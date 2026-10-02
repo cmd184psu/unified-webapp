@@ -1,0 +1,32 @@
+Name: HAProxy
+Version: 3.0.5-8e879a5
+Release_date: 2024/09/19
+Nbthread: 4
+Nbproc: 1
+Process_num: 1
+Pid: 28417
+Uptime: 2d 3h12m41s
+Uptime_sec: 184361
+Memmax_MB: 0
+PoolAlloc_MB: 1
+PoolUsed_MB: 1
+PoolFailed: 0
+Ulimit-n: 4031
+Maxsock: 4031
+Maxconn: 2000
+Hard_maxconn: 2000
+CurrConns: 7
+CumConns: 51234
+CumReq: 49987
+MaxSslConns: 0
+CurrSslConns: 6
+CumSslConns: 50011
+Maxpipes: 0
+PipesUsed: 0
+PipesFree: 0
+ConnRate: 2
+Tasks: 18
+Run_queue: 1
+Idle_pct: 99
+node: lb1
+description:

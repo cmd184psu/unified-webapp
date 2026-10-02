@@ -52,6 +52,13 @@ const suites = [
   { name: "shared-menu", entry: "web/shared/ts/menu.test.ts", runner: "esbuild-cjs" },
   { name: "shared-patchlist", entry: "web/shared/ts/patchlist.test.ts", runner: "esbuild-cjs" },
   { name: "shared-queuepanel", entry: "web/shared/ts/queuepanel.test.ts", runner: "esbuild-cjs" },
+  { name: "haproxy-modelform", entry: "web/haproxy/src/modelForm.test.ts", runner: "esbuild-cjs" },
+  { name: "haproxy-issues", entry: "web/haproxy/src/issues.test.ts", runner: "esbuild-cjs" },
+  { name: "haproxy-pending", entry: "web/haproxy/src/pending.test.ts", runner: "esbuild-cjs" },
+  { name: "haproxy-certview", entry: "web/haproxy/src/certview.test.ts", runner: "esbuild-cjs" },
+  { name: "haproxy-livefeed", entry: "web/haproxy/src/livefeed.test.ts", runner: "esbuild-cjs" },
+  { name: "haproxy-statsview", entry: "web/haproxy/src/statsview.test.ts", runner: "esbuild-cjs" },
+  { name: "haproxy-sourceguard", entry: "web/haproxy/src/sourceguard.test.ts", runner: "esbuild-cjs" },
   { name: "grocery", entry: "web/grocery/js/main.test.ts", runner: "node-test" },
 ];
 
