@@ -72,3 +72,4 @@ reference/
 .omo/
 ca-verify-test/
 local-test/*.pin
+unified-webapp.json
