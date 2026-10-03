@@ -30,6 +30,7 @@ export function diagnosticNotices(lines: string[] | null | undefined): ToastSpec
 export function applyToast(r: ApplyResult): ToastSpec {
   switch (r.outcome) {
     case 'applied':
+      if (r.started) return { tone: 'success', message: 'Applied. HAProxy was not running, so it was started.' }
       return { tone: 'success', message: r.message || 'Changes applied.' }
     case 'no_changes':
       return { tone: 'notice', message: r.message || 'Nothing to apply: the live configuration already matches.' }

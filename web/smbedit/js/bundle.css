@@ -27,6 +27,9 @@ body {
   overflow: hidden;
   transition: background 0.2s, color 0.2s;
 }
+#root {
+  height: 100%;
+}
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;

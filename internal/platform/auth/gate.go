@@ -48,6 +48,21 @@ type authGateRoute struct {
 	handle        func(*Service, http.ResponseWriter, *http.Request, string)
 }
 
+// ErrPasskeysNotConfiguredMsg is the plain-language 409 answer every passkey
+// route gives when no passkey service is configured; the admin UI and tests
+// share it.
+const ErrPasskeysNotConfiguredMsg = "Passkeys are not configured on this server: set the Relying Party ID and allowed origins in Admin > Passkey settings (passkeys also need HTTPS)."
+
+// errPasskeysNotConfiguredCode is the machine-readable companion of the message.
+const errPasskeysNotConfiguredCode = "passkeys_not_configured"
+
+func writePasskeysNotConfigured(w http.ResponseWriter) {
+	response.WriteJSON(w, http.StatusConflict, map[string]string{
+		"error": ErrPasskeysNotConfiguredMsg,
+		"code":  errPasskeysNotConfiguredCode,
+	})
+}
+
 // authGateRoutes is the fixed set of routes the gate itself owns on every
 // protected module. The five unauthenticated-allowlist routes let a caller
 // establish or inspect a session; the four session-required routes manage
@@ -186,11 +201,19 @@ func (s *Service) Gate(module string, next http.Handler) http.Handler {
 					response.WriteError(w, http.StatusUnauthorized, "unauthorized")
 					return
 				}
+				if p.passkeys == nil && strings.HasPrefix(r.URL.Path, "/api/auth/passkey") {
+					writePasskeysNotConfigured(w)
+					return
+				}
 				if rt.requiredGrant != "" && !hasGrant(claims.Grants, identityGrant(rt.requiredGrant, module)) {
 					log.Printf("event=auth_passkey_denied module=%q reason=%q", module, "requires_ldap")
 					response.WriteError(w, http.StatusForbidden, "passkey management requires a full (LDAP) login")
 					return
 				}
+			}
+			if !rt.session && p.passkeys == nil && strings.HasPrefix(r.URL.Path, "/api/auth/passkey") {
+				writePasskeysNotConfigured(w)
+				return
 			}
 			rt.handle(s, w, r, module)
 			return

@@ -45,75 +45,108 @@ func Build(cfg config.HaproxyConfig) (http.Handler, error) {
 		return nil, fmt.Errorf("haproxy: create data dir %s: %w", dataDir, err)
 	}
 
-	detected, err := DetectOS(cfg.OS)
-	if err != nil {
-		// The module builds; every request answers 503 with the reason.
-		return scoped503Handler(err.Error()), nil
-	}
-
-	driver, err := NewDriver(detected, NewDefaultExec(), DriverOptions{
-		ConfigPath:      strings.TrimSpace(cfg.ConfigPath),
-		CertsDir:        strings.TrimSpace(cfg.CertsDir),
-		CrtListPath:     strings.TrimSpace(cfg.CrtListPath),
-		StatsSocketPath: strings.TrimSpace(cfg.StatsSocketPath),
-		ServiceName:     strings.TrimSpace(cfg.ServiceName),
-	})
+	s, err := newServer(cfg)
 	if err != nil {
 		return nil, err
 	}
-
-	// The CertMachine client exists only when a URL is configured; without it
-	// the certmachine routes answer 409. A bad url/ca_file is an operator
-	// misconfiguration, so it fails the build loudly (scoped 503 by the
-	// dispatcher) rather than degrading silently.
-	var client *CertMachineClient
-	if u := strings.TrimSpace(cfg.CertMachine.URL); u != "" {
-		client, err = CertMachineNewClient(CertMachineSettings{
-			URL:    u,
-			APIKey: CertMachineAPIKey(cfg.CertMachine.APIKey),
-			CAFile: strings.TrimSpace(cfg.CertMachine.CAFile),
-		})
-		if err != nil {
-			return nil, err
-		}
+	// The effective settings are the config block overridden by settings.json.
+	// A bad url/ca_file is an operator misconfiguration, so it fails the build
+	// loudly (scoped 503 by the dispatcher); an unsupported OS builds a module
+	// that explains itself (FR-H30).
+	st, err := loadStored(s.dataDir)
+	if err != nil {
+		return nil, err
 	}
-	return buildWithDriver(cfg, driver, client)
+	set, key := st.overlay(baseSettings(cfg), cfg.CertMachine.APIKey)
+	rt, err := s.build(set, key)
+	if err != nil {
+		return nil, err
+	}
+	s.cur = rt
+	return s.routes(staticDir), nil
 }
 
-// buildWithDriver assembles the module over an already-chosen driver and
-// (possibly nil) CertMachine client. It is the seam handler tests use to run
-// the real handlers over the fake driver, never touching sudo or haproxy.
-func buildWithDriver(cfg config.HaproxyConfig, driver Driver, client *CertMachineClient) (http.Handler, error) {
+// driverFactory makes the OS driver for the given overrides. Tests replace it.
+type driverFactory func(OS, DriverOptions) (Driver, error)
+
+func newServer(cfg config.HaproxyConfig) (*server, error) {
 	dataDir := strings.TrimSpace(cfg.DataDir)
 	models, err := NewModelStore(dataDir)
 	if err != nil {
 		return nil, fmt.Errorf("haproxy: %w", err)
 	}
-	certs := CertNewStore(dataDir, driver)
-	log := NewOpLog(500)
-
-	s := &server{
-		cfg: cfg, driver: driver, models: models, certs: certs, log: log, client: client,
-		dataDir: dataDir, warnDays: cfg.ExpiryWarnDays, maxSubs: cfg.SSEMaxSubscribers,
+	if err := os.MkdirAll(filepath.Join(dataDir, "staging"), 0o700); err != nil {
+		return nil, fmt.Errorf("haproxy: create staging dir: %w", err)
 	}
-	if s.warnDays <= 0 {
-		s.warnDays = config.DefaultHaproxyExpiryWarnDays
+	s := &server{
+		cfg: cfg, models: models, log: NewOpLog(500), dataDir: dataDir, maxSubs: cfg.SSEMaxSubscribers,
+		mk: func(o OS, opts DriverOptions) (Driver, error) { return NewDriver(o, NewDefaultExec(), opts) },
 	}
 	if s.maxSubs <= 0 {
 		s.maxSubs = config.DefaultSSEMaxSubscribers
 	}
-	keep := cfg.BackupKeep
-	if keep <= 0 {
-		keep = config.DefaultHaproxyBackupKeep
+	return s, nil
+}
+
+// build makes a complete runtime from the settings: OS driver, CertMachine
+// client, cert store, applier. An unsupported OS is not an error; it yields a
+// runtime that only carries the reason.
+func (s *server) build(set Settings, key string) (*live, error) {
+	detected, err := DetectOS(set.OS)
+	if err != nil {
+		return &live{settings: set, apiKey: key, unavailable: err.Error()}, nil
 	}
-	s.applier = NewApplier(driver, models, certs, log, ApplyOptions{
-		Verifier:     StatsVerifier{Driver: driver, Log: log, Timeout: statsTimeout},
-		BackupKeep:   keep,
-		StagingDir:   filepath.Join(dataDir, "staging"),
-		AfterSuccess: s.removeSuperseded,
+	driver, err := s.mk(detected, driverOptions(set))
+	if err != nil {
+		return nil, err
+	}
+	var client *CertMachineClient
+	if set.CertMachineURL != "" {
+		client, err = CertMachineNewClient(CertMachineSettings{
+			URL: set.CertMachineURL, APIKey: CertMachineAPIKey(key), CAFile: set.CertMachineCAFile,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	return s.assemble(driver, client, set, key), nil
+}
+
+// assemble wires the collaborators over an already-chosen driver and (possibly
+// nil) CertMachine client.
+func (s *server) assemble(driver Driver, client *CertMachineClient, set Settings, key string) *live {
+	rt := &live{driver: driver, client: client, settings: set, apiKey: key, warnDays: set.ExpiryWarnDays}
+	rt.certs = CertNewStore(s.dataDir, driver)
+	rt.applier = NewApplier(driver, s.models, rt.certs, s.log, ApplyOptions{
+		Verifier:     StatsVerifier{Driver: driver, Log: s.log, Timeout: statsTimeout},
+		BackupKeep:   set.BackupKeep,
+		StagingDir:   filepath.Join(s.dataDir, "staging"),
+		AfterSuccess: rt.removeSuperseded,
 	})
-	if err := os.MkdirAll(filepath.Join(dataDir, "staging"), 0o700); err != nil {
-		return nil, fmt.Errorf("haproxy: create staging dir: %w", err)
+	return rt
+}
+
+// buildServer assembles the module over an already-chosen driver and (possibly
+// nil) CertMachine client. It is the seam handler tests use to run the real
+// handlers over the fake driver, never touching sudo or haproxy.
+func buildServer(cfg config.HaproxyConfig, driver Driver, client *CertMachineClient) (*server, error) {
+	s, err := newServer(cfg)
+	if err != nil {
+		return nil, err
+	}
+	st, err := loadStored(s.dataDir)
+	if err != nil {
+		return nil, err
+	}
+	set, key := st.overlay(baseSettings(cfg), cfg.CertMachine.APIKey)
+	s.cur = s.assemble(driver, client, set, key)
+	return s, nil
+}
+
+func buildWithDriver(cfg config.HaproxyConfig, driver Driver, client *CertMachineClient) (http.Handler, error) {
+	s, err := buildServer(cfg, driver, client)
+	if err != nil {
+		return nil, err
 	}
 	return s.routes(strings.TrimSpace(cfg.StaticDir)), nil
 }
@@ -151,4 +184,19 @@ func checkStaticDir(dir string) error {
 	}
 	_ = f.Close()
 	return nil
+}
+
+// driverOptions maps the effective settings onto the driver's overrides. An
+// unset setting stays empty so the driver's per-OS default applies; every path
+// the operator can set must be mapped here (a missing one silently falls back
+// to the default location of the real HAProxy).
+func driverOptions(set Settings) DriverOptions {
+	return DriverOptions{
+		ConfigPath:      set.ConfigPath,
+		CertsDir:        set.CertsDir,
+		CrtListPath:     set.CrtListPath,
+		StatsSocketPath: set.StatsSocketPath,
+		BackupDir:       set.BackupDir,
+		ServiceName:     set.ServiceName,
+	}
 }

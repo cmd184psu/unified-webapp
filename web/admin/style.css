@@ -281,6 +281,44 @@ button:disabled:hover {
   box-sizing: border-box;
 }
 
+#passkey-settings-form label:not(.ui-toggle),
+.passkey-origins-field {
+  width: min(100%, 52rem);
+}
+
+#passkey-settings-form input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.passkey-origins-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--color-text-faint);
+}
+
+.passkey-origins-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.passkey-origins-list li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.passkey-origins-list input {
+  flex: 1;
+  min-width: 0;
+}
+
 .settings-form .ui-toggle {
   font-size: 0.85rem;
   color: var(--color-text-faint);

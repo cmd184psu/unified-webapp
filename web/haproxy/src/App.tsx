@@ -16,15 +16,17 @@ import { runApplyLike } from './applyAction'
 import { POLL_MS, firstRunState, shouldPoll } from './livefeed'
 import { ServicesPage } from './ServicesPage'
 import { GlobalsPage } from './GlobalsPage'
+import { SettingsPage } from './SettingsPage'
 import './styles.css'
 
-type Tab = 'services' | 'globals' | 'certs' | 'backups' | 'raw' | 'log' | 'stats'
+type Tab = 'services' | 'globals' | 'certs' | 'backups' | 'settings' | 'raw' | 'log' | 'stats'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'services', label: 'Services' },
   { id: 'globals', label: 'Globals' },
   { id: 'certs', label: 'Certificates' },
   { id: 'backups', label: 'Backups' },
+  { id: 'settings', label: 'Settings' },
   { id: 'raw', label: 'Raw' },
   { id: 'log', label: 'Log' },
   { id: 'stats', label: 'Stats' },
@@ -375,6 +377,7 @@ export default function App() {
           />
         )}
         {tab === 'backups' && <BackupsPage refreshKey={refreshKey} onRestore={restore} />}
+        {tab === 'settings' && <SettingsPage onSaved={refreshAll} />}
         {tab === 'raw' && <RawPage refreshKey={refreshKey} />}
         {tab === 'log' && <LogPage />}
         {tab === 'stats' && <StatsPage />}

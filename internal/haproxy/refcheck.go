@@ -135,8 +135,8 @@ func CheckModel(m *Model, certs []CertManaged) []Issue {
 }
 
 // checkStored runs CheckModel over the stored model and the tracked certs.
-func (s *server) checkStored(ctx context.Context) ([]Issue, error) {
-	list, err := s.certs.List(ctx)
+func (s *server) checkStored(rt *live, ctx context.Context) ([]Issue, error) {
+	list, err := rt.certs.List(ctx)
 	if err != nil {
 		return nil, err
 	}

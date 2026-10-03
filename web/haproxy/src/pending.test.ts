@@ -49,6 +49,12 @@ test('apply outcome maps to a toast for every outcome', () => {
   ok(f.message.includes('boom'), 'message shown')
 })
 
+test('applied with started says HAProxy was started', () => {
+  const t = applyToast({ applied: true, rolledBack: false, outcome: 'applied', message: 'x', started: true })
+  eq(t.tone, 'success')
+  eq(t.message, 'Applied. HAProxy was not running, so it was started.')
+})
+
 test('unknown outcome is an error, never silent', () => {
   const t = applyToast({ applied: false, rolledBack: false, outcome: 'weird' as never, message: 'x' })
   eq(t.tone, 'error')

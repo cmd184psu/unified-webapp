@@ -130,6 +130,7 @@
     "certs_dir": "",
     "crt_list_path": "",
     "stats_socket_path": "",
+    "backup_dir": "",
     "service_name": "",
     "backup_keep": 10,
     "expiry_warn_days": 30,

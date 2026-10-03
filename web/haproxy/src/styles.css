@@ -116,3 +116,5 @@ body {
 .stat-down { color: var(--danger, #e06c6c); font-weight: 600; border-color: var(--danger, #e06c6c); }
 .stat-maint { color: var(--warning, #e0af68); }
 .stat-nocheck, .stat-other { opacity: 0.7; }
+
+.settings-input { max-width: 48rem; }

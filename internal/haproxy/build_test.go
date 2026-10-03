@@ -121,7 +121,7 @@ func TestUnsupportedOSYieldsScoped503WithReason(t *testing.T) {
 		t.Fatal("Build returned a nil handler for an unsupported OS")
 	}
 
-	for _, path := range []string{"/", "/api/status", "/anything"} {
+	for _, path := range []string{"/api/model", "/api/status", "/api/anything"} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusServiceUnavailable {
@@ -158,5 +158,26 @@ func TestAPIKeyRedactedInStatusView(t *testing.T) {
 
 	if strings.Contains(string(body), "certmachine.example") && strings.Contains(string(body), "api_key") {
 		t.Errorf("status echoes the certmachine settings: %s", body)
+	}
+}
+
+// Every path the operator can set must reach the driver; backup_dir used to be
+// missing, so a second instance silently wrote its backups into the default
+// directory of the real one.
+func TestDriverOptionsCarryEveryConfiguredPath(t *testing.T) {
+	cfg := config.HaproxyConfig{
+		ConfigPath: "/x/haproxy.cfg", CertsDir: "/x/certs", CrtListPath: "/x/crt-list.txt",
+		StatsSocketPath: "/run/x/admin.sock", ServiceName: "haproxy-x", BackupDir: "/x/backups",
+	}
+	got := driverOptions(baseSettings(cfg))
+	want := DriverOptions{
+		ConfigPath: "/x/haproxy.cfg", CertsDir: "/x/certs", CrtListPath: "/x/crt-list.txt",
+		StatsSocketPath: "/run/x/admin.sock", ServiceName: "haproxy-x", BackupDir: "/x/backups",
+	}
+	if got != want {
+		t.Errorf("driverOptions = %+v, want %+v", got, want)
+	}
+	if empty := driverOptions(baseSettings(config.HaproxyConfig{})); empty != (DriverOptions{}) {
+		t.Errorf("an unset config must leave every option empty so the driver defaults apply: %+v", empty)
 	}
 }

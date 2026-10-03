@@ -415,14 +415,25 @@
     });
   });
 
+  // serverMessage shows the server's own plain-language reason for a failed
+  // passkey call (its JSON "error" field), falling back to a generic line.
+  function serverMessage(res, fallback) {
+    return res.json().then(function (body) {
+      showError((body && body.error) || fallback);
+    }, function () { showError(fallback); });
+  }
+
   passkeyBtn.addEventListener("click", function () {
     showError("");
+    // Typing a username is optional: with one, the server runs the targeted
+    // flow; without, the browser offers the passkeys it holds for this site.
+    var typed = document.getElementById("ldap-username").value.trim();
     fetch("/api/auth/passkey/login/begin", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({})
+      body: JSON.stringify(typed ? { username: typed } : {})
     }).then(function (res) {
-      if (!res.ok) { showError("Passkey sign-in isn't available."); return null; }
+      if (!res.ok) return serverMessage(res, "Passkey sign-in isn't available.").then(function () { return null; });
       return res.json();
     }).then(function (ceremony) {
       if (!ceremony) return;
@@ -438,7 +449,10 @@
             })
           });
         })
-        .then(handleLoginResponse);
+        .then(function (res) {
+          if (res.status === 200) { location.reload(); return; }
+          return serverMessage(res, "Passkey sign-in failed.");
+        });
     }).catch(function () { showError("Passkey sign-in failed or was canceled."); });
   });
 

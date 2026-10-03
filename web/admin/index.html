@@ -109,9 +109,32 @@
       <p id="session-status" class="status"></p>
     </section>
 
+    <section class="panel hidden" id="panel-passkey-settings">
+      <h2>Passkey settings</h2>
+      <p class="hint">The Relying Party ID must be a parent domain of every allowed origin (for example <code>example.com</code> for <code>https://app.example.com</code>), and passkeys only work over HTTPS. Leave both empty to turn passkeys off; already-registered passkeys stay stored.</p>
+      <form id="passkey-settings-form" class="settings-form" novalidate>
+        <label>Relying Party ID
+          <input id="passkey-rp-id" type="text" autocomplete="off" spellcheck="false" placeholder="example.com">
+        </label>
+        <div class="passkey-origins-field">
+          <span class="passkey-origins-label">Allowed origins</span>
+          <ul id="passkey-origins-list" class="passkey-origins-list"></ul>
+          <div class="inline-form">
+            <button id="passkey-origin-add" type="button" class="btn btn-outline">Add origin</button>
+            <button id="passkey-origin-here" type="button" class="btn btn-outline">Use this page's address</button>
+          </div>
+        </div>
+        <p id="passkey-settings-hint" class="hint"></p>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </form>
+      <p id="passkey-settings-status" class="status"></p>
+      <p id="passkey-settings-error" class="error"></p>
+    </section>
+
     <section class="panel hidden" id="panel-passkeys">
       <h2>Passkeys</h2>
       <p id="passkey-https-note" class="hint warn hidden"></p>
+      <p id="passkey-unconfigured-note" class="hint warn hidden"></p>
       <ul id="passkeys-list" class="named-list"></ul>
       <form id="passkey-form" class="inline-form">
         <input id="passkey-name" placeholder="name (optional)" autocomplete="off">

@@ -27,10 +27,13 @@ Do not fold it in here.
 |---|---|---|---|---|
 | P8-1 | certmachine | Edit dialog **Save** button does nothing | High: blocked SAN re-issue | **Done and signed off** (commit 79bf28f) |
 | P8-2 | admin | LDAP form corrupts `required_groups` (DNs split on commas); admin "Test user login" disagrees with the real login | High | Open (autosave removed, Test configuration added; comma split and the test-box discrepancy remain) |
-| P8-3 | auth / admin | Passkeys cannot be registered or used | High | **Open: fix in this phase** (design decisions, then build) |
+| P8-3 | auth / admin | Passkeys cannot be registered or used | High | **Done**: register in admin and passkey login on todo confirmed by the owner (2026-10-02) |
 | P8-4 | auth | An LDAP/passkey login on one module was accepted by every module | High: contradicted the per-module session rule | **Done** (red/green test); owner confirmed it works |
-| P8-5 | certmachine | "Show/Hide N expired/archived certificates" button does not hide or show | Medium | Open (cause found in CSS; not browser-verified) |
-| P8-6 | certmachine | Delete should be a button on each cert card, behind an "Are you sure?" modal | Medium | Requested |
+| P8-5 | certmachine | "Show/Hide N expired/archived certificates" button does not hide or show | Medium | **Fixed in code** (measured in headless Chrome); awaiting owner browser check |
+| P8-6 | certmachine | Delete should be a button on each cert card, behind an "Are you sure?" modal | Medium | **Built**: Delete on every card with an "Are you sure?" dialog; awaiting owner browser check |
+| P8-7 | auth | API keys are global: one key is accepted on every protected non-admin module (not module-scoped) | Medium: contradicts the per-module isolation rule | Open; owner to circle back |
+| P8-8 | smbedit | With many shares the list falls off the bottom of the screen with no scrollbar; the footer is pushed out of view | Medium | **Fixed in code**, measured in headless Chrome; awaiting owner browser check |
+| P8-9 | haproxy | The haproxy module has no settings UI: CertMachine URL/API key/CA file, config/certs/crt-list/stats-socket paths, backup count, expiry warning days, OS override can only be set by editing the config file | Medium: violates "always a UI to do it for you" | **Built** (Settings tab, live apply); enabling the module itself and its hostname still needs host_routing, tracked separately as the general "Modules" admin control |
 
 ---
 
@@ -94,7 +97,7 @@ guidance on `base_dn` / group-name rules are still open. The session form and th
 
 ---
 
-## P8-3: passkeys cannot be registered or used (fix in this phase)
+## P8-3: passkeys (done, confirmed 2026-10-02)
 
 CMD> to be clear: this is the plan where we should fix it and stop deferring the fix
 
@@ -135,6 +138,51 @@ UI in the meantime: the Passkeys card keeps showing its real failure states unti
 4. Whether admin may ever accept a passkey; today `OfferedMethods("admin")` is `["admin_pin"]` only.
 5. What the card shows when passkeys are not configured. Owner preference: show the truth of the current
    behaviour; do not hide or disable the feature as a workaround.
+
+**Progress 2026-10-02.** The owner signed in through the new dialog and got "Signed in as chris, but passkeys
+are still unavailable (HTTP 400)": the server answers 400 "passkeys not available" while `auth.passkey.rp_id` is
+empty. Most of this item is configuration, not code: HTTPS is already terminated by haproxy (go-webauthn checks
+the browser's origin string, not the request scheme), so the app does not need `tls_cert`/`tls_key`. Set in the
+owner's live config: `rp_id: "cmdhome.net"` (a parent of every origin, including `certmachine.cmdhome.net`) and
+`rp_origins` for the four hosts that have haproxy certs (`https://admin.hero.cmdhome.net`,
+`https://todo.hero.cmdhome.net`, `https://utuber.hero.cmdhome.net`, `https://certmachine.cmdhome.net`). After the
+restart, `/api/auth/mode` offers `passkey` on todo and certmachine and stays PIN-only on admin. **Awaiting the
+owner's browser test of registration (admin) and passkey login (another module).** Modules without an HTTPS cert
+(grocery, smbedit, ...) cannot use passkeys until haproxy serves them over TLS. Fixed: when passkeys
+are not configured every passkey route answers 409 with a plain message (and `code: passkeys_not_configured`),
+checked before the LDAP requirement; the admin card explains it, disables registration and offers no pointless
+sign-in.
+
+**Gap found 2026-10-02 (owner): there is no way to configure passkeys in the UI. FIXED 2026-10-02** (panel `#panel-passkey-settings`, route `PUT /api/config/passkey`, server-side validation, hot apply; Go tests in `internal/admin/passkey_config_test.go`, web tests in `web/admin/js/passkeyform.test.ts`). The owner's live config already has `rp_id` `cmdhome.net` and four https origins set by hand earlier; the panel now shows them. Original gap text follows. The admin module has panels
+for LDAP, session, API keys and the security matrix, but `auth.passkey.rp_id` / `rp_origins` can only be set by
+editing the config file, and the "not configured" message used to point there. Fix (to build, owner confirmed):
+a **Passkey settings** panel in admin next to LDAP: `rp_id`, an allowed-origins list with add/remove and a "use
+this page's address" helper, explicit Save (no autosave), `PUT /api/config/passkey` hot-applied through the same
+`mutateAuth`/`applyAuth` path as LDAP (the policy swap rebuilds the passkey service), with server-side
+validation (origins https, or http only for localhost; each origin's host is `rp_id` or a subdomain of it) and
+plain-text errors. The "not configured" 409 message and the Passkeys card then point at this panel, not at the
+config file.
+
+**Passkey login could never work. FIXED 2026-10-02 (awaiting the owner's browser test).** Cause: the login
+page and the server disagreed. The page's passkey button posted `{}` (no username) to
+`/api/auth/passkey/login/begin`, but the server only implemented the targeted flow and demanded a username
+(`ErrPasskeyIdentityRequired`), so it answered a generic 400 (logged as `bad_credential`) and the page hid it
+behind "Passkey sign-in isn't available." Registration was never the problem. Fix, in `internal/platform/auth`:
+(1) `BeginPasskeyLogin("")` now runs the discoverable flow (`BeginDiscoverableLogin`), and `FinishPasskeyLogin`
+resolves the identity from the credential ID and checks the returned userHandle against the enrolment; a typed
+username still runs the targeted flow. (2) Registration requests a resident key (it already did: the new test
+pins it). (3) Plain, specific answers: no passkey for the given account 404 "No passkey is registered for that
+account. Sign in another way, then register one in Admin > Passkeys."; failed assertion 401 "That passkey was
+not accepted."; expired/unknown/replayed challenge 400 "The passkey sign-in timed out. Try again."; the 409
+not-configured answer is unchanged. The log carries `passkey_begin_failed`, `passkey_no_credentials`,
+`passkey_verification_failed`, `passkey_challenge_expired`, `passkey_not_authorized`. (4) The finish handler now
+also applies the global login throttle and re-checks the LDAP directory (`Authorize`, required groups) before
+issuing the session, failing closed; neither existed before. (5) `login.html` sends the typed username only when
+there is one and shows the server's message. Tests: `passkey_ceremony_test.go` drives register then login through
+the real handlers with a software ES256 authenticator. **Owner action:** if the existing fingerprint passkey was
+not created as a discoverable credential, discovery-style login will not offer it: delete it in Admin >
+Passkeys and register it again (new enrolments are discoverable), or type the username before pressing the
+passkey button to use the targeted flow.
 
 **Acceptance.** Register a passkey for an LDAP user over HTTPS and see it listed; log in to a PIN-protected
 module with it; confirm removing the user from the required group revokes it; certmachine unaffected.
@@ -230,6 +278,86 @@ folded into the same flow, not duplicated with different behavior.
 **Acceptance:** Delete on a card opens the modal; Cancel and Escape do nothing; Confirm deletes, the list
 refreshes, and a toast reports it; deleting the wrong row by a stray click is not possible without
 confirming.
+
+---
+
+## P8-7: API keys are not module-scoped
+
+**Owner expectation (2026-10-02).** API keys were thought to be per module. Same principle as P8-4: each
+module has its own login and credentials, and one module's credential grants nothing on another.
+
+**Verified behaviour.** `internal/platform/auth/gate.go` (~line 203): every protected non-admin module
+accepts a valid bearer API key unconditionally, "no per-module opt-in"; admin never accepts one. The config
+shape is `auth.api_keys: [{name, hash}]` (`config.NamedHash`), with no module field. So a key created for
+one client (for example the haproxy editor talking to CertMachine) is also valid on todo, grocery, utuber,
+smbedit and every other protected module. The `-gen-api-key -name <name>` flag and the admin "Generate key"
+action store only a name and a hash; `-name` is a label, not a scope.
+
+**Fix direction (needs owner decision; not started).** Add an optional module scope to a key entry (for
+example `modules: ["certmachine"]`; empty could mean all, to keep existing keys working, or could be
+refused), have the gate accept a key only on its listed modules, show and set the scope in the admin Generate
+key action and in `-gen-api-key` (a `-modules` flag), and add a red-first test like P8-4's
+`session_isolation_test.go`: a key scoped to certmachine gets 401 on every other module host. Decide what an
+unscoped existing key does (breaking vs. compatible).
+
+---
+
+## P8-8: smbedit, many shares fall off the bottom with no scrollbar
+
+**Reported (owner, 2026-10-02).** Add enough shares and they fall off the bottom of the screen; no vertical
+scrollbar appears. The page should scroll, with the footer staying at the footer. (A follow-on to Phase 7 D4,
+"smbedit page scrolls below the footer": that fix left the opposite symptom.)
+
+**Root cause (verified by measurement).** `web/smbedit/src/styles.css`: `.layout { height: 100% }` inside
+`#root`, which had no height, so the percentage resolved to `auto` and the grid grew to its content (3727px in a
+633px window with 40 shares); `body { height: 100vh; overflow: hidden }` clipped it; `.main-content`
+(`overflow-y: auto`) never overflowed because it had grown to fit, so it never scrolled; the footer sat at
+3727px, off screen.
+
+**Fix.** `#root { height: 100% }`. Re-measured in headless Chrome with 40 shares: layout 633px (= viewport),
+main area scrolls (536px visible of 3630px), footer flush at the bottom, no page scroll range; with 2 shares the
+footer is still at the bottom. Rebuilt `web/smbedit/js/bundle.css` (the only tracked artifact that changed).
+Regression guard `web/smbedit/src/layout.test.ts` (suite `smbedit-layout`) asserts the height chain and the
+scrolling region in the stylesheet; shown to FAIL with the fix removed and PASS with it.
+
+**Acceptance.** Owner confirms in a browser: with many shares the list scrolls, the header and the Save & Restart
+footer stay put, and the footer is flush with the bottom of the window.
+
+---
+
+## P8-9: haproxy module settings have no UI
+
+**Owner rule (2026-10-02).** Except in extreme circumstances there should always be a UI component to do it for
+you; no feature may require hand-editing a file (memory: feedback-no-hand-editing-features).
+
+**Gap (found while closing the rule out, not yet raised by the owner on this module).** Every setting of the
+haproxy module is only editable in `unified-webapp.json`: `certmachine.url`, `certmachine.api_key`,
+`certmachine.ca_file`, `os`, `config_path`, `certs_dir`, `crt_list_path`, `stats_socket_path`, `service_name`,
+`backup_keep`, `expiry_warn_days`. The editor itself is a UI, but the editor's own settings are not, and the
+module cannot be turned on at all without a `host_routing` entry and a `haproxy` block added by hand (the
+FRD 9 module-settings list was written without a UI home for them).
+
+**Fix direction (needs a short design and owner approval before building).** A Settings tab in the haproxy
+module: CertMachine URL, API key (write-only field, shown as set/not set), CA file, a "Test connection" button
+(list call plus an ETag-verified pull of a harmless cert, reporting plainly), and the path/backup/expiry
+settings with the driver's defaults shown as placeholders; explicit Save, no autosave; applied without a
+restart where the module can rebuild its driver/client live, otherwise the UI says exactly that and offers a
+restart control rather than telling the owner to run a command. Also decide how the module gets enabled without
+hand editing (an admin "Modules" control for host routing and the settings block is the general fix and would
+help every module).
+
+**Built (2026-10-02).** Settings tab in the haproxy module: grouped fields, write-only API key with Set/Not set
+and Clear, driver defaults as placeholders, explicit Save with Discard and an unsaved indicator, Test connection
+(list call, plain failure classes, no key leakage). Stored in `<data_dir>/settings.json` (0600, only changed
+fields), the config block is optional starting values. Save rebuilds driver, CertMachine client, cert store,
+applier and stats verifier live under an RWMutex (including `os`; an unsupported OS keeps the scoped 503 with
+the reason shown). Nothing needs a restart. Not covered here: turning the module on and its hostname still
+needs a `host_routing` entry (the general "Modules" admin control is a separate item), and the test is a list
+call only, not an ETag-verified pull.
+
+**Acceptance.** Every `haproxy` setting can be viewed and changed from the UI with validation errors in plain
+text, the API key is never returned, and nothing in the guide tells the operator to edit a file except as an
+explicitly labelled convenience.
 
 ---
 

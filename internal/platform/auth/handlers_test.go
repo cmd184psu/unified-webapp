@@ -959,6 +959,7 @@ func TestAuthEventLogPasskeyManagementDeniedWithoutLDAP(t *testing.T) {
 	p := &Policy{
 		Modules:    map[string]ModulePolicy{"grocery": {PinFile: pinPath}},
 		SessionTTL: time.Hour,
+		passkeys:   newTestPasskeyService(t, testPasskeyConfig(), func() time.Time { return now }),
 	}
 	svc := newGateService(t, now, p)
 

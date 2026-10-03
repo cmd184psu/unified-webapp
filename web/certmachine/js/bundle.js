@@ -807,7 +807,7 @@ function extraBadge(kind, label) {
   badge.textContent = label;
   return badge;
 }
-function buildCertRow(cert, kind, onOpenDetail) {
+function buildCertRow(cert, kind, onOpenDetail, onDelete) {
   const row = el3("li", "cert-row");
   row.dataset.kind = kind;
   const main = el3("div", "cert-row-main");
@@ -845,6 +845,11 @@ function buildCertRow(cert, kind, onOpenDetail) {
   details.textContent = "Details";
   details.addEventListener("click", () => onOpenDetail(cert.id));
   actions.append(details);
+  const del = el3("button", "cert-action cert-action-btn cert-action-danger");
+  del.type = "button";
+  del.textContent = "Delete";
+  del.addEventListener("click", () => onDelete(cert));
+  actions.append(del);
   for (const [label, href] of downloadActions(cert.id)) {
     actions.append(
       cert.quarantineReason === void 0 ? downloadLink(label, href) : disabledAction(label, `Unavailable: quarantined -- ${cert.quarantineReason}`)
@@ -877,7 +882,7 @@ function emptyState(message) {
   p.textContent = message;
   return p;
 }
-function appendRowGroup(target, certs, warnDays, now, onOpenDetail, emptyMessage, emptyPrimaryMessage) {
+function appendRowGroup(target, certs, warnDays, now, onOpenDetail, onDelete, emptyMessage, emptyPrimaryMessage) {
   if (certs.length === 0) {
     target.appendChild(emptyState(emptyMessage));
     return;
@@ -886,7 +891,7 @@ function appendRowGroup(target, certs, warnDays, now, onOpenDetail, emptyMessage
   const deemphasized = [];
   for (const cert of certs) {
     const kind = badgeFor(cert.notAfter, cert.status, warnDays, now);
-    const row = buildCertRow(cert, kind, onOpenDetail);
+    const row = buildCertRow(cert, kind, onOpenDetail, onDelete);
     (isDeemphasized(kind) ? deemphasized : primary).push(row);
   }
   const primaryList = el3("ul", "cert-list");
@@ -930,6 +935,7 @@ function renderCertList(container, certs, warnDays, now, options) {
       warnDays,
       now,
       options.onOpenDetail,
+      options.onDelete,
       "No certificates match your search.",
       "No active certificates -- everything is expired or archived."
     );
@@ -953,6 +959,7 @@ function renderCertList(container, certs, warnDays, now, options) {
         warnDays,
         now,
         options.onOpenDetail,
+        options.onDelete,
         "No certificates match your search.",
         "No active certificates in this group."
       );
@@ -1736,7 +1743,7 @@ function openImportWizard(certCount, onImported) {
 }
 
 // web/certmachine/js/ui.ts
-import { showToast as showToast6, promptDialog } from "/shared/dist/shared.mjs";
+import { showToast as showToast6, promptDialog, confirmDialog as confirmDialog2 } from "/shared/dist/shared.mjs";
 function el7(tag, className) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -1908,6 +1915,25 @@ async function mountCertApp(root) {
             void refresh();
           }
         });
+      },
+      onDelete: (cert) => {
+        void (async () => {
+          const ok = await confirmDialog2(
+            `Delete ${cert.fqdn}? This permanently removes the certificate and its private key and cannot be undone.`,
+            { title: "Delete certificate?", confirmLabel: "Delete", cancelLabel: "Cancel" }
+          );
+          if (!ok) return;
+          try {
+            const resp = await deleteCert(cert.id, cert.fqdn);
+            showToast6(
+              resp.previousDropped ? `Deleted ${cert.fqdn}. The previous CA no longer signed any active certificate and was removed, along with its archived certificates.` : `Deleted ${cert.fqdn}.`,
+              "success"
+            );
+            void refresh();
+          } catch (err) {
+            showToast6(err instanceof Error ? err.message : String(err), "error");
+          }
+        })();
       }
     });
   }

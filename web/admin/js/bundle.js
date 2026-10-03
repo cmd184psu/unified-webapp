@@ -1,3 +1,81 @@
+// web/admin/js/passkeyform.ts
+var MAX_ORIGINS = 64;
+function normalizeOrigins(list) {
+  const out = [];
+  for (const o of list) {
+    const t = o.trim();
+    if (t && !out.includes(t)) out.push(t);
+  }
+  return out;
+}
+function addOrigin(list, origin = "") {
+  return [...list, origin];
+}
+function removeOrigin(list, index) {
+  return list.filter((_, i) => i !== index);
+}
+function suggestFromOrigin(origin, rpId, origins) {
+  const list = origins.includes(origin) ? origins.slice() : addOrigin(origins.filter((o) => o.trim() !== ""), origin);
+  let host = "";
+  try {
+    host = new URL(origin).hostname.toLowerCase();
+  } catch {
+    host = "";
+  }
+  let hint = origins.includes(origin) ? origin + " was already in the list." : "Added " + origin + ".";
+  let id = rpId;
+  if (rpId.trim() === "") {
+    const isIP = /^[0-9.]+$/.test(host) || host.includes(":");
+    if (host && !isIP) {
+      const labels = host.split(".");
+      id = labels.length >= 3 ? labels.slice(1).join(".") : host;
+      hint += " Set the Relying Party ID to " + id + ", the parent domain of this page.";
+    } else {
+      hint += " Could not guess a Relying Party ID from this address; passkeys need a domain name, not an IP.";
+    }
+  }
+  return { origins: list, rpId: id, hint };
+}
+function validatePasskeyForm(rpIdRaw, originsRaw) {
+  const id = rpIdRaw.trim().toLowerCase();
+  const origins = normalizeOrigins(originsRaw);
+  if (id === "" && origins.length === 0) return "";
+  if (id === "") return "Relying Party ID is required when allowed origins are set";
+  if (origins.length === 0) return "at least one allowed origin is required when a Relying Party ID is set";
+  if (origins.length > MAX_ORIGINS) return "too many allowed origins: at most " + MAX_ORIGINS;
+  if (/[\s:/?#@\\]/.test(id)) return "Relying Party ID " + id + " must be a bare host name: no scheme, port, path or spaces";
+  if (!id.includes(".") && id !== "localhost") return "Relying Party ID " + id + " must contain at least one dot (for example example.com)";
+  for (const o of origins) {
+    let u;
+    try {
+      u = new URL(o);
+    } catch {
+      return o + " is not a valid origin: use a URL like https://host.example.com";
+    }
+    const host = u.hostname.toLowerCase();
+    if (host === "") return o + " has no host";
+    if (u.protocol !== "https:" && !(u.protocol === "http:" && host === "localhost")) {
+      return o + " must use https (http is only allowed for http://localhost)";
+    }
+    if (u.pathname !== "/" && u.pathname !== "" || u.search !== "" || u.hash !== "") {
+      return o + " must be an origin only: no path, query or fragment";
+    }
+    if (host !== id && !host.endsWith("." + id)) {
+      return host + " is not under " + id + ": an origin's host must be the RP ID or a subdomain of it";
+    }
+  }
+  return "";
+}
+
+// web/admin/js/passkeystate.ts
+var PASSKEYS_NOT_CONFIGURED_TEXT = "Passkeys are not configured on this server: set the Relying Party ID and allowed origins in Admin > Passkey settings (passkeys also need HTTPS).";
+function passkeyCardState(status, message) {
+  if (status === 409) return { kind: "unconfigured", text: message || PASSKEYS_NOT_CONFIGURED_TEXT };
+  if (status === 403) return { kind: "locked", text: "Sign in with LDAP to view and manage your passkeys." };
+  if (status >= 200 && status < 300) return { kind: "ready", text: "" };
+  return { kind: "error", text: (message || "Unable to load passkeys") + " (HTTP " + status + ")" };
+}
+
 // web/admin/js/main.ts
 import { ThemeManager, HamburgerMenu, createCopyButton, openModal, showToast } from "/shared/dist/shared.mjs";
 function debounce(fn, ms) {
@@ -17,6 +95,7 @@ var panels = [
   "panel-keys",
   "panel-ldap",
   "panel-session",
+  "panel-passkey-settings",
   "panel-passkeys",
   "panel-operator-pin"
 ].map((id) => document.getElementById(id));
@@ -24,6 +103,7 @@ var authConfig = null;
 var matrix = {};
 var passkeys = [];
 var passkeysLocked = false;
+var passkeysUnconfigured = "";
 var pinFiles = [];
 async function api(method, path, body) {
   const opts = { method, headers: {} };
@@ -116,13 +196,14 @@ async function loadAll() {
     matrix[m] = { protected: true, pinFile: entry.pin_file || "", idle: entry.idle_minutes || 0 };
   });
   passkeys = passkeysRes.ok && passkeysRes.data && passkeysRes.data.passkeys || [];
-  passkeysLocked = passkeysRes.status === 403;
+  applyPasskeyStatus(passkeysRes);
   statusEl.classList.add("hidden");
   panels.forEach((p) => p.classList.remove("hidden"));
   renderMatrix();
   renderKeys();
   renderLdap();
   renderSession();
+  renderPasskeySettings();
   renderPasskeys();
   renderOperatorPin();
 }
@@ -511,6 +592,106 @@ document.querySelectorAll("#session-form input").forEach((el) => {
   const eventName = el instanceof HTMLInputElement && el.type === "checkbox" ? "change" : "input";
   el.addEventListener(eventName, autoSaveSession);
 });
+var passkeyOrigins = [];
+function passkeyRpIdInput() {
+  return document.getElementById("passkey-rp-id");
+}
+function renderPasskeyOrigins() {
+  const list = document.getElementById("passkey-origins-list");
+  list.innerHTML = "";
+  passkeyOrigins.forEach((origin, i) => {
+    const li = document.createElement("li");
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = origin;
+    input.placeholder = "https://app.example.com";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    input.setAttribute("aria-label", "Allowed origin " + (i + 1));
+    input.addEventListener("input", () => {
+      passkeyOrigins[i] = input.value;
+    });
+    const rm = document.createElement("button");
+    rm.type = "button";
+    rm.className = "btn btn-ghost";
+    rm.textContent = "Remove";
+    rm.addEventListener("click", () => {
+      passkeyOrigins = removeOrigin(passkeyOrigins, i);
+      renderPasskeyOrigins();
+    });
+    li.append(input, rm);
+    list.appendChild(li);
+  });
+}
+function renderPasskeySettings() {
+  const p = authConfig.passkey || {};
+  passkeyRpIdInput().value = p.rp_id || "";
+  passkeyOrigins = (p.rp_origins || []).slice();
+  renderPasskeyOrigins();
+}
+function setPasskeySettingsError(text) {
+  document.getElementById("passkey-settings-error").textContent = text;
+}
+async function reloadPasskeyCard() {
+  const res = await api("GET", "/api/auth/passkeys");
+  applyPasskeyStatus(res);
+  passkeys = res.ok && res.data && res.data.passkeys || [];
+  renderPasskeys();
+}
+async function savePasskeySettings() {
+  const statusEl2 = document.getElementById("passkey-settings-status");
+  statusEl2.textContent = "";
+  statusEl2.className = "status";
+  setPasskeySettingsError("");
+  const rp_id = passkeyRpIdInput().value.trim();
+  const rp_origins = normalizeOrigins(passkeyOrigins);
+  const advice = validatePasskeyForm(rp_id, rp_origins);
+  if (advice) {
+    setPasskeySettingsError(advice);
+    showToast("Passkey settings not saved: " + advice, "error");
+    return;
+  }
+  const cur = authConfig.passkey || {};
+  const unchanged = (cur.rp_id || "") === rp_id.toLowerCase() && JSON.stringify(cur.rp_origins || []) === JSON.stringify(rp_origins);
+  if (unchanged) {
+    statusEl2.textContent = "Nothing changed.";
+    showToast("Passkey settings: nothing changed.", "notice");
+    return;
+  }
+  const res = await api("PUT", "/api/config/passkey", {
+    rp_id,
+    rp_origins
+  });
+  if (!res.ok) {
+    const msg = errorText(res, "Unable to save passkey settings.");
+    setPasskeySettingsError(msg);
+    showToast("Passkey settings not saved: " + msg, "error");
+    return;
+  }
+  authConfig.passkey = res.data || {};
+  renderPasskeySettings();
+  statusEl2.textContent = "Saved.";
+  statusEl2.className = "status status-good";
+  showToast("Passkey settings saved.", "success");
+  await reloadPasskeyCard();
+}
+document.getElementById("passkey-settings-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  await savePasskeySettings();
+});
+document.getElementById("passkey-origin-add").addEventListener("click", () => {
+  passkeyOrigins = addOrigin(passkeyOrigins);
+  renderPasskeyOrigins();
+  const inputs = document.querySelectorAll("#passkey-origins-list input");
+  inputs[inputs.length - 1]?.focus();
+});
+document.getElementById("passkey-origin-here").addEventListener("click", () => {
+  const s = suggestFromOrigin(location.origin, passkeyRpIdInput().value, passkeyOrigins);
+  passkeyOrigins = s.origins;
+  passkeyRpIdInput().value = s.rpId;
+  renderPasskeyOrigins();
+  document.getElementById("passkey-settings-hint").textContent = s.hint + " Press Save to apply.";
+});
 function formatTimestamp(sec) {
   if (!sec) return "";
   return new Date(sec * 1e3).toLocaleString();
@@ -584,15 +765,21 @@ function askLdapLogin() {
     });
   });
 }
+function applyPasskeyStatus(res) {
+  const state = passkeyCardState(res.status, errorText(res, ""));
+  passkeysLocked = state.kind === "locked";
+  passkeysUnconfigured = state.kind === "unconfigured" ? state.text : "";
+}
 async function unlockPasskeys() {
   const identity = await askLdapLogin();
   if (identity === null) return false;
   const res = await api("GET", "/api/auth/passkeys");
-  passkeysLocked = !res.ok;
+  applyPasskeyStatus(res);
+  passkeysLocked = !res.ok && !passkeysUnconfigured;
   passkeys = res.ok && res.data && res.data.passkeys || [];
   renderPasskeys();
-  if (passkeysLocked) {
-    showToast("Signed in as " + identity + ", but passkeys are still unavailable (HTTP " + res.status + ").", "error");
+  if (!res.ok) {
+    showToast(errorText(res, "Signed in as " + identity + ", but passkeys are still unavailable."), "error");
     return false;
   }
   showToast("Signed in as " + identity + ".", "success");
@@ -602,7 +789,31 @@ function renderPasskeys() {
   const list = document.getElementById("passkeys-list");
   list.innerHTML = "";
   const submitBtn = document.getElementById("passkey-submit");
-  if (submitBtn) submitBtn.textContent = passkeysLocked ? "Sign in with LDAP\u2026" : "Register new passkey";
+  const notice = document.getElementById("passkey-unconfigured-note");
+  if (notice) {
+    notice.textContent = passkeysUnconfigured;
+    if (passkeysUnconfigured) {
+      const link = document.createElement("a");
+      link.href = "#panel-passkey-settings";
+      link.textContent = " Go to Passkey settings.";
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        document.getElementById("panel-passkey-settings").scrollIntoView({ behavior: "smooth" });
+        passkeyRpIdInput().focus();
+      });
+      notice.appendChild(link);
+    }
+    notice.classList.toggle("hidden", !passkeysUnconfigured);
+  }
+  if (submitBtn) {
+    submitBtn.textContent = passkeysLocked ? "Sign in with LDAP\u2026" : "Register new passkey";
+    submitBtn.disabled = !!passkeysUnconfigured;
+    submitBtn.title = passkeysUnconfigured;
+  }
+  if (passkeysUnconfigured) {
+    list.innerHTML = '<li class="named-list-empty">Passkeys are not available.</li>';
+    return;
+  }
   if (passkeysLocked) {
     list.innerHTML = '<li class="named-list-empty">Sign in with LDAP to view and manage your passkeys.</li>';
     return;
@@ -697,6 +908,7 @@ async function registerPasskey(friendlyName, retried = false) {
     showToast(msg, "error");
     return false;
   };
+  if (passkeysUnconfigured) return fail(passkeysUnconfigured);
   if (passkeysLocked && !await unlockPasskeys()) return false;
   const beginRes = await api(
     "POST",
@@ -704,6 +916,11 @@ async function registerPasskey(friendlyName, retried = false) {
     { friendlyName }
   );
   if (!beginRes.ok) {
+    if (beginRes.status === 409) {
+      passkeysUnconfigured = errorText(beginRes, PASSKEYS_NOT_CONFIGURED_TEXT);
+      renderPasskeys();
+      return fail(passkeysUnconfigured);
+    }
     if (beginRes.status === 403 && !retried) {
       passkeysLocked = true;
       renderPasskeys();

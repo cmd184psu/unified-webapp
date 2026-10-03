@@ -88,7 +88,8 @@ func main() {
 	flagKey := flag.String("tls-key", "", "Override TLS key path")
 	flagInit := flag.Bool("init-config", false, "Write default config and exit")
 	flagHashPin := flag.Bool("hash-pin", false, "Read a PIN from stdin, print its bcrypt hash, and exit")
-	flagGenAPIKey := flag.Bool("gen-api-key", false, "Generate a new API key and its config hash, print both, and exit")
+	flagGenAPIKey := flag.Bool("gen-api-key", false, "Generate a new API key and its config hash, print both, and exit (with -name, also store the hash in the config file)")
+	flagName := flag.String("name", "", "With -gen-api-key: name of the auth.api_keys entry; the hash is stored (added or replaced) in the -config file")
 	flag.Parse()
 
 	if *flagInit {
@@ -104,8 +105,13 @@ func main() {
 		return
 	}
 
+	if *flagName != "" && !*flagGenAPIKey {
+		log.Fatalf("-name is only valid with -gen-api-key")
+	}
 	if *flagGenAPIKey {
-		genAPIKeyAndExit()
+		if err := runGenAPIKey(*flagName, *cfgPath, os.Stdout); err != nil {
+			log.Fatalf("gen-api-key: %v", err)
+		}
 		return
 	}
 
@@ -241,24 +247,45 @@ func hashPINAndExit() {
 	fmt.Println(string(hash))
 }
 
-// genAPIKeyAndExit generates a new 32-byte random API key, encodes it as
+// runGenAPIKey generates a new 32-byte random API key, encodes it as
 // base64url without padding (the text a client will send in the
 // Authorization/X-API-Key header), and prints it alongside its
 // "sha256:<hex>" config hash. The hash is computed over the encoded key
 // string itself -- exactly what a client sends -- so it matches what
 // auth.checkAPIKey computes from the header value.
-func genAPIKeyAndExit() {
+//
+// With an empty name nothing is written anywhere. With a name, the hash is
+// stored in cfgPath's auth.api_keys first, and the key is printed only if
+// that succeeded: a key that was not stored is useless and must not be left
+// on the terminal.
+func runGenAPIKey(name, cfgPath string, out io.Writer) error {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
-		log.Fatalf("gen-api-key: generating key: %v", err)
+		return fmt.Errorf("generating key: %w", err)
 	}
 	key := base64.RawURLEncoding.EncodeToString(raw)
 
 	sum := sha256.Sum256([]byte(key))
 	hash := "sha256:" + hex.EncodeToString(sum[:])
 
-	fmt.Printf("key:  %s\n", key)
-	fmt.Printf("hash: %s\n", hash)
+	if name == "" {
+		fmt.Fprintf(out, "key:  %s\n", key)
+		fmt.Fprintf(out, "hash: %s\n", hash)
+		return nil
+	}
+
+	replaced, err := admin.AddAPIKeyToConfigFile(cfgPath, name, hash)
+	if err != nil {
+		return fmt.Errorf("storing key %q in %s: %w", name, cfgPath, err)
+	}
+	verb := "added"
+	if replaced {
+		verb = "replaced existing entry"
+	}
+	fmt.Fprintf(out, "key:  %s\n", key)
+	fmt.Fprintf(out, "hash: %s\n", hash)
+	fmt.Fprintf(out, "stored as %q in %s (%s). The running service does not see the change until it is restarted (the admin module's Generate key applies live).\n", name, cfgPath, verb)
+	return nil
 }
 
 // newServer builds the http.Server used to serve the app.

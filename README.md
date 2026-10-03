@@ -611,13 +611,13 @@ The server still binds `0.0.0.0:<port>` regardless of auth configuration — tha
 
 ### API keys for automation
 
-Scripts and other non-browser clients can authenticate with an API key instead of logging in interactively. Generate one with:
+Scripts and other non-browser clients can authenticate with an API key instead of logging in interactively. Generate one and store its hash in the config file in one step:
 
 ```bash
-go run ./cmd/server -gen-api-key
+go run ./cmd/server -gen-api-key -name haproxy-editor -config ./unified-webapp.json
 ```
 
-which prints the key once (put it wherever your script reads secrets from) and its `sha256:...` hash (paste that into `auth.api_keys`). Send the key as either header — `Authorization: Bearer <key>` is checked first, falling back to `X-API-Key: <key>` if `Authorization` is absent or isn't `Bearer`-shaped. Any protected module accepts a valid API key, and a module you haven't listed in `auth.modules` doesn't require one.
+This prints the key once (put it wherever your script reads secrets from) and adds an `auth.api_keys` entry named `haproxy-editor` (an existing entry with that name has its hash replaced). The name is just the entry's label, not a module scope. Only the `auth` member of the file is rewritten, and the running service does not see the change until it is restarted. The admin module's Generate key does the same live, without a restart. Alternatively, run `go run ./cmd/server -gen-api-key` without `-name`: it only prints the key and its `sha256:...` hash, and you paste the hash into `auth.api_keys` yourself. Send the key as either header — `Authorization: Bearer <key>` is checked first, falling back to `X-API-Key: <key>` if `Authorization` is absent or isn't `Bearer`-shaped. Any protected module accepts a valid API key, and a module you haven't listed in `auth.modules` doesn't require one.
 
 ---
 

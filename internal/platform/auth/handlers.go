@@ -43,6 +43,15 @@ const (
 	reasonThrottled        = "throttled"
 	reasonAdminPINConfig   = "admin_pin_config"
 	reasonPinFileConfig    = "pin_file_config"
+
+	// Passkey ceremony failure classes: each names what actually went wrong
+	// so the log line is useful, instead of one bad_credential for all.
+	reasonPasskeyBeginFailed        = "passkey_begin_failed"
+	reasonPasskeyNoCredentials      = "passkey_no_credentials"
+	reasonPasskeyVerificationFailed = "passkey_verification_failed"
+	reasonPasskeyChallengeExpired   = "passkey_challenge_expired"
+	reasonPasskeyNotAuthorized      = "passkey_not_authorized"
+	reasonPasskeyFinishFailed       = "passkey_finish_failed"
 )
 
 // containsMethod reports whether method appears in list -- used against
@@ -298,6 +307,13 @@ func (s *Service) handleActivity(w http.ResponseWriter, r *http.Request, module 
 	response.WriteJSON(w, http.StatusOK, map[string]any{"identity": claims.Subject, "methods": claims.Grants, "idleSeconds": int(left.Seconds())})
 }
 
+// Plain-language answers to a failed passkey sign-in, one per failure class.
+const (
+	msgPasskeyNoCredentials = "No passkey is registered for that account. Sign in another way, then register one in Admin > Passkeys."
+	msgPasskeyNotAccepted   = "That passkey was not accepted."
+	msgPasskeyTimedOut      = "The passkey sign-in timed out. Try again."
+)
+
 // passkeyLoginBeginRequest is the POST /api/auth/passkey/login/begin body.
 type passkeyLoginBeginRequest struct {
 	Username string `json:"username"`
@@ -322,9 +338,15 @@ func (s *Service) handlePasskeyLoginBegin(w http.ResponseWriter, r *http.Request
 	}
 
 	ceremony, err := p.passkeys.BeginPasskeyLogin(req.Username)
+	if errors.Is(err, ErrPasskeyNoCredentials) {
+		logLoginAttempt(false, module, "passkey", req.Username, reasonPasskeyNoCredentials)
+		response.WriteError(w, http.StatusNotFound, msgPasskeyNoCredentials)
+		return
+	}
 	if err != nil {
-		logLoginAttempt(false, module, "passkey", "", reasonBadCredential)
-		response.WriteError(w, http.StatusBadRequest, "unable to begin passkey login")
+		log.Printf("event=auth_passkey_error module=%q stage=%q err=%q", module, "login_begin", err.Error())
+		logLoginAttempt(false, module, "passkey", "", reasonPasskeyBeginFailed)
+		response.WriteError(w, http.StatusInternalServerError, "The server could not start the passkey sign-in. See the server log.")
 		return
 	}
 	writePasskeyCeremony(w, ceremony)
@@ -354,10 +376,41 @@ func (s *Service) handlePasskeyLoginFinish(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if d := s.throttle.delay(); d > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(d.Seconds()))))
+		logLoginAttempt(false, module, "passkey", "", reasonThrottled)
+		response.WriteError(w, http.StatusTooManyRequests, "too many login attempts")
+		return
+	}
+
 	identity, err := p.passkeys.FinishPasskeyLogin(r.Context(), req.ChallengeID, req.Credential)
-	if err != nil {
-		logLoginAttempt(false, module, "passkey", "", reasonBadCredential)
-		response.WriteError(w, http.StatusUnauthorized, "passkey verification failed")
+	switch {
+	case errors.Is(err, ErrPasskeyChallengeInvalid):
+		logLoginAttempt(false, module, "passkey", "", reasonPasskeyChallengeExpired)
+		response.WriteError(w, http.StatusBadRequest, msgPasskeyTimedOut)
+		return
+	case errors.Is(err, ErrPasskeyVerificationFailed), errors.Is(err, ErrPasskeyNoCredentials):
+		s.throttle.fail()
+		logLoginAttempt(false, module, "passkey", "", reasonPasskeyVerificationFailed)
+		response.WriteError(w, http.StatusUnauthorized, msgPasskeyNotAccepted)
+		return
+	case err != nil:
+		log.Printf("event=auth_passkey_error module=%q stage=%q err=%q", module, "login_finish", err.Error())
+		logLoginAttempt(false, module, "passkey", "", reasonPasskeyFinishFailed)
+		response.WriteError(w, http.StatusInternalServerError, "The server could not finish the passkey sign-in. See the server log.")
+		return
+	}
+
+	// A valid assertion proves possession of the passkey, not that the
+	// person is still allowed in: re-check the directory (fails closed when
+	// LDAP is unreachable or not configured).
+	if _, err := s.ldapClient(p.LDAP).Authorize(r.Context(), identity); err != nil {
+		if !errors.Is(err, ErrLDAPAuth) && !errors.Is(err, ErrLDAPForbidden) {
+			log.Printf("event=auth_ldap_error module=%q err=%q", module, err.Error())
+		}
+		s.throttle.fail()
+		logLoginAttempt(false, module, "passkey", identity, reasonPasskeyNotAuthorized)
+		response.WriteError(w, http.StatusUnauthorized, msgPasskeyNotAccepted)
 		return
 	}
 
@@ -371,6 +424,7 @@ func (s *Service) handlePasskeyLoginFinish(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	setSessionCookie(w, tok, p.tokenLifetime(), p.CookieSecure, p.CookieDomain)
+	s.throttle.success()
 	logLoginAttempt(true, module, "passkey", sub, "")
 	response.WriteJSON(w, http.StatusOK, map[string]any{"identity": sub, "methods": methods})
 }
@@ -381,7 +435,7 @@ func (s *Service) handlePasskeysList(w http.ResponseWriter, r *http.Request, mod
 	p := s.policy()
 	claims, ok := s.sessionClaimsFromRequest(r, s.now())
 	if !ok || p.passkeys == nil {
-		response.WriteError(w, http.StatusBadRequest, "passkeys not available")
+		writePasskeysNotConfigured(w)
 		return
 	}
 	items, err := p.passkeys.ListPasskeys(claims.Subject)
@@ -408,7 +462,7 @@ func (s *Service) handlePasskeyRegisterBegin(w http.ResponseWriter, r *http.Requ
 	p := s.policy()
 	claims, ok := s.sessionClaimsFromRequest(r, s.now())
 	if !ok || p.passkeys == nil {
-		response.WriteError(w, http.StatusBadRequest, "passkeys not available")
+		writePasskeysNotConfigured(w)
 		return
 	}
 	var req passkeyRegisterBeginRequest
@@ -436,7 +490,7 @@ func (s *Service) handlePasskeyRegisterFinish(w http.ResponseWriter, r *http.Req
 	p := s.policy()
 	claims, ok := s.sessionClaimsFromRequest(r, s.now())
 	if !ok || p.passkeys == nil {
-		response.WriteError(w, http.StatusBadRequest, "passkeys not available")
+		writePasskeysNotConfigured(w)
 		return
 	}
 	var req passkeyRegisterFinishRequest
@@ -458,7 +512,7 @@ func (s *Service) handlePasskeyDelete(w http.ResponseWriter, r *http.Request, mo
 	p := s.policy()
 	claims, ok := s.sessionClaimsFromRequest(r, s.now())
 	if !ok || p.passkeys == nil {
-		response.WriteError(w, http.StatusBadRequest, "passkeys not available")
+		writePasskeysNotConfigured(w)
 		return
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/auth/passkeys/")

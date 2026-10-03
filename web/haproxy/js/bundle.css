@@ -324,3 +324,6 @@ body {
 .stat-other {
   opacity: 0.7;
 }
+.settings-input {
+  max-width: 48rem;
+}

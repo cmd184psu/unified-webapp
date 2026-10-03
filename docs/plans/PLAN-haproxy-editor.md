@@ -1,168 +1,26 @@
-# PLAN: haproxy editor module
+# HAProxy editor: status
 
-Status: **Approved by ralplan consensus** (Critic APPROVE on draft 2, 2026-10-01). Execution via ralph authorized by the owner on 2026-10-01. Owner gates (A-OG, B-OG) and B5b stay pending owner sign-off; they are never self-certified.
-Mode: DELIBERATE consensus (ralplan)
-Source of truth: `docs/frd/FRD-haproxy-editor.md` (Approved 2026-09-30, draft v7). Every `CMD>` line in the FRD is binding owner law and overrides this plan on any conflict.
-Execution target: the `ralph` loop. Branch `bugfixes` (Go + TypeScript, one binary, modules via `host_routing`).
-Standard verification: `make test` (= `go test -race ./...`), `make test-web` for web code, `make check` for everything. Tests are written RED FIRST (write failing test, confirm it fails, implement, confirm green) on every task that carries code.
+What it is: a module that edits HAProxy from a browser, like smbedit does for Samba. Requirements are in
+`docs/frd/FRD-haproxy-editor.md`; how to run it is in `docs/guides/haproxy.md`.
 
-Build order is fixed by the FRD §3 and §13.5: **Phase A (the CertMachine extension) is built and accepted by curl before any editor code exists.** Phase B is the editor.
+## Built
 
----
+- CertMachine API additions (list filters, `ETag`, `X-Cert-Id`, `X-Cert-Fingerprint`, `If-None-Match`, `HEAD`).
+- The module: model and import of an existing `haproxy.cfg`, generator, Ubuntu/Rocky/macOS drivers, Apply with
+  backup and rollback (and it starts HAProxy if it was stopped), certificates pulled from CertMachine and
+  checked against their ETag, referential checks, a React UI (services, globals, certificates, backups, log,
+  raw, stats), and `backup_dir`.
+- Tests: `make test` and `npm run test:web` pass. Everything uses fakes; nothing has been run against a real
+  HAProxy.
 
-## 1. RALPLAN-DR summary
+## Checked by you
 
-### Principles (owner-derived, govern every task)
+- CertMachine extension against the live CertMachine (`a-og-curl-checks.sh`): passed.
+- The editor's CertMachine client against the live CertMachine (`TestLiveCertMachineClient`, opt-in): passed.
 
-1. **The OS is invisible.** All OS difference lives behind one driver interface; model, render, validate, apply, certs, UI and the HTTP API shape are OS-agnostic and tested with a fake driver. The user cannot tell macOS from Linux (D1, D13, FR-H31).
-2. **Nothing is live until Apply, and Apply is a no-op when nothing changed** (D4). Edits mutate only `state.json`/`certs.json`. Apply = render → validate-in-staging → backup → atomic install → reload → verify → rollback-on-failure (§7).
-3. **CertMachine is the sole, remote source of truth for certs.** The editor never parses, issues, inspects or computes anything about a certificate; it has no `x509`, no `openssl`, no upload path (D15, §2). It downloads a verified `haproxy.pem`, names the file, tracks enabled state, references it in the crt-list.
-4. **The editor owns the files it writes.** It overwrites `haproxy.cfg` and the crt-list, drops comments, does no drift detection; the only output contract is "`haproxy -c` accepts it" (D3). It owns the certs dir and the 6.2 naming; files not matching the convention are never touched.
-5. **Platform conventions are inherited, not reinvented** (§9, `docs/guides/adding-a-module.md`): module-scoped auth (its own login/session/timeout, no shared cookie, `auth.cookie_domain` empty), ☰ on the right from config only, toggle switches never checkboxes, wide text fields, no autosave on keystroke, every outcome a toast. All privilege via sudo with a documented minimal command set; private keys never leave the editor's API.
+## Not done
 
-### Top 3 decision drivers
-
-1. **Correctness of a change that takes effect with no CLI** — a wrong `haproxy.cfg` is an outage or a silently un-served host. Drives: validate-in-staging with the real binary, backup+rollback, change-detection, coverage check.
-2. **Feature/UX parity across Ubuntu, Rocky 10 and macOS Tahoe (Apple silicon)** — owner `CMD>` law. Drives: the driver abstraction and its fake, and the "no OS-specific field in the API shape" test.
-3. **Usage economy / execution by the ralph loop** — small, independently verifiable, red-first tasks; one final review; no deslop passes. Drives the task partition granularity below.
-
-### Viable options weighed
-
-**Option A — Two-phase build: CertMachine extension first (accepted by curl), then the editor as vertical slices. (CHOSEN)**
-- Pros: matches FRD §13.5 build order exactly; the extension is `curl`-verifiable and stands alone, de-risking the hardest external contract (ETag/identity) before any editor code depends on it; slices map 1:1 to the FRD's suggested seams; each slice is a one-pass executor task.
-- Cons: only the real-endpoint swap (B5b) is blocked on Phase A acceptance; the client itself (B5a) is unblocked by building against a fake that replays Phase A's byte vectors.
-
-**Option B — Build the editor against a local fake CertMachine first, extend the real CertMachine in parallel.**
-- Pros: more parallelism; editor UI progresses without waiting on Phase A.
-- Cons: violates the FRD's explicit "done first" order (§13, §13.5); risks the editor's verification code being written to a fake that diverges from the real ETag/header semantics; two teams racing on the integrity contract is exactly where silent bugs hide. Rejected.
-
-**Option C — One monolithic "system config editor" now, with Samba and HAProxy as plug-ins (the §10 future merge).**
-- Pros: no second refactor later.
-- Cons: the FRD forbids it now ("no shared-code refactor now", "must not modify smbedit now", §2/§10). Out of scope by owner law. Rejected — but Principle 1/Option A keep the seams (§10) clean so the merge stays cheap.
-
-Two-plus viable options survive; Option A chosen for strict FRD-order compliance and lowest integrity-contract risk.
-
-### Pre-mortem (3 failure scenarios)
-
-1. **The integrity contract is subtly wrong and ships green.** The shared `writeDownload` funnel (handler.go ~901) is used by FIVE callers — cert.pem/key.pem/haproxy.pem (`handleCertFileGet`) **and** rootCA.crt (~609, no cert id) **and** the `.tgz` bundle (`BundleTGZ` embeds `time.Now()`, so its ETag would be unstable). Changing the funnel would leak identity headers onto rootCA.crt/.tgz and emit an unstable ETag; a hasty change could also compute the ETag over the wrong bytes, send identity headers on a 409 refusal, or break `If-None-Match` list/`*`/weak-tag parsing. *Mitigation:* A2 adds the logic **only in `handleCertFileGet`** (local `writeVerifiedDownload`), never the shared funnel, with a test that rootCA.crt and .tgz carry no `X-Cert-*`. The repo spec `internal/certmachine/handler_extension_test.go` (copied from `docs/plans/haproxy-editor/handler_extension_test.go.draft`) encodes every case (exact/weak/list/star `If-None-Match`, 304-keeps-headers, refusals carry no ETag, fingerprint non-nil). **A-REV** reviews the contract before any editor trusts it; A-OG re-checks with real `curl` + `sha256sum` (FRD §13.5).
-2. **macOS parity breaks in a way Linux CI never sees.** The driver could emit `bind 127.0.0.1:443` (fails on macOS), use the removed `master-worker` keyword instead of `-W`, or omit the raised file limit (maxconn silently drops to 100). *Mitigation:* B3 asserts "macOS never emits a non-wildcard bind" and "`-W`, never the keyword" against the fake exec layer; B-OG runs the core flow on the owner's Tahoe Mac (192.168.1.11) — never self-certified.
-3. **Apply half-succeeds and leaves HAProxy serving a config nobody can see.** Install order (certs → crt-list → config), atomicity, and rollback-after-reload-failure are easy to get subtly wrong, and a wrong order serves a cert file that the crt-list already references but isn't on disk yet, or rolls back config but not the crt-list. *Mitigation:* B4's fake-driver table tests cover validate-fail / install-fail / reload-fail and assert "a failed Apply leaves the previous config live"; verify step reads the stats socket for the new worker generation.
-
-### Expanded test plan (deliberate mode)
-
-- **Unit** (`go test -race ./internal/haproxy/...`, `./internal/certmachine/...`): parser/generator round-trip stability (`import(render(import(x))) == import(x)`); change-detection; cert file-naming determinism; download verification (hash==ETag, X-Cert-Id, X-Cert-Fingerprint); freshness id-compare; coverage flagging; driver paths/commands/baseline/ownership per OS; crt-list enable/disable; the "no x509/openssl/upload import" guard test; "no cert detail ever written to certs.json"; "key never in any API response".
-- **Integration** (Go, fake driver + fake CertMachine server, and the real CertMachine handler for Phase A): Apply pipeline table tests (validate/install/reload fail + rollback); CertMachine client against a fake server for every failure class and "details unavailable"; non-loopback HTTP refused; the real `GET /api/certs` filters and file-download headers end to end.
-- **E2E / owner acceptance** (browser, not self-certified — B-OG): the full §12 owner checklist on real Linux and on the Tahoe Mac, plus the `curl` acceptance of §13.5 (A-OG).
-- **Observability**: ops log + service log over SSE (FR-H24); service-status panel (active/inactive, version, uptime, last apply + result); the read-only Stats tab from the `level user` stats socket (FR-H25); every outcome a toast (FR-H35); distinct visible messages for each CertMachine failure class (FR-H44).
-
----
-
-## 2. Task partition
-
-Legend: **Seq** = strictly sequential (shares files / hard data dependency). **Par** = may run in parallel with siblings at the same dependency depth. Every code task is RED FIRST. "Verify" names the exact command(s); `make test` is the gate for Go, `make test-web` for web, `make check` before hand-off.
-
-### Phase A — CertMachine extension (FR-C1..FR-C7) — BUILT AND ACCEPTED FIRST, STANDS ALONE
-
-| ID | Task | Dep | Files touched | Red-first test(s) | Acceptance | Verify |
-|----|------|-----|---------------|-------------------|-----------|--------|
-| **A1** | FR-C1 list filters `fqdn` (exact, case-insensitive, literal wildcard) + `status` (active/archived/quarantined; else 400) on `GET /api/certs`; unfiltered response unchanged from today; no match → `{"certs":[]}`. | — | `internal/certmachine/handler.go` (`handleCertsGet`), optionally `store.go` for a filtered query | **Copy** `docs/plans/haproxy-editor/handler_extension_test.go.draft` to `internal/certmachine/handler_extension_test.go` as the Phase-A red-first spec; enable `TestListCertsFilters` only (A2/A3 enable their own next). First **tighten the unfiltered assertion**: compare the unfiltered response to `ListCerts` as the same set, same order and same JSON shape (not just count). | Filters each-alone, combined, no-match, 400 on bad status; unfiltered list is the same set+order+shape as `ListCerts`. | `go test -race ./internal/certmachine/ -run TestListCertsFilters` → then `make test` |
-| **A2** | FR-C2 strong `ETag: "sha256-<hex of body>"` + FR-C3 `X-Cert-Id` / `X-Cert-Fingerprint` on the three file downloads of `GET /api/certs/{id}/files/{name}` **only**. Implement in `handleCertFileGet` (a local `writeVerifiedDownload` used by only the three file names), **not** in the shared `writeDownload` — that funnel is also used by `rootCA.crt` (handler.go ~609, no cert id) and the `.tgz` bundle (`handleCertBundleGet`, whose `BundleTGZ` embeds `time.Now()`, so its ETag would be unstable). Assert each cert's `Fingerprint` (`*string` in model.go) is non-nil before emitting the header; a NULL fingerprint on a downloadable cert is a 500-class internal error (never a blank header). `Content-Type`/`Content-Disposition`/`Cache-Control` unchanged. | A1 (same file) | `internal/certmachine/handler.go` (`handleCertFileGet`; new `writeVerifiedDownload`) | Enable `TestFileDownloadsCarryETagAndIdentityHeaders`; **add** `TestSharedDownloadsCarryNoCertHeaders` asserting `rootCA.crt` and the `.tgz` bundle carry **no** `X-Cert-*`/custom `ETag` and behave exactly as before. | ETag == sha256 of exact body for cert.pem/key.pem/haproxy.pem; identity headers present; fingerprint non-nil == list's; ETag stable across requests; no-store preserved; rootCA.crt and .tgz unchanged. | `go test -race ./internal/certmachine/ -run 'TestFileDownloads|TestSharedDownloads'` → `make test` |
-| **A3** | FR-C4 `If-None-Match` → `304` (no body; ETag + identity headers still sent; handle exact/weak/list/`*`) and `HEAD` → headers, no body. HEAD/304 **short-circuit before the body write while still computing the ETag** (build the bundle server-side, send no bytes). Refusals (quarantined 409, root-mismatch 409, unknown id 404) still carry **no** ETag/identity headers. Tests must **not** assert `405` on the files route — a wrong method `404`s by design (closed name lookup). | A2 (same file) | `internal/certmachine/handler.go` | Enable `TestFileDownloadsConditionalAndHead`, `TestRefusedAndMissingDownloadsCarryNoETag`. | 304 on matching tag incl. weak/list/star; 200 on wrong tag; HEAD headers-only; refusals carry no ETag; no 405 assertion. | `go test -race ./internal/certmachine/` → `make test` |
-| **A4** | FR-C6 + FR-C7 docs: `docs/guides/certmachine.md` documents the filters and download headers with a `curl` + `sha256sum` example; FR-C7 setup (create an API key, list it in `auth.api_keys`; any key works, dedicated recommended not enforced) documented in both `certmachine.md` and a stub note in `docs/guides/haproxy.md`. | A1–A3 green | `docs/guides/certmachine.md`, `docs/guides/haproxy.md` | n/a (docs) | Filters + headers documented; curl example matches real behaviour. | `make check` (doc/gate pass) |
-| **A-REV** | **Focused review gate (not a per-task review, not a deslop pass):** one targeted review of the CertMachine integrity contract before any editor code trusts it — `If-None-Match` weak/list/`*`/exact parsing, HEAD/304 short-circuit, header scope (identity on the three file names only; none on refusals/rootCA.crt/.tgz), ETag computed over the exact body. | A1–A3 green | — | — | Reviewer signs off the contract; findings fixed in A1–A3 before Phase-B deps proceed. | Reviewer (agent) + `make test` green. |
-| **A-OG** | **Owner-gate (curl, §13.5):** filtered list returns the one active cert; a bundle download has all three headers and `sha256sum` of body == ETag; repeat with `If-None-Match` → 304; `HEAD` → headers only; an Edit that re-issues (new SANs) makes the filtered list return the new id. | A1–A4, A-REV | — | — | **Pending owner sign-off — never mark done by the agent.** | Owner runs curl against a real CertMachine instance. |
-
-Phase A is strictly sequential (A1→A2→A3→A4) because A1–A3 share `handler.go` and the one repo spec file `internal/certmachine/handler_extension_test.go` (each task enables only its own tests first); A4 after green; A-REV is the one focused review gate on the integrity contract. One executor, incremental green.
-
-### Phase B — the editor module (`internal/haproxy`, `web/haproxy`, config `haproxy`, `docs/guides/haproxy.md`)
-
-| ID | Task | Dep | Files touched | Red-first test(s) | Acceptance | Verify |
-|----|------|-----|---------------|-------------------|-----------|--------|
-| **B1** | Scaffolding + registration + auth conventions + scoped 503. `HaproxyConfig` struct + expander + `SSEMaxSubscribers` copy-down (config.go); `buildModule` case + `knownModules` entry (cmd/server/main.go); `Build(cfg) (http.Handler,error)` that fails loudly (missing static/data dir) and whose detect-failure path is a scoped 503 with reason (smbedit pattern, FR-H30); add `haproxy` to the `bundle-shape` gate `--require` list (Makefile); `host_routing` + `haproxy` block + `auth.modules.haproxy` example in `unified-webapp.json` (auth opt-in, encouraged not required); `web/haproxy/` skeleton (index.html, src) using `web/shared`; **define the COMPLETE OS-driver interface here** — paths (config/certs/crt-list/stats-socket), service name + reload/restart/start ops, ownership+mode, privileged read/write (sudo), baseline directives, exec with `haproxy -c` and `haproxy -v` — so B2 and B3 can both compile and test against it in parallel (B3 only implements it, adds nothing to the interface). | Phase A accepted (build order) | `internal/platform/config/config.go`, `cmd/server/main.go`, `internal/haproxy/build.go`, `internal/haproxy/driver.go` (interface only), `web/haproxy/*`, `Makefile`, `unified-webapp.json` | `build_test.go`: Build fails on missing static_dir/data_dir; returns a handler on a good config; unsupported-OS detection → scoped 503 reason. | Module registers, serves, inherits platform posture; 503 is scoped (other modules keep serving); auth is module-scoped (its session opens nothing else — pinned later in B6 auth test). | `go test -race ./internal/haproxy/ ./cmd/server/`; `make check` for the gate list |
-| **B2** | Model + import + generator (FR-H1, H2, H5, §5). `state.json` model (global/defaults ordered kv, defaultService, ports, services, rawSections); import parser mapping hero's cfg → model (comments dropped, unmapped kept raw and reported, result checked with `haproxy -c` or stub); generator emitting one TLS frontend per exposed port (`bind *:<port> ssl crt-list <path>`), host ACLs, `use_backend`, backends, default_backend; managed header. Create a **sanitized hero fixture** under `internal/haproxy/testdata/`. | B1 (interface) — **Par with B3** | `internal/haproxy/model.go`, `parse.go`, `render.go`, `state.go`, `testdata/hero.cfg` | §12 Import/render: model has default service + `brandx` + `s3-hero` + 8443 service + raw stats section; render passes `haproxy -c` (stub where no binary); `import(render(import(x))) == import(x)`. | Hero's cfg round-trips; unmapped reported; stable. | `go test -race ./internal/haproxy/`; `make test` |
-| **B3** | OS driver interface + fake + three drivers + auto-detect (FR-H30, H31, H32, H33, D1, D13). Interface: paths (config/certs/crt-list/stats-socket), service name, reload/restart/start, ownership+mode, privileged read/write (sudo), baseline directives, `haproxy -c`/`-v`. Drivers: Ubuntu, Rocky (+ SELinux detect/report only), macOS (launchd job owned by driver, `-W`, pidfile, raised file limit, `bind *:443`, `SIGUSR2` reload). Auto-detect via `haproxy.os` (default auto). Fake exec layer. | B1 (interface) — **Par with B2** | `internal/haproxy/driver.go`, `driver_linux.go`, `driver_darwin.go`, `driver_fake.go` | §12 Drivers: each OS's paths/commands/baseline/ownership; macOS never emits a non-wildcard bind; `-W` not the deprecated keyword; **no OS-specific field appears in the API shape**; unsupported OS (incl. Intel macOS) → scoped 503. | All three drivers behave identically through the interface; fake drives everything above it. | `go test -race ./internal/haproxy/`; `make test` |
-| **B4** | Staging-validate + Apply pipeline + change-detection + backups + rollback + ops log (FR-H20, H21, H22, H23, H24, D4, D6). Change-detection (compare would-write vs live); Check (render+validate only); Apply (render candidate into staging with paths substituted → `haproxy -c` → backup keep-N → install certs→crt-list→config atomically with OS ownership/mode via sudo → reload → verify via stats socket → rollback on any post-install failure); Reload/Restart/Start actions; service-status panel; backups list+restore; ops+service log SSE (mirror `internal/smbedit/oplog.go`). | B2, B3 | `internal/haproxy/apply.go`, `backup.go`, `oplog.go`, `handler.go` | §12 Change detection (red first): unedited → no changes, Apply does nothing and says so; any edit/toggle → changes. Apply table tests (fake driver): validate-fail/install-fail/reload-fail/rollback; **a failed Apply leaves the previous config live**; **rollback does NOT delete the newly written content-addressed cert file** (it is kept until a successful Apply; only then is the superseded file removed, per 6.2). | Pipeline exactly §7; no CLI step ever required. | `go test -race ./internal/haproxy/`; `make test` |
-| **B-REV** | **Focused review gate (not a per-task review, not a deslop pass):** one targeted review of the Apply/rollback pipeline — install order (certs→crt-list→config), atomicity, rollback-after-reload-failure, verify-via-stats-socket, and the "content-addressed cert file kept until success" rule. | B4 green | — | — | Reviewer signs off the pipeline; findings fixed in B4. | Reviewer (agent) + `make test` green. |
-| **B5a** | **CertMachine client + verify + freshness + coverage + cert-detail/expiry, built and verified against a FAKE server that replays Phase A's exact byte-level vectors** (so it runs in parallel with Phase A and the other B tasks; does **not** wait on A-OG). Certs tracking + crt-list: `certs.json` (name/enabled/note/certmachine{id,fqdn}/sha256 — **no cert details**); 6.2 file naming (deterministic, new bytes → new file, old removed only after successful Apply); managed crt-list (enable/disable without touching the file). Client: list+filters, fetch, pull `haproxy.pem`; **verify FR-H45** (body-hash==ETag && X-Cert-Id && X-Cert-Fingerprint or write nothing); **FR-H47** absent ETag → "this CertMachine needs updating", write nothing; **FR-H46** update-available by active-id compare; **FR-H44** distinct failure classes; HTTPS required non-loopback. **FR-H11** expose cert FQDN/SANs/issuer/validity-window/status from CertMachine (never parsed locally); **FR-H15** compute expired / soon-to-expire warnings from CertMachine's expiry against the `expiry_warn_days` setting. Coverage check (picker shows only covering certs by default, warn-not-block on Apply, "unknown" when unreachable, FR-H18). | B1; B2 (crt-list in render) — **Par with Phase A and B3/B4** | `internal/haproxy/certs.go`, `crtlist.go`, `certmachine_client.go`, `coverage.go` | §12 Certificates/Integrity/Freshness/Coverage/CertMachine-client, all red first, against the fake replaying Phase A vectors: naming deterministic; changed bundle → new name, old removed only after Apply; non-convention files never touched; **no cert detail in certs.json**; key never in any API response; **no x509/openssl/upload import** (a test that fails if one is imported); hash≠ETag / wrong X-Cert-Id / wrong fingerprint / missing ETag → rejected, nothing written; matching → byte-for-byte; different active id → Update available (no key downloaded); **no active cert for the recorded FQDN is reported plainly** (§12 Freshness); FR-H11 details surfaced; FR-H15 expired/soon-to-expire flagged against `expiry_warn_days`; coverage flag doesn't block Apply; SAN spanning two systems → one file; non-loopback HTTP refused; API key never in a response or log. | Certs come only from CertMachine, verified against replayed Phase A vectors; details/expiry surfaced; disable/enable/remove per §6.7. | `go test -race ./internal/haproxy/`; `make test` |
-| **B5b** | **Swap the client from the fake to the real CertMachine endpoint and re-verify** (the only part gated on A-OG). Wire the client into the B4 install funnel (write verified file with OS ownership/mode, record in `certs.json`, add to crt-list, pending until Apply). No new contract logic — B5a owns that. | A-OG; B5a; B4 (install funnel) | `internal/haproxy/certmachine_client.go`, `certs.go`, `handler.go` | Re-run B5a's suite against the real endpoint shape (integration); install-funnel path test (verified file written through B4). | Real CertMachine downloads verify identically to the fake; install funnel writes/records/references correctly. | `go test -race ./internal/haproxy/`; `make test` |
-| **B6** | Frontend: globals/defaults list, services/ports/default-service editor, pending-changes bar + Review-changes diff, read-only Raw view, cert list + picker + coverage badges, **cert detail panel (FQDN/SANs/issuer/validity/status, FR-H11) and expired/soon-to-expire badges from the B5a expiry-warn computation (FR-H15)**, certs enable/disable/remove, stats tab mount, toasts, module-scoped auth (FR-H3, H4, H6, H7, H8, H11, H15, H20, H35, D5, D11, §9). Toggle switches never checkboxes; wide text fields; no autosave; ☰ right from config; `web/shared` components. | B4, B5a (live data via B5b) | `web/haproxy/src/*`, `internal/haproxy/handler.go` (referential checks FR-H6) | FR-H6 referential checks (dup name/FQDN, FQDN claimed twice on a port, service naming a missing/disabled cert, port default not one of its services); FR-H11 detail panel renders CertMachine data; FR-H15 badge shows on an expired/soon-to-expire cert; §12 Auth: a session from another module must not open this one. Web: `test-web` typecheck + unit. | UI applies changes; pending bar appears after edit, clears after Apply; cert details + expiry badges shown; conventions honoured. | `go test -race ./internal/haproxy/`; `make test-web`; `make check` |
-| **B7** | Stats tab backend + UI (FR-H25, D14, §7). Generated `global` emits a `level user` stats socket owned by the app user; parse `show stat` CSV into frontends/backends/servers table + version/uptime/connections; refresh on button + every few seconds while visible; plain message when socket absent. **Sequenced after B6** (shares `web/haproxy/src/*` and the `handler.go` route table; no concurrent edit of that seam). | B3, B4, B6 | `internal/haproxy/stats.go`, `web/haproxy/src/*` | §12 Stats: parse a recorded `show stat` CSV into the table; missing socket → plain message. | Read-only, simple; no controls; app reads socket with no sudo. | `go test -race ./internal/haproxy/`; `make test`; `make test-web` |
-| **B8** | `docs/guides/haproxy.md` (FR-H guide, §9, §8), mirroring `docs/guides/smbedit.md`: before you start, how it fits together, privileges per OS + the sudoers wildcard-`..` caveat and exact-path preference, CertMachine setup, troubleshooting, HTTP API, owner acceptance checklist. | B2–B7 substantially (draft in parallel, finalize last) | `docs/guides/haproxy.md` | n/a (docs) | Matches shipped behaviour; sudo command set documented and minimal. | `make check` |
-| **B-OG** | **Owner acceptance (browser, not self-certified — §12 last bullet):** import hero's config and review the generated file; add a service (new FQDN + local port), install its cert from CertMachine, Apply; add a second exposed port with several services; disable a cert and see it stop being served after Apply while still listed; make a deliberately broken edit and see Check + Apply refuse it with the old config still live; see the pending-changes bar appear and clear with no CLI step; open the Stats tab and see servers UP/DOWN. **Repeat the core flow on the owner's Tahoe Mac** (192.168.1.11, ssh same user, macOS 26.5 arm64, Homebrew `/opt/homebrew`, haproxy 3.4.6, passwordless sudo) **and on real Linux** and confirm identical look and behaviour. | B1–B8 | — | — | **Pending owner sign-off — never marked done by the agent.** | Owner, in a browser, on both OSs. |
-
-### Parallelism map
-
-- Phase A: A1 → A2 → A3 → A4 (strictly sequential) → **A-REV** (focused integrity-contract review) → A-OG owner-gate.
-- Phase B: B1 first. Then **B2 ∥ B3 ∥ B5a** — B2 and B3 build against the B1 driver interface; **B5a builds against a fake CertMachine replaying Phase A's byte vectors, so it does not wait on Phase-A acceptance** (needs B1, and B2 for crt-list). Then B4 (needs B2+B3) → **B-REV** (focused Apply/rollback review). B5b after A-OG + B5a + B4 (swap to the real endpoint, wire the install funnel). Then B6 (UI, needs B4 + B5a). **B7 after B6** (shares `web/haproxy/src/*` and the handler route table). B8 drafts in parallel, finalizes after B6/B7. B-OG last.
-- Two focused review gates only — **A-REV** (integrity contract) and **B-REV** (Apply/rollback) — on the two outage-class seams, plus **one final review** at the end of Phase B. No per-task review cycles, no deslop pass. (See Revision notes for the lean-usage tension this resolves.)
-
-### FRD coverage matrix (FR id → task whose acceptance covers it)
-
-| FR | Task | FR | Task | FR | Task |
-|----|------|----|------|----|------|
-| FR-C1 | A1 | FR-H6 | B6 | FR-H18 | B5a |
-| FR-C2 | A2 | FR-H7 | B6 | FR-H20 | B4/B6 |
-| FR-C3 | A2 | FR-H8 | B6 (ports), B2 (render) | FR-H21 | B4 |
-| FR-C4 | A3 | FR-H10 | B5a/B6 | FR-H22 | B4/B6 |
-| FR-C5 | A1–A3 | FR-H11 | **B5a (data), B6 (display)** | FR-H23 | B4/B6 |
-| FR-C6 | A4 | FR-H12 | B5a | FR-H24 | B4 |
-| FR-C7 | A4 | FR-H13 | B5a/B6 | FR-H25 | B7 |
-| FR-H1 | B2 | FR-H14 | B5a/B6 | FR-H30 | B1/B3 |
-| FR-H2 | B2/B6 | FR-H15 | **B5a (warn calc), B6 (badge)** | FR-H31 | B3 |
-| FR-H3 | B6 | FR-H16 | B5a | FR-H32 | B3 |
-| FR-H4 | B6 | FR-H17 | B5a | FR-H33 | B3 |
-| FR-H5 | B2 | FR-H40–H47 | B5a (H42/install via B5b) | FR-H34 | B3/B4 |
-| | | | | FR-H35 | B6 |
-
----
-
-## 3. Owner-gate items (cannot be self-certified — pending owner sign-off, never "done")
-
-- **A-OG** — curl acceptance of the CertMachine extension (FRD §13.5), against a real CertMachine instance with an API key.
-- **B-OG** — browser sign-off of the editor UI; the full §12 core flow run on the owner's Tahoe Mac (192.168.1.11) **and** on real Linux, confirmed identical. macOS launchd/file-limit bootstrap observed as "set and forget".
-- Any behaviour depending on the **untested macOS local-network privacy** control (FRD §4): if a LAN backend is ever needed on the Mac, that path is owner-verified, not self-certified (owner's services are localhost, so it may not arise).
-
----
-
-## 4. Risks / unknowns
-
-1. **Integrity-contract fidelity (highest).** The ETag/identity/conditional/HEAD logic must live in `handleCertFileGet` (a `writeVerifiedDownload` for the three file names only), **not** the shared `writeDownload` funnel, so rootCA.crt and the `time.Now()`-stamped .tgz are untouched and no identity header leaks onto 409/404 refusals; `If-None-Match` must handle weak/list/`*` forms. The in-repo spec encodes all of it; A-REV reviews it; A-OG re-checks with real curl. Risk of a green-but-wrong ship if the spec is weakened — do not weaken it.
-2. **macOS parity vs Linux-only CI.** `-W` vs removed `master-worker` keyword, `bind *:443` only, raised file limit, launchd job ownership, `SIGUSR2` reload — all verified on the owner's Mac on 2026-09-30 but exercised in CI only through the fake. Real behaviour is B-OG, not self-certifiable.
-3. **Apply atomicity + rollback ordering.** Install order certs→crt-list→config, atomic rename, and rollback-after-reload-failure are the outage-class paths; covered by B4 fake-driver table tests but the real reload/verify-via-socket path is only fully exercised at B-OG.
-4. **Sanitized hero fixture fidelity.** B2's `testdata` fixture is modelled on the real `/etc/haproxy/haproxy.cfg` (global, defaults, `frontend stats` :1936, `https_in` :443 with brandx/s3-hero ACLs → `unified_webapp` 127.0.0.1:8787 default, second frontend :8443 for fakes3_ui). If the sanitized copy drifts from the real file's shape, import tests pass but real import surprises the owner — reconcile at B-OG.
-5. **CertMachine reachability semantics.** Coverage "unknown" and "details unavailable" must degrade gracefully (page keeps working); the id-compare freshness check assumes CertMachine allows exactly one active cert per FQDN (stated in FRD §13.1) — relied upon, not re-verified here.
-
----
-
-## 5. ADR
-
-**Decision.** Build in two phases: (A) the additive CertMachine API extension (FR-C1..FR-C7), accepted by curl before any editor code; then (B) a new OS-agnostic `haproxy` editor module built behind a single OS-driver interface, as independently verifiable red-first vertical slices, leaving smbedit untouched and keeping the §10 merge seams clean.
-
-**Drivers.** (1) Correctness of a no-CLI change that takes effect (outage risk); (2) identical feature/UX across Ubuntu/Rocky/macOS (owner law); (3) usage economy / ralph-loop executability.
-
-**Alternatives considered.** Option B (editor-first against a fake CertMachine, extend in parallel) — rejected: violates the FRD's explicit "done first" order and splits the integrity contract across a fake. Option C (monolithic system-config editor with Samba+HAProxy plug-ins now) — rejected: forbidden by FRD §2/§10 this release; the plan instead keeps the pipeline/driver/UI seams generic so the future merge stays cheap.
-
-**Why chosen.** Option A is the only one that obeys the FRD build order and the owner `CMD>` lines, de-risks the hardest external contract first with a `curl`-checkable deliverable, and decomposes cleanly into one-pass red-first tasks the ralph loop can verify with `make test` / `make test-web` / `make check`.
-
-**Consequences.** Positive: the integrity contract is proven before anything depends on it (and reviewed once at A-REV); the CertMachine client (B5a) is no longer calendar-blocked — it builds against a fake replaying Phase A's byte vectors and only B5b (the real-endpoint swap) waits on A-OG; OS difference is fully fakeable so almost everything is CI-covered. Negative: two focused review gates (A-REV, B-REV) are added over the strict "one final review" lean rule (see Revision notes); two owner-gated milestones (A-OG, B-OG) cannot be closed by the agent; a sanitized fixture carries drift risk against the real hero config.
-
-**Follow-ups.** The §10 smbedit merge into one "system config editor" with per-service plug-ins (a later FRD). Re-test macOS local-network privacy if a non-localhost backend is ever added on the Mac. Revisit the 6.2 naming convention freely later — nothing outside the editor depends on it.
-
----
-
-## 6. Revision notes (consensus draft 2)
-
-Applied from the two independent reviews:
-
-- **Architect / Critic (writeDownload scope, HIGH / MAJOR):** A2 corrected — ETag/identity/conditional/HEAD go in `handleCertFileGet` (`writeVerifiedDownload`), never the shared `writeDownload` funnel (verified: 5 callers incl. rootCA.crt and the `time.Now()`-stamped .tgz). Added `TestSharedDownloadsCarryNoCertHeaders`. Pre-mortem #1 rewritten.
-- **Critic (red-first spec location, CRITICAL):** A1–A3 now copy the in-repo `docs/plans/haproxy-editor/handler_extension_test.go.draft` to `internal/certmachine/handler_extension_test.go`, each task enabling only its own tests; all scratchpad references removed.
-- **Critic (FR-H11/FR-H15, MAJOR):** both now have concrete coverage — B5a computes cert details + expiry-warn against `expiry_warn_days` (red-first), B6 displays them. Added the FRD-coverage matrix (FR id → task).
-- **Critic (MINOR):** A1 unfiltered assertion tightened to same set+order+shape as `ListCerts`; B5a acceptance now includes "no active cert for the FQDN reported plainly" (§12 Freshness).
-- **Architect (B5 split):** B5 → **B5a** (client vs. fake replaying Phase A vectors, runs parallel with Phase A) + **B5b** (real-endpoint swap, gated on A-OG).
-- **Architect (driver interface, MEDIUM):** B1 now defines the COMPLETE driver interface so B2 ∥ B3; B3 only implements.
-- **Architect (B6/B7 seam, MEDIUM):** B7 sequenced after B6 (shared `web/haproxy/src/*` + handler route table).
-- **Architect (LOW):** Fingerprint (`*string`) asserted non-nil (NULL → 500, never blank header); HEAD/304 short-circuit before body write while computing ETag; A3 does not assert 405 (wrong method 404s by design); B4 asserts rollback keeps the content-addressed cert file until success.
-
-**Declined / flagged, not silently applied:**
-
-- **Two review gates vs. the "one final review, no deslop" lean-usage rule (owner memory).** The architect's A-REV and B-REV conflict with the owner's standing lean-usage preference. I applied them because each is a single, narrowly scoped review of one genuinely outage-class contract (silent-green integrity; Apply half-success), and the plan still carries **no** per-task reviews and **no** deslop pass. This is a direct tension with owner law, so it is **flagged for owner veto at approval** rather than treated as settled — the owner may strike A-REV/B-REV and fall back to the single final review. `-race` stays on (`make test`), per the FRD/Makefile, which wins over the lean "no -race" note (noted in §4, Risk 2 area). Nothing else was declined.
+- Trying the editor in a browser, on the Mac and on Linux, against a real HAProxy.
+- A settings screen for the module (CertMachine URL and key, paths, backups). Today these are config-file
+  only; see P8-9 in `PLAN-phase8-punchlist.md`.
+- Per-module API keys (P8-7).

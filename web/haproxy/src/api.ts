@@ -55,6 +55,8 @@ export interface ApplyResult {
   rolledBack: boolean
   outcome: Outcome
   message: string
+  /** True when HAProxy was not running and Apply started it instead of reloading. */
+  started?: boolean
 }
 
 export interface LastApply { time: string; outcome: Outcome; message: string }
@@ -156,6 +158,38 @@ export interface CoverageResult {
 }
 export interface Freshness { name: string; fqdn: string; status: string; error?: string }
 
+// ---- settings (internal/haproxy/settings.go) -------------------------------
+
+export interface SettingsValues {
+  os: string
+  certmachineUrl: string
+  certmachineCaFile: string
+  configPath: string
+  certsDir: string
+  crtListPath: string
+  statsSocketPath: string
+  backupDir: string
+  serviceName: string
+  backupKeep: number
+  expiryWarnDays: number
+}
+
+/** GET /api/settings. The API key itself is never returned, only whether one is set. */
+export interface SettingsResponse {
+  effective: SettingsValues
+  /** The driver's per-OS default for each path/service setting (placeholder text). */
+  defaults: Record<string, string>
+  apiKeySet: boolean
+  certmachineConfigured: boolean
+  /** Non-empty when the module cannot drive HAProxy (unsupported OS). */
+  unavailable: string
+}
+
+/** PUT /api/settings body: every value, plus a new key ('' keeps the stored one) or clearApiKey. */
+export interface SettingsPayload extends SettingsValues { apiKey: string; clearApiKey: boolean }
+export interface SettingsSaveResult { ok: boolean; needsRestart: boolean; message: string; unavailable: string }
+export interface TestConnectionResult { ok: boolean; class: string; message: string }
+
 // ---- transport -------------------------------------------------------------
 
 export class ApiError extends Error {
@@ -232,5 +266,11 @@ export const api = {
     request<{ ok: boolean }>('PUT', `/api/certs/${enc(name)}/enabled`, { enabled }),
   deleteCert: (name: string) => request<{ ok: boolean }>('DELETE', `/api/certs/${enc(name)}`),
   coverage: () => request<CoverageResult[]>('GET', '/api/coverage'),
+  settings: () => request<SettingsResponse>('GET', '/api/settings'),
+  /** Writes the module settings. Called from the Settings tab's Save button only. */
+  saveSettings: (p: SettingsPayload) => request<SettingsSaveResult>('PUT', '/api/settings', p),
+  /** Tests the given (possibly unsaved) CertMachine values; apiKey '' means the stored key. */
+  testConnection: (b: { certmachineUrl: string; certmachineCaFile: string; apiKey: string }) =>
+    request<TestConnectionResult>('POST', '/api/settings/test-connection', b),
   freshness: () => request<Freshness[]>('GET', '/api/certs/freshness'),
 }

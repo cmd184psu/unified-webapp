@@ -132,9 +132,22 @@ architecture probe; the code does not check the CPU in that case.)
 
 ## 4. Module settings
 
-The `haproxy` section of the server config (`~/.unified-webapp.json`; see
-`unified-webapp-example.json`). A leading `~` in any path is expanded. Path
-settings left empty take the driver's default for the detected OS.
+Open the **Settings** tab: every setting below except `static_dir` and
+`data_dir` is edited there, with plain-text errors, and applied live when you
+press **Save settings** (no restart; the module rebuilds its driver, CertMachine
+client and applier, and requests already running finish on the old ones). Path
+and service fields left empty take the driver's default for the detected OS, and
+the field shows that default as placeholder text. **Test connection** lists
+CertMachine's active certificates with the values on the form, saved or not, and
+reports "Connected: N active certs" or the kind of failure (unreachable,
+unauthorized, TLS, server error).
+
+Settings are stored in `<data_dir>/settings.json` (mode `0600`; only the fields
+you changed, plus the API key, which is write-only and never returned by the
+API). The `haproxy` block of the server config is optional starting values:
+`settings.json` overrides it field by field, and nothing needs migrating. A
+leading `~` in a config-block path is expanded. The table lists the setting
+names used by both.
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -145,15 +158,13 @@ settings left empty take the driver's default for the detected OS.
 | `certs_dir` | Ubuntu/Rocky `/etc/haproxy/certs`; macOS `/opt/homebrew/etc/haproxy/certs` | Where certificate files are written. |
 | `crt_list_path` | Ubuntu/Rocky `/etc/haproxy/crt-list.txt`; macOS `/opt/homebrew/etc/haproxy/crt-list.txt` | The managed crt-list. |
 | `stats_socket_path` | Ubuntu `/run/haproxy/admin.sock`; Rocky `/var/lib/haproxy/stats`; macOS `/opt/homebrew/var/run/haproxy.sock` | The stats socket the generated config creates and the Stats tab reads. |
+| `backup_dir` | Ubuntu and Rocky `/etc/haproxy/backups`; macOS under the Homebrew etc directory | Where timestamped backups of the config and crt-list are kept (the first-adoption `.orig` backup lives here too). Set it whenever a second HAProxy instance is managed, so its backups do not land in the first one's directory. |
 | `service_name` | Ubuntu/Rocky `haproxy`; macOS `net.cmdhome.unified.haproxy` | The systemd unit, or the launchd job label. |
 | `backup_keep` | `10` | Timestamped backups kept per kind (config, crt-list). Zero or negative means 10. |
 | `expiry_warn_days` | `30` | A certificate expiring within this many days is flagged "expires soon". Zero or negative means 30. |
 | `certmachine.url` | empty | CertMachine base URL. Empty means CertMachine is not configured (the certificate routes answer 409). |
 | `certmachine.api_key` | empty | The API key, sent as `Authorization: Bearer <key>`. A secret; it is redacted wherever the config struct is printed and never appears in an API response, error or log. |
 | `certmachine.ca_file` | empty | PEM file of an extra root to trust when talking to CertMachine. Added to the system roots. |
-
-The backup directory is not a setting: it is `/etc/haproxy/backups` on Linux
-and `/opt/homebrew/etc/haproxy/backups` on macOS.
 
 **The config, certs and backups directories are created on first write.** If
 the directory a file is going into is missing, the driver creates it (through
@@ -305,22 +316,27 @@ The editor fetches certificates from a CertMachine instance with an API key,
 using the existing mechanism
 ([README, API keys for automation](../../README.md#api-keys-for-automation)):
 
-1. Generate a key: `go run ./cmd/server -gen-api-key`. It prints the key once
-   and its `sha256:...` hash.
-2. Paste the hash into the CertMachine instance's `auth.api_keys`.
-3. Put the key itself in `haproxy.certmachine.api_key`; it is sent as
-   `Authorization: Bearer <key>`.
+1. Generate a key and store its hash in one step:
+   `go run ./cmd/server -gen-api-key -name haproxy-editor -config ./unified-webapp.json`.
+   It prints the key once and adds the hash to `auth.api_keys`; restart the
+   service to pick it up (the admin module's Generate key does the same live,
+   without a restart).
+2. Alternative, manual: `go run ./cmd/server -gen-api-key` (no `-name`) prints
+   the key and its `sha256:...` hash; paste the hash into the CertMachine
+   instance's `auth.api_keys` yourself.
+3. Paste the key itself into the **API key** field of the Settings tab; it is
+   write-only and sent as `Authorization: Bearer <key>`.
 
 Any key in `auth.api_keys` works. A dedicated key for the haproxy editor is
 recommended but not enforced.
 
-Then set `haproxy.certmachine.url` (and, if CertMachine uses a private CA,
-`haproxy.certmachine.ca_file`).
+Then enter the CertMachine URL in the Settings tab (and, if CertMachine uses a
+private CA, the CA file), and press **Test connection**.
 
 - **HTTPS is required for any non-loopback address.** Plain `http://` is
   accepted only for `localhost` or a loopback IP, because a bundle carries a
   private key. A plain-http URL elsewhere, or a URL scheme other than http or
-  https, fails the module's build at boot (scoped 503 with the reason).
+  https, is refused when you save, with the reason shown in the Settings tab.
 - **`ca_file`** adds a root on top of the system roots, for example CertMachine's
   own CA when it runs on another machine. An unreadable file or one with no
   usable certificate also fails the build.
@@ -403,13 +419,19 @@ order is:
 2. **Back up** the live config and crt-list ([section 9](#9-backups-and-restore)),
    then prune to `backup_keep`.
 3. **Install the crt-list, then the config**, each atomically.
-4. **Reload** gracefully.
+4. **Reload** gracefully. If HAProxy is not running (a fresh machine, or a
+   stopped service), Apply **starts** it instead, which loads the new config;
+   the result then carries `started: true` and the message says HAProxy was not
+   running, so it was started. Apply never fails just because the service was
+   stopped.
 5. **Verify.** The service must be active and the stats socket must answer
    `show info` with a version. If the socket is not available yet (first run,
    macOS before the job is bootstrapped), it falls back to the active check
    alone and says so in the Log.
 6. **Roll back** on any failure after the first install: the previous files are
-   restored (or removed if they did not exist) and HAProxy is reloaded again.
+   restored (or removed if they did not exist) and HAProxy is reloaded again
+   (a service that was stopped before the Apply is not reloaded if the start
+   itself failed).
    A rollback never deletes a certificate file.
 7. **Clean up** (success only): certificate files superseded by an update are
    removed.
@@ -637,7 +659,8 @@ answers 503 "too many log streams"):
    "haproxy.cmdhome.net":      "haproxy"
    ```
 
-3. Fill in the `haproxy` section. The minimum:
+3. Fill in the `haproxy` section. The minimum (the CertMachine URL and API key
+   can instead be entered later in the Settings tab):
 
    ```json
    "haproxy": {
@@ -675,13 +698,13 @@ answers 503 "too many log streams"):
 | **rollback failed** (HTTP 500) | Both the step and the rollback failed. Inspect the files and use the Backups tab or restore by hand from the backup directory. |
 | Apply or pull fails with a backup, list or write error | The sudoers grant is missing (it must include the directory commands, so the first write can create the directories) ([section 4](#4-module-settings), [section 5](#5-privileges)). |
 | Apply refused with 409 and a list of issues | An error-severity check ([section 7](#7-the-model)); the list says which service or port. |
-| Certificate routes answer 409 "CertMachine is not configured" | `haproxy.certmachine.url` is empty. |
+| Certificate routes answer 409 "CertMachine is not configured" | The CertMachine URL is not set (Settings tab). |
 | Pull or details say **CertMachine is unreachable** (502) | Network, DNS or CertMachine is down. |
-| **TLS error** (502) talking to CertMachine | CertMachine's certificate is not trusted. Set `certmachine.ca_file` to its CA. |
+| **TLS error** (502) talking to CertMachine | CertMachine's certificate is not trusted. Set the CA file (Settings tab) to its CA. |
 | **CertMachine rejected the API key** (502) | The key is wrong or its hash is not in CertMachine's `auth.api_keys`. |
 | **Integrity check failed** (502) | The body hash did not match the ETag, or `X-Cert-Id` or `X-Cert-Fingerprint` did not match. Nothing was written. Retry; if it persists, investigate the path to CertMachine. |
 | "**this CertMachine needs updating**" | The download carried no `ETag`: CertMachine lacks the integrity extension. Upgrade it ([certmachine.md](certmachine.md#download-integrity-headers-and-api-key-access)). |
-| Stats tab says "statistics are not available" | The stats socket is missing, refused, denied or timed out. HAProxy may not have been applied yet or is stopped; Apply once, or use Start. Check `stats_socket_path` and that HAProxy created it. |
+| Stats tab says "statistics are not available" | The stats socket is missing, refused, denied or timed out. HAProxy may not have been applied yet or is stopped; Apply once (Apply starts HAProxy when it is not running), or use Start. Check `stats_socket_path` and that HAProxy created it. |
 | Log tab empty | A proxy is buffering SSE ([section 14](#14-putting-it-behind-a-proxy)), or the stream cap was reached (503). |
 | A backend is unreachable on Rocky after Apply | Check SELinux `haproxy_connect_any` ([section 13](#13-per-os-notes)). |
 
@@ -690,10 +713,14 @@ answers 503 "too many log streams"):
 ## 17. Owner acceptance checklist
 
 This guide, the Go code and its tests were written without the owner's hands on
-a real system. **Three items are PENDING OWNER SIGN-OFF and are not done.**
+a real system. **A-OG has passed (below); two items are still PENDING OWNER
+SIGN-OFF and are not done.**
 
-- [ ] **A-OG: curl acceptance of the CertMachine extension** (FRD section 13.5),
-  against a real CertMachine with an API key: the filtered list returns the one
+- [x] **A-OG: curl acceptance of the CertMachine extension** (FRD section 13.5)
+  **PASSED, owner, 2026-10-02**, run by the owner against the live CertMachine
+  (`certmachine.cmdhome.net`) with `docs/plans/haproxy-editor/a-og-curl-checks.sh`:
+  every check passed, including the re-issue check on a throwaway cert. What it
+  checks: against a real CertMachine with an API key: the filtered list returns the one
   active certificate; a bundle download carries `ETag`, `X-Cert-Id` and
   `X-Cert-Fingerprint` and `sha256sum` of the body equals the ETag; repeating with
   `If-None-Match` gives 304; `HEAD` returns headers only; an Edit that re-issues
@@ -709,12 +736,19 @@ a real system. **Three items are PENDING OWNER SIGN-OFF and are not done.**
   UP/DOWN. On the Mac, confirm the launchd job and file limit are "set and
   forget".
 - [ ] **B5b: swap the client from the fake to the real CertMachine endpoint** and
-  re-verify. The client's integrity logic has only ever run against a fake
-  that replays the byte-level vectors; B5b re-runs it against a real
-  CertMachine after A-OG passes.
+  re-verify. **The client half is verified**: `TestLiveCertMachineClient`
+  (opt-in, read-only; set `HAPROXY_LIVE_CERTMACHINE_URL` and
+  `HAPROXY_LIVE_CERTMACHINE_KEY`) ran the editor's real client against the live
+  CertMachine on 2026-10-02: list and active-cert lookup, a verified
+  `haproxy.pem` pull (body hash = ETag, `X-Cert-Id`, `X-Cert-Fingerprint`), a wrong
+  fingerprint refused with no bytes, and the three freshness answers. **Still
+  open:** installing a pulled cert through a real driver into a real HAProxy and
+  seeing it served, which is part of B-OG.
 
-**What has and has not been tested.** Against a **real HAProxy** and a **real
-CertMachine**: nothing in this repository's tests. The module's behaviour has
+**What has and has not been tested.** Against a **real HAProxy**: nothing in
+this repository's tests. Against a **real CertMachine**: the A-OG curl checks
+(owner, 2026-10-02) and the opt-in `TestLiveCertMachineClient` above, nothing
+else. The rest of the module's behaviour has
 been exercised through unit tests over an in-package fake driver and fake
 command layer, handler tests, a fake CertMachine server, and web unit and type
 tests. The only real-system evidence is the set of macOS experiments recorded in
@@ -727,9 +761,8 @@ is removed in 3.5 so `-W` is used; without a raised file limit `maxconn` drops t
 **Not browser-tested.** The UI has not been driven in a real browser by the
 agent that built it. Not exercised anywhere: the real sudoers set on Ubuntu or
 Rocky, real `systemctl reload` and a real rollback after a failed reload, the
-stats-socket path and ownership on real Linux, SELinux behaviour on Rocky, the
-macOS launchd bootstrap by this driver, and CertMachine downloads over a real
-network. The sudoers file in section 5 is derived from reading the driver code,
+stats-socket path and ownership on real Linux, SELinux behaviour on Rocky, and
+the macOS launchd bootstrap by this driver. The sudoers file in section 5 is derived from reading the driver code,
 not from running it under `sudo`.
 
 ---

@@ -17,7 +17,8 @@ package haproxy
 //	                                      on the stats socket); socket missing/unreachable is 200 with available:false and a plain message
 //	GET    /api/raw                       {config, crtList}: exactly what Apply would write
 //	POST   /api/check                     CheckResult{ok, message} (haproxy -c on the staged candidate)
-//	POST   /api/apply                     ApplyResult{applied, rolledBack, outcome, message}; 409 {error, issues} when any
+//	POST   /api/apply                     ApplyResult{applied, rolledBack, outcome, message, started?}; started:true when HAProxy was
+//	                                      not running and Apply started it instead of reloading; 409 {error, issues} when any
 //	                                      error-severity /api/model/check issue exists (warnings never block)
 //	POST   /api/reload | /api/restart | /api/start   {ok:true}
 //	GET    /api/backups                   []Backup
@@ -34,6 +35,14 @@ package haproxy
 //	PUT    /api/certs/{name}/enabled {enabled}       toggle the tracking flag only
 //	DELETE /api/certs/{name}              remove file + row; 409 while a service uses it
 //	GET    /api/coverage                  []CoverageResult per service (warnings only; unknown when CertMachine is down)
+//	GET    /api/settings                  {effective:{os,certmachineUrl,certmachineCaFile,configPath,certsDir,crtListPath,statsSocketPath,backupDir,serviceName,
+//	                                      backupKeep,expiryWarnDays}, defaults:{<each path/service setting>: the driver's per-OS default}, apiKeySet,
+//	                                      certmachineConfigured, unavailable}; NEVER the api key; unavailable is the unsupported-OS reason or ""
+//	PUT    /api/settings                  the full effective set + apiKey ("" keeps the stored key) + clearApiKey; plain-text 400 on a bad value and
+//	                                      nothing changes; on success saved to <data_dir>/settings.json (0600) and applied live ->
+//	                                      {ok, needsRestart, message, unavailable}
+//	POST   /api/settings/test-connection  optional body {certmachineUrl, certmachineCaFile, apiKey} tests unsaved values (no body: the current effective
+//	                                      settings) -> {ok, class:""|unreachable|unauthorized|tls|server|notConfigured, message}; 200 unless the values are invalid
 //	GET    /api/certs/freshness           [{name, fqdn, status}] up to date | update available | no active cert | unknown
 //
 // Apply and restore answer HTTP 200 for the outcomes applied, no_changes,
@@ -74,21 +83,49 @@ type lastApply struct {
 	Message string    `json:"message"`
 }
 
-type server struct {
-	cfg      config.HaproxyConfig
+// live is everything a settings change rebuilds: handlers take one snapshot
+// per request (server.rt) so an in-flight request finishes on the old set.
+type live struct {
 	driver   Driver
-	models   *ModelStore
 	certs    *CertStore
-	log      *OpLog
-	applier  *Applier
 	client   *CertMachineClient // nil when certmachine.url is unset
-	dataDir  string
+	applier  *Applier
 	warnDays int
-	maxSubs  int
-	subs     atomic.Int64
+	settings Settings
+	apiKey   string
+	// unavailable is the reason the module cannot drive HAProxy (unsupported
+	// OS); driver, certs and applier are nil and every API route but settings 503s.
+	unavailable string
+}
+
+type server struct {
+	cfg     config.HaproxyConfig
+	models  *ModelStore
+	log     *OpLog
+	dataDir string
+	maxSubs int
+	subs    atomic.Int64
+	mk      driverFactory
+	putMu   sync.Mutex // serializes settings saves
 
 	mu   sync.Mutex
 	last *lastApply
+
+	rtMu sync.RWMutex
+	cur  *live
+}
+
+// rt is the one accessor for the settings-dependent collaborators.
+func (s *server) rt() *live {
+	s.rtMu.RLock()
+	defer s.rtMu.RUnlock()
+	return s.cur
+}
+
+func (s *server) swap(next *live) {
+	s.rtMu.Lock()
+	s.cur = next
+	s.rtMu.Unlock()
 }
 
 type handlerFuncs map[string]http.HandlerFunc
@@ -120,9 +157,11 @@ func (s *server) routes(staticDir string) http.Handler {
 	mux.HandleFunc("/api/stats", methods(handlerFuncs{"GET": s.handleStats}))
 	mux.HandleFunc("/api/check", methods(handlerFuncs{"POST": s.handleCheck}))
 	mux.HandleFunc("/api/apply", methods(handlerFuncs{"POST": s.handleApply}))
-	mux.HandleFunc("/api/reload", methods(handlerFuncs{"POST": s.serviceAction("reload", s.applier.Reload)}))
-	mux.HandleFunc("/api/restart", methods(handlerFuncs{"POST": s.serviceAction("restart", s.applier.Restart)}))
-	mux.HandleFunc("/api/start", methods(handlerFuncs{"POST": s.serviceAction("start", s.applier.Start)}))
+	mux.HandleFunc("/api/reload", methods(handlerFuncs{"POST": s.serviceAction("reload", (*Applier).Reload)}))
+	mux.HandleFunc("/api/restart", methods(handlerFuncs{"POST": s.serviceAction("restart", (*Applier).Restart)}))
+	mux.HandleFunc("/api/start", methods(handlerFuncs{"POST": s.serviceAction("start", (*Applier).Start)}))
+	mux.HandleFunc("/api/settings", methods(handlerFuncs{"GET": s.handleSettingsGet, "PUT": s.handleSettingsPut}))
+	mux.HandleFunc("/api/settings/test-connection", methods(handlerFuncs{"POST": s.handleSettingsTestConnection}))
 	mux.HandleFunc("/api/backups", methods(handlerFuncs{"GET": s.handleBackups}))
 	mux.HandleFunc("/api/backups/{name}", methods(handlerFuncs{"GET": s.handleBackupView}))
 	mux.HandleFunc("/api/backups/{name}/restore", methods(handlerFuncs{"POST": s.handleBackupRestore}))
@@ -136,7 +175,15 @@ func (s *server) routes(staticDir string) http.Handler {
 	mux.HandleFunc("/api/certmachine/certs", methods(handlerFuncs{"GET": s.handleCertMachineCerts}))
 	mux.HandleFunc("/api/coverage", methods(handlerFuncs{"GET": s.handleCoverage}))
 	mux.Handle("/", static.NewHandler(staticDir))
-	return mux
+	// Unsupported OS: the module still serves its UI and settings routes but
+	// every other API route answers a scoped 503 with the reason.
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if reason := s.rt().unavailable; reason != "" && strings.HasPrefix(r.URL.Path, "/api/") && !strings.HasPrefix(r.URL.Path, "/api/settings") {
+			scoped503Handler(reason).ServeHTTP(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 func fail(w http.ResponseWriter, status int, msg string) { response.WriteError(w, status, msg) }
@@ -157,35 +204,36 @@ func reqCtx(r *http.Request) (context.Context, context.CancelFunc) {
 // ---- status / model ------------------------------------------------------
 
 func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	rt := s.rt()
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	svc := ServiceStatus{Detail: "status unavailable"}
 	version := ""
-	if st, err := s.applier.Status(ctx); err == nil {
+	if st, err := rt.applier.Status(ctx); err == nil {
 		svc, version = st.ServiceStatus, st.Version
 	}
 	pending := false
-	if ch, err := s.applier.Pending(ctx); err == nil {
+	if ch, err := rt.applier.Pending(ctx); err == nil {
 		pending = ch.HasChanges
 	}
 	s.mu.Lock()
 	last := s.last
 	s.mu.Unlock()
 	response.WriteJSON(w, http.StatusOK, map[string]any{
-		"diagnostics":           s.diagnostics(ctx),
+		"diagnostics":           s.diagnostics(rt, ctx),
 		"module":                "haproxy",
 		"moduleVersion":         Version,
 		"service":               svc,
 		"version":               version,
 		"lastApply":             last,
 		"pending":               pending,
-		"certmachineConfigured": s.client != nil,
+		"certmachineConfigured": rt.client != nil,
 	})
 }
 
 // diagnostics asks the driver for its OS conditions; a panic is logged to the
 // op log and answered as none, so /api/status never fails over it.
-func (s *server) diagnostics(ctx context.Context) (lines []string) {
+func (s *server) diagnostics(rt *live, ctx context.Context) (lines []string) {
 	defer func() {
 		if r := recover(); r != nil {
 			s.log.Addf("status: reading diagnostics failed: %v", r)
@@ -195,7 +243,7 @@ func (s *server) diagnostics(ctx context.Context) (lines []string) {
 			lines = []string{}
 		}
 	}()
-	return s.driver.Diagnostics(ctx)
+	return rt.driver.Diagnostics(ctx)
 }
 
 func (s *server) handleModelGet(w http.ResponseWriter, r *http.Request) {
@@ -223,9 +271,10 @@ func (s *server) handleModelPut(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleModelCheck(w http.ResponseWriter, r *http.Request) {
+	rt := s.rt()
 	ctx, cancel := reqCtx(r)
 	defer cancel()
-	issues, err := s.checkStored(ctx)
+	issues, err := s.checkStored(rt, ctx)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, "listing certificates failed")
 		return
@@ -234,6 +283,7 @@ func (s *server) handleModelCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleImport(w http.ResponseWriter, r *http.Request) {
+	rt := s.rt()
 	var req struct {
 		Commit bool `json:"commit"`
 	}
@@ -242,7 +292,7 @@ func (s *server) handleImport(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := reqCtx(r)
 	defer cancel()
-	data, err := s.driver.PrivilegedRead(ctx, s.driver.ConfigPath())
+	data, err := rt.driver.PrivilegedRead(ctx, rt.driver.ConfigPath())
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			fail(w, http.StatusNotFound, "no live HAProxy config was found to import")
@@ -270,9 +320,10 @@ func (s *server) handleImport(w http.ResponseWriter, r *http.Request) {
 // ---- changes / check / apply --------------------------------------------
 
 func (s *server) handleChanges(w http.ResponseWriter, r *http.Request) {
+	rt := s.rt()
 	ctx, cancel := reqCtx(r)
 	defer cancel()
-	ch, err := s.applier.Pending(ctx)
+	ch, err := rt.applier.Pending(ctx)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
@@ -281,7 +332,8 @@ func (s *server) handleChanges(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleRaw(w http.ResponseWriter, r *http.Request) {
-	_, cfgText, crtText, err := s.applier.renderCandidate()
+	rt := s.rt()
+	_, cfgText, crtText, err := rt.applier.renderCandidate()
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
@@ -290,9 +342,10 @@ func (s *server) handleRaw(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleStats(w http.ResponseWriter, r *http.Request) {
+	rt := s.rt()
 	ctx, cancel := reqCtx(r)
 	defer cancel()
-	info, rows, err := FetchStats(ctx, s.driver.StatsSocketPath(), statsTimeout)
+	info, rows, err := FetchStats(ctx, rt.driver.StatsSocketPath(), statsTimeout)
 	if err != nil {
 		var ue *ErrStatsUnavailable
 		if !errors.As(err, &ue) {
@@ -306,9 +359,10 @@ func (s *server) handleStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleCheck(w http.ResponseWriter, r *http.Request) {
+	rt := s.rt()
 	ctx, cancel := reqCtx(r)
 	defer cancel()
-	res, err := s.applier.Check(ctx)
+	res, err := rt.applier.Check(ctx)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
@@ -336,9 +390,10 @@ func (s *server) writeApplyResult(w http.ResponseWriter, res ApplyResult, err er
 }
 
 func (s *server) handleApply(w http.ResponseWriter, r *http.Request) {
+	rt := s.rt()
 	ctx, cancel := reqCtx(r)
 	defer cancel()
-	issues, err := s.checkStored(ctx)
+	issues, err := s.checkStored(rt, ctx)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, "listing certificates failed")
 		return
@@ -350,15 +405,15 @@ func (s *server) handleApply(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	res, err := s.applier.Apply(ctx)
+	res, err := rt.applier.Apply(ctx)
 	s.writeApplyResult(w, res, err)
 }
 
-func (s *server) serviceAction(name string, fn func(context.Context) error) http.HandlerFunc {
+func (s *server) serviceAction(name string, fn func(*Applier, context.Context) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := reqCtx(r)
 		defer cancel()
-		if err := fn(ctx); err != nil {
+		if err := fn(s.rt().applier, ctx); err != nil {
 			fail(w, http.StatusInternalServerError, name+" failed: "+err.Error())
 			return
 		}
@@ -369,9 +424,10 @@ func (s *server) serviceAction(name string, fn func(context.Context) error) http
 // ---- backups / ops -------------------------------------------------------
 
 func (s *server) handleBackups(w http.ResponseWriter, r *http.Request) {
+	rt := s.rt()
 	ctx, cancel := reqCtx(r)
 	defer cancel()
-	list, err := s.applier.ListBackups(ctx)
+	list, err := rt.applier.ListBackups(ctx)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, "listing backups failed")
 		return
@@ -380,10 +436,11 @@ func (s *server) handleBackups(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleBackupView(w http.ResponseWriter, r *http.Request) {
+	rt := s.rt()
 	ctx, cancel := reqCtx(r)
 	defer cancel()
 	name := r.PathValue("name")
-	data, err := s.applier.ViewBackup(ctx, name)
+	data, err := rt.applier.ViewBackup(ctx, name)
 	switch {
 	case err == nil:
 		response.WriteJSON(w, http.StatusOK, map[string]string{"name": name, "content": string(data)})
@@ -402,6 +459,7 @@ func isBackupName(name string) bool {
 }
 
 func (s *server) handleBackupRestore(w http.ResponseWriter, r *http.Request) {
+	rt := s.rt()
 	ctx, cancel := reqCtx(r)
 	defer cancel()
 	name := r.PathValue("name")
@@ -409,7 +467,7 @@ func (s *server) handleBackupRestore(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "not a backup file name")
 		return
 	}
-	res, err := s.applier.Restore(ctx, name)
+	res, err := rt.applier.Restore(ctx, name)
 	if err != nil && res.Outcome == "" && errors.Is(err, os.ErrNotExist) {
 		fail(w, http.StatusNotFound, "no such backup")
 		return
@@ -465,8 +523,8 @@ func (s *server) handleOpsStream(w http.ResponseWriter, r *http.Request) {
 var errNoCertMachine = errors.New("CertMachine is not configured")
 
 // requireClient writes the 409 and returns false when CertMachine is not set up.
-func (s *server) requireClient(w http.ResponseWriter) bool {
-	if s.client == nil {
+func (s *server) requireClient(rt *live, w http.ResponseWriter) bool {
+	if rt.client == nil {
 		fail(w, http.StatusConflict, errNoCertMachine.Error())
 		return false
 	}
@@ -502,26 +560,27 @@ type certView struct {
 }
 
 func (s *server) handleCerts(w http.ResponseWriter, r *http.Request) {
+	rt := s.rt()
 	ctx, cancel := reqCtx(r)
 	defer cancel()
-	list, err := s.certs.List(ctx)
+	list, err := rt.certs.List(ctx)
 	if err != nil {
 		s.log.Addf("certs: listing failed: %v", err)
 		fail(w, http.StatusInternalServerError, "listing certificates failed")
 		return
 	}
 	now := time.Now()
-	live := s.readLiveCrtList(ctx)
+	live := s.readLiveCrtList(rt, ctx)
 	rows := make([]certView, 0, len(list.Certs))
 	for _, c := range list.Certs {
 		v := certView{CertManaged: c}
-		kind, reason := s.certUsage(ctx, c, live)
+		kind, reason := s.certUsage(rt, ctx, c, live)
 		v.Removable, v.InUseReason = kind == certFree, reason
-		if s.client != nil && c.CertMachine.ID != 0 {
-			if cm, err := s.client.GetCert(ctx, c.CertMachine.ID); err != nil {
+		if rt.client != nil && c.CertMachine.ID != 0 {
+			if cm, err := rt.client.GetCert(ctx, c.CertMachine.ID); err != nil {
 				_, v.DetailsError = cmError(err)
 			} else {
-				d := CertDetailsFrom(cm, now, s.warnDays)
+				d := CertDetailsFrom(cm, now, rt.warnDays)
 				v.Details = &d
 			}
 		}
@@ -540,7 +599,8 @@ func certNames(c CertMachineCert) []string {
 }
 
 func (s *server) handleCertMachineCerts(w http.ResponseWriter, r *http.Request) {
-	if !s.requireClient(w) {
+	rt := s.rt()
+	if !s.requireClient(rt, w) {
 		return
 	}
 	ctx, cancel := reqCtx(r)
@@ -552,7 +612,7 @@ func (s *server) handleCertMachineCerts(w http.ResponseWriter, r *http.Request) 
 	if all {
 		status = ""
 	}
-	certs, err := s.client.ListCerts(ctx, "", status)
+	certs, err := rt.client.ListCerts(ctx, "", status)
 	if err != nil {
 		code, msg := cmError(err)
 		fail(w, code, msg)
@@ -570,7 +630,8 @@ func (s *server) handleCertMachineCerts(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *server) handleCertPull(w http.ResponseWriter, r *http.Request) {
-	if !s.requireClient(w) {
+	rt := s.rt()
+	if !s.requireClient(rt, w) {
 		return
 	}
 	var req struct {
@@ -586,7 +647,7 @@ func (s *server) handleCertPull(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := reqCtx(r)
 	defer cancel()
-	cert, err := s.client.GetCert(ctx, req.CertMachineID)
+	cert, err := rt.client.GetCert(ctx, req.CertMachineID)
 	if err != nil {
 		code, msg := cmError(err)
 		fail(w, code, msg)
@@ -596,7 +657,7 @@ func (s *server) handleCertPull(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, "only an active CertMachine certificate can be installed")
 		return
 	}
-	res, err := s.certs.PullAndStage(ctx, s.driver, s.client, cert, req.Note)
+	res, err := rt.certs.PullAndStage(ctx, rt.driver, rt.client, cert, req.Note)
 	if err != nil {
 		if isCMError(err) {
 			code, msg := cmError(err)
@@ -627,8 +688,8 @@ func isCMError(err error) bool {
 }
 
 // findCert returns the tracking row called name.
-func (s *server) findCert(ctx context.Context, name string) (CertManaged, bool, error) {
-	list, err := s.certs.List(ctx)
+func (s *server) findCert(rt *live, ctx context.Context, name string) (CertManaged, bool, error) {
+	list, err := rt.certs.List(ctx)
 	if err != nil {
 		return CertManaged{}, false, err
 	}
@@ -641,6 +702,7 @@ func (s *server) findCert(ctx context.Context, name string) (CertManaged, bool, 
 }
 
 func (s *server) handleCertEnabled(w http.ResponseWriter, r *http.Request) {
+	rt := s.rt()
 	var req struct {
 		Enabled bool `json:"enabled"`
 	}
@@ -650,7 +712,7 @@ func (s *server) handleCertEnabled(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := reqCtx(r)
 	defer cancel()
 	name := r.PathValue("name")
-	_, ok, err := s.findCert(ctx, name)
+	_, ok, err := s.findCert(rt, ctx, name)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, "listing certificates failed")
 		return
@@ -659,7 +721,7 @@ func (s *server) handleCertEnabled(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "no such certificate")
 		return
 	}
-	if err := s.certs.SetEnabled(name, req.Enabled); err != nil {
+	if err := rt.certs.SetEnabled(name, req.Enabled); err != nil {
 		fail(w, http.StatusInternalServerError, "saving the certificate state failed")
 		return
 	}
@@ -667,6 +729,7 @@ func (s *server) handleCertEnabled(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleCertDelete(w http.ResponseWriter, r *http.Request) {
+	rt := s.rt()
 	ctx, cancel := reqCtx(r)
 	defer cancel()
 	name := r.PathValue("name")
@@ -677,8 +740,8 @@ func (s *server) handleCertDelete(w http.ResponseWriter, r *http.Request) {
 	// Check and delete under the Applier's lock so a Remove cannot run
 	// mid-Apply or between a crt-list install and its reload.
 	status, msg := 0, ""
-	_ = s.applier.WithLock(func() error {
-		row, ok, err := s.findCert(ctx, name)
+	_ = rt.applier.WithLock(func() error {
+		row, ok, err := s.findCert(rt, ctx, name)
 		if err != nil {
 			status, msg = http.StatusInternalServerError, "listing certificates failed"
 			return nil
@@ -687,7 +750,7 @@ func (s *server) handleCertDelete(w http.ResponseWriter, r *http.Request) {
 			status, msg = http.StatusNotFound, "no such certificate"
 			return nil
 		}
-		kind, _ := s.certUsage(ctx, row, s.readLiveCrtList(ctx))
+		kind, _ := s.certUsage(rt, ctx, row, s.readLiveCrtList(rt, ctx))
 		switch kind {
 		case certUnreadable:
 			status, msg = http.StatusInternalServerError, "reading the live crt-list failed"
@@ -699,7 +762,7 @@ func (s *server) handleCertDelete(w http.ResponseWriter, r *http.Request) {
 			status, msg = http.StatusConflict, "this certificate is in use by a service; remove it from the service first"
 			return nil
 		}
-		if err := s.certs.Remove(ctx, s.driver, name, nil); err != nil {
+		if err := rt.certs.Remove(ctx, rt.driver, name, nil); err != nil {
 			s.log.Addf("cert remove %s failed: %v", name, err)
 			status, msg = http.StatusInternalServerError, "removing the certificate failed; see the operations log"
 		}
@@ -722,8 +785,8 @@ type liveCrtList struct {
 
 // readLiveCrtList reads the LIVE crt-list. HAProxy loads it on its next
 // restart, start or host reboot, so a cert it still names must keep its file.
-func (s *server) readLiveCrtList(ctx context.Context) liveCrtList {
-	b, err := s.driver.PrivilegedRead(ctx, s.driver.CrtListPath())
+func (s *server) readLiveCrtList(rt *live, ctx context.Context) liveCrtList {
+	b, err := rt.driver.PrivilegedRead(ctx, rt.driver.CrtListPath())
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return liveCrtList{err: err}
 	}
@@ -748,11 +811,11 @@ const (
 // certUsage is the single "is this cert in use" decision shared by the list
 // (removable / inUseReason) and Remove (the 409 backstop). Unreadable live
 // state is treated as in use.
-func (s *server) certUsage(_ context.Context, row CertManaged, live liveCrtList) (certUse, string) {
+func (s *server) certUsage(rt *live, _ context.Context, row CertManaged, live liveCrtList) (certUse, string) {
 	if live.err != nil {
 		return certUnreadable, reasonUnreadable
 	}
-	if crtListReferences(live.data, s.driver.CertsDir(), row.Name) {
+	if crtListReferences(live.data, rt.driver.CertsDir(), row.Name) {
 		return certInLive, reasonInLive
 	}
 	if row.Enabled {
@@ -785,8 +848,8 @@ func crtListReferences(crtList, certsDir, name string) bool {
 // read from certs.json each time (rows explicitly marked Superseded by a pull
 // and still disabled), so it survives a restart. A row the owner disabled on
 // purpose is never in it.
-func (s *server) removeSuperseded(ctx context.Context) error {
-	list, err := s.certs.List(ctx)
+func (rt *live) removeSuperseded(ctx context.Context) error {
+	list, err := rt.certs.List(ctx)
 	if err != nil {
 		return err
 	}
@@ -799,12 +862,13 @@ func (s *server) removeSuperseded(ctx context.Context) error {
 	if len(drop) == 0 {
 		return nil
 	}
-	return s.certs.RemoveSuperseded(ctx, s.driver, drop)
+	return rt.certs.RemoveSuperseded(ctx, rt.driver, drop)
 }
 
 // ---- coverage / freshness -----------------------------------------------
 
 func (s *server) handleCoverage(w http.ResponseWriter, r *http.Request) {
+	rt := s.rt()
 	ctx, cancel := reqCtx(r)
 	defer cancel()
 	var svcs []CoverageService
@@ -816,13 +880,13 @@ func (s *server) handleCoverage(w http.ResponseWriter, r *http.Request) {
 	}
 	cache := map[string][]string{}
 	lookup := func(certFQDN string) ([]string, error) {
-		if s.client == nil {
+		if rt.client == nil {
 			return nil, errNoCertMachine
 		}
 		if names, ok := cache[certFQDN]; ok {
 			return names, nil
 		}
-		c, err := s.client.ActiveCertForFQDN(ctx, certFQDN)
+		c, err := rt.client.ActiveCertForFQDN(ctx, certFQDN)
 		if err != nil {
 			return nil, err
 		}
@@ -841,12 +905,13 @@ func (s *server) handleCoverage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleFreshness(w http.ResponseWriter, r *http.Request) {
-	if !s.requireClient(w) {
+	rt := s.rt()
+	if !s.requireClient(rt, w) {
 		return
 	}
 	ctx, cancel := reqCtx(r)
 	defer cancel()
-	list, err := s.certs.List(ctx)
+	list, err := rt.certs.List(ctx)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, "listing certificates failed")
 		return
@@ -863,7 +928,7 @@ func (s *server) handleFreshness(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		v := row{Name: c.Name, FQDN: c.CertMachine.FQDN}
-		f, err := CertFreshnessFor(ctx, s.client, c.CertMachine.ID, c.CertMachine.FQDN)
+		f, err := CertFreshnessFor(ctx, rt.client, c.CertMachine.ID, c.CertMachine.FQDN)
 		if err != nil {
 			v.Status = "unknown"
 			_, v.Error = cmError(err)

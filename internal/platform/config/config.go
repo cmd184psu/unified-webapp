@@ -471,6 +471,7 @@ type HaproxyConfig struct {
 	CertsDir        string                   `json:"certs_dir"`
 	CrtListPath     string                   `json:"crt_list_path"`
 	StatsSocketPath string                   `json:"stats_socket_path"`
+	BackupDir       string                   `json:"backup_dir"`
 	ServiceName     string                   `json:"service_name"`
 	BackupKeep      int                      `json:"backup_keep"`
 	ExpiryWarnDays  int                      `json:"expiry_warn_days"`
@@ -1029,7 +1030,7 @@ func expandHaproxyPaths(h *HaproxyConfig) error {
 	var err error
 	for _, p := range []*string{
 		&h.StaticDir, &h.DataDir, &h.ConfigPath, &h.CertsDir,
-		&h.CrtListPath, &h.StatsSocketPath, &h.CertMachine.CAFile,
+		&h.CrtListPath, &h.StatsSocketPath, &h.BackupDir, &h.CertMachine.CAFile,
 	} {
 		if *p, err = ExpandPath(*p); err != nil {
 			return err

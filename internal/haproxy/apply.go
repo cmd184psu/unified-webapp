@@ -137,6 +137,9 @@ type ApplyResult struct {
 	RolledBack bool    `json:"rolledBack"`
 	Outcome    Outcome `json:"outcome"`
 	Message    string  `json:"message"`
+	// Started is true when HAProxy was not running and Apply/Restore started it
+	// (loading the new config) instead of reloading.
+	Started bool `json:"started,omitempty"`
 }
 
 // StatusInfo is the service-status panel data (FR-H23): the driver's status
@@ -383,6 +386,16 @@ func (a *Applier) run(ctx context.Context, cfgText, crtListText string, buildSta
 	crtListInstalled := false
 	cfgInstalled := false
 
+	// `systemctl reload` fails on a stopped service, so record whether HAProxy is
+	// running before touching anything. A Status error leaves the state unknown,
+	// and unknown keeps the reload behaviour.
+	inactive := false
+	if st, serr := a.driver.Status(ctx); serr != nil {
+		a.log.Addf("%s: could not read the service status (%v); assuming it is running", op, serr)
+	} else if !st.Active {
+		inactive = true
+	}
+
 	// Install the crt-list first (the config's TLS binds reference it). A failure
 	// here changes nothing live, so the previous config is still loaded: a clean,
 	// fully-described outcome (nil error), not an indeterminate one.
@@ -397,32 +410,55 @@ func (a *Applier) run(ctx context.Context, cfgText, crtListText string, buildSta
 	// Then the config.
 	if err := a.driver.PrivilegedWrite(ctx, a.driver.ConfigPath(), []byte(cfgText), mode); err != nil {
 		a.log.Addf("%s: installing config failed: %v", op, err)
-		rbErr := a.rollback(ctx, crtListInstalled, cfgInstalled, live)
+		// Nothing was reloaded or started, so the service state is untouched.
+		rbErr := a.rollback(ctx, crtListInstalled, cfgInstalled, live, !inactive)
 		return a.rollbackResult(op, "installing config", err, rbErr)
 	}
 	cfgInstalled = true
 	a.log.Addf("%s: installed config", op)
 
-	if err := a.driver.Reload(ctx); err != nil {
-		a.log.Addf("%s: reload failed: %v", op, err)
-		rbErr := a.rollback(ctx, crtListInstalled, cfgInstalled, live)
-		return a.rollbackResult(op, "reload", err, rbErr)
+	started := false
+	if inactive {
+		if err := a.driver.Start(ctx); err != nil {
+			a.log.Addf("%s: HAProxy was not running and starting it failed: %v", op, err)
+			// Nothing is running, so there is nothing to reload after the restore.
+			rbErr := a.rollback(ctx, crtListInstalled, cfgInstalled, live, false)
+			return a.rollbackResult(op, "start", err, rbErr)
+		}
+		started = true
+		a.log.Addf("%s: HAProxy was not running, so it was started with the new configuration", op)
+	} else {
+		if err := a.driver.Reload(ctx); err != nil {
+			a.log.Addf("%s: reload failed: %v", op, err)
+			rbErr := a.rollback(ctx, crtListInstalled, cfgInstalled, live, true)
+			return a.rollbackResult(op, "reload", err, rbErr)
+		}
+		a.log.Addf("%s: reloaded", op)
 	}
-	a.log.Addf("%s: reloaded", op)
+	// After a rollback, reload when the service was running before; when we
+	// started it ourselves, reload only if restored files exist to load.
+	reloadOnRollback := !inactive || live.cfgExists
 
 	if err := a.verifier.Verify(ctx); err != nil {
 		a.log.Addf("%s: verify failed: %v", op, err)
-		rbErr := a.rollback(ctx, crtListInstalled, cfgInstalled, live)
+		rbErr := a.rollback(ctx, crtListInstalled, cfgInstalled, live, reloadOnRollback)
 		return a.rollbackResult(op, "verify", err, rbErr)
 	}
 	a.log.Addf("%s: verified; succeeded", op)
+	if started {
+		lead := "Applied."
+		if op == "restore" {
+			lead = "Restored."
+		}
+		return ApplyResult{Applied: true, Started: true, Outcome: OutcomeApplied, Message: lead + " HAProxy was not running, so it was started."}, nil
+	}
 	return ApplyResult{Applied: true, Outcome: OutcomeApplied, Message: op + " succeeded"}, nil
 }
 
-// rollback restores the live files to exactly their pre-apply state and reloads
-// again. It restores only files this run actually installed, and NEVER removes
+// rollback restores the live files to exactly their pre-apply state and, when reload
+// is true, reloads again (never on a service known to be stopped). It restores only files this run actually installed, and NEVER removes
 // a cert file (it touches only the config and crt-list paths).
-func (a *Applier) rollback(ctx context.Context, crtListInstalled, cfgInstalled bool, live liveState) error {
+func (a *Applier) rollback(ctx context.Context, crtListInstalled, cfgInstalled bool, live liveState, reload bool) error {
 	mode := a.driver.Ownership().ConfigMode
 	var errs []string
 
@@ -444,8 +480,10 @@ func (a *Applier) rollback(ctx context.Context, crtListInstalled, cfgInstalled b
 	restore(cfgInstalled, live.cfgExists, a.driver.ConfigPath(), live.cfg)
 	restore(crtListInstalled, live.crtListExists, a.driver.CrtListPath(), live.crtList)
 
-	if err := a.driver.Reload(ctx); err != nil {
-		errs = append(errs, fmt.Sprintf("reload after rollback: %v", err))
+	if reload {
+		if err := a.driver.Reload(ctx); err != nil {
+			errs = append(errs, fmt.Sprintf("reload after rollback: %v", err))
+		}
 	}
 	if len(errs) > 0 {
 		return errors.New(strings.Join(errs, "; "))

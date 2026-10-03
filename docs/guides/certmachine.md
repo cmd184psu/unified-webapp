@@ -699,10 +699,15 @@ Non-browser clients authenticate to a CertMachine instance with an API key,
 using the existing mechanism described in
 [README § API keys for automation](../../README.md#api-keys-for-automation):
 
-1. Generate a key: `go run ./cmd/server -gen-api-key`. It prints the key once
-   (store it where your client reads secrets) and its `sha256:...` hash.
-2. Paste the hash into that CertMachine instance's `auth.api_keys` and restart
-   or reload as you normally do for config changes.
+1. Generate a key and store its hash in one step:
+   `go run ./cmd/server -gen-api-key -name haproxy-editor -config ./unified-webapp.json`.
+   It prints the key once (store it where your client reads secrets) and adds
+   the hash to that instance's `auth.api_keys`; restart or reload as you
+   normally do for config changes. The admin module's Generate key does the
+   same live, without a restart.
+2. Alternative, manual: `go run ./cmd/server -gen-api-key` (no `-name`) only
+   prints the key and its `sha256:...` hash; paste the hash into
+   `auth.api_keys` yourself.
 3. Send the key as `Authorization: Bearer <key>` (or `X-API-Key: <key>`).
 
 Any key listed in `auth.api_keys` works. A dedicated key for each client

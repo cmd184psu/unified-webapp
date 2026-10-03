@@ -7274,13 +7274,13 @@ var require_jsx_runtime = __commonJS({
 });
 
 // web/haproxy/src/main.tsx
-var import_react11 = __toESM(require_react());
+var import_react12 = __toESM(require_react());
 var import_client = __toESM(require_client());
 import { ThemeManager, HamburgerMenu } from "/shared/dist/shared.mjs";
 
 // web/haproxy/src/App.tsx
-var import_react10 = __toESM(require_react());
-import { showToast as showToast10 } from "/shared/dist/shared.mjs";
+var import_react11 = __toESM(require_react());
+import { showToast as showToast11 } from "/shared/dist/shared.mjs";
 
 // web/haproxy/src/api.ts
 var ApiError = class extends Error {
@@ -7349,6 +7349,11 @@ var api = {
   setCertEnabled: (name, enabled) => request("PUT", `/api/certs/${enc(name)}/enabled`, { enabled }),
   deleteCert: (name) => request("DELETE", `/api/certs/${enc(name)}`),
   coverage: () => request("GET", "/api/coverage"),
+  settings: () => request("GET", "/api/settings"),
+  /** Writes the module settings. Called from the Settings tab's Save button only. */
+  saveSettings: (p) => request("PUT", "/api/settings", p),
+  /** Tests the given (possibly unsaved) CertMachine values; apiKey '' means the stored key. */
+  testConnection: (b) => request("POST", "/api/settings/test-connection", b),
   freshness: () => request("GET", "/api/certs/freshness")
 };
 
@@ -7739,6 +7744,7 @@ function diagnosticNotices(lines) {
 function applyToast(r) {
   switch (r.outcome) {
     case "applied":
+      if (r.started) return { tone: "success", message: "Applied. HAProxy was not running, so it was started." };
       return { tone: "success", message: r.message || "Changes applied." };
     case "no_changes":
       return { tone: "notice", message: r.message || "Nothing to apply: the live configuration already matches." };
@@ -8792,18 +8798,286 @@ function GlobalsPage({ global, defaults, onGlobal, onDefaults }) {
   ] });
 }
 
-// web/haproxy/src/App.tsx
+// web/haproxy/src/SettingsPage.tsx
+var import_react10 = __toESM(require_react());
+import { showToast as showToast10 } from "/shared/dist/shared.mjs";
+
+// web/haproxy/src/settingsform.ts
+function fromEffective(e) {
+  return {
+    values: { ...e, backupKeep: String(e.backupKeep), expiryWarnDays: String(e.expiryWarnDays) },
+    apiKey: "",
+    clearApiKey: false
+  };
+}
+function isDirty2(saved, draft) {
+  return JSON.stringify(saved) !== JSON.stringify(draft);
+}
+var SERVICE_RE = /^[A-Za-z0-9_.@-]+$/;
+var LOOPBACK = /^(localhost|127(\.\d{1,3}){3}|\[::1\])$/i;
+function pathError(label, p) {
+  if (p === "") return void 0;
+  if (/[\u0000-\u001f\u007f]/.test(p)) return `The ${label} must not contain control characters.`;
+  if (!p.startsWith("/")) return `The ${label} must be an absolute path (start with /).`;
+  if (p.split("/").includes("..")) return `The ${label} must not contain "..".`;
+  return void 0;
+}
+function urlError(raw) {
+  if (raw === "") return void 0;
+  let u;
+  try {
+    u = new URL(raw);
+  } catch {
+    return "The CertMachine URL is not a valid address; use something like https://certmachine.example.com.";
+  }
+  if (u.protocol === "https:") return void 0;
+  if (u.protocol === "http:") {
+    return LOOPBACK.test(u.hostname) ? void 0 : "The CertMachine URL uses plain http; https is required for a non-loopback address.";
+  }
+  return `The CertMachine URL scheme "${u.protocol.replace(":", "")}" is not supported (use https).`;
+}
+function intError(label, raw, lo, hi, unit) {
+  const n = Number(raw);
+  if (raw.trim() === "" || !Number.isInteger(n) || n < lo || n > hi) return `The ${label} must be between ${lo} and ${hi}${unit}.`;
+  return void 0;
+}
+function validate(s) {
+  const v = s.values;
+  const errs = {};
+  const set = (k, m) => {
+    if (m) errs[k] = m;
+  };
+  set("certmachineUrl", urlError(v.certmachineUrl.trim()));
+  set("configPath", pathError("config path", v.configPath.trim()));
+  set("certsDir", pathError("certs directory", v.certsDir.trim()));
+  set("crtListPath", pathError("crt-list path", v.crtListPath.trim()));
+  set("statsSocketPath", pathError("stats socket path", v.statsSocketPath.trim()));
+  set("backupDir", pathError("backup directory", v.backupDir.trim()));
+  const svc = v.serviceName.trim();
+  if (svc !== "" && !SERVICE_RE.test(svc)) errs.serviceName = "The service name may only contain letters, digits and . _ @ -";
+  set("certmachineCaFile", pathError("CA file path", v.certmachineCaFile.trim()));
+  set("backupKeep", intError("backup count", v.backupKeep, 1, 100, ""));
+  set("expiryWarnDays", intError("expiry warning", v.expiryWarnDays, 1, 365, " days"));
+  if (s.apiKey !== "" && s.clearApiKey) errs.apiKey = "Give a new API key or clear the stored one, not both.";
+  return errs;
+}
+function hasErrors(e) {
+  return Object.keys(e).length > 0;
+}
+function buildPayload(s) {
+  const v = s.values;
+  const t = (x) => x.trim();
+  return {
+    os: t(v.os),
+    certmachineUrl: t(v.certmachineUrl),
+    certmachineCaFile: t(v.certmachineCaFile),
+    configPath: t(v.configPath),
+    certsDir: t(v.certsDir),
+    crtListPath: t(v.crtListPath),
+    statsSocketPath: t(v.statsSocketPath),
+    backupDir: t(v.backupDir),
+    serviceName: t(v.serviceName),
+    backupKeep: Number(v.backupKeep),
+    expiryWarnDays: Number(v.expiryWarnDays),
+    apiKey: s.apiKey,
+    clearApiKey: s.clearApiKey
+  };
+}
+function apiKeyLabel(apiKeySet, s) {
+  if (s.apiKey !== "") return "Will be replaced on Save";
+  if (s.clearApiKey) return "Will be cleared on Save";
+  return apiKeySet ? "Set" : "Not set";
+}
+
+// web/haproxy/src/SettingsPage.tsx
 var import_jsx_runtime12 = __toESM(require_jsx_runtime());
+var errMsg3 = (e) => e instanceof Error ? e.message : String(e);
+function SettingsPage({ onSaved }) {
+  const [loaded, setLoaded] = (0, import_react10.useState)(null);
+  const [saved, setSaved] = (0, import_react10.useState)(null);
+  const [draft, setDraft] = (0, import_react10.useState)(null);
+  const [loadError, setLoadError] = (0, import_react10.useState)(null);
+  const [fieldErrors, setFieldErrors] = (0, import_react10.useState)({});
+  const [serverError, setServerError] = (0, import_react10.useState)(null);
+  const [notice, setNotice] = (0, import_react10.useState)(null);
+  const [busy, setBusy] = (0, import_react10.useState)(false);
+  const load = (0, import_react10.useCallback)(async () => {
+    try {
+      const r = await api.settings();
+      const f = fromEffective(r.effective);
+      setLoaded(r);
+      setSaved(f);
+      setDraft(f);
+      setLoadError(null);
+    } catch (e) {
+      setLoadError(errMsg3(e));
+      showToast10(`Could not load settings: ${errMsg3(e)}`, "error");
+    }
+  }, []);
+  (0, import_react10.useEffect)(() => {
+    load();
+  }, [load]);
+  if (loadError) return /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "error", children: loadError });
+  if (!loaded || !saved || !draft) return /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { children: "Loading\u2026" });
+  const dirty = isDirty2(saved, draft);
+  const edit = (k, v) => {
+    setDraft({ ...draft, values: { ...draft.values, [k]: v } });
+    setFieldErrors({ ...fieldErrors, [k]: void 0 });
+    setServerError(null);
+  };
+  const def = (k) => loaded.defaults[k] ?? "";
+  const field = (k, label, opts = {}) => /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("label", { className: "field", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "field-label", children: label }),
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
+      "input",
+      {
+        className: "input settings-input",
+        value: draft.values[k],
+        placeholder: opts.placeholder,
+        onChange: (e) => edit(k, e.target.value),
+        spellCheck: false
+      }
+    ),
+    opts.hint && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "muted", children: opts.hint }),
+    fieldErrors[k] && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "error", children: fieldErrors[k] })
+  ] }, k);
+  const pathField = (k, label) => field(k, label, { placeholder: def(k) });
+  const submit = async () => {
+    const errs = validate(draft);
+    setFieldErrors(errs);
+    if (hasErrors(errs)) {
+      showToast10("Fix the highlighted settings first; nothing was saved.", "error");
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await api.saveSettings(buildPayload(draft));
+      setServerError(null);
+      setNotice(r.needsRestart ? r.message : null);
+      showToast10(r.needsRestart ? r.message : "Settings saved and applied.", r.needsRestart ? "notice" : "success");
+      await load();
+      onSaved();
+    } catch (e) {
+      setServerError(errMsg3(e));
+      showToast10(`Save failed: ${errMsg3(e)}`, "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const discard = () => {
+    setDraft(saved);
+    setFieldErrors({});
+    setServerError(null);
+    showToast10("Unsaved changes discarded.", "notice");
+  };
+  const testConnection = async () => {
+    setBusy(true);
+    try {
+      const r = await api.testConnection({
+        certmachineUrl: draft.values.certmachineUrl.trim(),
+        certmachineCaFile: draft.values.certmachineCaFile.trim(),
+        apiKey: draft.clearApiKey ? "" : draft.apiKey
+      });
+      showToast10(r.message, r.ok ? "success" : "error");
+    } catch (e) {
+      showToast10(`Test connection failed: ${errMsg3(e)}`, "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "stack", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "savebar", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: dirty ? "unsaved" : "muted", children: dirty ? "Unsaved changes" : "All changes saved" }),
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "grow" }),
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("button", { className: "btn btn-ghost", disabled: !dirty || busy, onClick: discard, children: "Discard" }),
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("button", { className: "btn btn-primary", disabled: !dirty || busy, onClick: submit, children: "Save settings" })
+    ] }),
+    serverError && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "error", children: serverError }),
+    notice && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "muted", children: notice }),
+    loaded.unavailable && /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { className: "error", children: [
+      "The module cannot drive HAProxy right now: ",
+      loaded.unavailable
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "card stack", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("div", { className: "card-title", children: "CertMachine" }),
+      field("certmachineUrl", "CertMachine URL", { placeholder: "https://certmachine.example.com", hint: "Leave empty to run without CertMachine." }),
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "field-label", children: "API key" }),
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "row", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
+            "input",
+            {
+              className: "input settings-input grow",
+              type: "password",
+              autoComplete: "new-password",
+              value: draft.apiKey,
+              placeholder: loaded.apiKeySet ? "Type a new key to replace the stored one" : "Paste the API key",
+              onChange: (e) => {
+                setDraft({ ...draft, apiKey: e.target.value, clearApiKey: false });
+                setServerError(null);
+              }
+            }
+          ),
+          /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "badge", children: apiKeyLabel(loaded.apiKeySet, draft) }),
+          /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
+            "button",
+            {
+              className: "btn btn-ghost btn-sm",
+              disabled: !loaded.apiKeySet || draft.clearApiKey,
+              onClick: () => setDraft({ ...draft, apiKey: "", clearApiKey: true }),
+              children: "Clear"
+            }
+          )
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "muted", children: "The key is write-only: it is stored on this machine and never shown again." }),
+        fieldErrors.apiKey && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "error", children: fieldErrors.apiKey })
+      ] }),
+      field("certmachineCaFile", "CA file", { placeholder: "Optional: path to a CA certificate to trust" }),
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("button", { className: "btn", disabled: busy, onClick: testConnection, children: "Test connection" }),
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "muted", children: "Uses the values above, saved or not." })
+      ] })
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "card stack", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("div", { className: "card-title", children: "Files and service" }),
+      pathField("configPath", "Config path"),
+      pathField("certsDir", "Certs directory"),
+      pathField("crtListPath", "crt-list path"),
+      pathField("statsSocketPath", "Stats socket path"),
+      pathField("backupDir", "Backup directory"),
+      pathField("serviceName", "Service name"),
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "muted", children: "An empty field uses the default shown in it." })
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "card stack", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("div", { className: "card-title", children: "Behaviour" }),
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("label", { className: "field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "field-label", children: "Operating system" }),
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("select", { className: "input settings-input", value: draft.values.os, onChange: (e) => edit("os", e.target.value), children: [
+          /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("option", { value: "auto", children: "Detect automatically" }),
+          /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("option", { value: "ubuntu", children: "Ubuntu" }),
+          /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("option", { value: "rocky", children: "Rocky / RHEL" }),
+          /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("option", { value: "macos", children: "macOS (Apple silicon)" })
+        ] })
+      ] }),
+      field("backupKeep", "Backups to keep (1-100)"),
+      field("expiryWarnDays", "Warn this many days before a certificate expires (1-365)")
+    ] })
+  ] });
+}
+
+// web/haproxy/src/App.tsx
+var import_jsx_runtime13 = __toESM(require_jsx_runtime());
 var TABS = [
   { id: "services", label: "Services" },
   { id: "globals", label: "Globals" },
   { id: "certs", label: "Certificates" },
   { id: "backups", label: "Backups" },
+  { id: "settings", label: "Settings" },
   { id: "raw", label: "Raw" },
   { id: "log", label: "Log" },
   { id: "stats", label: "Stats" }
 ];
-var errMsg3 = (e) => e instanceof Error ? e.message : String(e);
+var errMsg4 = (e) => e instanceof Error ? e.message : String(e);
 function reportLines(r) {
   const lines = [];
   const list = (k, label) => {
@@ -8816,68 +9090,68 @@ function reportLines(r) {
   return lines;
 }
 function App() {
-  const [status, setStatus] = (0, import_react10.useState)(null);
-  const [statusError, setStatusError] = (0, import_react10.useState)(null);
-  const [loadError, setLoadError] = (0, import_react10.useState)(null);
-  const [saved, setSaved] = (0, import_react10.useState)(null);
-  const [draft, setDraft] = (0, import_react10.useState)(null);
-  const [imported, setImported] = (0, import_react10.useState)(true);
-  const [issues, setIssues] = (0, import_react10.useState)([]);
-  const [certsResp, setCertsResp] = (0, import_react10.useState)(null);
-  const [changes, setChanges] = (0, import_react10.useState)(null);
-  const [changesError, setChangesError] = (0, import_react10.useState)(null);
-  const [blockers, setBlockers] = (0, import_react10.useState)([]);
-  const [applyBusy, setApplyBusy] = (0, import_react10.useState)(false);
-  const [coverage, setCoverage] = (0, import_react10.useState)([]);
-  const [refreshKey, setRefreshKey] = (0, import_react10.useState)(0);
-  const [picker, setPicker] = (0, import_react10.useState)(null);
-  const [importStatus, setImportStatus] = (0, import_react10.useState)(void 0);
-  const inFlight = (0, import_react10.useRef)(false);
+  const [status, setStatus] = (0, import_react11.useState)(null);
+  const [statusError, setStatusError] = (0, import_react11.useState)(null);
+  const [loadError, setLoadError] = (0, import_react11.useState)(null);
+  const [saved, setSaved] = (0, import_react11.useState)(null);
+  const [draft, setDraft] = (0, import_react11.useState)(null);
+  const [imported, setImported] = (0, import_react11.useState)(true);
+  const [issues, setIssues] = (0, import_react11.useState)([]);
+  const [certsResp, setCertsResp] = (0, import_react11.useState)(null);
+  const [changes, setChanges] = (0, import_react11.useState)(null);
+  const [changesError, setChangesError] = (0, import_react11.useState)(null);
+  const [blockers, setBlockers] = (0, import_react11.useState)([]);
+  const [applyBusy, setApplyBusy] = (0, import_react11.useState)(false);
+  const [coverage, setCoverage] = (0, import_react11.useState)([]);
+  const [refreshKey, setRefreshKey] = (0, import_react11.useState)(0);
+  const [picker, setPicker] = (0, import_react11.useState)(null);
+  const [importStatus, setImportStatus] = (0, import_react11.useState)(void 0);
+  const inFlight = (0, import_react11.useRef)(false);
   const certs = certsResp?.certs ?? [];
-  const [tab, setTab] = (0, import_react10.useState)("services");
-  const [busy, setBusy] = (0, import_react10.useState)(false);
-  const [preview, setPreview] = (0, import_react10.useState)(null);
-  (0, import_react10.useEffect)(() => {
+  const [tab, setTab] = (0, import_react11.useState)("services");
+  const [busy, setBusy] = (0, import_react11.useState)(false);
+  const [preview, setPreview] = (0, import_react11.useState)(null);
+  (0, import_react11.useEffect)(() => {
     initHamburger();
   }, []);
-  const loadStatus = (0, import_react10.useCallback)(async (quiet = false) => {
+  const loadStatus = (0, import_react11.useCallback)(async (quiet = false) => {
     try {
       setStatus(await api.status());
       setStatusError(null);
     } catch (e) {
-      setStatusError(errMsg3(e));
-      if (!quiet) showToast10(`Could not load status: ${errMsg3(e)}`, "error");
+      setStatusError(errMsg4(e));
+      if (!quiet) showToast11(`Could not load status: ${errMsg4(e)}`, "error");
     }
   }, []);
-  const loadChanges = (0, import_react10.useCallback)(async (quiet = false) => {
+  const loadChanges = (0, import_react11.useCallback)(async (quiet = false) => {
     try {
       setChanges(await api.changes());
       setChangesError(null);
     } catch (e) {
-      setChangesError(errMsg3(e));
-      if (!quiet) showToast10(`Could not read pending changes: ${errMsg3(e)}`, "error");
+      setChangesError(errMsg4(e));
+      if (!quiet) showToast11(`Could not read pending changes: ${errMsg4(e)}`, "error");
     }
   }, []);
-  const loadIssues = (0, import_react10.useCallback)(async (announce) => {
+  const loadIssues = (0, import_react11.useCallback)(async (announce) => {
     try {
       const r = await api.checkModel();
       setIssues(r.issues ?? []);
       if (announce) {
         const { errors } = issueCounts(r.issues ?? []);
-        showToast10(issuesSummary(r.issues ?? []), errors > 0 ? "error" : (r.issues ?? []).length > 0 ? "notice" : "success");
+        showToast11(issuesSummary(r.issues ?? []), errors > 0 ? "error" : (r.issues ?? []).length > 0 ? "notice" : "success");
       }
     } catch (e) {
-      showToast10(`Could not check the model: ${errMsg3(e)}`, "error");
+      showToast11(`Could not check the model: ${errMsg4(e)}`, "error");
     }
   }, []);
-  const loadCerts = (0, import_react10.useCallback)(async () => {
+  const loadCerts = (0, import_react11.useCallback)(async () => {
     try {
       setCertsResp(await api.certs());
     } catch (e) {
-      showToast10(`Could not load certificates: ${errMsg3(e)}`, "error");
+      showToast11(`Could not load certificates: ${errMsg4(e)}`, "error");
     }
   }, []);
-  const loadModel = (0, import_react10.useCallback)(async () => {
+  const loadModel = (0, import_react11.useCallback)(async () => {
     try {
       const r = await api.getModel();
       const m = normalizeModel(r);
@@ -8887,33 +9161,33 @@ function App() {
       setLoadError(null);
       if (r.imported) loadIssues(false);
     } catch (e) {
-      setLoadError(errMsg3(e));
-      showToast10(`Could not load the model: ${errMsg3(e)}`, "error");
+      setLoadError(errMsg4(e));
+      showToast11(`Could not load the model: ${errMsg4(e)}`, "error");
     }
   }, [loadIssues]);
-  const loadCoverage = (0, import_react10.useCallback)(async () => {
+  const loadCoverage = (0, import_react11.useCallback)(async () => {
     try {
       setCoverage(await api.coverage() ?? []);
     } catch (e) {
       setCoverage([]);
-      showToast10(`Could not check certificate coverage: ${errMsg3(e)}`, "error");
+      showToast11(`Could not check certificate coverage: ${errMsg4(e)}`, "error");
     }
   }, []);
-  const refreshAll = (0, import_react10.useCallback)(() => {
+  const refreshAll = (0, import_react11.useCallback)(() => {
     loadStatus();
     loadChanges();
     loadCerts();
     loadCoverage();
     setRefreshKey((k) => k + 1);
   }, [loadStatus, loadChanges, loadCerts, loadCoverage]);
-  (0, import_react10.useEffect)(() => {
+  (0, import_react11.useEffect)(() => {
     loadStatus();
     loadChanges();
     loadModel();
     loadCerts();
     loadCoverage();
   }, [loadStatus, loadChanges, loadModel, loadCerts, loadCoverage]);
-  (0, import_react10.useEffect)(() => {
+  (0, import_react11.useEffect)(() => {
     const tick = async () => {
       if (!shouldPoll(document.hidden, inFlight.current)) return;
       inFlight.current = true;
@@ -8934,7 +9208,7 @@ function App() {
     };
   }, [loadStatus, loadChanges]);
   const dirty = saved !== null && draft !== null && isDirty(saved, draft);
-  const save = (0, import_react10.useCallback)(async () => {
+  const save = (0, import_react11.useCallback)(async () => {
     if (!draft) return;
     const body = finalizeForSave(draft);
     setBusy(true);
@@ -8943,12 +9217,12 @@ function App() {
       const m = normalizeModel(body);
       setSaved(m);
       setDraft(m);
-      showToast10("Model saved.", "success");
+      showToast11("Model saved.", "success");
       setBlockers([]);
       await loadIssues(true);
       refreshAll();
     } catch (e) {
-      showToast10(`Save failed: ${errMsg3(e)}`, "error");
+      showToast11(`Save failed: ${errMsg4(e)}`, "error");
       if (e instanceof ApiError && e.issues.length > 0) setIssues(e.issues);
     } finally {
       setBusy(false);
@@ -8957,7 +9231,7 @@ function App() {
   const discard = () => {
     if (!saved) return;
     setDraft(saved);
-    showToast10("Unsaved changes discarded.", "notice");
+    showToast11("Unsaved changes discarded.", "notice");
   };
   const importPreview = async () => {
     setBusy(true);
@@ -8965,10 +9239,10 @@ function App() {
       const r = await api.importLive(false);
       setPreview({ model: normalizeModel(r.model), report: r.report });
       const n = reportLines(r.report).length;
-      showToast10(`Import report ready: ${n} item${n === 1 ? "" : "s"} need your attention. Nothing is stored yet.`, "notice");
+      showToast11(`Import report ready: ${n} item${n === 1 ? "" : "s"} need your attention. Nothing is stored yet.`, "notice");
     } catch (e) {
       if (e instanceof ApiError) setImportStatus(e.status);
-      showToast10(e instanceof ApiError && e.status === 404 ? "No live HAProxy configuration was found. You can start with defaults instead." : `Import failed: ${errMsg3(e)}`, "error");
+      showToast11(e instanceof ApiError && e.status === 404 ? "No live HAProxy configuration was found. You can start with defaults instead." : `Import failed: ${errMsg4(e)}`, "error");
     } finally {
       setBusy(false);
     }
@@ -8982,11 +9256,11 @@ function App() {
       setDraft(m);
       setImported(true);
       setPreview(null);
-      showToast10("Live configuration imported and stored.", "success");
+      showToast11("Live configuration imported and stored.", "success");
       await loadIssues(true);
       refreshAll();
     } catch (e) {
-      showToast10(`Import failed: ${errMsg3(e)}`, "error");
+      showToast11(`Import failed: ${errMsg4(e)}`, "error");
     } finally {
       setBusy(false);
     }
@@ -9000,11 +9274,11 @@ function App() {
       setSaved(m);
       setDraft(m);
       setImported(true);
-      showToast10("Started with the default configuration. Review it, then Apply.", "success");
+      showToast11("Started with the default configuration. Review it, then Apply.", "success");
       await loadIssues(true);
       refreshAll();
     } catch (e) {
-      showToast10(`Could not start with defaults: ${errMsg3(e)}`, "error");
+      showToast11(`Could not start with defaults: ${errMsg4(e)}`, "error");
     } finally {
       setBusy(false);
     }
@@ -9034,53 +9308,53 @@ function App() {
     if (target && draft) setDraft(updateService(draft, target.id, { cert: { fqdn: cert.fqdn } }));
     refreshAll();
   };
-  const grouped = (0, import_react10.useMemo)(() => groupIssues(issues), [issues]);
+  const grouped = (0, import_react11.useMemo)(() => groupIssues(issues), [issues]);
   const counts = issueCounts(issues);
   const editor = () => {
-    if (loadError) return /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "error", children: loadError });
-    if (!draft || !saved) return /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { children: "Loading\u2026" });
+    if (loadError) return /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("p", { className: "error", children: loadError });
+    if (!draft || !saved) return /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("p", { children: "Loading\u2026" });
     if (!imported) {
       const first = firstRunState({ imported, importStatus });
-      return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "card stack", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("div", { className: "card-title", children: "Import the live HAProxy configuration" }),
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "muted", children: "No model has been stored yet. Import reads the running configuration and shows what it could and could not map; nothing is stored until you confirm." }),
-        preview ? /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(import_jsx_runtime12.Fragment, { children: [
-          reportLines(preview.report).length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { children: "The whole configuration maps cleanly." }) : /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("ul", { className: "issues", children: reportLines(preview.report).map((l, n) => /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("li", { className: "issue issue-warning", children: l }, n)) }),
-          /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { className: "muted", children: [
+      return /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "card stack", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("div", { className: "card-title", children: "Import the live HAProxy configuration" }),
+        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("p", { className: "muted", children: "No model has been stored yet. Import reads the running configuration and shows what it could and could not map; nothing is stored until you confirm." }),
+        preview ? /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(import_jsx_runtime13.Fragment, { children: [
+          reportLines(preview.report).length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("p", { children: "The whole configuration maps cleanly." }) : /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("ul", { className: "issues", children: reportLines(preview.report).map((l, n) => /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("li", { className: "issue issue-warning", children: l }, n)) }),
+          /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("p", { className: "muted", children: [
             preview.model.services.length,
             " service(s) found."
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "row", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("button", { className: "btn btn-primary", disabled: busy, onClick: importCommit, children: "Confirm import" }),
-            /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("button", { className: "btn btn-ghost", disabled: busy, onClick: () => {
+          /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "row", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("button", { className: "btn btn-primary", disabled: busy, onClick: importCommit, children: "Confirm import" }),
+            /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("button", { className: "btn btn-ghost", disabled: busy, onClick: () => {
               setPreview(null);
-              showToast10("Import cancelled; nothing stored.", "notice");
+              showToast11("Import cancelled; nothing stored.", "notice");
             }, children: "Cancel" })
           ] })
-        ] }) : /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(import_jsx_runtime12.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "row", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("button", { className: "btn btn-primary", disabled: busy, onClick: importPreview, children: "Import live config" }),
-            first === "defaults" && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("button", { className: "btn btn-ghost", disabled: busy, onClick: startWithDefaults, children: "Start with defaults" })
+        ] }) : /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(import_jsx_runtime13.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "row", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("button", { className: "btn btn-primary", disabled: busy, onClick: importPreview, children: "Import live config" }),
+            first === "defaults" && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("button", { className: "btn btn-ghost", disabled: busy, onClick: startWithDefaults, children: "Start with defaults" })
           ] }),
-          first === "defaults" && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "muted", children: "No live HAProxy configuration exists on this machine. Start with defaults stores the default model so you can add services." })
+          first === "defaults" && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("p", { className: "muted", children: "No live HAProxy configuration exists on this machine. Start with defaults stores the default model so you can add services." })
         ] })
       ] });
     }
-    return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(import_jsx_runtime12.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "savebar", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: dirty ? "unsaved" : "muted", children: dirty ? "Unsaved changes" : "All changes saved" }),
-        counts.errors + counts.warnings > 0 && /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("span", { className: "muted", children: [
+    return /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(import_jsx_runtime13.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "savebar", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: dirty ? "unsaved" : "muted", children: dirty ? "Unsaved changes" : "All changes saved" }),
+        counts.errors + counts.warnings > 0 && /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("span", { className: "muted", children: [
           counts.errors,
           " error(s), ",
           counts.warnings,
           " warning(s)"
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "grow" }),
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("button", { className: "btn btn-ghost", disabled: !dirty || busy, onClick: discard, children: "Discard" }),
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("button", { className: "btn btn-primary", disabled: !dirty || busy, onClick: save, children: "Save" })
+        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "grow" }),
+        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("button", { className: "btn btn-ghost", disabled: !dirty || busy, onClick: discard, children: "Discard" }),
+        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("button", { className: "btn btn-primary", disabled: !dirty || busy, onClick: save, children: "Save" })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(IssueList, { issues: grouped.other }),
-      tab === "services" && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(IssueList, { issues: grouped.other }),
+      tab === "services" && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
         ServicesPage,
         {
           model: draft,
@@ -9091,7 +9365,7 @@ function App() {
           onChange: setDraft
         }
       ),
-      tab === "globals" && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
+      tab === "globals" && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
         GlobalsPage,
         {
           global: draft.global,
@@ -9102,12 +9376,12 @@ function App() {
       )
     ] });
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(import_jsx_runtime12.Fragment, { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("header", { className: "topbar", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("h1", { children: "HAProxy editor" }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("button", { id: "hamburger-trigger", className: "hamburger-trigger", "aria-label": "Settings", children: "\u2630" })
+  return /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(import_jsx_runtime13.Fragment, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("header", { className: "topbar", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("h1", { children: "HAProxy editor" }),
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("button", { id: "hamburger-trigger", className: "hamburger-trigger", "aria-label": "Settings", children: "\u2630" })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
       PendingBar,
       {
         status,
@@ -9121,10 +9395,10 @@ function App() {
         onRefresh: refreshAll
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("nav", { className: "tabs", children: TABS.map((t) => /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("button", { className: `tab${tab === t.id ? " active" : ""}`, onClick: () => setTab(t.id), children: t.label }, t.id)) }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("main", { className: "content", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("nav", { className: "tabs", children: TABS.map((t) => /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("button", { className: `tab${tab === t.id ? " active" : ""}`, onClick: () => setTab(t.id), children: t.label }, t.id)) }),
+    /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("main", { className: "content", children: [
       (tab === "services" || tab === "globals") && editor(),
-      tab === "certs" && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
+      tab === "certs" && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
         CertsPage,
         {
           data: certsResp,
@@ -9134,12 +9408,13 @@ function App() {
           onPick: () => setPicker({ svc: null })
         }
       ),
-      tab === "backups" && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(BackupsPage, { refreshKey, onRestore: restore }),
-      tab === "raw" && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(RawPage, { refreshKey }),
-      tab === "log" && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(LogPage, {}),
-      tab === "stats" && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(StatsPage, {})
+      tab === "backups" && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(BackupsPage, { refreshKey, onRestore: restore }),
+      tab === "settings" && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(SettingsPage, { onSaved: refreshAll }),
+      tab === "raw" && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(RawPage, { refreshKey }),
+      tab === "log" && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(LogPage, {}),
+      tab === "stats" && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(StatsPage, {})
     ] }),
-    picker && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
+    picker && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
       CertPicker,
       {
         configured: status?.certmachineConfigured ?? false,
@@ -9152,7 +9427,7 @@ function App() {
 }
 
 // web/haproxy/src/main.tsx
-var import_jsx_runtime13 = __toESM(require_jsx_runtime());
+var import_jsx_runtime14 = __toESM(require_jsx_runtime());
 var themes = new ThemeManager({
   module: "haproxy",
   default: "dark"
@@ -9177,7 +9452,7 @@ function initHamburger() {
   return settingsHost;
 }
 (0, import_client.createRoot)(document.getElementById("root")).render(
-  /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(import_react11.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(App, {}) })
+  /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(import_react12.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(App, {}) })
 );
 export {
   initHamburger,

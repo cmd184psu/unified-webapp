@@ -77,6 +77,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/config/pin-files", h.handleGetPinFiles)
 	mux.HandleFunc("POST /api/config/pin-files", h.handlePostPinFile)
 	mux.HandleFunc("PUT /api/config/ldap", h.handlePutConfigLdap)
+	mux.HandleFunc("PUT /api/config/passkey", h.handlePutConfigPasskey)
 }
 
 // mutateAuth is the single path every mutating route below uses. It holds
@@ -200,6 +201,11 @@ func redactAuthConfig(a config.AuthConfig) authConfigView {
 		modules = map[string]config.ModuleAuthConfig{}
 	}
 
+	passkey := a.Passkey
+	if passkey.RPOrigins == nil {
+		passkey.RPOrigins = []string{}
+	}
+
 	return authConfigView{
 		Modules:  modules,
 		APIKeys:  keys,
@@ -215,7 +221,7 @@ func redactAuthConfig(a config.AuthConfig) authConfigView {
 			RequiredGroups: a.LDAP.RequiredGroups,
 			TimeoutSeconds: a.LDAP.TimeoutSeconds,
 		},
-		Passkey:      a.Passkey,
+		Passkey:      passkey,
 		Session:      sessionConfigView{TTLHours: a.Session.TTLHours, RefreshAfterFraction: a.Session.RefreshAfterFraction},
 		CookieSecure: a.CookieSecure,
 		CookieDomain: a.CookieDomain,

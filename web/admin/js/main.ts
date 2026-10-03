@@ -1,3 +1,5 @@
+import { addOrigin, normalizeOrigins, removeOrigin, suggestFromOrigin, validatePasskeyForm } from "./passkeyform";
+import { passkeyCardState, PASSKEYS_NOT_CONFIGURED_TEXT } from "./passkeystate";
 import { ThemeManager, HamburgerMenu, createCopyButton, openModal, showToast } from "@shared";
 import type { MenuItem } from "@shared";
 
@@ -38,6 +40,7 @@ interface AuthConfig {
   known_modules?: string[];
   api_keys?: Array<{ name: string; hash?: string }>;
   ldap?: Record<string, unknown>;
+  passkey?: { rp_id?: string; rp_origins?: string[] };
   session?: { ttl_hours?: number };
   cookie_domain?: string;
   cookie_secure?: boolean;
@@ -71,6 +74,7 @@ const panels = [
   "panel-keys",
   "panel-ldap",
   "panel-session",
+  "panel-passkey-settings",
   "panel-passkeys",
   "panel-operator-pin",
 ].map((id) => document.getElementById(id)!);
@@ -81,6 +85,8 @@ let passkeys: PasskeyEntry[] = [];
 // True while this session has no LDAP identity: the server answers the passkey
 // routes 403 until the operator signs in with LDAP (see askLdapLogin).
 let passkeysLocked = false;
+// Set when the server answers 409: passkeys are not configured at all.
+let passkeysUnconfigured = "";
 let pinFiles: PinFile[] = [];
 
 // ────────────────────────────────────────────────────────────────
@@ -200,7 +206,7 @@ async function loadAll(): Promise<void> {
     matrix[m] = { protected: true, pinFile: entry.pin_file || "", idle: entry.idle_minutes || 0 };
   });
   passkeys = (passkeysRes.ok && passkeysRes.data && passkeysRes.data.passkeys) || [];
-  passkeysLocked = passkeysRes.status === 403;
+  applyPasskeyStatus(passkeysRes);
 
   statusEl.classList.add("hidden");
   panels.forEach((p) => p.classList.remove("hidden"));
@@ -209,6 +215,7 @@ async function loadAll(): Promise<void> {
   renderKeys();
   renderLdap();
   renderSession();
+  renderPasskeySettings();
   renderPasskeys();
   renderOperatorPin();
 }
@@ -691,6 +698,121 @@ document.querySelectorAll<HTMLElement>("#session-form input").forEach((el) => {
   el.addEventListener(eventName, autoSaveSession);
 });
 
+// ── Passkey settings ────────────────────────────────────────────
+
+// Working copy of the origins list; edited only in memory until Save.
+let passkeyOrigins: string[] = [];
+
+function passkeyRpIdInput(): HTMLInputElement {
+  return document.getElementById("passkey-rp-id") as HTMLInputElement;
+}
+
+function renderPasskeyOrigins(): void {
+  const list = document.getElementById("passkey-origins-list")!;
+  list.innerHTML = "";
+  passkeyOrigins.forEach((origin, i) => {
+    const li = document.createElement("li");
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = origin;
+    input.placeholder = "https://app.example.com";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    input.setAttribute("aria-label", "Allowed origin " + (i + 1));
+    input.addEventListener("input", () => {
+      passkeyOrigins[i] = input.value;
+    });
+    const rm = document.createElement("button");
+    rm.type = "button";
+    rm.className = "btn btn-ghost";
+    rm.textContent = "Remove";
+    rm.addEventListener("click", () => {
+      passkeyOrigins = removeOrigin(passkeyOrigins, i);
+      renderPasskeyOrigins();
+    });
+    li.append(input, rm);
+    list.appendChild(li);
+  });
+}
+
+function renderPasskeySettings(): void {
+  const p = authConfig!.passkey || {};
+  passkeyRpIdInput().value = p.rp_id || "";
+  passkeyOrigins = (p.rp_origins || []).slice();
+  renderPasskeyOrigins();
+}
+
+function setPasskeySettingsError(text: string): void {
+  document.getElementById("passkey-settings-error")!.textContent = text;
+}
+
+async function reloadPasskeyCard(): Promise<void> {
+  const res = await api<{ passkeys?: PasskeyEntry[] }>("GET", "/api/auth/passkeys");
+  applyPasskeyStatus(res);
+  passkeys = (res.ok && res.data && res.data.passkeys) || [];
+  renderPasskeys();
+}
+
+async function savePasskeySettings(): Promise<void> {
+  const statusEl2 = document.getElementById("passkey-settings-status")!;
+  statusEl2.textContent = "";
+  statusEl2.className = "status";
+  setPasskeySettingsError("");
+  const rp_id = passkeyRpIdInput().value.trim();
+  const rp_origins = normalizeOrigins(passkeyOrigins);
+  const advice = validatePasskeyForm(rp_id, rp_origins);
+  if (advice) {
+    setPasskeySettingsError(advice);
+    showToast("Passkey settings not saved: " + advice, "error");
+    return;
+  }
+  const cur = authConfig!.passkey || {};
+  const unchanged =
+    (cur.rp_id || "") === rp_id.toLowerCase() &&
+    JSON.stringify(cur.rp_origins || []) === JSON.stringify(rp_origins);
+  if (unchanged) {
+    statusEl2.textContent = "Nothing changed.";
+    showToast("Passkey settings: nothing changed.", "notice");
+    return;
+  }
+  const res = await api<{ rp_id: string; rp_origins: string[] }>("PUT", "/api/config/passkey", {
+    rp_id,
+    rp_origins,
+  });
+  if (!res.ok) {
+    const msg = errorText(res, "Unable to save passkey settings.");
+    setPasskeySettingsError(msg);
+    showToast("Passkey settings not saved: " + msg, "error");
+    return;
+  }
+  authConfig!.passkey = res.data || {};
+  renderPasskeySettings();
+  statusEl2.textContent = "Saved.";
+  statusEl2.className = "status status-good";
+  showToast("Passkey settings saved.", "success");
+  await reloadPasskeyCard();
+}
+
+document.getElementById("passkey-settings-form")!.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  await savePasskeySettings();
+});
+
+document.getElementById("passkey-origin-add")!.addEventListener("click", () => {
+  passkeyOrigins = addOrigin(passkeyOrigins);
+  renderPasskeyOrigins();
+  const inputs = document.querySelectorAll<HTMLInputElement>("#passkey-origins-list input");
+  inputs[inputs.length - 1]?.focus();
+});
+
+document.getElementById("passkey-origin-here")!.addEventListener("click", () => {
+  const s = suggestFromOrigin(location.origin, passkeyRpIdInput().value, passkeyOrigins);
+  passkeyOrigins = s.origins;
+  passkeyRpIdInput().value = s.rpId;
+  renderPasskeyOrigins();
+  document.getElementById("passkey-settings-hint")!.textContent = s.hint + " Press Save to apply.";
+});
+
 // ── Passkeys ────────────────────────────────────────────────────
 
 function formatTimestamp(sec: number | undefined): string {
@@ -790,16 +912,23 @@ function askLdapLogin(): Promise<string | null> {
   });
 }
 
+function applyPasskeyStatus(res: ApiResponse<unknown>): void {
+  const state = passkeyCardState(res.status, errorText(res, ""));
+  passkeysLocked = state.kind === "locked";
+  passkeysUnconfigured = state.kind === "unconfigured" ? state.text : "";
+}
+
 /** Prompt for LDAP sign-in, then reload the passkey list. True if now unlocked. */
 async function unlockPasskeys(): Promise<boolean> {
   const identity = await askLdapLogin();
   if (identity === null) return false;
   const res = await api<{ passkeys?: PasskeyEntry[] }>("GET", "/api/auth/passkeys");
-  passkeysLocked = !res.ok;
+  applyPasskeyStatus(res);
+  passkeysLocked = !res.ok && !passkeysUnconfigured;
   passkeys = (res.ok && res.data && res.data.passkeys) || [];
   renderPasskeys();
-  if (passkeysLocked) {
-    showToast("Signed in as " + identity + ", but passkeys are still unavailable (HTTP " + res.status + ").", "error");
+  if (!res.ok) {
+    showToast(errorText(res, "Signed in as " + identity + ", but passkeys are still unavailable.") , "error");
     return false;
   }
   showToast("Signed in as " + identity + ".", "success");
@@ -810,7 +939,31 @@ function renderPasskeys(): void {
   const list = document.getElementById("passkeys-list")!;
   list.innerHTML = "";
   const submitBtn = document.getElementById("passkey-submit");
-  if (submitBtn) submitBtn.textContent = passkeysLocked ? "Sign in with LDAP…" : "Register new passkey";
+  const notice = document.getElementById("passkey-unconfigured-note");
+  if (notice) {
+    notice.textContent = passkeysUnconfigured;
+    if (passkeysUnconfigured) {
+      const link = document.createElement("a");
+      link.href = "#panel-passkey-settings";
+      link.textContent = " Go to Passkey settings.";
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        document.getElementById("panel-passkey-settings")!.scrollIntoView({ behavior: "smooth" });
+        passkeyRpIdInput().focus();
+      });
+      notice.appendChild(link);
+    }
+    notice.classList.toggle("hidden", !passkeysUnconfigured);
+  }
+  if (submitBtn) {
+    submitBtn.textContent = passkeysLocked ? "Sign in with LDAP…" : "Register new passkey";
+    (submitBtn as HTMLButtonElement).disabled = !!passkeysUnconfigured;
+    (submitBtn as HTMLButtonElement).title = passkeysUnconfigured;
+  }
+  if (passkeysUnconfigured) {
+    list.innerHTML = '<li class="named-list-empty">Passkeys are not available.</li>';
+    return;
+  }
   if (passkeysLocked) {
     list.innerHTML = '<li class="named-list-empty">Sign in with LDAP to view and manage your passkeys.</li>';
     return;
@@ -926,6 +1079,7 @@ async function registerPasskey(friendlyName: string, retried = false): Promise<b
     showToast(msg, "error");
     return false;
   };
+  if (passkeysUnconfigured) return fail(passkeysUnconfigured);
   if (passkeysLocked && !(await unlockPasskeys())) return false;
 
   const beginRes = await api<{ options: { publicKey: Record<string, unknown> }; challengeId: string }>(
@@ -934,6 +1088,11 @@ async function registerPasskey(friendlyName: string, retried = false): Promise<b
     { friendlyName },
   );
   if (!beginRes.ok) {
+    if (beginRes.status === 409) {
+      passkeysUnconfigured = errorText(beginRes, PASSKEYS_NOT_CONFIGURED_TEXT);
+      renderPasskeys();
+      return fail(passkeysUnconfigured);
+    }
     if (beginRes.status === 403 && !retried) {
       passkeysLocked = true;
       renderPasskeys();

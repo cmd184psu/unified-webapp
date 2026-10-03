@@ -269,6 +269,28 @@ func TestHandlerApplyStatusMapping(t *testing.T) {
 		})
 	}
 
+	t.Run("started_when_inactive", func(t *testing.T) {
+		cfg := goodConfig(t)
+		drv := newFakeDriver()
+		drv.Active = false
+		h, err := buildWithDriver(cfg, &startFlips{drv}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		x := &hx{t: t, h: h, drv: drv, cfg: cfg, dataDir: cfg.DataDir}
+		rec := x.do("POST", "/api/apply", "")
+		var raw map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != 200 || raw["applied"] != true || raw["started"] != true {
+			t.Errorf("status %d body %v, want applied+started", rec.Code, raw)
+		}
+		if countCall(calls(drv), "start") != 1 || countCall(calls(drv), "reload") != 0 {
+			t.Errorf("inactive apply must start, not reload: %v", calls(drv))
+		}
+	})
+
 	t.Run("no_changes", func(t *testing.T) {
 		x := newHX(t, false)
 		x.json("POST", "/api/apply", "", 200, nil)
