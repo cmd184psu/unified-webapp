@@ -13,6 +13,10 @@ type Issue struct {
 	Severity string `json:"severity"` // issueError | issueWarning
 	Where    string `json:"where"`
 	Message  string `json:"message"`
+	// Cert is the certificate FQDN a service names that has no tracked row, and
+	// Suggest the untracked files in the certs directory that look like it.
+	Cert    string   `json:"cert,omitempty"`
+	Suggest []string `json:"suggest,omitempty"`
 }
 
 const (
@@ -103,6 +107,7 @@ func CheckModel(m *Model, certs []CertManaged) []Issue {
 			switch {
 			case rows == 0:
 				add(issueError, where, "service %q names certificate %q but there is no tracked certificate for it; install one on the Certificates tab", s.Name, fq)
+				issues[len(issues)-1].Cert = fq
 			case enabled == 0:
 				add(issueWarning, where, "service %q names certificate %q, which is disabled", s.Name, fq)
 			}
@@ -140,5 +145,53 @@ func (s *server) checkStored(rt *live, ctx context.Context) ([]Issue, error) {
 	if err != nil {
 		return nil, err
 	}
-	return CheckModel(s.models.Snapshot(), list.Certs), nil
+	issues := CheckModel(s.models.Snapshot(), list.Certs)
+	found, _ := rt.certs.Importable(ctx) // best effort: without it the issue just has no suggestion
+	return hintMissingCerts(issues, found), nil
+}
+
+// hintMissingCerts turns the "no tracked certificate" errors into a calm
+// did-you-mean: the untracked files in the certs directory that look like the
+// certificate the service names, which the UI can adopt in one click.
+func hintMissingCerts(issues []Issue, found []ImportableCert) []Issue {
+	for i := range issues {
+		is := &issues[i]
+		if is.Cert == "" {
+			continue
+		}
+		is.Suggest = suggestCerts(is.Cert, found)
+		who := "A service"
+		if m := regexp.MustCompile(`^service "([^"]*)"`).FindStringSubmatch(is.Message); m != nil {
+			who = m[1]
+		}
+		is.Message = fmt.Sprintf("%s needs a certificate for %s.", who, is.Cert)
+		if len(is.Suggest) == 0 {
+			is.Message += " Pull one from CertMachine."
+		}
+	}
+	return issues
+}
+
+// suggestCerts ranks untracked files for a wanted FQDN: an exact name first,
+// then files for the same host with something extra (a hash or date suffix),
+// then files sharing the first label. At most three.
+func suggestCerts(want string, found []ImportableCert) []string {
+	want = strings.ToLower(want)
+	first, _, _ := strings.Cut(want, ".")
+	var exact, near, loose []string
+	for _, c := range found {
+		switch {
+		case c.FQDN == want:
+			exact = append(exact, c.Name)
+		case strings.HasPrefix(c.FQDN, want+"-") || strings.HasPrefix(c.FQDN, want+"."):
+			near = append(near, c.Name)
+		case first != "" && strings.HasPrefix(c.FQDN, first+"."):
+			loose = append(loose, c.Name)
+		}
+	}
+	out := append(append(exact, near...), loose...)
+	if len(out) > 3 {
+		out = out[:3]
+	}
+	return out
 }

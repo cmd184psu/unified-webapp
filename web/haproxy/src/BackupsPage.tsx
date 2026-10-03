@@ -9,17 +9,14 @@ interface Props {
 
 export function BackupsPage({ refreshKey, onRestore }: Props) {
   const [list, setList] = useState<Backup[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<{ name: string; content: string } | null>(null)
 
   const load = useCallback(async () => {
     try {
       setList(await api.backups())
-      setError(null)
     } catch (e) {
-      const m = e instanceof Error ? e.message : String(e)
-      setError(m)
-      showToast(`Could not load backups: ${m}`, 'error')
+      console.warn('backups unavailable', e)
+      setList([])
     }
   }, [])
   useEffect(() => { load() }, [load, refreshKey])
@@ -42,8 +39,7 @@ export function BackupsPage({ refreshKey, onRestore }: Props) {
 
   return (
     <div className="stack">
-      {error && <p className="error">{error}</p>}
-      {list && list.length === 0 && <p className="muted">No backups yet. One is made on every Apply.</p>}
+      {list && list.length === 0 && <p className="muted">No backups yet. One is made every time you Apply.</p>}
       {list && list.map(b => (
         <div className="card row" key={b.name}>
           <span className="grow">{b.name}</span>

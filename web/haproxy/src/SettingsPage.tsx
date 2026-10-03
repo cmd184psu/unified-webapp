@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { showToast } from '@shared'
 import { api, SettingsResponse } from './api'
-import { FieldErrors, FormState, FormValues, apiKeyLabel, buildPayload, fromEffective, hasErrors, isDirty, validate } from './settingsform'
+import { Toggle } from './Toggle'
+import { FieldErrors, FormState, TextKey, apiKeyLabel, buildPayload, fromEffective, hasErrors, isDirty, validate } from './settingsform'
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
@@ -40,14 +41,14 @@ export function SettingsPage({ onSaved }: Props) {
   if (!loaded || !saved || !draft) return <p>Loading…</p>
 
   const dirty = isDirty(saved, draft)
-  const edit = (k: keyof FormValues, v: string) => {
+  const edit = (k: TextKey, v: string) => {
     setDraft({ ...draft, values: { ...draft.values, [k]: v } })
     setFieldErrors({ ...fieldErrors, [k]: undefined })
     setServerError(null)
   }
   const def = (k: string) => loaded.defaults[k] ?? ''
 
-  const field = (k: keyof FormValues, label: string, opts: { placeholder?: string; hint?: string } = {}) => (
+  const field = (k: TextKey, label: string, opts: { placeholder?: string; hint?: string } = {}) => (
     <label className="field" key={k}>
       <span className="field-label">{label}</span>
       <input
@@ -56,12 +57,16 @@ export function SettingsPage({ onSaved }: Props) {
         placeholder={opts.placeholder}
         onChange={e => edit(k, e.target.value)}
         spellCheck={false}
+        autoComplete="off"
+        data-lpignore="true"
+        data-1p-ignore
+        data-form-type="other"
       />
       {opts.hint && <span className="muted">{opts.hint}</span>}
       {fieldErrors[k] && <span className="error">{fieldErrors[k]}</span>}
     </label>
   )
-  const pathField = (k: keyof FormValues, label: string) => field(k, label, { placeholder: def(k) })
+  const pathField = (k: TextKey, label: string) => field(k, label, { placeholder: def(k) })
 
   const submit = async () => {
     const errs = validate(draft)
@@ -99,6 +104,7 @@ export function SettingsPage({ onSaved }: Props) {
       const r = await api.testConnection({
         certmachineUrl: draft.values.certmachineUrl.trim(),
         certmachineCaFile: draft.values.certmachineCaFile.trim(),
+        certmachineInsecure: draft.values.certmachineInsecure,
         apiKey: draft.clearApiKey ? '' : draft.apiKey,
       })
       showToast(r.message, r.ok ? 'success' : 'error')
@@ -128,9 +134,13 @@ export function SettingsPage({ onSaved }: Props) {
           <span className="field-label">API key</span>
           <div className="row">
             <input
-              className="input settings-input grow"
-              type="password"
-              autoComplete="new-password"
+              type="text"
+              className="input settings-input grow ui-secret"
+              autoComplete="off"
+              data-lpignore="true"
+              data-1p-ignore
+              data-form-type="other"
+              spellCheck={false}
               value={draft.apiKey}
               placeholder={loaded.apiKeySet ? 'Type a new key to replace the stored one' : 'Paste the API key'}
               onChange={e => { setDraft({ ...draft, apiKey: e.target.value, clearApiKey: false }); setServerError(null) }}
@@ -146,6 +156,11 @@ export function SettingsPage({ onSaved }: Props) {
           {fieldErrors.apiKey && <span className="error">{fieldErrors.apiKey}</span>}
         </div>
         {field('certmachineCaFile', 'CA file', { placeholder: 'Optional: path to a CA certificate to trust' })}
+        <Toggle
+          checked={draft.values.certmachineInsecure}
+          onChange={v => setDraft({ ...draft, values: { ...draft.values, certmachineInsecure: v } })}
+          label="Skip certificate check (use only while the proxy is serving a bad certificate)"
+        />
         <div className="row">
           <button className="btn" disabled={busy} onClick={testConnection}>Test connection</button>
           <span className="muted">Uses the values above, saved or not.</span>

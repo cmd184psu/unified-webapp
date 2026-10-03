@@ -1,10 +1,10 @@
 package haproxy
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"cmd184psu/unified-webapp/internal/platform/config"
@@ -75,8 +75,8 @@ func newServer(cfg config.HaproxyConfig) (*server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("haproxy: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Join(dataDir, "staging"), 0o700); err != nil {
-		return nil, fmt.Errorf("haproxy: create staging dir: %w", err)
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return nil, fmt.Errorf("haproxy: create data dir: %w", err)
 	}
 	s := &server{
 		cfg: cfg, models: models, log: NewOpLog(500), dataDir: dataDir, maxSubs: cfg.SSEMaxSubscribers,
@@ -103,13 +103,26 @@ func (s *server) build(set Settings, key string) (*live, error) {
 	var client *CertMachineClient
 	if set.CertMachineURL != "" {
 		client, err = CertMachineNewClient(CertMachineSettings{
-			URL: set.CertMachineURL, APIKey: CertMachineAPIKey(key), CAFile: set.CertMachineCAFile,
+			URL: set.CertMachineURL, APIKey: CertMachineAPIKey(key), CAFile: set.CertMachineCAFile, InsecureSkipVerify: set.CertMachineInsecure,
 		})
 		if err != nil {
 			return nil, err
 		}
 	}
-	return s.assemble(driver, client, set, key), nil
+	rt := s.assemble(driver, client, set, key)
+	if err := rt.applier.includeAll(context.Background()); err != nil {
+		s.log.Addf("certs: could not include the files in the certs directory: %v", err)
+	}
+	if e, ok := driver.(interface{ EnsureDirs(context.Context) error }); ok {
+		if err := e.EnsureDirs(context.Background()); err != nil {
+			s.log.Addf("could not create the backup folder: %v", err)
+		}
+	}
+	// Only the real build runs the staged proxy; handler tests use buildServer
+	// over the fake driver and never start haproxy.
+	rt.applier.opts.StageTest = NewStageTester(set.CertMachineCAFile)
+	rt.applier.opts.RequireCerts = true
+	return rt, nil
 }
 
 // assemble wires the collaborators over an already-chosen driver and (possibly
@@ -120,7 +133,7 @@ func (s *server) assemble(driver Driver, client *CertMachineClient, set Settings
 	rt.applier = NewApplier(driver, s.models, rt.certs, s.log, ApplyOptions{
 		Verifier:     StatsVerifier{Driver: driver, Log: s.log, Timeout: statsTimeout},
 		BackupKeep:   set.BackupKeep,
-		StagingDir:   filepath.Join(s.dataDir, "staging"),
+		StagingDir:   s.dataDir,
 		AfterSuccess: rt.removeSuperseded,
 	})
 	return rt

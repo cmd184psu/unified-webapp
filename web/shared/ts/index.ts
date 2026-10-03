@@ -23,6 +23,7 @@ export type { PatchListOptions } from "./patchlist.js";
 export { statusSymbol, effectiveStatus } from "./status.js";
 export type { ExecStatus } from "./status.js";
 export { createToggle } from "./toggle.js";
+export { watchSecrets } from "./secrets.js";
 export type { ToggleOptions } from "./toggle.js";
 export { QueuePanel } from "./queuepanel.js";
 export type {

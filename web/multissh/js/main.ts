@@ -1,10 +1,11 @@
 import "./ssh.css";
-import { ThemeManager, HamburgerMenu } from "@shared";
+import { ThemeManager, HamburgerMenu, watchSecrets } from "@shared";
 import type { MenuItem } from "@shared";
 import { fetchConfig } from "./api";
 import { mountTabs } from "./tabs";
 import { reThemeAll } from "./terminal";
 
+watchSecrets();
 export const themes = new ThemeManager({
   module: "multissh",
   default: "dark",

@@ -1,5 +1,5 @@
 // web/certmachine/js/main.ts
-import { ThemeManager, HamburgerMenu } from "/shared/dist/shared.mjs";
+import { ThemeManager, HamburgerMenu, watchSecrets } from "/shared/dist/shared.mjs";
 
 // web/certmachine/js/ndjson.ts
 function parseNDJSONChunk(remainder, chunk) {
@@ -358,8 +358,13 @@ function openTrustDialog(config) {
   const keySelect = el("select", "cert-field-input");
   const keyField = field("Key (from the server's ~/.ssh)", keySelect);
   const password = el("input", "cert-field-input");
-  password.type = "password";
+  password.type = "text";
+  password.classList.add("ui-secret");
   password.autocomplete = "off";
+  password.setAttribute("data-lpignore", "true");
+  password.setAttribute("data-1p-ignore", "");
+  password.setAttribute("data-form-type", "other");
+  password.spellcheck = false;
   const pwField = field("Password", password);
   pwField.hidden = true;
   const sudoNote = el("p", "cert-ca-note");
@@ -2036,6 +2041,7 @@ async function mountCertApp(root) {
 // web/certmachine/js/main.ts
 var themes = new ThemeManager({ module: "certmachine", default: "dark" });
 themes.apply();
+watchSecrets();
 var hamburger = new HamburgerMenu({
   title: "CertMachine",
   items: [],

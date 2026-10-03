@@ -104,7 +104,7 @@ function ServiceEditor({ svc, model, certs, issues, coverage, onPickCert, open, 
         {!svc.enabled && <span className="badge">disabled</span>}
         {cov && <span className={`badge badge-${cov.tone}`} title={cov.title}>{cov.label}</span>}
         {mine && mine.length > 0 && (
-          <span className={`badge ${errors > 0 ? 'badge-error' : 'badge-warning'}`}>{errors > 0 ? 'error' : 'warning'}</span>
+          <span className={`badge ${errors > 0 ? 'badge-error' : 'badge-warning'}`} title={errors > 0 ? 'error' : 'warning'}>{errors > 0 ? '✕' : '⚠'}</span>
         )}
         <span className="svc-caret">{open ? '▾' : '▸'}</span>
       </div>

@@ -41,6 +41,9 @@ test('apply outcome maps to a toast for every outcome', () => {
   const v = applyToast(res('validation_failed', 'unknown keyword foo'))
   eq(v.tone, 'error')
   ok(v.message.includes('unknown keyword foo'), 'haproxy message shown')
+  const raw = "validation failed: sudo haproxy -c -f data/x/haproxy.cfg: exit status 1: [WARNING]  (1) : w\n[ALERT]    (1) : Proxy 'fe_443': no SSL certificate specified for bind '*:443' at [data/x/haproxy.cfg:19] (use 'crt').\n[ALERT]    (1) : Fatal errors found in configuration."
+  const f2 = applyToast(res('validation_failed', raw)).message
+  ok(f2.includes("no SSL certificate") && f2.includes('(line 19)') && !f2.includes('sudo') && !f2.includes('Fatal'), 'only the readable reason')
   const r = applyToast(res('rolled_back', 'reload failed'))
   eq(r.tone, 'error')
   ok(/previous configuration is (still )?live/i.test(r.message), 'says previous config is live')

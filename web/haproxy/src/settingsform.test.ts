@@ -3,7 +3,7 @@ import type { SettingsValues } from './api'
 import { fromEffective, isDirty, validate, hasErrors, buildPayload, apiKeyLabel } from './settingsform'
 
 const eff: SettingsValues = {
-  os: 'auto', certmachineUrl: 'https://cm.example.com', certmachineCaFile: '', configPath: '', certsDir: '/srv/certs',
+  os: 'auto', certmachineUrl: 'https://cm.example.com', certmachineCaFile: '', certmachineInsecure: false, configPath: '', certsDir: '/srv/certs',
   crtListPath: '', statsSocketPath: '', backupDir: '', serviceName: '', backupKeep: 10, expiryWarnDays: 30,
 }
 

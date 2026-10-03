@@ -8,6 +8,7 @@ export interface FormValues {
   os: string
   certmachineUrl: string
   certmachineCaFile: string
+  certmachineInsecure: boolean
   configPath: string
   certsDir: string
   crtListPath: string
@@ -25,7 +26,9 @@ export interface FormState {
   clearApiKey: boolean
 }
 
-export type FieldErrors = Partial<Record<keyof FormValues | 'apiKey', string>>
+/** The text inputs of the form (everything but the toggles). */
+export type TextKey = Exclude<keyof FormValues, 'certmachineInsecure'>
+export type FieldErrors = Partial<Record<TextKey | 'apiKey', string>>
 
 export function fromEffective(e: SettingsValues): FormState {
   return {
@@ -71,7 +74,7 @@ function intError(label: string, raw: string, lo: number, hi: number, unit: stri
 export function validate(s: FormState): FieldErrors {
   const v = s.values
   const errs: FieldErrors = {}
-  const set = (k: keyof FormValues | 'apiKey', m: string | undefined) => { if (m) errs[k] = m }
+  const set = (k: TextKey | 'apiKey', m: string | undefined) => { if (m) errs[k] = m }
   set('certmachineUrl', urlError(v.certmachineUrl.trim()))
   set('configPath', pathError('config path', v.configPath.trim()))
   set('certsDir', pathError('certs directory', v.certsDir.trim()))
@@ -95,7 +98,7 @@ export function buildPayload(s: FormState): SettingsPayload {
   const v = s.values
   const t = (x: string) => x.trim()
   return {
-    os: t(v.os), certmachineUrl: t(v.certmachineUrl), certmachineCaFile: t(v.certmachineCaFile),
+    os: t(v.os), certmachineUrl: t(v.certmachineUrl), certmachineCaFile: t(v.certmachineCaFile), certmachineInsecure: v.certmachineInsecure,
     configPath: t(v.configPath), certsDir: t(v.certsDir), crtListPath: t(v.crtListPath),
     statsSocketPath: t(v.statsSocketPath), backupDir: t(v.backupDir), serviceName: t(v.serviceName),
     backupKeep: Number(v.backupKeep), expiryWarnDays: Number(v.expiryWarnDays),

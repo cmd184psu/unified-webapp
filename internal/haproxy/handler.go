@@ -32,6 +32,8 @@ package haproxy
 //	GET    /api/certmachine/certs         ?forFqdn=<name>[&all=1] CertMachine's active certs with covers:bool;
 //	                                      only covering certs unless all=1 (then any status, flagged)
 //	POST   /api/certs/pull {certmachineId, note}     verified download + stage -> {name, superseded}
+//	GET    /api/certs/importable          untrusted bundles already in the certs dir [{name, fqdns, notAfter, expired}]
+//	POST   /api/certs/import {names}      track them as-is (never renamed or deleted) -> {imported}
 //	PUT    /api/certs/{name}/enabled {enabled}       toggle the tracking flag only
 //	DELETE /api/certs/{name}              remove file + row; 409 while a service uses it
 //	GET    /api/coverage                  []CoverageResult per service (warnings only; unknown when CertMachine is down)
@@ -168,6 +170,8 @@ func (s *server) routes(staticDir string) http.Handler {
 	mux.HandleFunc("/api/ops", methods(handlerFuncs{"GET": s.handleOps}))
 	mux.HandleFunc("/api/ops/stream", methods(handlerFuncs{"GET": s.handleOpsStream}))
 	mux.HandleFunc("/api/certs", methods(handlerFuncs{"GET": s.handleCerts}))
+	mux.HandleFunc("/api/certs/importable", methods(handlerFuncs{"GET": s.handleCertImportable}))
+	mux.HandleFunc("/api/certs/import", methods(handlerFuncs{"POST": s.handleCertImport}))
 	mux.HandleFunc("/api/certs/pull", methods(handlerFuncs{"POST": s.handleCertPull}))
 	mux.HandleFunc("/api/certs/freshness", methods(handlerFuncs{"GET": s.handleFreshness}))
 	mux.HandleFunc("/api/certs/{name}", methods(handlerFuncs{"DELETE": s.handleCertDelete}))
@@ -429,8 +433,8 @@ func (s *server) handleBackups(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	list, err := rt.applier.ListBackups(ctx)
 	if err != nil {
-		fail(w, http.StatusInternalServerError, "listing backups failed")
-		return
+		s.log.Addf("backups: could not list them: %v", err) // quiet; the page just shows none
+		list = []Backup{}
 	}
 	response.WriteJSON(w, http.StatusOK, list)
 }
@@ -699,6 +703,39 @@ func (s *server) findCert(rt *live, ctx context.Context, name string) (CertManag
 		}
 	}
 	return CertManaged{}, false, nil
+}
+
+func (s *server) handleCertImportable(w http.ResponseWriter, r *http.Request) {
+	rt := s.rt()
+	ctx, cancel := reqCtx(r)
+	defer cancel()
+	found, err := rt.certs.Importable(ctx)
+	if err != nil {
+		s.log.Addf("certs: scanning for importable certificates failed: %v", err)
+		response.WriteJSON(w, http.StatusOK, []ImportableCert{})
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, found)
+}
+
+func (s *server) handleCertImport(w http.ResponseWriter, r *http.Request) {
+	rt := s.rt()
+	var req struct {
+		Names []string `json:"names"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	ctx, cancel := reqCtx(r)
+	defer cancel()
+	adopted, err := rt.certs.Import(ctx, req.Names)
+	if err != nil {
+		s.log.Addf("certs: import failed: %v", err)
+		fail(w, http.StatusInternalServerError, "importing the certificates failed")
+		return
+	}
+	s.log.Addf("certs: imported %d existing certificate(s)", len(adopted))
+	response.WriteJSON(w, http.StatusOK, map[string]any{"imported": adopted})
 }
 
 func (s *server) handleCertEnabled(w http.ResponseWriter, r *http.Request) {

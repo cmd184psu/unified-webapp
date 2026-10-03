@@ -77,7 +77,7 @@ function passkeyCardState(status, message) {
 }
 
 // web/admin/js/main.ts
-import { ThemeManager, HamburgerMenu, createCopyButton, openModal, showToast } from "/shared/dist/shared.mjs";
+import { ThemeManager, HamburgerMenu, createCopyButton, openModal, showToast, watchSecrets } from "/shared/dist/shared.mjs";
 function debounce(fn, ms) {
   let timer = null;
   return (...args) => {
@@ -87,6 +87,7 @@ function debounce(fn, ms) {
 }
 var themes = new ThemeManager({ module: "admin", default: "dark" });
 themes.apply();
+watchSecrets();
 var DEFAULT_IDLE_MINUTES = 60;
 var MAX_IDLE_MINUTES = 7 * 24 * 60;
 var statusEl = document.getElementById("status");
@@ -229,7 +230,7 @@ function renderMatrix() {
   modules.forEach((mod) => {
     const entry = matrix[mod];
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${esc(mod)}</td><td><label class="ui-toggle" title="Protected"><input type="checkbox" class="matrix-protected" data-module="${esc(mod)}" aria-label="Protect ${esc(mod)}"${entry.protected ? " checked" : ""}><span class="ui-toggle-track"></span></label></td><td><input type="number" class="matrix-idle" data-module="${esc(mod)}" min="1" max="${MAX_IDLE_MINUTES}" step="1" placeholder="${DEFAULT_IDLE_MINUTES}" value="${entry.idle > 0 ? entry.idle : ""}" aria-label="Idle sign-out for ${esc(mod)}, in minutes"${entry.protected ? "" : " disabled"}></td><td><select class="matrix-pinfile" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>${pinFileOptions(entry.pinFile)}</select> <button type="button" class="btn btn-outline btn-sm matrix-setpin-btn" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>Set PIN&hellip;</button><div class="matrix-setpin-form inline-form hidden" data-module="${esc(mod)}"><input type="password" class="matrix-pin-input" placeholder="new PIN" autocomplete="off"><button type="button" class="btn btn-primary btn-sm matrix-pin-save" data-module="${esc(mod)}">Save</button><button type="button" class="btn btn-ghost btn-sm matrix-pin-cancel" data-module="${esc(mod)}">Cancel</button></div><span class="matrix-pin-status status" data-module="${esc(mod)}"></span><p class="matrix-pin-error error" data-module="${esc(mod)}"></p></td>`;
+    tr.innerHTML = `<td>${esc(mod)}</td><td><label class="ui-toggle" title="Protected"><input type="checkbox" class="matrix-protected" data-module="${esc(mod)}" aria-label="Protect ${esc(mod)}"${entry.protected ? " checked" : ""}><span class="ui-toggle-track"></span></label></td><td><input type="number" class="matrix-idle" data-module="${esc(mod)}" min="1" max="${MAX_IDLE_MINUTES}" step="1" placeholder="${DEFAULT_IDLE_MINUTES}" value="${entry.idle > 0 ? entry.idle : ""}" aria-label="Idle sign-out for ${esc(mod)}, in minutes"${entry.protected ? "" : " disabled"}></td><td><select class="matrix-pinfile" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>${pinFileOptions(entry.pinFile)}</select> <button type="button" class="btn btn-outline btn-sm matrix-setpin-btn" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>Set PIN&hellip;</button><div class="matrix-setpin-form inline-form hidden" data-module="${esc(mod)}"><input type="text" class="matrix-pin-input ui-secret" placeholder="new PIN" autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other" spellcheck="false"><button type="button" class="btn btn-primary btn-sm matrix-pin-save" data-module="${esc(mod)}">Save</button><button type="button" class="btn btn-ghost btn-sm matrix-pin-cancel" data-module="${esc(mod)}">Cancel</button></div><span class="matrix-pin-status status" data-module="${esc(mod)}"></span><p class="matrix-pin-error error" data-module="${esc(mod)}"></p></td>`;
     tbody.appendChild(tr);
   });
   const adminTr = document.createElement("tr");
@@ -713,8 +714,13 @@ function askLdapLogin() {
     const passLabel = document.createElement("label");
     passLabel.textContent = "Password";
     const pass = document.createElement("input");
-    pass.type = "password";
-    pass.autocomplete = "current-password";
+    pass.type = "text";
+    pass.className = "ui-secret";
+    pass.autocomplete = "off";
+    pass.setAttribute("data-lpignore", "true");
+    pass.setAttribute("data-1p-ignore", "");
+    pass.setAttribute("data-form-type", "other");
+    pass.spellcheck = false;
     pass.required = true;
     passLabel.append(pass);
     const err = document.createElement("p");

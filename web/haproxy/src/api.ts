@@ -43,12 +43,12 @@ export interface ModelResponse extends Model { imported: boolean }
 // ---- referential checks (refcheck.go) --------------------------------------
 
 export type IssueSeverity = 'error' | 'warning'
-export interface Issue { severity: IssueSeverity; where: string; message: string }
+export interface Issue { severity: IssueSeverity; where: string; message: string; cert?: string; suggest?: string[] }
 export interface CheckModelResponse { issues: Issue[] }
 
 // ---- status, changes, apply ------------------------------------------------
 
-export type Outcome = 'applied' | 'no_changes' | 'validation_failed' | 'rolled_back' | 'rollback_failed'
+export type Outcome = 'applied' | 'no_changes' | 'validation_failed' | 'rolled_back' | 'rollback_failed' | 'needs_certs'
 
 export interface ApplyResult {
   applied: boolean
@@ -80,7 +80,9 @@ export interface Changes {
   summary: string
 }
 
-export interface CheckResult { ok: boolean; message: string }
+export interface ProbeResult { host: string; trusted: boolean; status: number; detail: string }
+export interface CheckResult { ok: boolean; message: string; needsCerts?: boolean; probes?: ProbeResult[] }
+export interface ImportableCert { name: string; fqdn: string }
 export interface StatRow {
   proxy: string
   server: string
@@ -130,6 +132,8 @@ export interface CertRow {
   certmachine: { id: number; fqdn: string }
   sha256: string
   superseded?: boolean
+  /** An existing file the editor tracks but never renames or deletes. */
+  adopted?: boolean
   missing: boolean
   details?: CertDetails
   detailsError?: string
@@ -164,6 +168,7 @@ export interface SettingsValues {
   os: string
   certmachineUrl: string
   certmachineCaFile: string
+  certmachineInsecure: boolean
   configPath: string
   certsDir: string
   crtListPath: string
@@ -270,7 +275,9 @@ export const api = {
   /** Writes the module settings. Called from the Settings tab's Save button only. */
   saveSettings: (p: SettingsPayload) => request<SettingsSaveResult>('PUT', '/api/settings', p),
   /** Tests the given (possibly unsaved) CertMachine values; apiKey '' means the stored key. */
-  testConnection: (b: { certmachineUrl: string; certmachineCaFile: string; apiKey: string }) =>
+  testConnection: (b: { certmachineUrl: string; certmachineCaFile: string; certmachineInsecure: boolean; apiKey: string }) =>
     request<TestConnectionResult>('POST', '/api/settings/test-connection', b),
+  importableCerts: () => request<ImportableCert[]>('GET', '/api/certs/importable'),
+  importCerts: (names: string[]) => request<{ imported: string[] | null }>('POST', '/api/certs/import', { names }),
   freshness: () => request<Freshness[]>('GET', '/api/certs/freshness'),
 }

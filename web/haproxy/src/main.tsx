@@ -1,11 +1,13 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { ThemeManager, HamburgerMenu } from '@shared'
+import { ThemeManager, HamburgerMenu, watchSecrets } from '@shared'
 import App from './App'
 
 // ThemeManager persists to `ui-theme:haproxy`, which index.html reads before
 // first paint. No server round-trip and nothing for the operator to toggle
 // beyond the theme picker — B1 has no settings yet.
+watchSecrets()
+
 export const themes = new ThemeManager({
   module: 'haproxy',
   default: 'dark',

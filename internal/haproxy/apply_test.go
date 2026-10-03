@@ -151,8 +151,12 @@ func stagingEmpty(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 0 {
-		t.Errorf("staging dir not cleaned, %d entries remain: %v", len(entries), entries)
+	// The staged copy is kept on purpose so the owner can read what was tested;
+	// anything else left behind would be a leak.
+	for _, e := range entries {
+		if e.Name() != "haproxy.cfg" && e.Name() != "crt-list.txt" {
+			t.Errorf("unexpected file left in the staging dir: %s", e.Name())
+		}
 	}
 }
 

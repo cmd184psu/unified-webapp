@@ -9,7 +9,9 @@ package haproxy
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -148,8 +150,8 @@ func (a *Applier) prune(ctx context.Context) error {
 // (FR-H23).
 func (a *Applier) ListBackups(ctx context.Context) ([]Backup, error) {
 	list, err := a.driver.PrivilegedList(ctx, a.driver.BackupDir())
-	if err != nil {
-		return nil, err
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err // a missing folder just means nothing has been backed up yet
 	}
 	out := []Backup{}
 	for _, f := range list {

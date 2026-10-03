@@ -31,7 +31,11 @@ type Settings struct {
 	OS                string `json:"os"`
 	CertMachineURL    string `json:"certmachineUrl"`
 	CertMachineCAFile string `json:"certmachineCaFile"`
-	ConfigPath        string `json:"configPath"`
+	// CertMachineInsecure skips the certificate check on the CertMachine
+	// connection: the way back in when the proxy in front of CertMachine is
+	// serving a bad certificate.
+	CertMachineInsecure bool   `json:"certmachineInsecure"`
+	ConfigPath          string `json:"configPath"`
 	CertsDir          string `json:"certsDir"`
 	CrtListPath       string `json:"crtListPath"`
 	StatsSocketPath   string `json:"statsSocketPath"`
@@ -46,6 +50,7 @@ type storedSettings struct {
 	OS                *string `json:"os,omitempty"`
 	CertMachineURL    *string `json:"certmachine_url,omitempty"`
 	CertMachineCAFile *string `json:"certmachine_ca_file,omitempty"`
+	CertMachineInsecure *bool  `json:"certmachine_insecure,omitempty"`
 	ConfigPath        *string `json:"config_path,omitempty"`
 	CertsDir          *string `json:"certs_dir,omitempty"`
 	CrtListPath       *string `json:"crt_list_path,omitempty"`
@@ -94,6 +99,9 @@ func (st storedSettings) overlay(base Settings, baseKey string) (Settings, strin
 	str(&base.OS, st.OS)
 	str(&base.CertMachineURL, st.CertMachineURL)
 	str(&base.CertMachineCAFile, st.CertMachineCAFile)
+	if st.CertMachineInsecure != nil {
+		base.CertMachineInsecure = *st.CertMachineInsecure
+	}
 	str(&base.ConfigPath, st.ConfigPath)
 	str(&base.CertsDir, st.CertsDir)
 	str(&base.CrtListPath, st.CrtListPath)
@@ -124,6 +132,10 @@ func diffStored(base Settings, baseKey string, eff Settings, key string) storedS
 	str(&st.OS, base.OS, eff.OS)
 	str(&st.CertMachineURL, base.CertMachineURL, eff.CertMachineURL)
 	str(&st.CertMachineCAFile, base.CertMachineCAFile, eff.CertMachineCAFile)
+	if base.CertMachineInsecure != eff.CertMachineInsecure {
+		v := eff.CertMachineInsecure
+		st.CertMachineInsecure = &v
+	}
 	str(&st.ConfigPath, base.ConfigPath, eff.ConfigPath)
 	str(&st.CertsDir, base.CertsDir, eff.CertsDir)
 	str(&st.CrtListPath, base.CrtListPath, eff.CrtListPath)
@@ -360,6 +372,7 @@ func (s *server) handleSettingsTestConnection(w http.ResponseWriter, r *http.Req
 	var body struct {
 		URL    *string `json:"certmachineUrl"`
 		CAFile *string `json:"certmachineCaFile"`
+		Insecure *bool `json:"certmachineInsecure"`
 		APIKey string  `json:"apiKey"`
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
@@ -372,6 +385,10 @@ func (s *server) handleSettingsTestConnection(w http.ResponseWriter, r *http.Req
 	}
 	if body.CAFile != nil {
 		ca = strings.TrimSpace(*body.CAFile)
+	}
+	insecure := cur.settings.CertMachineInsecure
+	if body.Insecure != nil {
+		insecure = *body.Insecure
 	}
 	if body.APIKey != "" {
 		key = body.APIKey
@@ -387,7 +404,7 @@ func (s *server) handleSettingsTestConnection(w http.ResponseWriter, r *http.Req
 		fail(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	client, err := CertMachineNewClient(CertMachineSettings{URL: u, APIKey: CertMachineAPIKey(key), CAFile: ca})
+	client, err := CertMachineNewClient(CertMachineSettings{URL: u, APIKey: CertMachineAPIKey(key), CAFile: ca, InsecureSkipVerify: insecure})
 	if err != nil {
 		fail(w, http.StatusBadRequest, strings.TrimPrefix(err.Error(), "haproxy: "))
 		return
@@ -405,7 +422,7 @@ func (s *server) handleSettingsTestConnection(w http.ResponseWriter, r *http.Req
 	case errors.Is(err, CertMachineErrUnauthorized):
 		reply(false, "unauthorized", "CertMachine refused the API key (unauthorized).")
 	case errors.Is(err, CertMachineErrTLS):
-		reply(false, "tls", "TLS problem: the CertMachine certificate could not be verified. Check the CA file.")
+		reply(false, "tls", "TLS problem: the CertMachine certificate could not be verified. Check the CA file, or turn on Skip certificate check.")
 	case errors.Is(err, CertMachineErrServer), errors.Is(err, CertMachineErrRefused):
 		reply(false, "server", "CertMachine answered with a server error.")
 	default:

@@ -42,6 +42,9 @@ type CertEntry struct {
 	// PullAndStage on the rows it disables, cleared when the owner re-enables
 	// the row. Only disabled+Superseded rows are ever removed by cleanup.
 	Superseded bool `json:"superseded,omitempty"`
+	// Adopted marks a file that was already in the certs directory and was
+	// imported as-is. The editor tracks it but never deletes the file.
+	Adopted bool `json:"adopted,omitempty"`
 }
 
 // CertManaged is a tracked row combined with its on-disk presence.
@@ -138,10 +141,14 @@ func (s *CertStore) List(ctx context.Context) (CertListing, error) {
 	if err != nil {
 		return CertListing{}, fmt.Errorf("haproxy: list certs dir: %w", err)
 	}
+	tracked := map[string]bool{}
+	for _, e := range data.Certs {
+		tracked[e.Name] = true
+	}
 	present := map[string]bool{}
 	unmanaged := 0
 	for _, f := range files {
-		if !NamingIsManaged(f.Name) {
+		if !NamingIsManaged(f.Name) && !tracked[f.Name] {
 			unmanaged++
 			continue
 		}
@@ -211,8 +218,10 @@ func (s *CertStore) Remove(ctx context.Context, driver Driver, name string, used
 	if idx < 0 {
 		return fmt.Errorf("haproxy: no tracked cert named %q", name)
 	}
-	if err := driver.PrivilegedRemove(ctx, filepath.Join(driver.CertsDir(), name)); err != nil {
-		return fmt.Errorf("haproxy: remove cert file: %w", err)
+	if !data.Certs[idx].Adopted {
+		if err := driver.PrivilegedRemove(ctx, filepath.Join(driver.CertsDir(), name)); err != nil {
+			return fmt.Errorf("haproxy: remove cert file: %w", err)
+		}
 	}
 	data.Certs = append(data.Certs[:idx], data.Certs[idx+1:]...)
 	return s.save(data)
@@ -293,7 +302,7 @@ func (s *CertStore) RemoveSuperseded(ctx context.Context, driver Driver, names [
 	}
 	eligible := map[string]bool{}
 	for _, e := range data.Certs {
-		if e.Superseded && !e.Enabled {
+		if e.Superseded && !e.Enabled && !e.Adopted {
 			eligible[e.Name] = true
 		}
 	}
@@ -318,4 +327,43 @@ func (s *CertStore) RemoveSuperseded(ctx context.Context, driver Driver, names [
 	}
 	data.Certs = kept
 	return s.save(data)
+}
+
+// EnabledCount is how many tracked certs are enabled, i.e. how many lines the
+// crt-list will have. HAProxy refuses a TLS bind with none.
+func (s *CertStore) EnabledCount() (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, err := s.load()
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, e := range data.Certs {
+		if e.Enabled {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// EnabledFQDNs are the FQDNs of the enabled tracked certs, sorted and unique.
+func (s *CertStore) EnabledFQDNs() ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, err := s.load()
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, e := range data.Certs {
+		f := strings.ToLower(strings.TrimSpace(e.CertMachine.FQDN))
+		if e.Enabled && f != "" && !seen[f] {
+			seen[f] = true
+			out = append(out, f)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }

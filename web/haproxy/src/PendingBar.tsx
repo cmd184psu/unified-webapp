@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { showToast, confirmDialog } from '@shared'
 import { api, Changes, Issue, Status } from './api'
-import { classifyDiff, pendingView, serviceActionNeedsConfirm, diagnosticNotices } from './pending'
+import { checkMessage, classifyDiff, pendingView, serviceActionNeedsConfirm, diagnosticNotices } from './pending'
 import { IssueList } from './IssueList'
+import { BusyDialog } from './BusyDialog'
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
@@ -34,17 +35,20 @@ interface Props {
 export function PendingBar({ status, statusError, changes, changesError, blockers, busy, dirty, onApply, onRefresh }: Props) {
   const [review, setReview] = useState(false)
   const [acting, setActing] = useState(false)
+  const [working, setWorking] = useState('')
   const v = pendingView(changes, busy)
   const active = status?.service.active ?? false
 
   const check = async () => {
+    setWorking('Testing the configuration…')
     setActing(true)
     try {
       const r = await api.check()
-      showToast(r.ok ? `HAProxy accepts the candidate configuration. ${r.message}`.trim() : `HAProxy rejected the candidate configuration: ${r.message}`, r.ok ? 'success' : 'error')
+      showToast(checkMessage(r), r.needsCerts ? 'notice' : r.ok ? 'success' : 'error')
     } catch (e) {
       showToast(`Check failed: ${errMsg(e)}`, 'error')
     } finally {
+      setWorking('')
       setActing(false)
     }
   }
@@ -59,6 +63,7 @@ export function PendingBar({ status, statusError, changes, changesError, blocker
         return
       }
     }
+    setWorking(action === 'reload' ? 'Reloading HAProxy…' : action === 'restart' ? 'Restarting HAProxy…' : 'Starting HAProxy…')
     setActing(true)
     try {
       await api[action]()
@@ -66,6 +71,7 @@ export function PendingBar({ status, statusError, changes, changesError, blocker
     } catch (e) {
       showToast(`${action} failed: ${errMsg(e)}`, 'error')
     } finally {
+      setWorking('')
       setActing(false)
       onRefresh()
     }
@@ -74,16 +80,17 @@ export function PendingBar({ status, statusError, changes, changesError, blocker
   const last = status?.lastApply
   return (
     <section className="pendingbar">
+      {working && <BusyDialog message={working} />}
       <div className="row">
         <span className={`pending-label ${changes?.hasChanges ? 'unsaved' : 'muted'}`}>{v.label}</span>
         {v.summary && <span className="muted">{v.summary}</span>}
-        {dirty && <span className="muted">Unsaved edits are not included until you Save.</span>}
+        {dirty && <span className="unsaved" title="Unsaved edits are not included until you Save.">● unsaved</span>}
         <span className="grow" />
-        <button className="btn btn-ghost btn-sm" disabled={!v.canReview} onClick={() => setReview(r => !r)}>{review ? 'Hide changes' : 'Review changes'}</button>
-        <button className="btn btn-ghost btn-sm" disabled={acting} onClick={check}>Check</button>
+        <button className="btn btn-ghost btn-sm" disabled={!v.canReview} title={review ? 'Hide changes' : 'Review changes'} onClick={() => setReview(r => !r)}><span aria-hidden="true">{review ? '▾' : '▸'}</span> Diff</button>
+        <button className="btn btn-ghost btn-sm" disabled={acting} title="Check the candidate configuration" aria-label="Check" onClick={check}>✓ Check</button>
         <button className="btn btn-primary btn-sm" disabled={v.applyDisabled || acting} onClick={onApply}>{v.applyLabel}</button>
       </div>
-      {changesError && <p className="error">Could not read pending changes: {changesError}</p>}
+      {changesError && <p className="muted">{changesError}</p>}
       <IssueList issues={blockers} />
       {review && changes && (
         <div className="stack review">
@@ -95,17 +102,17 @@ export function PendingBar({ status, statusError, changes, changesError, blocker
       <div className="row statuspanel">
         {status ? (
           <>
-            <span className={`badge ${status.service.active ? 'badge-ok' : 'badge-error'}`}>{status.service.active ? 'active' : 'inactive'}</span>
+            <span className={`badge ${status.service.active ? 'badge-ok' : 'badge-error'}`} title={status.service.active ? 'active' : 'inactive'}>{status.service.active ? '● running' : '○ stopped'}</span>
             {status.service.detail && <span className="muted">{status.service.detail}</span>}
             <span className="muted">HAProxy {status.version || 'version unknown'}</span>
-            <span className="muted">{last ? `last apply: ${last.outcome} at ${new Date(last.time).toLocaleString()}` : 'never applied'}</span>
+            <span className="muted" title={last ? `last apply: ${last.outcome}` : 'never applied'}>{last ? <><span className={/ok|success|applied/i.test(last.outcome) ? 'stat-up' : 'error'}>{/ok|success|applied/i.test(last.outcome) ? '✓' : '✕'}</span> {new Date(last.time).toLocaleString()}</> : '—'}</span>
             {last && last.message && <span className="muted" title={last.message}>{last.message.slice(0, 80)}</span>}
           </>
         ) : <span className="muted">{statusError ? `Status unavailable: ${statusError}` : 'Loading status…'}</span>}
         <span className="grow" />
-        <button className="btn btn-ghost btn-sm" disabled={acting} onClick={() => service('reload')}>Reload</button>
-        <button className="btn btn-ghost btn-sm" disabled={acting} onClick={() => service('restart')}>Restart</button>
-        <button className="btn btn-ghost btn-sm" disabled={acting} onClick={() => service('start')}>Start</button>
+        <button className="btn btn-ghost btn-sm" disabled={acting} title="Reload" aria-label="Reload" onClick={() => service('reload')}>⟳</button>
+        <button className="btn btn-ghost btn-sm" disabled={acting} title="Restart" aria-label="Restart" onClick={() => service('restart')}>⏻</button>
+        <button className="btn btn-ghost btn-sm" disabled={acting} title="Start" aria-label="Start" onClick={() => service('start')}>▶</button>
       </div>
     </section>
   )

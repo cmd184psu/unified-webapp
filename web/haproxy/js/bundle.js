@@ -7276,11 +7276,11 @@ var require_jsx_runtime = __commonJS({
 // web/haproxy/src/main.tsx
 var import_react12 = __toESM(require_react());
 var import_client = __toESM(require_client());
-import { ThemeManager, HamburgerMenu } from "/shared/dist/shared.mjs";
+import { ThemeManager, HamburgerMenu, watchSecrets } from "/shared/dist/shared.mjs";
 
 // web/haproxy/src/App.tsx
 var import_react11 = __toESM(require_react());
-import { showToast as showToast11 } from "/shared/dist/shared.mjs";
+import { showToast as showToast12 } from "/shared/dist/shared.mjs";
 
 // web/haproxy/src/api.ts
 var ApiError = class extends Error {
@@ -7354,6 +7354,8 @@ var api = {
   saveSettings: (p) => request("PUT", "/api/settings", p),
   /** Tests the given (possibly unsaved) CertMachine values; apiKey '' means the stored key. */
   testConnection: (b) => request("POST", "/api/settings/test-connection", b),
+  importableCerts: () => request("GET", "/api/certs/importable"),
+  importCerts: (names) => request("POST", "/api/certs/import", { names }),
   freshness: () => request("GET", "/api/certs/freshness")
 };
 
@@ -7552,19 +7554,46 @@ function issuesSummary(issues) {
 }
 
 // web/haproxy/src/IssueList.tsx
+import { showToast } from "/shared/dist/shared.mjs";
 var import_jsx_runtime = __toESM(require_jsx_runtime());
+var REFRESH_EVENT = "haproxy-refresh";
+var onRefreshRequest = (fn) => {
+  window.addEventListener(REFRESH_EVENT, fn);
+  return () => window.removeEventListener(REFRESH_EVENT, fn);
+};
+var adoptFile = async (name) => {
+  try {
+    await api.importCerts([name]);
+    showToast(`${name} added. Run Check to test it.`, "success");
+  } catch {
+    showToast("Could not add that certificate just now.", "notice");
+  }
+  window.dispatchEvent(new Event(REFRESH_EVENT));
+};
 function IssueList({ issues }) {
   if (!issues || issues.length === 0) return null;
   return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("ul", { className: "issues", children: issues.map((i, n) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", { className: `issue issue-${i.severity}`, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "issue-tag", children: i.severity === "error" ? "Error" : "Warning" }),
-    " ",
-    i.message
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "issue-tag", title: i.severity, "aria-label": i.severity, children: i.severity === "error" ? "\u2715" : "\u26A0" }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "issue-msg", children: i.message }),
+    (i.suggest ?? []).map((f) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", { className: "chip", title: "Add this certificate", onClick: () => adoptFile(f), children: [
+      "\uFF0B ",
+      f
+    ] }, f))
   ] }, n)) });
+}
+
+// web/haproxy/src/BusyDialog.tsx
+var import_jsx_runtime2 = __toESM(require_jsx_runtime());
+function BusyDialog({ message }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "ui-modal-overlay", role: "alertdialog", "aria-modal": "true", "aria-busy": "true", "aria-label": message, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "ui-modal-panel busy-panel", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "spinner", "aria-hidden": "true" }),
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: message })
+  ] }) });
 }
 
 // web/haproxy/src/StatsPage.tsx
 var import_react = __toESM(require_react());
-import { showToast } from "/shared/dist/shared.mjs";
+import { showToast as showToast2 } from "/shared/dist/shared.mjs";
 
 // web/haproxy/src/livefeed.ts
 var POLL_MS = 5e3;
@@ -7638,7 +7667,7 @@ function statsViewState(r) {
 }
 
 // web/haproxy/src/StatsPage.tsx
-var import_jsx_runtime2 = __toESM(require_jsx_runtime());
+var import_jsx_runtime3 = __toESM(require_jsx_runtime());
 function StatsPage() {
   const [data, setData] = (0, import_react.useState)(null);
   const inFlight = (0, import_react.useRef)(false);
@@ -7648,7 +7677,7 @@ function StatsPage() {
     try {
       setData(await api.stats());
     } catch (e) {
-      showToast(`Could not load statistics: ${e instanceof Error ? e.message : String(e)}`, "error");
+      showToast2(`Could not load statistics: ${e instanceof Error ? e.message : String(e)}`, "error");
     } finally {
       inFlight.current = false;
     }
@@ -7669,58 +7698,58 @@ function StatsPage() {
     };
   }, [load]);
   const view = statsViewState(data);
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "stack", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "muted", children: "Read-only live statistics from HAProxy." }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "grow" }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { className: "btn btn-ghost btn-sm", onClick: async () => {
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "stack", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "muted", children: "Read-only live statistics from HAProxy." }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "grow" }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { className: "btn btn-ghost btn-sm", onClick: async () => {
         await load();
-        showToast("Statistics refreshed.", "notice");
+        showToast2("Statistics refreshed.", "notice");
       }, children: "Refresh" })
     ] }),
-    view.kind !== "ready" && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { className: "muted", children: view.message }),
-    data && view.kind === "ready" && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "card", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { children: [
+    view.kind !== "ready" && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "muted", children: view.message }),
+    data && view.kind === "ready" && /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "card", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("span", { children: [
           "Version ",
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("strong", { children: data.info.version })
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("strong", { children: data.info.version })
         ] }),
         " \xB7 ",
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("span", { children: [
           "Uptime ",
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("strong", { children: formatUptime(data.info.uptimeSec) })
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("strong", { children: formatUptime(data.info.uptimeSec) })
         ] }),
         " \xB7 ",
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("span", { children: [
           "Current connections ",
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("strong", { children: data.info.currConns })
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("strong", { children: data.info.currConns })
         ] })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "card", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("table", { className: "stats-table", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("thead", { children: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("tr", { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("th", { children: "Proxy" }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("th", { children: "Name" }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("th", { children: "Status" }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("th", { children: "Sessions" }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("th", { children: "Rate" }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("th", { children: "In" }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("th", { children: "Out" }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("th", { children: "Last check" })
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "card", children: /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("table", { className: "stats-table", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("thead", { children: /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("tr", { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("th", { children: "Proxy" }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("th", { children: "Name" }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("th", { children: "Status" }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("th", { children: "Sessions" }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("th", { children: "Rate" }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("th", { children: "In" }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("th", { children: "Out" }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("th", { children: "Last check" })
         ] }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("tbody", { children: groupByProxy(data.rows).flatMap((g) => g.rows.map((r, i) => {
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("tbody", { children: groupByProxy(data.rows).flatMap((g) => g.rows.map((r, i) => {
           const cls = classifyStatus(r);
-          return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("tr", { children: [
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("td", { children: i === 0 ? g.proxy : "" }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("td", { children: r.server || r.kind }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("td", { children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: `badge stat-${cls}`, children: r.status }) }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("td", { children: r.sessionsCur }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("td", { children: [
+          return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("tr", { children: [
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("td", { children: i === 0 ? g.proxy : "" }),
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("td", { children: r.server || r.kind }),
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("td", { children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: `badge stat-${cls}`, children: r.status }) }),
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("td", { children: r.sessionsCur }),
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("td", { children: [
               r.sessionRate,
               "/s"
             ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("td", { children: formatBytes(r.bytesIn) }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("td", { children: formatBytes(r.bytesOut) }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("td", { children: r.checkStatus ? `${r.checkStatus}${r.lastCheck ? `: ${r.lastCheck}` : ""}` : "" })
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("td", { children: formatBytes(r.bytesIn) }),
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("td", { children: formatBytes(r.bytesOut) }),
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("td", { children: r.checkStatus ? `${r.checkStatus}${r.lastCheck ? `: ${r.lastCheck}` : ""}` : "" })
           ] }, `${g.proxy}/${r.kind}/${r.server}/${i}`);
         })) })
       ] }) })
@@ -7730,7 +7759,7 @@ function StatsPage() {
 
 // web/haproxy/src/PendingBar.tsx
 var import_react2 = __toESM(require_react());
-import { showToast as showToast2, confirmDialog } from "/shared/dist/shared.mjs";
+import { showToast as showToast3, confirmDialog } from "/shared/dist/shared.mjs";
 
 // web/haproxy/src/pending.ts
 function pendingView(c, busy = false) {
@@ -7741,6 +7770,12 @@ function pendingView(c, busy = false) {
 function diagnosticNotices(lines) {
   return (lines ?? []).map((l) => l.trim()).filter((l) => l !== "").map((message) => ({ tone: "notice", message }));
 }
+function friendlyReason(raw) {
+  const alerts = (raw || "").split("\n").filter((l) => l.includes("[ALERT]")).map((l) => l.replace(/^.*\[ALERT\]\s*\(\d+\)\s*:\s*/, "").replace(/\s*at \[[^\]]*haproxy\.cfg:(\d+)\]/g, " (line $1)").trim()).filter((l) => l !== "" && !/^Fatal errors found/i.test(l));
+  if (alerts.length > 0) return " " + alerts.join(" ");
+  const flat = (raw || "").replace(/^.*?exit status \d+:\s*/s, "").trim();
+  return flat ? " " + flat : "";
+}
 function applyToast(r) {
   switch (r.outcome) {
     case "applied":
@@ -7748,8 +7783,10 @@ function applyToast(r) {
       return { tone: "success", message: r.message || "Changes applied." };
     case "no_changes":
       return { tone: "notice", message: r.message || "Nothing to apply: the live configuration already matches." };
+    case "needs_certs":
+      return { tone: "notice", message: r.message };
     case "validation_failed":
-      return { tone: "error", message: `HAProxy rejected the configuration; nothing was changed. ${r.message}`.trim() };
+      return { tone: "error", message: `Not applied: HAProxy found a problem, and your live setup is untouched.${friendlyReason(r.message)}` };
     case "rolled_back":
       return { tone: "error", message: `The new configuration failed to load; the previous configuration is live again. ${r.message}`.trim() };
     case "rollback_failed":
@@ -7788,30 +7825,42 @@ function serviceActionNeedsConfirm(action, active) {
   if (action === "start") return !active;
   return false;
 }
+function checkMessage(r) {
+  if (r.needsCerts) return r.message;
+  if (!r.ok) return `Not applied: HAProxy found a problem, and your live setup is untouched.${friendlyReason(r.message)}`;
+  const probes = r.probes ?? [];
+  if (probes.length === 0) return "HAProxy accepts the configuration.";
+  const down = probes.filter((p) => p.detail !== "");
+  const base = `Tested on port 10443: ${probes.length} host${probes.length === 1 ? "" : "s"} answered securely with a trusted certificate.`;
+  return down.length === 0 ? base : `${base} Not answering behind it: ${down.map((p) => p.host).join(", ")}.`;
+}
 
 // web/haproxy/src/PendingBar.tsx
-var import_jsx_runtime3 = __toESM(require_jsx_runtime());
+var import_jsx_runtime4 = __toESM(require_jsx_runtime());
 var errMsg = (e) => e instanceof Error ? e.message : String(e);
 function DiffView({ title, diff }) {
   if (!diff) return null;
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "stack", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "field-label", children: title }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("pre", { className: "diff", children: classifyDiff(diff).map((l, n) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: `diff-${l.kind}`, children: l.text || " " }, n)) })
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "stack", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "field-label", children: title }),
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("pre", { className: "diff", children: classifyDiff(diff).map((l, n) => /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: `diff-${l.kind}`, children: l.text || " " }, n)) })
   ] });
 }
 function PendingBar({ status, statusError, changes, changesError, blockers, busy, dirty, onApply, onRefresh }) {
   const [review, setReview] = (0, import_react2.useState)(false);
   const [acting, setActing] = (0, import_react2.useState)(false);
+  const [working, setWorking] = (0, import_react2.useState)("");
   const v = pendingView(changes, busy);
   const active = status?.service.active ?? false;
   const check = async () => {
+    setWorking("Testing the configuration\u2026");
     setActing(true);
     try {
       const r = await api.check();
-      showToast2(r.ok ? `HAProxy accepts the candidate configuration. ${r.message}`.trim() : `HAProxy rejected the candidate configuration: ${r.message}`, r.ok ? "success" : "error");
+      showToast3(checkMessage(r), r.needsCerts ? "notice" : r.ok ? "success" : "error");
     } catch (e) {
-      showToast2(`Check failed: ${errMsg(e)}`, "error");
+      showToast3(`Check failed: ${errMsg(e)}`, "error");
     } finally {
+      setWorking("");
       setActing(false);
     }
   };
@@ -7819,64 +7868,71 @@ function PendingBar({ status, statusError, changes, changesError, blockers, busy
     if (serviceActionNeedsConfirm(action, active)) {
       const msg = action === "restart" ? "Restart HAProxy? Active connections will be dropped." : "HAProxy is not running. Start it now?";
       if (!await confirmDialog(msg, { confirmLabel: action === "restart" ? "Restart" : "Start" })) {
-        showToast2(`${action === "restart" ? "Restart" : "Start"} cancelled.`, "notice");
+        showToast3(`${action === "restart" ? "Restart" : "Start"} cancelled.`, "notice");
         return;
       }
     }
+    setWorking(action === "reload" ? "Reloading HAProxy\u2026" : action === "restart" ? "Restarting HAProxy\u2026" : "Starting HAProxy\u2026");
     setActing(true);
     try {
       await api[action]();
-      showToast2(action === "reload" ? "HAProxy reloaded." : action === "restart" ? "HAProxy restarted." : "HAProxy started.", "success");
+      showToast3(action === "reload" ? "HAProxy reloaded." : action === "restart" ? "HAProxy restarted." : "HAProxy started.", "success");
     } catch (e) {
-      showToast2(`${action} failed: ${errMsg(e)}`, "error");
+      showToast3(`${action} failed: ${errMsg(e)}`, "error");
     } finally {
+      setWorking("");
       setActing(false);
       onRefresh();
     }
   };
   const last = status?.lastApply;
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("section", { className: "pendingbar", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: `pending-label ${changes?.hasChanges ? "unsaved" : "muted"}`, children: v.label }),
-      v.summary && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "muted", children: v.summary }),
-      dirty && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "muted", children: "Unsaved edits are not included until you Save." }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "grow" }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { className: "btn btn-ghost btn-sm", disabled: !v.canReview, onClick: () => setReview((r) => !r), children: review ? "Hide changes" : "Review changes" }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { className: "btn btn-ghost btn-sm", disabled: acting, onClick: check, children: "Check" }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { className: "btn btn-primary btn-sm", disabled: v.applyDisabled || acting, onClick: onApply, children: v.applyLabel })
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("section", { className: "pendingbar", children: [
+    working && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(BusyDialog, { message: working }),
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: `pending-label ${changes?.hasChanges ? "unsaved" : "muted"}`, children: v.label }),
+      v.summary && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "muted", children: v.summary }),
+      dirty && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "unsaved", title: "Unsaved edits are not included until you Save.", children: "\u25CF unsaved" }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "grow" }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("button", { className: "btn btn-ghost btn-sm", disabled: !v.canReview, title: review ? "Hide changes" : "Review changes", onClick: () => setReview((r) => !r), children: [
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { "aria-hidden": "true", children: review ? "\u25BE" : "\u25B8" }),
+        " Diff"
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { className: "btn btn-ghost btn-sm", disabled: acting, title: "Check the candidate configuration", "aria-label": "Check", onClick: check, children: "\u2713 Check" }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { className: "btn btn-primary btn-sm", disabled: v.applyDisabled || acting, onClick: onApply, children: v.applyLabel })
     ] }),
-    changesError && /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("p", { className: "error", children: [
-      "Could not read pending changes: ",
-      changesError
+    changesError && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "muted", children: changesError }),
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(IssueList, { issues: blockers }),
+    review && changes && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "stack review", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(DiffView, { title: "haproxy.cfg", diff: changes.configDiff }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(DiffView, { title: "crt-list", diff: changes.crtListDiff })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IssueList, { issues: blockers }),
-    review && changes && /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "stack review", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(DiffView, { title: "haproxy.cfg", diff: changes.configDiff }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(DiffView, { title: "crt-list", diff: changes.crtListDiff })
-    ] }),
-    diagnosticNotices(status?.diagnostics).map((n, i) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "diag-notice", role: "note", children: n.message }, i)),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "row statuspanel", children: [
-      status ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: `badge ${status.service.active ? "badge-ok" : "badge-error"}`, children: status.service.active ? "active" : "inactive" }),
-        status.service.detail && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "muted", children: status.service.detail }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("span", { className: "muted", children: [
+    diagnosticNotices(status?.diagnostics).map((n, i) => /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "diag-notice", role: "note", children: n.message }, i)),
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "row statuspanel", children: [
+      status ? /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_jsx_runtime4.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: `badge ${status.service.active ? "badge-ok" : "badge-error"}`, title: status.service.active ? "active" : "inactive", children: status.service.active ? "\u25CF running" : "\u25CB stopped" }),
+        status.service.detail && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "muted", children: status.service.detail }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("span", { className: "muted", children: [
           "HAProxy ",
           status.version || "version unknown"
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "muted", children: last ? `last apply: ${last.outcome} at ${new Date(last.time).toLocaleString()}` : "never applied" }),
-        last && last.message && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "muted", title: last.message, children: last.message.slice(0, 80) })
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "muted", children: statusError ? `Status unavailable: ${statusError}` : "Loading status\u2026" }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "grow" }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { className: "btn btn-ghost btn-sm", disabled: acting, onClick: () => service("reload"), children: "Reload" }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { className: "btn btn-ghost btn-sm", disabled: acting, onClick: () => service("restart"), children: "Restart" }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { className: "btn btn-ghost btn-sm", disabled: acting, onClick: () => service("start"), children: "Start" })
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "muted", title: last ? `last apply: ${last.outcome}` : "never applied", children: last ? /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_jsx_runtime4.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: /ok|success|applied/i.test(last.outcome) ? "stat-up" : "error", children: /ok|success|applied/i.test(last.outcome) ? "\u2713" : "\u2715" }),
+          " ",
+          new Date(last.time).toLocaleString()
+        ] }) : "\u2014" }),
+        last && last.message && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "muted", title: last.message, children: last.message.slice(0, 80) })
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "muted", children: statusError ? `Status unavailable: ${statusError}` : "Loading status\u2026" }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "grow" }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { className: "btn btn-ghost btn-sm", disabled: acting, title: "Reload", "aria-label": "Reload", onClick: () => service("reload"), children: "\u27F3" }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { className: "btn btn-ghost btn-sm", disabled: acting, title: "Restart", "aria-label": "Restart", onClick: () => service("restart"), children: "\u23FB" }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { className: "btn btn-ghost btn-sm", disabled: acting, title: "Start", "aria-label": "Start", onClick: () => service("start"), children: "\u25B6" })
     ] })
   ] });
 }
 
 // web/haproxy/src/CertsPage.tsx
 var import_react3 = __toESM(require_react());
-import { showToast as showToast3, confirmDialog as confirmDialog2 } from "/shared/dist/shared.mjs";
+import { showToast as showToast4, confirmDialog as confirmDialog2 } from "/shared/dist/shared.mjs";
 
 // web/haproxy/src/certview.ts
 function expiryBadge(d) {
@@ -7961,10 +8017,10 @@ function removeButtonState(c) {
 }
 
 // web/haproxy/src/Toggle.tsx
-var import_jsx_runtime4 = __toESM(require_jsx_runtime());
+var import_jsx_runtime5 = __toESM(require_jsx_runtime());
 function Toggle({ checked, onChange, label, disabled }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("label", { className: "ui-toggle", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("label", { className: "ui-toggle", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
       "input",
       {
         type: "checkbox",
@@ -7974,13 +8030,13 @@ function Toggle({ checked, onChange, label, disabled }) {
         onChange: (e) => onChange(e.target.checked)
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "ui-toggle-track", "aria-hidden": "true" }),
-    label && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "ui-toggle-label", children: label })
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "ui-toggle-track", "aria-hidden": "true" }),
+    label && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "ui-toggle-label", children: label })
   ] });
 }
 
 // web/haproxy/src/CertsPage.tsx
-var import_jsx_runtime5 = __toESM(require_jsx_runtime());
+var import_jsx_runtime6 = __toESM(require_jsx_runtime());
 var errMsg2 = (e) => e instanceof Error ? e.message : String(e);
 function CertsPage({ data, configured, refreshKey, onChanged, onPick }) {
   const [fresh, setFresh] = (0, import_react3.useState)([]);
@@ -7997,12 +8053,33 @@ function CertsPage({ data, configured, refreshKey, onChanged, onPick }) {
       setFreshError(null);
     } catch (e) {
       setFreshError(errMsg2(e));
-      showToast3(`Could not check certificate freshness: ${errMsg2(e)}`, "error");
+      showToast4(`Could not check certificate freshness: ${errMsg2(e)}`, "error");
     }
   }, [configured]);
   (0, import_react3.useEffect)(() => {
     loadFresh();
   }, [loadFresh, refreshKey]);
+  const [found, setFound] = (0, import_react3.useState)([]);
+  const [picked, setPicked] = (0, import_react3.useState)(/* @__PURE__ */ new Set());
+  (0, import_react3.useEffect)(() => {
+    api.importableCerts().then((list) => {
+      setFound(list ?? []);
+      setPicked(new Set((list ?? []).map((c) => c.name)));
+    }).catch(() => setFound([]));
+  }, [refreshKey]);
+  const importPicked = async () => {
+    setBusy(true);
+    try {
+      const r = await api.importCerts([...picked]);
+      const n = r.imported?.length ?? 0;
+      showToast4(`${n} certificate${n === 1 ? "" : "s"} imported. They stay exactly where they are. Run Check to test them.`, "success");
+    } catch (e) {
+      showToast4(`Could not import: ${errMsg2(e)}`, "error");
+    } finally {
+      setBusy(false);
+      onChanged();
+    }
+  };
   const toggleOpen = (n) => setOpen((p) => {
     const x = new Set(p);
     if (x.has(n)) x.delete(n);
@@ -8012,23 +8089,23 @@ function CertsPage({ data, configured, refreshKey, onChanged, onPick }) {
   const setEnabled = async (c, enabled) => {
     try {
       await api.setCertEnabled(c.name, enabled);
-      showToast3(`${c.name} ${enabled ? "enabled" : "disabled"}. The change is pending until you Apply.`, "success");
+      showToast4(`${c.name} ${enabled ? "enabled" : "disabled"}. The change is pending until you Apply.`, "success");
     } catch (e) {
-      showToast3(`Could not ${enabled ? "enable" : "disable"} ${c.name}: ${errMsg2(e)}`, "error");
+      showToast4(`Could not ${enabled ? "enable" : "disable"} ${c.name}: ${errMsg2(e)}`, "error");
     } finally {
       onChanged();
     }
   };
   const remove = async (c) => {
-    if (!await confirmDialog2(`Remove ${c.name}? The certificate file and its tracking row are deleted.`, { confirmLabel: "Remove" })) {
-      showToast3("Remove cancelled.", "notice");
+    if (!await confirmDialog2(c.adopted ? `Stop tracking ${c.name}? The file itself is left where it is.` : `Remove ${c.name}? The certificate file and its tracking row are deleted.`, { confirmLabel: "Remove" })) {
+      showToast4("Remove cancelled.", "notice");
       return;
     }
     try {
       await api.deleteCert(c.name);
-      showToast3(`${c.name} removed.`, "success");
+      showToast4(`${c.name} removed.`, "success");
     } catch (e) {
-      showToast3(`Could not remove ${c.name}: ${errMsg2(e)}`, "error");
+      showToast4(`Could not remove ${c.name}: ${errMsg2(e)}`, "error");
     } finally {
       onChanged();
     }
@@ -8039,59 +8116,81 @@ function CertsPage({ data, configured, refreshKey, onChanged, onPick }) {
       const r = await api.certMachineCerts(c.certmachine.fqdn);
       const active = (r.certs ?? []).find((x) => x.fqdn === c.certmachine.fqdn && (!x.status || x.status === "active"));
       if (!active) {
-        showToast3(`CertMachine has no active certificate for ${c.certmachine.fqdn}.`, "error");
+        showToast4(`CertMachine has no active certificate for ${c.certmachine.fqdn}.`, "error");
         return;
       }
       await api.pullCert(active.id, c.note);
-      showToast3(`${c.name} updated from CertMachine. The change is pending until you Apply.`, "success");
+      showToast4(`${c.name} updated from CertMachine. The change is pending until you Apply.`, "success");
     } catch (e) {
-      showToast3(`Could not update ${c.name}: ${errMsg2(e)}`, "error");
+      showToast4(`Could not update ${c.name}: ${errMsg2(e)}`, "error");
     } finally {
       setBusy(false);
       onChanged();
     }
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "stack", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "muted", children: data ? `${data.certs.length} managed certificate(s); ${data.unmanaged} unmanaged file(s) not tracked here.` : "Loading\u2026" }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "grow" }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("button", { className: "btn btn-primary btn-sm", onClick: onPick, children: "+ Add from CertMachine" })
+  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "stack", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "muted", children: data ? `${data.certs.length} managed certificate(s); ${data.unmanaged} unmanaged file(s) not tracked here.` : "Loading\u2026" }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "grow" }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { className: "btn btn-primary btn-sm", onClick: onPick, children: "+ Add from CertMachine" })
     ] }),
-    !configured && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "muted", children: "CertMachine is not configured: pulling and freshness checks are unavailable." }),
-    freshError && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("p", { className: "error", children: [
+    found.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "card stack", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "card-title", children: "Already on this server" }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "muted", children: "These certificate files are in the certs folder but not tracked here yet. Import the ones HAProxy should serve; the files are left untouched." }),
+      found.map((c) => /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+        Toggle,
+        {
+          checked: picked.has(c.name),
+          label: `${c.fqdn}  \xB7  ${c.name}`,
+          onChange: (v) => setPicked((p) => {
+            const x = new Set(p);
+            if (v) x.add(c.name);
+            else x.delete(c.name);
+            return x;
+          })
+        },
+        c.name
+      )),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "row", children: /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("button", { className: "btn btn-primary btn-sm", disabled: busy || picked.size === 0, onClick: importPicked, children: [
+        "Import ",
+        picked.size
+      ] }) })
+    ] }),
+    !configured && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "muted", children: "CertMachine is not configured: pulling and freshness checks are unavailable." }),
+    freshError && /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("p", { className: "error", children: [
       "Freshness unavailable: ",
       freshError
     ] }),
-    data && data.certs.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "muted", children: "No managed certificates yet." }),
+    data && data.certs.length === 0 && found.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "muted", children: "No certificates yet. Add one from CertMachine to get started." }),
     data && data.certs.map((c) => {
       const details = certDetailsView(c);
       const exp = expiryBadge(c.details);
       const rs = removeButtonState(c);
       const fb = freshnessBadge(configured ? freshnessFor(fresh, c.name) : void 0);
-      return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: `card${c.enabled ? "" : " svc-off"}`, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "row", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "svc-name grow", children: c.name }),
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(Toggle, { checked: c.enabled, onChange: (v) => setEnabled(c, v), label: "Enabled" }),
-          c.missing && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "badge badge-error", title: "The certificate file is not on disk", children: "missing" }),
-          c.superseded && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "badge", children: "superseded" }),
-          exp && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: `badge badge-${exp.tone}`, children: exp.label }),
-          configured && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: `badge badge-${fb.tone}`, title: fb.title, children: fb.label }),
-          fb.canUpdate && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("button", { className: "btn btn-primary btn-sm", disabled: busy, onClick: () => update(c), children: "Update" }),
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("button", { className: "btn btn-ghost btn-sm", onClick: () => toggleOpen(c.name), children: open.has(c.name) ? "Hide details" : "Details" }),
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("button", { className: "btn btn-danger btn-sm", disabled: rs.disabled, title: rs.title, onClick: () => remove(c), children: "Remove" })
+      return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: `card${c.enabled ? "" : " svc-off"}`, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "row", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "svc-name grow", children: c.name }),
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(Toggle, { checked: c.enabled, onChange: (v) => setEnabled(c, v), label: "Enabled" }),
+          c.missing && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "badge badge-error", title: "The certificate file is not on disk", children: "missing" }),
+          c.superseded && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "badge", children: "superseded" }),
+          exp && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: `badge badge-${exp.tone}`, children: exp.label }),
+          configured && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: `badge badge-${fb.tone}`, title: fb.title, children: fb.label }),
+          fb.canUpdate && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { className: "btn btn-primary btn-sm", disabled: busy, onClick: () => update(c), children: "Update" }),
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { className: "btn btn-ghost btn-sm", onClick: () => toggleOpen(c.name), children: open.has(c.name) ? "Hide details" : "Details" }),
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { className: "btn btn-danger btn-sm", disabled: rs.disabled, title: rs.title, onClick: () => remove(c), children: "Remove" })
         ] }),
-        rs.disabled && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "muted small", children: rs.title }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "muted", children: [
+        rs.disabled && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "muted small", children: rs.title }),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "muted", children: [
           c.certmachine.fqdn,
           " (CertMachine id ",
           c.certmachine.id,
           ")",
           c.note ? ` - ${c.note}` : ""
         ] }),
-        open.has(c.name) && (details.available ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("dl", { className: "status", children: details.fields.map((f) => /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(import_react3.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("dt", { children: f.label }),
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("dd", { children: f.value })
-        ] }, f.label)) }) : /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "muted", children: details.message }))
+        open.has(c.name) && (details.available ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("dl", { className: "status", children: details.fields.map((f) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(import_react3.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("dt", { children: f.label }),
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("dd", { children: f.value })
+        ] }, f.label)) }) : /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "muted", children: details.message }))
       ] }, c.name);
     })
   ] });
@@ -8099,13 +8198,14 @@ function CertsPage({ data, configured, refreshKey, onChanged, onPick }) {
 
 // web/haproxy/src/CertPicker.tsx
 var import_react4 = __toESM(require_react());
-import { showToast as showToast4, confirmDialog as confirmDialog3 } from "/shared/dist/shared.mjs";
-var import_jsx_runtime6 = __toESM(require_jsx_runtime());
+import { showToast as showToast5, confirmDialog as confirmDialog3 } from "/shared/dist/shared.mjs";
+var import_jsx_runtime7 = __toESM(require_jsx_runtime());
 function CertPicker({ configured, forFqdn, onClose, onPulled }) {
   const [showAll, setShowAll] = (0, import_react4.useState)(false);
   const [certs, setCerts] = (0, import_react4.useState)(null);
   const [error, setError] = (0, import_react4.useState)(null);
   const [busy, setBusy] = (0, import_react4.useState)(false);
+  const [query, setQuery] = (0, import_react4.useState)("");
   (0, import_react4.useEffect)(() => {
     if (!configured) return;
     let stale = false;
@@ -8119,7 +8219,7 @@ function CertPicker({ configured, forFqdn, onClose, onPulled }) {
       if (stale) return;
       const m = e instanceof Error ? e.message : String(e);
       setError(m);
-      showToast4(`Could not list CertMachine certificates: ${m}`, "error");
+      showToast5(`Could not list CertMachine certificates: ${m}`, "error");
     });
     return () => {
       stale = true;
@@ -8130,69 +8230,98 @@ function CertPicker({ configured, forFqdn, onClose, onPulled }) {
       `${cert.fqdn} (id ${cert.id}) is flagged and may not work for ${forFqdn || "this service"}. Install it anyway?`,
       { confirmLabel: "Install anyway" }
     )) {
-      showToast4("Install cancelled.", "notice");
+      showToast5("Install cancelled.", "notice");
       return;
     }
     setBusy(true);
     try {
       const r = await api.pullCert(cert.id, "");
-      showToast4(`Installed ${r.name}. The change is pending until you Apply.`, "success");
+      showToast5(`Installed ${r.name}. The change is pending until you Apply.`, "success");
       onPulled(cert);
     } catch (e) {
       const t = e instanceof ApiError ? pullErrorToast(e.status, e.message) : pullErrorToast(0, e instanceof Error ? e.message : String(e));
-      showToast4(t.message, t.tone);
+      showToast5(t.message, t.tone);
     } finally {
       setBusy(false);
     }
   };
-  const rows = certs ? pickerRows(certs, showAll, forFqdn !== "") : [];
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "ui-modal-overlay", role: "dialog", "aria-modal": "true", children: /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "ui-modal-panel picker", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "ui-modal-title", children: [
+  const all = certs ? pickerRows(certs, showAll, forFqdn !== "") : [];
+  const terms = query.toLowerCase().split(/\s+/).filter((t) => t !== "");
+  const matching = all.filter((r) => {
+    const hay = `${r.cert.fqdn} ${r.cert.id} ${r.cert.status ?? ""} ${r.flags.join(" ")}`.toLowerCase();
+    return terms.every((t) => hay.includes(t));
+  });
+  const LIMIT = 30;
+  const rows = matching.slice(0, LIMIT);
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "ui-modal-overlay", role: "dialog", "aria-modal": "true", children: /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "ui-modal-panel picker", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "ui-modal-title", children: [
       "Pick a CertMachine certificate",
       forFqdn ? ` for ${forFqdn}` : ""
     ] }),
-    !configured ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "error", children: "CertMachine is not configured. Set certmachine.url in the haproxy settings to pick certificates." }) : /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "stack", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(Toggle, { checked: showAll, onChange: setShowAll, label: "Show all (including non-covering, archived, quarantined, expired)" }),
-      error && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "error", children: error }),
-      !certs && !error && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "muted", children: "Loading\u2026" }),
-      certs && rows.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "muted", children: showAll ? "CertMachine has no certificates." : "No active certificate covers this name. Use Show all to see the rest." }),
-      rows.map((r) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "row pick-row", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { className: "grow", children: [
+    !configured ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "error", children: "CertMachine is not configured. Set certmachine.url in the haproxy settings to pick certificates." }) : /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "stack", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+        "input",
+        {
+          className: "input",
+          type: "text",
+          autoFocus: true,
+          placeholder: "Filter: type part of a name, an id or a status",
+          value: query,
+          onChange: (e) => setQuery(e.target.value),
+          autoComplete: "off",
+          "data-lpignore": "true",
+          "data-1p-ignore": true,
+          "data-form-type": "other",
+          spellCheck: false
+        }
+      ),
+      certs && all.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "muted small", children: matching.length === all.length ? `${all.length} certificates` : `${matching.length} of ${all.length} match` }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Toggle, { checked: showAll, onChange: setShowAll, label: "Show all (including non-covering, archived, quarantined, expired)" }),
+      error && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "error", children: error }),
+      !certs && !error && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "muted", children: "Loading\u2026" }),
+      certs && all.length > 0 && rows.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "muted", children: "Nothing matches that filter." }),
+      certs && all.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "muted", children: showAll ? "CertMachine has no certificates." : "No active certificate covers this name. Use Show all to see the rest." }),
+      rows.map((r) => /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "row pick-row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "grow", children: [
           r.cert.fqdn,
           " ",
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { className: "muted", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { className: "muted", children: [
             "(id ",
             r.cert.id,
             ")"
           ] })
         ] }),
-        r.flags.map((f) => /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "badge badge-warning", children: f }, f)),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { className: "btn btn-primary btn-sm", disabled: busy, onClick: () => choose(r.cert, pickerNeedsConfirm(r)), children: "Choose" })
-      ] }, r.cert.id))
+        r.flags.map((f) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "badge badge-warning", children: f }, f)),
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("button", { className: "btn btn-primary btn-sm", disabled: busy, onClick: () => choose(r.cert, pickerNeedsConfirm(r)), children: "Choose" })
+      ] }, r.cert.id)),
+      matching.length > LIMIT && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("p", { className: "muted small", children: [
+        "Showing the first ",
+        LIMIT,
+        " of ",
+        matching.length,
+        ". Keep typing to narrow it down."
+      ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "grow" }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { className: "btn btn-ghost", onClick: onClose, children: "Close" })
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "grow" }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("button", { className: "btn btn-ghost", onClick: onClose, children: "Close" })
     ] })
   ] }) });
 }
 
 // web/haproxy/src/BackupsPage.tsx
 var import_react5 = __toESM(require_react());
-import { showToast as showToast5, confirmDialog as confirmDialog4 } from "/shared/dist/shared.mjs";
-var import_jsx_runtime7 = __toESM(require_jsx_runtime());
+import { showToast as showToast6, confirmDialog as confirmDialog4 } from "/shared/dist/shared.mjs";
+var import_jsx_runtime8 = __toESM(require_jsx_runtime());
 function BackupsPage({ refreshKey, onRestore }) {
   const [list, setList] = (0, import_react5.useState)(null);
-  const [error, setError] = (0, import_react5.useState)(null);
   const [view, setView] = (0, import_react5.useState)(null);
   const load = (0, import_react5.useCallback)(async () => {
     try {
       setList(await api.backups());
-      setError(null);
     } catch (e) {
-      const m = e instanceof Error ? e.message : String(e);
-      setError(m);
-      showToast5(`Could not load backups: ${m}`, "error");
+      console.warn("backups unavailable", e);
+      setList([]);
     }
   }, []);
   (0, import_react5.useEffect)(() => {
@@ -8202,41 +8331,40 @@ function BackupsPage({ refreshKey, onRestore }) {
     try {
       setView(await api.backup(name));
     } catch (e) {
-      showToast5(`Could not read ${name}: ${e instanceof Error ? e.message : String(e)}`, "error");
+      showToast6(`Could not read ${name}: ${e instanceof Error ? e.message : String(e)}`, "error");
     }
   };
   const restore = async (name) => {
     if (!await confirmDialog4(`Restore ${name}? It becomes the live configuration (validated first; the current one is backed up).`, { confirmLabel: "Restore" })) {
-      showToast5("Restore cancelled.", "notice");
+      showToast6("Restore cancelled.", "notice");
       return;
     }
     await onRestore(name);
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "stack", children: [
-    error && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "error", children: error }),
-    list && list.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "muted", children: "No backups yet. One is made on every Apply." }),
-    list && list.map((b) => /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "card row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "grow", children: b.name }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "badge", children: b.kind }),
-      b.orig && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "badge", children: "original" }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "muted", children: b.timestamp }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("button", { className: "btn btn-ghost btn-sm", onClick: () => open(b.name), children: "View" }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("button", { className: "btn btn-danger btn-sm", onClick: () => restore(b.name), children: "Restore" })
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "stack", children: [
+    list && list.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "muted", children: "No backups yet. One is made every time you Apply." }),
+    list && list.map((b) => /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "card row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "grow", children: b.name }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "badge", children: b.kind }),
+      b.orig && /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "badge", children: "original" }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "muted", children: b.timestamp }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("button", { className: "btn btn-ghost btn-sm", onClick: () => open(b.name), children: "View" }),
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("button", { className: "btn btn-danger btn-sm", onClick: () => restore(b.name), children: "Restore" })
     ] }, b.name)),
-    view && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "card", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "card-title row", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "grow", children: view.name }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("button", { className: "btn btn-ghost btn-sm", onClick: () => setView(null), children: "Close" })
+    view && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "card", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "card-title row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "grow", children: view.name }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("button", { className: "btn btn-ghost btn-sm", onClick: () => setView(null), children: "Close" })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("pre", { className: "rawpre", children: view.content })
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("pre", { className: "rawpre", children: view.content })
     ] })
   ] });
 }
 
 // web/haproxy/src/LogPage.tsx
 var import_react6 = __toESM(require_react());
-import { showToast as showToast6 } from "/shared/dist/shared.mjs";
-var import_jsx_runtime8 = __toESM(require_jsx_runtime());
+import { showToast as showToast7 } from "/shared/dist/shared.mjs";
+var import_jsx_runtime9 = __toESM(require_jsx_runtime());
 var key = (e) => `${e.time}|${e.message}`;
 function LogPage() {
   const [entries, setEntries] = (0, import_react6.useState)([]);
@@ -8251,7 +8379,7 @@ function LogPage() {
         const snap = await api.ops();
         if (!closed) setEntries(capEntries(snap, MAX_LOG_ENTRIES));
       } catch (e) {
-        showToast6(`Could not load the log: ${e instanceof Error ? e.message : String(e)}`, "error");
+        showToast7(`Could not load the log: ${e instanceof Error ? e.message : String(e)}`, "error");
       }
     };
     const connect = () => {
@@ -8266,7 +8394,7 @@ function LogPage() {
           const e = JSON.parse(ev.data);
           setEntries((prev) => prev.some((p) => key(p) === key(e)) ? prev : capEntries([...prev, e], MAX_LOG_ENTRIES));
         } catch {
-          showToast6("A malformed log entry was ignored.", "error");
+          showToast7("A malformed log entry was ignored.", "error");
         }
       };
       es.onerror = () => {
@@ -8284,23 +8412,23 @@ function LogPage() {
       es?.close();
     };
   }, []);
-  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "stack", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: `badge ${live ? "badge-ok" : "badge-warning"}`, children: live ? "live" : "reconnecting\u2026" }),
-      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { className: "muted", children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "stack", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: `badge ${live ? "badge-ok" : "badge-warning"}`, children: live ? "live" : "reconnecting\u2026" }),
+      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("span", { className: "muted", children: [
         "Last ",
         MAX_LOG_ENTRIES,
         " operations are kept."
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("pre", { className: "rawpre logpre", children: entries.length === 0 ? "(no operations yet)" : entries.map((e) => `${new Date(e.time).toLocaleTimeString()}  ${e.message}`).join("\n") })
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("pre", { className: "rawpre logpre", children: entries.length === 0 ? "(no operations yet)" : entries.map((e) => `${new Date(e.time).toLocaleTimeString()}  ${e.message}`).join("\n") })
   ] });
 }
 
 // web/haproxy/src/RawPage.tsx
 var import_react7 = __toESM(require_react());
-import { showToast as showToast7 } from "/shared/dist/shared.mjs";
-var import_jsx_runtime9 = __toESM(require_jsx_runtime());
+import { showToast as showToast8 } from "/shared/dist/shared.mjs";
+var import_jsx_runtime10 = __toESM(require_jsx_runtime());
 function RawPage({ refreshKey }) {
   const [raw, setRaw] = (0, import_react7.useState)(null);
   const [error, setError] = (0, import_react7.useState)(null);
@@ -8311,63 +8439,63 @@ function RawPage({ refreshKey }) {
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
       setError(m);
-      showToast7(`Could not load the raw configuration: ${m}`, "error");
+      showToast8(`Could not load the raw configuration: ${m}`, "error");
     }
   }, []);
   (0, import_react7.useEffect)(() => {
     load();
   }, [load, refreshKey]);
-  return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "stack", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "muted", children: "Read-only: exactly what Apply would write." }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "grow" }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("button", { className: "btn btn-ghost btn-sm", onClick: async () => {
+  return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "stack", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "muted", children: "Read-only: exactly what Apply would write." }),
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "grow" }),
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("button", { className: "btn btn-ghost btn-sm", onClick: async () => {
         await load();
-        showToast7("Raw view refreshed.", "notice");
+        showToast8("Raw view refreshed.", "notice");
       }, children: "Refresh" })
     ] }),
-    error && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { className: "error", children: error }),
-    raw && /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)(import_jsx_runtime9.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "card", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "card-title", children: "haproxy.cfg" }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("pre", { className: "rawpre", children: raw.config })
+    error && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("p", { className: "error", children: error }),
+    raw && /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)(import_jsx_runtime10.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "card", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("div", { className: "card-title", children: "haproxy.cfg" }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("pre", { className: "rawpre", children: raw.config })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "card", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "card-title", children: "crt-list" }),
-        /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("pre", { className: "rawpre", children: raw.crtList || "(empty)" })
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "card", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("div", { className: "card-title", children: "crt-list" }),
+        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("pre", { className: "rawpre", children: raw.crtList || "(empty)" })
       ] })
     ] })
   ] });
 }
 
 // web/haproxy/src/applyAction.ts
-import { showToast as showToast8 } from "/shared/dist/shared.mjs";
+import { showToast as showToast9 } from "/shared/dist/shared.mjs";
 async function runApplyLike(fn) {
   try {
     const t = applyToast(await fn());
-    showToast8(t.message, t.tone);
+    showToast9(t.message, t.tone);
     return [];
   } catch (e) {
     if (e instanceof ApiError) {
       const t = applyErrorToast(e.status, e.message, e.issues);
-      showToast8(t.message, t.tone);
+      showToast9(t.message, t.tone);
       return e.status === 409 ? e.issues.filter((i) => i.severity === "error") : [];
     }
-    showToast8(`Apply failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+    showToast9(`Apply failed: ${e instanceof Error ? e.message : String(e)}`, "error");
     return [];
   }
 }
 
 // web/haproxy/src/ServicesPage.tsx
 var import_react8 = __toESM(require_react());
-import { showToast as showToast9 } from "/shared/dist/shared.mjs";
-var import_jsx_runtime10 = __toESM(require_jsx_runtime());
+import { showToast as showToast10 } from "/shared/dist/shared.mjs";
+var import_jsx_runtime11 = __toESM(require_jsx_runtime());
 function ExtraField({ extra, onChange }) {
   const [text, setText] = (0, import_react8.useState)(extraToText(extra));
   (0, import_react8.useEffect)(() => {
     if (textToExtra(text).join("\n") !== extra.join("\n")) setText(extraToText(extra));
   }, [extra]);
-  return /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
     "textarea",
     {
       className: "input extra",
@@ -8388,13 +8516,13 @@ function FqdnList({ svc, model, onChange }) {
     onChange(addFqdn(model, svc.id, draft));
     setDraft("");
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "stack", children: [
-    svc.fqdns.map((f, i) => /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("input", { className: "input grow", value: f, onChange: (e) => onChange(setFqdn(model, svc.id, i, e.target.value)), "aria-label": "FQDN" }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("button", { className: "btn btn-danger btn-sm", onClick: () => onChange(removeFqdn(model, svc.id, i)), title: "Remove FQDN", children: "\u2715" })
+  return /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "stack", children: [
+    svc.fqdns.map((f, i) => /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("input", { className: "input grow", value: f, onChange: (e) => onChange(setFqdn(model, svc.id, i, e.target.value)), "aria-label": "FQDN" }),
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("button", { className: "btn btn-danger btn-sm", onClick: () => onChange(removeFqdn(model, svc.id, i)), title: "Remove FQDN", children: "\u2715" })
     ] }, i)),
-    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
         "input",
         {
           className: "input grow",
@@ -8407,7 +8535,7 @@ function FqdnList({ svc, model, onChange }) {
           "aria-label": "New FQDN"
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("button", { className: "btn btn-primary btn-sm", onClick: add, children: "+ Add FQDN" })
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("button", { className: "btn btn-primary btn-sm", onClick: add, children: "+ Add FQDN" })
     ] })
   ] });
 }
@@ -8427,40 +8555,40 @@ function ServiceEditor({ svc, model, certs, issues, coverage, onPickCert, open, 
   const ports = groupByPort(model).map((g) => g.port);
   const patch = (p) => onChange(updateService(model, svc.id, p));
   const cov = coverageBadge(coverage);
-  return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: `svc${svc.enabled ? "" : " svc-off"}`, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "svc-head", onClick: onToggleOpen, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "svc-name", children: svc.name || "(unnamed)" }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("span", { className: "muted svc-summary", children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: `svc${svc.enabled ? "" : " svc-off"}`, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "svc-head", onClick: onToggleOpen, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { className: "svc-name", children: svc.name || "(unnamed)" }),
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("span", { className: "muted svc-summary", children: [
         svc.fqdns.join(", ") || "no FQDN",
         " \u2192 ",
         svc.upstream.host || DEFAULT_UPSTREAM_HOST,
         ":",
         svc.upstream.port
       ] }),
-      !svc.enabled && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "badge", children: "disabled" }),
-      cov && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: `badge badge-${cov.tone}`, title: cov.title, children: cov.label }),
-      mine && mine.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: `badge ${errors > 0 ? "badge-error" : "badge-warning"}`, children: errors > 0 ? "error" : "warning" }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "svc-caret", children: open ? "\u25BE" : "\u25B8" })
+      !svc.enabled && /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { className: "badge", children: "disabled" }),
+      cov && /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { className: `badge badge-${cov.tone}`, title: cov.title, children: cov.label }),
+      mine && mine.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { className: `badge ${errors > 0 ? "badge-error" : "badge-warning"}`, title: errors > 0 ? "error" : "warning", children: errors > 0 ? "\u2715" : "\u26A0" }),
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { className: "svc-caret", children: open ? "\u25BE" : "\u25B8" })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IssueList, { issues: mine }),
-    open && /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "svc-body", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "field", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("label", { className: "field-label", children: "Name" }),
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("input", { className: "input", value: svc.name, onChange: (e) => patch({ name: e.target.value }) })
+    /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(IssueList, { issues: mine }),
+    open && /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "svc-body", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("label", { className: "field-label", children: "Name" }),
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("input", { className: "input", value: svc.name, onChange: (e) => patch({ name: e.target.value }) })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("div", { className: "field", children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(Toggle, { checked: svc.enabled, onChange: (v) => onChange(setServiceEnabled(model, svc.id, v)), label: "Enabled" }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "field", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("label", { className: "field-label", children: "FQDNs" }),
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(FqdnList, { svc, model, onChange })
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("div", { className: "field", children: /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(Toggle, { checked: svc.enabled, onChange: (v) => onChange(setServiceEnabled(model, svc.id, v)), label: "Enabled" }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("label", { className: "field-label", children: "FQDNs" }),
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(FqdnList, { svc, model, onChange })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "field", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("label", { className: "field-label", children: "Exposed port" }),
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("select", { className: "input", value: svc.exposedPort || 443, onChange: (e) => patch({ exposedPort: Number(e.target.value) }), children: ports.map((p) => /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("option", { value: p, children: p }, p)) })
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("label", { className: "field-label", children: "Exposed port" }),
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("select", { className: "input", value: svc.exposedPort || 443, onChange: (e) => patch({ exposedPort: Number(e.target.value) }), children: ports.map((p) => /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("option", { value: p, children: p }, p)) })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "field", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("label", { className: "field-label", children: "Upstream (host and port)" }),
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "row", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("label", { className: "field-label", children: "Upstream (host and port)" }),
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "row", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
             "input",
             {
               className: "input grow",
@@ -8470,7 +8598,7 @@ function ServiceEditor({ svc, model, certs, issues, coverage, onPickCert, open, 
               "aria-label": "Upstream host"
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
             "input",
             {
               className: "input port",
@@ -8482,22 +8610,22 @@ function ServiceEditor({ svc, model, certs, issues, coverage, onPickCert, open, 
           )
         ] })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("div", { className: "field", children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(Toggle, { checked: svc.check, onChange: (v) => patch({ check: v }), label: "Health check" }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "field", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("label", { className: "field-label", children: "Certificate" }),
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "row", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("select", { className: "input grow", value: svc.cert.fqdn, onChange: (e) => patch({ cert: { fqdn: e.target.value } }), children: [
-            /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("option", { value: "", children: "(none)" }),
-            certOptions(certs, svc.cert.fqdn).map((o) => /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("option", { value: o.fqdn, children: o.label }, o.fqdn))
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("div", { className: "field", children: /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(Toggle, { checked: svc.check, onChange: (v) => patch({ check: v }), label: "Health check" }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("label", { className: "field-label", children: "Certificate" }),
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "row", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("select", { className: "input grow", value: svc.cert.fqdn, onChange: (e) => patch({ cert: { fqdn: e.target.value } }), children: [
+            /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("option", { value: "", children: "(none)" }),
+            certOptions(certs, svc.cert.fqdn).map((o) => /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("option", { value: o.fqdn, children: o.label }, o.fqdn))
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("button", { className: "btn btn-ghost btn-sm", onClick: () => onPickCert(svc), children: "Pick from CertMachine" })
+          /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("button", { className: "btn btn-ghost btn-sm", onClick: () => onPickCert(svc), children: "Pick from CertMachine" })
         ] })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "field", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("label", { className: "field-label", children: "Extra directives" }),
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(ExtraField, { extra: svc.extra, onChange: (extra) => patch({ extra }) })
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("label", { className: "field-label", children: "Extra directives" }),
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(ExtraField, { extra: svc.extra, onChange: (extra) => patch({ extra }) })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("button", { className: "btn btn-danger btn-sm", onClick: () => onChange(removeService(model, svc.id)), children: "Delete service" })
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("button", { className: "btn btn-danger btn-sm", onClick: () => onChange(removeService(model, svc.id)), children: "Delete service" })
     ] })
   ] });
 }
@@ -8517,48 +8645,48 @@ function ServicesPage({ model, certs, issues, coverage, onPickCert, onChange }) 
   const addNewPort = () => {
     const r = addPort(model, Number(newPort));
     if (r.error) {
-      showToast9(r.error, "error");
+      showToast10(r.error, "error");
       return;
     }
     onChange(r.model);
     setNewPort("");
-    showToast9(`Port ${newPort} added. Add a service to it, then Save.`, "notice");
+    showToast10(`Port ${newPort} added. Add a service to it, then Save.`, "notice");
   };
   const dropPort = (port) => {
     const r = removePort(model, port);
-    if (r.error) showToast9(r.error, "error");
+    if (r.error) showToast10(r.error, "error");
     else onChange(r.model);
   };
   const chooseDefault = (port, name) => {
     const r = setPortDefault(model, port, name);
-    if (r.error) showToast9(r.error, "error");
+    if (r.error) showToast10(r.error, "error");
     else onChange(r.model);
   };
   const ds = model.defaultService;
-  return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IssueList, { issues: issues.other }),
-    groupByPort(model).map((g) => /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "card", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "card-title", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("span", { children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(IssueList, { issues: issues.other }),
+    groupByPort(model).map((g) => /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "card", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "card-title", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("span", { children: [
           "Port ",
           g.port,
           g.isDefaultPort ? " (default)" : ""
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "grow" }),
-        !g.isDefaultPort && /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("button", { className: "btn btn-ghost btn-sm", onClick: () => dropPort(g.port), title: "Remove this port (only while it has no services)", children: "Remove port" })
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { className: "grow" }),
+        !g.isDefaultPort && /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("button", { className: "btn btn-ghost btn-sm", onClick: () => dropPort(g.port), title: "Remove this port (only while it has no services)", children: "Remove port" })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(IssueList, { issues: issues.byPort[g.port] }),
-      g.isDefaultPort ? /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "svc svc-default", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "svc-head", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "svc-name", children: ds.name }),
-          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "badge", children: "default service" }),
-          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "muted svc-summary", children: "receives every :443 request that matches no host rule; cannot be deleted" })
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(IssueList, { issues: issues.byPort[g.port] }),
+      g.isDefaultPort ? /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "svc svc-default", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "svc-head", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { className: "svc-name", children: ds.name }),
+          /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { className: "badge", children: "default service" }),
+          /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { className: "muted svc-summary", children: "receives every :443 request that matches no host rule; cannot be deleted" })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "svc-body", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "field", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("label", { className: "field-label", children: "Upstream (host and port)" }),
-            /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "row", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "svc-body", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "field", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("label", { className: "field-label", children: "Upstream (host and port)" }),
+            /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "row", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
                 "input",
                 {
                   className: "input grow",
@@ -8567,7 +8695,7 @@ function ServicesPage({ model, certs, issues, coverage, onPickCert, onChange }) 
                   "aria-label": "Default service upstream host"
                 }
               ),
-              /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+              /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
                 "input",
                 {
                   className: "input port",
@@ -8579,20 +8707,20 @@ function ServicesPage({ model, certs, issues, coverage, onPickCert, onChange }) 
               )
             ] })
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("div", { className: "field", children: /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(Toggle, { checked: ds.check, onChange: (v) => onChange(updateDefaultService(model, { check: v })), label: "Health check" }) })
+          /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("div", { className: "field", children: /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(Toggle, { checked: ds.check, onChange: (v) => onChange(updateDefaultService(model, { check: v })), label: "Health check" }) })
         ] })
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "field", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("label", { className: "field-label", children: "Default service for this port" }),
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("select", { className: "input", value: g.defaultServiceName, onChange: (e) => chooseDefault(g.port, e.target.value), children: [
-          /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("option", { value: "", children: "(none)" }),
-          portDefaultOptions(model, g.port).map((n) => /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("option", { value: n, children: n }, n)),
-          g.defaultServiceName && !portDefaultOptions(model, g.port).includes(g.defaultServiceName) && /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("option", { value: g.defaultServiceName, children: [
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("label", { className: "field-label", children: "Default service for this port" }),
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("select", { className: "input", value: g.defaultServiceName, onChange: (e) => chooseDefault(g.port, e.target.value), children: [
+          /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("option", { value: "", children: "(none)" }),
+          portDefaultOptions(model, g.port).map((n) => /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("option", { value: n, children: n }, n)),
+          g.defaultServiceName && !portDefaultOptions(model, g.port).includes(g.defaultServiceName) && /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("option", { value: g.defaultServiceName, children: [
             g.defaultServiceName,
             " (not on this port)"
           ] })
         ] })
       ] }),
-      g.services.map((s) => /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+      g.services.map((s) => /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
         ServiceEditor,
         {
           svc: s,
@@ -8607,15 +8735,15 @@ function ServicesPage({ model, certs, issues, coverage, onPickCert, onChange }) 
         },
         s.id
       )),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("button", { className: "btn btn-primary btn-sm", onClick: () => add(g.port), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("button", { className: "btn btn-primary btn-sm", onClick: () => add(g.port), children: [
         "+ Add service on port ",
         g.port
       ] })
     ] }, g.port)),
-    /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "card", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("div", { className: "card-title", children: "Add port" }),
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "row", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "card", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("div", { className: "card-title", children: "Add port" }),
+      /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
           "input",
           {
             className: "input port",
@@ -8629,7 +8757,7 @@ function ServicesPage({ model, certs, issues, coverage, onPickCert, onChange }) 
             "aria-label": "New port"
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("button", { className: "btn btn-primary btn-sm", onClick: addNewPort, children: "+ Add port" })
+        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("button", { className: "btn btn-primary btn-sm", onClick: addNewPort, children: "+ Add port" })
       ] })
     ] })
   ] });
@@ -8677,7 +8805,7 @@ function moveDirective(list, i, delta) {
 }
 
 // web/haproxy/src/GlobalsPage.tsx
-var import_jsx_runtime11 = __toESM(require_jsx_runtime());
+var import_jsx_runtime12 = __toESM(require_jsx_runtime());
 function DirectiveGroup({ title, hint, rows, onChange, marksManaged }) {
   const [newKey, setNewKey] = (0, import_react9.useState)("");
   const [newVal, setNewVal] = (0, import_react9.useState)("");
@@ -8688,12 +8816,12 @@ function DirectiveGroup({ title, hint, rows, onChange, marksManaged }) {
     setNewKey("");
     setNewVal("");
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "card", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("div", { className: "card-title", children: title }),
-    /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("p", { className: "muted", children: hint }),
-    /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "dir-rows", children: [
-      rows.map((d, i) => /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "dir-row", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "card", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("div", { className: "card-title", children: title }),
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "muted", children: hint }),
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "dir-rows", children: [
+      rows.map((d, i) => /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "dir-row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
           "input",
           {
             className: "input dir-key",
@@ -8703,7 +8831,7 @@ function DirectiveGroup({ title, hint, rows, onChange, marksManaged }) {
             "aria-label": "Key"
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
           "input",
           {
             className: "input dir-value",
@@ -8712,17 +8840,17 @@ function DirectiveGroup({ title, hint, rows, onChange, marksManaged }) {
             "aria-label": "Value"
           }
         ),
-        marksManaged && isOsManaged(d.key) && /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("span", { className: "badge", title: "The platform driver supplies this setting; a row here overrides the driver's value.", children: "OS-managed" }),
-        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("button", { className: "btn btn-ghost btn-sm", disabled: i === 0, onClick: () => onChange(moveDirective(rows, i, -1)), title: "Move up", children: "\u2191" }),
-        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("button", { className: "btn btn-ghost btn-sm", disabled: i === rows.length - 1, onClick: () => onChange(moveDirective(rows, i, 1)), title: "Move down", children: "\u2193" }),
-        /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("button", { className: "btn btn-danger btn-sm", onClick: () => onChange(removeDirective(rows, i)), title: "Remove row", children: "\u2715" })
+        marksManaged && isOsManaged(d.key) && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "badge", title: "The platform driver supplies this setting; a row here overrides the driver's value.", children: "OS-managed" }),
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("button", { className: "btn btn-ghost btn-sm", disabled: i === 0, onClick: () => onChange(moveDirective(rows, i, -1)), title: "Move up", children: "\u2191" }),
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("button", { className: "btn btn-ghost btn-sm", disabled: i === rows.length - 1, onClick: () => onChange(moveDirective(rows, i, 1)), title: "Move down", children: "\u2193" }),
+        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("button", { className: "btn btn-danger btn-sm", onClick: () => onChange(removeDirective(rows, i)), title: "Remove row", children: "\u2715" })
       ] }, i)),
-      rows.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("p", { className: "muted", children: "No rows." })
+      rows.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "muted", children: "No rows." })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("datalist", { id: listId, children: [...new Set(COMMON_KEYS.map((k) => k.key))].map((k) => /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("option", { value: k }, k)) }),
-    /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("div", { className: "divider" }),
-    /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { className: "dir-row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("datalist", { id: listId, children: [...new Set(COMMON_KEYS.map((k) => k.key))].map((k) => /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("option", { value: k }, k)) }),
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("div", { className: "divider" }),
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "dir-row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
         "input",
         {
           className: "input dir-key",
@@ -8735,7 +8863,7 @@ function DirectiveGroup({ title, hint, rows, onChange, marksManaged }) {
           }
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
         "input",
         {
           className: "input dir-value",
@@ -8747,9 +8875,9 @@ function DirectiveGroup({ title, hint, rows, onChange, marksManaged }) {
           }
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("button", { className: "btn btn-primary btn-sm", onClick: add, children: "+ Add" })
+      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("button", { className: "btn btn-primary btn-sm", onClick: add, children: "+ Add" })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("div", { className: "dir-row", style: { marginTop: 8 }, children: /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)(
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("div", { className: "dir-row", style: { marginTop: 8 }, children: /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)(
       "select",
       {
         className: "input",
@@ -8760,8 +8888,8 @@ function DirectiveGroup({ title, hint, rows, onChange, marksManaged }) {
           if (c) onChange(addDirective(rows, c.key, c.value));
         },
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime11.jsx)("option", { value: "", children: "Add a common setting\u2026" }),
-          COMMON_KEYS.map((c, i) => /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("option", { value: i, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("option", { value: "", children: "Add a common setting\u2026" }),
+          COMMON_KEYS.map((c, i) => /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("option", { value: i, children: [
             c.key,
             " ",
             c.key === "timeout" ? c.value.split(" ")[0] : "",
@@ -8774,8 +8902,8 @@ function DirectiveGroup({ title, hint, rows, onChange, marksManaged }) {
   ] });
 }
 function GlobalsPage({ global, defaults, onGlobal, onDefaults }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime11.jsxs)("div", { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
       DirectiveGroup,
       {
         title: "global",
@@ -8785,7 +8913,7 @@ function GlobalsPage({ global, defaults, onGlobal, onDefaults }) {
         marksManaged: true
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
       DirectiveGroup,
       {
         title: "defaults",
@@ -8800,7 +8928,7 @@ function GlobalsPage({ global, defaults, onGlobal, onDefaults }) {
 
 // web/haproxy/src/SettingsPage.tsx
 var import_react10 = __toESM(require_react());
-import { showToast as showToast10 } from "/shared/dist/shared.mjs";
+import { showToast as showToast11 } from "/shared/dist/shared.mjs";
 
 // web/haproxy/src/settingsform.ts
 function fromEffective(e) {
@@ -8871,6 +8999,7 @@ function buildPayload(s) {
     os: t(v.os),
     certmachineUrl: t(v.certmachineUrl),
     certmachineCaFile: t(v.certmachineCaFile),
+    certmachineInsecure: v.certmachineInsecure,
     configPath: t(v.configPath),
     certsDir: t(v.certsDir),
     crtListPath: t(v.crtListPath),
@@ -8890,7 +9019,7 @@ function apiKeyLabel(apiKeySet, s) {
 }
 
 // web/haproxy/src/SettingsPage.tsx
-var import_jsx_runtime12 = __toESM(require_jsx_runtime());
+var import_jsx_runtime13 = __toESM(require_jsx_runtime());
 var errMsg3 = (e) => e instanceof Error ? e.message : String(e);
 function SettingsPage({ onSaved }) {
   const [loaded, setLoaded] = (0, import_react10.useState)(null);
@@ -8911,14 +9040,14 @@ function SettingsPage({ onSaved }) {
       setLoadError(null);
     } catch (e) {
       setLoadError(errMsg3(e));
-      showToast10(`Could not load settings: ${errMsg3(e)}`, "error");
+      showToast11(`Could not load settings: ${errMsg3(e)}`, "error");
     }
   }, []);
   (0, import_react10.useEffect)(() => {
     load();
   }, [load]);
-  if (loadError) return /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "error", children: loadError });
-  if (!loaded || !saved || !draft) return /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { children: "Loading\u2026" });
+  if (loadError) return /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("p", { className: "error", children: loadError });
+  if (!loaded || !saved || !draft) return /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("p", { children: "Loading\u2026" });
   const dirty = isDirty2(saved, draft);
   const edit = (k, v) => {
     setDraft({ ...draft, values: { ...draft.values, [k]: v } });
@@ -8926,27 +9055,31 @@ function SettingsPage({ onSaved }) {
     setServerError(null);
   };
   const def = (k) => loaded.defaults[k] ?? "";
-  const field = (k, label, opts = {}) => /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("label", { className: "field", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "field-label", children: label }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
+  const field = (k, label, opts = {}) => /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("label", { className: "field", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "field-label", children: label }),
+    /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
       "input",
       {
         className: "input settings-input",
         value: draft.values[k],
         placeholder: opts.placeholder,
         onChange: (e) => edit(k, e.target.value),
-        spellCheck: false
+        spellCheck: false,
+        autoComplete: "off",
+        "data-lpignore": "true",
+        "data-1p-ignore": true,
+        "data-form-type": "other"
       }
     ),
-    opts.hint && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "muted", children: opts.hint }),
-    fieldErrors[k] && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "error", children: fieldErrors[k] })
+    opts.hint && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "muted", children: opts.hint }),
+    fieldErrors[k] && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "error", children: fieldErrors[k] })
   ] }, k);
   const pathField = (k, label) => field(k, label, { placeholder: def(k) });
   const submit = async () => {
     const errs = validate(draft);
     setFieldErrors(errs);
     if (hasErrors(errs)) {
-      showToast10("Fix the highlighted settings first; nothing was saved.", "error");
+      showToast11("Fix the highlighted settings first; nothing was saved.", "error");
       return;
     }
     setBusy(true);
@@ -8954,12 +9087,12 @@ function SettingsPage({ onSaved }) {
       const r = await api.saveSettings(buildPayload(draft));
       setServerError(null);
       setNotice(r.needsRestart ? r.message : null);
-      showToast10(r.needsRestart ? r.message : "Settings saved and applied.", r.needsRestart ? "notice" : "success");
+      showToast11(r.needsRestart ? r.message : "Settings saved and applied.", r.needsRestart ? "notice" : "success");
       await load();
       onSaved();
     } catch (e) {
       setServerError(errMsg3(e));
-      showToast10(`Save failed: ${errMsg3(e)}`, "error");
+      showToast11(`Save failed: ${errMsg3(e)}`, "error");
     } finally {
       setBusy(false);
     }
@@ -8968,7 +9101,7 @@ function SettingsPage({ onSaved }) {
     setDraft(saved);
     setFieldErrors({});
     setServerError(null);
-    showToast10("Unsaved changes discarded.", "notice");
+    showToast11("Unsaved changes discarded.", "notice");
   };
   const testConnection = async () => {
     setBusy(true);
@@ -8976,40 +9109,45 @@ function SettingsPage({ onSaved }) {
       const r = await api.testConnection({
         certmachineUrl: draft.values.certmachineUrl.trim(),
         certmachineCaFile: draft.values.certmachineCaFile.trim(),
+        certmachineInsecure: draft.values.certmachineInsecure,
         apiKey: draft.clearApiKey ? "" : draft.apiKey
       });
-      showToast10(r.message, r.ok ? "success" : "error");
+      showToast11(r.message, r.ok ? "success" : "error");
     } catch (e) {
-      showToast10(`Test connection failed: ${errMsg3(e)}`, "error");
+      showToast11(`Test connection failed: ${errMsg3(e)}`, "error");
     } finally {
       setBusy(false);
     }
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "stack", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "savebar", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: dirty ? "unsaved" : "muted", children: dirty ? "Unsaved changes" : "All changes saved" }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "grow" }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("button", { className: "btn btn-ghost", disabled: !dirty || busy, onClick: discard, children: "Discard" }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("button", { className: "btn btn-primary", disabled: !dirty || busy, onClick: submit, children: "Save settings" })
+  return /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "stack", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "savebar", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: dirty ? "unsaved" : "muted", children: dirty ? "Unsaved changes" : "All changes saved" }),
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "grow" }),
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("button", { className: "btn btn-ghost", disabled: !dirty || busy, onClick: discard, children: "Discard" }),
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("button", { className: "btn btn-primary", disabled: !dirty || busy, onClick: submit, children: "Save settings" })
     ] }),
-    serverError && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "error", children: serverError }),
-    notice && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("p", { className: "muted", children: notice }),
-    loaded.unavailable && /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("p", { className: "error", children: [
+    serverError && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("p", { className: "error", children: serverError }),
+    notice && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("p", { className: "muted", children: notice }),
+    loaded.unavailable && /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("p", { className: "error", children: [
       "The module cannot drive HAProxy right now: ",
       loaded.unavailable
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "card stack", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("div", { className: "card-title", children: "CertMachine" }),
+    /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "card stack", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("div", { className: "card-title", children: "CertMachine" }),
       field("certmachineUrl", "CertMachine URL", { placeholder: "https://certmachine.example.com", hint: "Leave empty to run without CertMachine." }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "field", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "field-label", children: "API key" }),
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "row", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "field-label", children: "API key" }),
+        /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "row", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
             "input",
             {
-              className: "input settings-input grow",
-              type: "password",
-              autoComplete: "new-password",
+              type: "text",
+              className: "input settings-input grow ui-secret",
+              autoComplete: "off",
+              "data-lpignore": "true",
+              "data-1p-ignore": true,
+              "data-form-type": "other",
+              spellCheck: false,
               value: draft.apiKey,
               placeholder: loaded.apiKeySet ? "Type a new key to replace the stored one" : "Paste the API key",
               onChange: (e) => {
@@ -9018,8 +9156,8 @@ function SettingsPage({ onSaved }) {
               }
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "badge", children: apiKeyLabel(loaded.apiKeySet, draft) }),
-          /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "badge", children: apiKeyLabel(loaded.apiKeySet, draft) }),
+          /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
             "button",
             {
               className: "btn btn-ghost btn-sm",
@@ -9029,34 +9167,42 @@ function SettingsPage({ onSaved }) {
             }
           )
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "muted", children: "The key is write-only: it is stored on this machine and never shown again." }),
-        fieldErrors.apiKey && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "error", children: fieldErrors.apiKey })
+        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "muted", children: "The key is write-only: it is stored on this machine and never shown again." }),
+        fieldErrors.apiKey && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "error", children: fieldErrors.apiKey })
       ] }),
       field("certmachineCaFile", "CA file", { placeholder: "Optional: path to a CA certificate to trust" }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "row", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("button", { className: "btn", disabled: busy, onClick: testConnection, children: "Test connection" }),
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "muted", children: "Uses the values above, saved or not." })
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
+        Toggle,
+        {
+          checked: draft.values.certmachineInsecure,
+          onChange: (v) => setDraft({ ...draft, values: { ...draft.values, certmachineInsecure: v } }),
+          label: "Skip certificate check (use only while the proxy is serving a bad certificate)"
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("button", { className: "btn", disabled: busy, onClick: testConnection, children: "Test connection" }),
+        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "muted", children: "Uses the values above, saved or not." })
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "card stack", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("div", { className: "card-title", children: "Files and service" }),
+    /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "card stack", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("div", { className: "card-title", children: "Files and service" }),
       pathField("configPath", "Config path"),
       pathField("certsDir", "Certs directory"),
       pathField("crtListPath", "crt-list path"),
       pathField("statsSocketPath", "Stats socket path"),
       pathField("backupDir", "Backup directory"),
       pathField("serviceName", "Service name"),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "muted", children: "An empty field uses the default shown in it." })
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "muted", children: "An empty field uses the default shown in it." })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { className: "card stack", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("div", { className: "card-title", children: "Behaviour" }),
-      /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("label", { className: "field", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "field-label", children: "Operating system" }),
-        /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("select", { className: "input settings-input", value: draft.values.os, onChange: (e) => edit("os", e.target.value), children: [
-          /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("option", { value: "auto", children: "Detect automatically" }),
-          /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("option", { value: "ubuntu", children: "Ubuntu" }),
-          /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("option", { value: "rocky", children: "Rocky / RHEL" }),
-          /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("option", { value: "macos", children: "macOS (Apple silicon)" })
+    /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "card stack", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("div", { className: "card-title", children: "Behaviour" }),
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("label", { className: "field", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "field-label", children: "Operating system" }),
+        /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("select", { className: "input settings-input", value: draft.values.os, onChange: (e) => edit("os", e.target.value), children: [
+          /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("option", { value: "auto", children: "Detect automatically" }),
+          /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("option", { value: "ubuntu", children: "Ubuntu" }),
+          /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("option", { value: "rocky", children: "Rocky / RHEL" }),
+          /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("option", { value: "macos", children: "macOS (Apple silicon)" })
         ] })
       ] }),
       field("backupKeep", "Backups to keep (1-100)"),
@@ -9066,16 +9212,16 @@ function SettingsPage({ onSaved }) {
 }
 
 // web/haproxy/src/App.tsx
-var import_jsx_runtime13 = __toESM(require_jsx_runtime());
+var import_jsx_runtime14 = __toESM(require_jsx_runtime());
 var TABS = [
-  { id: "services", label: "Services" },
-  { id: "globals", label: "Globals" },
-  { id: "certs", label: "Certificates" },
-  { id: "backups", label: "Backups" },
-  { id: "settings", label: "Settings" },
-  { id: "raw", label: "Raw" },
-  { id: "log", label: "Log" },
-  { id: "stats", label: "Stats" }
+  { id: "services", label: "Services", icon: "\u21C4" },
+  { id: "globals", label: "Globals", icon: "\u2699" },
+  { id: "certs", label: "Certificates", icon: "\u{1F512}" },
+  { id: "backups", label: "Backups", icon: "\u27F2" },
+  { id: "settings", label: "Settings", icon: "\u2630" },
+  { id: "raw", label: "Raw", icon: "</>" },
+  { id: "log", label: "Log", icon: "\u2261" },
+  { id: "stats", label: "Stats", icon: "\u25AE\u25AE" }
 ];
 var errMsg4 = (e) => e instanceof Error ? e.message : String(e);
 function reportLines(r) {
@@ -9119,8 +9265,8 @@ function App() {
       setStatus(await api.status());
       setStatusError(null);
     } catch (e) {
-      setStatusError(errMsg4(e));
-      if (!quiet) showToast11(`Could not load status: ${errMsg4(e)}`, "error");
+      setStatusError("HAProxy status is not available right now.");
+      if (!quiet) console.warn("status unavailable", e);
     }
   }, []);
   const loadChanges = (0, import_react11.useCallback)(async (quiet = false) => {
@@ -9128,8 +9274,8 @@ function App() {
       setChanges(await api.changes());
       setChangesError(null);
     } catch (e) {
-      setChangesError(errMsg4(e));
-      if (!quiet) showToast11(`Could not read pending changes: ${errMsg4(e)}`, "error");
+      setChangesError("Pending changes are not available right now.");
+      if (!quiet) console.warn("pending changes unavailable", e);
     }
   }, []);
   const loadIssues = (0, import_react11.useCallback)(async (announce) => {
@@ -9138,17 +9284,17 @@ function App() {
       setIssues(r.issues ?? []);
       if (announce) {
         const { errors } = issueCounts(r.issues ?? []);
-        showToast11(issuesSummary(r.issues ?? []), errors > 0 ? "error" : (r.issues ?? []).length > 0 ? "notice" : "success");
+        showToast12(issuesSummary(r.issues ?? []), errors > 0 ? "error" : (r.issues ?? []).length > 0 ? "notice" : "success");
       }
     } catch (e) {
-      showToast11(`Could not check the model: ${errMsg4(e)}`, "error");
+      showToast12(`Could not check the model: ${errMsg4(e)}`, "error");
     }
   }, []);
   const loadCerts = (0, import_react11.useCallback)(async () => {
     try {
       setCertsResp(await api.certs());
     } catch (e) {
-      showToast11(`Could not load certificates: ${errMsg4(e)}`, "error");
+      showToast12(`Could not load certificates: ${errMsg4(e)}`, "error");
     }
   }, []);
   const loadModel = (0, import_react11.useCallback)(async () => {
@@ -9162,7 +9308,7 @@ function App() {
       if (r.imported) loadIssues(false);
     } catch (e) {
       setLoadError(errMsg4(e));
-      showToast11(`Could not load the model: ${errMsg4(e)}`, "error");
+      showToast12(`Could not load the model: ${errMsg4(e)}`, "error");
     }
   }, [loadIssues]);
   const loadCoverage = (0, import_react11.useCallback)(async () => {
@@ -9170,7 +9316,7 @@ function App() {
       setCoverage(await api.coverage() ?? []);
     } catch (e) {
       setCoverage([]);
-      showToast11(`Could not check certificate coverage: ${errMsg4(e)}`, "error");
+      showToast12(`Could not check certificate coverage: ${errMsg4(e)}`, "error");
     }
   }, []);
   const refreshAll = (0, import_react11.useCallback)(() => {
@@ -9217,12 +9363,12 @@ function App() {
       const m = normalizeModel(body);
       setSaved(m);
       setDraft(m);
-      showToast11("Model saved.", "success");
+      showToast12("Model saved.", "success");
       setBlockers([]);
       await loadIssues(true);
       refreshAll();
     } catch (e) {
-      showToast11(`Save failed: ${errMsg4(e)}`, "error");
+      showToast12(`Save failed: ${errMsg4(e)}`, "error");
       if (e instanceof ApiError && e.issues.length > 0) setIssues(e.issues);
     } finally {
       setBusy(false);
@@ -9231,7 +9377,7 @@ function App() {
   const discard = () => {
     if (!saved) return;
     setDraft(saved);
-    showToast11("Unsaved changes discarded.", "notice");
+    showToast12("Unsaved changes discarded.", "notice");
   };
   const importPreview = async () => {
     setBusy(true);
@@ -9239,10 +9385,10 @@ function App() {
       const r = await api.importLive(false);
       setPreview({ model: normalizeModel(r.model), report: r.report });
       const n = reportLines(r.report).length;
-      showToast11(`Import report ready: ${n} item${n === 1 ? "" : "s"} need your attention. Nothing is stored yet.`, "notice");
+      showToast12(`Import report ready: ${n} item${n === 1 ? "" : "s"} need your attention. Nothing is stored yet.`, "notice");
     } catch (e) {
       if (e instanceof ApiError) setImportStatus(e.status);
-      showToast11(e instanceof ApiError && e.status === 404 ? "No live HAProxy configuration was found. You can start with defaults instead." : `Import failed: ${errMsg4(e)}`, "error");
+      showToast12(e instanceof ApiError && e.status === 404 ? "No live HAProxy configuration was found. You can start with defaults instead." : `Import failed: ${errMsg4(e)}`, "error");
     } finally {
       setBusy(false);
     }
@@ -9256,11 +9402,11 @@ function App() {
       setDraft(m);
       setImported(true);
       setPreview(null);
-      showToast11("Live configuration imported and stored.", "success");
+      showToast12("Live configuration imported and stored.", "success");
       await loadIssues(true);
       refreshAll();
     } catch (e) {
-      showToast11(`Import failed: ${errMsg4(e)}`, "error");
+      showToast12(`Import failed: ${errMsg4(e)}`, "error");
     } finally {
       setBusy(false);
     }
@@ -9274,11 +9420,11 @@ function App() {
       setSaved(m);
       setDraft(m);
       setImported(true);
-      showToast11("Started with the default configuration. Review it, then Apply.", "success");
+      showToast12("Started with the default configuration. Review it, then Apply.", "success");
       await loadIssues(true);
       refreshAll();
     } catch (e) {
-      showToast11(`Could not start with defaults: ${errMsg4(e)}`, "error");
+      showToast12(`Could not start with defaults: ${errMsg4(e)}`, "error");
     } finally {
       setBusy(false);
     }
@@ -9293,6 +9439,10 @@ function App() {
       loadIssues(false);
     }
   };
+  (0, import_react11.useEffect)(() => onRefreshRequest(() => {
+    refreshAll();
+    loadIssues(false);
+  }), [refreshAll, loadIssues]);
   const restore = async (name) => {
     setApplyBusy(true);
     try {
@@ -9310,51 +9460,50 @@ function App() {
   };
   const grouped = (0, import_react11.useMemo)(() => groupIssues(issues), [issues]);
   const counts = issueCounts(issues);
+  const setupNeeded = status !== null && !status.certmachineConfigured;
+  const locked = (t) => setupNeeded && t !== "settings";
   const editor = () => {
-    if (loadError) return /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("p", { className: "error", children: loadError });
-    if (!draft || !saved) return /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("p", { children: "Loading\u2026" });
+    if (loadError) return /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { className: "error", children: loadError });
+    if (!draft || !saved) return /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { children: "Loading\u2026" });
     if (!imported) {
       const first = firstRunState({ imported, importStatus });
-      return /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "card stack", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("div", { className: "card-title", children: "Import the live HAProxy configuration" }),
-        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("p", { className: "muted", children: "No model has been stored yet. Import reads the running configuration and shows what it could and could not map; nothing is stored until you confirm." }),
-        preview ? /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(import_jsx_runtime13.Fragment, { children: [
-          reportLines(preview.report).length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("p", { children: "The whole configuration maps cleanly." }) : /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("ul", { className: "issues", children: reportLines(preview.report).map((l, n) => /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("li", { className: "issue issue-warning", children: l }, n)) }),
-          /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("p", { className: "muted", children: [
-            preview.model.services.length,
-            " service(s) found."
-          ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "row", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("button", { className: "btn btn-primary", disabled: busy, onClick: importCommit, children: "Confirm import" }),
-            /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("button", { className: "btn btn-ghost", disabled: busy, onClick: () => {
+      return /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("div", { className: "card stack", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("div", { className: "card-title", children: "Import the live HAProxy configuration" }),
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { className: "muted", children: "No model has been stored yet. Import reads the running configuration and shows what it could and could not map; nothing is stored until you confirm." }),
+        preview ? /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(import_jsx_runtime14.Fragment, { children: [
+          reportLines(preview.report).length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { children: "The whole configuration maps cleanly." }) : /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("ul", { className: "issues", children: reportLines(preview.report).map((l, n) => /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("li", { className: "issue issue-warning", children: l }, n)) }),
+          /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { className: "muted", children: `Default service: ${preview.model.defaultService.name}, plus ${preview.model.services.length} additional service${preview.model.services.length === 1 ? "" : "s"}.` }),
+          /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("div", { className: "row", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("button", { className: "btn btn-primary", disabled: busy, onClick: importCommit, children: "Confirm import" }),
+            /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("button", { className: "btn btn-ghost", disabled: busy, onClick: () => {
               setPreview(null);
-              showToast11("Import cancelled; nothing stored.", "notice");
+              showToast12("Import cancelled; nothing stored.", "notice");
             }, children: "Cancel" })
           ] })
-        ] }) : /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(import_jsx_runtime13.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "row", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("button", { className: "btn btn-primary", disabled: busy, onClick: importPreview, children: "Import live config" }),
-            first === "defaults" && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("button", { className: "btn btn-ghost", disabled: busy, onClick: startWithDefaults, children: "Start with defaults" })
+        ] }) : /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(import_jsx_runtime14.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("div", { className: "row", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("button", { className: "btn btn-primary", disabled: busy, onClick: importPreview, children: "Import live config" }),
+            first === "defaults" && /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("button", { className: "btn btn-ghost", disabled: busy, onClick: startWithDefaults, children: "Start with defaults" })
           ] }),
-          first === "defaults" && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("p", { className: "muted", children: "No live HAProxy configuration exists on this machine. Start with defaults stores the default model so you can add services." })
+          first === "defaults" && /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { className: "muted", children: "No live HAProxy configuration exists on this machine. Start with defaults stores the default model so you can add services." })
         ] })
       ] });
     }
-    return /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(import_jsx_runtime13.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "savebar", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: dirty ? "unsaved" : "muted", children: dirty ? "Unsaved changes" : "All changes saved" }),
-        counts.errors + counts.warnings > 0 && /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("span", { className: "muted", children: [
+    return /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(import_jsx_runtime14.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("div", { className: "savebar", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("span", { className: dirty ? "unsaved" : "muted", children: dirty ? "Unsaved changes" : "All changes saved" }),
+        counts.errors + counts.warnings > 0 && /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("span", { className: "muted", children: [
           counts.errors,
           " error(s), ",
           counts.warnings,
           " warning(s)"
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "grow" }),
-        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("button", { className: "btn btn-ghost", disabled: !dirty || busy, onClick: discard, children: "Discard" }),
-        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("button", { className: "btn btn-primary", disabled: !dirty || busy, onClick: save, children: "Save" })
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("span", { className: "grow" }),
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("button", { className: "btn btn-ghost", disabled: !dirty || busy, onClick: discard, children: "Discard" }),
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("button", { className: "btn btn-primary", disabled: !dirty || busy, onClick: save, children: "Save" })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(IssueList, { issues: grouped.other }),
-      tab === "services" && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(IssueList, { issues: grouped.other }),
+      tab === "services" && /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
         ServicesPage,
         {
           model: draft,
@@ -9365,7 +9514,7 @@ function App() {
           onChange: setDraft
         }
       ),
-      tab === "globals" && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
+      tab === "globals" && /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
         GlobalsPage,
         {
           global: draft.global,
@@ -9376,12 +9525,12 @@ function App() {
       )
     ] });
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)(import_jsx_runtime13.Fragment, { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("header", { className: "topbar", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("h1", { children: "HAProxy editor" }),
-      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("button", { id: "hamburger-trigger", className: "hamburger-trigger", "aria-label": "Settings", children: "\u2630" })
+  return /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(import_jsx_runtime14.Fragment, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("header", { className: "topbar", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("h1", { children: "HAProxy editor" }),
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("button", { id: "hamburger-trigger", className: "hamburger-trigger", "aria-label": "Settings", children: "\u2630" })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
+    !setupNeeded && /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
       PendingBar,
       {
         status,
@@ -9395,26 +9544,37 @@ function App() {
         onRefresh: refreshAll
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("nav", { className: "tabs", children: TABS.map((t) => /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("button", { className: `tab${tab === t.id ? " active" : ""}`, onClick: () => setTab(t.id), children: t.label }, t.id)) }),
-    /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("main", { className: "content", children: [
-      (tab === "services" || tab === "globals") && editor(),
-      tab === "certs" && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
-        CertsPage,
-        {
-          data: certsResp,
-          configured: status?.certmachineConfigured ?? false,
-          refreshKey,
-          onChanged: refreshAll,
-          onPick: () => setPicker({ svc: null })
-        }
-      ),
-      tab === "backups" && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(BackupsPage, { refreshKey, onRestore: restore }),
-      tab === "settings" && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(SettingsPage, { onSaved: refreshAll }),
-      tab === "raw" && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(RawPage, { refreshKey }),
-      tab === "log" && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(LogPage, {}),
-      tab === "stats" && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(StatsPage, {})
+    /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("nav", { className: "tabs", children: TABS.map((t) => /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("button", { className: `tab${tab === t.id ? " active" : ""}`, disabled: locked(t.id), title: t.label, onClick: () => setTab(t.id), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("span", { className: "tab-icon", "aria-hidden": "true", children: t.icon }),
+      /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("span", { className: "tab-label", children: t.label })
+    ] }, t.id)) }),
+    /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("main", { className: "content", children: [
+      setupNeeded && tab !== "settings" && /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("div", { className: "card stack", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("div", { className: "card-title", children: "Connect CertMachine to get started" }),
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { className: "muted", children: "HAProxy certificates come from CertMachine. Enter its address and API key in Settings and everything else unlocks." }),
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("div", { className: "row", children: /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("button", { className: "btn btn-primary", onClick: () => setTab("settings"), children: "Open Settings" }) })
+      ] }),
+      !locked(tab) && /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(import_jsx_runtime14.Fragment, { children: [
+        (tab === "services" || tab === "globals") && editor(),
+        tab === "certs" && /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
+          CertsPage,
+          {
+            data: certsResp,
+            configured: status?.certmachineConfigured ?? false,
+            refreshKey,
+            onChanged: refreshAll,
+            onPick: () => setPicker({ svc: null })
+          }
+        ),
+        tab === "backups" && /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(BackupsPage, { refreshKey, onRestore: restore }),
+        tab === "settings" && /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(SettingsPage, { onSaved: refreshAll }),
+        tab === "raw" && /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(RawPage, { refreshKey }),
+        tab === "log" && /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(LogPage, {}),
+        tab === "stats" && /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(StatsPage, {})
+      ] })
     ] }),
-    picker && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(
+    applyBusy && /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(BusyDialog, { message: "Testing, then applying\u2026" }),
+    picker && /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(
       CertPicker,
       {
         configured: status?.certmachineConfigured ?? false,
@@ -9427,7 +9587,8 @@ function App() {
 }
 
 // web/haproxy/src/main.tsx
-var import_jsx_runtime14 = __toESM(require_jsx_runtime());
+var import_jsx_runtime15 = __toESM(require_jsx_runtime());
+watchSecrets();
 var themes = new ThemeManager({
   module: "haproxy",
   default: "dark"
@@ -9452,7 +9613,7 @@ function initHamburger() {
   return settingsHost;
 }
 (0, import_client.createRoot)(document.getElementById("root")).render(
-  /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(import_react12.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(App, {}) })
+  /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(import_react12.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(App, {}) })
 );
 export {
   initHamburger,

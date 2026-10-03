@@ -1,6 +1,6 @@
 import { addOrigin, normalizeOrigins, removeOrigin, suggestFromOrigin, validatePasskeyForm } from "./passkeyform";
 import { passkeyCardState, PASSKEYS_NOT_CONFIGURED_TEXT } from "./passkeystate";
-import { ThemeManager, HamburgerMenu, createCopyButton, openModal, showToast } from "@shared";
+import { ThemeManager, HamburgerMenu, createCopyButton, openModal, showToast, watchSecrets } from "@shared";
 import type { MenuItem } from "@shared";
 
 function debounce<Args extends unknown[]>(
@@ -16,6 +16,7 @@ function debounce<Args extends unknown[]>(
 
 const themes = new ThemeManager({ module: "admin", default: "dark" });
 themes.apply();
+watchSecrets();
 
 interface ApiResponse<T = Record<string, unknown>> {
   ok: boolean;
@@ -262,7 +263,7 @@ function renderMatrix(): void {
       `<select class="matrix-pinfile" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>${pinFileOptions(entry.pinFile)}</select> ` +
       `<button type="button" class="btn btn-outline btn-sm matrix-setpin-btn" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>Set PIN&hellip;</button>` +
       `<div class="matrix-setpin-form inline-form hidden" data-module="${esc(mod)}">` +
-      `<input type="password" class="matrix-pin-input" placeholder="new PIN" autocomplete="off">` +
+      `<input type="text" class="matrix-pin-input ui-secret" placeholder="new PIN" autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other" spellcheck="false">` +
       `<button type="button" class="btn btn-primary btn-sm matrix-pin-save" data-module="${esc(mod)}">Save</button>` +
       `<button type="button" class="btn btn-ghost btn-sm matrix-pin-cancel" data-module="${esc(mod)}">Cancel</button>` +
       `</div>` +
@@ -847,8 +848,13 @@ function askLdapLogin(): Promise<string | null> {
     const passLabel = document.createElement("label");
     passLabel.textContent = "Password";
     const pass = document.createElement("input");
-    pass.type = "password";
-    pass.autocomplete = "current-password";
+    pass.type = "text";
+    pass.className = "ui-secret";
+    pass.autocomplete = "off";
+    pass.setAttribute("data-lpignore", "true");
+    pass.setAttribute("data-1p-ignore", "");
+    pass.setAttribute("data-form-type", "other");
+    pass.spellcheck = false;
     pass.required = true;
     passLabel.append(pass);
 

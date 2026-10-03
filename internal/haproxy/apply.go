@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -59,6 +60,12 @@ type ApplyOptions struct {
 	// AfterSuccess runs only after a fully successful Apply (B4b wires it to
 	// CertStore.RemoveSuperseded). Its error does not fail the apply.
 	AfterSuccess func(ctx context.Context) error
+	// StageTest, when set, starts the staged config on shifted ports and probes
+	// it (stage.go) after `haproxy -c` passes. nil skips the live test.
+	StageTest StageTester
+	// RequireCerts makes Check and Apply stop with OutcomeNeedsCerts, instead of
+	// handing HAProxy an empty crt-list, when no certificate is enabled.
+	RequireCerts bool
 }
 
 // Applier runs the Apply pipeline against a Driver, the model and cert stores,
@@ -101,8 +108,10 @@ type Changes struct {
 // CheckResult is the outcome of Check (FR-H22): whether the candidate passed
 // `haproxy -c` in staging, and the validator's message when it did not.
 type CheckResult struct {
-	OK      bool   `json:"ok"`
-	Message string `json:"message"`
+	OK         bool          `json:"ok"`
+	Message    string        `json:"message"`
+	NeedsCerts bool          `json:"needsCerts,omitempty"`
+	Probes     []ProbeResult `json:"probes,omitempty"`
 }
 
 // Outcome names exactly what an Apply or Restore did. It is the machine-readable
@@ -127,7 +136,13 @@ const (
 	// inconsistent. This is the one failure outcome accompanied by a non-nil
 	// error (the indeterminate case).
 	OutcomeRollbackFailed Outcome = "rollback_failed"
+	// OutcomeNeedsCerts: no certificate is enabled, so there is nothing HAProxy
+	// could serve over TLS. Nothing was tested or changed.
+	OutcomeNeedsCerts Outcome = "needs_certs"
 )
+
+// needsCertsMessage is the calm explanation shown instead of an error.
+const needsCertsMessage = "Add a certificate first. Pull one from CertMachine, or import the ones already in the certs directory, then try again."
 
 // ApplyResult is the outcome of Apply/Restore. Outcome names what happened; the
 // error return is used ONLY for indeterminate state (OutcomeRollbackFailed, or
@@ -278,49 +293,147 @@ func (a *Applier) Pending(ctx context.Context) (Changes, error) {
 // steps 1-2 of §7). It never touches the live files and always removes the
 // staging dir.
 func (a *Applier) Check(ctx context.Context) (CheckResult, error) {
+	a.mu.Lock() // the staged files and test port are shared
+	defer a.mu.Unlock()
+	if msg, err := a.certsGap(ctx); err != nil {
+		return CheckResult{}, err
+	} else if msg != "" {
+		return CheckResult{NeedsCerts: true, Message: msg}, nil
+	}
 	model, _, crtListText, err := a.renderCandidate()
 	if err != nil {
 		return CheckResult{}, err
 	}
-	valid, msg, err := a.stageAndValidate(ctx, crtListText, func(stagedCrtListPath string) string {
+	valid, msg, probes, err := a.stageAndValidate(ctx, crtListText, func(stagedCrtListPath string) string {
 		return a.renderStagedCfg(model, stagedCrtListPath)
 	})
 	if err != nil {
 		return CheckResult{}, err
 	}
-	return CheckResult{OK: valid, Message: msg}, nil
+	return CheckResult{OK: valid, Message: msg, Probes: probes}, nil
 }
 
-// stageAndValidate writes the candidate crt-list and config into a fresh temp
-// dir under StagingDir (ordinary file I/O, never the live files), runs the
-// driver's validator on the staged config, and removes the dir. The staged
-// config is produced by buildStagedCfg from the path the staged crt-list was
-// written to, so validation sees the candidate crt-list and certs (D6) without
-// any textual substitution against the final config. A non-nil error is an
-// infrastructure failure (temp dir / write); the bool and string report the
-// validator's verdict.
-func (a *Applier) stageAndValidate(ctx context.Context, crtListText string, buildStagedCfg func(stagedCrtListPath string) string) (bool, string, error) {
-	dir, err := os.MkdirTemp(a.opts.StagingDir, "haproxy-stage-*")
-	if err != nil {
-		return false, "", fmt.Errorf("haproxy: create staging dir: %w", err)
+// certsGap says why the certificate set is not ready ("" when it is): nothing
+// is enabled. Any file in the certs directory that is not tracked yet is
+// included first, because a crt-list that leaves a certificate out makes
+// HAProxy answer that host with some other certificate.
+func (a *Applier) certsGap(ctx context.Context) (string, error) {
+	if !a.opts.RequireCerts {
+		return "", nil
 	}
-	defer os.RemoveAll(dir)
+	if err := a.includeAll(ctx); err != nil {
+		a.log.Addf("certs: could not include the files in the certs directory: %v", err)
+	}
+	n, err := a.certs.EnabledCount()
+	if err != nil {
+		return "", err
+	}
+	if n == 0 {
+		return needsCertsMessage, nil
+	}
+	return "", nil
+}
+
+// includeAll starts tracking, enabled and untouched, every .pem in the certs
+// directory that is not tracked yet.
+func (a *Applier) includeAll(ctx context.Context) error {
+	left, err := a.certs.Importable(ctx)
+	if err != nil || len(left) == 0 {
+		return err
+	}
+	names := make([]string, 0, len(left))
+	for _, c := range left {
+		names = append(names, c.Name)
+	}
+	added, err := a.certs.Import(ctx, names)
+	if len(added) > 0 {
+		a.log.Addf("certs: included %d existing file(s) from %s: %s", len(added), a.driver.CertsDir(), strings.Join(added, ", "))
+	}
+	return err
+}
+
+// stageAndValidate writes the candidate crt-list and config into the staging
+// directory (kept afterwards, so the owner can read exactly what was tested),
+// with every listening port shifted (StageRewrite), then asks the driver's
+// validator to accept it and, when a StageTest is configured, runs it on those
+// ports and probes each host over TLS. The live files are never involved. The
+// staged config is produced by buildStagedCfg from the path the staged
+// crt-list was written to, so validation sees the candidate crt-list and certs
+// (D6) without any textual substitution against the final config. A non-nil
+// error is an infrastructure failure (directory / write); the bool and string
+// report the verdict. Callers hold a.mu: the files and the test port are shared.
+func (a *Applier) stageAndValidate(ctx context.Context, crtListText string, buildStagedCfg func(stagedCrtListPath string) string) (bool, string, []ProbeResult, error) {
+	dir := a.opts.StagingDir
+	if dir == "" {
+		d, err := os.MkdirTemp("", "haproxy-stage-*")
+		if err != nil {
+			return false, "", nil, fmt.Errorf("haproxy: create staging dir: %w", err)
+		}
+		defer os.RemoveAll(d)
+		dir = d
+	}
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return false, "", nil, fmt.Errorf("haproxy: create staging dir: %w", err)
+	}
+	// HAProxy reads a path without a leading "/" as host:port, so every path
+	// written into the staged config must be absolute.
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
 
 	stagedCrtList := filepath.Join(dir, "crt-list.txt")
 	stagedCfg := filepath.Join(dir, "haproxy.cfg")
-	cfgForStage := buildStagedCfg(stagedCrtList)
+	cfgForStage := StageRewrite(buildStagedCfg(stagedCrtList))
 
 	if err := os.WriteFile(stagedCrtList, []byte(crtListText), 0o600); err != nil {
-		return false, "", fmt.Errorf("haproxy: write staged crt-list: %w", err)
+		return false, "", nil, fmt.Errorf("haproxy: write staged crt-list: %w", err)
 	}
 	if err := os.WriteFile(stagedCfg, []byte(cfgForStage), 0o600); err != nil {
-		return false, "", fmt.Errorf("haproxy: write staged config: %w", err)
+		return false, "", nil, fmt.Errorf("haproxy: write staged config: %w", err)
 	}
 
 	if err := a.driver.Validate(ctx, stagedCfg); err != nil {
-		return false, err.Error(), nil
+		return false, err.Error(), nil, nil
 	}
-	return true, "", nil
+	if a.opts.StageTest == nil {
+		return true, "", nil, nil
+	}
+	hosts, err := a.probeHosts()
+	if err != nil {
+		return false, "", nil, err
+	}
+	probes, err := a.opts.StageTest(ctx, stagedCfg, hosts)
+	if err != nil {
+		return false, err.Error(), nil, nil
+	}
+	if bad := untrusted(probes); len(bad) > 0 {
+		return false, "STOPPED, nothing was applied. The staged proxy served a certificate that cannot be trusted or does not fit: " + strings.Join(bad, "; "), probes, nil
+	}
+	return true, "", probes, nil
+}
+
+// probeHosts are the names the staged proxy must answer for: every enabled
+// service's FQDNs. A certificate's own name is no guide to what it is served
+// for, so certificates are not probed by name.
+func (a *Applier) probeHosts() ([]string, error) {
+	seen := map[string]bool{}
+	var hosts []string
+	add := func(h string) {
+		h = strings.ToLower(strings.TrimSpace(h))
+		if h != "" && !seen[h] {
+			seen[h] = true
+			hosts = append(hosts, h)
+		}
+	}
+	for _, svc := range a.models.Snapshot().Services {
+		if svc.Enabled {
+			for _, f := range svc.FQDNs {
+				add(f)
+			}
+		}
+	}
+	sort.Strings(hosts)
+	return hosts, nil
 }
 
 // Apply runs the full pipeline (FR-H21, §7). It serializes with other Apply and
@@ -329,6 +442,11 @@ func (a *Applier) Apply(ctx context.Context) (ApplyResult, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	if msg, err := a.certsGap(ctx); err != nil {
+		return ApplyResult{}, err
+	} else if msg != "" {
+		return ApplyResult{Outcome: OutcomeNeedsCerts, Message: msg}, nil
+	}
 	model, cfgText, crtListText, err := a.renderCandidate()
 	if err != nil {
 		return ApplyResult{}, err
@@ -365,7 +483,7 @@ func (a *Applier) Apply(ctx context.Context) (ApplyResult, error) {
 // failure after the first install. It assumes the caller holds a.mu.
 func (a *Applier) run(ctx context.Context, cfgText, crtListText string, buildStagedCfg func(stagedCrtListPath string) string, live liveState, op string) (ApplyResult, error) {
 	a.log.Addf("%s: validating candidate in staging", op)
-	valid, vmsg, err := a.stageAndValidate(ctx, crtListText, buildStagedCfg)
+	valid, vmsg, _, err := a.stageAndValidate(ctx, crtListText, buildStagedCfg)
 	if err != nil {
 		return ApplyResult{}, err
 	}

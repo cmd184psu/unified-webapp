@@ -4,7 +4,8 @@ import { api, ApiError, Issue, ImportReport, Model, Status, CertsResponse, Chang
 import { initHamburger } from './main'
 import { finalizeForSave, isDirty, normalizeModel, updateService } from './modelForm'
 import { groupIssues, issueCounts, issuesSummary } from './issues'
-import { IssueList } from './IssueList'
+import { IssueList, onRefreshRequest } from './IssueList'
+import { BusyDialog } from './BusyDialog'
 import { StatsPage } from './StatsPage'
 import { PendingBar } from './PendingBar'
 import { CertsPage } from './CertsPage'
@@ -21,15 +22,15 @@ import './styles.css'
 
 type Tab = 'services' | 'globals' | 'certs' | 'backups' | 'settings' | 'raw' | 'log' | 'stats'
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'services', label: 'Services' },
-  { id: 'globals', label: 'Globals' },
-  { id: 'certs', label: 'Certificates' },
-  { id: 'backups', label: 'Backups' },
-  { id: 'settings', label: 'Settings' },
-  { id: 'raw', label: 'Raw' },
-  { id: 'log', label: 'Log' },
-  { id: 'stats', label: 'Stats' },
+const TABS: { id: Tab; label: string; icon: string }[] = [
+  { id: 'services', label: 'Services', icon: '⇄' },
+  { id: 'globals', label: 'Globals', icon: '⚙' },
+  { id: 'certs', label: 'Certificates', icon: '🔒' },
+  { id: 'backups', label: 'Backups', icon: '⟲' },
+  { id: 'settings', label: 'Settings', icon: '☰' },
+  { id: 'raw', label: 'Raw', icon: '</>' },
+  { id: 'log', label: 'Log', icon: '≡' },
+  { id: 'stats', label: 'Stats', icon: '▮▮' },
 ]
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e))
@@ -77,8 +78,8 @@ export default function App() {
       setStatus(await api.status())
       setStatusError(null)
     } catch (e) {
-      setStatusError(errMsg(e))
-      if (!quiet) showToast(`Could not load status: ${errMsg(e)}`, 'error')
+      setStatusError('HAProxy status is not available right now.')
+      if (!quiet) console.warn('status unavailable', e)
     }
   }, [])
 
@@ -87,8 +88,8 @@ export default function App() {
       setChanges(await api.changes())
       setChangesError(null)
     } catch (e) {
-      setChangesError(errMsg(e))
-      if (!quiet) showToast(`Could not read pending changes: ${errMsg(e)}`, 'error')
+      setChangesError('Pending changes are not available right now.')
+      if (!quiet) console.warn('pending changes unavailable', e)
     }
   }, [])
 
@@ -258,6 +259,8 @@ export default function App() {
     }
   }
 
+  useEffect(() => onRefreshRequest(() => { refreshAll(); loadIssues(false) }), [refreshAll, loadIssues])
+
   const restore = async (name: string) => {
     setApplyBusy(true)
     try {
@@ -277,6 +280,10 @@ export default function App() {
   const grouped = useMemo(() => groupIssues(issues), [issues])
   const counts = issueCounts(issues)
 
+  // CertMachine is a hard requirement: until it is connected, everything but Settings is grayed out.
+  const setupNeeded = status !== null && !status.certmachineConfigured
+  const locked = (t: Tab) => setupNeeded && t !== 'settings'
+
   const editor = () => {
     if (loadError) return <p className="error">{loadError}</p>
     if (!draft || !saved) return <p>Loading…</p>
@@ -291,7 +298,7 @@ export default function App() {
               {reportLines(preview.report).length === 0
                 ? <p>The whole configuration maps cleanly.</p>
                 : <ul className="issues">{reportLines(preview.report).map((l, n) => <li key={n} className="issue issue-warning">{l}</li>)}</ul>}
-              <p className="muted">{preview.model.services.length} service(s) found.</p>
+              <p className="muted">{`Default service: ${preview.model.defaultService.name}, plus ${preview.model.services.length} additional service${preview.model.services.length === 1 ? '' : 's'}.`}</p>
               <div className="row">
                 <button className="btn btn-primary" disabled={busy} onClick={importCommit}>Confirm import</button>
                 <button className="btn btn-ghost" disabled={busy} onClick={() => { setPreview(null); showToast('Import cancelled; nothing stored.', 'notice') }}>Cancel</button>
@@ -349,7 +356,7 @@ export default function App() {
         <h1>HAProxy editor</h1>
         <button id="hamburger-trigger" className="hamburger-trigger" aria-label="Settings">☰</button>
       </header>
-      <PendingBar
+      {!setupNeeded && <PendingBar
         status={status}
         statusError={statusError}
         changes={changes}
@@ -359,13 +366,21 @@ export default function App() {
         dirty={dirty}
         onApply={apply}
         onRefresh={refreshAll}
-      />
+      />}
       <nav className="tabs">
         {TABS.map(t => (
-          <button key={t.id} className={`tab${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>
+          <button key={t.id} className={`tab${tab === t.id ? ' active' : ''}`} disabled={locked(t.id)} title={t.label} onClick={() => setTab(t.id)}><span className="tab-icon" aria-hidden="true">{t.icon}</span><span className="tab-label">{t.label}</span></button>
         ))}
       </nav>
       <main className="content">
+        {setupNeeded && tab !== 'settings' && (
+          <div className="card stack">
+            <div className="card-title">Connect CertMachine to get started</div>
+            <p className="muted">HAProxy certificates come from CertMachine. Enter its address and API key in Settings and everything else unlocks.</p>
+            <div className="row"><button className="btn btn-primary" onClick={() => setTab('settings')}>Open Settings</button></div>
+          </div>
+        )}
+        {!locked(tab) && <>
         {(tab === 'services' || tab === 'globals') && editor()}
         {tab === 'certs' && (
           <CertsPage
@@ -381,7 +396,9 @@ export default function App() {
         {tab === 'raw' && <RawPage refreshKey={refreshKey} />}
         {tab === 'log' && <LogPage />}
         {tab === 'stats' && <StatsPage />}
+        </>}
       </main>
+      {applyBusy && <BusyDialog message="Testing, then applying…" />}
       {picker && (
         <CertPicker
           configured={status?.certmachineConfigured ?? false}

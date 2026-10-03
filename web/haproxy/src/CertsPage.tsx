@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import { showToast, confirmDialog } from '@shared'
-import { api, CertRow, CertsResponse, Freshness } from './api'
+import { api, CertRow, CertsResponse, Freshness, ImportableCert } from './api'
 import { certDetailsView, expiryBadge, freshnessBadge, freshnessFor, removeButtonState } from './certview'
 import { Toggle } from './Toggle'
 
@@ -32,6 +32,29 @@ export function CertsPage({ data, configured, refreshKey, onChanged, onPick }: P
   }, [configured])
   useEffect(() => { loadFresh() }, [loadFresh, refreshKey])
 
+  const [found, setFound] = useState<ImportableCert[]>([])
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    api.importableCerts().then(list => {
+      setFound(list ?? [])
+      setPicked(new Set((list ?? []).map(c => c.name)))
+    }).catch(() => setFound([]))
+  }, [refreshKey])
+
+  const importPicked = async () => {
+    setBusy(true)
+    try {
+      const r = await api.importCerts([...picked])
+      const n = r.imported?.length ?? 0
+      showToast(`${n} certificate${n === 1 ? '' : 's'} imported. They stay exactly where they are. Run Check to test them.`, 'success')
+    } catch (e) {
+      showToast(`Could not import: ${errMsg(e)}`, 'error')
+    } finally {
+      setBusy(false)
+      onChanged()
+    }
+  }
+
   const toggleOpen = (n: string) => setOpen(p => { const x = new Set(p); if (x.has(n)) x.delete(n); else x.add(n); return x })
 
   const setEnabled = async (c: CertRow, enabled: boolean) => {
@@ -46,7 +69,7 @@ export function CertsPage({ data, configured, refreshKey, onChanged, onPick }: P
   }
 
   const remove = async (c: CertRow) => {
-    if (!(await confirmDialog(`Remove ${c.name}? The certificate file and its tracking row are deleted.`, { confirmLabel: 'Remove' }))) {
+    if (!(await confirmDialog(c.adopted ? `Stop tracking ${c.name}? The file itself is left where it is.` : `Remove ${c.name}? The certificate file and its tracking row are deleted.`, { confirmLabel: 'Remove' }))) {
       showToast('Remove cancelled.', 'notice')
       return
     }
@@ -88,9 +111,22 @@ export function CertsPage({ data, configured, refreshKey, onChanged, onPick }: P
         <span className="grow" />
         <button className="btn btn-primary btn-sm" onClick={onPick}>+ Add from CertMachine</button>
       </div>
+      {found.length > 0 && (
+        <div className="card stack">
+          <div className="card-title">Already on this server</div>
+          <p className="muted">These certificate files are in the certs folder but not tracked here yet. Import the ones HAProxy should serve; the files are left untouched.</p>
+          {found.map(c => (
+            <Toggle key={c.name} checked={picked.has(c.name)} label={`${c.fqdn}  ·  ${c.name}`}
+              onChange={v => setPicked(p => { const x = new Set(p); if (v) x.add(c.name); else x.delete(c.name); return x })} />
+          ))}
+          <div className="row">
+            <button className="btn btn-primary btn-sm" disabled={busy || picked.size === 0} onClick={importPicked}>Import {picked.size}</button>
+          </div>
+        </div>
+      )}
       {!configured && <p className="muted">CertMachine is not configured: pulling and freshness checks are unavailable.</p>}
       {freshError && <p className="error">Freshness unavailable: {freshError}</p>}
-      {data && data.certs.length === 0 && <p className="muted">No managed certificates yet.</p>}
+      {data && data.certs.length === 0 && found.length === 0 && <p className="muted">No certificates yet. Add one from CertMachine to get started.</p>}
       {data && data.certs.map(c => {
         const details = certDetailsView(c)
         const exp = expiryBadge(c.details)

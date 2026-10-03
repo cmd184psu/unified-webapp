@@ -79,7 +79,11 @@ func (f *linuxFileIO) run(ctx context.Context, stdin []byte, name string, args .
 }
 
 func (f *linuxFileIO) read(ctx context.Context, path string) ([]byte, error) {
-	return f.run(ctx, nil, "cat", path)
+	out, err := f.run(ctx, nil, "cat", path)
+	if err != nil && strings.Contains(err.Error(), "No such file or directory") {
+		return nil, os.ErrNotExist
+	}
+	return out, err
 }
 
 func (f *linuxFileIO) remove(ctx context.Context, path string) error {
@@ -113,6 +117,12 @@ func (f *linuxFileIO) ensureDir(ctx context.Context, dir string, fileMode os.Fil
 		}
 	}
 	return nil
+}
+
+// EnsureDirs creates the backup folder (same mode Apply writes backups with) so
+// a fresh install lists an empty folder, not a missing one.
+func (d *linuxDriver) EnsureDirs(ctx context.Context) error {
+	return d.io.ensureDir(ctx, d.backup, d.io.own.ConfigMode)
 }
 
 func (f *linuxFileIO) write(ctx context.Context, path string, data []byte, mode os.FileMode) error {
@@ -156,10 +166,16 @@ func (f *linuxFileIO) write(ctx context.Context, path string, data []byte, mode 
 func (f *linuxFileIO) listDir(ctx context.Context, dir string) ([]FileInfo, error) {
 	args := make([]string, len(f.list))
 	for i, a := range f.list {
-		args[i] = strings.ReplaceAll(a, "%s", dir)
+		args[i] = a
+		if a == "%s" { // only the whole-argument placeholder: -printf has its own %s (size)
+			args[i] = dir
+		}
 	}
 	out, err := f.run(ctx, nil, args[0], args[1:]...)
 	if err != nil {
+		if strings.Contains(err.Error(), "No such file or directory") {
+			return nil, os.ErrNotExist
+		}
 		return nil, err
 	}
 	infos := []FileInfo{}

@@ -19,6 +19,7 @@ export function CertPicker({ configured, forFqdn, onClose, onPulled }: Props) {
   const [certs, setCerts] = useState<CertMachineCert[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [query, setQuery] = useState('')
 
   useEffect(() => {
     if (!configured) return
@@ -56,7 +57,14 @@ export function CertPicker({ configured, forFqdn, onClose, onPulled }: Props) {
     }
   }
 
-  const rows = certs ? pickerRows(certs, showAll, forFqdn !== '') : []
+  const all = certs ? pickerRows(certs, showAll, forFqdn !== '') : []
+  const terms = query.toLowerCase().split(/\s+/).filter(t => t !== '')
+  const matching = all.filter(r => {
+    const hay = `${r.cert.fqdn} ${r.cert.id} ${r.cert.status ?? ''} ${r.flags.join(' ')}`.toLowerCase()
+    return terms.every(t => hay.includes(t))
+  })
+  const LIMIT = 30
+  const rows = matching.slice(0, LIMIT)
   return (
     <div className="ui-modal-overlay" role="dialog" aria-modal="true">
       <div className="ui-modal-panel picker">
@@ -65,10 +73,27 @@ export function CertPicker({ configured, forFqdn, onClose, onPulled }: Props) {
           <p className="error">CertMachine is not configured. Set certmachine.url in the haproxy settings to pick certificates.</p>
         ) : (
           <div className="stack">
+            <input
+              className="input"
+              type="text"
+              autoFocus
+              placeholder="Filter: type part of a name, an id or a status"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              autoComplete="off"
+              data-lpignore="true"
+              data-1p-ignore
+              data-form-type="other"
+              spellCheck={false}
+            />
+            {certs && all.length > 0 && (
+              <span className="muted small">{matching.length === all.length ? `${all.length} certificates` : `${matching.length} of ${all.length} match`}</span>
+            )}
             <Toggle checked={showAll} onChange={setShowAll} label="Show all (including non-covering, archived, quarantined, expired)" />
             {error && <p className="error">{error}</p>}
             {!certs && !error && <p className="muted">Loading…</p>}
-            {certs && rows.length === 0 && <p className="muted">{showAll ? 'CertMachine has no certificates.' : 'No active certificate covers this name. Use Show all to see the rest.'}</p>}
+            {certs && all.length > 0 && rows.length === 0 && <p className="muted">Nothing matches that filter.</p>}
+            {certs && all.length === 0 && <p className="muted">{showAll ? 'CertMachine has no certificates.' : 'No active certificate covers this name. Use Show all to see the rest.'}</p>}
             {rows.map(r => (
               <div className="row pick-row" key={r.cert.id}>
                 <span className="grow">{r.cert.fqdn} <span className="muted">(id {r.cert.id})</span></span>
@@ -76,6 +101,7 @@ export function CertPicker({ configured, forFqdn, onClose, onPulled }: Props) {
                 <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => choose(r.cert, pickerNeedsConfirm(r))}>Choose</button>
               </div>
             ))}
+            {matching.length > LIMIT && <p className="muted small">Showing the first {LIMIT} of {matching.length}. Keep typing to narrow it down.</p>}
           </div>
         )}
         <div className="row"><span className="grow" /><button className="btn btn-ghost" onClick={onClose}>Close</button></div>

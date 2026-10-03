@@ -36,3 +36,23 @@ func CertMachineHTTPClient(s CertMachineSettings) (*http.Client, error) {
 	}
 	return &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{TLSClientConfig: cfg}}, nil
 }
+
+// StageTLSConfig is the TLS client config the staged test uses to ask the staged
+// proxy for serverName: system roots, plus caFile when set. Like the function
+// above it only builds a trust pool; it never reads a certificate's contents.
+func StageTLSConfig(caFile, serverName string) (*tls.Config, error) {
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		pool = x509.NewCertPool()
+	}
+	if caFile != "" {
+		pem, err := os.ReadFile(caFile)
+		if err != nil {
+			return nil, fmt.Errorf("cannot read the CA file %s: %w", caFile, err)
+		}
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("the CA file %s holds no certificates", caFile)
+		}
+	}
+	return &tls.Config{RootCAs: pool, ServerName: serverName}, nil
+}
