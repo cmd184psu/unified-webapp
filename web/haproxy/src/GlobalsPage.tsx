@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Toggle } from './Toggle'
 import type { Directive } from './api'
 import {
   COMMON_KEYS, addDirective, updateDirective, removeDirective, moveDirective, isOsManaged,
@@ -45,7 +46,7 @@ function DirectiveGroup({ title, hint, rows, onChange, marksManaged }: GroupProp
               aria-label="Value"
             />
             {marksManaged && isOsManaged(d.key) && (
-              <span className="badge" title="The platform driver supplies this setting; a row here overrides the driver's value.">OS-managed</span>
+              <span className="badge" title="From the platform driver; a row here overrides it">OS-managed</span>
             )}
             <button className="btn btn-ghost btn-sm" disabled={i === 0} onClick={() => onChange(moveDirective(rows, i, -1))} title="Move up">↑</button>
             <button className="btn btn-ghost btn-sm" disabled={i === rows.length - 1} onClick={() => onChange(moveDirective(rows, i, 1))} title="Move down">↓</button>
@@ -101,23 +102,28 @@ function DirectiveGroup({ title, hint, rows, onChange, marksManaged }: GroupProp
 interface Props {
   global: Directive[]
   defaults: Directive[]
+  serverClose: boolean
+  onServerClose: (v: boolean) => void
   onGlobal: (rows: Directive[]) => void
   onDefaults: (rows: Directive[]) => void
 }
 
-export function GlobalsPage({ global, defaults, onGlobal, onDefaults }: Props) {
+export function GlobalsPage({ global, defaults, serverClose, onServerClose, onGlobal, onDefaults }: Props) {
   return (
     <div>
+      <div className="card">
+        <Toggle checked={serverClose} onChange={onServerClose} label="Close backend connections after each response" />
+      </div>
       <DirectiveGroup
         title="global"
-        hint="Process-wide settings, written in this order. Rows marked OS-managed come from the platform driver's baseline."
+        hint="Process-wide, in order."
         rows={global}
         onChange={onGlobal}
         marksManaged
       />
       <DirectiveGroup
         title="defaults"
-        hint="Defaults inherited by every frontend and backend, written in this order."
+        hint="Inherited by every frontend and backend."
         rows={defaults}
         onChange={onDefaults}
         marksManaged={false}

@@ -129,7 +129,7 @@ export function SettingsPage({ onSaved }: Props) {
 
       <div className="card stack">
         <div className="card-title">CertMachine</div>
-        {field('certmachineUrl', 'CertMachine URL', { placeholder: 'https://certmachine.example.com', hint: 'Leave empty to run without CertMachine.' })}
+        {field('certmachineUrl', 'CertMachine URL', { placeholder: 'https://certmachine.example.com', hint: 'Empty = no CertMachine' })}
         <div className="field">
           <span className="field-label">API key</span>
           <div className="row">
@@ -152,18 +152,17 @@ export function SettingsPage({ onSaved }: Props) {
               onClick={() => setDraft({ ...draft, apiKey: '', clearApiKey: true })}
             >Clear</button>
           </div>
-          <span className="muted">The key is write-only: it is stored on this machine and never shown again.</span>
+          <span className="muted">Write-only; stored on this machine.</span>
           {fieldErrors.apiKey && <span className="error">{fieldErrors.apiKey}</span>}
         </div>
         {field('certmachineCaFile', 'CA file', { placeholder: 'Optional: path to a CA certificate to trust' })}
         <Toggle
           checked={draft.values.certmachineInsecure}
           onChange={v => setDraft({ ...draft, values: { ...draft.values, certmachineInsecure: v } })}
-          label="Skip certificate check (use only while the proxy is serving a bad certificate)"
+          label="Skip certificate check"
         />
         <div className="row">
           <button className="btn" disabled={busy} onClick={testConnection}>Test connection</button>
-          <span className="muted">Uses the values above, saved or not.</span>
         </div>
       </div>
 
@@ -175,7 +174,7 @@ export function SettingsPage({ onSaved }: Props) {
         {pathField('statsSocketPath', 'Stats socket path')}
         {pathField('backupDir', 'Backup directory')}
         {pathField('serviceName', 'Service name')}
-        <span className="muted">An empty field uses the default shown in it.</span>
+        <span className="muted">Empty = default.</span>
       </div>
 
       <div className="card stack">

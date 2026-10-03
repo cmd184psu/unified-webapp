@@ -20,7 +20,7 @@ export function RawPage({ refreshKey }: { refreshKey: number }) {
   return (
     <div className="stack">
       <div className="row">
-        <span className="muted">Read-only: exactly what Apply would write.</span>
+        <span className="muted" title="Exactly what Apply would write">read-only</span>
         <span className="grow" />
         <button className="btn btn-ghost btn-sm" onClick={async () => { await load(); showToast('Raw view refreshed.', 'notice') }}>Refresh</button>
       </div>

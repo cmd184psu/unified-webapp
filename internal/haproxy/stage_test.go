@@ -87,3 +87,26 @@ func TestEverythingInCertsDirIsIncludedAutomatically(t *testing.T) {
 		t.Fatalf("crt-list = %q, %v", list, err)
 	}
 }
+
+func TestShortVersionIsJustTheNumber(t *testing.T) {
+	raw := "HAProxy version 2.4.22-f8e3218 2023/02/14 - https://haproxy.org/\nStatus: long-term supported branch\nRunning on: Linux 5.14.0"
+	if got := shortVersion(raw); got != "2.4.22" {
+		t.Errorf("shortVersion = %q", got)
+	}
+	if got := shortVersion("weird output\nsecond line"); got != "weird output" {
+		t.Errorf("fallback = %q", got)
+	}
+}
+
+func TestHTTPServerCloseIsOffUnlessChosen(t *testing.T) {
+	m := DefaultModel()
+	off := Render(m, nil, "", "", "/x")
+	if strings.Contains(off, "\n    option http-server-close") || !strings.Contains(off, "# option http-server-close") {
+		t.Errorf("off by default, as a comment:\n%s", off)
+	}
+	m.HTTPServerClose = true
+	on := Render(m, nil, "", "", "/x")
+	if !strings.Contains(on, "\n    option http-server-close\n") {
+		t.Errorf("not written when on:\n%s", on)
+	}
+}

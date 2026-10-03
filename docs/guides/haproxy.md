@@ -152,7 +152,7 @@ names used by both.
 | Setting | Default | Meaning |
 |---|---|---|
 | `static_dir` | `./web/haproxy` | Directory the UI is served from. Must exist and be readable or the module fails to build (503). |
-| `data_dir` | `./data/haproxy` | Holds `state.json`, `certs.json` and `staging/`. Created at boot; unset is a build failure. |
+| `data_dir` | `./data/haproxy` | Holds `state.json`, `certs.json`, `settings.json` and the staged `haproxy.cfg` and `crt-list.txt`. Created at boot; unset is a build failure. |
 | `os` | `auto` | `auto`, `ubuntu`, `rocky`, or `macos` (`darwin` is accepted too). Case-insensitive. |
 | `config_path` | Ubuntu/Rocky `/etc/haproxy/haproxy.cfg`; macOS `/opt/homebrew/etc/haproxy.cfg` | The live config the module owns. |
 | `certs_dir` | Ubuntu/Rocky `/etc/haproxy/certs`; macOS `/opt/homebrew/etc/haproxy/certs` | Where certificate files are written. |
@@ -165,6 +165,7 @@ names used by both.
 | `certmachine.url` | empty | CertMachine base URL. Empty means CertMachine is not configured (the certificate routes answer 409). |
 | `certmachine.api_key` | empty | The API key, sent as `Authorization: Bearer <key>`. A secret; it is redacted wherever the config struct is printed and never appears in an API response, error or log. |
 | `certmachine.ca_file` | empty | PEM file of an extra root to trust when talking to CertMachine. Added to the system roots. |
+| `certmachine_insecure` | off | Skip the certificate check on the CertMachine connection (Settings: "Skip certificate check"). The way back in when the proxy in front of CertMachine is serving a bad certificate. Turn it off again afterwards. |
 
 **The config, certs and backups directories are created on first write.** If
 the directory a file is going into is missing, the driver creates it (through
@@ -368,6 +369,11 @@ The model is what you edit; it is stored in `state.json` and rendered to
   `level user` (read-only) and is authoritative: the stats socket is always
   read-only, and adding a `stats socket` directive on the Globals page is
   rejected (Apply returns 409 with that issue).
+- **HTTP server close.** One toggle on the Globals tab (off by default).
+  Off, HAProxy reuses backend connections and the generated config carries a
+  commented `# option http-server-close` note; on, it writes
+  `option http-server-close` in every frontend and backend connections are
+  closed after each response.
 - **Services.** Each service has a name, an enabled toggle, one or more FQDNs,
   an exposed port, an upstream (host and port), an optional health check, a
   certificate (by FQDN, linked to a CertMachine cert) and optional extra
@@ -412,10 +418,23 @@ HAProxy version, last apply) and **Reload / Restart / Start**.
 Nothing is live until Apply, and Apply does nothing when nothing changed. The
 order is:
 
-1. **Stage and validate.** The candidate config and crt-list are written to a
-   fresh directory under `<data_dir>/staging` and checked with the real
-   `haproxy -c -f`. The live files are not touched. **Check** runs just this
-   step.
+0. **Include every certificate.** Any `.pem` in `certs_dir` that is not tracked
+   yet is tracked automatically (enabled, never renamed or deleted), so the
+   crt-list never leaves a certificate out. If nothing is enabled at all, Apply
+   and Check stop with `needs_certs` and a plain note instead of handing HAProxy
+   an empty crt-list.
+1. **Stage and test.** The candidate config and crt-list are written to
+   `<data_dir>/haproxy.cfg` and `<data_dir>/crt-list.txt` (kept afterwards, so
+   you can read exactly what was tested) with every listening port shifted by
+   +10000 (443 becomes 10443, 8443 becomes 18443, the 1936 stats page 11936)
+   and the stats socket line removed. It is checked with the real
+   `haproxy -c -f`, then a throwaway HAProxy is started on those ports and asked
+   over TLS for every enabled service FQDN: the certificate must be trusted
+   (the private CA is assumed trusted by the machine) and cover the name. An
+   untrusted or mismatched certificate stops the Apply. A backend that answers
+   502/503/504 only produces a note: the host was served securely, whatever is
+   behind it is not answering. The throwaway proxy is always stopped again. The
+   live files are not touched. **Check** runs just this step.
 2. **Back up** the live config and crt-list ([section 9](#9-backups-and-restore)),
    then prune to `backup_keep`.
 3. **Install the crt-list, then the config**, each atomically.
@@ -442,7 +461,8 @@ Apply and restore answer HTTP 200 for these outcomes, in `outcome`:
 |---|---|
 | `applied` | Installed, reloaded and verified. The new config is live. |
 | `no_changes` | Nothing differed from the live files; nothing was done. |
-| `validation_failed` | `haproxy -c` rejected the candidate. The live files were never touched. The message carries HAProxy's own text. |
+| `needs_certs` | No certificate is enabled, so there is nothing to serve over TLS. Nothing was tested or changed; the message says to add one. |
+| `validation_failed` | `haproxy -c` or the staged TLS test rejected the candidate. The live files were never touched. The message carries HAProxy's own reason (only its `[ALERT]` lines) or the host that failed the trust check. |
 | `rolled_back` | A step after validation failed (installing the crt-list or the config, reload, or verify) and the previous config is live again. `rolledBack` is `true`. |
 
 `rollback_failed` is the one outcome that is an error: the rollback itself
@@ -495,7 +515,15 @@ tracked, but the crt-list only references it once Apply installs the crt-list.
 `*.` becomes `_wildcard.` and unsafe characters become `_`. A name identifies
 its contents, so a changed bundle is a **new file**; nothing is overwritten in
 place. A file in the directory that does not follow this convention is never
-touched, only counted ("N unmanaged file(s) not tracked here").
+touched by the pull/update path.
+
+**Existing files.** Every `.pem` already in the certs directory is tracked
+automatically at startup and before each Check or Apply, enabled, as an
+*adopted* row: the file keeps its name and is never rewritten or deleted (Remove
+only stops tracking it). The module does not read inside certificates, so the
+host name shown comes from the file name; the staged TLS test is what proves the
+bundle is valid and trusted. If a service names a certificate that has no
+tracked row, the issue offers the matching file in one click ("＋ file.pem").
 
 **Tracking.** `certs.json` records name, enabled, note, the CertMachine id and
 FQDN, and the SHA-256. The crt-list holds one absolute path per **enabled**
@@ -783,7 +811,7 @@ carries key material or the CertMachine API key.
 | `POST /api/import` `{commit}` | Read the live config and import it, returning `{model, report}`; stored only when `commit` is true. 404 when there is no live config; 422 when it cannot be parsed |
 | `GET /api/changes` | `{hasChanges, configDiff, crtListDiff, summary}` |
 | `GET /api/raw` | `{config, crtList}`: exactly what Apply would write |
-| `POST /api/check` | `{ok, message}`: `haproxy -c` on the staged candidate |
+| `POST /api/check` | `{ok, message, needsCerts?, probes?:[{host, trusted, status, detail}]}`: `haproxy -c` plus the staged TLS test on the shifted ports (section 8) |
 | `POST /api/apply` | `{applied, rolledBack, outcome, message}`. 409 `{error, issues}` when any error-severity issue exists (warnings never block) |
 | `POST /api/reload`, `POST /api/restart`, `POST /api/start` | `{ok:true}`; 500 on failure |
 | `GET /api/backups` | List of backups (`name`, `kind`, `timestamp`, `orig`) |
@@ -794,6 +822,8 @@ carries key material or the CertMachine API key.
 | `GET /api/ops/stream` | SSE of operations-log entries; 503 past `sse_max_subscribers` |
 | `GET /api/certs` | `{certs:[tracking row, missing, details or detailsError, removable, inUseReason], unmanaged}`; `removable` is false while the cert is in use and `inUseReason` says why (empty when removable) |
 | `GET /api/certmachine/certs` | `?forFqdn=<name>[&all=1]`: CertMachine's active certificates with `covers`; only covering ones unless `all=1` |
+| `GET /api/certs/importable` | Untracked `.pem` files in the certs directory: `[{name, fqdn}]` (the host comes from the file name) |
+| `POST /api/certs/import` `{names}` | Track those files as-is (enabled, never renamed or deleted); returns `{imported}` |
 | `POST /api/certs/pull` `{certmachineId, note}` | Verified download and stage; returns `{name, superseded}` |
 | `PUT /api/certs/{name}/enabled` `{enabled}` | Toggle the tracking flag only |
 | `DELETE /api/certs/{name}` | Remove the file and row; 409 while a service uses it or the live crt-list references it |

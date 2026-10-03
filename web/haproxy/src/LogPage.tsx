@@ -53,7 +53,6 @@ export function LogPage() {
     <div className="stack">
       <div className="row">
         <span className={`badge ${live ? 'badge-ok' : 'badge-warning'}`}>{live ? 'live' : 'reconnecting…'}</span>
-        <span className="muted">Last {MAX_LOG_ENTRIES} operations are kept.</span>
       </div>
       <pre className="rawpre logpre">
         {entries.length === 0 ? '(no operations yet)' : entries.map(e => `${new Date(e.time).toLocaleTimeString()}  ${e.message}`).join('\n')}

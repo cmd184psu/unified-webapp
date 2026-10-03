@@ -7700,7 +7700,6 @@ function StatsPage() {
   const view = statsViewState(data);
   return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "stack", children: [
     /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "muted", children: "Read-only live statistics from HAProxy." }),
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "grow" }),
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { className: "btn btn-ghost btn-sm", onClick: async () => {
         await load();
@@ -7910,17 +7909,15 @@ function PendingBar({ status, statusError, changes, changesError, blockers, busy
     /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "row statuspanel", children: [
       status ? /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_jsx_runtime4.Fragment, { children: [
         /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: `badge ${status.service.active ? "badge-ok" : "badge-error"}`, title: status.service.active ? "active" : "inactive", children: status.service.active ? "\u25CF running" : "\u25CB stopped" }),
-        status.service.detail && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "muted", children: status.service.detail }),
         /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("span", { className: "muted", children: [
           "HAProxy ",
-          status.version || "version unknown"
+          status.version || "?"
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "muted", title: last ? `last apply: ${last.outcome}` : "never applied", children: last ? /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_jsx_runtime4.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "muted", title: last ? `last apply: ${last.outcome}${last.message ? " - " + last.message : ""}` : "never applied", children: last ? /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_jsx_runtime4.Fragment, { children: [
           /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: /ok|success|applied/i.test(last.outcome) ? "stat-up" : "error", children: /ok|success|applied/i.test(last.outcome) ? "\u2713" : "\u2715" }),
           " ",
           new Date(last.time).toLocaleString()
-        ] }) : "\u2014" }),
-        last && last.message && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "muted", title: last.message, children: last.message.slice(0, 80) })
+        ] }) : "\u2014" })
       ] }) : /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "muted", children: statusError ? `Status unavailable: ${statusError}` : "Loading status\u2026" }),
       /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "grow" }),
       /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { className: "btn btn-ghost btn-sm", disabled: acting, title: "Reload", "aria-label": "Reload", onClick: () => service("reload"), children: "\u27F3" }),
@@ -8130,13 +8127,13 @@ function CertsPage({ data, configured, refreshKey, onChanged, onPick }) {
   };
   return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "stack", children: [
     /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "muted", children: data ? `${data.certs.length} managed certificate(s); ${data.unmanaged} unmanaged file(s) not tracked here.` : "Loading\u2026" }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "muted", children: data ? `${data.certs.length} certificate${data.certs.length === 1 ? "" : "s"}` : "Loading\u2026" }),
       /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "grow" }),
       /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { className: "btn btn-primary btn-sm", onClick: onPick, children: "+ Add from CertMachine" })
     ] }),
     found.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "card stack", children: [
       /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "card-title", children: "Already on this server" }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "muted", children: "These certificate files are in the certs folder but not tracked here yet. Import the ones HAProxy should serve; the files are left untouched." }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "muted", children: "In the certs folder, not tracked yet. Files are left as they are." }),
       found.map((c) => /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
         Toggle,
         {
@@ -8156,12 +8153,12 @@ function CertsPage({ data, configured, refreshKey, onChanged, onPick }) {
         picked.size
       ] }) })
     ] }),
-    !configured && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "muted", children: "CertMachine is not configured: pulling and freshness checks are unavailable." }),
+    !configured && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "muted", children: "CertMachine isn't set up." }),
     freshError && /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("p", { className: "error", children: [
       "Freshness unavailable: ",
       freshError
     ] }),
-    data && data.certs.length === 0 && found.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "muted", children: "No certificates yet. Add one from CertMachine to get started." }),
+    data && data.certs.length === 0 && found.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "muted", children: "No certificates yet." }),
     data && data.certs.map((c) => {
       const details = certDetailsView(c);
       const exp = expiryBadge(c.details);
@@ -8413,14 +8410,7 @@ function LogPage() {
     };
   }, []);
   return /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "stack", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: `badge ${live ? "badge-ok" : "badge-warning"}`, children: live ? "live" : "reconnecting\u2026" }),
-      /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("span", { className: "muted", children: [
-        "Last ",
-        MAX_LOG_ENTRIES,
-        " operations are kept."
-      ] })
-    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: "row", children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: `badge ${live ? "badge-ok" : "badge-warning"}`, children: live ? "live" : "reconnecting\u2026" }) }),
     /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("pre", { className: "rawpre logpre", children: entries.length === 0 ? "(no operations yet)" : entries.map((e) => `${new Date(e.time).toLocaleTimeString()}  ${e.message}`).join("\n") })
   ] });
 }
@@ -8447,7 +8437,7 @@ function RawPage({ refreshKey }) {
   }, [load, refreshKey]);
   return /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "stack", children: [
     /* @__PURE__ */ (0, import_jsx_runtime10.jsxs)("div", { className: "row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "muted", children: "Read-only: exactly what Apply would write." }),
+      /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "muted", title: "Exactly what Apply would write", children: "read-only" }),
       /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: "grow" }),
       /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("button", { className: "btn btn-ghost btn-sm", onClick: async () => {
         await load();
@@ -8840,7 +8830,7 @@ function DirectiveGroup({ title, hint, rows, onChange, marksManaged }) {
             "aria-label": "Value"
           }
         ),
-        marksManaged && isOsManaged(d.key) && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "badge", title: "The platform driver supplies this setting; a row here overrides the driver's value.", children: "OS-managed" }),
+        marksManaged && isOsManaged(d.key) && /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("span", { className: "badge", title: "From the platform driver; a row here overrides it", children: "OS-managed" }),
         /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("button", { className: "btn btn-ghost btn-sm", disabled: i === 0, onClick: () => onChange(moveDirective(rows, i, -1)), title: "Move up", children: "\u2191" }),
         /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("button", { className: "btn btn-ghost btn-sm", disabled: i === rows.length - 1, onClick: () => onChange(moveDirective(rows, i, 1)), title: "Move down", children: "\u2193" }),
         /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("button", { className: "btn btn-danger btn-sm", onClick: () => onChange(removeDirective(rows, i)), title: "Remove row", children: "\u2715" })
@@ -8901,13 +8891,14 @@ function DirectiveGroup({ title, hint, rows, onChange, marksManaged }) {
     ) })
   ] });
 }
-function GlobalsPage({ global, defaults, onGlobal, onDefaults }) {
+function GlobalsPage({ global, defaults, serverClose, onServerClose, onGlobal, onDefaults }) {
   return /* @__PURE__ */ (0, import_jsx_runtime12.jsxs)("div", { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime12.jsx)("div", { className: "card", children: /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(Toggle, { checked: serverClose, onChange: onServerClose, label: "Close backend connections after each response" }) }),
     /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(
       DirectiveGroup,
       {
         title: "global",
-        hint: "Process-wide settings, written in this order. Rows marked OS-managed come from the platform driver's baseline.",
+        hint: "Process-wide, in order.",
         rows: global,
         onChange: onGlobal,
         marksManaged: true
@@ -8917,7 +8908,7 @@ function GlobalsPage({ global, defaults, onGlobal, onDefaults }) {
       DirectiveGroup,
       {
         title: "defaults",
-        hint: "Defaults inherited by every frontend and backend, written in this order.",
+        hint: "Inherited by every frontend and backend.",
         rows: defaults,
         onChange: onDefaults,
         marksManaged: false
@@ -9134,7 +9125,7 @@ function SettingsPage({ onSaved }) {
     ] }),
     /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "card stack", children: [
       /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("div", { className: "card-title", children: "CertMachine" }),
-      field("certmachineUrl", "CertMachine URL", { placeholder: "https://certmachine.example.com", hint: "Leave empty to run without CertMachine." }),
+      field("certmachineUrl", "CertMachine URL", { placeholder: "https://certmachine.example.com", hint: "Empty = no CertMachine" }),
       /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "field", children: [
         /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "field-label", children: "API key" }),
         /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "row", children: [
@@ -9167,7 +9158,7 @@ function SettingsPage({ onSaved }) {
             }
           )
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "muted", children: "The key is write-only: it is stored on this machine and never shown again." }),
+        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "muted", children: "Write-only; stored on this machine." }),
         fieldErrors.apiKey && /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "error", children: fieldErrors.apiKey })
       ] }),
       field("certmachineCaFile", "CA file", { placeholder: "Optional: path to a CA certificate to trust" }),
@@ -9176,13 +9167,10 @@ function SettingsPage({ onSaved }) {
         {
           checked: draft.values.certmachineInsecure,
           onChange: (v) => setDraft({ ...draft, values: { ...draft.values, certmachineInsecure: v } }),
-          label: "Skip certificate check (use only while the proxy is serving a bad certificate)"
+          label: "Skip certificate check"
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "row", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("button", { className: "btn", disabled: busy, onClick: testConnection, children: "Test connection" }),
-        /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "muted", children: "Uses the values above, saved or not." })
-      ] })
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("div", { className: "row", children: /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("button", { className: "btn", disabled: busy, onClick: testConnection, children: "Test connection" }) })
     ] }),
     /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "card stack", children: [
       /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("div", { className: "card-title", children: "Files and service" }),
@@ -9192,7 +9180,7 @@ function SettingsPage({ onSaved }) {
       pathField("statsSocketPath", "Stats socket path"),
       pathField("backupDir", "Backup directory"),
       pathField("serviceName", "Service name"),
-      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "muted", children: "An empty field uses the default shown in it." })
+      /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("span", { className: "muted", children: "Empty = default." })
     ] }),
     /* @__PURE__ */ (0, import_jsx_runtime13.jsxs)("div", { className: "card stack", children: [
       /* @__PURE__ */ (0, import_jsx_runtime13.jsx)("div", { className: "card-title", children: "Behaviour" }),
@@ -9469,7 +9457,7 @@ function App() {
       const first = firstRunState({ imported, importStatus });
       return /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("div", { className: "card stack", children: [
         /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("div", { className: "card-title", children: "Import the live HAProxy configuration" }),
-        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { className: "muted", children: "No model has been stored yet. Import reads the running configuration and shows what it could and could not map; nothing is stored until you confirm." }),
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { className: "muted", children: "Read the running config and review what maps. Nothing is stored until you confirm." }),
         preview ? /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(import_jsx_runtime14.Fragment, { children: [
           reportLines(preview.report).length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { children: "The whole configuration maps cleanly." }) : /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("ul", { className: "issues", children: reportLines(preview.report).map((l, n) => /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("li", { className: "issue issue-warning", children: l }, n)) }),
           /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { className: "muted", children: `Default service: ${preview.model.defaultService.name}, plus ${preview.model.services.length} additional service${preview.model.services.length === 1 ? "" : "s"}.` }),
@@ -9485,7 +9473,7 @@ function App() {
             /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("button", { className: "btn btn-primary", disabled: busy, onClick: importPreview, children: "Import live config" }),
             first === "defaults" && /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("button", { className: "btn btn-ghost", disabled: busy, onClick: startWithDefaults, children: "Start with defaults" })
           ] }),
-          first === "defaults" && /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { className: "muted", children: "No live HAProxy configuration exists on this machine. Start with defaults stores the default model so you can add services." })
+          first === "defaults" && /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { className: "muted", children: "No live config here. Start with defaults." })
         ] })
       ] });
     }
@@ -9493,10 +9481,15 @@ function App() {
       /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("div", { className: "savebar", children: [
         /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("span", { className: dirty ? "unsaved" : "muted", children: dirty ? "Unsaved changes" : "All changes saved" }),
         counts.errors + counts.warnings > 0 && /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("span", { className: "muted", children: [
-          counts.errors,
-          " error(s), ",
-          counts.warnings,
-          " warning(s)"
+          /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("span", { className: "issue-error", children: [
+            "\u2715 ",
+            counts.errors
+          ] }),
+          " ",
+          /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("span", { className: "issue-warning", children: [
+            "\u26A0 ",
+            counts.warnings
+          ] })
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("span", { className: "grow" }),
         /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("button", { className: "btn btn-ghost", disabled: !dirty || busy, onClick: discard, children: "Discard" }),
@@ -9519,6 +9512,8 @@ function App() {
         {
           global: draft.global,
           defaults: draft.defaults,
+          serverClose: !!draft.httpServerClose,
+          onServerClose: (v) => setDraft({ ...draft, httpServerClose: v }),
           onGlobal: (rows) => setDraft({ ...draft, global: rows }),
           onDefaults: (rows) => setDraft({ ...draft, defaults: rows })
         }
@@ -9551,7 +9546,7 @@ function App() {
     /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("main", { className: "content", children: [
       setupNeeded && tab !== "settings" && /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)("div", { className: "card stack", children: [
         /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("div", { className: "card-title", children: "Connect CertMachine to get started" }),
-        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { className: "muted", children: "HAProxy certificates come from CertMachine. Enter its address and API key in Settings and everything else unlocks." }),
+        /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("p", { className: "muted", children: "Certificates come from CertMachine. Add its address and API key in Settings." }),
         /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("div", { className: "row", children: /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("button", { className: "btn btn-primary", onClick: () => setTab("settings"), children: "Open Settings" }) })
       ] }),
       !locked(tab) && /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(import_jsx_runtime14.Fragment, { children: [

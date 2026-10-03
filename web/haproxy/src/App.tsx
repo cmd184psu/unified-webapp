@@ -292,7 +292,7 @@ export default function App() {
       return (
         <div className="card stack">
           <div className="card-title">Import the live HAProxy configuration</div>
-          <p className="muted">No model has been stored yet. Import reads the running configuration and shows what it could and could not map; nothing is stored until you confirm.</p>
+          <p className="muted">Read the running config and review what maps. Nothing is stored until you confirm.</p>
           {preview ? (
             <>
               {reportLines(preview.report).length === 0
@@ -310,7 +310,7 @@ export default function App() {
               <button className="btn btn-primary" disabled={busy} onClick={importPreview}>Import live config</button>
               {first === 'defaults' && <button className="btn btn-ghost" disabled={busy} onClick={startWithDefaults}>Start with defaults</button>}
             </div>
-            {first === 'defaults' && <p className="muted">No live HAProxy configuration exists on this machine. Start with defaults stores the default model so you can add services.</p>}
+            {first === 'defaults' && <p className="muted">No live config here. Start with defaults.</p>}
             </>
           )}
         </div>
@@ -321,7 +321,7 @@ export default function App() {
         <div className="savebar">
           <span className={dirty ? 'unsaved' : 'muted'}>{dirty ? 'Unsaved changes' : 'All changes saved'}</span>
           {counts.errors + counts.warnings > 0 && (
-            <span className="muted">{counts.errors} error(s), {counts.warnings} warning(s)</span>
+            <span className="muted"><span className="issue-error">✕ {counts.errors}</span> <span className="issue-warning">⚠ {counts.warnings}</span></span>
           )}
           <span className="grow" />
           <button className="btn btn-ghost" disabled={!dirty || busy} onClick={discard}>Discard</button>
@@ -342,6 +342,8 @@ export default function App() {
           <GlobalsPage
             global={draft.global}
             defaults={draft.defaults}
+            serverClose={!!draft.httpServerClose}
+            onServerClose={v => setDraft({ ...draft, httpServerClose: v })}
             onGlobal={rows => setDraft({ ...draft, global: rows })}
             onDefaults={rows => setDraft({ ...draft, defaults: rows })}
           />
@@ -376,7 +378,7 @@ export default function App() {
         {setupNeeded && tab !== 'settings' && (
           <div className="card stack">
             <div className="card-title">Connect CertMachine to get started</div>
-            <p className="muted">HAProxy certificates come from CertMachine. Enter its address and API key in Settings and everything else unlocks.</p>
+            <p className="muted">Certificates come from CertMachine. Add its address and API key in Settings.</p>
             <div className="row"><button className="btn btn-primary" onClick={() => setTab('settings')}>Open Settings</button></div>
           </div>
         )}

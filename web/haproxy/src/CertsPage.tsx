@@ -106,7 +106,7 @@ export function CertsPage({ data, configured, refreshKey, onChanged, onPick }: P
     <div className="stack">
       <div className="row">
         <span className="muted">
-          {data ? `${data.certs.length} managed certificate(s); ${data.unmanaged} unmanaged file(s) not tracked here.` : 'Loading…'}
+          {data ? `${data.certs.length} certificate${data.certs.length === 1 ? '' : 's'}` : 'Loading…'}
         </span>
         <span className="grow" />
         <button className="btn btn-primary btn-sm" onClick={onPick}>+ Add from CertMachine</button>
@@ -114,7 +114,7 @@ export function CertsPage({ data, configured, refreshKey, onChanged, onPick }: P
       {found.length > 0 && (
         <div className="card stack">
           <div className="card-title">Already on this server</div>
-          <p className="muted">These certificate files are in the certs folder but not tracked here yet. Import the ones HAProxy should serve; the files are left untouched.</p>
+          <p className="muted">In the certs folder, not tracked yet. Files are left as they are.</p>
           {found.map(c => (
             <Toggle key={c.name} checked={picked.has(c.name)} label={`${c.fqdn}  ·  ${c.name}`}
               onChange={v => setPicked(p => { const x = new Set(p); if (v) x.add(c.name); else x.delete(c.name); return x })} />
@@ -124,9 +124,9 @@ export function CertsPage({ data, configured, refreshKey, onChanged, onPick }: P
           </div>
         </div>
       )}
-      {!configured && <p className="muted">CertMachine is not configured: pulling and freshness checks are unavailable.</p>}
+      {!configured && <p className="muted">CertMachine isn't set up.</p>}
       {freshError && <p className="error">Freshness unavailable: {freshError}</p>}
-      {data && data.certs.length === 0 && found.length === 0 && <p className="muted">No certificates yet. Add one from CertMachine to get started.</p>}
+      {data && data.certs.length === 0 && found.length === 0 && <p className="muted">No certificates yet.</p>}
       {data && data.certs.map(c => {
         const details = certDetailsView(c)
         const exp = expiryBadge(c.details)

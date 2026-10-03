@@ -62,6 +62,9 @@ type Model struct {
 	Global         []Directive    `json:"global"`
 	Defaults       []Directive    `json:"defaults"`
 	DefaultService DefaultService `json:"defaultService"`
+	// HTTPServerClose closes the backend connection after every response instead
+	// of reusing it. Off by default.
+	HTTPServerClose bool `json:"httpServerClose,omitempty"`
 	Ports          []Port         `json:"ports"`
 	Services       []Service      `json:"services"`
 	RawSections    []RawSection   `json:"rawSections"`

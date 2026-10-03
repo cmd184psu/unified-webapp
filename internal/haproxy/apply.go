@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -687,5 +688,17 @@ func (a *Applier) Status(ctx context.Context) (StatusInfo, error) {
 		// A missing version is not fatal to the status panel.
 		ver = ""
 	}
-	return StatusInfo{ServiceStatus: st, Version: ver}, nil
+	return StatusInfo{ServiceStatus: st, Version: shortVersion(ver)}, nil
+}
+
+var versionRe = regexp.MustCompile(`(?i)version\s+(\d+(?:\.\d+)*)`)
+
+// shortVersion reduces `haproxy -v` output to the bare version number ("2.4.22").
+// Anything it cannot read is returned trimmed to its first line.
+func shortVersion(raw string) string {
+	if m := versionRe.FindStringSubmatch(raw); m != nil {
+		return m[1]
+	}
+	first, _, _ := strings.Cut(strings.TrimSpace(raw), "\n")
+	return first
 }

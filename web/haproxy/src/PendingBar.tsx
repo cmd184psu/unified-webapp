@@ -103,10 +103,8 @@ export function PendingBar({ status, statusError, changes, changesError, blocker
         {status ? (
           <>
             <span className={`badge ${status.service.active ? 'badge-ok' : 'badge-error'}`} title={status.service.active ? 'active' : 'inactive'}>{status.service.active ? '● running' : '○ stopped'}</span>
-            {status.service.detail && <span className="muted">{status.service.detail}</span>}
-            <span className="muted">HAProxy {status.version || 'version unknown'}</span>
-            <span className="muted" title={last ? `last apply: ${last.outcome}` : 'never applied'}>{last ? <><span className={/ok|success|applied/i.test(last.outcome) ? 'stat-up' : 'error'}>{/ok|success|applied/i.test(last.outcome) ? '✓' : '✕'}</span> {new Date(last.time).toLocaleString()}</> : '—'}</span>
-            {last && last.message && <span className="muted" title={last.message}>{last.message.slice(0, 80)}</span>}
+            <span className="muted">HAProxy {status.version || '?'}</span>
+            <span className="muted" title={last ? `last apply: ${last.outcome}${last.message ? " - " + last.message : ""}` : 'never applied'}>{last ? <><span className={/ok|success|applied/i.test(last.outcome) ? 'stat-up' : 'error'}>{/ok|success|applied/i.test(last.outcome) ? '✓' : '✕'}</span> {new Date(last.time).toLocaleString()}</> : '—'}</span>
           </>
         ) : <span className="muted">{statusError ? `Status unavailable: ${statusError}` : 'Loading status…'}</span>}
         <span className="grow" />

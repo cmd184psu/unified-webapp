@@ -34,7 +34,6 @@ export function StatsPage() {
   return (
     <div className="stack">
       <div className="row">
-        <span className="muted">Read-only live statistics from HAProxy.</span>
         <span className="grow" />
         <button className="btn btn-ghost btn-sm" onClick={async () => { await load(); showToast('Statistics refreshed.', 'notice') }}>Refresh</button>
       </div>

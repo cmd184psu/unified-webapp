@@ -127,10 +127,11 @@ func Render(m *Model, baseline []Directive, statsSocket, statsOwner, crtListPath
 		// address (X-Forwarded-For) and the HTTP log format, as hero's config does.
 		b.WriteString("    option httplog\n")
 		b.WriteString("    option forwardfor\n")
-		b.WriteString("    # http-server-close: uncomment to close the backend connection after every\n")
-		b.WriteString("    # response instead of reusing it. Slower, but the safest choice for a backend\n")
-		b.WriteString("    # that copes badly with reused connections. Off by default.\n")
-		b.WriteString("    # option http-server-close\n")
+		if m.HTTPServerClose {
+			b.WriteString("    option http-server-close\n")
+		} else {
+			b.WriteString("    # option http-server-close  (off: backend connections are reused; on: closed after each response)\n")
+		}
 		var rules []string
 		for i := range m.Services {
 			s := &m.Services[i]

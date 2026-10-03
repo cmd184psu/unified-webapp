@@ -32,6 +32,8 @@ export interface Model {
   global: Directive[]
   defaults: Directive[]
   defaultService: DefaultService
+  /** Close backend connections after each response (off = reuse them). */
+  httpServerClose?: boolean
   ports: Port[]
   services: Service[]
   rawSections: RawSection[]
