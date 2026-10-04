@@ -634,7 +634,7 @@ are the exception by design (generic to the client, detailed in the log).
 | `DELETE /api/certs/{id}` | Delete a row | Requires `?confirm=<fqdn>` (case-insensitive); 400 without it. **200** `{"previousDropped": bool}` on success (previously 204 with no body — deleting the last active certificate under the previous CA can now trigger its automatic removal, which the response reports) |
 | `POST /api/certs/{id}/renew` | Renew | 201 with the new row; the predecessor is archived. Response gains `previousDropped` (bool), same reason as Delete above |
 | `POST /api/certs/{id}/edit` | Edit FQDN, SANs, and/or validity in place (see [§10](#10-replacing-the-root-ca)) | Body `{fqdn, dnsSans[], ipSans[], validityDays}` — the only issuance route that accepts a validity directly, still clamped to the current CA's own expiry. 201, same shape as `POST /api/certs`'s response plus `previousDropped`. 409 `ErrDuplicateActive` if another row is already active for the new FQDN; 409 `ErrQuarantined` for a quarantined source |
-| `GET /api/certs/{id}/files/{name}` | Individual file download | `name` is a closed enum: `cert.pem`, `key.pem`, `haproxy.pem`. 409 `ErrUnknownSigner` if the certificate's signing CA cannot be resolved (`caId` is `null`) — re-issue it first. Success carries `ETag`, `X-Cert-Id`, `X-Cert-Fingerprint` and honours `If-None-Match` and `HEAD` (see [below](#download-integrity-headers-and-api-key-access)) |
+| `GET /api/certs/{id}/files/{name}` | Individual file download | `name` is a closed enum: `cert.pem`, `key.pem`, `haproxy.pem`. 409 `ErrUnknownSigner` if the certificate's signing CA cannot be resolved (`caId` is `null`) — re-issue it first. Success carries `ETag`, `X-Cert-Id`, `X-Cert-Fingerprint` and honors `If-None-Match` and `HEAD` (see [below](#download-integrity-headers-and-api-key-access)) |
 | `GET /api/certs/{id}/bundle` | `.tgz` bundle download | `cert.pem`, `key.pem`, `haproxy.pem`, `<CA name>.crt`. Same `ErrUnknownSigner` 409 as above. No `ETag` or identity headers |
 | `GET /api/import/preview` | Dry-run the legacy import | Counts and per-item reasons; never writes |
 | `POST /api/import` | Execute the legacy import | Idempotent-safe; already-imported leaves report `skipped` |
@@ -658,7 +658,7 @@ A successful response carries:
 - `X-Cert-Fingerprint`: the certificate's fingerprint as stored (the same
   value `GET /api/certs` reports).
 
-`If-None-Match` is honoured: a header that is `*`, equals the ETag, equals it
+`If-None-Match` is honored: a header that is `*`, equals the ETag, equals it
 with a `W/` prefix, or is a comma-separated list containing such an entry
 gets **304** with no body (the `ETag` and identity headers are still sent).
 `HEAD` returns the same headers as `GET` with no body.
@@ -700,7 +700,7 @@ using the existing mechanism described in
 [README § API keys for automation](../../README.md#api-keys-for-automation):
 
 1. Generate a key and store its hash in one step:
-   `go run ./cmd/server -gen-api-key -name haproxy-editor -config ./unified-webapp.json`.
+   `go run ./cmd/server -gen-api-key -name haproxy-editor -modules certmachine -config ./unified-webapp.json`.
    It prints the key once (store it where your client reads secrets) and adds
    the hash to that instance's `auth.api_keys`; restart or reload as you
    normally do for config changes. The admin module's Generate key does the

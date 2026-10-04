@@ -194,7 +194,13 @@ type SessionConfig struct {
 type NamedHash struct {
 	Name string `json:"name"`
 	Hash string `json:"hash"`
+	// Modules is where an API key works: module names, or "*" for every
+	// protected module. An empty list (a legacy key) means "*". Unused by pins.
+	Modules []string `json:"modules,omitempty"`
 }
+
+// AllModules is the Modules value meaning "every protected module".
+const AllModules = "*"
 
 // LDAPConfig configures LDAP authentication. Full behavior is ported in
 // T3.7; fields are defined now for validation.
@@ -212,8 +218,13 @@ type LDAPConfig struct {
 
 // PasskeyConfig configures WebAuthn/passkey authentication.
 type PasskeyConfig struct {
-	RPID      string   `json:"rp_id"`
+	RPID string `json:"rp_id"`
+	// RPOrigins are extra allowed origins. Every routed host under RPID is
+	// allowed automatically (see auth.PasskeyOrigins).
 	RPOrigins []string `json:"rp_origins"`
+	// Hosts are the routed host names, filled in at boot and on a live apply.
+	// Never persisted.
+	Hosts []string `json:"-"`
 }
 
 // ServerConfig holds configuration for the shared HTTP server infrastructure,

@@ -249,7 +249,7 @@ func TestKeyGenerateRoundTripsThenDeleteRevokesIt(t *testing.T) {
 
 	generate := func(name string) string {
 		t.Helper()
-		rec := doAdmin(t, mux, http.MethodPost, "/api/keys", map[string]string{"name": name})
+		rec := doAdmin(t, mux, http.MethodPost, "/api/keys", map[string]any{"name": name, "modules": []string{"*"}})
 		if rec.Code != http.StatusOK {
 			t.Fatalf("POST /api/keys {name:%q} = %d, want 200; body: %s", name, rec.Code, rec.Body.String())
 		}
@@ -424,7 +424,7 @@ func TestAC15NoResponseBodyEverLeaksASecret(t *testing.T) {
 	// 3. Generate two API keys -- svc1's plaintext is the one this test
 	// tracks for the exactly-once assertion below; "keeper" stays configured
 	// throughout so deleting svc1 later doesn't touch it.
-	genRec := capture(doAdmin(t, mux, http.MethodPost, "/api/keys", map[string]string{"name": generateNm}))
+	genRec := capture(doAdmin(t, mux, http.MethodPost, "/api/keys", map[string]any{"name": generateNm, "modules": []string{"*"}}))
 	if genRec.Code != http.StatusOK {
 		t.Fatalf("POST /api/keys = %d, want 200; body: %s", genRec.Code, genRec.Body.String())
 	}
@@ -438,7 +438,7 @@ func TestAC15NoResponseBodyEverLeaksASecret(t *testing.T) {
 		t.Fatalf("generated key is empty")
 	}
 
-	keeperRec := capture(doAdmin(t, mux, http.MethodPost, "/api/keys", map[string]string{"name": "keeper"}))
+	keeperRec := capture(doAdmin(t, mux, http.MethodPost, "/api/keys", map[string]any{"name": "keeper", "modules": []string{"*"}}))
 	if keeperRec.Code != http.StatusOK {
 		t.Fatalf("POST /api/keys {name:keeper} = %d, want 200; body: %s", keeperRec.Code, keeperRec.Body.String())
 	}

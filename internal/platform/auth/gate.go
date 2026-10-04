@@ -163,7 +163,7 @@ func (s *Service) Gate(module string, next http.Handler) http.Handler {
 		// can ask the gate who (if anyone) this request was authorized as.
 		// FR6: purely informational, adds no allow/deny outcome of its own.
 		if r.Method == http.MethodGet && r.URL.Path == "/api/auth/whoami" {
-			s.handleWhoami(w, r, now)
+			s.handleWhoami(w, r, now, module)
 			return
 		}
 
@@ -223,7 +223,7 @@ func (s *Service) Gate(module string, next http.Handler) http.Handler {
 		// included, with no special-casing. admin is PIN-only, exclusively:
 		// no API key ever satisfies it, and only a session carrying the
 		// admin_pin grant does (sessionAllows). Every other protected module
-		// accepts a bearer API key unconditionally (no per-module opt-in),
+		// accepts a bearer API key scoped to it (or to "*"),
 		// falling through to the session cookie -- an identity grant
 		// (ldap/passkey) or that module's own scoped door-code grant.
 		// sessionAllows (session_scope.go) also checks a door-code grant
@@ -240,7 +240,7 @@ func (s *Service) Gate(module string, next http.Handler) http.Handler {
 				return
 			}
 		} else {
-			if name, ok := s.checkAPIKey(r); ok {
+			if name, ok := s.checkAPIKey(r, module); ok {
 				r = r.WithContext(WithPrincipal(r.Context(), Principal{Method: "apikey", Subject: name}))
 				next.ServeHTTP(w, r)
 				return
@@ -275,8 +275,8 @@ func (s *Service) Gate(module string, next http.Handler) http.Handler {
 // state. It never mutates the session cookie (no sliding-refresh reissue
 // here -- that only happens on a request that actually authorizes into a
 // module).
-func (s *Service) handleWhoami(w http.ResponseWriter, r *http.Request, now time.Time) {
-	if name, ok := s.checkAPIKey(r); ok {
+func (s *Service) handleWhoami(w http.ResponseWriter, r *http.Request, now time.Time, module string) {
+	if name, ok := s.checkAPIKey(r, module); ok {
 		response.WriteJSON(w, http.StatusOK, map[string]any{
 			"authenticated": true,
 			"method":        "apikey",

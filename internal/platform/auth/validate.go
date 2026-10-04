@@ -24,6 +24,9 @@ import (
 // performs no authentication and has no side effects beyond stat-ing pin
 // files.
 func ValidatePolicy(a config.AuthConfig, knownModules []string, adminRouted bool) error {
+	if err := validateKeyScopes(a.APIKeys, knownModules); err != nil {
+		return err
+	}
 	// Fast path: nothing configured and admin isn't routed through auth, so
 	// there is nothing to validate. This also covers a zero-value AuthConfig
 	// (no "auth" key at all in the config file).
@@ -102,5 +105,32 @@ func ValidatePolicy(a config.AuthConfig, knownModules []string, adminRouted bool
 		}
 	}
 
+	return nil
+}
+
+// validateKeyScopes checks each API key's module scope names real modules (or
+// "*"). admin never accepts a key, so it cannot be named. Skipped when the set
+// of known modules is not given.
+func validateKeyScopes(keys []config.NamedHash, knownModules []string) error {
+	if len(knownModules) == 0 {
+		return nil
+	}
+	known := make(map[string]bool, len(knownModules))
+	for _, m := range knownModules {
+		known[m] = true
+	}
+	for _, k := range keys {
+		for _, m := range k.Modules {
+			if m == config.AllModules {
+				continue
+			}
+			if m == "admin" {
+				return fmt.Errorf("auth.api_keys: key %q names admin, which never accepts an API key", k.Name)
+			}
+			if !known[m] {
+				return fmt.Errorf("auth.api_keys: key %q names unknown module %q", k.Name, m)
+			}
+		}
+	}
 	return nil
 }

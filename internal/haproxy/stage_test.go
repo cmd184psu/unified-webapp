@@ -110,3 +110,23 @@ func TestHTTPServerCloseIsOffUnlessChosen(t *testing.T) {
 		t.Errorf("not written when on:\n%s", on)
 	}
 }
+
+func TestOlderCopyOfACertMachineHostComesInDisabled(t *testing.T) {
+	drv := newFakeDriver()
+	drv.Files[drv.CertsDir()+"/smb.example.com.pem"] = []byte("x")
+	_, _, certs, dataDir := newTestApplier(t, drv, ApplyOptions{})
+	data := certStoreData{Certs: []CertEntry{{Name: "smb.example.com-aaaaaaaaaaaa.pem", Enabled: true, CertMachine: CertSource{ID: 7, FQDN: "smb.example.com"}}}}
+	if err := certs.save(data); err != nil {
+		t.Fatal(err)
+	}
+	_ = dataDir
+	if _, err := certs.Import(context.Background(), []string{"smb.example.com.pem"}); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := certs.load()
+	for _, e := range d.Certs {
+		if e.Name == "smb.example.com.pem" && e.Enabled {
+			t.Errorf("the older duplicate came in enabled: %+v", e)
+		}
+	}
+}

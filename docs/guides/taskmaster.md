@@ -74,7 +74,7 @@ How a func task differs from a shell task:
   populated only on success and also capped at 64 KiB.
 - **Cancel reaches queued jobs too.** For a shell task, `POST
   /api/executions/{id}/cancel` on a still-pending (queued) execution answers
-  `200 {"status":"not_running"}` — cancelling a queue slot). For a func task,
+  `200 {"status":"not_running"}` — canceling a queue slot). For a func task,
   the same call on a pending execution actually cancels it:
   `200 {"status":"canceled"}`. A running func task's cancel still answers
   `{"status":"canceling"}`, the same as shell.

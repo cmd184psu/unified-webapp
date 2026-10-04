@@ -1849,7 +1849,7 @@ func TestReplaceCA_Progress_NoEventsOnValidationError(t *testing.T) {
 	}
 }
 
-// TestReplaceCA_ContextCancelledBetweenLeafKeys: cancelling ctx from inside
+// TestReplaceCA_ContextCancelledBetweenLeafKeys: canceling ctx from inside
 // the progress hook, after some leaf keys have already been generated, must
 // make ReplaceCA return the context error with nothing written -- the
 // transaction never opens (R2: all crypto, including the leaf loop, runs

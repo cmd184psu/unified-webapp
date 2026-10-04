@@ -44,9 +44,6 @@ func validatePasskeyConfig(req putPasskeyRequest) (config.PasskeyConfig, error) 
 	if id == "" {
 		return config.PasskeyConfig{}, fmt.Errorf("Relying Party ID is required when allowed origins are set")
 	}
-	if len(origins) == 0 {
-		return config.PasskeyConfig{}, fmt.Errorf("at least one allowed origin is required when a Relying Party ID is set")
-	}
 	if len(origins) > maxPasskeyOrigins {
 		return config.PasskeyConfig{}, fmt.Errorf("too many allowed origins (%d): at most %d", len(origins), maxPasskeyOrigins)
 	}

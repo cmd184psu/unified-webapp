@@ -147,7 +147,7 @@ func BuildPolicy(a config.AuthConfig) (*Policy, error) {
 
 	p := &Policy{
 		Modules:      copyModules(a.Modules),
-		APIKeys:      append([]config.NamedHash(nil), a.APIKeys...),
+		APIKeys:      copyKeys(a.APIKeys),
 		AdminPIN:     a.AdminPIN,
 		AdminPINFile: adminPINFile,
 		LDAP:         a.LDAP,
@@ -336,6 +336,17 @@ func (s *Service) checkAdminPIN(pin string) (ok bool, err error) {
 // checkAPIKey validates a presented API key from r against the current
 // policy's API-key table, delegating to apikey.go's package-level
 // checkAPIKey.
-func (s *Service) checkAPIKey(r *http.Request) (name string, ok bool) {
-	return checkAPIKey(s.policy().APIKeys, r)
+func (s *Service) checkAPIKey(r *http.Request, module string) (name string, ok bool) {
+	return checkAPIKey(s.policy().APIKeys, module, r)
+}
+
+// copyKeys returns a deep copy of keys, so a caller changing a key's scope after
+// BuildPolicy returns cannot affect the snapshot.
+func copyKeys(keys []config.NamedHash) []config.NamedHash {
+	out := make([]config.NamedHash, len(keys))
+	for i, k := range keys {
+		out[i] = k
+		out[i].Modules = append([]string(nil), k.Modules...)
+	}
+	return out
 }

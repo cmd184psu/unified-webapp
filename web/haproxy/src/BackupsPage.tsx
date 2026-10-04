@@ -31,7 +31,7 @@ export function BackupsPage({ refreshKey, onRestore }: Props) {
 
   const restore = async (name: string) => {
     if (!(await confirmDialog(`Restore ${name}? It becomes the live configuration (validated first; the current one is backed up).`, { confirmLabel: 'Restore' }))) {
-      showToast('Restore cancelled.', 'notice')
+      showToast('Restore canceled.', 'notice')
       return
     }
     await onRestore(name)

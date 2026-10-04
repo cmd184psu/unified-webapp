@@ -318,7 +318,7 @@ using the existing mechanism
 ([README, API keys for automation](../../README.md#api-keys-for-automation)):
 
 1. Generate a key and store its hash in one step:
-   `go run ./cmd/server -gen-api-key -name haproxy-editor -config ./unified-webapp.json`.
+   `go run ./cmd/server -gen-api-key -name haproxy-editor -modules certmachine -config ./unified-webapp.json`.
    It prints the key once and adds the hash to `auth.api_keys`; restart the
    service to pick it up (the admin module's Generate key does the same live,
    without a restart).
@@ -518,11 +518,14 @@ place. A file in the directory that does not follow this convention is never
 touched by the pull/update path.
 
 **Existing files.** Every `.pem` already in the certs directory is tracked
-automatically at startup and before each Check or Apply, enabled, as an
-*adopted* row: the file keeps its name and is never rewritten or deleted (Remove
-only stops tracking it). The module does not read inside certificates, so the
-host name shown comes from the file name; the staged TLS test is what proves the
-bundle is valid and trusted. If a service names a certificate that has no
+automatically at startup and before each Check or Apply, as an *adopted* row:
+the file keeps its name and is never rewritten. The module does not read inside
+certificates, so the host name shown comes from the file name; the staged TLS
+test is what proves the bundle is valid and trusted. CertMachine is the source
+of truth: a file for a host that already has an enabled CertMachine copy comes in
+**disabled** (an older duplicate: visible and removable, not in the crt-list).
+**Remove** on any row deletes its file; it is refused while the live crt-list
+still references it, so Apply first. If a service names a certificate that has no
 tracked row, the issue offers the matching file in one click ("＋ file.pem").
 
 **Tracking.** `certs.json` records name, enabled, note, the CertMachine id and
@@ -754,7 +757,7 @@ SIGN-OFF and are not done.**
   `If-None-Match` gives 304; `HEAD` returns headers only; an Edit that re-issues
   with new SANs makes the filtered list return the new id.
 - [ ] **B-OG: browser sign-off of the full flow**, repeated on the owner's Tahoe
-  Mac and on real Linux, confirming identical look and behaviour: import the
+  Mac and on real Linux, confirming identical look and behavior: import the
   existing config and review the generated file; add a service (new FQDN and
   local port) and install its certificate from CertMachine; Apply; add a second
   exposed port with several services; disable a certificate and see it stop
@@ -776,7 +779,7 @@ SIGN-OFF and are not done.**
 **What has and has not been tested.** Against a **real HAProxy**: nothing in
 this repository's tests. Against a **real CertMachine**: the A-OG curl checks
 (owner, 2026-10-02) and the opt-in `TestLiveCertMachineClient` above, nothing
-else. The rest of the module's behaviour has
+else. The rest of the module's behavior has
 been exercised through unit tests over an in-package fake driver and fake
 command layer, handler tests, a fake CertMachine server, and web unit and type
 tests. The only real-system evidence is the set of macOS experiments recorded in
@@ -789,7 +792,7 @@ is removed in 3.5 so `-W` is used; without a raised file limit `maxconn` drops t
 **Not browser-tested.** The UI has not been driven in a real browser by the
 agent that built it. Not exercised anywhere: the real sudoers set on Ubuntu or
 Rocky, real `systemctl reload` and a real rollback after a failed reload, the
-stats-socket path and ownership on real Linux, SELinux behaviour on Rocky, and
+stats-socket path and ownership on real Linux, SELinux behavior on Rocky, and
 the macOS launchd bootstrap by this driver. The sudoers file in section 5 is derived from reading the driver code,
 not from running it under `sudo`.
 

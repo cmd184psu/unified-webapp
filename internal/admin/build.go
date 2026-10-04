@@ -47,6 +47,10 @@ type Deps struct {
 	// computed at boot. T5.3's live-apply passes the same value to
 	// auth.ValidatePolicy for the same reason as KnownModules.
 	AdminRouted bool
+
+	// Hosts are the host_routing host names; every one under the passkey RP ID
+	// is an allowed passkey origin automatically.
+	Hosts []string
 }
 
 // Build returns a ready-to-use http.Handler for the admin module: a static

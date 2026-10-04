@@ -301,7 +301,7 @@ export default function App() {
               <p className="muted">{`Default service: ${preview.model.defaultService.name}, plus ${preview.model.services.length} additional service${preview.model.services.length === 1 ? '' : 's'}.`}</p>
               <div className="row">
                 <button className="btn btn-primary" disabled={busy} onClick={importCommit}>Confirm import</button>
-                <button className="btn btn-ghost" disabled={busy} onClick={() => { setPreview(null); showToast('Import cancelled; nothing stored.', 'notice') }}>Cancel</button>
+                <button className="btn btn-ghost" disabled={busy} onClick={() => { setPreview(null); showToast('Import canceled; nothing stored.', 'notice') }}>Cancel</button>
               </div>
             </>
           ) : (

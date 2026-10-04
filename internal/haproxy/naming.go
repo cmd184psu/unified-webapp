@@ -26,7 +26,7 @@ var (
 	namingDisallowed = regexp.MustCompile(`[^A-Za-z0-9._-]`)
 	namingDotRun     = regexp.MustCompile(`\.{2,}`)
 	namingAllFiller  = regexp.MustCompile(`^_*$`)
-	// namingConvention recognises a managed name: a non-empty safe-fqdn, a
+	// namingConvention recognizes a managed name: a non-empty safe-fqdn, a
 	// hyphen, exactly 12 lowercase hex, then ".pem".
 	namingConvention = regexp.MustCompile(`^[A-Za-z0-9._-]+-[0-9a-f]{12}\.pem$`)
 )

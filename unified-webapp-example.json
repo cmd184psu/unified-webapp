@@ -169,15 +169,15 @@
       "bind_password": "REPLACE_WITH_BIND_PASSWORD",
       "base_dn": "ou=people,dc=cmdhome,dc=net",
       "user_filter": "(uid=%s)",
-      "required_groups": ["cn=household,ou=groups,dc=cmdhome,dc=net"],
+      "required_groups": ["household"],
       "timeout_seconds": 5
     },
     "api_keys": [
-      { "name": "automation", "hash": "sha256:b408256cc1181a47c036389a767e271f39da77e401ad27a28c35805a696b7d22" }
+      { "name": "automation", "hash": "sha256:b408256cc1181a47c036389a767e271f39da77e401ad27a28c35805a696b7d22", "modules": ["certmachine"] }
     ],
     "passkey": {
       "rp_id": "cmdhome.net",
-      "rp_origins": ["https://obsidianoid.cmdhome.net"]
+      "rp_origins": []
     }
   }
 }

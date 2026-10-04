@@ -104,7 +104,7 @@ across two files, not four:
 | `web/shared/ts/menu.test.ts:872-914` | the `side: "auto"` test block: 3 checks (no `data-side` before first open; resolves right on the right half; caches the resolution) | delete the block |
 
 Those last three are why this cannot be a pure "delete dead code" pass: three tests assert the
-behaviour being removed, and the two fakes exist only to feed it. **Delete the tests; do not
+behavior being removed, and the two fakes exist only to feed it. **Delete the tests; do not
 re-point them at `left`/`right`.** They encode the guess the CMD> calls expensive and wrong, and
 keeping them would keep `getBoundingClientRect` alive in the test harness for no reason.
 
@@ -242,7 +242,7 @@ CMD> Once the hamburger placement bug is fixed in shared code, this should be si
   `justify-content`**, so its children pack to the start. MS-1a on its own therefore leaves a
   right-opening drawer behind a left-hand ☰, which is the same mismatch in a new place.
 
-  Land the ☰ at the trailing edge by changing the flex behaviour, not by reordering the append:
+  Land the ☰ at the trailing edge by changing the flex behavior, not by reordering the append:
   either `justify-content: space-between` on `.app-header`, or `margin-inline-start: auto` on the
   trigger. `  `.app-header` is declared **twice, identically** — `ssh.css:29` and `bundle.css:30` — and both
   are tracked and hand-maintained (neither is generated), so **both must be edited or the module
@@ -256,7 +256,7 @@ CMD> Once the hamburger placement bug is fixed in shared code, this should be si
   shared code, not from a multissh source file:
 
   - `web/shared/ts/menu.ts:275` — `if (options.signOut !== false) this.unmountSignOut = mountSignOut(this.trigger)`.
-    The behaviour is **on by default**; a module opts out by passing `signOut: false`
+    The behavior is **on by default**; a module opts out by passing `signOut: false`
     (`menu.ts:112`). multissh passes no `signOut`, so it gets the button.
   - `web/shared/ts/session.ts:201` `mountSignOut` places it in the required order,
     `[ …nav items… ] [ Sign out ] [ ☰ ]`: it wraps both in one `.ui-menu-actions` group and calls
@@ -402,10 +402,10 @@ unshared work; nothing in the lane plan does it.
   must say so plainly rather than implying the module can sign in. Two ways to produce it:
   - a browser extension that exports Netscape format ("Get cookies.txt LOCALLY"), or
   - on the signed-in machine: `yt-dlp --cookies-from-browser chrome --cookies cookies.txt --skip-download <any-url>`
-- New config key `utuber.cookies_file`. Empty means no cookies, which is today's behaviour —
+- New config key `utuber.cookies_file`. Empty means no cookies, which is today's behavior —
   yt-dlp's `--no-cookies` is already the default, so omitting the flag changes nothing.
 - `media.Download` appends `--cookies <cookies_file>` only when the file exists, so deleting
-  the cookie degrades to today's behaviour instead of an error. (Verified: yt-dlp tolerates a
+  the cookie degrades to today's behavior instead of an error. (Verified: yt-dlp tolerates a
   missing `--cookies` path, but being explicit keeps the logged argv honest.)
 - The UI posts the cookie text to the existing `POST /settings.json`. `settingsFile` gains a
   `cookies_txt` field and `settingsStore` gains the cookie path, so this reuses the mechanism
@@ -430,7 +430,7 @@ unshared work; nothing in the lane plan does it.
 - A stale or wrong cookie file produces the same informative error, not a silent failure.
 - `POST /settings.json` with valid Netscape text writes the cookie file `0600`; with
   unparseable text it returns 400 and leaves any existing file untouched.
-- Deleting the cookie file returns the module to today's behaviour with no config error.
+- Deleting the cookie file returns the module to today's behavior with no config error.
 - `media_test.go`: stderr-only failure surfaces the yt-dlp `ERROR:` line; `[download] 45.2%`
   still parses as progress; `--cookies` absent when unconfigured and present when configured.
 - `GET /settings.json` returns D8's seven keys **plus** `cookies_configured` and the mtime —
@@ -455,7 +455,7 @@ git status --porcelain web/                              # → empty     (artifa
 ```
 
 If all five hold, D6 is **done** — record that and move on. Do not re-adopt the panel, and do
-not begin taskmaster work here: the remaining taskmaster behaviour is headless owned-lanes mode
+not begin taskmaster work here: the remaining taskmaster behavior is headless owned-lanes mode
 (item P16) and func-metric aggregation (P17), both of which ship inside D8 with the code they
 depend on. Splitting them from D8 would mean editing files D8 is about to rewrite.
 
@@ -500,7 +500,7 @@ Check in this order, and fix only what you find:
 1. The module's `ThemeManager({ module: ... })` name does not equal its `host_routing` name, so
    it writes a key the login page never looks up.
 2. The module stores its theme under a bespoke key that none of the three lookups cover
-   (`theme.ts:194` also honours an explicit `storageKey` override at `theme.ts:111`).
+   (`theme.ts:194` also honors an explicit `storageKey` override at `theme.ts:111`).
 3. `localStorage` is unavailable or partitioned, so the script silently falls through to the
    system preference — note this is already handled by the `try/catch` at `login.html:15`, so
    if this is the cause, the fix belongs in the module, not the login page.
@@ -530,7 +530,7 @@ new `internal/utuber/main_test.go`, `web/utuber/js/main.ts`, `web/utuber/style.c
 **Item P15 is the part that matters to the rest of Phase 7.** `OSExecutor.Run` is rewritten
 outright: `cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}`, `cmd.Cancel` killing the
 process *group* with `SIGKILL`, `cmd.WaitDelay = 10 * time.Second`, and `cmd.Stdout`/`cmd.Stderr`
-bound to **one shared `lineWriter`** that splits on `\n`, buffers partial lines, serialises
+bound to **one shared `lineWriter`** that splits on `\n`, buffers partial lines, serializes
 `onLine` under a mutex and flushes the remainder after `Wait`. `StdoutPipe` and both scanner
 goroutines are **deleted**. D5 depends on this landing first.
 
@@ -553,7 +553,7 @@ npm run typecheck && npm run build && make gates
 **Runs after D5 and D6.** Authority: lane plan §6 step 6.
 
 **Use these paths.** The lane plan names all three of its documentation targets with paths that
-**no longer exist** after the docs were reorganised. Corrected:
+**no longer exist** after the docs were reorganized. Corrected:
 
 | Lane plan says | The real file |
 |---|---|

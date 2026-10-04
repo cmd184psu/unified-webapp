@@ -40,7 +40,7 @@ type Backup struct {
 	Orig      bool   `json:"orig"`
 }
 
-// classifyBackup recognises a backup file name and extracts its kind, timestamp
+// classifyBackup recognizes a backup file name and extracts its kind, timestamp
 // and whether it is an ".orig-" original. ok is false for an unrelated name.
 func classifyBackup(name string) (kind, ts string, orig, ok bool) {
 	var rest string

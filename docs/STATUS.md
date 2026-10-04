@@ -12,7 +12,7 @@ awaiting sign-off when the sign-off was already recorded.
 
 ---
 
-## 1. The doc set was reorganised. Old paths are dead.
+## 1. The doc set was reorganized. Old paths are dead.
 
 `docs/` is now sorted into subdirectories. **A `docs/X.md` path from any pre-2026-09-28
 document is almost certainly wrong.** 38 of the 50 documents moved to `docs/archived/`.

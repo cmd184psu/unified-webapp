@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -167,13 +168,17 @@ type ceremonyRig struct {
 }
 
 func newCeremonyRig(t *testing.T) *ceremonyRig {
+	return newCeremonyRigWith(t, config.PasskeyConfig{RPID: e2eRPID, RPOrigins: []string{e2eOrigin}})
+}
+
+func newCeremonyRigWith(t *testing.T, pk config.PasskeyConfig) *ceremonyRig {
 	t.Helper()
 	now := time.Now()
 	r := &ceremonyRig{t: t, now: now, groups: []string{"household"}}
 	p := &Policy{
 		Modules:    map[string]ModulePolicy{e2eModule: {PinFile: "/tmp/does-not-matter"}},
 		LDAP:       config.LDAPConfig{URL: "ldap://fake", BaseDN: "dc=example,dc=com", RequiredGroups: []string{"household"}},
-		Passkey:    config.PasskeyConfig{RPID: e2eRPID, RPOrigins: []string{e2eOrigin}},
+		Passkey:    pk,
 		SessionTTL: time.Hour,
 	}
 	ps, err := newPasskeyService(p.Passkey, t.TempDir(), func() time.Time { return now })
@@ -311,7 +316,6 @@ func TestPasskeyE2ERejections(t *testing.T) {
 		mutate func(a *softAuthenticator)
 	}{
 		{"tampered signature", func(a *softAuthenticator) { a.tamperSig = true }},
-		{"wrong origin", func(a *softAuthenticator) { a.origin = "https://evil.test" }},
 		{"wrong rp id", func(a *softAuthenticator) { a.rpID = "evil.test" }},
 		{"unknown credential id", func(a *softAuthenticator) { a.credID = []byte("not-an-enrolled-credential") }},
 		{"mismatched user handle", func(a *softAuthenticator) { a.altUserHand = []byte("someone-elses-handle-0123456789ab") }},
@@ -325,6 +329,27 @@ func TestPasskeyE2ERejections(t *testing.T) {
 			tc.mutate(a)
 			r.wantRejected(r.login(a, ""), http.StatusUnauthorized, msgNotAccepted)
 		})
+	}
+}
+
+// A wrong origin is not a bad passkey: it says so, instead of the generic
+// "not accepted", so the owner knows the address is what needs fixing.
+func TestPasskeyE2EWrongOriginSaysSo(t *testing.T) {
+	r := newCeremonyRig(t)
+	a := newSoftAuthenticator(t)
+	r.register(a)
+	a.origin = "https://evil.test"
+	r.wantRejected(r.login(a, ""), http.StatusBadRequest, msgPasskeyOrigin)
+}
+
+// A routed host under the RP ID needs no entry in rp_origins.
+func TestPasskeyE2ERoutedHostIsAllowedAutomatically(t *testing.T) {
+	u, _ := url.Parse(e2eOrigin)
+	r := newCeremonyRigWith(t, config.PasskeyConfig{RPID: e2eRPID, Hosts: []string{u.Hostname()}})
+	a := newSoftAuthenticator(t)
+	r.register(a)
+	if rec := r.login(a, ""); rec.Code != http.StatusOK {
+		t.Fatalf("login from a routed host = %d %s", rec.Code, rec.Body.String())
 	}
 }
 

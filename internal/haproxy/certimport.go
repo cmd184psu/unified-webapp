@@ -2,7 +2,7 @@ package haproxy
 
 // Importing certificates that already sit in the certs directory (for example
 // from a hand-written haproxy.cfg). They are tracked as-is: the file is never
-// renamed, rewritten or deleted by the editor. The module does not read inside
+// renamed or rewritten. The module does not read inside
 // certificates (D15), so the host name comes from the file name, and whether the
 // bundle really is trusted and serves is settled by the staged test.
 
@@ -56,8 +56,8 @@ func (s *CertStore) Importable(ctx context.Context) ([]ImportableCert, error) {
 	return out, nil
 }
 
-// Import starts tracking the named untracked files, enabled, exactly where they
-// are. It returns the names it adopted; names already tracked or missing from
+// Import starts tracking the named untracked files, exactly where they are
+// (enabled, unless a CertMachine copy of the same host already is). It returns the names it adopted; names already tracked or missing from
 // the directory are skipped.
 func (s *CertStore) Import(ctx context.Context, names []string) ([]string, error) {
 	have, err := s.Importable(ctx)
@@ -74,6 +74,15 @@ func (s *CertStore) Import(ctx context.Context, names []string) ([]string, error
 	if err != nil {
 		return nil, err
 	}
+	// CertMachine is the source of truth: a file for a host that already has an
+	// enabled CertMachine copy is an older duplicate, so it comes in disabled
+	// (visible and removable, but not in the crt-list).
+	haveCM := map[string]bool{}
+	for _, e := range data.Certs {
+		if e.Enabled && e.CertMachine.ID != 0 {
+			haveCM[strings.ToLower(e.CertMachine.FQDN)] = true
+		}
+	}
 	var adopted []string
 	for _, n := range names {
 		c, ok := avail[n]
@@ -81,7 +90,7 @@ func (s *CertStore) Import(ctx context.Context, names []string) ([]string, error
 			continue
 		}
 		data.Certs = append(data.Certs, CertEntry{
-			Name: n, Enabled: true, Note: "imported from " + s.driver.CertsDir(),
+			Name: n, Enabled: !haveCM[c.FQDN], Note: "imported from " + s.driver.CertsDir(),
 			CertMachine: CertSource{FQDN: c.FQDN}, Adopted: true,
 		})
 		adopted = append(adopted, n)

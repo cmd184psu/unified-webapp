@@ -43,7 +43,7 @@ type CertEntry struct {
 	// the row. Only disabled+Superseded rows are ever removed by cleanup.
 	Superseded bool `json:"superseded,omitempty"`
 	// Adopted marks a file that was already in the certs directory and was
-	// imported as-is. The editor tracks it but never deletes the file.
+	// imported as-is rather than pulled from CertMachine.
 	Adopted bool `json:"adopted,omitempty"`
 }
 
@@ -218,10 +218,8 @@ func (s *CertStore) Remove(ctx context.Context, driver Driver, name string, used
 	if idx < 0 {
 		return fmt.Errorf("haproxy: no tracked cert named %q", name)
 	}
-	if !data.Certs[idx].Adopted {
-		if err := driver.PrivilegedRemove(ctx, filepath.Join(driver.CertsDir(), name)); err != nil {
-			return fmt.Errorf("haproxy: remove cert file: %w", err)
-		}
+	if err := driver.PrivilegedRemove(ctx, filepath.Join(driver.CertsDir(), name)); err != nil {
+		return fmt.Errorf("haproxy: remove cert file: %w", err)
 	}
 	data.Certs = append(data.Certs[:idx], data.Certs[idx+1:]...)
 	return s.save(data)
@@ -302,7 +300,7 @@ func (s *CertStore) RemoveSuperseded(ctx context.Context, driver Driver, names [
 	}
 	eligible := map[string]bool{}
 	for _, e := range data.Certs {
-		if e.Superseded && !e.Enabled && !e.Adopted {
+		if e.Superseded && !e.Enabled {
 			eligible[e.Name] = true
 		}
 	}

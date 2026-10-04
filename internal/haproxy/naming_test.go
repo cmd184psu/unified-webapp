@@ -69,11 +69,11 @@ func TestNamingValidateNameRejectsSeparatorsAndTraversal(t *testing.T) {
 func TestNamingIsManaged(t *testing.T) {
 	managed := NamingFileName("brandx.cmdhome.net", []byte("x"))
 	if !NamingIsManaged(managed) {
-		t.Errorf("%q should be recognised as managed", managed)
+		t.Errorf("%q should be recognized as managed", managed)
 	}
 	for _, unmanaged := range []string{"hand-placed.pem", "server.crt", "notes.txt", "brandx.pem", "x-ZZZ.pem"} {
 		if NamingIsManaged(unmanaged) {
-			t.Errorf("%q should NOT be recognised as managed", unmanaged)
+			t.Errorf("%q should NOT be recognized as managed", unmanaged)
 		}
 	}
 }

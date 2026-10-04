@@ -39,7 +39,7 @@ check("port is kept in the origin", suggestFromOrigin("https://a.b.example.com:8
 const ok = ["https://certmachine.cmdhome.net"];
 check("both empty is fine (disabled)", validatePasskeyForm("", []) === "", validatePasskeyForm("", []));
 check("valid passes", validatePasskeyForm("cmdhome.net", ok) === "", validatePasskeyForm("cmdhome.net", ok));
-check("id without origins", validatePasskeyForm("cmdhome.net", []).includes("origin"), "x");
+check("id alone is fine (routed hosts are allowed automatically)", validatePasskeyForm("cmdhome.net", []) === "", validatePasskeyForm("cmdhome.net", []));
 check("origins without id", validatePasskeyForm("", ok).includes("Relying Party ID"), "x");
 check("id with scheme", validatePasskeyForm("https://cmdhome.net", ok).includes("bare host name"), "x");
 check("id with port", validatePasskeyForm("cmdhome.net:443", ok).includes("bare host name"), "x");

@@ -71,10 +71,12 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/config/modules", h.handlePutConfigModules)
 	mux.HandleFunc("POST /api/keys", h.handlePostKey)
 	mux.HandleFunc("DELETE /api/keys/{name}", h.handleDeleteKey)
+	mux.HandleFunc("PUT /api/keys/{name}", h.handlePutKeyScope)
 	mux.HandleFunc("POST /api/ldap/test", h.handlePostLDAPTest)
 	mux.HandleFunc("POST /api/ldap/check", h.handlePostLDAPCheck)
 	mux.HandleFunc("PUT /api/config/session", h.handlePutConfigSession)
 	mux.HandleFunc("GET /api/config/pin-files", h.handleGetPinFiles)
+	mux.HandleFunc("GET /api/config/fs", h.handleListFS)
 	mux.HandleFunc("POST /api/config/pin-files", h.handlePostPinFile)
 	mux.HandleFunc("PUT /api/config/ldap", h.handlePutConfigLdap)
 	mux.HandleFunc("PUT /api/config/passkey", h.handlePutConfigPasskey)
@@ -131,6 +133,10 @@ type authConfigView struct {
 	AdminPIN     adminPINView                       `json:"admin_pin"`
 	LDAP         ldapConfigView                     `json:"ldap"`
 	Passkey      config.PasskeyConfig               `json:"passkey"`
+	// RoutedOrigins are the origins allowed automatically (routed hosts under
+	// the RP ID); SuggestedRPID is the parent domain they share. Read-only.
+	RoutedOrigins []string `json:"routed_origins"`
+	SuggestedRPID string   `json:"suggested_rp_id"`
 	Session      sessionConfigView                  `json:"session"`
 	CookieSecure bool                               `json:"cookie_secure"`
 	CookieDomain string                             `json:"cookie_domain"`
@@ -141,8 +147,9 @@ type authConfigView struct {
 // (upsertNamedHash/handlePostKey never store an empty one), so
 // there is no "unset" case to distinguish here.
 type namedHashView struct {
-	Name string `json:"name"`
-	Hash string `json:"hash"`
+	Name    string   `json:"name"`
+	Hash    string   `json:"hash"`
+	Modules []string `json:"modules"`
 }
 
 // adminPINView reports how the operator PIN is configured without ever
@@ -179,7 +186,7 @@ type sessionConfigView struct {
 func redactAuthConfig(a config.AuthConfig) authConfigView {
 	keys := make([]namedHashView, len(a.APIKeys))
 	for i, k := range a.APIKeys {
-		keys[i] = namedHashView{Name: k.Name, Hash: "(set)"}
+		keys[i] = namedHashView{Name: k.Name, Hash: "(set)", Modules: keyScopeView(k.Modules)}
 	}
 
 	adminPIN := adminPINView{DefinedBy: "none"}
@@ -206,7 +213,13 @@ func redactAuthConfig(a config.AuthConfig) authConfigView {
 		passkey.RPOrigins = []string{}
 	}
 
+	routed := auth.PasskeyOrigins(passkey.RPID, nil, passkey.Hosts)
+	if routed == nil {
+		routed = []string{}
+	}
 	return authConfigView{
+		RoutedOrigins: routed,
+		SuggestedRPID: auth.SuggestRPID(passkey.Hosts),
 		Modules:  modules,
 		APIKeys:  keys,
 		AdminPIN: adminPIN,
@@ -278,7 +291,8 @@ func (h *Handler) handlePutConfigModules(w http.ResponseWriter, r *http.Request)
 
 // postKeyRequest is the POST /api/keys body.
 type postKeyRequest struct {
-	Name string `json:"name"`
+	Name    string   `json:"name"`
+	Modules []string `json:"modules"`
 }
 
 // handlePostKey generates a fresh API key server-side, mirroring
@@ -300,6 +314,11 @@ func (h *Handler) handlePostKey(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, http.StatusBadRequest, "name is required")
 		return
 	}
+	scope, err := NormalizeKeyScope(req.Modules, h.deps.KnownModules)
+	if err != nil {
+		response.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	key, hash, err := generateAPIKey()
 	if err != nil {
@@ -308,14 +327,54 @@ func (h *Handler) handlePostKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = h.mutateAuth(func(cur config.AuthConfig) (config.AuthConfig, bool) {
-		cur.APIKeys = upsertNamedHash(cur.APIKeys, req.Name, hash)
+		cur.APIKeys = upsertKey(cur.APIKeys, req.Name, hash, scope)
 		return cur, true
 	})
 	if err != nil {
 		response.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	response.WriteJSON(w, http.StatusOK, map[string]string{"name": req.Name, "key": key})
+	response.WriteJSON(w, http.StatusOK, map[string]any{"name": req.Name, "key": key, "modules": scope})
+}
+
+// handlePutKeyScope changes where an existing key works, without rotating it:
+// the key itself is unchanged and takes effect on the next request.
+func (h *Handler) handlePutKeyScope(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	var req struct {
+		Modules []string `json:"modules"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.WriteDecodeError(w, err)
+		return
+	}
+	scope, err := NormalizeKeyScope(req.Modules, h.deps.KnownModules)
+	if err != nil {
+		response.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	applied, err := h.mutateAuth(func(cur config.AuthConfig) (config.AuthConfig, bool) {
+		keys := make([]config.NamedHash, len(cur.APIKeys))
+		copy(keys, cur.APIKeys)
+		found := false
+		for i := range keys {
+			if keys[i].Name == name {
+				keys[i].Modules = scope
+				found = true
+			}
+		}
+		cur.APIKeys = keys
+		return cur, found
+	})
+	if err != nil {
+		response.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !applied {
+		response.WriteError(w, http.StatusNotFound, "key not found")
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, map[string]any{"name": name, "modules": scope})
 }
 
 // generateAPIKey mirrors cmd/server/main.go's genAPIKeyAndExit precisely:

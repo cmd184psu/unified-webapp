@@ -1155,8 +1155,30 @@
   -webkit-text-security: none;
   text-security: none;
 }
+.ui-secret.ui-has-reveal {
+  padding-right: 2.25rem;
+}
 .ui-reveal {
-  margin-left: var(--space-1);
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  line-height: 0;
+}
+.ui-reveal:hover {
+  color: var(--color-text);
+}
+.ui-reveal:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
 }
 
 /* web/shared/css/index.css */

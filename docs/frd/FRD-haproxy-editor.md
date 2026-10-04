@@ -22,7 +22,7 @@ effect from the UI**, with no command line:
   the editor, each one **disable-able** while still tracked. Nobody uploads a cert;
 - a read-only **Stats tab** to see how HAProxy is faring.
 
-The behaviour and the user experience are **identical on Ubuntu, Rocky Linux 10 and macOS Tahoe
+The behavior and the user experience are **identical on Ubuntu, Rocky Linux 10 and macOS Tahoe
 (Apple silicon)**; the user cannot tell which one they are touching (D13).
 
 Why: today hero's `haproxy.cfg` is hand-edited as root: a `global`, a `defaults`, a stats listener, one
@@ -63,7 +63,7 @@ Owner answers of 2026-09-30 are marked **(owner)**.
 | D10 | **CertMachine is a separate service, even if it is also a module on this host.** The editor is configured with its **URL and an API key** and talks to it only over HTTP, so it works when CertMachine is on another machine. Any API key issued by that instance works; the editor **does not enforce** that it is dedicated. CertMachine's API **is extended** where the editor needs it, and that extension is specified in this FRD (section 13). **(owner)** |
 | D11 | **Follow the module conventions** (section 9): login by PIN and/or LDAP is **encouraged but not required**, like any other module; each module has its own login, session and timeout (no shared cookie; a login on another module grants nothing here); ☰ menu on the right (side from config only); boolean settings as toggle switches; roomy text fields; no autosave on keystroke; every outcome a toast. **(owner)** |
 | D12 | **Each service has its own certificate, and a certificate may carry SANs for the same service on several systems.** **(owner)** A service names its cert, the editor checks that the service's FQDN(s) are covered by that cert's SANs, and flags any that are not. **Included in this FRD; the owner needs section 6.5's explanation before accepting it.** |
-| D13 | **Identical behaviour and UX on every supported OS.** Ubuntu, Rocky Linux 10 and macOS Tahoe on **Apple silicon** (Homebrew `haproxy`) behave the same; the OS-specific detail is hidden entirely behind the driver, and where that needs sudo or extra effort, the driver does it. The user cannot tell which OS they are on. The macOS-specific setup (launchd job, file limit) is one-time and automatic; the owner sees it as set and forget. **(owner)** |
+| D13 | **Identical behavior and UX on every supported OS.** Ubuntu, Rocky Linux 10 and macOS Tahoe on **Apple silicon** (Homebrew `haproxy`) behave the same; the OS-specific detail is hidden entirely behind the driver, and where that needs sudo or extra effort, the driver does it. The user cannot tell which OS they are on. The macOS-specific setup (launchd job, file limit) is one-time and automatic; the owner sees it as set and forget. **(owner)** |
 | D14 | **A simple read-only Stats tab,** fed by HAProxy's local stats socket (section 7). Kept deliberately small. **(owner)** |
 | D15 | **CertMachine provides every cert detail, over its REST API.** Anything the UI shows about a cert (FQDN, SANs, issuer, validity, status, whether a newer one exists) is fetched from CertMachine. The editor does not parse certs, compute fingerprints, or call `openssl`, and it keeps no copy of those details. It only ensures the HAProxy-format PEM is in place and referenced correctly. If CertMachine's API lacks something the editor needs, **the API is extended** (section 6). **(owner)** |
 | D16 | **The editor owns the certs directory and names the files.** Certs are mandated to come from CertMachine, so the editor does not inherit anyone's naming. It names each file from CertMachine's data by a fixed convention (section 6.2). Nobody works with the files by hand; the owner works in the UI. Files that do not follow the convention are never touched. **(owner)** |
@@ -142,7 +142,7 @@ frontend with a default backend. `state.json` (in `data_dir`), simplified:
 
 - **Globals** are an ordered key/value list, like smbedit's globals: one group for `global`, one for
   `defaults`, editable as text rows, with a pick-list of common keys for convenience. Anything valid is
-  allowed; `haproxy -c` is the check. (This replaces the earlier idea of a typed keyword catalogue.)
+  allowed; `haproxy -c` is the check. (This replaces the earlier idea of a typed keyword catalog.)
 - **Services** are what the generator expands into HAProxy. For each exposed port it emits one TLS
   frontend (`bind *:<port> ssl crt-list <path>`); for each enabled service it emits a host ACL matching
   the service's FQDN(s), with or without a port in the `Host` header, a `use_backend` rule, and a
@@ -470,7 +470,7 @@ If the merge happens, the likely outcome is one "system config editor" module wi
 - **FR-H30** Three drivers (Ubuntu, Rocky Linux, macOS Tahoe on Apple silicon) behind one interface (D1);
   auto-detect with a settings override; an unsupported OS (including Intel macOS) is a scoped 503 with the
   reason.
-- **FR-H31** Identical behaviour and UX on all three OSs; no OS-specific control, label or option appears in
+- **FR-H31** Identical behavior and UX on all three OSs; no OS-specific control, label or option appears in
   the UI (D13).
 - **FR-H32** macOS: HAProxy runs as a driver-owned launchd job with `-W`, a pidfile, a raised file limit and
   `bind *:443`, with graceful `SIGUSR2` reload (verified on Tahoe).
@@ -583,7 +583,7 @@ FR-C2/FR-C3 to verify each download (6.4).
 
 ### 13.4 Requirements
 
-- **FR-C1** `fqdn` and `status` filters on `GET /api/certs` as above; unfiltered behaviour unchanged.
+- **FR-C1** `fqdn` and `status` filters on `GET /api/certs` as above; unfiltered behavior unchanged.
 - **FR-C2** Strong `ETag` (`"sha256-<hex of body>"`) on every file download.
 - **FR-C3** `X-Cert-Id` and `X-Cert-Fingerprint` on every file download.
 - **FR-C4** `If-None-Match` to `304`, and `HEAD`, on file downloads.

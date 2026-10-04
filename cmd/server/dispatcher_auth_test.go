@@ -995,7 +995,7 @@ func TestT5_6_RestartEquivalence(t *testing.T) {
 	// removed under the two-state model; a module's door code is now purely
 	// a config-file (or, here, live-apply) pin_file reference.
 
-	keyRes := doHostWithCookieAndBody(t, srv, http.MethodPost, "admin.example", "/api/keys", `{"name":"`+apiKeyName+`"}`, adminCookie)
+	keyRes := doHostWithCookieAndBody(t, srv, http.MethodPost, "admin.example", "/api/keys", `{"name":"`+apiKeyName+`","modules":["*"]}`, adminCookie)
 	keyBody, _ := io.ReadAll(keyRes.Body)
 	keyRes.Body.Close()
 	if keyRes.StatusCode != http.StatusOK {

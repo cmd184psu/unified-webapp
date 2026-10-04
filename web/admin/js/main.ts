@@ -1,18 +1,10 @@
-import { addOrigin, normalizeOrigins, removeOrigin, suggestFromOrigin, validatePasskeyForm } from "./passkeyform";
+import { parseRequiredGroups } from "./groups";
+import { scopeFromList, scopeSummary, scopeToList, scopeValid, setAll, setModule } from "./keyscope";
+import type { Scope } from "./keyscope";
+import { addOrigin, normalizeOrigins, removeOrigin, validatePasskeyForm } from "./passkeyform";
 import { passkeyCardState, PASSKEYS_NOT_CONFIGURED_TEXT } from "./passkeystate";
-import { ThemeManager, HamburgerMenu, createCopyButton, openModal, showToast, watchSecrets } from "@shared";
+import { ThemeManager, HamburgerMenu, createCopyButton, createToggle, openModal, openTreePicker, showToast, watchSecrets } from "@shared";
 import type { MenuItem } from "@shared";
-
-function debounce<Args extends unknown[]>(
-  fn: (...args: Args) => void,
-  ms: number,
-): (...args: Args) => void {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  return (...args: Args) => {
-    if (timer !== null) clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), ms);
-  };
-}
 
 const themes = new ThemeManager({ module: "admin", default: "dark" });
 themes.apply();
@@ -39,9 +31,11 @@ interface AuthConfig {
   modules?: Record<string, AuthModule>;
   admin_pin?: AdminPin;
   known_modules?: string[];
-  api_keys?: Array<{ name: string; hash?: string }>;
+  api_keys?: Array<{ name: string; hash?: string; modules?: string[] }>;
   ldap?: Record<string, unknown>;
   passkey?: { rp_id?: string; rp_origins?: string[] };
+  routed_origins?: string[];
+  suggested_rp_id?: string;
   session?: { ttl_hours?: number };
   cookie_domain?: string;
   cookie_secure?: boolean;
@@ -52,11 +46,6 @@ interface PasskeyEntry {
   friendlyName?: string;
   createdAt?: number;
   lastUsedAt?: number;
-}
-
-interface PinFile {
-  name: string;
-  path: string;
 }
 
 interface MatrixEntry {
@@ -88,7 +77,6 @@ let passkeys: PasskeyEntry[] = [];
 let passkeysLocked = false;
 // Set when the server answers 409: passkeys are not configured at all.
 let passkeysUnconfigured = "";
-let pinFiles: PinFile[] = [];
 
 // ────────────────────────────────────────────────────────────────
 // API helper
@@ -132,28 +120,60 @@ function errorText(res: ApiResponse<unknown>, fallback: string): string {
 // Pin files
 // ────────────────────────────────────────────────────────────────
 
-async function loadPinFiles(): Promise<void> {
-  const res = await api<{ files?: PinFile[] }>("GET", "/api/config/pin-files");
-  if (res.ok && res.data) {
-    pinFiles = res.data.files || [];
-  }
+function baseName(p: string): string {
+  const i = p.lastIndexOf("/");
+  return i >= 0 ? p.slice(i + 1) : p;
 }
 
-function pinFileOptions(currentValue: string): string {
-  const opts = [
-    `<option value=""${currentValue ? "" : " selected"}>(no pin file)</option>`,
-  ];
-  let found = !currentValue;
-  pinFiles.forEach((f) => {
-    if (f.path === currentValue) found = true;
-    opts.push(
-      `<option value="${esc(f.path)}"${f.path === currentValue ? " selected" : ""}>${esc(f.name)}</option>`,
-    );
+function fmtSize(n: number): string {
+  if (n < 1024) return n + " B";
+  if (n < 1_048_576) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1_048_576).toFixed(1) + " MB";
+}
+
+/** Marks the matrix as changed but not yet saved. */
+function markMatrixDirty(): void {
+  const el = document.getElementById("matrix-status")!;
+  el.textContent = "Unsaved changes";
+  el.className = "status";
+}
+
+/**
+ * Server-side file picker: browse the server's folders, hidden files included.
+ * Resolves with the chosen path, or "" if canceled. It opens where the current
+ * file is, else where any module's key file already is.
+ */
+async function pickServerFile(title: string, current: string): Promise<string> {
+  const start = current || Object.values(matrix).map((e) => e.pinFile).find(Boolean) || "";
+  const chosen = await openTreePicker({
+    title,
+    select: "file",
+    confirmLabel: "Use this file",
+    emptyText: "Nothing here.",
+    startPath: start || undefined,
+    load: async (dir) => {
+      const res = await api<{ entries?: Array<{ name: string; path: string; isDir: boolean; size: number }> }>(
+        "GET",
+        "/api/config/fs?path=" + encodeURIComponent(dir ? dir.path : "/"),
+      );
+      if (!res.ok) throw new Error(errorText(res, "That folder cannot be opened."));
+      return (res.data?.entries || []).map((e) => ({
+        name: e.name,
+        path: e.path,
+        isDir: e.isDir,
+        meta: e.isDir ? undefined : fmtSize(e.size),
+      }));
+    },
   });
-  if (currentValue && !found) {
-    opts.push(`<option value="${esc(currentValue)}" selected>${esc(currentValue)}</option>`);
-  }
-  return opts.join("");
+  return chosen ? chosen.path : "";
+}
+
+async function chooseKeyFile(mod: string): Promise<void> {
+  const path = await pickServerFile("Choose key file for " + mod, matrix[mod].pinFile);
+  if (!path) return;
+  matrix[mod].pinFile = path;
+  renderMatrix();
+  markMatrixDirty();
 }
 
 function buildModulesPayload(adminOverride?: AuthModule): Record<string, AuthModule> {
@@ -189,7 +209,6 @@ async function loadAll(): Promise<void> {
   const [authRes, passkeysRes] = await Promise.all([
     api<AuthConfig>("GET", "/api/config/auth"),
     api<{ passkeys?: PasskeyEntry[] }>("GET", "/api/auth/passkeys"),
-    loadPinFiles(),
   ]);
   if (!authRes.ok) {
     statusEl.textContent = "Unable to load admin config.";
@@ -260,7 +279,9 @@ function renderMatrix(): void {
       `<td><input type="number" class="matrix-idle" data-module="${esc(mod)}" min="1" max="${MAX_IDLE_MINUTES}" step="1" ` +
       `placeholder="${DEFAULT_IDLE_MINUTES}" value="${entry.idle > 0 ? entry.idle : ""}" aria-label="Idle sign-out for ${esc(mod)}, in minutes"${entry.protected ? "" : " disabled"}></td>` +
       `<td>` +
-      `<select class="matrix-pinfile" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>${pinFileOptions(entry.pinFile)}</select> ` +
+      `<span class="matrix-pinfile" title="${esc(entry.pinFile)}">${entry.pinFile ? esc(baseName(entry.pinFile)) : '<span class="hint">no key file</span>'}</span> ` +
+      `<button type="button" class="btn btn-outline btn-sm matrix-choose-btn" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>Choose&hellip;</button> ` +
+      (entry.pinFile ? `<button type="button" class="btn btn-ghost btn-sm matrix-clear-btn" data-module="${esc(mod)}" title="Use no key file" aria-label="Use no key file for ${esc(mod)}"${entry.protected ? "" : " disabled"}>&#x2715;</button> ` : "") +
       `<button type="button" class="btn btn-outline btn-sm matrix-setpin-btn" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>Set PIN&hellip;</button>` +
       `<div class="matrix-setpin-form inline-form hidden" data-module="${esc(mod)}">` +
       `<input type="text" class="matrix-pin-input ui-secret" placeholder="new PIN" autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other" spellcheck="false">` +
@@ -290,10 +311,11 @@ function renderMatrix(): void {
     box.addEventListener("change", () => {
       const mod = box.dataset.module!;
       matrix[mod].protected = box.checked;
-      const select = container.querySelector<HTMLSelectElement>(
-        `select.matrix-pinfile[data-module="${CSS.escape(mod)}"]`,
-      );
-      if (select) select.disabled = !box.checked;
+      container
+        .querySelectorAll<HTMLButtonElement>(
+          `.matrix-choose-btn[data-module="${CSS.escape(mod)}"], .matrix-clear-btn[data-module="${CSS.escape(mod)}"]`,
+        )
+        .forEach((b) => (b.disabled = !box.checked));
       const idle = container.querySelector<HTMLInputElement>(
         `input.matrix-idle[data-module="${CSS.escape(mod)}"]`,
       );
@@ -302,7 +324,7 @@ function renderMatrix(): void {
         `.matrix-setpin-btn[data-module="${CSS.escape(mod)}"]`,
       );
       if (setBtn) setBtn.disabled = !box.checked;
-      autoSaveMatrix();
+      markMatrixDirty();
     });
   });
   container.querySelectorAll<HTMLInputElement>("input.matrix-idle").forEach((input) => {
@@ -312,13 +334,17 @@ function renderMatrix(): void {
       const idle = input.value.trim() === "" || !(n >= 1 && n <= MAX_IDLE_MINUTES) ? 0 : n;
       input.value = idle > 0 ? String(idle) : "";
       matrix[input.dataset.module!].idle = idle;
-      autoSaveMatrix();
+      markMatrixDirty();
     });
   });
-  container.querySelectorAll<HTMLSelectElement>("select.matrix-pinfile").forEach((select) => {
-    select.addEventListener("change", () => {
-      matrix[select.dataset.module!].pinFile = select.value;
-      autoSaveMatrix();
+  container.querySelectorAll<HTMLButtonElement>(".matrix-choose-btn").forEach((btn) => {
+    btn.addEventListener("click", () => void chooseKeyFile(btn.dataset.module!));
+  });
+  container.querySelectorAll<HTMLButtonElement>(".matrix-clear-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      matrix[btn.dataset.module!].pinFile = "";
+      renderMatrix();
+      markMatrixDirty();
     });
   });
   container.querySelectorAll<HTMLButtonElement>(".matrix-setpin-btn").forEach((btn) => {
@@ -353,16 +379,13 @@ async function matrixSetPinSubmit(mod: string): Promise<void> {
   const form = container.querySelector<HTMLElement>(
     `.matrix-setpin-form[data-module="${CSS.escape(mod)}"]`,
   )!;
-  const select = container.querySelector<HTMLSelectElement>(
-    `select.matrix-pinfile[data-module="${CSS.escape(mod)}"]`,
-  )!;
   const errorEl = container.querySelector<HTMLElement>(
     `.matrix-pin-error[data-module="${CSS.escape(mod)}"]`,
   )!;
   const input = form.querySelector<HTMLInputElement>(".matrix-pin-input")!;
   const pin = input.value;
   errorEl.textContent = "";
-  const selectedPath = select.value;
+  const selectedPath = matrix[mod].pinFile;
   const payload = selectedPath
     ? { path: selectedPath, pin }
     : { name: mod + ".pin", pin };
@@ -373,7 +396,6 @@ async function matrixSetPinSubmit(mod: string): Promise<void> {
     return;
   }
   matrix[mod].pinFile = (res.data && res.data.path) || "";
-  await loadPinFiles();
   renderMatrix();
   const statusEl2 = document
     .getElementById("matrix-table")!
@@ -403,8 +425,10 @@ async function saveMatrix(): Promise<void> {
   }
   authConfig!.modules = (res.data && res.data.modules) || toSave;
   Object.keys(matrix).forEach((m) => {
-    matrix[m].pinFile = (authConfig!.modules![m] && authConfig!.modules![m].pin_file) || "";
-    matrix[m].idle = (authConfig!.modules![m] && authConfig!.modules![m].idle_minutes) || 0;
+    const saved = authConfig!.modules![m];
+    if (!saved && !matrix[m].protected) return; // switched off: remember its key file and idle time for when it is switched back on
+    matrix[m].pinFile = (saved && saved.pin_file) || "";
+    matrix[m].idle = (saved && saved.idle_minutes) || 0;
   });
   renderMatrix();
   statusEl2.textContent = "Saved.";
@@ -417,30 +441,145 @@ document.getElementById("matrix-save")!.addEventListener("click", async () => {
   await saveMatrix();
 });
 
-const autoSaveMatrix = debounce(() => {
-  void saveMatrix();
-}, 500);
-
 // ── API keys ────────────────────────────────────────────────────
+
+// A key works on the modules chosen here, or on all of them. Never neither.
+function chooseableModules(): string[] {
+  return (authConfig!.known_modules || []).filter((m) => m !== "admin").sort();
+}
+
+/** "All modules" switch plus one switch per module; calls onChange with every change. */
+function buildScopeChooser(initial: Scope, onChange: (s: Scope) => void): HTMLElement {
+  let scope = initial;
+  const root = document.createElement("div");
+  root.className = "scope-chooser";
+  const draw = (): void => {
+    root.innerHTML = "";
+    root.append(
+      createToggle({
+        checked: scope.all,
+        label: "All modules",
+        onChange: (on) => {
+          scope = setAll(scope, on);
+          onChange(scope);
+          draw();
+        },
+      }),
+    );
+    if (scope.all) return;
+    const grid = document.createElement("div");
+    grid.className = "scope-grid";
+    chooseableModules().forEach((m) => {
+      grid.append(
+        createToggle({
+          checked: scope.modules.includes(m),
+          label: m,
+          onChange: (on) => {
+            scope = setModule(scope, m, on);
+            onChange(scope);
+            draw();
+          },
+        }),
+      );
+    });
+    root.append(grid);
+  };
+  draw();
+  return root;
+}
+
+let newKeyScope: Scope = { all: false, modules: [] };
+
+function updateGenerateButton(): void {
+  const name = (document.getElementById("key-name") as HTMLInputElement).value.trim();
+  (document.getElementById("key-generate") as HTMLButtonElement).disabled = !(name && scopeValid(newKeyScope));
+}
+
+function renderKeyForm(): void {
+  const host = document.getElementById("key-scope")!;
+  host.innerHTML = "";
+  host.append(
+    buildScopeChooser(newKeyScope, (s) => {
+      newKeyScope = s;
+      updateGenerateButton();
+    }),
+  );
+  updateGenerateButton();
+}
+
+document.getElementById("key-name")!.addEventListener("input", updateGenerateButton);
 
 function renderKeys(): void {
   const list = document.getElementById("keys-list")!;
   list.innerHTML = "";
   const keys = authConfig!.api_keys || [];
   if (keys.length === 0) {
-    list.innerHTML = '<li class="named-list-empty">No API keys configured.</li>';
-    return;
+    list.innerHTML = '<li class="named-list-empty">No API keys yet.</li>';
   }
   keys.forEach((k) => {
     const li = document.createElement("li");
+    const scope = scopeFromList(k.modules);
+    const tags = scope.all
+      ? '<span class="tag tag-all">All modules</span>'
+      : scope.modules.map((m) => `<span class="tag">${esc(m)}</span>`).join("");
     li.innerHTML =
       `<span class="named-list-name">${esc(k.name)}</span>` +
-      `<span class="named-list-value">(set)</span>` +
+      `<span class="key-tags" title="${esc(scopeSummary(k.modules))}">${tags}</span>` +
+      `<button type="button" class="btn btn-outline btn-sm btn-scope" data-name="${esc(k.name)}">Scope&hellip;</button>` +
       `<button type="button" class="btn btn-danger btn-sm btn-remove" data-name="${esc(k.name)}">Revoke</button>`;
     list.appendChild(li);
   });
   list.querySelectorAll<HTMLButtonElement>(".btn-remove").forEach((btn) => {
     btn.addEventListener("click", () => revokeKey(btn.dataset.name!));
+  });
+  list.querySelectorAll<HTMLButtonElement>(".btn-scope").forEach((btn) => {
+    btn.addEventListener("click", () => editKeyScope(btn.dataset.name!));
+  });
+  renderKeyForm();
+}
+
+/** Change where an existing key works, without rotating it. */
+function editKeyScope(name: string): void {
+  const key = (authConfig!.api_keys || []).find((k) => k.name === name);
+  if (!key) return;
+  let scope = scopeFromList(key.modules);
+  const body = document.createElement("div");
+  body.className = "scope-dialog";
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "btn btn-primary";
+  save.textContent = "Save";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "btn btn-ghost";
+  cancel.textContent = "Cancel";
+  const error = document.createElement("p");
+  error.className = "error";
+  const actions = document.createElement("div");
+  actions.className = "panel-actions";
+  actions.append(save, cancel);
+  body.append(
+    buildScopeChooser(scope, (s) => {
+      scope = s;
+      save.disabled = !scopeValid(scope);
+    }),
+    error,
+    actions,
+  );
+  const modal = openModal(body, { title: "Where " + name + " works" });
+  cancel.addEventListener("click", () => modal.close());
+  save.addEventListener("click", async () => {
+    const res = await api<{ modules?: string[] }>("PUT", "/api/keys/" + encodeURIComponent(name), {
+      modules: scopeToList(scope),
+    });
+    if (!res.ok) {
+      error.textContent = errorText(res, "Unable to change this key.");
+      return;
+    }
+    key.modules = (res.data && res.data.modules) || scopeToList(scope);
+    modal.close();
+    renderKeys();
+    showToast("Saved.", "success");
   });
 }
 
@@ -450,18 +589,22 @@ document.getElementById("key-form")!.addEventListener("submit", async (e) => {
   errorEl.textContent = "";
   const nameInput = document.getElementById("key-name") as HTMLInputElement;
   const name = nameInput.value.trim();
-  if (!name) return;
-  const res = await api<{ key: string }>("POST", "/api/keys", { name });
+  if (!name || !scopeValid(newKeyScope)) return;
+  const res = await api<{ key: string; modules?: string[] }>("POST", "/api/keys", {
+    name,
+    modules: scopeToList(newKeyScope),
+  });
   if (!res.ok) {
     errorEl.textContent = errorText(res, "Unable to generate key.");
     return;
   }
   authConfig!.api_keys = authConfig!.api_keys || [];
   const idx = authConfig!.api_keys.findIndex((k) => k.name === name);
-  const entry = { name, hash: "(set)" };
+  const entry = { name, hash: "(set)", modules: res.data!.modules || scopeToList(newKeyScope) };
   if (idx !== -1) authConfig!.api_keys[idx] = entry;
   else authConfig!.api_keys.push(entry);
   nameInput.value = "";
+  newKeyScope = { all: false, modules: [] };
   renderKeys();
   showKeyModal(res.data!.key);
 });
@@ -541,12 +684,9 @@ async function saveLdap(): Promise<void> {
   const user_filter = (
     document.getElementById("ldap-user-filter") as HTMLInputElement
   ).value.trim();
-  const required_groups = (
-    document.getElementById("ldap-required-groups") as HTMLInputElement
-  ).value
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const required_groups = parseRequiredGroups(
+    (document.getElementById("ldap-required-groups") as HTMLInputElement).value,
+  );
   const timeout_seconds =
     parseInt((document.getElementById("ldap-timeout") as HTMLInputElement).value, 10) || 0;
   const res = await api("PUT", "/api/config/ldap", {
@@ -690,13 +830,13 @@ document.getElementById("session-form")!.addEventListener("submit", async (e) =>
   await saveSession();
 });
 
-const autoSaveSession = debounce(() => {
-  void saveSession();
-}, 500);
-
 document.querySelectorAll<HTMLElement>("#session-form input").forEach((el) => {
   const eventName = el instanceof HTMLInputElement && el.type === "checkbox" ? "change" : "input";
-  el.addEventListener(eventName, autoSaveSession);
+  el.addEventListener(eventName, () => {
+    const st = document.getElementById("session-status")!;
+    st.textContent = "Unsaved changes";
+    st.className = "status";
+  });
 });
 
 // ── Passkey settings ────────────────────────────────────────────
@@ -741,6 +881,22 @@ function renderPasskeySettings(): void {
   passkeyRpIdInput().value = p.rp_id || "";
   passkeyOrigins = (p.rp_origins || []).slice();
   renderPasskeyOrigins();
+  const routed = document.getElementById("passkey-routed-list")!;
+  routed.innerHTML = "";
+  (authConfig!.routed_origins || []).forEach((o) => {
+    const li = document.createElement("li");
+    li.textContent = o.replace(/^https:\/\//, "");
+    routed.appendChild(li);
+  });
+  routed.classList.toggle("hidden", routed.children.length === 0);
+  // Offer the domain the routed hosts share while the field is empty.
+  const chip = document.getElementById("passkey-rp-suggest") as HTMLButtonElement;
+  const sug = authConfig!.suggested_rp_id || "";
+  chip.textContent = sug ? "＋ " + sug : "";
+  chip.dataset.value = sug;
+  chip.classList.toggle("hidden", !(sug && !(p.rp_id || "")));
+  const extras = document.querySelector<HTMLDetailsElement>(".passkey-extra");
+  if (extras) extras.open = passkeyOrigins.length > 0;
 }
 
 function setPasskeySettingsError(text: string): void {
@@ -787,6 +943,8 @@ async function savePasskeySettings(): Promise<void> {
     return;
   }
   authConfig!.passkey = res.data || {};
+  const fresh = await api<AuthConfig>("GET", "/api/config/auth");
+  if (fresh.ok && fresh.data) authConfig = fresh.data;
   renderPasskeySettings();
   statusEl2.textContent = "Saved.";
   statusEl2.className = "status status-good";
@@ -806,12 +964,9 @@ document.getElementById("passkey-origin-add")!.addEventListener("click", () => {
   inputs[inputs.length - 1]?.focus();
 });
 
-document.getElementById("passkey-origin-here")!.addEventListener("click", () => {
-  const s = suggestFromOrigin(location.origin, passkeyRpIdInput().value, passkeyOrigins);
-  passkeyOrigins = s.origins;
-  passkeyRpIdInput().value = s.rpId;
-  renderPasskeyOrigins();
-  document.getElementById("passkey-settings-hint")!.textContent = s.hint + " Press Save to apply.";
+document.getElementById("passkey-rp-suggest")!.addEventListener("click", (e) => {
+  passkeyRpIdInput().value = (e.currentTarget as HTMLElement).dataset.value || "";
+  (e.currentTarget as HTMLElement).classList.add("hidden");
 });
 
 // ── Passkeys ────────────────────────────────────────────────────
@@ -1151,9 +1306,10 @@ function renderOperatorPin(): void {
     el.textContent =
       "Operator PIN: Not set — the admin module has its own PIN, separate from module PINs.";
   }
-  document.getElementById("operator-pin-file-select")!.innerHTML = pinFileOptions(
-    currentAdminPinFilePath(),
-  );
+  const file = currentAdminPinFilePath();
+  const nameEl = document.getElementById("operator-pin-file-name")!;
+  nameEl.textContent = file ? baseName(file) : "no key file";
+  nameEl.title = file;
 }
 
 document.getElementById("operator-pin-change-file")!.addEventListener("click", async () => {
@@ -1161,8 +1317,8 @@ document.getElementById("operator-pin-change-file")!.addEventListener("click", a
   const errorEl = document.getElementById("operator-pin-error")!;
   statusEl2.textContent = "";
   errorEl.textContent = "";
-  const selectedPath = (document.getElementById("operator-pin-file-select") as HTMLSelectElement)
-    .value;
+  const selectedPath = await pickServerFile("Choose the Operator PIN file", currentAdminPinFilePath());
+  if (!selectedPath) return;
   const toSave = buildModulesPayload({ pin_file: selectedPath });
   const res = await api<{ modules?: Record<string, AuthModule> }>(
     "PUT",
@@ -1175,8 +1331,10 @@ document.getElementById("operator-pin-change-file")!.addEventListener("click", a
   }
   authConfig!.modules = (res.data && res.data.modules) || toSave;
   Object.keys(matrix).forEach((m) => {
-    matrix[m].pinFile = (authConfig!.modules![m] && authConfig!.modules![m].pin_file) || "";
-    matrix[m].idle = (authConfig!.modules![m] && authConfig!.modules![m].idle_minutes) || 0;
+    const saved = authConfig!.modules![m];
+    if (!saved && !matrix[m].protected) return; // switched off: remember its key file and idle time for when it is switched back on
+    matrix[m].pinFile = (saved && saved.pin_file) || "";
+    matrix[m].idle = (saved && saved.idle_minutes) || 0;
   });
   renderMatrix();
   renderOperatorPin();
@@ -1230,10 +1388,11 @@ document.getElementById("operator-pin-form")!.addEventListener("submit", async (
   }
   authConfig!.modules = (modRes.data && modRes.data.modules) || toSave;
   Object.keys(matrix).forEach((m) => {
-    matrix[m].pinFile = (authConfig!.modules![m] && authConfig!.modules![m].pin_file) || "";
-    matrix[m].idle = (authConfig!.modules![m] && authConfig!.modules![m].idle_minutes) || 0;
+    const saved = authConfig!.modules![m];
+    if (!saved && !matrix[m].protected) return; // switched off: remember its key file and idle time for when it is switched back on
+    matrix[m].pinFile = (saved && saved.pin_file) || "";
+    matrix[m].idle = (saved && saved.idle_minutes) || 0;
   });
-  await loadPinFiles();
   renderMatrix();
   renderOperatorPin();
   document.getElementById("operator-pin-form")!.classList.add("hidden");

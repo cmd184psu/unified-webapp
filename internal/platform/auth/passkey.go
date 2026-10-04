@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-webauthn/webauthn/protocol"
@@ -69,6 +70,9 @@ var (
 	// ErrPasskeyNoCredentials is returned when a login ceremony is started
 	// or finished for a username with no enrolled credentials.
 	ErrPasskeyNoCredentials = errors.New("auth: no passkeys enrolled")
+	// ErrPasskeyOriginNotAllowed is returned when the browser's origin is not
+	// one the passkey settings allow (the address is not routed under the RP ID).
+	ErrPasskeyOriginNotAllowed = errors.New("auth: passkeys are not enabled for this address")
 	// ErrPasskeyVerificationFailed is returned when the browser's assertion
 	// or attestation fails WebAuthn verification.
 	ErrPasskeyVerificationFailed = errors.New("auth: passkey verification failed")
@@ -118,10 +122,14 @@ func newPasskeyService(cfg config.PasskeyConfig, dataDir string, now func() time
 		now = time.Now
 	}
 
+	origins := PasskeyOrigins(cfg.RPID, cfg.RPOrigins, cfg.Hosts)
+	if len(origins) == 0 {
+		return nil, fmt.Errorf("auth: no host is routed under %s, so passkeys have nowhere to work; pick the domain your hosts share", cfg.RPID)
+	}
 	w, err := webauthn.New(&webauthn.Config{
 		RPID:          cfg.RPID,
 		RPDisplayName: passkeyRPDisplayName,
-		RPOrigins:     cfg.RPOrigins,
+		RPOrigins:     origins,
 		AuthenticatorSelection: protocol.AuthenticatorSelection{
 			ResidentKey:      protocol.ResidentKeyRequirementRequired,
 			UserVerification: protocol.VerificationPreferred,
@@ -230,6 +238,9 @@ func (s *passkeyService) FinishPasskeyRegistration(ctx context.Context, identity
 	}
 	credential, err := s.webauthn.FinishRegistration(user, session, req)
 	if err != nil {
+		if isOriginError(err) {
+			return PasskeyInfo{}, fmt.Errorf("%w: %v", ErrPasskeyOriginNotAllowed, err)
+		}
 		return PasskeyInfo{}, fmt.Errorf("%w: %v", ErrPasskeyVerificationFailed, err)
 	}
 	stored, err := json.Marshal(credential)
@@ -343,6 +354,9 @@ func (s *passkeyService) FinishPasskeyLogin(ctx context.Context, challengeID str
 		credential, err = s.webauthn.FinishLogin(user, session, req)
 	}
 	if err != nil {
+		if isOriginError(err) {
+			return "", fmt.Errorf("%w: %v", ErrPasskeyOriginNotAllowed, err)
+		}
 		return "", fmt.Errorf("%w: %v", ErrPasskeyVerificationFailed, err)
 	}
 	stored, err := json.Marshal(credential)
@@ -464,4 +478,10 @@ func newPasskeyID(prefix string) string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 	return prefix + "_" + hex.EncodeToString(b)
+}
+
+// isOriginError reports whether a WebAuthn failure was the origin check.
+func isOriginError(err error) bool {
+	var pe *protocol.Error
+	return errors.As(err, &pe) && strings.Contains(strings.ToLower(pe.Details+" "+pe.DevInfo), "origin")
 }

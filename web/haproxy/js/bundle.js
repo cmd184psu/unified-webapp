@@ -7867,7 +7867,7 @@ function PendingBar({ status, statusError, changes, changesError, blockers, busy
     if (serviceActionNeedsConfirm(action, active)) {
       const msg = action === "restart" ? "Restart HAProxy? Active connections will be dropped." : "HAProxy is not running. Start it now?";
       if (!await confirmDialog(msg, { confirmLabel: action === "restart" ? "Restart" : "Start" })) {
-        showToast3(`${action === "restart" ? "Restart" : "Start"} cancelled.`, "notice");
+        showToast3(`${action === "restart" ? "Restart" : "Start"} canceled.`, "notice");
         return;
       }
     }
@@ -8094,8 +8094,8 @@ function CertsPage({ data, configured, refreshKey, onChanged, onPick }) {
     }
   };
   const remove = async (c) => {
-    if (!await confirmDialog2(c.adopted ? `Stop tracking ${c.name}? The file itself is left where it is.` : `Remove ${c.name}? The certificate file and its tracking row are deleted.`, { confirmLabel: "Remove" })) {
-      showToast4("Remove cancelled.", "notice");
+    if (!await confirmDialog2(`Remove ${c.name}? The file is deleted.`, { confirmLabel: "Remove" })) {
+      showToast4("Remove canceled.", "notice");
       return;
     }
     try {
@@ -8227,7 +8227,7 @@ function CertPicker({ configured, forFqdn, onClose, onPulled }) {
       `${cert.fqdn} (id ${cert.id}) is flagged and may not work for ${forFqdn || "this service"}. Install it anyway?`,
       { confirmLabel: "Install anyway" }
     )) {
-      showToast5("Install cancelled.", "notice");
+      showToast5("Install canceled.", "notice");
       return;
     }
     setBusy(true);
@@ -8333,7 +8333,7 @@ function BackupsPage({ refreshKey, onRestore }) {
   };
   const restore = async (name) => {
     if (!await confirmDialog4(`Restore ${name}? It becomes the live configuration (validated first; the current one is backed up).`, { confirmLabel: "Restore" })) {
-      showToast6("Restore cancelled.", "notice");
+      showToast6("Restore canceled.", "notice");
       return;
     }
     await onRestore(name);
@@ -9465,7 +9465,7 @@ function App() {
             /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("button", { className: "btn btn-primary", disabled: busy, onClick: importCommit, children: "Confirm import" }),
             /* @__PURE__ */ (0, import_jsx_runtime14.jsx)("button", { className: "btn btn-ghost", disabled: busy, onClick: () => {
               setPreview(null);
-              showToast12("Import cancelled; nothing stored.", "notice");
+              showToast12("Import canceled; nothing stored.", "notice");
             }, children: "Cancel" })
           ] })
         ] }) : /* @__PURE__ */ (0, import_jsx_runtime14.jsxs)(import_jsx_runtime14.Fragment, { children: [

@@ -49,6 +49,7 @@ const (
 	reasonPasskeyBeginFailed        = "passkey_begin_failed"
 	reasonPasskeyNoCredentials      = "passkey_no_credentials"
 	reasonPasskeyVerificationFailed = "passkey_verification_failed"
+	reasonPasskeyOriginNotAllowed   = "passkey_origin_not_allowed"
 	reasonPasskeyChallengeExpired   = "passkey_challenge_expired"
 	reasonPasskeyNotAuthorized      = "passkey_not_authorized"
 	reasonPasskeyFinishFailed       = "passkey_finish_failed"
@@ -311,6 +312,7 @@ func (s *Service) handleActivity(w http.ResponseWriter, r *http.Request, module 
 const (
 	msgPasskeyNoCredentials = "No passkey is registered for that account. Sign in another way, then register one in Admin > Passkeys."
 	msgPasskeyNotAccepted   = "That passkey was not accepted."
+	msgPasskeyOrigin        = "Passkeys are not enabled for this address."
 	msgPasskeyTimedOut      = "The passkey sign-in timed out. Try again."
 )
 
@@ -388,6 +390,11 @@ func (s *Service) handlePasskeyLoginFinish(w http.ResponseWriter, r *http.Reques
 	case errors.Is(err, ErrPasskeyChallengeInvalid):
 		logLoginAttempt(false, module, "passkey", "", reasonPasskeyChallengeExpired)
 		response.WriteError(w, http.StatusBadRequest, msgPasskeyTimedOut)
+		return
+	case errors.Is(err, ErrPasskeyOriginNotAllowed):
+		log.Printf("event=auth_passkey_origin_not_allowed module=%q host=%q", module, r.Host)
+		logLoginAttempt(false, module, "passkey", "", reasonPasskeyOriginNotAllowed)
+		response.WriteError(w, http.StatusBadRequest, msgPasskeyOrigin)
 		return
 	case errors.Is(err, ErrPasskeyVerificationFailed), errors.Is(err, ErrPasskeyNoCredentials):
 		s.throttle.fail()
@@ -500,6 +507,10 @@ func (s *Service) handlePasskeyRegisterFinish(w http.ResponseWriter, r *http.Req
 	}
 	info, err := p.passkeys.FinishPasskeyRegistration(r.Context(), claims.Subject, req.ChallengeID, req.FriendlyName, req.Credential)
 	if err != nil {
+		if errors.Is(err, ErrPasskeyOriginNotAllowed) {
+			response.WriteError(w, http.StatusBadRequest, msgPasskeyOrigin)
+			return
+		}
 		response.WriteError(w, http.StatusBadRequest, "passkey registration failed")
 		return
 	}

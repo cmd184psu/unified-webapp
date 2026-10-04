@@ -1,3 +1,44 @@
+// web/admin/js/groups.ts
+function parseRequiredGroups(raw) {
+  const out = [];
+  for (const piece of raw.split(",")) {
+    const t = piece.trim();
+    if (!t) continue;
+    const eq = t.indexOf("=");
+    let name = t;
+    if (eq >= 0) {
+      if (t.slice(0, eq).trim().toLowerCase() !== "cn") continue;
+      name = t.slice(eq + 1).trim();
+    }
+    if (name && !out.includes(name)) out.push(name);
+  }
+  return out;
+}
+
+// web/admin/js/keyscope.ts
+var ALL = "*";
+function scopeFromList(list) {
+  if (!list || list.length === 0 || list.includes(ALL)) return { all: true, modules: [] };
+  return { all: false, modules: [...list].sort() };
+}
+function scopeToList(s) {
+  return s.all ? [ALL] : [...s.modules].sort();
+}
+function scopeValid(s) {
+  return s.all || s.modules.length > 0;
+}
+function setAll(s, all) {
+  return { all, modules: s.modules };
+}
+function setModule(s, module, on) {
+  const without = s.modules.filter((m) => m !== module);
+  return { all: s.all, modules: on ? [...without, module].sort() : without };
+}
+function scopeSummary(list) {
+  const s = scopeFromList(list);
+  return s.all ? "All modules" : s.modules.join(", ");
+}
+
 // web/admin/js/passkeyform.ts
 var MAX_ORIGINS = 64;
 function normalizeOrigins(list) {
@@ -14,34 +55,11 @@ function addOrigin(list, origin = "") {
 function removeOrigin(list, index) {
   return list.filter((_, i) => i !== index);
 }
-function suggestFromOrigin(origin, rpId, origins) {
-  const list = origins.includes(origin) ? origins.slice() : addOrigin(origins.filter((o) => o.trim() !== ""), origin);
-  let host = "";
-  try {
-    host = new URL(origin).hostname.toLowerCase();
-  } catch {
-    host = "";
-  }
-  let hint = origins.includes(origin) ? origin + " was already in the list." : "Added " + origin + ".";
-  let id = rpId;
-  if (rpId.trim() === "") {
-    const isIP = /^[0-9.]+$/.test(host) || host.includes(":");
-    if (host && !isIP) {
-      const labels = host.split(".");
-      id = labels.length >= 3 ? labels.slice(1).join(".") : host;
-      hint += " Set the Relying Party ID to " + id + ", the parent domain of this page.";
-    } else {
-      hint += " Could not guess a Relying Party ID from this address; passkeys need a domain name, not an IP.";
-    }
-  }
-  return { origins: list, rpId: id, hint };
-}
 function validatePasskeyForm(rpIdRaw, originsRaw) {
   const id = rpIdRaw.trim().toLowerCase();
   const origins = normalizeOrigins(originsRaw);
   if (id === "" && origins.length === 0) return "";
   if (id === "") return "Relying Party ID is required when allowed origins are set";
-  if (origins.length === 0) return "at least one allowed origin is required when a Relying Party ID is set";
   if (origins.length > MAX_ORIGINS) return "too many allowed origins: at most " + MAX_ORIGINS;
   if (/[\s:/?#@\\]/.test(id)) return "Relying Party ID " + id + " must be a bare host name: no scheme, port, path or spaces";
   if (!id.includes(".") && id !== "localhost") return "Relying Party ID " + id + " must contain at least one dot (for example example.com)";
@@ -77,14 +95,7 @@ function passkeyCardState(status, message) {
 }
 
 // web/admin/js/main.ts
-import { ThemeManager, HamburgerMenu, createCopyButton, openModal, showToast, watchSecrets } from "/shared/dist/shared.mjs";
-function debounce(fn, ms) {
-  let timer = null;
-  return (...args) => {
-    if (timer !== null) clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), ms);
-  };
-}
+import { ThemeManager, HamburgerMenu, createCopyButton, createToggle, openModal, openTreePicker, showToast, watchSecrets } from "/shared/dist/shared.mjs";
 var themes = new ThemeManager({ module: "admin", default: "dark" });
 themes.apply();
 watchSecrets();
@@ -105,7 +116,6 @@ var matrix = {};
 var passkeys = [];
 var passkeysLocked = false;
 var passkeysUnconfigured = "";
-var pinFiles = [];
 async function api(method, path, body) {
   const opts = { method, headers: {} };
   if (body !== void 0) {
@@ -130,27 +140,50 @@ function esc(str) {
 function errorText(res, fallback) {
   return res.data?.error || fallback;
 }
-async function loadPinFiles() {
-  const res = await api("GET", "/api/config/pin-files");
-  if (res.ok && res.data) {
-    pinFiles = res.data.files || [];
-  }
+function baseName(p) {
+  const i = p.lastIndexOf("/");
+  return i >= 0 ? p.slice(i + 1) : p;
 }
-function pinFileOptions(currentValue) {
-  const opts = [
-    `<option value=""${currentValue ? "" : " selected"}>(no pin file)</option>`
-  ];
-  let found = !currentValue;
-  pinFiles.forEach((f) => {
-    if (f.path === currentValue) found = true;
-    opts.push(
-      `<option value="${esc(f.path)}"${f.path === currentValue ? " selected" : ""}>${esc(f.name)}</option>`
-    );
+function fmtSize(n) {
+  if (n < 1024) return n + " B";
+  if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1048576).toFixed(1) + " MB";
+}
+function markMatrixDirty() {
+  const el = document.getElementById("matrix-status");
+  el.textContent = "Unsaved changes";
+  el.className = "status";
+}
+async function pickServerFile(title, current) {
+  const start = current || Object.values(matrix).map((e) => e.pinFile).find(Boolean) || "";
+  const chosen = await openTreePicker({
+    title,
+    select: "file",
+    confirmLabel: "Use this file",
+    emptyText: "Nothing here.",
+    startPath: start || void 0,
+    load: async (dir) => {
+      const res = await api(
+        "GET",
+        "/api/config/fs?path=" + encodeURIComponent(dir ? dir.path : "/")
+      );
+      if (!res.ok) throw new Error(errorText(res, "That folder cannot be opened."));
+      return (res.data?.entries || []).map((e) => ({
+        name: e.name,
+        path: e.path,
+        isDir: e.isDir,
+        meta: e.isDir ? void 0 : fmtSize(e.size)
+      }));
+    }
   });
-  if (currentValue && !found) {
-    opts.push(`<option value="${esc(currentValue)}" selected>${esc(currentValue)}</option>`);
-  }
-  return opts.join("");
+  return chosen ? chosen.path : "";
+}
+async function chooseKeyFile(mod) {
+  const path = await pickServerFile("Choose key file for " + mod, matrix[mod].pinFile);
+  if (!path) return;
+  matrix[mod].pinFile = path;
+  renderMatrix();
+  markMatrixDirty();
 }
 function buildModulesPayload(adminOverride) {
   const toSave = {};
@@ -178,8 +211,7 @@ function currentAdminPinFilePath() {
 async function loadAll() {
   const [authRes, passkeysRes] = await Promise.all([
     api("GET", "/api/config/auth"),
-    api("GET", "/api/auth/passkeys"),
-    loadPinFiles()
+    api("GET", "/api/auth/passkeys")
   ]);
   if (!authRes.ok) {
     statusEl.textContent = "Unable to load admin config.";
@@ -230,7 +262,7 @@ function renderMatrix() {
   modules.forEach((mod) => {
     const entry = matrix[mod];
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${esc(mod)}</td><td><label class="ui-toggle" title="Protected"><input type="checkbox" class="matrix-protected" data-module="${esc(mod)}" aria-label="Protect ${esc(mod)}"${entry.protected ? " checked" : ""}><span class="ui-toggle-track"></span></label></td><td><input type="number" class="matrix-idle" data-module="${esc(mod)}" min="1" max="${MAX_IDLE_MINUTES}" step="1" placeholder="${DEFAULT_IDLE_MINUTES}" value="${entry.idle > 0 ? entry.idle : ""}" aria-label="Idle sign-out for ${esc(mod)}, in minutes"${entry.protected ? "" : " disabled"}></td><td><select class="matrix-pinfile" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>${pinFileOptions(entry.pinFile)}</select> <button type="button" class="btn btn-outline btn-sm matrix-setpin-btn" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>Set PIN&hellip;</button><div class="matrix-setpin-form inline-form hidden" data-module="${esc(mod)}"><input type="text" class="matrix-pin-input ui-secret" placeholder="new PIN" autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other" spellcheck="false"><button type="button" class="btn btn-primary btn-sm matrix-pin-save" data-module="${esc(mod)}">Save</button><button type="button" class="btn btn-ghost btn-sm matrix-pin-cancel" data-module="${esc(mod)}">Cancel</button></div><span class="matrix-pin-status status" data-module="${esc(mod)}"></span><p class="matrix-pin-error error" data-module="${esc(mod)}"></p></td>`;
+    tr.innerHTML = `<td>${esc(mod)}</td><td><label class="ui-toggle" title="Protected"><input type="checkbox" class="matrix-protected" data-module="${esc(mod)}" aria-label="Protect ${esc(mod)}"${entry.protected ? " checked" : ""}><span class="ui-toggle-track"></span></label></td><td><input type="number" class="matrix-idle" data-module="${esc(mod)}" min="1" max="${MAX_IDLE_MINUTES}" step="1" placeholder="${DEFAULT_IDLE_MINUTES}" value="${entry.idle > 0 ? entry.idle : ""}" aria-label="Idle sign-out for ${esc(mod)}, in minutes"${entry.protected ? "" : " disabled"}></td><td><span class="matrix-pinfile" title="${esc(entry.pinFile)}">${entry.pinFile ? esc(baseName(entry.pinFile)) : '<span class="hint">no key file</span>'}</span> <button type="button" class="btn btn-outline btn-sm matrix-choose-btn" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>Choose&hellip;</button> ` + (entry.pinFile ? `<button type="button" class="btn btn-ghost btn-sm matrix-clear-btn" data-module="${esc(mod)}" title="Use no key file" aria-label="Use no key file for ${esc(mod)}"${entry.protected ? "" : " disabled"}>&#x2715;</button> ` : "") + `<button type="button" class="btn btn-outline btn-sm matrix-setpin-btn" data-module="${esc(mod)}"${entry.protected ? "" : " disabled"}>Set PIN&hellip;</button><div class="matrix-setpin-form inline-form hidden" data-module="${esc(mod)}"><input type="text" class="matrix-pin-input ui-secret" placeholder="new PIN" autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other" spellcheck="false"><button type="button" class="btn btn-primary btn-sm matrix-pin-save" data-module="${esc(mod)}">Save</button><button type="button" class="btn btn-ghost btn-sm matrix-pin-cancel" data-module="${esc(mod)}">Cancel</button></div><span class="matrix-pin-status status" data-module="${esc(mod)}"></span><p class="matrix-pin-error error" data-module="${esc(mod)}"></p></td>`;
     tbody.appendChild(tr);
   });
   const adminTr = document.createElement("tr");
@@ -243,10 +275,9 @@ function renderMatrix() {
     box.addEventListener("change", () => {
       const mod = box.dataset.module;
       matrix[mod].protected = box.checked;
-      const select = container.querySelector(
-        `select.matrix-pinfile[data-module="${CSS.escape(mod)}"]`
-      );
-      if (select) select.disabled = !box.checked;
+      container.querySelectorAll(
+        `.matrix-choose-btn[data-module="${CSS.escape(mod)}"], .matrix-clear-btn[data-module="${CSS.escape(mod)}"]`
+      ).forEach((b) => b.disabled = !box.checked);
       const idle = container.querySelector(
         `input.matrix-idle[data-module="${CSS.escape(mod)}"]`
       );
@@ -255,7 +286,7 @@ function renderMatrix() {
         `.matrix-setpin-btn[data-module="${CSS.escape(mod)}"]`
       );
       if (setBtn) setBtn.disabled = !box.checked;
-      autoSaveMatrix();
+      markMatrixDirty();
     });
   });
   container.querySelectorAll("input.matrix-idle").forEach((input) => {
@@ -264,13 +295,17 @@ function renderMatrix() {
       const idle = input.value.trim() === "" || !(n >= 1 && n <= MAX_IDLE_MINUTES) ? 0 : n;
       input.value = idle > 0 ? String(idle) : "";
       matrix[input.dataset.module].idle = idle;
-      autoSaveMatrix();
+      markMatrixDirty();
     });
   });
-  container.querySelectorAll("select.matrix-pinfile").forEach((select) => {
-    select.addEventListener("change", () => {
-      matrix[select.dataset.module].pinFile = select.value;
-      autoSaveMatrix();
+  container.querySelectorAll(".matrix-choose-btn").forEach((btn) => {
+    btn.addEventListener("click", () => void chooseKeyFile(btn.dataset.module));
+  });
+  container.querySelectorAll(".matrix-clear-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      matrix[btn.dataset.module].pinFile = "";
+      renderMatrix();
+      markMatrixDirty();
     });
   });
   container.querySelectorAll(".matrix-setpin-btn").forEach((btn) => {
@@ -304,16 +339,13 @@ async function matrixSetPinSubmit(mod) {
   const form = container.querySelector(
     `.matrix-setpin-form[data-module="${CSS.escape(mod)}"]`
   );
-  const select = container.querySelector(
-    `select.matrix-pinfile[data-module="${CSS.escape(mod)}"]`
-  );
   const errorEl = container.querySelector(
     `.matrix-pin-error[data-module="${CSS.escape(mod)}"]`
   );
   const input = form.querySelector(".matrix-pin-input");
   const pin = input.value;
   errorEl.textContent = "";
-  const selectedPath = select.value;
+  const selectedPath = matrix[mod].pinFile;
   const payload = selectedPath ? { path: selectedPath, pin } : { name: mod + ".pin", pin };
   const res = await api("POST", "/api/config/pin-files", payload);
   input.value = "";
@@ -322,7 +354,6 @@ async function matrixSetPinSubmit(mod) {
     return;
   }
   matrix[mod].pinFile = res.data && res.data.path || "";
-  await loadPinFiles();
   renderMatrix();
   const statusEl2 = document.getElementById("matrix-table").querySelector(`.matrix-pin-status[data-module="${CSS.escape(mod)}"]`);
   if (statusEl2) {
@@ -349,8 +380,10 @@ async function saveMatrix() {
   }
   authConfig.modules = res.data && res.data.modules || toSave;
   Object.keys(matrix).forEach((m) => {
-    matrix[m].pinFile = authConfig.modules[m] && authConfig.modules[m].pin_file || "";
-    matrix[m].idle = authConfig.modules[m] && authConfig.modules[m].idle_minutes || 0;
+    const saved = authConfig.modules[m];
+    if (!saved && !matrix[m].protected) return;
+    matrix[m].pinFile = saved && saved.pin_file || "";
+    matrix[m].idle = saved && saved.idle_minutes || 0;
   });
   renderMatrix();
   statusEl2.textContent = "Saved.";
@@ -361,24 +394,127 @@ async function saveMatrix() {
 document.getElementById("matrix-save").addEventListener("click", async () => {
   await saveMatrix();
 });
-var autoSaveMatrix = debounce(() => {
-  void saveMatrix();
-}, 500);
+function chooseableModules() {
+  return (authConfig.known_modules || []).filter((m) => m !== "admin").sort();
+}
+function buildScopeChooser(initial, onChange) {
+  let scope = initial;
+  const root = document.createElement("div");
+  root.className = "scope-chooser";
+  const draw = () => {
+    root.innerHTML = "";
+    root.append(
+      createToggle({
+        checked: scope.all,
+        label: "All modules",
+        onChange: (on) => {
+          scope = setAll(scope, on);
+          onChange(scope);
+          draw();
+        }
+      })
+    );
+    if (scope.all) return;
+    const grid = document.createElement("div");
+    grid.className = "scope-grid";
+    chooseableModules().forEach((m) => {
+      grid.append(
+        createToggle({
+          checked: scope.modules.includes(m),
+          label: m,
+          onChange: (on) => {
+            scope = setModule(scope, m, on);
+            onChange(scope);
+            draw();
+          }
+        })
+      );
+    });
+    root.append(grid);
+  };
+  draw();
+  return root;
+}
+var newKeyScope = { all: false, modules: [] };
+function updateGenerateButton() {
+  const name = document.getElementById("key-name").value.trim();
+  document.getElementById("key-generate").disabled = !(name && scopeValid(newKeyScope));
+}
+function renderKeyForm() {
+  const host = document.getElementById("key-scope");
+  host.innerHTML = "";
+  host.append(
+    buildScopeChooser(newKeyScope, (s) => {
+      newKeyScope = s;
+      updateGenerateButton();
+    })
+  );
+  updateGenerateButton();
+}
+document.getElementById("key-name").addEventListener("input", updateGenerateButton);
 function renderKeys() {
   const list = document.getElementById("keys-list");
   list.innerHTML = "";
   const keys = authConfig.api_keys || [];
   if (keys.length === 0) {
-    list.innerHTML = '<li class="named-list-empty">No API keys configured.</li>';
-    return;
+    list.innerHTML = '<li class="named-list-empty">No API keys yet.</li>';
   }
   keys.forEach((k) => {
     const li = document.createElement("li");
-    li.innerHTML = `<span class="named-list-name">${esc(k.name)}</span><span class="named-list-value">(set)</span><button type="button" class="btn btn-danger btn-sm btn-remove" data-name="${esc(k.name)}">Revoke</button>`;
+    const scope = scopeFromList(k.modules);
+    const tags = scope.all ? '<span class="tag tag-all">All modules</span>' : scope.modules.map((m) => `<span class="tag">${esc(m)}</span>`).join("");
+    li.innerHTML = `<span class="named-list-name">${esc(k.name)}</span><span class="key-tags" title="${esc(scopeSummary(k.modules))}">${tags}</span><button type="button" class="btn btn-outline btn-sm btn-scope" data-name="${esc(k.name)}">Scope&hellip;</button><button type="button" class="btn btn-danger btn-sm btn-remove" data-name="${esc(k.name)}">Revoke</button>`;
     list.appendChild(li);
   });
   list.querySelectorAll(".btn-remove").forEach((btn) => {
     btn.addEventListener("click", () => revokeKey(btn.dataset.name));
+  });
+  list.querySelectorAll(".btn-scope").forEach((btn) => {
+    btn.addEventListener("click", () => editKeyScope(btn.dataset.name));
+  });
+  renderKeyForm();
+}
+function editKeyScope(name) {
+  const key = (authConfig.api_keys || []).find((k) => k.name === name);
+  if (!key) return;
+  let scope = scopeFromList(key.modules);
+  const body = document.createElement("div");
+  body.className = "scope-dialog";
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "btn btn-primary";
+  save.textContent = "Save";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "btn btn-ghost";
+  cancel.textContent = "Cancel";
+  const error = document.createElement("p");
+  error.className = "error";
+  const actions = document.createElement("div");
+  actions.className = "panel-actions";
+  actions.append(save, cancel);
+  body.append(
+    buildScopeChooser(scope, (s) => {
+      scope = s;
+      save.disabled = !scopeValid(scope);
+    }),
+    error,
+    actions
+  );
+  const modal = openModal(body, { title: "Where " + name + " works" });
+  cancel.addEventListener("click", () => modal.close());
+  save.addEventListener("click", async () => {
+    const res = await api("PUT", "/api/keys/" + encodeURIComponent(name), {
+      modules: scopeToList(scope)
+    });
+    if (!res.ok) {
+      error.textContent = errorText(res, "Unable to change this key.");
+      return;
+    }
+    key.modules = res.data && res.data.modules || scopeToList(scope);
+    modal.close();
+    renderKeys();
+    showToast("Saved.", "success");
   });
 }
 document.getElementById("key-form").addEventListener("submit", async (e) => {
@@ -387,18 +523,22 @@ document.getElementById("key-form").addEventListener("submit", async (e) => {
   errorEl.textContent = "";
   const nameInput = document.getElementById("key-name");
   const name = nameInput.value.trim();
-  if (!name) return;
-  const res = await api("POST", "/api/keys", { name });
+  if (!name || !scopeValid(newKeyScope)) return;
+  const res = await api("POST", "/api/keys", {
+    name,
+    modules: scopeToList(newKeyScope)
+  });
   if (!res.ok) {
     errorEl.textContent = errorText(res, "Unable to generate key.");
     return;
   }
   authConfig.api_keys = authConfig.api_keys || [];
   const idx = authConfig.api_keys.findIndex((k) => k.name === name);
-  const entry = { name, hash: "(set)" };
+  const entry = { name, hash: "(set)", modules: res.data.modules || scopeToList(newKeyScope) };
   if (idx !== -1) authConfig.api_keys[idx] = entry;
   else authConfig.api_keys.push(entry);
   nameInput.value = "";
+  newKeyScope = { all: false, modules: [] };
   renderKeys();
   showKeyModal(res.data.key);
 });
@@ -459,7 +599,9 @@ async function saveLdap() {
   const bind_password = document.getElementById("ldap-bind-password").value;
   const base_dn = document.getElementById("ldap-base-dn").value.trim();
   const user_filter = document.getElementById("ldap-user-filter").value.trim();
-  const required_groups = document.getElementById("ldap-required-groups").value.split(",").map((s) => s.trim()).filter(Boolean);
+  const required_groups = parseRequiredGroups(
+    document.getElementById("ldap-required-groups").value
+  );
   const timeout_seconds = parseInt(document.getElementById("ldap-timeout").value, 10) || 0;
   const res = await api("PUT", "/api/config/ldap", {
     url,
@@ -586,12 +728,13 @@ document.getElementById("session-form").addEventListener("submit", async (e) => 
   e.preventDefault();
   await saveSession();
 });
-var autoSaveSession = debounce(() => {
-  void saveSession();
-}, 500);
 document.querySelectorAll("#session-form input").forEach((el) => {
   const eventName = el instanceof HTMLInputElement && el.type === "checkbox" ? "change" : "input";
-  el.addEventListener(eventName, autoSaveSession);
+  el.addEventListener(eventName, () => {
+    const st = document.getElementById("session-status");
+    st.textContent = "Unsaved changes";
+    st.className = "status";
+  });
 });
 var passkeyOrigins = [];
 function passkeyRpIdInput() {
@@ -629,6 +772,21 @@ function renderPasskeySettings() {
   passkeyRpIdInput().value = p.rp_id || "";
   passkeyOrigins = (p.rp_origins || []).slice();
   renderPasskeyOrigins();
+  const routed = document.getElementById("passkey-routed-list");
+  routed.innerHTML = "";
+  (authConfig.routed_origins || []).forEach((o) => {
+    const li = document.createElement("li");
+    li.textContent = o.replace(/^https:\/\//, "");
+    routed.appendChild(li);
+  });
+  routed.classList.toggle("hidden", routed.children.length === 0);
+  const chip = document.getElementById("passkey-rp-suggest");
+  const sug = authConfig.suggested_rp_id || "";
+  chip.textContent = sug ? "\uFF0B " + sug : "";
+  chip.dataset.value = sug;
+  chip.classList.toggle("hidden", !(sug && !(p.rp_id || "")));
+  const extras = document.querySelector(".passkey-extra");
+  if (extras) extras.open = passkeyOrigins.length > 0;
 }
 function setPasskeySettingsError(text) {
   document.getElementById("passkey-settings-error").textContent = text;
@@ -670,6 +828,8 @@ async function savePasskeySettings() {
     return;
   }
   authConfig.passkey = res.data || {};
+  const fresh = await api("GET", "/api/config/auth");
+  if (fresh.ok && fresh.data) authConfig = fresh.data;
   renderPasskeySettings();
   statusEl2.textContent = "Saved.";
   statusEl2.className = "status status-good";
@@ -686,12 +846,9 @@ document.getElementById("passkey-origin-add").addEventListener("click", () => {
   const inputs = document.querySelectorAll("#passkey-origins-list input");
   inputs[inputs.length - 1]?.focus();
 });
-document.getElementById("passkey-origin-here").addEventListener("click", () => {
-  const s = suggestFromOrigin(location.origin, passkeyRpIdInput().value, passkeyOrigins);
-  passkeyOrigins = s.origins;
-  passkeyRpIdInput().value = s.rpId;
-  renderPasskeyOrigins();
-  document.getElementById("passkey-settings-hint").textContent = s.hint + " Press Save to apply.";
+document.getElementById("passkey-rp-suggest").addEventListener("click", (e) => {
+  passkeyRpIdInput().value = e.currentTarget.dataset.value || "";
+  e.currentTarget.classList.add("hidden");
 });
 function formatTimestamp(sec) {
   if (!sec) return "";
@@ -972,16 +1129,18 @@ function renderOperatorPin() {
   } else {
     el.textContent = "Operator PIN: Not set \u2014 the admin module has its own PIN, separate from module PINs.";
   }
-  document.getElementById("operator-pin-file-select").innerHTML = pinFileOptions(
-    currentAdminPinFilePath()
-  );
+  const file = currentAdminPinFilePath();
+  const nameEl = document.getElementById("operator-pin-file-name");
+  nameEl.textContent = file ? baseName(file) : "no key file";
+  nameEl.title = file;
 }
 document.getElementById("operator-pin-change-file").addEventListener("click", async () => {
   const statusEl2 = document.getElementById("operator-pin-file-status");
   const errorEl = document.getElementById("operator-pin-error");
   statusEl2.textContent = "";
   errorEl.textContent = "";
-  const selectedPath = document.getElementById("operator-pin-file-select").value;
+  const selectedPath = await pickServerFile("Choose the Operator PIN file", currentAdminPinFilePath());
+  if (!selectedPath) return;
   const toSave = buildModulesPayload({ pin_file: selectedPath });
   const res = await api(
     "PUT",
@@ -994,8 +1153,10 @@ document.getElementById("operator-pin-change-file").addEventListener("click", as
   }
   authConfig.modules = res.data && res.data.modules || toSave;
   Object.keys(matrix).forEach((m) => {
-    matrix[m].pinFile = authConfig.modules[m] && authConfig.modules[m].pin_file || "";
-    matrix[m].idle = authConfig.modules[m] && authConfig.modules[m].idle_minutes || 0;
+    const saved = authConfig.modules[m];
+    if (!saved && !matrix[m].protected) return;
+    matrix[m].pinFile = saved && saved.pin_file || "";
+    matrix[m].idle = saved && saved.idle_minutes || 0;
   });
   renderMatrix();
   renderOperatorPin();
@@ -1046,10 +1207,11 @@ document.getElementById("operator-pin-form").addEventListener("submit", async (e
   }
   authConfig.modules = modRes.data && modRes.data.modules || toSave;
   Object.keys(matrix).forEach((m) => {
-    matrix[m].pinFile = authConfig.modules[m] && authConfig.modules[m].pin_file || "";
-    matrix[m].idle = authConfig.modules[m] && authConfig.modules[m].idle_minutes || 0;
+    const saved = authConfig.modules[m];
+    if (!saved && !matrix[m].protected) return;
+    matrix[m].pinFile = saved && saved.pin_file || "";
+    matrix[m].idle = saved && saved.idle_minutes || 0;
   });
-  await loadPinFiles();
   renderMatrix();
   renderOperatorPin();
   document.getElementById("operator-pin-form").classList.add("hidden");

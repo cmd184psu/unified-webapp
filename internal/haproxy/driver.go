@@ -28,7 +28,7 @@ const (
 // case-insensitive name ("ubuntu", "rocky", "macos"/"darwin") selects that
 // platform directly. "auto" (or "") probes the running host: /etc/os-release
 // ID ubuntu/rocky, or uname Darwin on arm64 for macOS. Any other value — an
-// unsupported or unrecognised OS, including Intel macOS — returns an error
+// unsupported or unrecognized OS, including Intel macOS — returns an error
 // whose message names the offending OS, which the caller surfaces as the
 // scoped-503 reason.
 //

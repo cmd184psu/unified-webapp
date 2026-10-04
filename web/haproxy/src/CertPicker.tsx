@@ -41,7 +41,7 @@ export function CertPicker({ configured, forFqdn, onClose, onPulled }: Props) {
       `${cert.fqdn} (id ${cert.id}) is flagged and may not work for ${forFqdn || 'this service'}. Install it anyway?`,
       { confirmLabel: 'Install anyway' },
     ))) {
-      showToast('Install cancelled.', 'notice')
+      showToast('Install canceled.', 'notice')
       return
     }
     setBusy(true)

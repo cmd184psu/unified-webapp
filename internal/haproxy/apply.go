@@ -507,7 +507,7 @@ func (a *Applier) run(ctx context.Context, cfgText, crtListText string, buildSta
 
 	// `systemctl reload` fails on a stopped service, so record whether HAProxy is
 	// running before touching anything. A Status error leaves the state unknown,
-	// and unknown keeps the reload behaviour.
+	// and unknown keeps the reload behavior.
 	inactive := false
 	if st, serr := a.driver.Status(ctx); serr != nil {
 		a.log.Addf("%s: could not read the service status (%v); assuming it is running", op, serr)

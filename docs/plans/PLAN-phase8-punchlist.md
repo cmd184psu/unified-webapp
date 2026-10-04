@@ -1,6 +1,6 @@
 # Phase 8: Punch List Fixes
 
-Status: `In progress`. P8-1 and P8-4 are done; P8-2, P8-3, P8-5 and P8-6 are open and are to be fixed in this phase.
+Status: `In progress`. Done: P8-1 through P8-9 (P8-7 built, awaiting the owner's check). Nothing else is open; the utuber cookie-auth effort moved to Phase 9.
 Branch: `bugfixes`
 Sibling docs: `docs/plans/PLAN-ui-unification-phase7-punchlist.md` (Phase 7, D0–D9).
 Section labels here are **P8-1, P8-2, …** so they never collide with Phase 7's D-numbers.
@@ -12,27 +12,27 @@ Section labels here are **P8-1, P8-2, …** so they never collide with Phase 7's
 - **`make test` is the standard full test** (it runs `go test -race ./...`). Run it before calling work done.
   It does not run the web tests: `make test-web` (typecheck plus the web suites) does, and `make check`
   runs everything (web-verify, test-web, gates, test).
-- **Defer means "until Phase 8", and this is Phase 8.** Nothing here is parked for a later phase.
+- **Defer means "until Phase 8", and this is Phase 8.** Nothing on this punch list is parked for a later phase. (The utuber cookie-auth effort was never a punch-list item; it moved to Phase 9 on 2026-10-03.)
 - Modules do not share sessions: each has its own login, session and timeout cycle, and no global cookie.
 
-## Related Phase 8 work not tracked in this list
+## Deferred to Phase 9
 
-Phase 8 also carries the utuber headless-browser cookie-auth effort (IP-bound cookies make
-pasted cookie files useless across networks). It gets its **own FRD** and is not a punch-list item.
-Do not fold it in here.
+The utuber headless-browser cookie-auth effort (IP-bound cookies make pasted cookie files useless across
+networks) is **out of Phase 8 and moves to Phase 9** (owner decision, 2026-10-03). It gets its own FRD there.
+Nothing about it is left open in this phase.
 
 ## Punch list
 
 | # | Module | Item | Severity | Status |
 |---|---|---|---|---|
 | P8-1 | certmachine | Edit dialog **Save** button does nothing | High: blocked SAN re-issue | **Done and signed off** (commit 79bf28f) |
-| P8-2 | admin | LDAP form corrupts `required_groups` (DNs split on commas); admin "Test user login" disagrees with the real login | High | Open (autosave removed, Test configuration added; comma split and the test-box discrepancy remain) |
+| P8-2 | admin | LDAP form corrupts `required_groups` (DNs split on commas); admin "Test user login" disagrees with the real login | High | **Done** (2026-10-03): a pasted group DN is reduced to its cn instead of split on commas; LDAP, session, Module Access and passkey forms all save only on an explicit Save; Test configuration added; "Test user login" confirmed working by the owner. Module Access also has a server-side file picker for key files (hidden files shown) and remembers a module's key file while it is switched off |
 | P8-3 | auth / admin | Passkeys cannot be registered or used | High | **Done**: register in admin and passkey login on todo confirmed by the owner (2026-10-02) |
 | P8-4 | auth | An LDAP/passkey login on one module was accepted by every module | High: contradicted the per-module session rule | **Done** (red/green test); owner confirmed it works |
-| P8-5 | certmachine | "Show/Hide N expired/archived certificates" button does not hide or show | Medium | **Fixed in code** (measured in headless Chrome); awaiting owner browser check |
-| P8-6 | certmachine | Delete should be a button on each cert card, behind an "Are you sure?" modal | Medium | **Built**: Delete on every card with an "Are you sure?" dialog; awaiting owner browser check |
-| P8-7 | auth | API keys are global: one key is accepted on every protected non-admin module (not module-scoped) | Medium: contradicts the per-module isolation rule | Open; owner to circle back |
-| P8-8 | smbedit | With many shares the list falls off the bottom of the screen with no scrollbar; the footer is pushed out of view | Medium | **Fixed in code**, measured in headless Chrome; awaiting owner browser check |
+| P8-5 | certmachine | "Show/Hide N expired/archived certificates" button does not hide or show | Medium | **Done**: confirmed by the owner in a browser (2026-10-02) |
+| P8-6 | certmachine | Delete should be a button on each cert card, behind an "Are you sure?" modal | Medium | **Done**: Delete on every card with an "Are you sure?" dialog; confirmed by the owner (2026-10-02) |
+| P8-7 | auth | API keys are global: one key is accepted on every protected non-admin module (not module-scoped) | Medium: contradicts the per-module isolation rule | **Built** (2026-10-03): each key lists the modules it works on, or all (`*`); an unscoped legacy key is treated as all; the admin form and `-modules` require a scope; awaiting the owner's browser check |
+| P8-8 | smbedit | With many shares the list falls off the bottom of the screen with no scrollbar; the footer is pushed out of view | Medium | **Done**: confirmed by the owner in a browser (2026-10-02) |
 | P8-9 | haproxy | The haproxy module has no settings UI: CertMachine URL/API key/CA file, config/certs/crt-list/stats-socket paths, backup count, expiry warning days, OS override can only be set by editing the config file | Medium: violates "always a UI to do it for you" | **Built** (Settings tab, live apply); enabling the module itself and its hostname still needs host_routing, tracked separately as the general "Modules" admin control |
 
 ---
@@ -113,7 +113,7 @@ UI in the meantime: the Passkeys card keeps showing its real failure states unti
 - Browsers only allow WebAuthn on HTTPS or `localhost`. The app serves plain HTTP (no `tls_cert` /
   `tls_key`); the admin page already warns about this. (hero is reached over HTTPS through haproxy, so the
   origin the browser sees may already be HTTPS; the app behind it does not know that.)
-- `rp_origins` must list each module's exact origin, and `rp_id` must be a parent of every one.
+- `rp_origins` must list each module's exact origin, and `rp_id` must be a parent of every one. **(Superseded 2026-10-03: routed hosts under `rp_id` are now allowed automatically; see the note at the end of this section.)**
 - Session cookies are host-only (`cookie_domain` empty) and identity grants are module-scoped, so a
   passkey login is per module host, as the design requires. A shared `cookie_domain` is not a fix: it is
   one global value, it is against the design, and certmachine is on a different domain
@@ -137,7 +137,7 @@ UI in the meantime: the Passkeys card keeps showing its real failure states unti
    passkey is registered and used per module host.
 4. Whether admin may ever accept a passkey; today `OfferedMethods("admin")` is `["admin_pin"]` only.
 5. What the card shows when passkeys are not configured. Owner preference: show the truth of the current
-   behaviour; do not hide or disable the feature as a workaround.
+   behavior; do not hide or disable the feature as a workaround.
 
 **Progress 2026-10-02.** The owner signed in through the new dialog and got "Signed in as chris, but passkeys
 are still unavailable (HTTP 400)": the server answers 400 "passkeys not available" while `auth.passkey.rp_id` is
@@ -188,6 +188,17 @@ passkey button to use the targeted flow.
 module with it; confirm removing the user from the required group revokes it; certmachine unaffected.
 
 CMD> not "eventual" .. fix it during this phase.  This was a misunderstanding.  I meant defer until phase 8 and this is phase 8.
+
+
+**Update 2026-10-03: allowed addresses are automatic.** Passkey login on smbedit failed with
+`passkey_verification_failed` because `https://smb.hero.cmdhome.net` was missing from the hand-kept `rp_origins`
+list, and the generic message hid the reason. Now: every host in `host_routing` at or under `rp_id` is an
+allowed origin automatically (`auth.PasskeyOrigins`, computed from config, never from the request); `rp_origins`
+holds only extras; a wrong origin answers 400 "Passkeys are not enabled for this address." and logs the host
+(`passkey_origin_not_allowed`); the admin card is one Domain field (with the shared parent domain offered),
+a read-only list of the addresses in use, and a collapsed "Extra addresses". Tests: `passkey_origins_test.go`,
+`TestPasskeyE2ERoutedHostIsAllowedAutomatically`, `TestPasskeyE2EWrongOriginSaysSo`. **Confirmed by the owner
+(2026-10-03): passkey login on smbedit works.**
 
 ---
 
@@ -286,7 +297,7 @@ confirming.
 **Owner expectation (2026-10-02).** API keys were thought to be per module. Same principle as P8-4: each
 module has its own login and credentials, and one module's credential grants nothing on another.
 
-**Verified behaviour.** `internal/platform/auth/gate.go` (~line 203): every protected non-admin module
+**Verified behavior.** `internal/platform/auth/gate.go` (~line 203): every protected non-admin module
 accepts a valid bearer API key unconditionally, "no per-module opt-in"; admin never accepts one. The config
 shape is `auth.api_keys: [{name, hash}]` (`config.NamedHash`), with no module field. So a key created for
 one client (for example the haproxy editor talking to CertMachine) is also valid on todo, grocery, utuber,
@@ -299,6 +310,15 @@ refused), have the gate accept a key only on its listed modules, show and set th
 key action and in `-gen-api-key` (a `-modules` flag), and add a red-first test like P8-4's
 `session_isolation_test.go`: a key scoped to certmachine gets 401 on every other module host. Decide what an
 unscoped existing key does (breaking vs. compatible).
+
+
+**Built 2026-10-03 (owner decisions).** A key has a module list or "all" (`"*"`). A key can never be created
+unscoped (admin form and `-gen-api-key -modules`, validated by `admin.NormalizeKeyScope`); a legacy entry with no
+`modules` is treated as "all" (`auth.KeyAllowsModule`) and shown as All modules. The gate accepts a key only on a
+module in its scope, a key naming admin or an unknown module is rejected, and Scope… in Admin > API Keys changes a
+key's modules without rotating it (`PUT /api/keys/{name}`). Tests: `apikey_scope_test.go` (a scoped key gets 401
+everywhere else), `keyscope_test.go`, `keyscope.test.ts`. The existing `haproxy-editor` key stays "all" until the
+owner scopes it (it only needs `certmachine`).
 
 ---
 

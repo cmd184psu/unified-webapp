@@ -42,6 +42,8 @@ function fail(message) {
 // added at PLAN-utuber-taskmaster-lane.md Phase 4 (D10 shared queue panel).
 const suites = [
   { name: "admin-passkeyform", entry: "web/admin/js/passkeyform.test.ts", runner: "esbuild-cjs" },
+  { name: "admin-keyscope", entry: "web/admin/js/keyscope.test.ts", runner: "esbuild-cjs" },
+  { name: "admin-groups", entry: "web/admin/js/groups.test.ts", runner: "esbuild-cjs" },
   { name: "admin-passkeystate", entry: "web/admin/js/passkeystate.test.ts", runner: "esbuild-cjs" },
   { name: "sshcommand", entry: "web/multissh/js/sshcommand.test.ts", runner: "esbuild-cjs" },
   { name: "certmachine-status", entry: "web/certmachine/js/status.test.ts", runner: "esbuild-cjs" },

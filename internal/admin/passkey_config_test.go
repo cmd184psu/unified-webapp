@@ -94,7 +94,7 @@ func TestPutConfigPasskeyInvalidRejected400UnchangedState(t *testing.T) {
 		{"origin with fragment", "example.com", []string{"https://example.com#x"}, "no path"},
 		{"origin no host", "example.com", []string{"https://"}, "host"},
 		{"origin garbage", "example.com", []string{"not a url"}, "origin"},
-		{"id without origins", "example.com", nil, "allowed origin"},
+		{"id with nothing routed under it", "example.com", nil, "no host is routed under example.com"},
 		{"origins without id", "", []string{"https://example.com"}, "Relying Party ID"},
 		{"too many origins", "example.com", long, "64"},
 	}

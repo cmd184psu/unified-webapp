@@ -1556,7 +1556,7 @@ function mountTaskView(container, live2, caps3, taskName) {
 }
 
 // web/taskmaster/js/buildinfo.ts
-var FRONTEND_BUILD_TIME = "6bf31b04e4aa";
+var FRONTEND_BUILD_TIME = "85a22a34cacd";
 
 // web/taskmaster/js/main.ts
 var caps2 = { allow_sudo: false };

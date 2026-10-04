@@ -116,7 +116,7 @@ type CertMachineClient struct {
 type CertMachineOption func(*CertMachineClient)
 
 // CertMachineWithHTTPClient replaces the HTTP client (tests, or a caller with
-// its own transport). By default the client honours CAFile/InsecureSkipVerify
+// its own transport). By default the client honors CAFile/InsecureSkipVerify
 // via CertMachineHTTPClient.
 func CertMachineWithHTTPClient(hc *http.Client) CertMachineOption {
 	return func(c *CertMachineClient) {

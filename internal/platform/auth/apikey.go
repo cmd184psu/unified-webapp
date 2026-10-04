@@ -18,13 +18,13 @@ const sha256HashPrefix = "sha256:"
 // checkAPIKey extracts a presented API key from r -- an Authorization: Bearer
 // header first, falling back to X-API-Key if that header is absent or not
 // Bearer-shaped -- and compares its SHA-256 digest against every entry in
-// keys, returning the name of the first match.
+// keys, returning the name of the first match whose scope includes module.
 //
 // A missing, malformed, or unrecognized key is a silent (\"\", false): no
 // error, no logging, so callers can fall through to cookie auth. checkAPIKey
 // only reads r; it never touches cookies or a ResponseWriter and never
 // creates a session.
-func checkAPIKey(keys []config.NamedHash, r *http.Request) (name string, ok bool) {
+func checkAPIKey(keys []config.NamedHash, module string, r *http.Request) (name string, ok bool) {
 	presented := extractAPIKey(r)
 	if presented == "" {
 		return "", false
@@ -38,11 +38,25 @@ func checkAPIKey(keys []config.NamedHash, r *http.Request) (name string, ok bool
 		if !ok {
 			continue
 		}
-		if subtle.ConstantTimeCompare([]byte(presentedHex), []byte(entryHex)) == 1 {
+		if subtle.ConstantTimeCompare([]byte(presentedHex), []byte(entryHex)) == 1 && KeyAllowsModule(entry.Modules, module) {
 			return entry.Name, true
 		}
 	}
 	return "", false
+}
+
+// KeyAllowsModule reports whether an API key scoped to modules works on module.
+// An empty scope (a legacy key) and "*" both mean every module.
+func KeyAllowsModule(modules []string, module string) bool {
+	if len(modules) == 0 {
+		return true
+	}
+	for _, m := range modules {
+		if m == config.AllModules || m == module {
+			return true
+		}
+	}
+	return false
 }
 
 // extractAPIKey reads the presented key value from r: the Authorization

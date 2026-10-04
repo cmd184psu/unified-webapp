@@ -59,7 +59,7 @@ export function PendingBar({ status, statusError, changes, changesError, blocker
         ? 'Restart HAProxy? Active connections will be dropped.'
         : 'HAProxy is not running. Start it now?'
       if (!(await confirmDialog(msg, { confirmLabel: action === 'restart' ? 'Restart' : 'Start' }))) {
-        showToast(`${action === 'restart' ? 'Restart' : 'Start'} cancelled.`, 'notice')
+        showToast(`${action === 'restart' ? 'Restart' : 'Start'} canceled.`, 'notice')
         return
       }
     }

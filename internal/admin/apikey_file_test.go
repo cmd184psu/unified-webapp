@@ -43,7 +43,7 @@ func loadKeys(t *testing.T, p string) []config.NamedHash {
 
 func TestAddAPIKeyToConfigFile_EmptyList(t *testing.T) {
 	p := writeCfg(t, `{"api_keys": []}`)
-	replaced, err := AddAPIKeyToConfigFile(p, "haproxy-editor", "sha256:aa")
+	replaced, err := AddAPIKeyToConfigFile(p, "haproxy-editor", "sha256:aa", nil)
 	if err != nil || replaced {
 		t.Fatalf("replaced=%v err=%v", replaced, err)
 	}
@@ -55,7 +55,7 @@ func TestAddAPIKeyToConfigFile_EmptyList(t *testing.T) {
 
 func TestAddAPIKeyToConfigFile_NoAPIKeysMember(t *testing.T) {
 	p := writeCfg(t, `{"cookie_secure": true}`)
-	if _, err := AddAPIKeyToConfigFile(p, "n", "sha256:bb"); err != nil {
+	if _, err := AddAPIKeyToConfigFile(p, "n", "sha256:bb", nil); err != nil {
 		t.Fatal(err)
 	}
 	if k := loadKeys(t, p); len(k) != 1 || k[0].Hash != "sha256:bb" {
@@ -65,7 +65,7 @@ func TestAddAPIKeyToConfigFile_NoAPIKeysMember(t *testing.T) {
 
 func TestAddAPIKeyToConfigFile_NoAuthMember(t *testing.T) {
 	p := writeCfg(t, "")
-	if _, err := AddAPIKeyToConfigFile(p, "n", "sha256:bb"); err != nil {
+	if _, err := AddAPIKeyToConfigFile(p, "n", "sha256:bb", nil); err != nil {
 		t.Fatal(err)
 	}
 	if k := loadKeys(t, p); len(k) != 1 {
@@ -75,31 +75,31 @@ func TestAddAPIKeyToConfigFile_NoAuthMember(t *testing.T) {
 
 func TestAddAPIKeyToConfigFile_AppendsAndLeavesOthers(t *testing.T) {
 	p := writeCfg(t, `{"api_keys": [{"name":"old","hash":"sha256:01"}]}`)
-	replaced, err := AddAPIKeyToConfigFile(p, "new", "sha256:02")
+	replaced, err := AddAPIKeyToConfigFile(p, "new", "sha256:02", nil)
 	if err != nil || replaced {
 		t.Fatalf("replaced=%v err=%v", replaced, err)
 	}
 	k := loadKeys(t, p)
-	if len(k) != 2 || k[0] != (config.NamedHash{Name: "old", Hash: "sha256:01"}) || k[1].Name != "new" {
+	if len(k) != 2 || k[0].Name != "old" || k[0].Hash != "sha256:01" || k[1].Name != "new" {
 		t.Fatalf("keys=%+v", k)
 	}
 }
 
 func TestAddAPIKeyToConfigFile_ReplaceSameName(t *testing.T) {
 	p := writeCfg(t, `{"api_keys": [{"name":"a","hash":"sha256:01"},{"name":"b","hash":"sha256:02"}]}`)
-	replaced, err := AddAPIKeyToConfigFile(p, "b", "sha256:99")
+	replaced, err := AddAPIKeyToConfigFile(p, "b", "sha256:99", nil)
 	if err != nil || !replaced {
 		t.Fatalf("replaced=%v err=%v", replaced, err)
 	}
 	k := loadKeys(t, p)
-	if len(k) != 2 || k[0].Hash != "sha256:01" || k[1] != (config.NamedHash{Name: "b", Hash: "sha256:99"}) {
+	if len(k) != 2 || k[0].Hash != "sha256:01" || k[1].Name != "b" || k[1].Hash != "sha256:99" {
 		t.Fatalf("keys=%+v", k)
 	}
 }
 
 func TestAddAPIKeyToConfigFile_BytesOutsideAuthUntouched(t *testing.T) {
 	p := writeCfg(t, `{"api_keys": []}`)
-	if _, err := AddAPIKeyToConfigFile(p, "n", "sha256:cc"); err != nil {
+	if _, err := AddAPIKeyToConfigFile(p, "n", "sha256:cc", nil); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(p)
@@ -117,7 +117,7 @@ func TestAddAPIKeyToConfigFile_StoredHashMatchesKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := writeCfg(t, `{}`)
-	if _, err := AddAPIKeyToConfigFile(p, "n", hash); err != nil {
+	if _, err := AddAPIKeyToConfigFile(p, "n", hash, nil); err != nil {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256([]byte(key))
@@ -128,7 +128,7 @@ func TestAddAPIKeyToConfigFile_StoredHashMatchesKey(t *testing.T) {
 
 func TestAddAPIKeyToConfigFile_PreservesMode(t *testing.T) {
 	p := writeCfg(t, `{}`)
-	if _, err := AddAPIKeyToConfigFile(p, "n", "sha256:dd"); err != nil {
+	if _, err := AddAPIKeyToConfigFile(p, "n", "sha256:dd", nil); err != nil {
 		t.Fatal(err)
 	}
 	st, _ := os.Stat(p)
@@ -139,7 +139,7 @@ func TestAddAPIKeyToConfigFile_PreservesMode(t *testing.T) {
 
 func TestAddAPIKeyToConfigFile_MissingFile(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "nope.json")
-	if _, err := AddAPIKeyToConfigFile(p, "n", "sha256:ee"); err == nil {
+	if _, err := AddAPIKeyToConfigFile(p, "n", "sha256:ee", nil); err == nil {
 		t.Fatal("want error")
 	}
 	if _, err := os.Stat(p); !os.IsNotExist(err) {
@@ -151,7 +151,7 @@ func TestAddAPIKeyToConfigFile_InvalidJSONUnchanged(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "bad.json")
 	orig := []byte("{ not json")
 	os.WriteFile(p, orig, 0o600)
-	if _, err := AddAPIKeyToConfigFile(p, "n", "sha256:ee"); err == nil {
+	if _, err := AddAPIKeyToConfigFile(p, "n", "sha256:ee", nil); err == nil {
 		t.Fatal("want error")
 	}
 	if got, _ := os.ReadFile(p); !bytes.Equal(got, orig) {
@@ -163,7 +163,7 @@ func TestAddAPIKeyToConfigFile_BlankName(t *testing.T) {
 	p := writeCfg(t, `{}`)
 	before, _ := os.ReadFile(p)
 	for _, n := range []string{"", "   "} {
-		if _, err := AddAPIKeyToConfigFile(p, n, "sha256:ee"); err == nil {
+		if _, err := AddAPIKeyToConfigFile(p, n, "sha256:ee", nil); err == nil {
 			t.Fatalf("name %q: want error", n)
 		}
 	}
@@ -181,7 +181,7 @@ func TestAddAPIKeyToConfigFile_RestoresOriginalOnValidationFailure(t *testing.T)
 	validateConfigFile = func(string) error { return errors.New("boom") }
 	defer func() { validateConfigFile = old }()
 
-	_, err := AddAPIKeyToConfigFile(p, "n", "sha256:ff")
+	_, err := AddAPIKeyToConfigFile(p, "n", "sha256:ff", nil)
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("err=%v", err)
 	}
@@ -191,5 +191,16 @@ func TestAddAPIKeyToConfigFile_RestoresOriginalOnValidationFailure(t *testing.T)
 	}
 	if st, _ := os.Stat(p); st.Mode().Perm() != 0o640 {
 		t.Fatalf("mode=%v", st.Mode().Perm())
+	}
+}
+
+func TestAddAPIKeyToConfigFile_StoresTheScope(t *testing.T) {
+	p := writeCfg(t, `{"api_keys": []}`)
+	if _, err := AddAPIKeyToConfigFile(p, "svc", "sha256:aa", []string{"certmachine", "todo"}); err != nil {
+		t.Fatal(err)
+	}
+	k := loadKeys(t, p)
+	if len(k) != 1 || len(k[0].Modules) != 2 || k[0].Modules[0] != "certmachine" {
+		t.Fatalf("keys=%+v", k)
 	}
 }

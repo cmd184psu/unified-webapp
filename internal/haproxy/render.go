@@ -7,7 +7,7 @@ import (
 )
 
 // repeatableGlobal keys may appear several times, so a baseline entry is never
-// dropped in favour of a model entry with the same key.
+// dropped in favor of a model entry with the same key.
 var repeatableGlobal = map[string]bool{"log": true, "stats": true}
 
 // statsSocketValue is the value of the generated `stats socket` line. The

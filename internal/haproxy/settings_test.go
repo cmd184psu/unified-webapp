@@ -13,7 +13,7 @@ import (
 	"cmd184psu/unified-webapp/internal/platform/config"
 )
 
-// optDriver is the fake driver honouring DriverOptions path overrides, so a
+// optDriver is the fake driver honoring DriverOptions path overrides, so a
 // live settings change is observable through the driver's reported paths.
 type optDriver struct {
 	*fakeDriver

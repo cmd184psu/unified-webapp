@@ -17,13 +17,13 @@ var validateConfigFile = func(path string) error {
 	return err
 }
 
-// AddAPIKeyToConfigFile upserts {name, hash} into auth.api_keys of the config
+// AddAPIKeyToConfigFile upserts {name, hash, modules} into auth.api_keys of the config
 // file at configPath, for the -gen-api-key CLI. An existing entry with the
 // same name has its hash replaced (key rotation) and replaced is true. Only
 // the top-level "auth" member is rewritten (spliceAuthConfig); every other
 // byte is untouched. The file must already exist and keeps its mode. If the
 // result fails to load, the original bytes are restored atomically.
-func AddAPIKeyToConfigFile(configPath, name, hash string) (replaced bool, err error) {
+func AddAPIKeyToConfigFile(configPath, name, hash string, modules []string) (replaced bool, err error) {
 	if strings.TrimSpace(name) == "" {
 		return false, errors.New("admin: API key name must not be empty")
 	}
@@ -47,7 +47,7 @@ func AddAPIKeyToConfigFile(configPath, name, hash string) (replaced bool, err er
 			break
 		}
 	}
-	auth.APIKeys = upsertNamedHash(auth.APIKeys, name, hash)
+	auth.APIKeys = upsertKey(auth.APIKeys, name, hash, modules)
 
 	if err := spliceAuthConfig(configPath, auth); err != nil {
 		return false, err

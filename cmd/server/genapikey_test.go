@@ -17,7 +17,7 @@ func TestRunGenAPIKey_WithNameStoresHash(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "cfg.json")
 	os.WriteFile(p, []byte(`{"port": 8081}`), 0o600)
 	var out bytes.Buffer
-	if err := runGenAPIKey("haproxy-editor", p, &out); err != nil {
+	if err := runGenAPIKey("haproxy-editor", "certmachine", p, &out); err != nil {
 		t.Fatal(err)
 	}
 	s := out.String()
@@ -42,7 +42,7 @@ func TestRunGenAPIKey_EmptyNameWritesNothing(t *testing.T) {
 	orig := []byte(`{"port": 8081}`)
 	os.WriteFile(p, orig, 0o600)
 	var out bytes.Buffer
-	if err := runGenAPIKey("", p, &out); err != nil {
+	if err := runGenAPIKey("", "", p, &out); err != nil {
 		t.Fatal(err)
 	}
 	if !regexp.MustCompile(`^key:  \S+\nhash: sha256:[0-9a-f]{64}\n$`).MatchString(out.String()) {
@@ -56,7 +56,7 @@ func TestRunGenAPIKey_EmptyNameWritesNothing(t *testing.T) {
 func TestRunGenAPIKey_MissingConfigPrintsNoKey(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "nope.json")
 	var out bytes.Buffer
-	if err := runGenAPIKey("x", p, &out); err == nil {
+	if err := runGenAPIKey("x", "all", p, &out); err == nil {
 		t.Fatal("want error")
 	}
 	if out.Len() != 0 {

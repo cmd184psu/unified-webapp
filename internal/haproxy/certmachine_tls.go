@@ -10,7 +10,7 @@ import (
 )
 
 // CertMachineHTTPClient builds the HTTP client the CertMachine client uses,
-// honouring the settings' TLS options: CAFile adds a private root (for example
+// honoring the settings' TLS options: CAFile adds a private root (for example
 // CertMachine's own CA when CertMachine runs on another machine) on top of the
 // system roots, and InsecureSkipVerify is the documented, off-by-default toggle.
 //

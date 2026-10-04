@@ -69,8 +69,8 @@ export function CertsPage({ data, configured, refreshKey, onChanged, onPick }: P
   }
 
   const remove = async (c: CertRow) => {
-    if (!(await confirmDialog(c.adopted ? `Stop tracking ${c.name}? The file itself is left where it is.` : `Remove ${c.name}? The certificate file and its tracking row are deleted.`, { confirmLabel: 'Remove' }))) {
-      showToast('Remove cancelled.', 'notice')
+    if (!(await confirmDialog(`Remove ${c.name}? The file is deleted.`, { confirmLabel: 'Remove' }))) {
+      showToast('Remove canceled.', 'notice')
       return
     }
     try {

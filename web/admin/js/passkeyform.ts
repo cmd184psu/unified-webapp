@@ -63,7 +63,6 @@ export function validatePasskeyForm(rpIdRaw: string, originsRaw: string[]): stri
   const origins = normalizeOrigins(originsRaw);
   if (id === "" && origins.length === 0) return "";
   if (id === "") return "Relying Party ID is required when allowed origins are set";
-  if (origins.length === 0) return "at least one allowed origin is required when a Relying Party ID is set";
   if (origins.length > MAX_ORIGINS) return "too many allowed origins: at most " + MAX_ORIGINS;
   if (/[\s:/?#@\\]/.test(id)) return "Relying Party ID " + id + " must be a bare host name: no scheme, port, path or spaces";
   if (!id.includes(".") && id !== "localhost") return "Relying Party ID " + id + " must contain at least one dot (for example example.com)";

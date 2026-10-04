@@ -427,3 +427,120 @@ table.matrix td {
   overflow-wrap: anywhere;
   font-size: 0.85rem;
 }
+
+/* Passkey settings: one domain field, the auto-allowed addresses, extras tucked away. */
+.passkey-domain {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.passkey-domain input {
+  flex: 1;
+  min-width: 0;
+}
+
+.passkey-routed-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.passkey-routed-list li::before {
+  content: "✓ ";
+  color: var(--color-success);
+}
+
+.passkey-extra summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  margin-bottom: 0.4rem;
+}
+
+.passkey-extra .btn {
+  margin-top: 0.4rem;
+}
+
+.chip {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.1rem 0.65rem;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-primary);
+  background: transparent;
+  color: var(--color-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chip:hover {
+  background: var(--color-primary-tint);
+}
+
+/* Module Access: the chosen key file, then Choose / clear. */
+.matrix-pinfile {
+  display: inline-block;
+  min-width: 8rem;
+  margin-right: 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+/* API keys: where each one works. */
+.key-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.key-form input {
+  width: min(100%, 20rem);
+}
+
+.key-tags {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.tag {
+  font-size: 0.78rem;
+  padding: 0.05rem 0.55rem;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.tag-all {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.scope-chooser {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.scope-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 0.4rem 1rem;
+}
+
+.scope-dialog .scope-chooser {
+  min-width: min(28rem, 80vw);
+}
+
+.key-scope {
+  align-self: stretch;
+}
