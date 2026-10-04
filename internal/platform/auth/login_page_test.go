@@ -202,3 +202,24 @@ func TestLoginPageNamesItsModule(t *testing.T) {
 		t.Error("an unknown module name must be HTML-escaped")
 	}
 }
+
+// TestLoginPagePasskeyShowsServerMessage proves the passkey button surfaces
+// the server's own error text for a failed begin/finish, sends the typed
+// username only when there is one, and keeps the cancel line for a genuine
+// browser cancel.
+func TestLoginPagePasskeyShowsServerMessage(t *testing.T) {
+	body := string(loginPageHTML)
+	for _, want := range []string{
+		"body.error",                  // the server's message is what gets shown
+		"serverMessage(res,",          // used for both begin and finish failures
+		"typed ? { username: typed }", // username only when typed, else {} (discoverable)
+		"Passkey sign-in failed or was canceled.",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("login page missing %q", want)
+		}
+	}
+	if strings.Count(body, "serverMessage(res,") < 3 { // definition + begin + finish
+		t.Errorf("serverMessage must be used for both the begin and the finish response")
+	}
+}

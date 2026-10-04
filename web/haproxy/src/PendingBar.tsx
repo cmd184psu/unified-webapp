@@ -1,0 +1,117 @@
+import { useState } from 'react'
+import { showToast, confirmDialog } from '@shared'
+import { api, Changes, Issue, Status } from './api'
+import { checkMessage, classifyDiff, pendingView, serviceActionNeedsConfirm, diagnosticNotices } from './pending'
+import { IssueList } from './IssueList'
+import { BusyDialog } from './BusyDialog'
+
+const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+function DiffView({ title, diff }: { title: string; diff: string }) {
+  if (!diff) return null
+  return (
+    <div className="stack">
+      <div className="field-label">{title}</div>
+      <pre className="diff">
+        {classifyDiff(diff).map((l, n) => <div key={n} className={`diff-${l.kind}`}>{l.text || ' '}</div>)}
+      </pre>
+    </div>
+  )
+}
+
+interface Props {
+  status: Status | null
+  statusError: string | null
+  changes: Changes | null
+  changesError: string | null
+  blockers: Issue[]
+  busy: boolean
+  dirty: boolean
+  onApply: () => void
+  onRefresh: () => void
+}
+
+/** Always-visible bar: pending state, Review/Apply/Check, service actions, status panel (D4, D5). */
+export function PendingBar({ status, statusError, changes, changesError, blockers, busy, dirty, onApply, onRefresh }: Props) {
+  const [review, setReview] = useState(false)
+  const [acting, setActing] = useState(false)
+  const [working, setWorking] = useState('')
+  const v = pendingView(changes, busy)
+  const active = status?.service.active ?? false
+
+  const check = async () => {
+    setWorking('Testing the configuration…')
+    setActing(true)
+    try {
+      const r = await api.check()
+      showToast(checkMessage(r), r.needsCerts ? 'notice' : r.ok ? 'success' : 'error')
+    } catch (e) {
+      showToast(`Check failed: ${errMsg(e)}`, 'error')
+    } finally {
+      setWorking('')
+      setActing(false)
+    }
+  }
+
+  const service = async (action: 'reload' | 'restart' | 'start') => {
+    if (serviceActionNeedsConfirm(action, active)) {
+      const msg = action === 'restart'
+        ? 'Restart HAProxy? Active connections will be dropped.'
+        : 'HAProxy is not running. Start it now?'
+      if (!(await confirmDialog(msg, { confirmLabel: action === 'restart' ? 'Restart' : 'Start' }))) {
+        showToast(`${action === 'restart' ? 'Restart' : 'Start'} canceled.`, 'notice')
+        return
+      }
+    }
+    setWorking(action === 'reload' ? 'Reloading HAProxy…' : action === 'restart' ? 'Restarting HAProxy…' : 'Starting HAProxy…')
+    setActing(true)
+    try {
+      await api[action]()
+      showToast(action === 'reload' ? 'HAProxy reloaded.' : action === 'restart' ? 'HAProxy restarted.' : 'HAProxy started.', 'success')
+    } catch (e) {
+      showToast(`${action} failed: ${errMsg(e)}`, 'error')
+    } finally {
+      setWorking('')
+      setActing(false)
+      onRefresh()
+    }
+  }
+
+  const last = status?.lastApply
+  return (
+    <section className="pendingbar">
+      {working && <BusyDialog message={working} />}
+      <div className="row">
+        <span className={`pending-label ${changes?.hasChanges ? 'unsaved' : 'muted'}`}>{v.label}</span>
+        {v.summary && <span className="muted">{v.summary}</span>}
+        {dirty && <span className="unsaved" title="Unsaved edits are not included until you Save.">● unsaved</span>}
+        <span className="grow" />
+        <button className="btn btn-ghost btn-sm" disabled={!v.canReview} title={review ? 'Hide changes' : 'Review changes'} onClick={() => setReview(r => !r)}><span aria-hidden="true">{review ? '▾' : '▸'}</span> Diff</button>
+        <button className="btn btn-ghost btn-sm" disabled={acting} title="Check the candidate configuration" aria-label="Check" onClick={check}>✓ Check</button>
+        <button className="btn btn-primary btn-sm" disabled={v.applyDisabled || acting} onClick={onApply}>{v.applyLabel}</button>
+      </div>
+      {changesError && <p className="muted">{changesError}</p>}
+      <IssueList issues={blockers} />
+      {review && changes && (
+        <div className="stack review">
+          <DiffView title="haproxy.cfg" diff={changes.configDiff} />
+          <DiffView title="crt-list" diff={changes.crtListDiff} />
+        </div>
+      )}
+      {diagnosticNotices(status?.diagnostics).map((n, i) => <p key={i} className="diag-notice" role="note">{n.message}</p>)}
+      <div className="row statuspanel">
+        {status ? (
+          <>
+            <span className={`badge ${status.service.active ? 'badge-ok' : 'badge-error'}`} title={status.service.active ? 'active' : 'inactive'}>{status.service.active ? '● running' : '○ stopped'}</span>
+            <span className="muted">HAProxy {status.version || '?'}</span>
+            <span className="muted" title={last ? `last apply: ${last.outcome}${last.message ? " - " + last.message : ""}` : 'never applied'}>{last ? <><span className={/ok|success|applied/i.test(last.outcome) ? 'stat-up' : 'error'}>{/ok|success|applied/i.test(last.outcome) ? '✓' : '✕'}</span> {new Date(last.time).toLocaleString()}</> : '—'}</span>
+          </>
+        ) : <span className="muted">{statusError ? `Status unavailable: ${statusError}` : 'Loading status…'}</span>}
+        <span className="grow" />
+        <button className="btn btn-ghost btn-sm" disabled={acting} title="Reload" aria-label="Reload" onClick={() => service('reload')}>⟳</button>
+        <button className="btn btn-ghost btn-sm" disabled={acting} title="Restart" aria-label="Restart" onClick={() => service('restart')}>⏻</button>
+        <button className="btn btn-ghost btn-sm" disabled={acting} title="Start" aria-label="Start" onClick={() => service('start')}>▶</button>
+      </div>
+    </section>
+  )
+}

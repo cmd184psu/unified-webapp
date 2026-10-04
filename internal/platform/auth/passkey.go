@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-webauthn/webauthn/protocol"
@@ -69,6 +70,9 @@ var (
 	// ErrPasskeyNoCredentials is returned when a login ceremony is started
 	// or finished for a username with no enrolled credentials.
 	ErrPasskeyNoCredentials = errors.New("auth: no passkeys enrolled")
+	// ErrPasskeyOriginNotAllowed is returned when the browser's origin is not
+	// one the passkey settings allow (the address is not routed under the RP ID).
+	ErrPasskeyOriginNotAllowed = errors.New("auth: passkeys are not enabled for this address")
 	// ErrPasskeyVerificationFailed is returned when the browser's assertion
 	// or attestation fails WebAuthn verification.
 	ErrPasskeyVerificationFailed = errors.New("auth: passkey verification failed")
@@ -118,10 +122,14 @@ func newPasskeyService(cfg config.PasskeyConfig, dataDir string, now func() time
 		now = time.Now
 	}
 
+	origins := PasskeyOrigins(cfg.RPID, cfg.RPOrigins, cfg.Hosts)
+	if len(origins) == 0 {
+		return nil, fmt.Errorf("auth: no host is routed under %s, so passkeys have nowhere to work; pick the domain your hosts share", cfg.RPID)
+	}
 	w, err := webauthn.New(&webauthn.Config{
 		RPID:          cfg.RPID,
 		RPDisplayName: passkeyRPDisplayName,
-		RPOrigins:     cfg.RPOrigins,
+		RPOrigins:     origins,
 		AuthenticatorSelection: protocol.AuthenticatorSelection{
 			ResidentKey:      protocol.ResidentKeyRequirementRequired,
 			UserVerification: protocol.VerificationPreferred,
@@ -230,6 +238,9 @@ func (s *passkeyService) FinishPasskeyRegistration(ctx context.Context, identity
 	}
 	credential, err := s.webauthn.FinishRegistration(user, session, req)
 	if err != nil {
+		if isOriginError(err) {
+			return PasskeyInfo{}, fmt.Errorf("%w: %v", ErrPasskeyOriginNotAllowed, err)
+		}
 		return PasskeyInfo{}, fmt.Errorf("%w: %v", ErrPasskeyVerificationFailed, err)
 	}
 	stored, err := json.Marshal(credential)
@@ -252,12 +263,24 @@ func (s *passkeyService) FinishPasskeyRegistration(ctx context.Context, identity
 	return PasskeyInfo{ID: c.ID, FriendlyName: c.FriendlyName, CreatedAt: c.CreatedAt}, nil
 }
 
-// BeginPasskeyLogin starts a passwordless login ceremony for a claimed
-// username. This is pre-authentication -- the returned identity is not
-// trusted until FinishPasskeyLogin verifies the assertion.
+// BeginPasskeyLogin starts a passwordless login ceremony. With an empty
+// username it runs the discoverable-credential flow: no allow list is sent,
+// the authenticator offers its own resident credentials, and
+// FinishPasskeyLogin resolves the identity from the credential itself. With a
+// username it runs the targeted flow (needed by authenticators that cannot
+// hold discoverable credentials). This is pre-authentication -- the returned
+// identity is not trusted until FinishPasskeyLogin verifies the assertion.
 func (s *passkeyService) BeginPasskeyLogin(username string) (PasskeyCeremony, error) {
 	if username == "" {
-		return PasskeyCeremony{}, ErrPasskeyIdentityRequired
+		assertion, session, err := s.webauthn.BeginDiscoverableLogin(webauthn.WithUserVerification(protocol.VerificationPreferred))
+		if err != nil {
+			return PasskeyCeremony{}, fmt.Errorf("auth: beginning discoverable passkey login: %w", err)
+		}
+		id, err := s.storeChallenge("", ceremonyLogin, session)
+		if err != nil {
+			return PasskeyCeremony{}, err
+		}
+		return PasskeyCeremony{ChallengeID: id, Options: assertion}, nil
 	}
 	creds, err := s.passkeys.listByUsername(username)
 	if err != nil {
@@ -291,23 +314,49 @@ func (s *passkeyService) FinishPasskeyLogin(ctx context.Context, challengeID str
 		return "", err
 	}
 	defer s.challenges.delete(challengeID)
-	creds, err := s.passkeys.listByUsername(ch.Username)
-	if err != nil {
-		return "", err
-	}
-	if len(creds) == 0 {
-		return "", ErrPasskeyNoCredentials
-	}
-	user, err := passkeyUserFrom(ch.Username, creds[0].UserHandle, creds)
-	if err != nil {
-		return "", err
-	}
 	req, err := ceremonyRequest(ctx, credentialJSON)
 	if err != nil {
 		return "", fmt.Errorf("auth: building passkey login request: %w", err)
 	}
-	credential, err := s.webauthn.FinishLogin(user, session, req)
+	identity := ch.Username
+	var credential *webauthn.Credential
+	if identity == "" {
+		// Discoverable flow: the identity is whoever enrolled the credential
+		// the browser presented, and the userHandle it returned must be that
+		// enrolment's handle.
+		credential, err = s.webauthn.FinishDiscoverableLogin(func(rawID, userHandle []byte) (webauthn.User, error) {
+			c, err := s.passkeys.getByCredentialID(rawID)
+			if err != nil {
+				return nil, err
+			}
+			if !bytes.Equal(userHandle, c.UserHandle) {
+				return nil, errors.New("user handle does not match the enrolled credential")
+			}
+			creds, err := s.passkeys.listByUsername(c.Username)
+			if err != nil {
+				return nil, err
+			}
+			identity = c.Username
+			return passkeyUserFrom(c.Username, c.UserHandle, creds)
+		}, session, req)
+	} else {
+		creds, lerr := s.passkeys.listByUsername(identity)
+		if lerr != nil {
+			return "", lerr
+		}
+		if len(creds) == 0 {
+			return "", ErrPasskeyNoCredentials
+		}
+		user, uerr := passkeyUserFrom(identity, creds[0].UserHandle, creds)
+		if uerr != nil {
+			return "", uerr
+		}
+		credential, err = s.webauthn.FinishLogin(user, session, req)
+	}
 	if err != nil {
+		if isOriginError(err) {
+			return "", fmt.Errorf("%w: %v", ErrPasskeyOriginNotAllowed, err)
+		}
 		return "", fmt.Errorf("%w: %v", ErrPasskeyVerificationFailed, err)
 	}
 	stored, err := json.Marshal(credential)
@@ -323,7 +372,7 @@ func (s *passkeyService) FinishPasskeyLogin(ctx context.Context, challengeID str
 	if err := s.passkeys.put(c); err != nil {
 		return "", err
 	}
-	return ch.Username, nil
+	return identity, nil
 }
 
 // DeletePasskey removes identity's credential id. Like the reference this
@@ -429,4 +478,10 @@ func newPasskeyID(prefix string) string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 	return prefix + "_" + hex.EncodeToString(b)
+}
+
+// isOriginError reports whether a WebAuthn failure was the origin check.
+func isOriginError(err error) bool {
+	var pe *protocol.Error
+	return errors.As(err, &pe) && strings.Contains(strings.ToLower(pe.Details+" "+pe.DevInfo), "origin")
 }

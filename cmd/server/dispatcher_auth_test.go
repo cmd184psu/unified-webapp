@@ -516,7 +516,7 @@ func TestAC4_TokenLifecycle(t *testing.T) {
 	// is out of reach from here.
 
 	t.Run("expired token", func(t *testing.T) {
-		tok := signSessionToken(t, realKey, "carol", []string{"ldap"}, now.Add(-2*time.Hour), now.Add(-time.Hour))
+		tok := signSessionToken(t, realKey, "carol", []string{"ldap:slideshow"}, now.Add(-2*time.Hour), now.Add(-time.Hour))
 		res := doHostWithCookie(t, srv, http.MethodGet, "slideshow.example", "/", &http.Cookie{Name: "uw_session", Value: tok})
 		defer res.Body.Close()
 		if res.StatusCode != http.StatusUnauthorized {
@@ -537,7 +537,7 @@ func TestAC4_TokenLifecycle(t *testing.T) {
 		if _, err := rand.Read(otherKey); err != nil {
 			t.Fatalf("generate other key: %v", err)
 		}
-		tok := signSessionToken(t, otherKey, "carol", []string{"ldap"}, now.Add(-time.Minute), now.Add(time.Hour))
+		tok := signSessionToken(t, otherKey, "carol", []string{"ldap:slideshow"}, now.Add(-time.Minute), now.Add(time.Hour))
 		res := doHostWithCookie(t, srv, http.MethodGet, "slideshow.example", "/", &http.Cookie{Name: "uw_session", Value: tok})
 		defer res.Body.Close()
 		if res.StatusCode != http.StatusUnauthorized {
@@ -548,7 +548,7 @@ func TestAC4_TokenLifecycle(t *testing.T) {
 	t.Run("use renews the cookie", func(t *testing.T) {
 		iat := now.Add(-40 * time.Minute) // within the default 60-minute idle limit.
 		exp := iat.Add(time.Hour)         // still valid: 20 minutes remain.
-		tok := signSessionToken(t, realKey, "carol", []string{"ldap"}, iat, exp)
+		tok := signSessionToken(t, realKey, "carol", []string{"ldap:slideshow"}, iat, exp)
 		// A click or keypress, as reported by the shared page code.
 		res := doHostWithCookie(t, srv, http.MethodPost, "slideshow.example", "/api/auth/activity", &http.Cookie{Name: "uw_session", Value: tok})
 		defer res.Body.Close()
@@ -995,7 +995,7 @@ func TestT5_6_RestartEquivalence(t *testing.T) {
 	// removed under the two-state model; a module's door code is now purely
 	// a config-file (or, here, live-apply) pin_file reference.
 
-	keyRes := doHostWithCookieAndBody(t, srv, http.MethodPost, "admin.example", "/api/keys", `{"name":"`+apiKeyName+`"}`, adminCookie)
+	keyRes := doHostWithCookieAndBody(t, srv, http.MethodPost, "admin.example", "/api/keys", `{"name":"`+apiKeyName+`","modules":["*"]}`, adminCookie)
 	keyBody, _ := io.ReadAll(keyRes.Body)
 	keyRes.Body.Close()
 	if keyRes.StatusCode != http.StatusOK {

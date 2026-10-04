@@ -32,6 +32,7 @@ type Config struct {
 	IssueTracker IssueTrackerConfig `json:"issuetracker"`
 	Timetracker  TimetrackerConfig  `json:"timetracker"`
 	Sampler      SamplerConfig      `json:"sampler"`
+	Haproxy      HaproxyConfig      `json:"haproxy"`
 
 	// configPath is the absolute path Load read this Config from (empty when
 	// built via DefaultConfig()/WriteDefault without going through Load, or
@@ -193,7 +194,13 @@ type SessionConfig struct {
 type NamedHash struct {
 	Name string `json:"name"`
 	Hash string `json:"hash"`
+	// Modules is where an API key works: module names, or "*" for every
+	// protected module. An empty list (a legacy key) means "*". Unused by pins.
+	Modules []string `json:"modules,omitempty"`
 }
+
+// AllModules is the Modules value meaning "every protected module".
+const AllModules = "*"
 
 // LDAPConfig configures LDAP authentication. Full behavior is ported in
 // T3.7; fields are defined now for validation.
@@ -211,8 +218,13 @@ type LDAPConfig struct {
 
 // PasskeyConfig configures WebAuthn/passkey authentication.
 type PasskeyConfig struct {
-	RPID      string   `json:"rp_id"`
+	RPID string `json:"rp_id"`
+	// RPOrigins are extra allowed origins. Every routed host under RPID is
+	// allowed automatically (see auth.PasskeyOrigins).
 	RPOrigins []string `json:"rp_origins"`
+	// Hosts are the routed host names, filled in at boot and on a live apply.
+	// Never persisted.
+	Hosts []string `json:"-"`
 }
 
 // ServerConfig holds configuration for the shared HTTP server infrastructure,
@@ -419,6 +431,68 @@ type SmbeditConfig struct {
 	PickerRoot string `json:"picker_root"`
 }
 
+// Haproxy module defaults applied by Load when the operator leaves a field at
+// its zero value. The per-OS path defaults (config_path, certs_dir, …) are not
+// here: they come from the OS driver at Build time (FRD §9, "Every default
+// comes from the driver"), because they differ by platform.
+const (
+	// DefaultHaproxyBackupKeep is how many timestamped backups of the live
+	// config and crt-list the module keeps when backup_keep is unset.
+	DefaultHaproxyBackupKeep = 10
+	// DefaultHaproxyExpiryWarnDays is the window within which a cert counts as
+	// "soon to expire" when expiry_warn_days is unset.
+	DefaultHaproxyExpiryWarnDays = DefaultExpiryWarnDays
+)
+
+// HaproxyCertMachineConfig holds the editor's connection to its CertMachine
+// service: the base URL, an API key (sent as a Bearer token), and an optional
+// CA file to trust. CertMachine is the sole source of certs (D10, D15).
+type HaproxyCertMachineConfig struct {
+	URL    string `json:"url"`
+	APIKey string `json:"api_key"`
+	CAFile string `json:"ca_file"`
+}
+
+// String renders the CertMachine config with the API key redacted to "(set)"
+// (or "" when unset), so the secret never reaches a log line even when the
+// whole HaproxyConfig is formatted with %v/%s. This mirrors how the admin
+// module redacts the LDAP bind_password (internal/admin/handler.go). fmt
+// applies this Stringer to the field when formatting the parent struct.
+func (c HaproxyCertMachineConfig) String() string {
+	key := ""
+	if c.APIKey != "" {
+		key = "(set)"
+	}
+	return fmt.Sprintf("{URL:%s APIKey:%s CAFile:%s}", c.URL, key, c.CAFile)
+}
+
+// HaproxyConfig holds configuration specific to the haproxy editor module.
+//
+// StaticDir and DataDir follow the smbedit pattern: DataDir is where state.json
+// and certs.json live (created at Build time). OS selects the platform driver
+// ("auto" detects it). The remaining path fields override the driver's per-OS
+// defaults; left empty, the driver supplies them. CertMachine is the remote
+// cert source. The api_key inside CertMachine is a secret: it is redacted in
+// every config/status view and never logged (see HaproxyCertMachineConfig).
+type HaproxyConfig struct {
+	StaticDir       string                   `json:"static_dir"`
+	DataDir         string                   `json:"data_dir"`
+	OS              string                   `json:"os"`
+	ConfigPath      string                   `json:"config_path"`
+	CertsDir        string                   `json:"certs_dir"`
+	CrtListPath     string                   `json:"crt_list_path"`
+	StatsSocketPath string                   `json:"stats_socket_path"`
+	BackupDir       string                   `json:"backup_dir"`
+	ServiceName     string                   `json:"service_name"`
+	BackupKeep      int                      `json:"backup_keep"`
+	ExpiryWarnDays  int                      `json:"expiry_warn_days"`
+	CertMachine     HaproxyCertMachineConfig `json:"certmachine"`
+
+	// SSEMaxSubscribers is the effective SSE subscriber cap, copied from
+	// Config.Server.SSEMaxSubscribers by Load. Not read from the config file.
+	SSEMaxSubscribers int `json:"-"`
+}
+
 // Multissh session-count bounds. MaxSessions is validated in exactly one place
 // (Load); Build trusts the resolved value and performs no re-validation.
 const (
@@ -596,6 +670,13 @@ func DefaultConfig() *Config {
 			DataDir:    "./data/smbedit",
 			PickerRoot: "/opt",
 		},
+		Haproxy: HaproxyConfig{
+			StaticDir:      "./web/haproxy",
+			DataDir:        "./data/haproxy",
+			OS:             "auto",
+			BackupKeep:     DefaultHaproxyBackupKeep,
+			ExpiryWarnDays: DefaultHaproxyExpiryWarnDays,
+		},
 		IssueTracker: IssueTrackerConfig{
 			StaticDir: "./web/issuetracker",
 			DBPath:    "./data/issuetracker/issues.db",
@@ -704,6 +785,10 @@ func Load(path string) (*Config, error) {
 	if err := expandIssueTrackerPaths(&cfg.IssueTracker); err != nil {
 		return nil, err
 	}
+	if err := expandHaproxyPaths(&cfg.Haproxy); err != nil {
+		return nil, err
+	}
+	normalizeHaproxy(&cfg.Haproxy)
 	if err := expandSmbeditPaths(&cfg.Smbedit); err != nil {
 		return nil, err
 	}
@@ -734,6 +819,7 @@ func applyServerDefaults(cfg *Config) {
 	cfg.Slideshow.SSEMaxSubscribers = max
 	cfg.Obsidianoid.SSEMaxSubscribers = max
 	cfg.Taskmaster.SSEMaxSubscribers = max
+	cfg.Haproxy.SSEMaxSubscribers = max
 	if cfg.Server.SharedStaticDir == "" {
 		cfg.Server.SharedStaticDir = "./web/shared"
 	}
@@ -945,6 +1031,36 @@ func expandIssueTrackerPaths(it *IssueTrackerConfig) error {
 		return err
 	}
 	return nil
+}
+
+// expandHaproxyPaths expands a leading ~ in every path-shaped field of the
+// haproxy module config, mirroring the other expand*Paths helpers. The OS
+// driver fills in any field left empty at Build time, so empty is left empty
+// here.
+func expandHaproxyPaths(h *HaproxyConfig) error {
+	var err error
+	for _, p := range []*string{
+		&h.StaticDir, &h.DataDir, &h.ConfigPath, &h.CertsDir,
+		&h.CrtListPath, &h.StatsSocketPath, &h.BackupDir, &h.CertMachine.CAFile,
+	} {
+		if *p, err = ExpandPath(*p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// normalizeHaproxy applies the module's scalar defaults when the operator
+// leaves a field at its zero value. Negative values are clamped to the
+// default rather than rejected: unlike certmachine's validity days, a stray
+// negative here is harmless and a boot failure would be worse.
+func normalizeHaproxy(h *HaproxyConfig) {
+	if h.BackupKeep <= 0 {
+		h.BackupKeep = DefaultHaproxyBackupKeep
+	}
+	if h.ExpiryWarnDays <= 0 {
+		h.ExpiryWarnDays = DefaultHaproxyExpiryWarnDays
+	}
 }
 
 func expandSmbeditPaths(s *SmbeditConfig) error {

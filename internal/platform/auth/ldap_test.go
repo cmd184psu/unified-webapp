@@ -283,3 +283,37 @@ func TestLdapAllowed(t *testing.T) {
 		t.Error("ldapAllowed: disjoint groups should be denied")
 	}
 }
+
+func TestCheckConfig(t *testing.T) {
+	cfg := config.LDAPConfig{URL: "ldaps://x", BindDN: "cn=svc", BindPassword: "pw", BaseDN: "dc=x", UserFilter: "(uid=%s)", RequiredGroups: []string{"household", "ghosts"}}
+	conn := &fakeLDAPConn{searchFn: func(req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+		switch req.Filter {
+		case "(uid=*)":
+			return &ldap.SearchResult{Entries: []*ldap.Entry{{DN: "uid=a"}, {DN: "uid=b"}}}, nil
+		case "(cn=household)":
+			return &ldap.SearchResult{Entries: []*ldap.Entry{{DN: "cn=household"}}}, nil
+		}
+		return &ldap.SearchResult{}, nil
+	}}
+	got, err := clientWithConn(cfg, conn).CheckConfig(context.Background())
+	if err != nil {
+		t.Fatalf("CheckConfig: %v", err)
+	}
+	if got.Users != 2 || len(got.MissingGroups) != 1 || got.MissingGroups[0] != "ghosts" {
+		t.Errorf("got %+v, want 2 users and [ghosts] missing", got)
+	}
+	if len(conn.binds) != 1 || conn.binds[0].username != "cn=svc" || !conn.closed {
+		t.Errorf("expected one service bind and a closed conn, got %+v closed=%v", conn.binds, conn.closed)
+	}
+
+	bad := &fakeLDAPConn{searchFn: func(*ldap.SearchRequest) (*ldap.SearchResult, error) {
+		return nil, &ldap.Error{ResultCode: ldap.LDAPResultNoSuchObject}
+	}}
+	if _, err := clientWithConn(cfg, bad).CheckConfig(context.Background()); !errors.Is(err, ErrLDAPSearch) {
+		t.Errorf("bad base DN: err = %v, want ErrLDAPSearch", err)
+	}
+	badBind := &fakeLDAPConn{bindFn: func(string, string) error { return &ldap.Error{ResultCode: ldap.LDAPResultInvalidCredentials} }}
+	if _, err := clientWithConn(cfg, badBind).CheckConfig(context.Background()); err == nil || errors.Is(err, ErrLDAPSearch) {
+		t.Errorf("bad bind: err = %v, want a bind error", err)
+	}
+}

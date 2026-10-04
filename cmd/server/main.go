@@ -15,6 +15,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -26,6 +27,7 @@ import (
 	"cmd184psu/unified-webapp/internal/admin"
 	"cmd184psu/unified-webapp/internal/certmachine"
 	"cmd184psu/unified-webapp/internal/grocery"
+	"cmd184psu/unified-webapp/internal/haproxy"
 	"cmd184psu/unified-webapp/internal/issuetracker"
 	"cmd184psu/unified-webapp/internal/menuserver"
 	"cmd184psu/unified-webapp/internal/multissh"
@@ -87,7 +89,9 @@ func main() {
 	flagKey := flag.String("tls-key", "", "Override TLS key path")
 	flagInit := flag.Bool("init-config", false, "Write default config and exit")
 	flagHashPin := flag.Bool("hash-pin", false, "Read a PIN from stdin, print its bcrypt hash, and exit")
-	flagGenAPIKey := flag.Bool("gen-api-key", false, "Generate a new API key and its config hash, print both, and exit")
+	flagGenAPIKey := flag.Bool("gen-api-key", false, "Generate a new API key and its config hash, print both, and exit (with -name, also store the hash in the config file)")
+	flagModules := flag.String("modules", "", "With -gen-api-key -name: where the key works, a comma-separated list of modules or \"all\" (required: a key is never unscoped)")
+	flagName := flag.String("name", "", "With -gen-api-key: name of the auth.api_keys entry; the hash is stored (added or replaced) in the -config file")
 	flag.Parse()
 
 	if *flagInit {
@@ -103,8 +107,13 @@ func main() {
 		return
 	}
 
+	if *flagName != "" && !*flagGenAPIKey {
+		log.Fatalf("-name is only valid with -gen-api-key")
+	}
 	if *flagGenAPIKey {
-		genAPIKeyAndExit()
+		if err := runGenAPIKey(*flagName, *flagModules, *cfgPath, os.Stdout); err != nil {
+			log.Fatalf("gen-api-key: %v", err)
+		}
 		return
 	}
 
@@ -130,6 +139,7 @@ func main() {
 	warnSharedStaticDir(cfg.Server.SharedStaticDir)
 
 	adminRouted := adminIsRouted(cfg.Routing)
+	cfg.Auth.Passkey.Hosts = routedHosts(cfg.Routing)
 	svc, err := auth.FromConfig(cfg.Auth, knownModules, adminRouted)
 	if err != nil {
 		// Errors from the auth package are already "auth:"-prefixed.
@@ -240,24 +250,57 @@ func hashPINAndExit() {
 	fmt.Println(string(hash))
 }
 
-// genAPIKeyAndExit generates a new 32-byte random API key, encodes it as
+// runGenAPIKey generates a new 32-byte random API key, encodes it as
 // base64url without padding (the text a client will send in the
 // Authorization/X-API-Key header), and prints it alongside its
 // "sha256:<hex>" config hash. The hash is computed over the encoded key
 // string itself -- exactly what a client sends -- so it matches what
 // auth.checkAPIKey computes from the header value.
-func genAPIKeyAndExit() {
+//
+// With an empty name nothing is written anywhere. With a name, the hash is
+// stored in cfgPath's auth.api_keys first, and the key is printed only if
+// that succeeded: a key that was not stored is useless and must not be left
+// on the terminal.
+func runGenAPIKey(name, modules, cfgPath string, out io.Writer) error {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
-		log.Fatalf("gen-api-key: generating key: %v", err)
+		return fmt.Errorf("generating key: %w", err)
 	}
 	key := base64.RawURLEncoding.EncodeToString(raw)
 
 	sum := sha256.Sum256([]byte(key))
 	hash := "sha256:" + hex.EncodeToString(sum[:])
 
-	fmt.Printf("key:  %s\n", key)
-	fmt.Printf("hash: %s\n", hash)
+	if name == "" {
+		fmt.Fprintf(out, "key:  %s\n", key)
+		fmt.Fprintf(out, "hash: %s\n", hash)
+		return nil
+	}
+
+	var requested []string
+	for _, m := range strings.Split(modules, ",") {
+		if strings.EqualFold(strings.TrimSpace(m), "all") {
+			m = config.AllModules
+		}
+		requested = append(requested, m)
+	}
+	scope, err := admin.NormalizeKeyScope(requested, knownModules)
+	if err != nil {
+		return fmt.Errorf("-modules: %w (use -modules todo,grocery or -modules all)", err)
+	}
+	replaced, err := admin.AddAPIKeyToConfigFile(cfgPath, name, hash, scope)
+	if err != nil {
+		return fmt.Errorf("storing key %q in %s: %w", name, cfgPath, err)
+	}
+	verb := "added"
+	if replaced {
+		verb = "replaced existing entry"
+	}
+	fmt.Fprintf(out, "key:  %s\n", key)
+	fmt.Fprintf(out, "hash: %s\n", hash)
+	fmt.Fprintf(out, "works on: %s\n", strings.Join(scope, ", "))
+	fmt.Fprintf(out, "stored as %q in %s (%s). The running service does not see the change until it is restarted (the admin module's Generate key applies live).\n", name, cfgPath, verb)
+	return nil
 }
 
 // newServer builds the http.Server used to serve the app.
@@ -359,7 +402,7 @@ func limitFor(module string, cfg *config.Config) int64 {
 // knownModules is the buildModule universe -- exactly the module names the
 // switch below handles. auth.FromConfig uses it to validate that every
 // module named in auth.modules is one buildDispatcher can actually build.
-var knownModules = []string{"grocery", "todo", "slideshow", "menuserver", "obsidianoid", "multissh", "certmachine", "taskmaster", "admin", "utuber", "smbedit", "issuetracker", "timetracker", "sampler"}
+var knownModules = []string{"grocery", "todo", "slideshow", "menuserver", "obsidianoid", "multissh", "certmachine", "taskmaster", "admin", "utuber", "smbedit", "issuetracker", "timetracker", "sampler", "haproxy"}
 
 // adminIsRouted reports whether "admin" appears among routing's module
 // values (config.Config.Routing / host_routing). Both main's boot-time
@@ -461,9 +504,12 @@ func buildModule(module string, cfg *config.Config, svc *auth.Service, deps *mod
 			ConfigPath:   cfg.ConfigPath(),
 			KnownModules: knownModules,
 			AdminRouted:  adminIsRouted(cfg.Routing),
+			Hosts:        routedHosts(cfg.Routing),
 		})
 	case "smbedit":
 		return smbedit.Build(cfg.Smbedit)
+	case "haproxy":
+		return haproxy.Build(cfg.Haproxy)
 	case "issuetracker":
 		return issuetracker.Build(cfg.IssueTracker)
 	default:
@@ -485,4 +531,15 @@ func unavailableHandler(module string, cause error) http.Handler {
 			"module": module,
 		})
 	})
+}
+
+// routedHosts are the host names in host_routing, the origins passkeys are
+// allowed from (see auth.PasskeyOrigins).
+func routedHosts(routing map[string]string) []string {
+	hosts := make([]string, 0, len(routing))
+	for h := range routing {
+		hosts = append(hosts, h)
+	}
+	sort.Strings(hosts)
+	return hosts
 }

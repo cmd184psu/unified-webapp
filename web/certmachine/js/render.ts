@@ -58,6 +58,7 @@ export function buildCertRow(
   cert: Cert,
   kind: BadgeKind,
   onOpenDetail: (id: number) => void,
+  onDelete: (cert: Cert) => void,
 ): HTMLLIElement {
   const row = el("li", "cert-row");
   row.dataset.kind = kind;
@@ -109,6 +110,11 @@ export function buildCertRow(
   details.textContent = "Details";
   details.addEventListener("click", () => onOpenDetail(cert.id));
   actions.append(details);
+  const del = el("button", "cert-action cert-action-btn cert-action-danger");
+  del.type = "button";
+  del.textContent = "Delete";
+  del.addEventListener("click", () => onDelete(cert));
+  actions.append(del);
   // haproxy.pem and the bundle are assembled from the row's cert+key against
   // the CA, and the server refuses both for a quarantined row
   // (ErrQuarantinedDownload) -- so rendering them as links offers the operator
@@ -173,6 +179,7 @@ function appendRowGroup(
   warnDays: number,
   now: Date,
   onOpenDetail: (id: number) => void,
+  onDelete: (cert: Cert) => void,
   emptyMessage: string,
   emptyPrimaryMessage: string,
 ): void {
@@ -185,7 +192,7 @@ function appendRowGroup(
   const deemphasized: HTMLLIElement[] = [];
   for (const cert of certs) {
     const kind = badgeFor(cert.notAfter, cert.status, warnDays, now);
-    const row = buildCertRow(cert, kind, onOpenDetail);
+    const row = buildCertRow(cert, kind, onOpenDetail, onDelete);
     (isDeemphasized(kind) ? deemphasized : primary).push(row);
   }
 
@@ -228,6 +235,8 @@ export interface RenderListOptions {
   hasAnyCerts: boolean;
   /** Invoked with a cert's id when its "Details" action is activated. */
   onOpenDetail: (id: number) => void;
+  /** Invoked when a card's "Delete" button is clicked; the caller confirms and deletes. */
+  onDelete: (cert: Cert) => void;
 }
 
 /**
@@ -268,6 +277,7 @@ export function renderCertList(
       warnDays,
       now,
       options.onOpenDetail,
+      options.onDelete,
       "No certificates match your search.",
       "No active certificates -- everything is expired or archived.",
     );
@@ -293,6 +303,7 @@ export function renderCertList(
         warnDays,
         now,
         options.onOpenDetail,
+        options.onDelete,
         "No certificates match your search.",
         "No active certificates in this group.",
       );

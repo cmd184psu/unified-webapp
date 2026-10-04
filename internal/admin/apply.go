@@ -66,6 +66,7 @@ func (h *Handler) applyAuth(newAuth config.AuthConfig) (config.AuthConfig, error
 		return config.AuthConfig{}, err
 	}
 
+	expanded.Passkey.Hosts = h.deps.Hosts
 	if err := auth.ValidatePolicy(expanded, h.deps.KnownModules, h.deps.AdminRouted); err != nil {
 		return config.AuthConfig{}, err
 	}

@@ -622,22 +622,97 @@ are the exception by design (generic to the client, detailed in the log).
 | `GET /api/config` | Runtime config for the SPA | `defaultValidityDays`, `expiryWarnDays`, `certCount`, `legacyImportAvailable`, `legacyImportDir`, `legacyImportReason`, `trustDeviceAvailable`, `trustPlatform`, `trustRemoteAvailable`, `trustRemoteReason` |
 | `GET /api/ca` | Current CA status | `{"exists": false}` if none yet. Otherwise `id`, `subject`, `serial`, `notBefore`, `notAfter`, `fingerprint`, `importedFrom`, `unknownSignerActiveCount` (always present, even 0), and `previous` (omitted if there is no previous CA — see below) |
 | `POST /api/ca/init` | Initialize a new root CA | Optional body `{name}` (the CA's Common Name; blank = "CertMachine Root CA"); 201 with none stored, 409 if one exists, 409 `ErrImportPending` if an import is pending |
-| `GET /api/ca/root.crt` | Download the root CA certificate | `Content-Disposition: attachment; filename="<CA name>.crt"` |
+| `GET /api/ca/root.crt` | Download the root CA certificate | `Content-Disposition: attachment; filename="<CA name>.crt"`. No `ETag` or identity headers |
 | `POST /api/ca/replace` | Replace the current CA (see [§10](#10-replacing-the-root-ca)) | Body `{"name", "existing": "reissue"\|"delete"\|"keep", "previousStale": "reissue"\|"delete"}` (`previousStale` omitted unless the previous CA still signs an active row). 200 `{"ca": <GET /api/ca shape>, "reissued", "deleted", "kept", "clamped", "previousDropped"}`. 400 on a bad `existing`/`previousStale` value or a name collision; 409 `ErrPreviousStaleChoiceRequired` if `previousStale` is required but missing, 409 `ErrConcurrentChange` if the certificate set moved between the read and the write. **Progress mode:** send `Accept: application/x-ndjson` to get a streamed alternative to the plain 200 above instead — see [below](#post-apicareplace-progress-mode-accept-applicationx-ndjson) |
 | `POST /api/ca/switch-back` | Swap the current and previous CA (see [§10](#10-replacing-the-root-ca)) | Empty body. 200 `{"ca": <GET /api/ca shape>}`. 409 `ErrNoPreviousCA` if there is none, or if the previous CA itself fails its own expiry check |
 | `POST /api/ca/trust` | Run this host's device-trust install (see [Automatic device trust](#automatic-device-trust)) | 409 if `trust_device_enabled` is false or no CA exists; body always carries `output` (the ran commands' combined stdout+stderr) alongside `platform` and, on failure, `error` |
 | `POST /api/ca/trust/remote` | Install the CA on another machine over SSH (see [above](#trusting-another-machine-over-ssh)) | `{host, port?, user, key \| password}`; 200 with `platform` and `output`; 400 bad request; 409 SSH unavailable, or the install failed on that machine (with `output`); 422 unsupported OS, nothing installed (with `output`); 502 couldn't connect |
 | `GET /api/ssh/keys` | The SSH key folder's files, for the dialog | `{keys: [...]}`: names only, never key material |
-| `GET /api/certs` | List certificates | Metadata only — no PEM in the response. Each row now carries `caId` (the signing CA's row id, or `null` for an unresolved/unknown signer), `caSubject` (omitted when unknown), and `stale` (`true` exactly when `caId` is non-null and differs from the current CA's id) |
+| `GET /api/certs` | List certificates | Optional `fqdn` and `status` filters (see [below](#download-integrity-headers-and-api-key-access)). Metadata only — no PEM in the response. Each row now carries `caId` (the signing CA's row id, or `null` for an unresolved/unknown signer), `caSubject` (omitted when unknown), and `stale` (`true` exactly when `caId` is non-null and differs from the current CA's id) |
 | `POST /api/certs` | Generate a certificate | `{fqdn, dnsSans[], ipSans[]}` → 201; no validity field, it is always `default_validity_days` (possibly clamped). Response gains `previousDropped` (bool) alongside the existing `cert`/`validityClamped`/`requestedNotAfter` fields |
 | `GET /api/certs/{id}` | Certificate detail | Includes `certPem`; never `keyPem`. Also carries `caId`, `caSubject`, `stale` |
 | `DELETE /api/certs/{id}` | Delete a row | Requires `?confirm=<fqdn>` (case-insensitive); 400 without it. **200** `{"previousDropped": bool}` on success (previously 204 with no body — deleting the last active certificate under the previous CA can now trigger its automatic removal, which the response reports) |
 | `POST /api/certs/{id}/renew` | Renew | 201 with the new row; the predecessor is archived. Response gains `previousDropped` (bool), same reason as Delete above |
 | `POST /api/certs/{id}/edit` | Edit FQDN, SANs, and/or validity in place (see [§10](#10-replacing-the-root-ca)) | Body `{fqdn, dnsSans[], ipSans[], validityDays}` — the only issuance route that accepts a validity directly, still clamped to the current CA's own expiry. 201, same shape as `POST /api/certs`'s response plus `previousDropped`. 409 `ErrDuplicateActive` if another row is already active for the new FQDN; 409 `ErrQuarantined` for a quarantined source |
-| `GET /api/certs/{id}/files/{name}` | Individual file download | `name` is a closed enum: `cert.pem`, `key.pem`, `haproxy.pem`. 409 `ErrUnknownSigner` if the certificate's signing CA cannot be resolved (`caId` is `null`) — re-issue it first |
-| `GET /api/certs/{id}/bundle` | `.tgz` bundle download | `cert.pem`, `key.pem`, `haproxy.pem`, `<CA name>.crt`. Same `ErrUnknownSigner` 409 as above |
+| `GET /api/certs/{id}/files/{name}` | Individual file download | `name` is a closed enum: `cert.pem`, `key.pem`, `haproxy.pem`. 409 `ErrUnknownSigner` if the certificate's signing CA cannot be resolved (`caId` is `null`) — re-issue it first. Success carries `ETag`, `X-Cert-Id`, `X-Cert-Fingerprint` and honors `If-None-Match` and `HEAD` (see [below](#download-integrity-headers-and-api-key-access)) |
+| `GET /api/certs/{id}/bundle` | `.tgz` bundle download | `cert.pem`, `key.pem`, `haproxy.pem`, `<CA name>.crt`. Same `ErrUnknownSigner` 409 as above. No `ETag` or identity headers |
 | `GET /api/import/preview` | Dry-run the legacy import | Counts and per-item reasons; never writes |
 | `POST /api/import` | Execute the legacy import | Idempotent-safe; already-imported leaves report `skipped` |
+
+### Download integrity headers and API-key access
+
+**Filters on `GET /api/certs`.** Two optional query parameters narrow the
+list; with neither, the response is exactly the unfiltered list.
+
+- `fqdn=<name>` keeps rows whose FQDN equals the value, case-insensitively
+  (exact match, not a substring).
+- `status=<value>` keeps rows with that status: `active`, `archived` or
+  `quarantined` (lowercase). Any other non-empty value is a **400**.
+- Both together are ANDed. No match is `{"certs": []}` with 200.
+
+**Headers on `GET /api/certs/{id}/files/{cert.pem|key.pem|haproxy.pem}`.**
+A successful response carries:
+
+- `ETag: "sha256-<hex>"`, a strong ETag: the SHA-256 of the exact response body.
+- `X-Cert-Id`: the certificate's row id.
+- `X-Cert-Fingerprint`: the certificate's fingerprint as stored (the same
+  value `GET /api/certs` reports).
+
+`If-None-Match` is honored: a header that is `*`, equals the ETag, equals it
+with a `W/` prefix, or is a comma-separated list containing such an entry
+gets **304** with no body (the `ETag` and identity headers are still sent).
+`HEAD` returns the same headers as `GET` with no body.
+
+Refusals carry none of these headers: a **409** (quarantined row, or a
+root/signer mismatch such as `ErrUnknownSigner`) and a **404** (unknown id or
+file name) send no `ETag`, `X-Cert-Id` or `X-Cert-Fingerprint`.
+`GET /api/ca/root.crt` and `GET /api/certs/{id}/bundle` are unchanged and
+carry no such headers (the bundle embeds a timestamp, so it has no stable
+ETag).
+
+**Example with an API key** (see [API key setup](#api-key-setup-for-automation)):
+
+```bash
+BASE=https://certs.example.local   # your CertMachine instance
+KEY=...                            # the API key (not its hash)
+ID=7                               # the cert's row id from GET /api/certs
+
+# Download and capture headers.
+curl -sS -D hdr.txt -o haproxy.pem \
+  -H "Authorization: Bearer $KEY" \
+  "$BASE/api/certs/$ID/files/haproxy.pem"
+
+# The ETag is "sha256-<hex of the body>"; the body must hash to it.
+etag=$(awk 'tolower($1)=="etag:" {gsub(/[\r"]/,"",$2); print $2}' hdr.txt)
+[ "$etag" = "sha256-$(sha256sum haproxy.pem | cut -d' ' -f1)" ] && echo OK
+
+# Conditional re-request: 304 and no body when nothing changed.
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  -H "Authorization: Bearer $KEY" \
+  -H "If-None-Match: \"$etag\"" \
+  "$BASE/api/certs/$ID/files/haproxy.pem"      # prints 304
+```
+
+### API key setup for automation
+
+Non-browser clients authenticate to a CertMachine instance with an API key,
+using the existing mechanism described in
+[README § API keys for automation](../../README.md#api-keys-for-automation):
+
+1. Generate a key and store its hash in one step:
+   `go run ./cmd/server -gen-api-key -name haproxy-editor -modules certmachine -config ./unified-webapp.json`.
+   It prints the key once (store it where your client reads secrets) and adds
+   the hash to that instance's `auth.api_keys`; restart or reload as you
+   normally do for config changes. The admin module's Generate key does the
+   same live, without a restart.
+2. Alternative, manual: `go run ./cmd/server -gen-api-key` (no `-name`) only
+   prints the key and its `sha256:...` hash; paste the hash into
+   `auth.api_keys` yourself.
+3. Send the key as `Authorization: Bearer <key>` (or `X-API-Key: <key>`).
+
+Any key listed in `auth.api_keys` works. A dedicated key for each client
+(for example the HAProxy editor) is recommended so it can be rotated or
+removed on its own, but this is not enforced.
 
 **Errors, in general:** `ErrValidation` and a malformed confirm/body are
 **400**; a missing row is **404**; everything else this package returns —

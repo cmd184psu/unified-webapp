@@ -214,7 +214,7 @@ all** sends it with a trailing newline.
   line returns. History is in memory only and is not persisted.
 - **`key:<name>`** sends a control sequence instead of text. Currently
   `key:ctrl+c` (interrupt every connected, non-paused terminal at once).
-  An unrecognised name sends **nothing at all** and shows a hint listing the
+  An unrecognized name sends **nothing at all** and shows a hint listing the
   known ones — a typo'd `key:ctlr+c` will not be blasted at your hosts as
   literal text. The line stays in the field so you can fix it.
 

@@ -20,7 +20,9 @@
   "issuetracker-test.cmdhome.net":     "issuetracker",
   "timetracker.cmdhome.net":           "timetracker",
   "timetracker-test.cmdhome.net":      "timetracker",
-  "sampler-test.cmdhome.net":          "sampler"
+  "sampler-test.cmdhome.net":          "sampler",
+  "haproxy-test.cmdhome.net":          "haproxy",
+  "haproxy.cmdhome.net":               "haproxy"
   },
   "server": {
     "origin_check": "enforce",
@@ -120,6 +122,24 @@
   "sampler": {
     "static_dir": "./web/sampler"
   },
+  "haproxy": {
+    "static_dir": "./web/haproxy",
+    "data_dir": "./data/haproxy",
+    "os": "auto",
+    "config_path": "",
+    "certs_dir": "",
+    "crt_list_path": "",
+    "stats_socket_path": "",
+    "backup_dir": "",
+    "service_name": "",
+    "backup_keep": 10,
+    "expiry_warn_days": 30,
+    "certmachine": {
+      "url": "https://certmachine.cmdhome.net",
+      "api_key": "REPLACE_WITH_CERTMACHINE_API_KEY",
+      "ca_file": ""
+    }
+  },
   "auth": {
     "modules": {
       "grocery": { "pin_file": "/etc/unified-webapp/grocery.pin" },
@@ -131,7 +151,8 @@
       "certmachine": { "pin_file": "/etc/unified-webapp/certmachine.pin" },
       "issuetracker": {},
       "admin": {},
-      "sampler": {}
+      "sampler": {},
+      "haproxy": { "pin_file": "/etc/unified-webapp/haproxy.pin" }
     },
     "admin_pin_file": "/etc/unified-webapp/admin.pin",
     "data_dir": "/data/auth",
@@ -148,15 +169,15 @@
       "bind_password": "REPLACE_WITH_BIND_PASSWORD",
       "base_dn": "ou=people,dc=cmdhome,dc=net",
       "user_filter": "(uid=%s)",
-      "required_groups": ["cn=household,ou=groups,dc=cmdhome,dc=net"],
+      "required_groups": ["household"],
       "timeout_seconds": 5
     },
     "api_keys": [
-      { "name": "automation", "hash": "sha256:b408256cc1181a47c036389a767e271f39da77e401ad27a28c35805a696b7d22" }
+      { "name": "automation", "hash": "sha256:b408256cc1181a47c036389a767e271f39da77e401ad27a28c35805a696b7d22", "modules": ["certmachine"] }
     ],
     "passkey": {
       "rp_id": "cmdhome.net",
-      "rp_origins": ["https://obsidianoid.cmdhome.net"]
+      "rp_origins": []
     }
   }
 }

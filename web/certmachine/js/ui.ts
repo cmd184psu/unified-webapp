@@ -1,4 +1,4 @@
-import { fetchConfig, fetchCerts, fetchCA, initCA } from "./api";
+import { fetchConfig, fetchCerts, fetchCA, initCA, deleteCert } from "./api";
 import { openTrustDialog } from "./trustdialog";
 import { openReplaceCADialog, confirmSwitchBackCA } from "./cadialog";
 import type { CAStatus } from "./api";
@@ -8,7 +8,7 @@ import type { SortKey, SortDir } from "./listmodel";
 import { openCertDetail } from "./detail";
 import { openGenerateForm } from "./generate";
 import { openImportWizard } from "./wizard";
-import { showToast, promptDialog } from "@shared";
+import { showToast, promptDialog, confirmDialog } from "@shared";
 import type { AppConfig, Cert } from "./types";
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -253,6 +253,27 @@ export async function mountCertApp(root: HTMLElement): Promise<void> {
             void refresh();
           },
         });
+      },
+      onDelete: (cert) => {
+        void (async () => {
+          const ok = await confirmDialog(
+            `Delete ${cert.fqdn}? This permanently removes the certificate and its private key and cannot be undone.`,
+            { title: "Delete certificate?", confirmLabel: "Delete", cancelLabel: "Cancel" },
+          );
+          if (!ok) return;
+          try {
+            const resp = await deleteCert(cert.id, cert.fqdn);
+            showToast(
+              resp.previousDropped
+                ? `Deleted ${cert.fqdn}. The previous CA no longer signed any active certificate and was removed, along with its archived certificates.`
+                : `Deleted ${cert.fqdn}.`,
+              "success",
+            );
+            void refresh();
+          } catch (err) {
+            showToast(err instanceof Error ? err.message : String(err), "error");
+          }
+        })();
       },
     });
   }

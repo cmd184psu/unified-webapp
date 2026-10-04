@@ -27,6 +27,17 @@ body {
   transition: background 0.2s, color 0.2s;
 }
 
+/* .layout is `height: 100%`, and a percentage height only resolves against a
+   parent with a definite height. #root had none, so .layout grew to fit its
+   content (hundreds of shares = thousands of px), body's overflow:hidden then
+   clipped it, .main-content never overflowed so it never scrolled, and the
+   footer was pushed off the bottom of the screen. Giving #root the body's full
+   height makes the grid exactly one viewport tall: the header and footer stay
+   put and .main-content (overflow-y: auto) scrolls between them. */
+#root {
+  height: 100%;
+}
+
 /* ─── Scrollbars ────────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: var(--scrollbar); }

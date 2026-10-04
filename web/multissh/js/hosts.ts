@@ -312,8 +312,13 @@ export function mountHostRail(root: HTMLElement, maxHosts: number): HostStore {
     const pwLabel = el("label", "field-label");
     pwLabel.textContent = "Password (memory only)";
     const pwInput = el("input", "field-input password-input");
-    pwInput.type = "password";
+    pwInput.type = "text";
+    pwInput.classList.add("ui-secret");
     pwInput.autocomplete = "off";
+    pwInput.setAttribute("data-lpignore", "true");
+    pwInput.setAttribute("data-1p-ignore", "");
+    pwInput.setAttribute("data-form-type", "other");
+    pwInput.spellcheck = false;
     pwInput.placeholder = "Not saved; cleared on reload";
     pwInput.value = h.password;
     pwInput.addEventListener("input", () => {

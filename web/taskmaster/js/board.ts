@@ -413,7 +413,7 @@ function updateLaneEl(el: HTMLElement, lane: LaneStatus): void {
   // A func task is only ever "up next" while a pending execution exists —
   // once it finishes it drops out of Up next entirely (P3's eligibility
   // narrowing means a finished one-shot func task never gets re-picked).
-  // Shell tasks keep their existing always-listed behaviour.
+  // Shell tasks keep their existing always-listed behavior.
   const upNextTasks = laneTasks.filter((t) => {
     if (runningTaskNames.has(t.name)) return false;
     if (t.kind && !pendingByTask.has(t.name)) return false;

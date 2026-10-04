@@ -38,7 +38,7 @@ only thing missing is the taskmaster board/API for cross-module visibility.
 | `GET` | `/` | The single-page frontend (`static_dir/index.html`; unknown paths fall back to it). |
 | `POST` | `/enqueue` | Queue a download. Form or query fields: `url` (required), `show`, `title`, `season`, `episode`, `mode` (`video` default, `audio`), `force=1` to override the duplicate check. Builds a `utuber.download` payload and calls `Lane.Submit`. `204` on success, `409` with the prior entry on a duplicate URL, `400` without `url` (or on a payload-validation error). |
 | `GET` | `/jobs.json` | The job list the page polls, in lane (FIFO) order. See [`/jobs.json` wire format](#jobsjson-wire-format) below for the exact 15 keys. |
-| `POST` | `/jobs/cancel?id=` | Cancel a queued or running download. `200 {"status":"canceled"}` if it was still queued (the pending job is cancelled outright), `200 {"status":"canceling"}` if it was running (SIGKILL is sent; the row finishes `canceled` once the process actually exits), `404` `job not found`, `409` `that download already finished` if it's already terminal, `405` (non-POST). |
+| `POST` | `/jobs/cancel?id=` | Cancel a queued or running download. `200 {"status":"canceled"}` if it was still queued (the pending job is canceled outright), `200 {"status":"canceling"}` if it was running (SIGKILL is sent; the row finishes `canceled` once the process actually exits), `404` `job not found`, `409` `that download already finished` if it's already terminal, `405` (non-POST). |
 | `POST` | `/jobs/rerun?id=` | Re-queue a finished download with the **same payload** (a fresh execution of the same job). `204` on success, `404` `job not found`, `409` `that download is queued or running`, `409` `that download already succeeded` (a succeeded one-shot job refuses re-run — see [Rerun refuses success](#rerun-refuses-a-succeeded-download) below), `405` (non-POST). |
 | `POST` | `/jobs/delete?id=` | Remove a queued or finished job (its downloaded file is left on disk). `204` on success, `409` `that job is running and can't be removed`, `404` `job not found`, `405` (non-POST). |
 | `GET` | `/ytdlp-update` | Server-sent-events stream of `<python_bin> -m pip install -U yt-dlp`; ends with `__done__` or an `ERROR:` line. |
@@ -220,6 +220,11 @@ produce the export:
 - on the signed-in machine, with yt-dlp itself:
   `yt-dlp --cookies-from-browser chrome --cookies cookies.txt --skip-download <any-url>`
 
+A pasted cookie file can stop working quickly: Google ties these session cookies to
+the network they were exported on, so a file exported on another network is often
+rotated and rejected. A same-machine, signed-in headless browser is the planned fix
+(Phase 9). Until then, export on the same network the server runs on.
+
 Paste the resulting file's contents into the textarea and click Save. The
 server validates it looks like a Netscape cookie file (every non-comment line
 has the expected 7 tab-separated fields), writes it to `cookies_file` (or its
@@ -242,7 +247,7 @@ the two cases apart without re-running anything.
 
 utuber's queue is now taskmaster's, so shutdown follows taskmaster's
 [Shutdown semantics](taskmaster.md#shutdown-semantics): the worker's context
-is cancelled, every in-flight download's `exec.CommandContext` receives a
+is canceled, every in-flight download's `exec.CommandContext` receives a
 kill signal (bounded by a 10-second `WaitDelay`), the worker joins every
 in-flight execution's goroutine before the process exits, and an
 in-flight download interrupted this way is recorded **`failed`** (not

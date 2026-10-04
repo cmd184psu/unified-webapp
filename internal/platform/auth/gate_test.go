@@ -402,9 +402,10 @@ func TestGatePinGrantScopedToItsModule(t *testing.T) {
 	})
 }
 
-// TestGateLDAPGrantReachesEveryProtectedNonAdminModule proves an "ldap"
-// identity grant authorizes every protected non-admin module.
-func TestGateLDAPGrantReachesEveryProtectedNonAdminModule(t *testing.T) {
+// TestGateLDAPGrantReachesOnlyItsOwnModule proves an "ldap:<module>" identity
+// grant authorizes that module. (That it authorizes no other module is
+// pinned in session_isolation_test.go.)
+func TestGateLDAPGrantReachesOnlyItsOwnModule(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	p := &Policy{
 		Modules: map[string]ModulePolicy{
@@ -416,10 +417,10 @@ func TestGateLDAPGrantReachesEveryProtectedNonAdminModule(t *testing.T) {
 		SessionTTL: time.Hour,
 	}
 	svc := newGateService(t, now, p)
-	tok := sessionCookieToken(t, "alice", []string{"ldap"}, time.Hour, now)
 
 	for _, module := range []string{"menuserver", "obsidianoid", "multissh"} {
 		t.Run(module, func(t *testing.T) {
+			tok := sessionCookieToken(t, "alice", []string{"ldap:" + module}, time.Hour, now)
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, "/api/items", nil)
 			req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
@@ -570,7 +571,7 @@ func TestGateRenewsOnlyOnUserActivity(t *testing.T) {
 		LDAP:       config.LDAPConfig{URL: "ldap://fake"},
 		SessionTTL: 720 * time.Hour,
 	}
-	tok := sessionCookieToken(t, "alice", []string{"ldap"}, time.Hour, issuedAt)
+	tok := sessionCookieToken(t, "alice", []string{"ldap:grocery"}, time.Hour, issuedAt)
 
 	send := func(at time.Duration, method, path, accept string) *httptest.ResponseRecorder {
 		t.Helper()
@@ -626,7 +627,7 @@ func TestGateHijackerSurvivesUpgradeRequest(t *testing.T) {
 	}
 	svc := newGateService(t, now, p)
 
-	tok := sessionCookieToken(t, "alice", []string{"ldap"}, time.Hour, now)
+	tok := sessionCookieToken(t, "alice", []string{"ldap:multissh"}, time.Hour, now)
 
 	var sawHijacker bool
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -671,7 +672,25 @@ func TestGateSessionRequiredPasskeyRoutes(t *testing.T) {
 		}
 	})
 
+	t.Run("door-code-only session, passkeys unconfigured -> 409", func(t *testing.T) {
+		tok := sessionCookieToken(t, "", []string{pinGrant("grocery")}, time.Hour, now)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/auth/passkeys", nil)
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
+		svc.Gate("grocery", echoHandler()).ServeHTTP(rec, req)
+		mustNotReached(t, rec)
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("status = %d, want 409", rec.Code)
+		}
+	})
+
 	t.Run("door-code-only session -> 403 requires_ldap", func(t *testing.T) {
+		svc := newGateService(t, now, &Policy{
+			Modules:    map[string]ModulePolicy{"grocery": {PinFile: "/tmp/does-not-matter"}},
+			LDAP:       config.LDAPConfig{URL: "ldap://fake"},
+			SessionTTL: time.Hour,
+			passkeys:   newTestPasskeyService(t, testPasskeyConfig(), func() time.Time { return now }),
+		})
 		tok := sessionCookieToken(t, "", []string{pinGrant("grocery")}, time.Hour, now)
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/api/auth/passkeys", nil)
@@ -687,7 +706,7 @@ func TestGateSessionRequiredPasskeyRoutes(t *testing.T) {
 	})
 
 	t.Run("ldap session -> handler reached (no passkey service configured in this policy)", func(t *testing.T) {
-		tok := sessionCookieToken(t, "alice", []string{"ldap"}, time.Hour, now)
+		tok := sessionCookieToken(t, "alice", []string{"ldap:grocery"}, time.Hour, now)
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/api/auth/passkeys", nil)
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
@@ -696,8 +715,8 @@ func TestGateSessionRequiredPasskeyRoutes(t *testing.T) {
 		// This policy has no configured passkey service (p.passkeys is nil)
 		// -- the handler itself fails closed on that, proving the ldap-grant
 		// precondition ran and let the request through to the stub.
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("status = %d, want 400 (handler reached, no passkey service configured)", rec.Code)
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("status = %d, want 409 (no passkey service configured)", rec.Code)
 		}
 	})
 
@@ -712,6 +731,12 @@ func TestGateSessionRequiredPasskeyRoutes(t *testing.T) {
 	})
 
 	t.Run("DELETE /api/auth/passkeys/{id} door-code session -> 403", func(t *testing.T) {
+		svc := newGateService(t, now, &Policy{
+			Modules:    map[string]ModulePolicy{"grocery": {PinFile: "/tmp/does-not-matter"}},
+			LDAP:       config.LDAPConfig{URL: "ldap://fake"},
+			SessionTTL: time.Hour,
+			passkeys:   newTestPasskeyService(t, testPasskeyConfig(), func() time.Time { return now }),
+		})
 		tok := sessionCookieToken(t, "", []string{pinGrant("grocery")}, time.Hour, now)
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodDelete, "/api/auth/passkeys/abc123", nil)
@@ -750,8 +775,8 @@ func TestGateUnauthenticatedAuthRoutesReachHandler(t *testing.T) {
 		{http.MethodGet, "/api/auth/session", "", http.StatusUnauthorized},
 		// grocery's policy has no passkey service configured -- "passkey"
 		// disallowed, rejected before the (empty) body would even matter.
-		{http.MethodPost, "/api/auth/passkey/login/begin", "", http.StatusBadRequest},
-		{http.MethodPost, "/api/auth/passkey/login/finish", "", http.StatusBadRequest},
+		{http.MethodPost, "/api/auth/passkey/login/begin", "", http.StatusConflict},
+		{http.MethodPost, "/api/auth/passkey/login/finish", "", http.StatusConflict},
 	}
 
 	for _, rt := range routes {
@@ -1005,7 +1030,7 @@ func TestGatePrincipalOnSessionPath(t *testing.T) {
 		SessionTTL: time.Hour,
 	}
 	svc := newGateService(t, now, p)
-	tok := sessionCookieToken(t, "alice", []string{"ldap"}, time.Hour, now)
+	tok := sessionCookieToken(t, "alice", []string{"ldap:grocery"}, time.Hour, now)
 
 	next, got, ok := principalCapturingHandler()
 	rec := httptest.NewRecorder()
@@ -1064,7 +1089,7 @@ func TestGateWhoamiSession(t *testing.T) {
 		SessionTTL: time.Hour,
 	}
 	svc := newGateService(t, now, p)
-	tok := sessionCookieToken(t, "alice", []string{"ldap"}, time.Hour, now)
+	tok := sessionCookieToken(t, "alice", []string{"ldap:grocery"}, time.Hour, now)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/whoami", nil)
@@ -1199,4 +1224,82 @@ func TestGateAdminModeNeverGainsMethodsFromMatrix(t *testing.T) {
 	}
 	svc.SwapPolicy(removed)
 	assertAdminPINOnly(t)
+}
+
+// --- Passkeys not configured: 409 with a plain message ---
+
+func TestGatePasskeysNotConfigured409(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	p := &Policy{
+		Modules:    map[string]ModulePolicy{"grocery": {PinFile: "/tmp/does-not-matter"}},
+		AdminPIN:   hashFor(t, "9999"),
+		LDAP:       config.LDAPConfig{URL: "ldap://fake"},
+		SessionTTL: time.Hour,
+	}
+	svc := newGateService(t, now, p)
+
+	check := func(t *testing.T, module, method, path, tok string) {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(method, path, nil)
+		if tok != "" {
+			req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
+		}
+		svc.Gate(module, echoHandler()).ServeHTTP(rec, req)
+		mustNotReached(t, rec)
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("%s %s: status = %d, want 409", method, path, rec.Code)
+		}
+		var body map[string]string
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("body %q: %v", rec.Body.String(), err)
+		}
+		if body["error"] != ErrPasskeysNotConfiguredMsg || body["code"] != "passkeys_not_configured" {
+			t.Fatalf("body = %v, want shared message and code", body)
+		}
+	}
+
+	pinTok := sessionCookieToken(t, "", []string{"admin_pin"}, time.Hour, now)
+	ldapTok := sessionCookieToken(t, "alice", []string{"ldap:admin"}, time.Hour, now)
+	for _, tc := range []struct{ name, tok string }{{"admin-PIN-only", pinTok}, {"ldap", ldapTok}} {
+		t.Run(tc.name, func(t *testing.T) {
+			check(t, "admin", http.MethodGet, "/api/auth/passkeys", tc.tok)
+			check(t, "admin", http.MethodPost, "/api/auth/passkey/register/begin", tc.tok)
+			check(t, "admin", http.MethodPost, "/api/auth/passkey/register/finish", tc.tok)
+			check(t, "admin", http.MethodDelete, "/api/auth/passkeys/abc", tc.tok)
+		})
+	}
+	t.Run("login ceremony routes", func(t *testing.T) {
+		check(t, "grocery", http.MethodPost, "/api/auth/passkey/login/begin", "")
+		check(t, "grocery", http.MethodPost, "/api/auth/passkey/login/finish", "")
+	})
+}
+
+func TestGatePasskeysConfiguredKeepsLDAPRequirement(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	p := &Policy{
+		Modules:    map[string]ModulePolicy{"grocery": {PinFile: "/tmp/does-not-matter"}},
+		LDAP:       config.LDAPConfig{URL: "ldap://fake"},
+		SessionTTL: time.Hour,
+		passkeys:   newTestPasskeyService(t, testPasskeyConfig(), func() time.Time { return now }),
+	}
+	svc := newGateService(t, now, p)
+
+	noLDAP := sessionCookieToken(t, "", []string{pinGrant("grocery")}, time.Hour, now)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/passkeys", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: noLDAP})
+	svc.Gate("grocery", echoHandler()).ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("no ldap grant: status = %d, want 403", rec.Code)
+	}
+
+	withLDAP := sessionCookieToken(t, "alice", []string{"ldap:grocery"}, time.Hour, now)
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/auth/passkeys", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: withLDAP})
+	svc.Gate("grocery", echoHandler()).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ldap grant: status = %d body=%q, want 200 from the handler", rec.Code, rec.Body.String())
+	}
 }

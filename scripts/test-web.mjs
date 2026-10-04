@@ -41,6 +41,10 @@ function fail(message) {
 // plus web/shared/ts/patchlist.test.ts and web/shared/ts/queuepanel.test.ts,
 // added at PLAN-utuber-taskmaster-lane.md Phase 4 (D10 shared queue panel).
 const suites = [
+  { name: "admin-passkeyform", entry: "web/admin/js/passkeyform.test.ts", runner: "esbuild-cjs" },
+  { name: "admin-keyscope", entry: "web/admin/js/keyscope.test.ts", runner: "esbuild-cjs" },
+  { name: "admin-groups", entry: "web/admin/js/groups.test.ts", runner: "esbuild-cjs" },
+  { name: "admin-passkeystate", entry: "web/admin/js/passkeystate.test.ts", runner: "esbuild-cjs" },
   { name: "sshcommand", entry: "web/multissh/js/sshcommand.test.ts", runner: "esbuild-cjs" },
   { name: "certmachine-status", entry: "web/certmachine/js/status.test.ts", runner: "esbuild-cjs" },
   { name: "certmachine-listmodel", entry: "web/certmachine/js/listmodel.test.ts", runner: "esbuild-cjs" },
@@ -52,6 +56,15 @@ const suites = [
   { name: "shared-menu", entry: "web/shared/ts/menu.test.ts", runner: "esbuild-cjs" },
   { name: "shared-patchlist", entry: "web/shared/ts/patchlist.test.ts", runner: "esbuild-cjs" },
   { name: "shared-queuepanel", entry: "web/shared/ts/queuepanel.test.ts", runner: "esbuild-cjs" },
+  { name: "smbedit-layout", entry: "web/smbedit/src/layout.test.ts", runner: "esbuild-cjs" },
+  { name: "haproxy-modelform", entry: "web/haproxy/src/modelForm.test.ts", runner: "esbuild-cjs" },
+  { name: "haproxy-issues", entry: "web/haproxy/src/issues.test.ts", runner: "esbuild-cjs" },
+  { name: "haproxy-settingsform", entry: "web/haproxy/src/settingsform.test.ts", runner: "esbuild-cjs" },
+  { name: "haproxy-pending", entry: "web/haproxy/src/pending.test.ts", runner: "esbuild-cjs" },
+  { name: "haproxy-certview", entry: "web/haproxy/src/certview.test.ts", runner: "esbuild-cjs" },
+  { name: "haproxy-livefeed", entry: "web/haproxy/src/livefeed.test.ts", runner: "esbuild-cjs" },
+  { name: "haproxy-statsview", entry: "web/haproxy/src/statsview.test.ts", runner: "esbuild-cjs" },
+  { name: "haproxy-sourceguard", entry: "web/haproxy/src/sourceguard.test.ts", runner: "esbuild-cjs" },
   { name: "grocery", entry: "web/grocery/js/main.test.ts", runner: "node-test" },
 ];
 

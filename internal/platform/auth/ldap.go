@@ -25,6 +25,11 @@ var ErrLDAPAuth = errors.New("auth: invalid ldap credentials")
 // a member of any of the configured required groups.
 var ErrLDAPForbidden = errors.New("auth: ldap user is not in an allowed group")
 
+// ErrLDAPSearch marks a directory search failure during CheckConfig (bad
+// base DN, malformed user filter, no read access for the service account).
+// The wrapped error is a *ldap.Error and carries no credentials.
+var ErrLDAPSearch = errors.New("auth: ldap search failed")
+
 // ldapConn is the seam between LDAPClient and the directory connection. It
 // captures only the methods the ported logic below actually calls, so tests
 // can substitute a fake without a real LDAP server. *ldap.Conn satisfies
@@ -90,6 +95,44 @@ func (c *LDAPClient) Authenticate(ctx context.Context, username, password string
 		return "", ErrLDAPForbidden
 	}
 	return username, nil
+}
+
+// LDAPCheck is what CheckConfig found: how many directory entries the
+// configured base DN and user filter match, and which required groups could
+// not be found under the base DN.
+type LDAPCheck struct {
+	Users         int
+	MissingGroups []string
+}
+
+// CheckConfig verifies the saved configuration without any user account:
+// it dials, binds as the service account (when bind_dn is set), searches
+// base_dn with user_filter matching any user, and looks each required group
+// up by cn. A connect/bind failure is returned as-is; a search failure is
+// wrapped in ErrLDAPSearch.
+func (c *LDAPClient) CheckConfig(ctx context.Context) (LDAPCheck, error) {
+	conn, err := c.connect(ctx)
+	if err != nil {
+		return LDAPCheck{}, err
+	}
+	defer conn.Close()
+
+	filter := fmt.Sprintf(c.cfg.UserFilter, "*")
+	res, err := conn.Search(ldap.NewSearchRequest(c.cfg.BaseDN, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false, filter, []string{"dn"}, nil))
+	if err != nil {
+		return LDAPCheck{}, fmt.Errorf("%w: %w", ErrLDAPSearch, err)
+	}
+	out := LDAPCheck{Users: len(res.Entries)}
+	for _, g := range c.cfg.RequiredGroups {
+		gres, err := conn.Search(ldap.NewSearchRequest(c.cfg.BaseDN, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 1, 0, false, "(cn="+ldap.EscapeFilter(g)+")", []string{"cn"}, nil))
+		if err != nil {
+			return LDAPCheck{}, fmt.Errorf("%w: %w", ErrLDAPSearch, err)
+		}
+		if len(gres.Entries) == 0 {
+			out.MissingGroups = append(out.MissingGroups, g)
+		}
+	}
+	return out, nil
 }
 
 // Authorize resolves a user's groups without a password bind, used to

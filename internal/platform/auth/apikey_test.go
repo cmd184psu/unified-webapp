@@ -34,7 +34,7 @@ func TestCheckAPIKeyBearer(t *testing.T) {
 		{Name: "svc-a", Hash: hashKey("key-a")},
 	}
 	r := newReq(t, "Bearer key-a", "")
-	name, ok := checkAPIKey(keys, r)
+	name, ok := checkAPIKey(keys, "todo", r)
 	if !ok || name != "svc-a" {
 		t.Fatalf("checkAPIKey(Bearer key-a) = (%q, %v), want (svc-a, true)", name, ok)
 	}
@@ -45,7 +45,7 @@ func TestCheckAPIKeyXAPIKeyHeader(t *testing.T) {
 		{Name: "svc-a", Hash: hashKey("key-a")},
 	}
 	r := newReq(t, "", "key-a")
-	name, ok := checkAPIKey(keys, r)
+	name, ok := checkAPIKey(keys, "todo", r)
 	if !ok || name != "svc-a" {
 		t.Fatalf("checkAPIKey(X-API-Key key-a) = (%q, %v), want (svc-a, true)", name, ok)
 	}
@@ -57,7 +57,7 @@ func TestCheckAPIKeyBearerTakesPrecedence(t *testing.T) {
 		{Name: "svc-b", Hash: hashKey("key-b")},
 	}
 	r := newReq(t, "Bearer key-a", "key-b")
-	name, ok := checkAPIKey(keys, r)
+	name, ok := checkAPIKey(keys, "todo", r)
 	if !ok || name != "svc-a" {
 		t.Fatalf("checkAPIKey(both headers) = (%q, %v), want (svc-a, true) since Bearer takes precedence", name, ok)
 	}
@@ -68,7 +68,7 @@ func TestCheckAPIKeyInvalidKey(t *testing.T) {
 		{Name: "svc-a", Hash: hashKey("key-a")},
 	}
 	r := newReq(t, "Bearer wrong-key", "")
-	name, ok := checkAPIKey(keys, r)
+	name, ok := checkAPIKey(keys, "todo", r)
 	if ok {
 		t.Fatalf("checkAPIKey(wrong key) = (%q, %v), want ok=false", name, ok)
 	}
@@ -79,7 +79,7 @@ func TestCheckAPIKeyNoHeaders(t *testing.T) {
 		{Name: "svc-a", Hash: hashKey("key-a")},
 	}
 	r := newReq(t, "", "")
-	name, ok := checkAPIKey(keys, r)
+	name, ok := checkAPIKey(keys, "todo", r)
 	if ok {
 		t.Fatalf("checkAPIKey(no headers) = (%q, %v), want ok=false", name, ok)
 	}
@@ -92,7 +92,7 @@ func TestCheckAPIKeyMalformedAuthorizationFallsBackToXAPIKey(t *testing.T) {
 	// Authorization present but not "Bearer "-shaped (e.g. Basic auth) --
 	// must fall back to X-API-Key rather than failing outright.
 	r := newReq(t, "Basic dXNlcjpwYXNz", "key-a")
-	name, ok := checkAPIKey(keys, r)
+	name, ok := checkAPIKey(keys, "todo", r)
 	if !ok || name != "svc-a" {
 		t.Fatalf("checkAPIKey(malformed Authorization + valid X-API-Key) = (%q, %v), want (svc-a, true)", name, ok)
 	}
@@ -107,7 +107,7 @@ func TestCheckAPIKeyExactHashForm(t *testing.T) {
 		{Name: "literal", Hash: entryHash},
 	}
 	r := newReq(t, "Bearer literal-key", "")
-	name, ok := checkAPIKey(keys, r)
+	name, ok := checkAPIKey(keys, "todo", r)
 	if !ok || name != "literal" {
 		t.Fatalf("checkAPIKey(literal hash form) = (%q, %v), want (literal, true)", name, ok)
 	}
@@ -120,7 +120,7 @@ func TestCheckAPIKeyMultipleEntriesSecondMatches(t *testing.T) {
 		{Name: "svc-c", Hash: hashKey("key-c")},
 	}
 	r := newReq(t, "Bearer key-b", "")
-	name, ok := checkAPIKey(keys, r)
+	name, ok := checkAPIKey(keys, "todo", r)
 	if !ok || name != "svc-b" {
 		t.Fatalf("checkAPIKey(key-b) = (%q, %v), want (svc-b, true)", name, ok)
 	}
@@ -128,7 +128,7 @@ func TestCheckAPIKeyMultipleEntriesSecondMatches(t *testing.T) {
 
 func TestCheckAPIKeyEmptyKeys(t *testing.T) {
 	r := newReq(t, "Bearer anything", "")
-	name, ok := checkAPIKey(nil, r)
+	name, ok := checkAPIKey(nil, "todo", r)
 	if ok {
 		t.Fatalf("checkAPIKey(nil keys) = (%q, %v), want ok=false", name, ok)
 	}

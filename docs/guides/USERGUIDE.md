@@ -165,16 +165,27 @@ set of methods, gated only by what's configured:
   shared numeric PIN read from a plaintext file that must be `chmod 0400`;
   it doesn't carry an identity the way LDAP does — it's just a door code
   for that one module. Edit the file to change the PIN; no restart needed.
-- **Passkey** — WebAuthn, offered when `auth.passkey` (`rp_id`/
-  `rp_origins`) is configured. Requires a secure context (HTTPS, or
-  `localhost`). Register keys from a module page once logged in by another
-  method.
-- **API key** — orthogonal to the modules matrix: a valid key from
-  `auth.api_keys` works on **any protected non-admin module**, regardless
-  of that module's own `pin_file` setting, and is ignored on open modules
-  (nothing to authenticate into) and never accepted for admin. Sent as
+- **Passkey** — WebAuthn, offered when `auth.passkey.rp_id` (the domain)
+  is set, in Admin > Passkey settings. Every host in `host_routing` that sits
+  under that domain is allowed automatically, so a new module needs nothing
+  more; `rp_origins` only lists extra addresses that are not routed. Requires
+  a secure context (HTTPS, or `localhost`). Register keys from a module page
+  once logged in by another method. A passkey is tied to the domain, so one
+  registered on any allowed host works on all of them, and each module still
+  keeps its own session. If sign-in says "Passkeys are not enabled for this
+  address", the address you opened is not routed under the domain.
+- **API key** — orthogonal to the modules matrix. Each key works on the
+  modules you chose for it, or on **all modules**; a key is never unscoped.
+  It is ignored on open modules (nothing to authenticate into), never accepted
+  for admin, and gets a 401 on any module outside its list. Sent as
   `Authorization: Bearer <key>` (no cookies involved); keys are stored as
-  SHA-256 hashes, generate a pair with `go run ./cmd/server -gen-api-key`.
+  SHA-256 hashes. In Admin > API Keys each key shows its modules, **Scope…**
+  changes them without rotating the key, and the create form needs a name and
+  at least one module (or All modules) before **Generate key** turns on. From
+  the command line, `go run ./cmd/server -gen-api-key -name <name> -modules
+  todo,grocery` (or `-modules all`); `-modules` is required with `-name`. In
+  the config, `auth.api_keys` entries carry `"modules": [...]` (`"*"` = all);
+  an older entry with no `modules` is treated as all.
 
 The **admin** module is the one exception to all of this: it is **PIN-only**
 — never LDAP, passkey, or API key — using the operator PIN configured

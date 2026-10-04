@@ -1,9 +1,10 @@
 import "./cert.css";
-import { ThemeManager, HamburgerMenu } from "@shared";
+import { ThemeManager, HamburgerMenu, watchSecrets } from "@shared";
 import { mountCertApp } from "./ui";
 
 const themes = new ThemeManager({ module: "certmachine", default: "dark" });
 themes.apply();
+watchSecrets();
 
 const hamburger = new HamburgerMenu({
   title: "CertMachine",

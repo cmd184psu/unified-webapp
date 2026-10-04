@@ -34,12 +34,14 @@ func TestIdentityGrantOf(t *testing.T) {
 		grants []string
 		want   string
 	}{
-		{"ldap grant", []string{"ldap"}, "ldap"},
-		{"passkey grant", []string{"passkey"}, "passkey"},
+		{"ldap grant", []string{"ldap:todo"}, "ldap"},
+		{"passkey grant", []string{"passkey:todo"}, "passkey"},
+		{"legacy unscoped ldap is not an identity", []string{"ldap"}, ""},
+		{"legacy unscoped passkey is not an identity", []string{"passkey"}, ""},
 		{"admin_pin grant", []string{"admin_pin"}, "admin_pin"},
 		{"door-code only", []string{pinGrant("grocery")}, ""},
 		{"nil grants", nil, ""},
-		{"identity among door codes", []string{pinGrant("grocery"), "ldap"}, "ldap"},
+		{"identity among door codes", []string{pinGrant("grocery"), "ldap:grocery"}, "ldap"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -48,7 +48,7 @@ func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 func identityGrantOf(grants []string) string {
 	for _, g := range grants {
 		if isIdentityGrant(g) || g == adminPINMethod {
-			return g
+			return grantKind(g)
 		}
 	}
 	return ""

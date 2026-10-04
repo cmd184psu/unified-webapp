@@ -279,6 +279,19 @@ body {
   padding-top: 2px;
 }
 
+/* .cert-list is display:flex, which overrides the browser's [hidden] rule, so
+   the collapsed expired/archived list was never actually hidden. */
+.cert-list[hidden] {
+  display: none;
+}
+
+.cert-action-danger {
+  color: var(--color-danger, #ef4444);
+}
+.cert-action-danger:hover {
+  border-color: var(--color-danger, #ef4444);
+}
+
 /* ---------- CA panel ---------- */
 .cert-ca-panel-wrap {
   max-width: 880px;

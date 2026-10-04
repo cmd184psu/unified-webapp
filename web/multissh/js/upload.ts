@@ -111,7 +111,7 @@ export function mountUploadApp(root: HTMLElement, store: HostStore): void {
 
   // ---- checked state ----
   // Keyed by host object, not position, so a removal or reorder in the rail
-  // never shifts a tick onto a neighbouring host.
+  // never shifts a tick onto a neighboring host.
   const checked = new WeakMap<HostConfig, boolean>();
 
   const renderHostChecks = (): void => {

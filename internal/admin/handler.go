@@ -71,11 +71,15 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/config/modules", h.handlePutConfigModules)
 	mux.HandleFunc("POST /api/keys", h.handlePostKey)
 	mux.HandleFunc("DELETE /api/keys/{name}", h.handleDeleteKey)
+	mux.HandleFunc("PUT /api/keys/{name}", h.handlePutKeyScope)
 	mux.HandleFunc("POST /api/ldap/test", h.handlePostLDAPTest)
+	mux.HandleFunc("POST /api/ldap/check", h.handlePostLDAPCheck)
 	mux.HandleFunc("PUT /api/config/session", h.handlePutConfigSession)
 	mux.HandleFunc("GET /api/config/pin-files", h.handleGetPinFiles)
+	mux.HandleFunc("GET /api/config/fs", h.handleListFS)
 	mux.HandleFunc("POST /api/config/pin-files", h.handlePostPinFile)
 	mux.HandleFunc("PUT /api/config/ldap", h.handlePutConfigLdap)
+	mux.HandleFunc("PUT /api/config/passkey", h.handlePutConfigPasskey)
 }
 
 // mutateAuth is the single path every mutating route below uses. It holds
@@ -129,6 +133,10 @@ type authConfigView struct {
 	AdminPIN     adminPINView                       `json:"admin_pin"`
 	LDAP         ldapConfigView                     `json:"ldap"`
 	Passkey      config.PasskeyConfig               `json:"passkey"`
+	// RoutedOrigins are the origins allowed automatically (routed hosts under
+	// the RP ID); SuggestedRPID is the parent domain they share. Read-only.
+	RoutedOrigins []string `json:"routed_origins"`
+	SuggestedRPID string   `json:"suggested_rp_id"`
 	Session      sessionConfigView                  `json:"session"`
 	CookieSecure bool                               `json:"cookie_secure"`
 	CookieDomain string                             `json:"cookie_domain"`
@@ -139,8 +147,9 @@ type authConfigView struct {
 // (upsertNamedHash/handlePostKey never store an empty one), so
 // there is no "unset" case to distinguish here.
 type namedHashView struct {
-	Name string `json:"name"`
-	Hash string `json:"hash"`
+	Name    string   `json:"name"`
+	Hash    string   `json:"hash"`
+	Modules []string `json:"modules"`
 }
 
 // adminPINView reports how the operator PIN is configured without ever
@@ -177,7 +186,7 @@ type sessionConfigView struct {
 func redactAuthConfig(a config.AuthConfig) authConfigView {
 	keys := make([]namedHashView, len(a.APIKeys))
 	for i, k := range a.APIKeys {
-		keys[i] = namedHashView{Name: k.Name, Hash: "(set)"}
+		keys[i] = namedHashView{Name: k.Name, Hash: "(set)", Modules: keyScopeView(k.Modules)}
 	}
 
 	adminPIN := adminPINView{DefinedBy: "none"}
@@ -199,7 +208,18 @@ func redactAuthConfig(a config.AuthConfig) authConfigView {
 		modules = map[string]config.ModuleAuthConfig{}
 	}
 
+	passkey := a.Passkey
+	if passkey.RPOrigins == nil {
+		passkey.RPOrigins = []string{}
+	}
+
+	routed := auth.PasskeyOrigins(passkey.RPID, nil, passkey.Hosts)
+	if routed == nil {
+		routed = []string{}
+	}
 	return authConfigView{
+		RoutedOrigins: routed,
+		SuggestedRPID: auth.SuggestRPID(passkey.Hosts),
 		Modules:  modules,
 		APIKeys:  keys,
 		AdminPIN: adminPIN,
@@ -214,7 +234,7 @@ func redactAuthConfig(a config.AuthConfig) authConfigView {
 			RequiredGroups: a.LDAP.RequiredGroups,
 			TimeoutSeconds: a.LDAP.TimeoutSeconds,
 		},
-		Passkey:      a.Passkey,
+		Passkey:      passkey,
 		Session:      sessionConfigView{TTLHours: a.Session.TTLHours, RefreshAfterFraction: a.Session.RefreshAfterFraction},
 		CookieSecure: a.CookieSecure,
 		CookieDomain: a.CookieDomain,
@@ -271,7 +291,8 @@ func (h *Handler) handlePutConfigModules(w http.ResponseWriter, r *http.Request)
 
 // postKeyRequest is the POST /api/keys body.
 type postKeyRequest struct {
-	Name string `json:"name"`
+	Name    string   `json:"name"`
+	Modules []string `json:"modules"`
 }
 
 // handlePostKey generates a fresh API key server-side, mirroring
@@ -293,6 +314,11 @@ func (h *Handler) handlePostKey(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, http.StatusBadRequest, "name is required")
 		return
 	}
+	scope, err := NormalizeKeyScope(req.Modules, h.deps.KnownModules)
+	if err != nil {
+		response.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	key, hash, err := generateAPIKey()
 	if err != nil {
@@ -301,14 +327,54 @@ func (h *Handler) handlePostKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = h.mutateAuth(func(cur config.AuthConfig) (config.AuthConfig, bool) {
-		cur.APIKeys = upsertNamedHash(cur.APIKeys, req.Name, hash)
+		cur.APIKeys = upsertKey(cur.APIKeys, req.Name, hash, scope)
 		return cur, true
 	})
 	if err != nil {
 		response.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	response.WriteJSON(w, http.StatusOK, map[string]string{"name": req.Name, "key": key})
+	response.WriteJSON(w, http.StatusOK, map[string]any{"name": req.Name, "key": key, "modules": scope})
+}
+
+// handlePutKeyScope changes where an existing key works, without rotating it:
+// the key itself is unchanged and takes effect on the next request.
+func (h *Handler) handlePutKeyScope(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	var req struct {
+		Modules []string `json:"modules"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.WriteDecodeError(w, err)
+		return
+	}
+	scope, err := NormalizeKeyScope(req.Modules, h.deps.KnownModules)
+	if err != nil {
+		response.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	applied, err := h.mutateAuth(func(cur config.AuthConfig) (config.AuthConfig, bool) {
+		keys := make([]config.NamedHash, len(cur.APIKeys))
+		copy(keys, cur.APIKeys)
+		found := false
+		for i := range keys {
+			if keys[i].Name == name {
+				keys[i].Modules = scope
+				found = true
+			}
+		}
+		cur.APIKeys = keys
+		return cur, found
+	})
+	if err != nil {
+		response.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !applied {
+		response.WriteError(w, http.StatusNotFound, "key not found")
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, map[string]any{"name": name, "modules": scope})
 }
 
 // generateAPIKey mirrors cmd/server/main.go's genAPIKeyAndExit precisely:
@@ -419,6 +485,47 @@ func (h *Handler) handlePostLDAPTest(w http.ResponseWriter, r *http.Request) {
 	_, bindErr := client.Authenticate(r.Context(), req.Username, req.Password)
 
 	response.WriteJSON(w, http.StatusOK, map[string]string{"result": classifyLDAPTestError(bindErr)})
+}
+
+// --- POST /api/ldap/check ---
+
+// handlePostLDAPCheck verifies the *currently saved* auth.ldap config with
+// no user account: connect, service bind, base-DN search, required groups.
+// It reports an outcome class ("ok", "unreachable", "tls_error",
+// "bind_failed", "search_failed"), plus the number of users matched and any
+// required groups not found. Nothing secret is returned or logged.
+func (h *Handler) handlePostLDAPCheck(w http.ResponseWriter, r *http.Request) {
+	h.mu.Lock()
+	ldapCfg := h.authConfig.LDAP
+	h.mu.Unlock()
+
+	check, err := auth.NewLDAPClient(ldapCfg).CheckConfig(r.Context())
+	body := map[string]any{"result": classifyLDAPCheckError(err), "users": check.Users, "missingGroups": check.MissingGroups}
+	var ldapErr *ldap.Error
+	if errors.As(err, &ldapErr) {
+		body["detail"] = ldap.LDAPResultCodeMap[ldapErr.ResultCode]
+	}
+	response.WriteJSON(w, http.StatusOK, body)
+}
+
+func classifyLDAPCheckError(err error) string {
+	if err == nil {
+		return "ok"
+	}
+	if errors.Is(err, auth.ErrLDAPSearch) {
+		return "search_failed"
+	}
+	if isLDAPTLSError(err) {
+		return "tls_error"
+	}
+	var ldapErr *ldap.Error
+	if errors.As(err, &ldapErr) {
+		switch ldapErr.ResultCode {
+		case ldap.LDAPResultInvalidCredentials, ldap.LDAPResultInappropriateAuthentication, ldap.LDAPResultInsufficientAccessRights, ldap.LDAPResultNoSuchObject:
+			return "bind_failed"
+		}
+	}
+	return "unreachable"
 }
 
 // classifyLDAPTestError maps an error from auth.LDAPClient.Authenticate to

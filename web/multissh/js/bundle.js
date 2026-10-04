@@ -1,5 +1,5 @@
 // web/multissh/js/main.ts
-import { ThemeManager, HamburgerMenu } from "/shared/dist/shared.mjs";
+import { ThemeManager, HamburgerMenu, watchSecrets } from "/shared/dist/shared.mjs";
 
 // web/multissh/js/api.ts
 var DEFAULT_MAX_SESSIONS = 10;
@@ -477,8 +477,13 @@ function mountHostRail(root, maxHosts) {
     const pwLabel = el2("label", "field-label");
     pwLabel.textContent = "Password (memory only)";
     const pwInput = el2("input", "field-input password-input");
-    pwInput.type = "password";
+    pwInput.type = "text";
+    pwInput.classList.add("ui-secret");
     pwInput.autocomplete = "off";
+    pwInput.setAttribute("data-lpignore", "true");
+    pwInput.setAttribute("data-1p-ignore", "");
+    pwInput.setAttribute("data-form-type", "other");
+    pwInput.spellcheck = false;
     pwInput.placeholder = "Not saved; cleared on reload";
     pwInput.value = h2.password;
     pwInput.addEventListener("input", () => {
@@ -10584,6 +10589,7 @@ function mountTabs(root, maxSessions) {
 }
 
 // web/multissh/js/main.ts
+watchSecrets();
 var themes = new ThemeManager({
   module: "multissh",
   default: "dark",
