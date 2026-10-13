@@ -6,7 +6,8 @@ Resume point for the ralplan → ralph run of [FRD-AF-REM-001](frd.md). Newest e
 - Branch: `agentflow` (commit per passing story, never push)
 - Scope: all priorities (must, should, could)
 - Security posture (owner, 2026-10-13): agentflow is local, single-user. Implement the FRD's explicit safety requirements only; reviewers log extra security findings below as notes instead of blocking.
-- Builders: every implementation (executor) agent runs on Sonnet 5.5 (owner, 2026-10-13); reviewers keep their tiers
+- Builders and reviewers: every implementation and review agent runs on Sonnet 5.5 (owner, 2026-10-13)
+- One review per story (owner, 2026-10-13): builder applies the reviewer's blocking fixes, orchestrator re-runs the tests and commits — no re-review rounds.
 - Plan: `.omc/plans/ralplan-agentflow-remediation.md` (iteration 1); ralph PRD in `.omc/state/sessions/<session>/prd.json`
 - Plan approval: automatic after critic approval; stop and ask only if the critic never approves within 5 rounds
 - Pre-change snapshot: `~/pre-remediation-tracked.patch`, `~/pre-remediation-modified.tgz`, `~/pre-remediation-untracked.tgz`
@@ -52,6 +53,7 @@ Logged per the owner's posture; candidates for the next phase alongside `.omc/pl
 - Sandbox `Spec.Env` denylist is case-sensitive and does not block `GIT_CONFIG_*` overrides (callers are trusted).
 - opencode permission rules are layer 1 only (grouped redirections, `/usr/bin/git`, `env git`, `sh -c` pass); `git grep -n TODO` is denied as a side effect of the `-O` rule.
 - gitsvc: owner-marker ref for integration overrides is not written atomically with the branch (fails safe); gitlink-path `reset` error ignored; each hardened call spawns two probe git processes (no cache).
+- opencode adapter (B7 review notes): `Incomplete` only when final text is empty (a rejected ask after earlier text returns stale text); token usage summed per step is unverified on multi-step streams; in the sandbox the frozen config is copied to `<stage>/home/.config/opencode/` each run (opencode writes next to its config).
 - verify: 5000-file cap applied after git lists everything; files over 8 MiB pass `parse` with a warning; TOCTOU between containment check and read.
 
 ## Log
@@ -76,6 +78,7 @@ Logged per the owner's posture; candidates for the next phase alongside `.omc/pl
 - 2026-10-13 — B3: model + store v3 (efforts/docs/queues/tasks/attempts/stages, derived status; fixed reset deadlock via 'abandoned').
 - 2026-10-13 — B12: verify feedback commands + baseline compare (head+tail output cap).
 - 2026-10-13 — B10: gitsvc policy (worktree-scoped detect-and-revert), serialized merge with clean abort, push instructions. Merge signature: Merge(ctx, repo, integrationWT, integrationBranch, taskBranch).
+- 2026-10-13 — B7: opencode invocation (stdin prompt), event parsing, error classes, sandboxed command, version. Real run vs stub verified with opencode 1.18.19.
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`
