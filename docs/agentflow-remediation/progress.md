@@ -74,6 +74,7 @@ Logged per the owner's posture; candidates for the next phase alongside `.omc/pl
 - 2026-10-13 — B6: opencode config generator + ordered permissions (3 review rounds; bypasses fixed and tested via matcher copy).
 - 2026-10-13 — B9: gitsvc (fixed reproduced symlinked-.git commit redirect and filter-driver execution; exported AdminGitDir + Hardened).
 - 2026-10-13 — B3: model + store v3 (efforts/docs/queues/tasks/attempts/stages, derived status; fixed reset deadlock via 'abandoned').
+- 2026-10-13 — B12: verify feedback commands + baseline compare (head+tail output cap).
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`
