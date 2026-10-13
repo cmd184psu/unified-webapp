@@ -61,6 +61,7 @@ Later stories must follow these, not the original plan text.
 - 2026-10-13 — B11: verify structural checks; fixed reviewer-found git filter-driver code-execution path (trusted --git-dir, empty attr-source). New dep: BurntSushi/toml.
 - 2026-10-13 — B8: bwrap sandbox (deny-by-default root, ro gitfile, ReadOnlyWorktree, env denylist, userns disabled).
 - 2026-10-13 — B6: opencode config generator + ordered permissions (3 review rounds; bypasses fixed and tested via matcher copy).
+- 2026-10-13 — B9: gitsvc (fixed reproduced symlinked-.git commit redirect and filter-driver execution; exported AdminGitDir + Hardened).
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`
