@@ -43,6 +43,7 @@ Full notes, fixtures, the opencode stub server and the bwrap template are kept o
 - 2026-10-13 — B1: store core package (migrations v1=events; B2 appends v2, B3 v3).
 - 2026-10-13 — A4: taskmaster RegisterLane: same-owner shared kinds, check->persist->register order, no residue on failure.
 - 2026-10-13 — B5: runner interface + scriptable fake (Match, Partial, EditBeforeBlock).
+- 2026-10-13 — B4: embedded role prompts + strict schema parser (last-object rule, blocked reviews, contract drift test); root prompts/ kept until D1.
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`
