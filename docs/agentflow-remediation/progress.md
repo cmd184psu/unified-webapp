@@ -30,6 +30,17 @@ Full notes, fixtures, the opencode stub server and the bwrap template are kept o
 - **S6 taskmaster — MET:** ctx cancel < 10 ms for Cancel, brake and Close. Cancel: queued → canceled; running → canceling → canceled. Pause keeps queued queued, leaves running alone. Brake cancels running jobs and pauses only unpaused lanes; release unpauses only those. Close: running → `failed: context canceled` (treat as infra:lost), queued stays pending. Width 0/-1 rejected by UpdateSettings; `InitialWidth:0` allowed. Pending jobs with unregistered kinds stay pending; RegisterLane after Open works (job starts next poll). Rule: if `BrakeEngaged` do nothing; pause only if not paused; unpause only if `PausedBy=="owner:agentflow"`. Reroute = Cancel + Submit. Second RegisterLane same name → ErrLaneRegistered.
 - **Baselines:** `~/agentflow-gates-baseline.txt` (make gates exit 0, 5 gates pass); UI screenshots in `~/agentflow-ui-baseline/` (desktop tabs, settings, hamburger desktop/mobile; server run against an empty temp project_path). Playwright installed only in the session scratchpad; it launched the cached chromium-1234 via `executablePath`.
 
+
+## Plan corrections found during execution
+Later stories must follow these, not the original plan text.
+- **Migrations:** v1 = events (B1), v2 = config tables (B2), v3 = effort/task tables (B3); append-only.
+- **Task branch name:** git cannot hold `agentflow/<effort>` and `agentflow/<effort>/<task>` at once (`cannot lock ref`). Integration branch stays `agentflow/<effort>` (or user-named); task branches are `agentflow-task/<effort>/<task>` (`gitsvc.TaskBranch`). Applies to GIT2/PX2, B10, C6, UI.
+- **opencode config location:** `<stage>/xdg/opencode/opencode.json` with `XDG_CONFIG_HOME=<stage>/xdg`, `--pure`, fresh HOME `<stage>/home`, `OPENCODE_DISABLE_PROJECT_CONFIG=1`; never set `OPENCODE_CONFIG`/`OPENCODE_CONFIG_DIR` (S3: OPENCODE_CONFIG is additive). Provider keys only as `{env:AGENTFLOW_KEY_<NAME>}`.
+- **Prompt delivery:** stdin, no message argument (S1).
+- **Sandbox:** deny-by-default root; `.git/worktrees/<id>` read-only; `Command` returns `(*exec.Cmd, error)`; env = allowlist + bwrap's `PWD`.
+- **worktree prune:** only when every stale entry is under `<data_dir>/worktrees`.
+- **Root `prompts/`:** copied into `internal/agentflow/prompts` (B4); D1 deletes the root copy.
+
 ## Log
 - 2026-10-12 — FRD written (frd.json canonical, frd.md generated). Owner added UI6: keep existing look and feel.
 - 2026-10-12 — OMC 5.7.1 installed mid-session; owner chose to run ralplan/ralph from a fresh session so OMC hooks, state tools and agent types are active.
@@ -44,6 +55,7 @@ Full notes, fixtures, the opencode stub server and the bwrap template are kept o
 - 2026-10-13 — A4: taskmaster RegisterLane: same-owner shared kinds, check->persist->register order, no residue on failure.
 - 2026-10-13 — B5: runner interface + scriptable fake (Match, Partial, EditBeforeBlock).
 - 2026-10-13 — B4: embedded role prompts + strict schema parser (last-object rule, blocked reviews, contract drift test); root prompts/ kept until D1.
+- 2026-10-13 — B2: store config tables (migration v2 + CHECK constraints), validation, snapshot, repo-path safety incl. RecheckRepoPath.
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`

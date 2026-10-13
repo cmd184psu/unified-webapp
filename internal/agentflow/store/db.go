@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"path/filepath"
 
 	_ "modernc.org/sqlite"
 )
@@ -14,6 +15,11 @@ import (
 // Store owns the agentflow database handle.
 type Store struct {
 	db *sql.DB
+	// dataDir is the directory holding the database file ("" for :memory:);
+	// project repositories may not overlap it.
+	dataDir string
+	// protected is captured once at Open; see captureProtected.
+	protected []protectedPath
 }
 
 // dsnFor builds the sqlite DSN for path: WAL, foreign keys on and a 5s busy
@@ -48,7 +54,15 @@ func openWith(path string, migs []migration) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Store{db: db}, nil
+	st := &Store{db: db}
+	if path != ":memory:" {
+		st.dataDir = filepath.Dir(path)
+	}
+	if st.protected, err = captureProtected(st.dataDir); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return st, nil
 }
 
 // Close closes the database.
