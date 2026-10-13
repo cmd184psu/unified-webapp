@@ -178,74 +178,29 @@ func TestHandleUnknownRoute(t *testing.T) {
 	}
 }
 
-func TestPostTaskAction_Approve(t *testing.T) {
+func TestRemovedExecutionRoutes404(t *testing.T) {
 	dir := t.TempDir()
-	qp := filepath.Join(dir, ".agentflow", "queue.json")
-	if err := os.MkdirAll(filepath.Dir(qp), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	wantData := QueueData{
-		Tasks: []Task{
-			{ID: "task-1", Title: "Test task", Status: "ready"},
-		},
-	}
-	if err := os.WriteFile(qp, mustMarshal(t, wantData), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
 	h := NewHandler(NewStore(dir), nil)
 	mux := http.NewServeMux()
 	h.Register(mux)
 
-	req := httptest.NewRequest("POST", "/tasks/task-1/approve", nil)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	routes := []struct{ method, path string }{
+		{"POST", "/run-next"},
+		{"POST", "/tasks/run"},
+		{"POST", "/tasks/task-1/approve"},
+		{"POST", "/tasks/task-1/repair"},
+		{"POST", "/tasks/task-1/fail"},
+		{"GET", "/tasks/task-1/stream"},
 	}
-
-	var got map[string]string
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if got["status"] != "approve" {
-		t.Fatalf("status = %q, want approve", got["status"])
-	}
-}
-
-func TestPostRunNext(t *testing.T) {
-	dir := t.TempDir()
-	qp := filepath.Join(dir, ".agentflow", "queue.json")
-	if err := os.MkdirAll(filepath.Dir(qp), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	wantData := QueueData{
-		Tasks: []Task{
-			{ID: "task-1", Title: "Test task", Status: "ready"},
-		},
-	}
-	if err := os.WriteFile(qp, mustMarshal(t, wantData), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	h := NewHandler(NewStore(dir), nil)
-	mux := http.NewServeMux()
-	h.Register(mux)
-
-	req := httptest.NewRequest("POST", "/run-next", nil)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
-	}
-
-	var got map[string]string
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if got["status"] != "run-next:true" {
-		t.Fatalf("status = %q, want run-next:true", got["status"])
+	for _, rt := range routes {
+		req := httptest.NewRequest(rt.method, rt.path, nil)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound && w.Code != http.StatusMethodNotAllowed {
+			t.Errorf("%s %s: status = %d, want 404", rt.method, rt.path, w.Code)
+		}
+		if w.Code == http.StatusMethodNotAllowed {
+			t.Errorf("%s %s: route still registered (405)", rt.method, rt.path)
+		}
 	}
 }

@@ -151,20 +151,6 @@ type PlanReview struct {
 	RepairPrompt string        `json:"repair_prompt,omitempty"`
 }
 
-// ─── Runtime State (in-memory, not persisted to JSON) ──────────────────────
-
-// TaskExecution represents a live task run with streaming output.
-type TaskExecution struct {
-	TaskID      string
-	Task        *Task
-	Status      string          // running, verifying, reviewing, completed
-	StartTime   time.Time
-	OutputLines []string        // accumulated stdout/stderr
-	VerifyOut   string          // verify command output
-	Review      *Review         // reviewer result
-	Cancel      chan struct{}   // for timeout/cancellation
-}
-
 // ─── Prompt Templates ──────────────────────────────────────────────────────
 
 // PromptTemplates holds all prompt templates loaded from disk.
@@ -174,14 +160,4 @@ type PromptTemplates struct {
 	Reviewer      string // prompts/reviewer.md
 	PlanReviewer  string // prompts/plan-reviewer.md
 	TaskCompiler  string // prompts/task-compiler.md
-}
-
-// ─── Lock ──────────────────────────────────────────────────────────────────
-
-// LockFile represents the .agentflow/lock file for single-task enforcement.
-type LockFile struct {
-	PID      int    `json:"pid"`
-	TaskID   string `json:"task_id"`
-	Started  string `json:"started"` // RFC3339
-	Hostname string `json:"hostname"`
 }

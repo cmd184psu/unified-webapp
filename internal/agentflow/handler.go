@@ -26,10 +26,6 @@ func NewHandler(store *Store, engine *Engine) *Handler {
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /queue", h.handleQueue)
 	mux.HandleFunc("GET /progress", h.handleProgress)
-	mux.HandleFunc("POST /tasks/{id}/approve", h.postTaskAction("approve"))
-	mux.HandleFunc("POST /tasks/{id}/repair", h.postTaskAction("repair"))
-	mux.HandleFunc("POST /tasks/{id}/fail", h.postTaskAction("fail"))
-	mux.HandleFunc("POST /run-next", h.postRunNext())
 
 	// FRD endpoints
 	mux.HandleFunc("GET /frd", h.handleFRD)
@@ -43,58 +39,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	// Task compilation
 	mux.HandleFunc("POST /tasks/compile", h.postCompileTasks)
 
-	// Task execution
-	mux.HandleFunc("POST /tasks/run", h.postRunTask)
-	mux.HandleFunc("GET /tasks/{id}/stream", h.engine.handleTaskStream)
-
 	// Settings
 	mux.HandleFunc("GET /settings", h.handleSettings)
 	mux.HandleFunc("POST /settings", h.postSettings)
-}
-
-// postTaskAction returns an http.HandlerFunc for POST /tasks/{id}/approve, repair, or fail.
-func (h *Handler) postTaskAction(action string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "POST required", http.StatusMethodNotAllowed)
-			return
-		}
-		id := r.PathValue("id")
-		if id == "" {
-			response.WriteError(w, http.StatusBadRequest, "missing task id")
-			return
-		}
-		err := h.store.WriteTaskStatus(id, action)
-		if os.IsNotExist(err) {
-			response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
-			return
-		}
-		if err != nil {
-			response.WriteError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		response.WriteJSON(w, http.StatusOK, map[string]string{
-			"status": action,
-		})
-	}
-}
-
-// postRunNext returns an http.HandlerFunc for POST /run-next.
-func (h *Handler) postRunNext() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "POST required", http.StatusMethodNotAllowed)
-			return
-		}
-		run, err := h.store.RunNext()
-		if err != nil {
-			response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		response.WriteJSON(w, http.StatusOK, map[string]string{
-			"status": fmt.Sprintf("run-next:%t", run),
-		})
-	}
 }
 
 // handleQueue reads queue.json from the store's project directory and writes it as JSON.
@@ -222,42 +169,6 @@ func (h *Handler) postCompileTasks(w http.ResponseWriter, r *http.Request) {
 		warnings = []string{}
 	}
 	response.WriteJSON(w, http.StatusOK, map[string]any{"queue": queue, "warnings": warnings})
-}
-
-// postRunTask triggers a task execution
-func (h *Handler) postRunTask(w http.ResponseWriter, r *http.Request) {
-	if h.engine == nil {
-		response.WriteError(w, http.StatusServiceUnavailable, "engine not initialized")
-		return
-	}
-	var req struct {
-		TaskID string `json:"task_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.WriteError(w, http.StatusBadRequest, "invalid request")
-		return
-	}
-	if req.TaskID == "" {
-		// Find first ready task
-		queue, err := h.store.GetQueue()
-		if err != nil {
-			response.WriteError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		for _, task := range queue.Tasks {
-			if task.Status == "ready" {
-				req.TaskID = task.ID
-				break
-			}
-		}
-	}
-	if req.TaskID == "" {
-		response.WriteJSON(w, http.StatusOK, map[string]string{"status": "no ready tasks"})
-		return
-	}
-	// Enqueue the task
-	h.engine.worker.EnqueueReady(&Task{ID: req.TaskID})
-	response.WriteJSON(w, http.StatusOK, map[string]string{"status": "enqueued", "task_id": req.TaskID})
 }
 
 // handleSettings returns current settings

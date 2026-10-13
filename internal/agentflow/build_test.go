@@ -1,6 +1,8 @@
 package agentflow_test
 
 import (
+	"runtime"
+	"time"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -120,5 +122,38 @@ func TestBuild_DefaultsProjectPath(t *testing.T) {
 	}
 	if h == nil {
 		t.Fatal("Build returned nil handler")
+	}
+}
+func TestBuildStartsNoWorker(t *testing.T) {
+	promptDir := setupPromptDir(t)
+	projectPath := filepath.Join(t.TempDir(), "agentflow")
+	// A ready task that the old worker would have picked up within its 5 s tick.
+	qdir := filepath.Join(projectPath, ".agentflow")
+	if err := os.MkdirAll(qdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	q := `{"tasks":[{"id":"t1","title":"x","status":"ready","verify":"touch ` + filepath.Join(projectPath, "ran") + `"}]}`
+	if err := os.WriteFile(filepath.Join(qdir, "queue.json"), []byte(q), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	before := runtime.NumGoroutine()
+	if _, err := agentflow.Build(config.AgentflowConfig{
+		StaticDir:   t.TempDir(),
+		ProjectPath: projectPath,
+		PromptDir:   promptDir,
+	}); err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	time.Sleep(2 * time.Second)
+
+	if _, err := os.Stat(filepath.Join(qdir, "lock")); !os.IsNotExist(err) {
+		t.Fatalf("lock file exists or unexpected stat error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectPath, "ran")); !os.IsNotExist(err) {
+		t.Fatalf("a task ran: %v", err)
+	}
+	if after := runtime.NumGoroutine(); after > before+2 {
+		t.Fatalf("goroutines grew from %d to %d; a worker is running", before, after)
 	}
 }
