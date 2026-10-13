@@ -64,10 +64,10 @@ type Model struct {
 	DefaultService DefaultService `json:"defaultService"`
 	// HTTPServerClose closes the backend connection after every response instead
 	// of reusing it. Off by default.
-	HTTPServerClose bool `json:"httpServerClose,omitempty"`
-	Ports          []Port         `json:"ports"`
-	Services       []Service      `json:"services"`
-	RawSections    []RawSection   `json:"rawSections"`
+	HTTPServerClose bool         `json:"httpServerClose,omitempty"`
+	Ports           []Port       `json:"ports"`
+	Services        []Service    `json:"services"`
+	RawSections     []RawSection `json:"rawSections"`
 }
 
 // DefaultModel returns a fresh model: unified on 127.0.0.1:8787 as the :443

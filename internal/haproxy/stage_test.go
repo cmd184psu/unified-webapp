@@ -21,7 +21,6 @@ func TestStageRewriteShiftsPortsAndSocket(t *testing.T) {
 	}
 }
 
-
 func TestApplyNeedsCertsIsCalmAndTouchesNothing(t *testing.T) {
 	drv := newFakeDriver()
 	ap, _, _, _ := newTestApplier(t, drv, ApplyOptions{RequireCerts: true})

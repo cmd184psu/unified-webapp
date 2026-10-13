@@ -135,11 +135,11 @@ type authConfigView struct {
 	Passkey      config.PasskeyConfig               `json:"passkey"`
 	// RoutedOrigins are the origins allowed automatically (routed hosts under
 	// the RP ID); SuggestedRPID is the parent domain they share. Read-only.
-	RoutedOrigins []string `json:"routed_origins"`
-	SuggestedRPID string   `json:"suggested_rp_id"`
-	Session      sessionConfigView                  `json:"session"`
-	CookieSecure bool                               `json:"cookie_secure"`
-	CookieDomain string                             `json:"cookie_domain"`
+	RoutedOrigins []string          `json:"routed_origins"`
+	SuggestedRPID string            `json:"suggested_rp_id"`
+	Session       sessionConfigView `json:"session"`
+	CookieSecure  bool              `json:"cookie_secure"`
+	CookieDomain  string            `json:"cookie_domain"`
 }
 
 // namedHashView mirrors config.NamedHash with Hash always redacted to
@@ -220,9 +220,9 @@ func redactAuthConfig(a config.AuthConfig) authConfigView {
 	return authConfigView{
 		RoutedOrigins: routed,
 		SuggestedRPID: auth.SuggestRPID(passkey.Hosts),
-		Modules:  modules,
-		APIKeys:  keys,
-		AdminPIN: adminPIN,
+		Modules:       modules,
+		APIKeys:       keys,
+		AdminPIN:      adminPIN,
 		LDAP: ldapConfigView{
 			URL:            a.LDAP.URL,
 			StartTLS:       a.LDAP.StartTLS,

@@ -36,30 +36,30 @@ type Settings struct {
 	// serving a bad certificate.
 	CertMachineInsecure bool   `json:"certmachineInsecure"`
 	ConfigPath          string `json:"configPath"`
-	CertsDir          string `json:"certsDir"`
-	CrtListPath       string `json:"crtListPath"`
-	StatsSocketPath   string `json:"statsSocketPath"`
-	BackupDir         string `json:"backupDir"`
-	ServiceName       string `json:"serviceName"`
-	BackupKeep        int    `json:"backupKeep"`
-	ExpiryWarnDays    int    `json:"expiryWarnDays"`
+	CertsDir            string `json:"certsDir"`
+	CrtListPath         string `json:"crtListPath"`
+	StatsSocketPath     string `json:"statsSocketPath"`
+	BackupDir           string `json:"backupDir"`
+	ServiceName         string `json:"serviceName"`
+	BackupKeep          int    `json:"backupKeep"`
+	ExpiryWarnDays      int    `json:"expiryWarnDays"`
 }
 
 // storedSettings is settings.json: a nil field means "not overridden".
 type storedSettings struct {
-	OS                *string `json:"os,omitempty"`
-	CertMachineURL    *string `json:"certmachine_url,omitempty"`
-	CertMachineCAFile *string `json:"certmachine_ca_file,omitempty"`
-	CertMachineInsecure *bool  `json:"certmachine_insecure,omitempty"`
-	ConfigPath        *string `json:"config_path,omitempty"`
-	CertsDir          *string `json:"certs_dir,omitempty"`
-	CrtListPath       *string `json:"crt_list_path,omitempty"`
-	StatsSocketPath   *string `json:"stats_socket_path,omitempty"`
-	BackupDir         *string `json:"backup_dir,omitempty"`
-	ServiceName       *string `json:"service_name,omitempty"`
-	BackupKeep        *int    `json:"backup_keep,omitempty"`
-	ExpiryWarnDays    *int    `json:"expiry_warn_days,omitempty"`
-	APIKey            *string `json:"api_key,omitempty"`
+	OS                  *string `json:"os,omitempty"`
+	CertMachineURL      *string `json:"certmachine_url,omitempty"`
+	CertMachineCAFile   *string `json:"certmachine_ca_file,omitempty"`
+	CertMachineInsecure *bool   `json:"certmachine_insecure,omitempty"`
+	ConfigPath          *string `json:"config_path,omitempty"`
+	CertsDir            *string `json:"certs_dir,omitempty"`
+	CrtListPath         *string `json:"crt_list_path,omitempty"`
+	StatsSocketPath     *string `json:"stats_socket_path,omitempty"`
+	BackupDir           *string `json:"backup_dir,omitempty"`
+	ServiceName         *string `json:"service_name,omitempty"`
+	BackupKeep          *int    `json:"backup_keep,omitempty"`
+	ExpiryWarnDays      *int    `json:"expiry_warn_days,omitempty"`
+	APIKey              *string `json:"api_key,omitempty"`
 }
 
 // baseSettings is the config-file block as effective starting values.
@@ -370,10 +370,10 @@ func (s *server) handleSettingsTestConnection(w http.ResponseWriter, r *http.Req
 	cur := s.rt()
 	u, ca, key := cur.settings.CertMachineURL, cur.settings.CertMachineCAFile, cur.apiKey
 	var body struct {
-		URL    *string `json:"certmachineUrl"`
-		CAFile *string `json:"certmachineCaFile"`
-		Insecure *bool `json:"certmachineInsecure"`
-		APIKey string  `json:"apiKey"`
+		URL      *string `json:"certmachineUrl"`
+		CAFile   *string `json:"certmachineCaFile"`
+		Insecure *bool   `json:"certmachineInsecure"`
+		APIKey   string  `json:"apiKey"`
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {

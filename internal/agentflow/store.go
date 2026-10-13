@@ -36,8 +36,6 @@ type QueueData struct {
 	Tasks []Task `json:"tasks"`
 }
 
-
-
 // ProgressCount holds the tally derived from a QueueData's task list.
 // total = len(tasks), passed/ready/blocked/review/repair/failed = count per status.
 type ProgressCount struct {

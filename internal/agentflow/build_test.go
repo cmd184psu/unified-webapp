@@ -1,16 +1,16 @@
 package agentflow_test
 
 import (
-	"runtime"
-	"time"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 
-	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/agentflow"
+	"cmd184psu/unified-webapp/internal/platform/config"
 )
 
 const testPrompts = `# Planner Prompt Template
@@ -51,10 +51,10 @@ func TestBuild_Success(t *testing.T) {
 	projectPath := filepath.Join(t.TempDir(), "agentflow")
 
 	cfg := config.AgentflowConfig{
-		StaticDir:     staticDir,
-		ProjectPath:   projectPath,
+		StaticDir:         staticDir,
+		ProjectPath:       projectPath,
 		SSEMaxSubscribers: 64,
-		PromptDir:     promptDir,
+		PromptDir:         promptDir,
 	}
 
 	h, err := agentflow.Build(cfg)

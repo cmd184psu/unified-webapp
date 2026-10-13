@@ -193,10 +193,10 @@ func (h *Handler) postSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		DefaultProfile string               `json:"default_profile"`
+		DefaultProfile string                 `json:"default_profile"`
 		Profiles       []config.ProfileConfig `json:"profiles"`
-		PromptDir      string              `json:"prompt_dir"`
-		TimeoutSecs    int                 `json:"timeout_secs"`
+		PromptDir      string                 `json:"prompt_dir"`
+		TimeoutSecs    int                    `json:"timeout_secs"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.WriteError(w, http.StatusBadRequest, "invalid settings")

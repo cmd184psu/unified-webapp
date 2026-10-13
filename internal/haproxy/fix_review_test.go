@@ -1,8 +1,8 @@
 package haproxy
 
 import (
-	"encoding/json"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"

@@ -34,26 +34,26 @@ type ResolvedProfile struct {
 
 // FRD matches schemas/frd.schema.json
 type FRD struct {
-	ID                string           `json:"id"`
-	Title             string           `json:"title"`
-	Status            string           `json:"status"` // draft, approved, in_progress, completed, abandoned
-	Created           string           `json:"created,omitempty"`
-	ApprovedDate      string           `json:"approved_date,omitempty"`
-	Objective         string           `json:"objective"`
-	Requirements      []FRDRequirement `json:"requirements"`
-	AcceptanceCriteria []FRDAC         `json:"acceptance_criteria"`
-	Constraints       []string         `json:"constraints,omitempty"`
-	Context           string           `json:"context,omitempty"`
+	ID                 string           `json:"id"`
+	Title              string           `json:"title"`
+	Status             string           `json:"status"` // draft, approved, in_progress, completed, abandoned
+	Created            string           `json:"created,omitempty"`
+	ApprovedDate       string           `json:"approved_date,omitempty"`
+	Objective          string           `json:"objective"`
+	Requirements       []FRDRequirement `json:"requirements"`
+	AcceptanceCriteria []FRDAC          `json:"acceptance_criteria"`
+	Constraints        []string         `json:"constraints,omitempty"`
+	Context            string           `json:"context,omitempty"`
 }
 
 type FRDRequirement struct {
-	ID          string `json:"id"`                    // R1, R2...
+	ID          string `json:"id"` // R1, R2...
 	Description string `json:"description"`
-	Priority    string `json:"priority,omitempty"`    // must, should, could
+	Priority    string `json:"priority,omitempty"` // must, should, could
 }
 
 type FRDAC struct {
-	ID        string `json:"id"`        // AC1, AC2...
+	ID        string `json:"id"` // AC1, AC2...
 	Criterion string `json:"criterion"`
 }
 
@@ -61,15 +61,15 @@ type FRDAC struct {
 
 // Plan matches schemas/plan.schema.json
 type Plan struct {
-	FRDID          string          `json:"frd_id"`
-	Status         string          `json:"status"` // draft, approved, in_progress, completed
-	Created        string          `json:"created,omitempty"`
-	ApprovedDate   string          `json:"approved_date,omitempty"`
-	Approach       string          `json:"approach"`
-	Assumptions    []string        `json:"assumptions,omitempty"`
-	Risks          []PlanRisk      `json:"risks,omitempty"`
-	Phases         []PlanPhase     `json:"phases"`
-	EstimatedTasks int             `json:"estimated_tasks,omitempty"`
+	FRDID          string           `json:"frd_id"`
+	Status         string           `json:"status"` // draft, approved, in_progress, completed
+	Created        string           `json:"created,omitempty"`
+	ApprovedDate   string           `json:"approved_date,omitempty"`
+	Approach       string           `json:"approach"`
+	Assumptions    []string         `json:"assumptions,omitempty"`
+	Risks          []PlanRisk       `json:"risks,omitempty"`
+	Phases         []PlanPhase      `json:"phases"`
+	EstimatedTasks int              `json:"estimated_tasks,omitempty"`
 	ReviewNotes    []PlanReviewNote `json:"review_notes,omitempty"`
 }
 
@@ -79,7 +79,7 @@ type PlanRisk struct {
 }
 
 type PlanPhase struct {
-	ID               string   `json:"id"`                 // P1, P2...
+	ID               string   `json:"id"` // P1, P2...
 	Name             string   `json:"name"`
 	TasksDescription string   `json:"tasks_description"`
 	DependsOn        []string `json:"depends_on,omitempty"`
@@ -94,45 +94,45 @@ type PlanReviewNote struct {
 
 // TaskQueue matches schemas/task-queue.schema.json
 type TaskQueue struct {
-	FRDID       string  `json:"frd_id"`
-	PlanStatus  string  `json:"plan_status"` // approved
+	FRDID        string `json:"frd_id"`
+	PlanStatus   string `json:"plan_status"` // approved
 	CompiledDate string `json:"compiled_date,omitempty"`
-	Tasks       []Task  `json:"tasks"`
+	Tasks        []Task `json:"tasks"`
 }
 
 // ─── Task ───────────────────────────────────────────────────────────────────
 
 // Task matches schemas/task.schema.json
 type Task struct {
-	ID             string   `json:"id"`               // T001, T002...
-	Phase          string   `json:"phase"`            // P1, P2...
-	Title          string   `json:"title"`
-	Status         string   `json:"status"`           // blocked, ready, running, review, passed, failed, repair
-	DependsOn      []string `json:"depends_on,omitempty"`
-	Prompt         string   `json:"prompt"`
-	WorkingDir     string   `json:"working_dir"`
-	Verify         string   `json:"verify"`
-	Acceptance     []string `json:"acceptance"`
-	FilesTouched   []string `json:"files_touched"`
-	Attempts       int      `json:"attempts"`
-	MaxAttempts    int      `json:"max_attempts"`
-	InfraRetries   int      `json:"infra_retries,omitempty"`
-	ReviewFollowups int     `json:"review_followups,omitempty"`
-	RepairPrompt   string   `json:"repair_prompt,omitempty"`
-	LastRun        string   `json:"last_run,omitempty"`
-	LastReview     *Review  `json:"last_review,omitempty"`
-	ReviewResult   *Review  `json:"review_result,omitempty"`
+	ID              string   `json:"id"`    // T001, T002...
+	Phase           string   `json:"phase"` // P1, P2...
+	Title           string   `json:"title"`
+	Status          string   `json:"status"` // blocked, ready, running, review, passed, failed, repair
+	DependsOn       []string `json:"depends_on,omitempty"`
+	Prompt          string   `json:"prompt"`
+	WorkingDir      string   `json:"working_dir"`
+	Verify          string   `json:"verify"`
+	Acceptance      []string `json:"acceptance"`
+	FilesTouched    []string `json:"files_touched"`
+	Attempts        int      `json:"attempts"`
+	MaxAttempts     int      `json:"max_attempts"`
+	InfraRetries    int      `json:"infra_retries,omitempty"`
+	ReviewFollowups int      `json:"review_followups,omitempty"`
+	RepairPrompt    string   `json:"repair_prompt,omitempty"`
+	LastRun         string   `json:"last_run,omitempty"`
+	LastReview      *Review  `json:"last_review,omitempty"`
+	ReviewResult    *Review  `json:"review_result,omitempty"`
 }
 
 // Review matches schemas/review.schema.json
 type Review struct {
-	TaskID     string        `json:"task_id"`
-	Verdict    string        `json:"verdict"` // pass, repair, fail
-	Summary    string        `json:"summary"`
-	Issues     []ReviewIssue `json:"issues"`
-	RepairPrompt string      `json:"repair_prompt,omitempty"`
-	ReviewedAt string        `json:"reviewed_at"`
-	Reviewer   string        `json:"reviewer"` // model name
+	TaskID       string        `json:"task_id"`
+	Verdict      string        `json:"verdict"` // pass, repair, fail
+	Summary      string        `json:"summary"`
+	Issues       []ReviewIssue `json:"issues"`
+	RepairPrompt string        `json:"repair_prompt,omitempty"`
+	ReviewedAt   string        `json:"reviewed_at"`
+	Reviewer     string        `json:"reviewer"` // model name
 }
 
 type ReviewIssue struct {
@@ -155,9 +155,9 @@ type PlanReview struct {
 
 // PromptTemplates holds all prompt templates loaded from disk.
 type PromptTemplates struct {
-	Planner       string // prompts/planner.md
-	Worker        string // prompts/worker.md
-	Reviewer      string // prompts/reviewer.md
-	PlanReviewer  string // prompts/plan-reviewer.md
-	TaskCompiler  string // prompts/task-compiler.md
+	Planner      string // prompts/planner.md
+	Worker       string // prompts/worker.md
+	Reviewer     string // prompts/reviewer.md
+	PlanReviewer string // prompts/plan-reviewer.md
+	TaskCompiler string // prompts/task-compiler.md
 }

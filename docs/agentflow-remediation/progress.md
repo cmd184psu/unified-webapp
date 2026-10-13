@@ -38,6 +38,7 @@ Full notes, fixtures, the opencode stub server and the bwrap template are kept o
 - 2026-10-13 — R0: pre-remediation baseline commit (excludes .agentflow/ and draft-frd.json).
 - 2026-10-13 — SP0: spikes S1-S6 run (S1 via stdin fallback; S2-S6 met); findings above; baselines captured.
 - 2026-10-13 — A1: unsafe execution half removed (Worker, runTask/runVerify, lock file, SSE stream, run-next/tasks/run/approve/repair/fail routes, LockFile/TaskExecution, broker SubscribePayload/UnsubscribePayload); `.agentflow/` deleted, draft-frd.json sha256 unchanged; TestBuildStartsNoWorker + TestRemovedExecutionRoutes404 added.
+- 2026-10-13 — A2: gofmt sweep (12 files, formatting-only) + gofmt gate. Ralph feedback commands switched to quiet-on-success wrappers and baseline re-recorded (verify counted new PASS lines as failures).
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`
