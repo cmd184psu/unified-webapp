@@ -30,6 +30,8 @@ type harness struct {
 	fake   *runner.Fake
 	eng    *Engine
 	widthZ bool
+	// tweak adjusts the engine's Deps before New (stage-runtime tests).
+	tweak func(*Deps)
 }
 
 func newHarness(t *testing.T) *harness {
@@ -44,7 +46,7 @@ func newHarness(t *testing.T) *harness {
 			StaticDir: static, DBPath: filepath.Join(t.TempDir(), "taskmaster.db"), ProgressIntervalMs: 50,
 		},
 		afPath: filepath.Join(t.TempDir(), "agentflow.db"),
-		fake:   runner.NewFake().Fallback(runner.Step{Reply: "done"}),
+		fake:   runner.NewFake().Fallback(runner.Step{Reply: `{"verdict":"approve","issues":[]}`}),
 	}
 	st, err := store.Open(h.afPath)
 	if err != nil {
@@ -90,7 +92,11 @@ func (h *harness) closeAll() {
 // start builds the engine over the current taskmaster and store.
 func (h *harness) start() {
 	h.t.Helper()
-	e, err := New(Deps{Store: h.st, Host: h.tm, Runner: h.fake, DataDir: h.t.TempDir(), TestWidthZero: h.widthZ})
+	d := Deps{Store: h.st, Host: h.tm, Runner: h.fake, DataDir: h.t.TempDir(), TestWidthZero: h.widthZ}
+	if h.tweak != nil {
+		h.tweak(&d)
+	}
+	e, err := New(d)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -149,7 +155,7 @@ func (h *harness) stageFor(backend string) StagePayload {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	sg, err := h.st.CreateStage(ctx, store.StageSpec{Effort: ef.ID, Role: "planner", Backend: backend, Model: "m1"})
+	sg, err := h.st.CreateStage(ctx, store.StageSpec{Effort: ef.ID, Role: "critic", Backend: backend, Model: "m1"})
 	if err != nil {
 		h.t.Fatal(err)
 	}

@@ -6,10 +6,10 @@ package engine
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
+	"cmd184psu/unified-webapp/internal/agentflow/model"
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
 	"cmd184psu/unified-webapp/internal/agentflow/store"
 	"cmd184psu/unified-webapp/internal/taskmaster/golane"
@@ -34,6 +34,19 @@ type Deps struct {
 	Clock  func() time.Time
 	// DataDir is the root of worktrees/ and stages/.
 	DataDir string
+	// Prompt builds the prompt a model stage sends. Nil uses the role prompt
+	// plus, for attempt stages, the task's prompt and acceptance criteria. The
+	// attempt chain and planning loop (C6, C10) supply their own.
+	Prompt func(ctx context.Context, st model.Stage) (string, error)
+	// FreezeConfig renders and freezes the runner's configuration into the
+	// stage directory before the first call (BK5, OC2). The composition root
+	// wires the concrete adapter's generator; the engine never imports it.
+	// Nil skips freezing, for runners that need no config.
+	FreezeConfig func(backend FrozenBackend, stageDir string) (path string, err error)
+	// Verify and Merge run the engine-owned stages (C6 fills them in).
+	Verify, Merge Executor
+	// Kick wakes the dispatcher after a stage's outcome is written (C5).
+	Kick func()
 	// TestWidthZero registers every agentflow lane at width 0 and never raises
 	// it, so no job runs unless a test sets a width itself.
 	TestWidthZero bool
@@ -49,11 +62,11 @@ type StagePayload struct {
 	QueueHash string `json:"queue_hash"`
 }
 
-func validatePayload(p StagePayload) error {
-	if p.Stage <= 0 {
-		return errors.New("stage id required")
-	}
-	return nil
+// FrozenBackend is the backend a stage's runner config is frozen from: the
+// stage's own backend and the models it may use.
+type FrozenBackend struct {
+	runner.Backend
+	Models []string
 }
 
 // Engine owns agentflow's lanes on the shared taskmaster engine.
@@ -88,36 +101,6 @@ func New(d Deps) (*Engine, error) {
 		return nil, err
 	}
 	return e, nil
-}
-
-func (e *Engine) kind(name string) golane.Kind {
-	return golane.NewKind[StagePayload](name, 1, validatePayload, e.run)
-}
-
-// run is the lane-agnostic job body. Model roles go through the runner with
-// the backend named on the stage row.
-func (e *Engine) run(ctx context.Context, rc golane.RunContext, p StagePayload) (any, error) {
-	st, err := e.deps.Store.GetStage(ctx, p.Stage)
-	if err != nil {
-		return nil, err
-	}
-	if st.Role == "verify" || st.Role == "merge" {
-		return map[string]int64{"stage": st.ID}, nil
-	}
-	b, err := e.deps.Store.GetBackend(ctx, st.Backend)
-	if err != nil {
-		return nil, err
-	}
-	res, err := e.deps.Runner.Run(ctx, runner.Request{
-		Role:    st.Role,
-		Backend: runner.Backend{Name: b.Name, Host: b.Host, APIType: b.APIType},
-		Model:   st.Model,
-		OnEvent: func(ev runner.Event) { fmt.Fprintln(rc.Log(), ev.Text) },
-	})
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{"stage": st.ID, "final": res.Final}, nil
 }
 
 // Resume lifts the engine's hold: active backends' lanes are unpaused, except

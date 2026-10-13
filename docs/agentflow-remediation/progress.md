@@ -45,6 +45,7 @@ Later stories must follow these, not the original plan text.
 - **Engine git hardening:** every engine git call uses `gitsvc.Hardened(ctx, repo)` (empty-tree attr-source, no attributes files, every config filter neutralised, no ssh/file protocols) and `gitsvc.AdminGitDir` (never trusts `$WT/.git`; refuses a symlinked gitfile). Consequence: engine commits/checkouts store raw bytes (no LFS, git-crypt or eol conversion). Integration overrides naming a pre-existing non-agentflow branch are refused; agentflow-created overrides carry `refs/agentflow/owned/<branch>`.
 - **opencode permissions are layer 1 only:** grouped redirections, `/usr/bin/git`, `env git`, `sh -c` are not caught; non-worker read-only is guaranteed by `sandbox.Spec.ReadOnlyWorktree`, git protection by GIT5 layers 2-3.
 - **Attempts/resets (B3):** outcome `abandoned` is non-counting (stop, cancel, restart, reset); `ResetTask(ctx, actor, task, clean, limits)` refuses non-halted tasks and abandons open attempts in-tx — C9 must also cancel/close that attempt's open stages and lane jobs. `ApproveQueue` takes the expected hash. B3 landed as one commit (~1,400 code lines) — size-cap exception; the split would only have cut shared fixtures.
+- **Engine composition (C2):** the engine can't import `runner/opencode` (AC-AR1 boundary); D1 wires `Deps.FreezeConfig` to `opencode.GenerateConfig`, `Deps.Prompt` (prompt builders), `Deps.Kick` (C5 dispatcher) and `Deps.Verify`/`Deps.Merge` (C6 executors). Outcomes: `pass|repair|blocked|timeout|discarded|infra:{rate_limit,unreachable,crash,cancel,timeout,unparseable,panic,lost}`. Verify/merge executors must apply `verify_timeout` themselves.
 - **Root `prompts/`:** copied into `internal/agentflow/prompts` (B4); D1 deletes the root copy.
 
 
@@ -81,6 +82,7 @@ Logged per the owner's posture; candidates for the next phase alongside `.omc/pl
 - 2026-10-13 — B10: gitsvc policy (worktree-scoped detect-and-revert), serialized merge with clean abort, push instructions. Merge signature: Merge(ctx, repo, integrationWT, integrationBranch, taskBranch).
 - 2026-10-13 — B7: opencode invocation (stdin prompt), event parsing, error classes, sandboxed command, version. Real run vs stub verified with opencode 1.18.19.
 - 2026-10-13 — C1: lane manager (per-backend lanes + agentflow_verify/agentflow_merge), runtime backend add/resize/retire/enable, lanes paused until Resume.
+- 2026-10-13 — C2: stage runtime (kinds, outcome write-before-return, one corrective retry, classification, panic recovery).
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`
