@@ -56,6 +56,7 @@ Later stories must follow these, not the original plan text.
 - 2026-10-13 — B5: runner interface + scriptable fake (Match, Partial, EditBeforeBlock).
 - 2026-10-13 — B4: embedded role prompts + strict schema parser (last-object rule, blocked reviews, contract drift test); root prompts/ kept until D1.
 - 2026-10-13 — B2: store config tables (migration v2 + CHECK constraints), validation, snapshot, repo-path safety incl. RecheckRepoPath.
+- 2026-10-13 — B11: verify structural checks; fixed reviewer-found git filter-driver code-execution path (trusted --git-dir, empty attr-source). New dep: BurntSushi/toml.
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`
