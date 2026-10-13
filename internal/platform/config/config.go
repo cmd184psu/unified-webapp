@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 const DefaultConfigPath = "~/.unified-webapp.json"
@@ -33,6 +34,7 @@ type Config struct {
 	Timetracker  TimetrackerConfig  `json:"timetracker"`
 	Sampler      SamplerConfig      `json:"sampler"`
 	Haproxy      HaproxyConfig      `json:"haproxy"`
+	Agentflow    AgentflowConfig    `json:"agentflow"`
 
 	// configPath is the absolute path Load read this Config from (empty when
 	// built via DefaultConfig()/WriteDefault without going through Load, or
@@ -567,6 +569,34 @@ const (
 	DefaultUtuberPythonBin = "python3.12"
 )
 
+// AgentflowConfig holds configuration specific to the agentflow module.
+type AgentflowConfig struct {
+	StaticDir           string          `json:"static_dir"`
+	ProjectPath         string          `json:"project_path"`
+	SSEMaxSubscribers   int             `json:"-"`
+	PromptDir           string          `json:"prompt_dir"`            // optional override for prompt templates
+	DefaultProfile      string          `json:"default_profile"`       // e.g., "m5"
+	Profiles            []ProfileConfig `json:"profiles"`              // model profiles
+	DefaultTimeoutSecs  int             `json:"default_timeout_secs"`  // default 300
+}
+
+// ProfileConfig defines a named model profile (knife switch).
+type ProfileConfig struct {
+	Name             string        `json:"name"`                    // e.g., "m5", "m4", "windows"
+	OllamaHost       string        `json:"ollama_host"`             // e.g., "http://192.168.1.239:11434"
+	WorkerModel      string        `json:"worker_model"`            // e.g., "qwen3.6:35b-a3b-mxfp8"
+	PlannerModel     string        `json:"planner_model"`           // e.g., "qwen3.6:35b-a3b-mxfp8"
+	ReviewModel      string        `json:"review_model"`            // e.g., "mistral-small3.2"
+	TimeoutSecs      int           `json:"timeout_secs,omitempty"`  // default 300
+	PromptDir        string        `json:"prompt_dir,omitempty"`    // optional override
+	EffectiveTimeout time.Duration `json:"-"`                       // computed at runtime
+}
+
+// DefaultAgentflowProjectPath is the default project root directory — the
+// directory that contains `.agentflow` — when project_path is unset
+// (0-length) in the config file.
+const DefaultAgentflowProjectPath = "./data/agentflow"
+
 // DefaultConfig returns a Config populated with safe defaults.
 func DefaultConfig() *Config {
 	return &Config{
@@ -676,6 +706,40 @@ func DefaultConfig() *Config {
 			OS:             "auto",
 			BackupKeep:     DefaultHaproxyBackupKeep,
 			ExpiryWarnDays: DefaultHaproxyExpiryWarnDays,
+		},
+		Agentflow: AgentflowConfig{
+			StaticDir:            "./web/agentflow",
+			ProjectPath:          DefaultAgentflowProjectPath,
+			SSEMaxSubscribers:    DefaultSSEMaxSubscribers,
+			PromptDir:            "./prompts",
+			DefaultProfile:       "m5",
+			DefaultTimeoutSecs:   300,
+			Profiles: []ProfileConfig{
+				{
+					Name:         "m5",
+					OllamaHost:   "http://192.168.1.239:11434",
+					WorkerModel:  "qwen3.6:35b-a3b-mxfp8",
+					PlannerModel: "qwen3.6:35b-a3b-mxfp8",
+					ReviewModel:  "mistral-small3.2",
+					TimeoutSecs:  300,
+				},
+				{
+					Name:         "m4",
+					OllamaHost:   "http://192.168.1.11:11434",
+					WorkerModel:  "qwen3.6:27b-q4_K_M",
+					PlannerModel: "qwen3.6:27b-q4_K_M",
+					ReviewModel:  "qwen2.5-coder:14b",
+					TimeoutSecs:  300,
+				},
+				{
+					Name:         "windows",
+					OllamaHost:   "http://windows.cmdhome.net:11434",
+					WorkerModel:  "qwen3-coder:30b",
+					PlannerModel: "qwen3-coder:30b",
+					ReviewModel:  "mistral-small3.2",
+					TimeoutSecs:  300,
+				},
+			},
 		},
 		IssueTracker: IssueTrackerConfig{
 			StaticDir: "./web/issuetracker",
@@ -792,6 +856,9 @@ func Load(path string) (*Config, error) {
 	if err := expandSmbeditPaths(&cfg.Smbedit); err != nil {
 		return nil, err
 	}
+	if err := expandAgentflowPaths(&cfg.Agentflow); err != nil {
+		return nil, err
+	}
 	if cfg.TLSCert != "" {
 		if cfg.TLSCert, err = ExpandPath(cfg.TLSCert); err != nil {
 			return nil, err
@@ -820,6 +887,7 @@ func applyServerDefaults(cfg *Config) {
 	cfg.Obsidianoid.SSEMaxSubscribers = max
 	cfg.Taskmaster.SSEMaxSubscribers = max
 	cfg.Haproxy.SSEMaxSubscribers = max
+	cfg.Agentflow.SSEMaxSubscribers = max
 	if cfg.Server.SharedStaticDir == "" {
 		cfg.Server.SharedStaticDir = "./web/shared"
 	}
@@ -1073,6 +1141,28 @@ func expandSmbeditPaths(s *SmbeditConfig) error {
 	}
 	if s.PickerRoot, err = ExpandPath(s.PickerRoot); err != nil {
 		return err
+	}
+	return nil
+}
+
+func expandAgentflowPaths(a *AgentflowConfig) error {
+	var err error
+	if a.StaticDir, err = ExpandPath(a.StaticDir); err != nil {
+		return err
+	}
+	if a.ProjectPath, err = ExpandPath(a.ProjectPath); err != nil {
+		return err
+	}
+	if a.PromptDir, err = ExpandPath(a.PromptDir); err != nil {
+		return err
+	}
+	for i := range a.Profiles {
+		if a.Profiles[i].OllamaHost, err = ExpandPath(a.Profiles[i].OllamaHost); err != nil {
+			return err
+		}
+		if a.Profiles[i].PromptDir, err = ExpandPath(a.Profiles[i].PromptDir); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -44,6 +44,21 @@ import { artifactPaths } from "../artifact-paths.mjs";
 process.chdir(path.resolve(import.meta.dirname, "..", ".."));
 
 const BARREL = "/shared/dist/shared.mjs";
+
+// A9.4 — index.html for bundle-mode modules must reference the built bundle
+// (/js/bundle.js), not the source .ts file. A source reference produces MIME
+// type text/vnd.trolltech.linguist and fails module loading in browsers.
+// This regressed once already.
+const HTML_BUNDLE_REF = /<script[^>]+src=["']\/?js\/bundle\.js["']/;
+const HTML_SOURCE_REF = /<script[^>]+src=["'][^"']*\.ts["']/;
+
+// Bundle-mode modules that produce a single bundle.js and must reference it.
+// (todo outputs shell.js, not bundle.js — excluded)
+const BUNDLE_MODE_MODULES = new Set([
+  "sampler", "multissh", "certmachine", "taskmaster", "smbedit",
+  "haproxy", "issuetracker", "admin", "timetracker",
+  "grocery", "menuserver", "utuber", "agentflow",
+]);
 // Top-level: the statement starts at column 0, so it is not nested inside a
 // function body or an iife wrapper. Matches both the named form
 // (`import { x } from "…"`) and the bare side-effect form (`import "…"`).
@@ -145,9 +160,26 @@ for (const d of inputs) {
   }
 }
 
+// A9.4 — verify each bundle-mode module's index.html references the bundle, not the source.
+for (const d of inputs) {
+  if (!BUNDLE_MODE_MODULES.has(d.name)) {
+    continue; // transpile-mode modules don't have a single bundle.js
+  }
+  const htmlPath = path.join("web", d.name, "index.html");
+  if (!fs.existsSync(htmlPath)) {
+    failures.push(`${d.name}: missing index.html at ${htmlPath}`);
+    continue;
+  }
+  const html = fs.readFileSync(htmlPath, "utf8");
+  if (!HTML_BUNDLE_REF.test(html)) {
+    failures.push(`${d.name}: index.html does not reference /js/bundle.js (must use built bundle, not .ts source)`);
+  }
+  if (HTML_SOURCE_REF.test(html)) {
+    failures.push(`${d.name}: index.html references a .ts source file (must use /js/bundle.js)`);
+  }
+}
+
 if (failures.length) {
   for (const f of failures) process.stderr.write(`bundle-shape: FAIL ${f}\n`);
   process.exit(1);
 }
-
-process.stdout.write(`bundle-shape: PASS — ${inspected} sharedConsumer bundle(s) inspected\n`);

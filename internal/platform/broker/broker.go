@@ -95,6 +95,24 @@ func (b *Broker) Subscribe(ch chan struct{}) { b.add(ch) }
 // Unsubscribe removes a previously registered channel.
 func (b *Broker) Unsubscribe(ch chan struct{}) { b.remove(ch) }
 
+// SubscribePayload returns a channel for receiving payload messages.
+// The caller must call UnsubscribePayload when done.
+func (b *Broker) SubscribePayload() chan string {
+	ch := make(chan string, 8)
+	b.mu.Lock()
+	b.payload[ch] = struct{}{}
+	b.mu.Unlock()
+	return ch
+}
+
+// UnsubscribePayload removes a payload subscription channel.
+func (b *Broker) UnsubscribePayload(ch chan string) {
+	b.mu.Lock()
+	delete(b.payload, ch)
+	b.mu.Unlock()
+	close(ch)
+}
+
 func sseEvent(payload string) string {
 	return fmt.Sprintf("data: %s\n\n", payload)
 }

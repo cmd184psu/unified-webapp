@@ -15,8 +15,8 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"sort"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -25,6 +25,7 @@ import (
 	"golang.org/x/term"
 
 	"cmd184psu/unified-webapp/internal/admin"
+	"cmd184psu/unified-webapp/internal/agentflow"
 	"cmd184psu/unified-webapp/internal/certmachine"
 	"cmd184psu/unified-webapp/internal/grocery"
 	"cmd184psu/unified-webapp/internal/haproxy"
@@ -402,7 +403,7 @@ func limitFor(module string, cfg *config.Config) int64 {
 // knownModules is the buildModule universe -- exactly the module names the
 // switch below handles. auth.FromConfig uses it to validate that every
 // module named in auth.modules is one buildDispatcher can actually build.
-var knownModules = []string{"grocery", "todo", "slideshow", "menuserver", "obsidianoid", "multissh", "certmachine", "taskmaster", "admin", "utuber", "smbedit", "issuetracker", "timetracker", "sampler", "haproxy"}
+var knownModules = []string{"agentflow", "grocery", "todo", "slideshow", "menuserver", "obsidianoid", "multissh", "certmachine", "taskmaster", "admin", "utuber", "smbedit", "issuetracker", "timetracker", "sampler", "haproxy"}
 
 // adminIsRouted reports whether "admin" appears among routing's module
 // values (config.Config.Routing / host_routing). Both main's boot-time
@@ -462,6 +463,8 @@ func (d *moduleDeps) taskmasterEngine() (*taskmaster.Engine, error) {
 
 func buildModule(module string, cfg *config.Config, svc *auth.Service, deps *moduleDeps) (http.Handler, error) {
 	switch module {
+	case "agentflow":
+		return agentflow.Build(cfg.Agentflow)
 	case "grocery":
 		return grocery.Build(cfg.Grocery)
 	case "todo":
