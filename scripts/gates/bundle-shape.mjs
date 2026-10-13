@@ -31,7 +31,9 @@
 // neither can fail while any one consumer remains, which is why --require
 // exists: it asserts that each NAMED descriptor is in the inspected set, and
 // fails by name the moment one leaves or was never added. The Makefile recipe
-// passes the list the plan relies on, per G16.
+// passes the list the plan relies on, per G16; it is a deliberate pin (and
+// cmd/server/haproxy_dispatch_test.go asserts it), separate from the checked
+// set, which is derived from the descriptors (GT3).
 //
 // Usage: node scripts/gates/bundle-shape.mjs [--expect-nonempty]
 //                                            [--require=<name>,…]
@@ -52,13 +54,20 @@ const BARREL = "/shared/dist/shared.mjs";
 const HTML_BUNDLE_REF = /<script[^>]+src=["']\/?js\/bundle\.js["']/;
 const HTML_SOURCE_REF = /<script[^>]+src=["'][^"']*\.ts["']/;
 
-// Bundle-mode modules that produce a single bundle.js and must reference it.
-// (todo outputs shell.js, not bundle.js — excluded)
-const BUNDLE_MODE_MODULES = new Set([
-  "sampler", "multissh", "certmachine", "taskmaster", "smbedit",
-  "haproxy", "issuetracker", "admin", "timetracker",
-  "grocery", "menuserver", "utuber", "agentflow",
-]);
+// Bundle-mode modules that produce a single bundle.js and must reference it,
+// derived from the descriptors (GT3): mode "bundle", an out file named
+// bundle.js, and an index.html present. todo (shell.js) and the shared library
+// (shared.mjs) fall out because their out is not bundle.js.
+const BUNDLE_MODE_MODULES = new Set(
+  descriptors
+    .filter(
+      (d) =>
+        d.mode === "bundle" &&
+        path.basename(d.out) === "bundle.js" &&
+        fs.existsSync(path.join("web", d.name, "index.html")),
+    )
+    .map((d) => d.name),
+);
 // Top-level: the statement starts at column 0, so it is not nested inside a
 // function body or an iife wrapper. Matches both the named form
 // (`import { x } from "…"`) and the bare side-effect form (`import "…"`).
@@ -163,7 +172,7 @@ for (const d of inputs) {
 // A9.4 — verify each bundle-mode module's index.html references the bundle, not the source.
 for (const d of inputs) {
   if (!BUNDLE_MODE_MODULES.has(d.name)) {
-    continue; // transpile-mode modules don't have a single bundle.js
+    continue; // not a bundle.js module with an index.html
   }
   const htmlPath = path.join("web", d.name, "index.html");
   if (!fs.existsSync(htmlPath)) {
@@ -183,3 +192,5 @@ if (failures.length) {
   for (const f of failures) process.stderr.write(`bundle-shape: FAIL ${f}\n`);
   process.exit(1);
 }
+
+process.stdout.write(`bundle-shape: PASS — ${inspected} sharedConsumer bundle(s) inspected\n`);

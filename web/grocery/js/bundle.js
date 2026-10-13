@@ -6,7 +6,8 @@ var hamburger = new HamburgerMenu({
   title: "Grocery",
   items: [],
   themePicker: true,
-  themes
+  themes,
+  side: "right"
 });
 document.querySelector(".header-right")?.prepend(hamburger.trigger);
 var STATES = ["needed", "check", "not_needed"];
