@@ -69,7 +69,9 @@ func openWith(path string, migs []migration) (*Store, error) {
 func (s *Store) Close() error { return s.db.Close() }
 
 // DB exposes the handle for read queries by sibling store files and tests.
-// Writes must go through WithTx.
+// Multi-statement writes must go through WithTx; the engine's single-statement
+// writes (stage and attempt bookkeeping) use it directly, where one statement
+// is atomic on its own.
 func (s *Store) DB() *sql.DB { return s.db }
 
 // WithTx runs fn in a transaction, committing if it returns nil and rolling

@@ -5,6 +5,7 @@ Resume point for the ralplan → ralph run of [FRD-AF-REM-001](frd.md). Newest e
 ## Run parameters
 - Branch: `agentflow` (commit per passing story, never push)
 - Scope: all priorities (must, should, could)
+- Security posture (owner, 2026-10-13): agentflow is local, single-user. Implement the FRD's explicit safety requirements only; reviewers log extra security findings below as notes instead of blocking.
 - Builders: every implementation (executor) agent runs on Sonnet 5.5 (owner, 2026-10-13); reviewers keep their tiers
 - Plan: `.omc/plans/ralplan-agentflow-remediation.md` (iteration 1); ralph PRD in `.omc/state/sessions/<session>/prd.json`
 - Plan approval: automatic after critic approval; stop and ask only if the critic never approves within 5 rounds
@@ -41,7 +42,17 @@ Later stories must follow these, not the original plan text.
 - **worktree prune:** only when every stale entry is under `<data_dir>/worktrees`.
 - **Engine git hardening:** every engine git call uses `gitsvc.Hardened(ctx, repo)` (empty-tree attr-source, no attributes files, every config filter neutralised, no ssh/file protocols) and `gitsvc.AdminGitDir` (never trusts `$WT/.git`; refuses a symlinked gitfile). Consequence: engine commits/checkouts store raw bytes (no LFS, git-crypt or eol conversion). Integration overrides naming a pre-existing non-agentflow branch are refused; agentflow-created overrides carry `refs/agentflow/owned/<branch>`.
 - **opencode permissions are layer 1 only:** grouped redirections, `/usr/bin/git`, `env git`, `sh -c` are not caught; non-worker read-only is guaranteed by `sandbox.Spec.ReadOnlyWorktree`, git protection by GIT5 layers 2-3.
+- **Attempts/resets (B3):** outcome `abandoned` is non-counting (stop, cancel, restart, reset); `ResetTask(ctx, actor, task, clean, limits)` refuses non-halted tasks and abandons open attempts in-tx — C9 must also cancel/close that attempt's open stages and lane jobs. `ApproveQueue` takes the expected hash. B3 landed as one commit (~1,400 code lines) — size-cap exception; the split would only have cut shared fixtures.
 - **Root `prompts/`:** copied into `internal/agentflow/prompts` (B4); D1 deletes the root copy.
+
+
+## Security findings (noted, not fixed)
+Logged per the owner's posture; candidates for the next phase alongside `.omc/plans/reviews/iter1-*.md`.
+- Sandbox shares the host network namespace: a sandboxed agent can reach the server's loopback API (deferred item from iter-1 review).
+- Sandbox `Spec.Env` denylist is case-sensitive and does not block `GIT_CONFIG_*` overrides (callers are trusted).
+- opencode permission rules are layer 1 only (grouped redirections, `/usr/bin/git`, `env git`, `sh -c` pass); `git grep -n TODO` is denied as a side effect of the `-O` rule.
+- gitsvc: owner-marker ref for integration overrides is not written atomically with the branch (fails safe); gitlink-path `reset` error ignored; each hardened call spawns two probe git processes (no cache).
+- verify: 5000-file cap applied after git lists everything; files over 8 MiB pass `parse` with a warning; TOCTOU between containment check and read.
 
 ## Log
 - 2026-10-12 — FRD written (frd.json canonical, frd.md generated). Owner added UI6: keep existing look and feel.
@@ -62,6 +73,7 @@ Later stories must follow these, not the original plan text.
 - 2026-10-13 — B8: bwrap sandbox (deny-by-default root, ro gitfile, ReadOnlyWorktree, env denylist, userns disabled).
 - 2026-10-13 — B6: opencode config generator + ordered permissions (3 review rounds; bypasses fixed and tested via matcher copy).
 - 2026-10-13 — B9: gitsvc (fixed reproduced symlinked-.git commit redirect and filter-driver execution; exported AdminGitDir + Hardened).
+- 2026-10-13 — B3: model + store v3 (efforts/docs/queues/tasks/attempts/stages, derived status; fixed reset deadlock via 'abandoned').
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`
