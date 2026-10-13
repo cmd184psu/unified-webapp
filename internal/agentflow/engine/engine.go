@@ -52,6 +52,10 @@ type Deps struct {
 	// goroutine, started by Start and stopped by Close, waits on it (DBS5).
 	Tick           <-chan time.Time
 	ReconcileEvery time.Duration
+	// DispatchTick, when set, replaces the dispatcher's safety ticker (tests);
+	// DispatchEvery is the period otherwise (default 30 s).
+	DispatchTick  <-chan time.Time
+	DispatchEvery time.Duration
 	// PublishRun receives every run-state transition (D3 wires the bus).
 	PublishRun func(RunEvent)
 	// TestWidthZero registers every agentflow lane at width 0 and never raises
@@ -99,6 +103,7 @@ type Engine struct {
 	ticker    *tickerState
 
 	runs *RunControl
+	disp *dispatcher
 }
 
 // New builds the engine, registers its lanes and leaves all of them paused
@@ -112,6 +117,15 @@ func New(d Deps) (*Engine, error) {
 	}
 	e := &Engine{deps: d, handles: map[string]golane.Lane{}, holding: true}
 	e.runs = newRunControl(e)
+	e.disp = newDispatcher(e)
+	// Every kick, including the caller's own hook, wakes the dispatcher.
+	userKick := d.Kick
+	e.deps.Kick = func() {
+		if userKick != nil {
+			userKick()
+		}
+		e.disp.kick()
+	}
 	e.backendKinds = []golane.Kind{e.kind(KindWork), e.kind(KindReview), e.kind(KindPlan)}
 	e.engineKinds = []golane.Kind{e.kind(KindVerify), e.kind(KindMerge)}
 	if err := e.SyncLanes(context.Background()); err != nil {

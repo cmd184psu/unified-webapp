@@ -305,6 +305,7 @@ func (e *Engine) Start(ctx context.Context) error {
 			}
 		}
 	}()
+	e.disp.start()
 	return nil
 }
 
@@ -318,6 +319,7 @@ func (e *Engine) Close() {
 	if ts == nil {
 		return
 	}
+	e.disp.halt()
 	close(ts.stop)
 	ts.cancel()
 	<-ts.done
