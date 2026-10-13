@@ -7,7 +7,8 @@ Resume point for the ralplan → ralph run of [FRD-AF-REM-001](frd.md). Newest e
 - Scope: all priorities (must, should, could)
 - Security posture (owner, 2026-10-13): agentflow is local, single-user. Implement the FRD's explicit safety requirements only; reviewers log extra security findings below as notes instead of blocking.
 - Builders and reviewers: every implementation and review agent runs on Sonnet 5.5 (owner, 2026-10-13)
-- One review per story (owner, 2026-10-13): builder applies the reviewer's blocking fixes, orchestrator re-runs the tests and commits — no re-review rounds.
+- Review per phase (owner, 2026-10-13): stories commit after the builder's V-STD passes, with no per-story review. One Sonnet review covers the whole phase at its end (C, D, E, F, G); its blocking fixes land as a follow-up commit.
+- Test runs (owner, 2026-10-13): avoid repeated runs. Builder runs V-STD once at the end; the phase reviewer runs the phase's package tests once; orchestrator re-runs only the touched package after post-review fixes, and runs the full `omc ralph verify` gate at phase boundaries (end of C, D, E, F, G).
 - Plan: `.omc/plans/ralplan-agentflow-remediation.md` (iteration 1); ralph PRD in `.omc/state/sessions/<session>/prd.json`
 - Plan approval: automatic after critic approval; stop and ask only if the critic never approves within 5 rounds
 - Pre-change snapshot: `~/pre-remediation-tracked.patch`, `~/pre-remediation-modified.tgz`, `~/pre-remediation-untracked.tgz`
@@ -79,6 +80,7 @@ Logged per the owner's posture; candidates for the next phase alongside `.omc/pl
 - 2026-10-13 — B12: verify feedback commands + baseline compare (head+tail output cap).
 - 2026-10-13 — B10: gitsvc policy (worktree-scoped detect-and-revert), serialized merge with clean abort, push instructions. Merge signature: Merge(ctx, repo, integrationWT, integrationBranch, taskBranch).
 - 2026-10-13 — B7: opencode invocation (stdin prompt), event parsing, error classes, sandboxed command, version. Real run vs stub verified with opencode 1.18.19.
+- 2026-10-13 — C1: lane manager (per-backend lanes + agentflow_verify/agentflow_merge), runtime backend add/resize/retire/enable, lanes paused until Resume.
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`

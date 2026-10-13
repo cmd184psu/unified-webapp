@@ -171,6 +171,23 @@ func (s *Store) RetireBackend(ctx context.Context, actor, name string) error {
 	})
 }
 
+// EnableBackend reverses RetireBackend (BK3). Enabling an active backend is a
+// no-op.
+func (s *Store) EnableBackend(ctx context.Context, actor, name string) error {
+	return s.WithTx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE backends SET retired = 0, updated = ? WHERE name = ?`,
+			time.Now().UnixMilli(), name)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return fmt.Errorf("backend %q: %w", name, ErrNotFound)
+		}
+		_, err = AppendEvent(tx, actor, "backend.enable", "backend", name, map[string]any{"retired": false})
+		return err
+	})
+}
+
 func loadBackends(ctx context.Context, q querier, name string) ([]Backend, error) {
 	query := `SELECT name, host, api_type, hosted, paid, slots, retired, created, updated FROM backends`
 	var args []any
