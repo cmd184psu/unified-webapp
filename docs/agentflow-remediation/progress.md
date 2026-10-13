@@ -39,6 +39,8 @@ Later stories must follow these, not the original plan text.
 - **Prompt delivery:** stdin, no message argument (S1).
 - **Sandbox:** deny-by-default root; `.git/worktrees/<id>` read-only; `Command` returns `(*exec.Cmd, error)`; env = allowlist + bwrap's `PWD`.
 - **worktree prune:** only when every stale entry is under `<data_dir>/worktrees`.
+- **Engine git hardening:** every engine git call uses `gitsvc.Hardened(ctx, repo)` (empty-tree attr-source, no attributes files, every config filter neutralised, no ssh/file protocols) and `gitsvc.AdminGitDir` (never trusts `$WT/.git`; refuses a symlinked gitfile). Consequence: engine commits/checkouts store raw bytes (no LFS, git-crypt or eol conversion). Integration overrides naming a pre-existing non-agentflow branch are refused; agentflow-created overrides carry `refs/agentflow/owned/<branch>`.
+- **opencode permissions are layer 1 only:** grouped redirections, `/usr/bin/git`, `env git`, `sh -c` are not caught; non-worker read-only is guaranteed by `sandbox.Spec.ReadOnlyWorktree`, git protection by GIT5 layers 2-3.
 - **Root `prompts/`:** copied into `internal/agentflow/prompts` (B4); D1 deletes the root copy.
 
 ## Log
@@ -58,6 +60,7 @@ Later stories must follow these, not the original plan text.
 - 2026-10-13 — B2: store config tables (migration v2 + CHECK constraints), validation, snapshot, repo-path safety incl. RecheckRepoPath.
 - 2026-10-13 — B11: verify structural checks; fixed reviewer-found git filter-driver code-execution path (trusted --git-dir, empty attr-source). New dep: BurntSushi/toml.
 - 2026-10-13 — B8: bwrap sandbox (deny-by-default root, ro gitfile, ReadOnlyWorktree, env denylist, userns disabled).
+- 2026-10-13 — B6: opencode config generator + ordered permissions (3 review rounds; bypasses fixed and tested via matcher copy).
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`
