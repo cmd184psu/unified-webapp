@@ -36,6 +36,11 @@ func (e *Engine) runStage(ctx context.Context, rc golane.RunContext, p StagePayl
 	if res.skip {
 		return map[string]int64{"stage": p.Stage}, nil
 	}
+	if res.Outcome == OutcomeInfraCrash && ctx.Err() != nil {
+		// Cancelled (stop, brake, shutdown) while still setting up: the store
+		// calls failed on the dead context, which is a cancel, not a crash.
+		res.Outcome = OutcomeInfraCancel
+	}
 	if !IsInfra(res.Outcome) && res.Outcome != OutcomeDiscarded {
 		if stale, _ := e.stale(ctx, p); stale {
 			res.Outcome = OutcomeDiscarded

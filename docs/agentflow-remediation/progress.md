@@ -46,6 +46,8 @@ Later stories must follow these, not the original plan text.
 - **opencode permissions are layer 1 only:** grouped redirections, `/usr/bin/git`, `env git`, `sh -c` are not caught; non-worker read-only is guaranteed by `sandbox.Spec.ReadOnlyWorktree`, git protection by GIT5 layers 2-3.
 - **Attempts/resets (B3):** outcome `abandoned` is non-counting (stop, cancel, restart, reset); `ResetTask(ctx, actor, task, clean, limits)` refuses non-halted tasks and abandons open attempts in-tx — C9 must also cancel/close that attempt's open stages and lane jobs. `ApproveQueue` takes the expected hash. B3 landed as one commit (~1,400 code lines) — size-cap exception; the split would only have cut shared fixtures.
 - **Engine composition (C2):** the engine can't import `runner/opencode` (AC-AR1 boundary); D1 wires `Deps.FreezeConfig` to `opencode.GenerateConfig`, `Deps.Prompt` (prompt builders), `Deps.Kick` (C5 dispatcher) and `Deps.Verify`/`Deps.Merge` (C6 executors). Outcomes: `pass|repair|blocked|timeout|discarded|infra:{rate_limit,unreachable,crash,cancel,timeout,unparseable,panic,lost}`. Verify/merge executors must apply `verify_timeout` themselves.
+- **Dispatch contract (C3/C4):** stages are created+submitted only through `Engine.Submit` (atomic against Reconcile). `Engine.Start(ctx)` = Reconcile → Resume → single tick goroutine. The dispatcher (C5) calls `Runs().Admit(ctx, project) (done func(), ok bool)` (call `done()` once the attempt and its first stage exist) and `Runs().Settle(ctx)` after each pass. Reconcile abandons an open attempt whose newest stage is `infra:cancel|infra:lost` with nothing in flight, so C8's reroute must re-submit before the cancel is observable. User stop/`infra:cancel` should not count toward `max_infra_retries` (C7 decides). Effort `status` transitions (queue_approved/running/paused) are still unowned — decide in C5/C6/D3.
+- **AC wording fixes (C3/C4):** "attempt count unchanged" = the interrupted attempt is closed `abandoned`; counting attempts stay 0. After a brake cancel the stage is `infra:cancel` at once; the task derives `ready` after the next reconcile pass (<= 60 s).
 - **Root `prompts/`:** copied into `internal/agentflow/prompts` (B4); D1 deletes the root copy.
 
 
@@ -83,6 +85,7 @@ Logged per the owner's posture; candidates for the next phase alongside `.omc/pl
 - 2026-10-13 — B7: opencode invocation (stdin prompt), event parsing, error classes, sandboxed command, version. Real run vs stub verified with opencode 1.18.19.
 - 2026-10-13 — C1: lane manager (per-backend lanes + agentflow_verify/agentflow_merge), runtime backend add/resize/retire/enable, lanes paused until Resume.
 - 2026-10-13 — C2: stage runtime (kinds, outcome write-before-return, one corrective retry, classification, panic recovery).
+- 2026-10-13 — C3+C4: reconciliation (stale/lost stages -> infra:lost, stale queued jobs removed, single tick goroutine, Start = Reconcile->Resume) and per-project run controllers (in-memory stopped/running/pausing/paused, never restored at boot; Start/Pause/Stop/RunOne; audit + publish hook; DispatchGate). Committed together: engine.go hunks interleave.
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`

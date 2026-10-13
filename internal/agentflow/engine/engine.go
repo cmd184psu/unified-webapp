@@ -47,6 +47,13 @@ type Deps struct {
 	Verify, Merge Executor
 	// Kick wakes the dispatcher after a stage's outcome is written (C5).
 	Kick func()
+	// Tick, when set, replaces the reconcile ticker (tests); ReconcileEvery is
+	// the period otherwise (default 60 s). The engine's one background
+	// goroutine, started by Start and stopped by Close, waits on it (DBS5).
+	Tick           <-chan time.Time
+	ReconcileEvery time.Duration
+	// PublishRun receives every run-state transition (D3 wires the bus).
+	PublishRun func(RunEvent)
 	// TestWidthZero registers every agentflow lane at width 0 and never raises
 	// it, so no job runs unless a test sets a width itself.
 	TestWidthZero bool
@@ -83,6 +90,15 @@ type Engine struct {
 	handles map[string]golane.Lane
 	// holding keeps every lane paused until Resume (RC4).
 	holding bool
+
+	// submitMu makes "create stage row, submit lane job" atomic against a
+	// reconcile scan (reconcile.go).
+	submitMu sync.RWMutex
+	// tickHooks run after every periodic reconcile.
+	tickHooks []func(context.Context)
+	ticker    *tickerState
+
+	runs *RunControl
 }
 
 // New builds the engine, registers its lanes and leaves all of them paused
@@ -95,6 +111,7 @@ func New(d Deps) (*Engine, error) {
 		d.Clock = time.Now
 	}
 	e := &Engine{deps: d, handles: map[string]golane.Lane{}, holding: true}
+	e.runs = newRunControl(e)
 	e.backendKinds = []golane.Kind{e.kind(KindWork), e.kind(KindReview), e.kind(KindPlan)}
 	e.engineKinds = []golane.Kind{e.kind(KindVerify), e.kind(KindMerge)}
 	if err := e.SyncLanes(context.Background()); err != nil {
