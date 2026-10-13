@@ -115,7 +115,7 @@ func setHook(t *testing.T, hook *func(int64), fn func(int64)) {
 func TestFuncTask_PanicRecordedFailed(t *testing.T) {
 	d := newInternalFuncTestDB(t)
 	funcs := NewFuncRegistry()
-	require.NoError(t, funcs.Register(golane.NewKind[internalEchoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p internalEchoPayload) (any, error) {
+	require.NoError(t, funcs.Register("acme-module", golane.NewKind[internalEchoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p internalEchoPayload) (any, error) {
 		panic("boom")
 	})))
 	w := newInternalFuncWorker(d, funcs, NewCancelRegistry(), NewBrakeGate(false), nil, NewHiddenLanes(nil))
@@ -138,7 +138,7 @@ func TestFuncTask_PanicRecordedFailed(t *testing.T) {
 func TestFuncTask_BadPayloadVersionFailsCleanly(t *testing.T) {
 	d := newInternalFuncTestDB(t)
 	funcs := NewFuncRegistry()
-	require.NoError(t, funcs.Register(golane.NewKind[internalEchoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p internalEchoPayload) (any, error) {
+	require.NoError(t, funcs.Register("acme-module", golane.NewKind[internalEchoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p internalEchoPayload) (any, error) {
 		return nil, nil
 	})))
 	w := newInternalFuncWorker(d, funcs, NewCancelRegistry(), NewBrakeGate(false), nil, NewHiddenLanes(nil))
@@ -169,7 +169,7 @@ func TestFuncTask_BrakeEngagedBeforeStart(t *testing.T) {
 	d := newInternalFuncTestDB(t)
 	ran := false
 	funcs := NewFuncRegistry()
-	require.NoError(t, funcs.Register(golane.NewKind[internalEchoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p internalEchoPayload) (any, error) {
+	require.NoError(t, funcs.Register("acme-module", golane.NewKind[internalEchoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p internalEchoPayload) (any, error) {
 		ran = true
 		return nil, nil
 	})))
@@ -198,7 +198,7 @@ func TestCancelExecution_PendingCancelBeforeClaim(t *testing.T) {
 	d := newInternalFuncTestDB(t)
 	ran := false
 	funcs := NewFuncRegistry()
-	require.NoError(t, funcs.Register(golane.NewKind[internalEchoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p internalEchoPayload) (any, error) {
+	require.NoError(t, funcs.Register("acme-module", golane.NewKind[internalEchoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p internalEchoPayload) (any, error) {
 		ran = true
 		return nil, nil
 	})))
@@ -235,7 +235,7 @@ func TestCancelExecution_ClaimThenCancel(t *testing.T) {
 	d := newInternalFuncTestDB(t)
 	ran := false
 	funcs := NewFuncRegistry()
-	require.NoError(t, funcs.Register(golane.NewKind[internalEchoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p internalEchoPayload) (any, error) {
+	require.NoError(t, funcs.Register("acme-module", golane.NewKind[internalEchoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p internalEchoPayload) (any, error) {
 		ran = true
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -272,7 +272,7 @@ func TestCancelExecution_CanceledBeforeRegistration(t *testing.T) {
 	d := newInternalFuncTestDB(t)
 	ran := false
 	funcs := NewFuncRegistry()
-	require.NoError(t, funcs.Register(golane.NewKind[internalEchoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p internalEchoPayload) (any, error) {
+	require.NoError(t, funcs.Register("acme-module", golane.NewKind[internalEchoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p internalEchoPayload) (any, error) {
 		ran = true
 		return nil, nil
 	})))
@@ -303,7 +303,7 @@ func TestFuncTask_BrakeVsPendingCancel_OneMetric(t *testing.T) {
 	d := newInternalFuncTestDB(t)
 	ran := false
 	funcs := NewFuncRegistry()
-	require.NoError(t, funcs.Register(golane.NewKind[internalEchoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p internalEchoPayload) (any, error) {
+	require.NoError(t, funcs.Register("acme-module", golane.NewKind[internalEchoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p internalEchoPayload) (any, error) {
 		ran = true
 		return nil, nil
 	})))
@@ -344,7 +344,7 @@ func TestFuncTask_BrakeAfterPreCheck_CanceledWithoutRun(t *testing.T) {
 	d := newInternalFuncTestDB(t)
 	ran := false
 	funcs := NewFuncRegistry()
-	require.NoError(t, funcs.Register(golane.NewKind[internalEchoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p internalEchoPayload) (any, error) {
+	require.NoError(t, funcs.Register("acme-module", golane.NewKind[internalEchoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p internalEchoPayload) (any, error) {
 		ran = true
 		return nil, nil
 	})))
@@ -376,7 +376,7 @@ func TestFuncTask_ShutdownBeforeClaimStaysPending(t *testing.T) {
 	d := newInternalFuncTestDB(t)
 	ran := false
 	funcs := NewFuncRegistry()
-	require.NoError(t, funcs.Register(golane.NewKind[internalEchoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p internalEchoPayload) (any, error) {
+	require.NoError(t, funcs.Register("acme-module", golane.NewKind[internalEchoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p internalEchoPayload) (any, error) {
 		ran = true
 		return nil, nil
 	})))

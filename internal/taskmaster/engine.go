@@ -267,30 +267,45 @@ func (e *Engine) pruneOnce() {
 }
 
 // RegisterLane validates spec/kinds, seeds (or attaches to) the owned lane,
-// registers every kind, and returns a golane.Lane handle. A second call for
-// the same lane name in this process returns golane.ErrLaneRegistered.
+// registers every kind, and returns a golane.Lane handle. A second call for the
+// same lane name in this process returns golane.ErrLaneRegistered.
+//
+// Kinds are shared per owner: lanes of the same owner may register the same
+// kind name, and the FIRST registration's Kind (its Run) wins; a later Kind of
+// that name is ignored (a differing Version is an error). A kind owned by a
+// different owner fails with golane.ErrKindRegistered.
+//
+// The whole call runs under lanesMu and commits in order: check every kind,
+// EnsureOwnedLane, then register the kinds. A failure before the commit leaves
+// no kind visible to the worker, no lane row for a kind failure, and the lane
+// name unset.
 func (e *Engine) RegisterLane(spec golane.LaneSpec, kinds ...golane.Kind) (golane.Lane, error) {
 	if err := validateLaneSpec(spec, kinds); err != nil {
 		return nil, err
 	}
 
 	e.lanesMu.Lock()
+	defer e.lanesMu.Unlock()
 	if e.lanes[spec.Name] {
-		e.lanesMu.Unlock()
 		return nil, golane.ErrLaneRegistered
 	}
-	e.lanes[spec.Name] = true
-	e.lanesMu.Unlock()
 
+	for _, k := range kinds {
+		if err := e.funcs.Check(spec.Owner, k); err != nil {
+			return nil, err
+		}
+	}
 	l, err := e.db.EnsureOwnedLane(spec.Name, spec.Owner, spec.InitialWidth, spec.InitialRetentionDays, spec.InitialHidden)
 	if err != nil {
 		return nil, err
 	}
 	for _, k := range kinds {
-		if err := e.funcs.Register(k); err != nil {
+		// Cannot fail: Check passed and lanesMu serialises writers.
+		if err := e.funcs.Register(spec.Owner, k); err != nil {
 			return nil, err
 		}
 	}
+	e.lanes[spec.Name] = true
 	e.hidden.Set(spec.Name, l.Hidden)
 	log.Printf("taskmaster: lane %q registered by %q (kinds %v, width %d, retention %dd, hidden %v)",
 		spec.Name, spec.Owner, kindNames(kinds), l.Width, l.RetentionDays, l.Hidden)

@@ -41,6 +41,7 @@ Full notes, fixtures, the opencode stub server and the bwrap template are kept o
 - 2026-10-13 — A2: gofmt sweep (12 files, formatting-only) + gofmt gate. Ralph feedback commands switched to quiet-on-success wrappers and baseline re-recorded (verify counted new PASS lines as failures).
 - 2026-10-13 — A3: gate repairs: bundle-shape PASS + derived set, strict hamburger gate (no 'unknown'); fixed grocery drawer side (right) found by the strict gate.
 - 2026-10-13 — B1: store core package (migrations v1=events; B2 appends v2, B3 v3).
+- 2026-10-13 — A4: taskmaster RegisterLane: same-owner shared kinds, check->persist->register order, no residue on failure.
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`
