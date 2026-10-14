@@ -51,6 +51,7 @@ function remember(slug: string): void {
 /** mountProjectTab renders the picker and sub-tabs into host and returns the dispose; wanted "+new" opens the create form. */
 export function mountProjectTab(host: HTMLElement, wanted: string): () => void {
   let dispose: void | (() => void);
+  let disposed = false;
   let sub = SUB_TABS[0].id;
   let slug = wanted === '+new' ? remembered() : wanted || remembered();
   let projects: ProjectView[] = [];
@@ -87,6 +88,7 @@ export function mountProjectTab(host: HTMLElement, wanted: string): () => void {
     } catch {
       projects = [];
     }
+    if (disposed) return;
     if (!projects.some((p) => p.slug === slug)) slug = projects[0]?.slug ?? '';
     replace(picker, ...projects.map((p) => h('option', { text: p.slug, attrs: { value: p.slug, selected: p.slug === slug } })));
     picker.value = slug;
@@ -120,5 +122,8 @@ export function mountProjectTab(host: HTMLElement, wanted: string): () => void {
   if (wanted === '+new') showForm();
   else void reload();
 
-  return closeSub;
+  return () => {
+    disposed = true;
+    closeSub();
+  };
 }

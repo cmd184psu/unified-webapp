@@ -97,4 +97,14 @@ test('a finished effort has no toggle; confirmText names the effort', () => {
   ok(confirmText(effort(), INV).startsWith('Enable YOLO for effort #4?'), 'text');
 });
 
+test('the invariants are fetched once per deps, however often the control is rebuilt', async () => {
+  const { d } = deps(true);
+  let calls = 0;
+  d.yoloInvariants = async () => { calls++; return INV; };
+  yoloControl('p1', effort(), d, () => {});
+  yoloControl('p1', effort(), d, () => {});
+  await flush();
+  eq(calls, 1);
+});
+
 void run('agentflow-yolo');

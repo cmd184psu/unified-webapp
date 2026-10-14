@@ -471,7 +471,7 @@ export const api = {
   compile: (slug: string, id: number): Promise<EffortView> => send('POST', `${eff(slug, id)}/compile`),
   queue: (slug: string, id: number, o?: FetchOptions): Promise<QueueView> => get(`${eff(slug, id)}/queue`, o),
   /** gitCommands lists the commands to merge and push a complete effort's branch; agentflow runs none of them (GIT4). */
-  gitCommands: (slug: string, id: number): Promise<{ commands: string[] }> => get(`${eff(slug, id)}/git-commands`),
+  gitCommands: (slug: string, id: number, o?: FetchOptions): Promise<{ commands: string[] }> => get(`${eff(slug, id)}/git-commands`, o),
   approveQueue: (slug: string, id: number, hash: string, o?: FetchOptions): Promise<QueueView> =>
     send('POST', `${eff(slug, id)}/queue/approve`, { hash }, o),
   tasks: (slug: string, id: number): Promise<TaskView[]> => get(`${eff(slug, id)}/tasks`),

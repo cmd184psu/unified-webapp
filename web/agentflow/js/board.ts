@@ -19,7 +19,7 @@ import { StreamPanel, defaultStreamDeps, type StreamDeps } from './stream.js';
 
 export type BoardDeps = Pick<
   typeof api,
-  'efforts' | 'tasks' | 'task' | 'run' | 'retryTask' | 'editTask' | 'overrideTask' | 'abandonEffort' | 'gitCommands'
+  'project' | 'efforts' | 'tasks' | 'task' | 'run' | 'retryTask' | 'editTask' | 'overrideTask' | 'abandonEffort' | 'gitCommands'
 > & {
   confirm(message: string, confirmLabel?: string): Promise<boolean>;
   copy(text: string): void;
@@ -27,6 +27,7 @@ export type BoardDeps = Pick<
 };
 
 export const defaultBoardDeps = (): BoardDeps => ({
+  project: api.project,
   efforts: api.efforts,
   tasks: api.tasks,
   task: api.task,
@@ -94,9 +95,16 @@ export class Board {
   tasks: TaskView[] = [];
   selected = '';
   detail: TaskDetail | null = null;
+  /** runState is the LIVE state (project.run_state); the effort's persisted run_state is only a hint. */
   runState = 'stopped';
   gitLines: string[] | null = null;
   private editing = false;
+  private detailEl: HTMLElement | null = null;
+  private reasonEl: HTMLTextAreaElement | null = null;
+  private cleanEl: HTMLInputElement | null = null;
+  private fresh = true; // rebuild the detail pane on the next render
+  private stateSeq = 0; // bumped by run-state events so a slower fetch cannot overwrite them
+  private gitFailed: number | null = null; // effort id whose git commands failed
   private loaded = false;
   private stream: StreamPanel;
   private off: (() => void) | null = null;
@@ -121,6 +129,7 @@ export class Board {
     if (ev.type === 'state.changed') {
       void this.refresh();
     } else if (ev.type === 'project.run_state' && ev.project === this.slug) {
+      this.stateSeq++;
       this.runState = ev.state;
       this.render();
       void this.refresh();
@@ -140,21 +149,34 @@ export class Board {
     this.selected = '';
     this.detail = null;
     this.gitLines = null;
+    this.fresh = true;
     this.stream.close();
     await this.refresh();
   }
 
   /** refresh refetches the efforts, the task list and the open task. */
   async refresh(): Promise<void> {
+    const seq = this.stateSeq;
+    try {
+      const live = (await this.deps.project(this.slug)).run_state;
+      if (seq === this.stateSeq) this.runState = live;
+    } catch {
+      // keep the last known live state
+    }
     try {
       this.efforts = await this.deps.efforts(this.slug);
       this.current = this.efforts.find((e) => e.id === this.current?.id) ?? chooseEffort(this.slug, this.efforts);
       this.loaded = true;
       const ef = this.current;
       this.tasks = ef ? await this.deps.tasks(this.slug, ef.id) : [];
-      if (ef) this.runState = ef.run_state;
       if (ef && this.selected && this.tasks.some((t) => t.key === this.selected)) this.detail = await this.deps.task(this.slug, ef.id, this.selected);
-      if (ef?.status === 'complete' && !this.gitLines) this.gitLines = (await this.deps.gitCommands(this.slug, ef.id)).commands;
+      if (ef?.status === 'complete' && !this.gitLines && this.gitFailed !== ef.id) {
+        try {
+          this.gitLines = (await this.deps.gitCommands(this.slug, ef.id, { quiet: true })).commands;
+        } catch {
+          this.gitFailed = ef.id;
+        }
+      }
     } catch {
       // apiFetch already told the user; keep what is shown.
     }
@@ -166,6 +188,7 @@ export class Board {
     if (!ef) return;
     this.selected = key;
     this.editing = false;
+    this.fresh = true;
     try {
       this.detail = await this.deps.task(this.slug, ef.id, key);
     } catch {
@@ -194,6 +217,7 @@ export class Board {
     } catch {
       return;
     }
+    this.fresh = true;
     this.deps.notify(`Retrying ${key}`);
     await this.refresh();
   }
@@ -211,6 +235,7 @@ export class Board {
     } catch {
       return;
     }
+    this.fresh = true;
     this.deps.notify(`Overrode ${key}`);
     await this.refresh();
   }
@@ -223,6 +248,7 @@ export class Board {
     } catch {
       return;
     }
+    this.fresh = true;
     this.deps.notify('Effort abandoned');
     await this.refresh();
   }
@@ -239,6 +265,7 @@ export class Board {
       return;
     }
     this.editing = false;
+    this.fresh = true;
     this.deps.notify(`Saved ${def.key}; approve the queue again`);
     await this.refresh();
   }
@@ -267,19 +294,21 @@ export class Board {
           acceptance: split(acceptance.value), files_touched: split(files.value),
           depends_on: deps.value.split(',').map((s) => s.trim()).filter((s) => s !== ''),
         }), { primary: true, field: 'save-task' }),
-        button('Cancel', () => { this.editing = false; this.render(); }, { field: 'cancel-edit' })));
+        button('Cancel', () => { this.editing = false; this.fresh = true; this.render(); }, { field: 'cancel-edit' })));
   }
 
   private actions(d: TaskDetail): HTMLElement {
     const clean = checkbox('clean_worktree', false);
     const reason = textArea('override_reason', '', 2);
     this.errors = new FormErrors();
+    this.reasonEl = reason;
+    this.cleanEl = clean;
     const reasonRow = this.errors.add('reason', fieldRow('Override reason', reason, 'Recorded with your name when you mark the task passed'));
     return h('div', { class: 'detail-section', attrs: { 'data-panid': 'actions' } },
       h('h4', { text: 'Halted: choose how to continue' }),
       h('label', { class: 'inline-check' }, clean, 'Recreate the worktree clean when retrying'),
       button('Retry', () => void this.retry(d.key, clean.checked), { field: 'retry' }),
-      button('Edit task', () => { this.editing = true; this.render(); }, { field: 'edit' }),
+      button('Edit task', () => { this.editing = true; this.fresh = true; this.render(); }, { field: 'edit' }),
       reasonRow.el,
       button('Override as passed', () => void this.override(d.key, reason.value), { field: 'override' }),
       button('Abandon effort', () => void this.abandon(), { field: 'abandon' }),
@@ -314,7 +343,7 @@ export class Board {
       h('div', { class: 'detail-body' },
         h('div', { class: 'detail-header' }, h('h3', { text: `${d.key} · ${d.title}` }), chip(d.status),
           h('button', { class: 'icon-btn detail-close-btn', text: 'Close', attrs: { type: 'button', 'data-action': 'close-detail' }, on: {
-            click: () => { this.selected = ''; this.detail = null; this.editing = false; this.render(); },
+            click: () => { this.selected = ''; this.detail = null; this.editing = false; this.fresh = true; this.render(); },
           } })),
         h('div', { class: 'detail-attempts', text: `Attempts: ${d.attempts}` }),
         d.waiting_reason ? block('Waiting', h('p', { text: d.waiting_reason, attrs: { 'data-role': 'waiting-reason' } })) : null,
@@ -353,6 +382,14 @@ export class Board {
     }
     const { pct, text } = progressText(counts(this.tasks));
     const bar = h('div', { class: 'progress-bar-wrap' }, h('div', { class: 'progress-bar', attrs: { style: `width: ${pct}%` } }));
+    const typed = (this.reasonEl?.value ?? '') !== '' || this.cleanEl?.checked === true;
+    const keep = !this.fresh && this.detailEl !== null && (this.editing || typed);
+    if (!keep) {
+      this.reasonEl = null;
+      this.cleanEl = null;
+      this.detailEl = this.detailPane();
+    }
+    this.fresh = false;
     const controls = buttonsFor(this.runState).map((b) =>
       h('button', {
         class: 'ui-modal-btn' + (b.primary ? ' ui-modal-btn-primary' : ''), text: b.label,
@@ -361,7 +398,8 @@ export class Board {
     replace(this.host,
       effortBar(this.slug, this.efforts, ef, (id) => { this.current = this.efforts.find((e) => e.id === id); void this.load(); }, { deps: this.yolo, onChanged: () => void this.refresh() }),
       h('div', { class: 'console-header' },
-        h('span', { class: 'pane-title', text: 'Progress' }), bar, h('span', { class: 'progress-pct', text }), chip(this.runState), ...controls),
+        h('span', { class: 'pane-title', text: 'Progress' }), bar, h('span', { class: 'progress-pct', text }), chip(this.runState), ef.run_state !== this.runState && ef.run_state === 'running'
+          ? h('span', { class: 'field-hint', text: 'was running before restart', attrs: { 'data-role': 'was-running' } }) : null, ...controls),
       this.gitBox(),
       h('div', { class: 'console-body' },
         h('div', { class: 'console-left' },
@@ -376,7 +414,7 @@ export class Board {
                 h('div', { class: 'task-item-meta' }, chip(t.status), h('span', { text: `${t.key} · attempts ${t.attempts}` })),
                 t.waiting_reason ? h('div', { class: 'task-item-meta', text: t.waiting_reason }) : null,
                 t.current ? h('div', { class: 'task-item-meta', text: `${t.current.role} · ${t.current.backend}/${t.current.model}` }) : null)))),
-        this.detailPane()));
+        this.detailEl));
   }
 }
 

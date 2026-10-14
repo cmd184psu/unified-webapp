@@ -4,6 +4,8 @@ import { StreamPanel, MAX_LINES, type SourceLike, type StreamDeps } from './stre
 import { statusKey } from './dom';
 import type { YoloDeps } from './yolo';
 import { dispatch } from './events';
+import { mountProjectTab, SUB_TABS } from './projecttab';
+import { api } from './api';
 import { ApiError, type Attempt, type EffortView, type Stage, type TaskDetail, type TaskView } from './api';
 
 // The suite runs under node (test-web.mjs pipes the bundle to it); the app tsconfig has no node types.
@@ -46,6 +48,8 @@ interface World {
   effort: EffortView;
   tasks: TaskView[];
   detail: Record<string, TaskDetail>;
+  /** the live project run state; defaults to the effort's */
+  live?: string;
 }
 
 function harness(w: World, over: Partial<BoardDeps> = {}) {
@@ -56,6 +60,7 @@ function harness(w: World, over: Partial<BoardDeps> = {}) {
   const sources: FakeSource[] = [];
   const answers = { confirm: true };
   const deps: BoardDeps = {
+    project: async () => ({ run_state: w.live ?? w.effort.run_state }) as never,
     efforts: async () => [w.effort],
     tasks: async () => w.tasks,
     task: async (_s, _id, key) => w.detail[key],
@@ -263,6 +268,89 @@ test('task.update for this project refetches the list and the open task', async 
   ok(t.host.textContent.includes('50% — passed 2/4'), 'progress advanced');
   dispatch(JSON.stringify({ type: 'task.update', project: 'other', effort: 9, task: 'T002' }));
   stop();
+});
+
+test('B1: the run controls follow the live state, not the effort\'s persisted run_state', async () => {
+  const w = mixed();
+  w.effort = effort({ run_state: 'running' });
+  w.live = 'stopped';
+  const t = harness(w);
+  const stop = t.board.mount();
+  await flush();
+  const ops = (): Array<string | null> => findAll(t.host, (e) => e.getAttribute('data-op') !== null).map((e) => e.getAttribute('data-op'));
+  eq(ops(), ['start', 'run-one']);
+  eq(byAttr(t.host, 'data-role', 'was-running').length, 1);
+  // An event sets the live state and the next refresh (which reads the same live value) keeps it.
+  w.live = 'running';
+  dispatch(JSON.stringify({ type: 'project.run_state', project: 'p1', effort: 1, state: 'running', action: 'start', actor: 'u' }));
+  await flush();
+  eq(ops(), ['pause', 'stop']);
+  w.live = 'paused';
+  w.effort = effort({ run_state: 'stopped' });
+  dispatch(JSON.stringify({ type: 'task.update', project: 'p1', effort: 1, task: 'T002' }));
+  await flush();
+  eq(ops(), ['start', 'run-one', 'stop']);
+  stop();
+});
+
+test('B2: state.changed does not wipe a typed override reason, the clean box or the edit form', async () => {
+  const w = mixed();
+  const t = harness(w);
+  const stop = t.board.mount();
+  await flush();
+  byAttr(t.host, 'data-task', 'T004')[0].click();
+  await flush();
+  byField(t.host, 'override_reason').value = 'typed by hand';
+  byField(t.host, 'clean_worktree').checked = true;
+  dispatch(JSON.stringify({ type: 'state.changed' }));
+  await flush();
+  eq(byField(t.host, 'override_reason').value, 'typed by hand');
+  eq(byField(t.host, 'clean_worktree').checked, true);
+  // The list still refreshes while the detail pane is kept.
+  w.tasks = w.tasks.map((x) => (x.key === 'T002' ? { ...x, status: 'passed', current: null } : x));
+  dispatch(JSON.stringify({ type: 'task.update', project: 'p1', effort: 1, task: 'T002' }));
+  await flush();
+  ok(t.host.textContent.includes('passed 2/4'), 'list refreshed');
+  eq(byField(t.host, 'override_reason').value, 'typed by hand');
+  // The edit form survives too.
+  button(byAttr(t.host, 'data-role', 'detail-pane')[0], 'Edit task').click();
+  byField(t.host, 'prompt').value = 'half-typed';
+  dispatch(JSON.stringify({ type: 'state.changed' }));
+  await flush();
+  eq(byField(t.host, 'prompt').value, 'half-typed');
+  stop();
+});
+
+test('a failing gitCommands is quiet and is not retried on every refresh', async () => {
+  const w = mixed();
+  w.effort = effort({ status: 'complete' });
+  let calls = 0;
+  let quiet: boolean | undefined;
+  const t = harness(w, { gitCommands: async (_s, _id, o) => { calls++; quiet = o?.quiet; throw new ApiError(409, 'not complete'); } });
+  const stop = t.board.mount();
+  await flush();
+  dispatch(JSON.stringify({ type: 'state.changed' }));
+  await flush();
+  eq(calls, 1);
+  eq(quiet, true);
+  stop();
+});
+
+test('a project tab disposed before the project list arrives mounts no sub-view', async () => {
+  const mounted: string[] = [];
+  const saved = SUB_TABS[0].mount;
+  SUB_TABS[0].mount = (_h, slug) => { mounted.push(slug); };
+  const origProjects = api.projects;
+  let release: (v: never[]) => void = () => {};
+  api.projects = () => new Promise((r) => { release = r as (v: never[]) => void; });
+  const host = new FakeEl('DIV');
+  const dispose = mountProjectTab(asEl(host), 'p1');
+  dispose();
+  release([{ slug: 'p1' }] as never);
+  await flush();
+  eq(mounted, []);
+  api.projects = origProjects;
+  SUB_TABS[0].mount = saved;
 });
 
 // ─── The stream panel ──────────────────────────────────────────────────────

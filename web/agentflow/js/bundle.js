@@ -196,7 +196,7 @@ var api = {
   compile: (slug, id) => send("POST", `${eff(slug, id)}/compile`),
   queue: (slug, id, o) => get(`${eff(slug, id)}/queue`, o),
   /** gitCommands lists the commands to merge and push a complete effort's branch; agentflow runs none of them (GIT4). */
-  gitCommands: (slug, id) => get(`${eff(slug, id)}/git-commands`),
+  gitCommands: (slug, id, o) => get(`${eff(slug, id)}/git-commands`, o),
   approveQueue: (slug, id, hash, o) => send("POST", `${eff(slug, id)}/queue/approve`, { hash }, o),
   tasks: (slug, id) => get(`${eff(slug, id)}/tasks`),
   task: (slug, id, key) => get(`${eff(slug, id)}/tasks/${enc(key)}`),
@@ -358,10 +358,20 @@ function confirmText(effort, invariants) {
   return `Enable YOLO for effort #${effort.id}? The FRD-to-plan, plan-to-queue and queue approvals will happen automatically, and a stuck task is retried once. Still enforced:
 ` + invariants.map((i) => `- ${i.id}: ${i.text}`).join("\n");
 }
+var invariantCache = /* @__PURE__ */ new WeakMap();
+function invariantsFor(deps) {
+  let p = invariantCache.get(deps);
+  if (!p) {
+    p = deps.yoloInvariants();
+    invariantCache.set(deps, p);
+    p.catch(() => invariantCache.delete(deps));
+  }
+  return p;
+}
 function yoloControl(slug, effort, deps, onChanged) {
   const listHost = h("div", { attrs: { "data-role": "yolo-invariants" } });
   let invariants = [];
-  const loading = deps.yoloInvariants().then((inv) => {
+  const loading = invariantsFor(deps).then((inv) => {
     invariants = inv;
     replace(listHost, h(
       "details",
@@ -1342,6 +1352,7 @@ var StreamPanel = class {
 
 // web/agentflow/js/board.ts
 var defaultBoardDeps = () => ({
+  project: api.project,
   efforts: api.efforts,
   tasks: api.tasks,
   task: api.task,
@@ -1405,9 +1416,19 @@ var Board = class {
     this.tasks = [];
     this.selected = "";
     this.detail = null;
+    /** runState is the LIVE state (project.run_state); the effort's persisted run_state is only a hint. */
     this.runState = "stopped";
     this.gitLines = null;
     this.editing = false;
+    this.detailEl = null;
+    this.reasonEl = null;
+    this.cleanEl = null;
+    this.fresh = true;
+    // rebuild the detail pane on the next render
+    this.stateSeq = 0;
+    // bumped by run-state events so a slower fetch cannot overwrite them
+    this.gitFailed = null;
+    // effort id whose git commands failed
     this.loaded = false;
     this.off = null;
     this.errors = new FormErrors();
@@ -1427,6 +1448,7 @@ var Board = class {
     if (ev.type === "state.changed") {
       void this.refresh();
     } else if (ev.type === "project.run_state" && ev.project === this.slug) {
+      this.stateSeq++;
       this.runState = ev.state;
       this.render();
       void this.refresh();
@@ -1445,20 +1467,32 @@ var Board = class {
     this.selected = "";
     this.detail = null;
     this.gitLines = null;
+    this.fresh = true;
     this.stream.close();
     await this.refresh();
   }
   /** refresh refetches the efforts, the task list and the open task. */
   async refresh() {
+    const seq = this.stateSeq;
+    try {
+      const live = (await this.deps.project(this.slug)).run_state;
+      if (seq === this.stateSeq) this.runState = live;
+    } catch {
+    }
     try {
       this.efforts = await this.deps.efforts(this.slug);
       this.current = this.efforts.find((e) => e.id === this.current?.id) ?? chooseEffort(this.slug, this.efforts);
       this.loaded = true;
       const ef = this.current;
       this.tasks = ef ? await this.deps.tasks(this.slug, ef.id) : [];
-      if (ef) this.runState = ef.run_state;
       if (ef && this.selected && this.tasks.some((t) => t.key === this.selected)) this.detail = await this.deps.task(this.slug, ef.id, this.selected);
-      if (ef?.status === "complete" && !this.gitLines) this.gitLines = (await this.deps.gitCommands(this.slug, ef.id)).commands;
+      if (ef?.status === "complete" && !this.gitLines && this.gitFailed !== ef.id) {
+        try {
+          this.gitLines = (await this.deps.gitCommands(this.slug, ef.id, { quiet: true })).commands;
+        } catch {
+          this.gitFailed = ef.id;
+        }
+      }
     } catch {
     }
     this.render();
@@ -1468,6 +1502,7 @@ var Board = class {
     if (!ef) return;
     this.selected = key;
     this.editing = false;
+    this.fresh = true;
     try {
       this.detail = await this.deps.task(this.slug, ef.id, key);
     } catch {
@@ -1493,6 +1528,7 @@ var Board = class {
     } catch {
       return;
     }
+    this.fresh = true;
     this.deps.notify(`Retrying ${key}`);
     await this.refresh();
   }
@@ -1509,6 +1545,7 @@ var Board = class {
     } catch {
       return;
     }
+    this.fresh = true;
     this.deps.notify(`Overrode ${key}`);
     await this.refresh();
   }
@@ -1520,6 +1557,7 @@ var Board = class {
     } catch {
       return;
     }
+    this.fresh = true;
     this.deps.notify("Effort abandoned");
     await this.refresh();
   }
@@ -1535,6 +1573,7 @@ var Board = class {
       return;
     }
     this.editing = false;
+    this.fresh = true;
     this.deps.notify(`Saved ${def.key}; approve the queue again`);
     await this.refresh();
   }
@@ -1572,6 +1611,7 @@ var Board = class {
         }), { primary: true, field: "save-task" }),
         button("Cancel", () => {
           this.editing = false;
+          this.fresh = true;
           this.render();
         }, { field: "cancel-edit" })
       )
@@ -1581,6 +1621,8 @@ var Board = class {
     const clean = checkbox("clean_worktree", false);
     const reason = textArea("override_reason", "", 2);
     this.errors = new FormErrors();
+    this.reasonEl = reason;
+    this.cleanEl = clean;
     const reasonRow = this.errors.add("reason", fieldRow("Override reason", reason, "Recorded with your name when you mark the task passed"));
     return h(
       "div",
@@ -1590,6 +1632,7 @@ var Board = class {
       button("Retry", () => void this.retry(d.key, clean.checked), { field: "retry" }),
       button("Edit task", () => {
         this.editing = true;
+        this.fresh = true;
         this.render();
       }, { field: "edit" }),
       reasonRow.el,
@@ -1645,6 +1688,7 @@ var Board = class {
               this.selected = "";
               this.detail = null;
               this.editing = false;
+              this.fresh = true;
               this.render();
             }
           } })
@@ -1698,6 +1742,14 @@ var Board = class {
     }
     const { pct: pct2, text } = progressText(counts(this.tasks));
     const bar = h("div", { class: "progress-bar-wrap" }, h("div", { class: "progress-bar", attrs: { style: `width: ${pct2}%` } }));
+    const typed = (this.reasonEl?.value ?? "") !== "" || this.cleanEl?.checked === true;
+    const keep = !this.fresh && this.detailEl !== null && (this.editing || typed);
+    if (!keep) {
+      this.reasonEl = null;
+      this.cleanEl = null;
+      this.detailEl = this.detailPane();
+    }
+    this.fresh = false;
     const controls = buttonsFor(this.runState).map((b) => h("button", {
       class: "ui-modal-btn" + (b.primary ? " ui-modal-btn-primary" : ""),
       text: b.label,
@@ -1717,6 +1769,7 @@ var Board = class {
         bar,
         h("span", { class: "progress-pct", text }),
         chip(this.runState),
+        ef.run_state !== this.runState && ef.run_state === "running" ? h("span", { class: "field-hint", text: "was running before restart", attrs: { "data-role": "was-running" } }) : null,
         ...controls
       ),
       this.gitBox(),
@@ -1738,7 +1791,7 @@ var Board = class {
             t.current ? h("div", { class: "task-item-meta", text: `${t.current.role} \xB7 ${t.current.backend}/${t.current.model}` }) : null
           )))
         ),
-        this.detailPane()
+        this.detailEl
       )
     );
   }
@@ -2895,6 +2948,7 @@ function remember(slug) {
 }
 function mountProjectTab(host, wanted2) {
   let dispose2;
+  let disposed = false;
   let sub = SUB_TABS[0].id;
   let slug = wanted2 === "+new" ? remembered() : wanted2 || remembered();
   let projects = [];
@@ -2930,6 +2984,7 @@ function mountProjectTab(host, wanted2) {
     } catch {
       projects = [];
     }
+    if (disposed) return;
     if (!projects.some((p) => p.slug === slug)) slug = projects[0]?.slug ?? "";
     replace(picker, ...projects.map((p) => h("option", { text: p.slug, attrs: { value: p.slug, selected: p.slug === slug } })));
     picker.value = slug;
@@ -2969,7 +3024,10 @@ function mountProjectTab(host, wanted2) {
   );
   if (wanted2 === "+new") showForm();
   else void reload();
-  return closeSub;
+  return () => {
+    disposed = true;
+    closeSub();
+  };
 }
 
 // web/agentflow/js/main.ts

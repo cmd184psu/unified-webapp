@@ -32,11 +32,24 @@ export function confirmText(effort: EffortView, invariants: Invariant[]): string
     invariants.map((i) => `- ${i.id}: ${i.text}`).join('\n');
 }
 
+// One invariants fetch per YoloDeps (the Board makes one per mount); a failure is not cached.
+const invariantCache = new WeakMap<YoloDeps, Promise<Invariant[]>>();
+
+function invariantsFor(deps: YoloDeps): Promise<Invariant[]> {
+  let p = invariantCache.get(deps);
+  if (!p) {
+    p = deps.yoloInvariants();
+    invariantCache.set(deps, p);
+    p.catch(() => invariantCache.delete(deps));
+  }
+  return p;
+}
+
 /** yoloControl builds the toggle for one active effort; onChanged runs after a successful switch. */
 export function yoloControl(slug: string, effort: EffortView, deps: YoloDeps, onChanged: () => void): HTMLElement {
   const listHost = h('div', { attrs: { 'data-role': 'yolo-invariants' } });
   let invariants: Invariant[] = [];
-  const loading = deps.yoloInvariants().then((inv) => {
+  const loading = invariantsFor(deps).then((inv) => {
     invariants = inv;
     replace(listHost, h('details', {}, h('summary', { text: 'Always enforced, even under YOLO' }),
       h('ul', { class: 'plan-review-notes' }, ...inv.map((i) => h('li', {}, h('strong', { text: i.id }), ` ${i.text}`)))));
