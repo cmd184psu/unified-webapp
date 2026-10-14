@@ -83,7 +83,7 @@ export function button(label: string, onClick: () => void, opts: { primary?: boo
   const glyph = opts.icon !== undefined;
   const asIcon = glyph && !opts.word;
   return h('button', {
-    class: 'ui-modal-btn' + (opts.primary ? ' ui-modal-btn-primary' : '') + (glyph ? ' has-icon' : '') + (asIcon ? ' icon-only' : ''),
+    class: 'ui-modal-btn' + (opts.primary ? ' ui-modal-btn-primary' : '') + (glyph ? ' af-has-icon' : '') + (asIcon ? ' af-icon-only' : ''),
     text: glyph ? undefined : label,
     attrs: { type: 'button', 'data-action': opts.field, 'data-op': opts.op, title: glyph ? label : undefined, 'aria-label': asIcon ? label : undefined },
     on: { click: onClick },

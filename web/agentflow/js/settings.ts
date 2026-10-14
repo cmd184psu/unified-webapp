@@ -158,7 +158,7 @@ export class SettingsView {
     this.renderOpenCode();
     this.renderRoots();
     replace(this.host,
-      h('div', { class: 'settings-host' },
+      h('div', { class: 'settings-host settings-host-drawer' },
         section('Limits', limits),
         section('Execution', exec),
         section('opencode', path, this.ocHost),

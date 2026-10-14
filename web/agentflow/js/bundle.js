@@ -400,7 +400,7 @@ function button(label, onClick, opts = {}) {
   const glyph = opts.icon !== void 0;
   const asIcon = glyph && !opts.word;
   return h("button", {
-    class: "ui-modal-btn" + (opts.primary ? " ui-modal-btn-primary" : "") + (glyph ? " has-icon" : "") + (asIcon ? " icon-only" : ""),
+    class: "ui-modal-btn" + (opts.primary ? " ui-modal-btn-primary" : "") + (glyph ? " af-has-icon" : "") + (asIcon ? " af-icon-only" : ""),
     text: glyph ? void 0 : label,
     attrs: { type: "button", "data-action": opts.field, "data-op": opts.op, title: glyph ? label : void 0, "aria-label": asIcon ? label : void 0 },
     on: { click: onClick }
@@ -1177,7 +1177,7 @@ var SettingsView = class {
       this.host,
       h(
         "div",
-        { class: "settings-host" },
+        { class: "settings-host settings-host-drawer" },
         section("Limits", limits),
         section("Execution", exec),
         section("opencode", path2, this.ocHost),
@@ -3282,7 +3282,7 @@ var FrdEditor = class {
     const mine = this.draft?.purpose !== "split";
     const draftBtn = button("Draft the FRD", () => void this.startDraft(false), { primary: true, field: "draft-frd", icon: "sparkle" });
     this.draftBtn = draftBtn;
-    if (this.desc.trim() === "") draftBtn.className += " is-disabled";
+    if (this.desc.trim() === "") draftBtn.className += " af-disabled";
     const error = this.draftError || (this.draft?.state === "failed" && mine ? this.draft.error ?? "The draft failed" : "");
     return [
       running && mine ? this.strip(this.stripLabel(), this.draft?.started ?? 0) : null,
@@ -3373,7 +3373,7 @@ var FrdEditor = class {
       const pending = !started && p.n > 1;
       const start = pending ? button("Start this part", () => void this.startPart(p.n), { field: "start-part", icon: "start" }) : null;
       if (start && busy) {
-        start.className += " is-disabled";
+        start.className += " af-disabled";
         start.setAttribute("aria-disabled", "true");
         start.setAttribute("title", `Finish or abandon #${busy.id} first`);
       }
@@ -3406,7 +3406,7 @@ var FrdEditor = class {
       this.box.addEventListener("input", () => {
         this.desc = this.box.value;
         const b = this.draftBtn;
-        if (b) b.className = b.className.replace(" is-disabled", "") + (this.desc.trim() === "" ? " is-disabled" : "");
+        if (b) b.className = b.className.replace(" af-disabled", "") + (this.desc.trim() === "" ? " af-disabled" : "");
       });
     }
     if (this.box.value !== this.desc) this.box.value = this.desc;
@@ -3462,7 +3462,7 @@ var FrdEditor = class {
     }) : null;
     if (bar && active2) {
       bar.appendChild(h("button", {
-        class: "ui-modal-btn is-disabled",
+        class: "ui-modal-btn af-disabled",
         text: "+",
         attrs: {
           type: "button",

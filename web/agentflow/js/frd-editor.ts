@@ -447,7 +447,7 @@ export class FrdEditor {
     const mine = this.draft?.purpose !== 'split';
     const draftBtn = button('Draft the FRD', () => void this.startDraft(false), { primary: true, field: 'draft-frd', icon: 'sparkle' });
     this.draftBtn = draftBtn;
-    if (this.desc.trim() === '') draftBtn.className += ' is-disabled';
+    if (this.desc.trim() === '') draftBtn.className += ' af-disabled';
     const error = this.draftError || (this.draft?.state === 'failed' && mine ? this.draft.error ?? 'The draft failed' : '');
     return [
       running && mine ? this.strip(this.stripLabel(), this.draft?.started ?? 0) : null,
@@ -517,7 +517,7 @@ export class FrdEditor {
       const pending = !started && p.n > 1;
       const start = pending ? button('Start this part', () => void this.startPart(p.n), { field: 'start-part', icon: 'start' }) : null;
       if (start && busy) {
-        start.className += ' is-disabled';
+        start.className += ' af-disabled';
         start.setAttribute('aria-disabled', 'true');
         start.setAttribute('title', `Finish or abandon #${busy.id} first`);
       }
@@ -545,7 +545,7 @@ export class FrdEditor {
       this.box.addEventListener('input', () => {
         this.desc = (this.box as HTMLTextAreaElement).value;
         const b = this.draftBtn;
-        if (b) b.className = b.className.replace(' is-disabled', '') + (this.desc.trim() === '' ? ' is-disabled' : '');
+        if (b) b.className = b.className.replace(' af-disabled', '') + (this.desc.trim() === '' ? ' af-disabled' : '');
       });
     }
     if (this.box.value !== this.desc) this.box.value = this.desc;
@@ -590,7 +590,7 @@ export class FrdEditor {
     const bar = this.efforts.length ? effortBar(this.slug, this.efforts, ef, (id) => { this.current = this.efforts.find((e) => e.id === id); void this.loadDoc(); }) : null;
     if (bar && active) {
       bar.appendChild(h('button', {
-        class: 'ui-modal-btn is-disabled',
+        class: 'ui-modal-btn af-disabled',
         text: '+',
         attrs: {
           type: 'button', 'data-action': 'new-effort', 'aria-disabled': 'true', 'aria-label': 'New effort',

@@ -507,12 +507,13 @@
 }
 .ui-toggle-track {
   position: relative;
+  display: inline-block;
   box-sizing: border-box;
   flex-shrink: 0;
   width: 2.25rem;
   height: 1.25rem;
-  background: var(--color-surface-3);
-  border: 1px solid var(--color-text-faint);
+  background: var(--color-text-muted);
+  border: 1px solid var(--color-text-muted);
   border-radius: var(--radius-full);
   transition: background var(--transition), border-color var(--transition);
 }
@@ -524,7 +525,7 @@
   width: 1rem;
   height: 1rem;
   border-radius: 50%;
-  background: var(--color-text-muted);
+  background: var(--color-surface-1);
   transition: transform var(--transition), background var(--transition);
 }
 .ui-toggle input:checked + .ui-toggle-track {

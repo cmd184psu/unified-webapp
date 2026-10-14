@@ -286,17 +286,21 @@
   pointer-events: none;
 }
 
-/* Off: a surface-3 track with a faint edge and a muted thumb; on: the primary
-   colour with its own foreground as the thumb. Only theme tokens, so each theme
-   keeps the thumb legible against its track. */
+/* Off: a muted-text track with a surface-coloured thumb; on: the primary
+   colour with its own foreground as the thumb. Tokens only. Each pair keeps
+   at least 3:1 contrast against the page and against each other in every
+   theme (checked against themes.css), unlike a surface-on-surface track,
+   which nearly disappears on light themes. The track is inline-block so it
+   keeps its size even when a module's CSS stops the label being a flex row. */
 .ui-toggle-track {
   position: relative;
+  display: inline-block;
   box-sizing: border-box;
   flex-shrink: 0;
   width: 2.25rem;
   height: 1.25rem;
-  background: var(--color-surface-3);
-  border: 1px solid var(--color-text-faint);
+  background: var(--color-text-muted);
+  border: 1px solid var(--color-text-muted);
   border-radius: var(--radius-full);
   transition: background var(--transition), border-color var(--transition);
 }
@@ -309,7 +313,7 @@
   width: 1rem;
   height: 1rem;
   border-radius: 50%;
-  background: var(--color-text-muted);
+  background: var(--color-surface-1);
   transition: transform var(--transition), background var(--transition);
 }
 
