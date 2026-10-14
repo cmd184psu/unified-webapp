@@ -110,6 +110,14 @@ Goal: writing an FRD is not a form-filling exercise. The human describes what th
 
 Acceptance: from a one-sentence description to an approved FRD takes one review click, with no id or boilerplate criterion typed; the drafted FRD never contains an AC that restates the definition of done; a unit test per story; UI follows the owner rules above (toggles, shared components, symbols, no typing where a list can be offered).
 
+## Next phase plan (started 2026-10-14)
+
+Audit (2026-10-14), done API-only, no browser: 61 routes, 53 UI client methods; every route has a client method except `health` and `PUT plan` (no UI). The request bodies the UI sends match the Go structs field for field (the server rejects unknown fields). `TestAPIWalk_EveryRouteIsExercised` (internal/agentflow/apiwalk_test.go) now drives every route over HTTP in a UI-like order and fails on any route it never reaches, so a new route needs a place in the walk. Data finding: backend `ollama-m5` is saved with `hosted=true` although it is a local Ollama (the toggle styling hid it); untick Hosted.
+
+- **P1 Correctness and clarity.** Views refresh on events with a polling fallback and never show stale "compiling"; Plan tab single source of truth and a live progress strip (stage, model, elapsed); completion state says "ready to merge" with branch, commits, diffstat and merge commands; run state idle after completion; planner/compiler forbid verification-only tasks; health shown; save-order adds the pending pick; one toggle rule set in the shared CSS.
+- **P2 Conventions.** Settings in the hamburger and live (secrets in the DB, no restart); symbols over words with tooltips; reorder like grocery; server-side directory picker; new-effort form out of the way; auto compile on plan approval.
+- **P3 Automation.** N1 definition of done, N2 description-only FRD drafted through opencode, N3 deterministic filler, opencode clean-up of typed text (titles, objectives, backend names), and context-aware chunking: estimate tokens of FRD/plan/stage prompt against the model's context window (new per-model `context_tokens`), and offer to split an oversized FRD into phases or efforts and a complex plan into smaller phases, because qwen's context is short and long contexts cost a lot on paid models.
+
 ## API contract for the UI (Phase D, final)
 All under `/api`; JSON errors `{"error","field"?}` (400 validation, 404, 409 ErrConflict, 503 at SSE cap). `…` = `/projects/{slug}`.
 - Health: GET /health (`{status: ok|degraded, opencode:{status,version?,error?}}`); GET /opencode/version?refresh=1.
