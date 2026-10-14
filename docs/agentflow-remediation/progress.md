@@ -18,7 +18,7 @@ Resume point for the ralplan → ralph run of [FRD-AF-REM-001](frd.md). Newest e
 |---|---|
 | FRD | done (2026-10-12) |
 | ralplan | done (2026-10-13, iteration 1; owner stopped review loop) |
-| ralph | pending |
+| ralph | done (2026-10-14: 46/46 stories committed; per-phase reviews + gates clean; deslop pass skipped by owner policy) |
 
 
 ## Spike findings (SP0, 2026-10-13)
@@ -140,6 +140,7 @@ Known limits: `opencode_path` setting needs a restart; project create defaults m
 - 2026-10-13 — F5: deliberate planning mode (pre-mortem validation, critic checks, UI toggle + keyword suggestion).
 - 2026-10-13 — G1: documentation (design + operator guide + README), docs_test.go route check.
 - 2026-10-13 — G2: end-to-end acceptance sweep (e2e_test.go, live smoke script, AC table: 40 proven + AC-OC1/OC2 live-only).
+- 2026-10-14 — ralph complete: 46/46 stories committed on `agentflow` (R0 bd2f120 .. G2-fixes 79fa65c), never pushed. Final `omc ralph verify` clean vs baseline; `make web-verify` PASS. Open items for the next phase: the iteration-1 Architect/Critic review backlog (`.omc/plans/reviews/iter1-*.md`), "Security findings (noted, not fixed)", the inert `opencode_path` setting, live-backend proof of AC-OC1/AC-OC2 (`AGENTFLOW_LIVE_SMOKE=1 scripts/agentflow-smoke.sh` against your own backend), and review notes logged per phase. The mandatory ralph deslop pass was not run (owner usage policy); run `/oh-my-claudecode:ai-slop-cleaner` on the changed files if wanted.
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`
