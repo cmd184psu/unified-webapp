@@ -77,6 +77,12 @@ Logged per the owner's posture; candidates for the next phase alongside `.omc/pl
 
 - G1 findings (docs vs code): the `opencode_path` setting is stored and echoed but nothing reads it — `Build` always resolves the binary via `opencodePath()` (~/.opencode/bin/opencode, then PATH, refusing any path containing /.agents/); the "needs a restart" note above is wrong, the setting is currently inert (candidate for the next phase). YOLO does not approve the FRD (a person always does). The 3-violation policy halt is a constant. The critic's blindness is by prompt construction only. Old config keys (`project_path`, `prompt_dir`, `profiles`) are silently ignored. Under systemd the working directory is the checkout, so projects can't be that checkout or contain it.
 
+## Owner design notes (2026-10-14, next phase, not fixed)
+
+- **Settings belong in the hamburger menu, not their own tab.** Other modules keep their settings in the shared hamburger drawer; agentflow put them on a Settings tab, which breaks the house design. Move Settings into the hamburger (`web/agentflow/js/main.ts` `initHamburger`, Settings view) and drop the tab.
+- **Settings should take effect on Save, with no restart.** The owner dislikes restarts. Known boot-time reads: the `AGENTFLOW_KEY_*` environment keys ("read once at boot", `docs/guides/agentflow.md`), the opencode binary path (inert `opencode_path`), and the opencode version/health check. Audit every key behind `PUT /api/settings` and make each one apply at use time or on a reload hook run by the PUT handler. For secrets, store the key in the DB (never in frozen stage configs, exports or logs) instead of in the process environment, so adding a hosted backend needs no restart.
+- Also seen in the first live use: the page's own sign-out button duplicated the shared one (fixed in fe41760); `agentflow` is not in `auth.modules` of the live config, so the module has no login.
+
 ## API contract for the UI (Phase D, final)
 All under `/api`; JSON errors `{"error","field"?}` (400 validation, 404, 409 ErrConflict, 503 at SSE cap). `…` = `/projects/{slug}`.
 - Health: GET /health (`{status: ok|degraded, opencode:{status,version?,error?}}`); GET /opencode/version?refresh=1.
