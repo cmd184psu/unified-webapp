@@ -218,7 +218,7 @@ is used as given.
 
 `browse_roots` is a list of absolute directories (default: the server user's home) that the
 directory picker may show. `GET /api/fs/dirs?path=/abs/dir` returns
-`{"path", "parent", "dirs": [{"name", "path", "git"}]}`: subdirectories only, sorted by name,
+`{"path", "parent", "dirs": [{"name", "path", "git"}]}` (`parent` is empty at a browse root): subdirectories only, sorted by name,
 hidden ones left out, `git` true when the directory has a `.git` entry. Without `path` it
 starts at the first root. A path that resolves (after symlinks) outside every root is a 400
 naming `browse_roots`.
@@ -258,8 +258,10 @@ Approve with `POST /api/projects/{slug}/efforts/{id}/plan/approve`.
 
 Approving the plan starts the compile by itself: the effort goes plan approved, compiling,
 queue draft without a second click. If no compiler candidate is available the approval still
-stands and the effort waits with a reason (shown in the Plan tab) until one is. **Compile**
-(`POST /api/projects/{slug}/efforts/{id}/compile`) stays for recompiling. The compiler turns the plan into tasks with
+stands and the effort waits with a reason (shown in the Plan tab) until one is. A compile that
+never started (for example across a restart) is started by the next tick; one that ran and halted
+is not retried, so the effort stays at plan approved with the reason and **Compile**
+(`POST /api/projects/{slug}/efforts/{id}/compile`) starts it again; it also recompiles. The compiler turns the plan into tasks with
 dependencies, acceptance criteria and touched files. Review them in the **Queue** sub-tab
 (`GET /api/projects/{slug}/efforts/{id}/queue`).
 

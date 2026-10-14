@@ -82,11 +82,21 @@ func (a *API) putSettings(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	before, _ := a.deps.Store.GetSettings(r.Context())
 	if err := a.deps.Store.UpdateSettings(r.Context(), actorOf(r), patch); err != nil {
 		writeErr(w, err)
 		return
 	}
-	a.applySettings(r.Context(), patch)
+	// The page sends every key on each save; only a changed one needs a refresh.
+	after, _ := a.deps.Store.GetSettings(r.Context())
+	changed := map[string]string{}
+	if before.VerifySlots != after.VerifySlots {
+		changed["verify_slots"] = ""
+	}
+	if before.OpencodePath != after.OpencodePath {
+		changed["opencode_path"] = ""
+	}
+	a.applySettings(r.Context(), changed)
 	a.emit("settings.update", nil)
 	a.getSettings(w, r)
 }

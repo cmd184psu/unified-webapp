@@ -96,14 +96,14 @@ test('an approved queue shows who approved it and offers no approve button', asy
   stop();
 });
 
-test('H3: with an approved plan and no queue the view says compiling and only offers Recompile', async () => {
+test('H3: with an approved plan and no queue the view says the compile has not started and offers Compile', async () => {
   const t = harness({ queue: null, effort: effort({ status: 'plan_approved' }) });
   const stop = t.v.mount();
   await flush();
   ok(t.host.textContent.includes('No queue yet'), 'empty state');
-  ok(byAttr(t.host, 'data-role', 'queue-note')[0].textContent.includes('Compiling the plan into tasks'), 'compiling note');
+  ok(byAttr(t.host, 'data-role', 'queue-note')[0].textContent.includes('has not started'), 'not-started note');
   eq(findAll(t.host, (e) => e.tagName === 'BUTTON' && e.getAttribute('aria-label') === 'Compile plan').length, 0);
-  button(t.host, 'Recompile').click();
+  button(t.host, 'Compile').click();
   await flush();
   eq(t.log.filter((l) => l === 'compile'), ['compile']);
   stop();

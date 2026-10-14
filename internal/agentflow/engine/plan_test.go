@@ -457,3 +457,79 @@ func TestP2_CompileWaitingForACandidateStartsWhenOneAppears(t *testing.T) {
 	}
 	f.waitStatus(model.EffortQueueDraft)
 }
+
+// An approved plan whose compile never began (a restart between approval and
+// start) is started by the next tick; one whose compile already ran and halted
+// is left for the human, so a failing compiler is not retried every tick.
+func TestP2_ApprovedPlanResumesCompileOnlyIfItNeverRan(t *testing.T) {
+	f := newPlanFix(t, false)
+	f.addBackend("gpu", 2, false, false, "m1", "m2", "m3")
+	f.candidates("global", "", "planner", "gpu/m1")
+	f.candidates("global", "", "architect", "gpu/m2")
+	f.candidates("global", "", "critic", "gpu/m3")
+	f.candidates("global", "", "compiler", "gpu/m1")
+	f.fake.Script("planner", runner.Step{Reply: planReply})
+	f.fake.Script("architect", runner.Step{Reply: approveReply})
+	f.fake.Script("critic", runner.Step{Reply: approveReply})
+	f.fake.Script("compiler", runner.Step{Reply: compileClean})
+	f.startEngine()
+	ctx := context.Background()
+	if err := f.eng.GeneratePlan(ctx, "alice", f.effort); err != nil {
+		t.Fatal(err)
+	}
+	f.waitStatus(model.EffortPlanReady)
+	if err := f.eng.ApprovePlan(ctx, "alice", f.effort); err != nil {
+		t.Fatal(err)
+	}
+	f.waitStatus(model.EffortQueueDraft)
+
+	// Never ran: roll the effort back to plan_approved and delete nothing; the
+	// compiler stage exists, so a tick must leave it alone (it halted).
+	approved := model.EffortPlanApproved
+	if _, err := f.st.UpdateEffort(ctx, "t", f.effort, store.EffortPatch{Status: &approved}); err != nil {
+		t.Fatal(err)
+	}
+	before := len(f.fake.CallsFor("compiler"))
+	if err := f.eng.AdvancePlans(ctx); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if got := len(f.fake.CallsFor("compiler")); got != before || f.status() != model.EffortPlanApproved {
+		t.Fatalf("a halted compile was retried: calls %d -> %d, status %s", before, got, f.status())
+	}
+}
+
+func TestP2_ApprovedPlanWithNoCompileYetIsResumedByTheNextTick(t *testing.T) {
+	f := newPlanFix(t, false)
+	f.addBackend("gpu", 2, false, false, "m1", "m2", "m3")
+	f.candidates("global", "", "planner", "gpu/m1")
+	f.candidates("global", "", "architect", "gpu/m2")
+	f.candidates("global", "", "critic", "gpu/m3")
+	f.candidates("global", "", "compiler", "gpu/m1")
+	f.fake.Script("planner", runner.Step{Reply: planReply})
+	f.fake.Script("architect", runner.Step{Reply: approveReply})
+	f.fake.Script("critic", runner.Step{Reply: approveReply})
+	f.fake.Script("compiler", runner.Step{Reply: compileClean})
+	f.startEngine()
+	ctx := context.Background()
+	if err := f.eng.GeneratePlan(ctx, "alice", f.effort); err != nil {
+		t.Fatal(err)
+	}
+	f.waitStatus(model.EffortPlanReady)
+	// The state a crash leaves between the approval and the compile start.
+	v, err := f.eng.PlanView(ctx, f.effort)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.st.ApproveDoc(ctx, "alice", f.effort, model.DocPlan, v.Revision); err != nil {
+		t.Fatal(err)
+	}
+	approved := model.EffortPlanApproved
+	if _, err := f.st.UpdateEffort(ctx, "alice", f.effort, store.EffortPatch{Status: &approved}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.eng.AdvancePlans(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f.waitStatus(model.EffortQueueDraft)
+}

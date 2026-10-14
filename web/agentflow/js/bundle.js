@@ -214,7 +214,7 @@ function startEvents() {
   wanted = true;
   connect();
 }
-var TRANSIENT = /* @__PURE__ */ new Set(["planning", "plan_approved", "compiling", "running"]);
+var TRANSIENT = /* @__PURE__ */ new Set(["planning", "compiling", "running"]);
 function isTransient(status) {
   return status !== void 0 && TRANSIENT.has(status);
 }
@@ -2888,7 +2888,7 @@ function elapsedText(ms) {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
 }
 function stageName(status, rounds, latestRevision) {
-  if (status === "plan_approved") return "Plan approved: the compiler is starting";
+  if (status === "plan_approved") return "Plan approved: the compile has not started or has stopped";
   if (status === "compiling") return "Compiler: turning the plan into tasks";
   if (status !== "planning") return "";
   const reviewed = Math.max(0, ...rounds.flatMap((r) => r.reviews.map((x) => x.plan_revision)));
@@ -3082,6 +3082,15 @@ var PlanViewer = class {
       return null;
     }
     const stage = stageName(ef.status, this.rounds, Math.max(0, ...this.revisions.map((r) => r.revision)));
+    if (ef.status === "plan_approved") {
+      this.stopTicker();
+      return h(
+        "div",
+        { class: "progress-strip", attrs: { "data-role": "progress-strip", role: "status" } },
+        h("div", { class: "row-actions" }, h("strong", { text: stage })),
+        h("p", { class: "field-hint", text: "Press Compile on the Queue tab to try again." })
+      );
+    }
     this.since = ef.updated;
     const elapsed = h("span", { class: "field-hint", text: this.since > 0 ? elapsedText(Date.now() - this.since) : "", attrs: { "data-role": "elapsed" } });
     this.elapsedEl = elapsed;
@@ -3316,7 +3325,8 @@ var QueueApproval = class {
     }
     const q = this.queue;
     const canCompile = ef.status === "queue_draft" && !!q;
-    const compiling = ef.status === "plan_approved" || ef.status === "compiling";
+    const compiling = ef.status === "compiling";
+    const notStarted = ef.status === "plan_approved";
     const draft = !!q && q.status === "draft";
     replace(
       this.host,
@@ -3348,8 +3358,8 @@ var QueueApproval = class {
           "div",
           { class: "plan-empty" },
           h("h3", { text: "No queue yet" }),
-          h("p", { attrs: { "data-role": "queue-note" }, text: compiling ? "Compiling the plan into tasks..." : "Approve a plan first; it is compiled into tasks automatically." }),
-          ef.status === "plan_approved" ? button("Recompile", () => void this.compile(), { field: "compile", icon: "refresh" }) : null
+          h("p", { attrs: { "data-role": "queue-note" }, text: compiling ? "Compiling the plan into tasks..." : notStarted ? "The plan is approved but its compile has not started or has stopped. Press Compile." : "Approve a plan first; it is compiled into tasks automatically." }),
+          notStarted ? button("Compile", () => void this.compile(), { field: "compile", icon: "refresh" }) : null
         ),
         this.errors.general,
         q ? section("Tasks", h("div", { class: "profile-list" }, ...q.tasks.map((t) => this.taskCard(t)))) : null

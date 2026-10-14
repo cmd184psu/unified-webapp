@@ -75,7 +75,9 @@ func (a *API) listDirs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := DirListing{Path: dir, Dirs: []DirEntry{}}
-	if parent := filepath.Dir(dir); parent != dir {
+	// The parent is offered only while it is still inside a browse root, so
+	// the picker's Up control never leads outside them.
+	if parent := filepath.Dir(dir); parent != dir && withinAny(roots, parent) {
 		out.Parent = parent
 	}
 	for _, e := range entries {

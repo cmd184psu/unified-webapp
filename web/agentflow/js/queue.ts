@@ -148,7 +148,8 @@ export class QueueApproval {
     const q = this.queue;
     // Compiling starts by itself when the plan is approved; Recompile redoes it from a draft queue.
     const canCompile = ef.status === 'queue_draft' && !!q;
-    const compiling = ef.status === 'plan_approved' || ef.status === 'compiling';
+    const compiling = ef.status === 'compiling';
+    const notStarted = ef.status === 'plan_approved';
     const draft = !!q && q.status === 'draft';
     replace(this.host,
       h('div', { class: 'settings-host' },
@@ -164,8 +165,8 @@ export class QueueApproval {
             draft ? button('Approve whole queue', () => void this.approve(), { primary: true, field: 'approve-queue', icon: 'approve' }) : null))
           : h('div', { class: 'plan-empty' },
             h('h3', { text: 'No queue yet' }),
-            h('p', { attrs: { 'data-role': 'queue-note' }, text: compiling ? 'Compiling the plan into tasks...' : 'Approve a plan first; it is compiled into tasks automatically.' }),
-            ef.status === 'plan_approved' ? button('Recompile', () => void this.compile(), { field: 'compile', icon: 'refresh' }) : null),
+            h('p', { attrs: { 'data-role': 'queue-note' }, text: compiling ? 'Compiling the plan into tasks...' : notStarted ? 'The plan is approved but its compile has not started or has stopped. Press Compile.' : 'Approve a plan first; it is compiled into tasks automatically.' }),
+            notStarted ? button('Compile', () => void this.compile(), { field: 'compile', icon: 'refresh' }) : null),
         this.errors.general,
         q ? section('Tasks', h('div', { class: 'profile-list' }, ...q.tasks.map((t) => this.taskCard(t)))) : null));
   }

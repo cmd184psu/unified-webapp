@@ -36,7 +36,7 @@ func TestFSDirs_ListsConfinesAndFollowsTheLiveSetting(t *testing.T) {
 	// Saving browse_roots applies to the very next call.
 	e.ok("PUT", "/api/settings", map[string]any{"browse_roots": []string{root}}, 200)
 	got = decode[DirListing](t, e.ok("GET", "/api/fs/dirs", nil, 200))
-	if got.Path != resolved || got.Parent != filepath.Dir(resolved) {
+	if got.Path != resolved || got.Parent != "" { // a browse root has no parent to offer
 		t.Fatalf("listing = %+v", got)
 	}
 	var names []string

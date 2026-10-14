@@ -72,7 +72,7 @@ export function elapsedText(ms: number): string {
 
 /** stageName says what the engine is doing now, from the effort status and the plan rounds so far. */
 export function stageName(status: string, rounds: PlanRound[], latestRevision: number): string {
-  if (status === 'plan_approved') return 'Plan approved: the compiler is starting';
+  if (status === 'plan_approved') return 'Plan approved: the compile has not started or has stopped';
   if (status === 'compiling') return 'Compiler: turning the plan into tasks';
   if (status !== 'planning') return '';
   const reviewed = Math.max(0, ...rounds.flatMap((r) => r.reviews.map((x) => x.plan_revision)));
@@ -271,6 +271,13 @@ export class PlanViewer {
       return null;
     }
     const stage = stageName(ef.status, this.rounds, Math.max(0, ...this.revisions.map((r) => r.revision)));
+    if (ef.status === 'plan_approved') {
+      // Nothing is running: after approval the compile starts at once, so this is a compile that did not start or halted.
+      this.stopTicker();
+      return h('div', { class: 'progress-strip', attrs: { 'data-role': 'progress-strip', role: 'status' } },
+        h('div', { class: 'row-actions' }, h('strong', { text: stage })),
+        h('p', { class: 'field-hint', text: 'Press Compile on the Queue tab to try again.' }));
+    }
     this.since = ef.updated;
     const elapsed = h('span', { class: 'field-hint', text: this.since > 0 ? elapsedText(Date.now() - this.since) : '', attrs: { 'data-role': 'elapsed' } });
     this.elapsedEl = elapsed;

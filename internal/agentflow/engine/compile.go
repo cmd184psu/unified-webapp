@@ -162,7 +162,7 @@ func (e *Engine) haltCompile(ctx context.Context, ef model.Effort, last model.St
 	if _, err := e.deps.Store.UpdateEffort(ctx, SystemActor, ef.ID, store.EffortPatch{Status: &back}); err != nil {
 		return err
 	}
-	e.setPlanWaiting(ef.ID, "")
+	e.setPlanWaiting(ef.ID, "compile halted: "+reason)
 	return e.noteEffort(ctx, SystemActor, eventCompileHalted, ef.ID, map[string]any{"stage": last.ID, "reason": reason})
 }
 

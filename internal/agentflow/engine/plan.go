@@ -424,6 +424,8 @@ func (e *Engine) AdvancePlans(ctx context.Context) error {
 			err = e.advancePlan(ctx, p, ef)
 		case model.EffortCompiling:
 			err = e.advanceCompile(ctx, p, ef)
+		case model.EffortPlanApproved:
+			err = e.resumeCompile(ctx, ef)
 		case model.EffortQueueDraft:
 			err = e.healQueueStatus(ctx, ef)
 		}
@@ -432,6 +434,26 @@ func (e *Engine) AdvancePlans(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// resumeCompile starts the compile of an approved plan whose compile never
+// began (a restart between approval and start, or a start that failed). A
+// compile that ran and halted is left alone: retrying it every tick would loop
+// on a failing compiler, so the human presses Compile instead.
+func (e *Engine) resumeCompile(ctx context.Context, ef model.Effort) error {
+	stages, err := e.deps.Store.ListEffortStages(ctx, ef.ID)
+	if err != nil {
+		return err
+	}
+	for _, st := range stages {
+		if st.Role == "compiler" {
+			return nil
+		}
+	}
+	if err := e.startCompileLocked(ctx, SystemActor, ef.ID); err != nil {
+		e.setPlanWaiting(ef.ID, "compile did not start: "+err.Error())
+	}
+	return nil
 }
 
 // advancePlan takes the next step of a planning effort. planMu is held.
@@ -569,7 +591,7 @@ func (e *Engine) haltPlan(ctx context.Context, ef model.Effort, last model.Stage
 // moves the effort to plan_approved (RP3). It is ErrConflict unless the effort
 // is plan_ready. The compile then starts at once, as the approver; if it
 // cannot start (no compiler candidate) the approval stands and the effort
-// waits with a reason until the next tick can submit the stage.
+// waits with a reason; a tick starts it once it can, unless a compile already ran and halted.
 func (e *Engine) ApprovePlan(ctx context.Context, actor string, effort int64) error {
 	e.planMu.Lock()
 	defer e.planMu.Unlock()
