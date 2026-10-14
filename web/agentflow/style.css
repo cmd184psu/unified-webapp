@@ -1274,3 +1274,11 @@ body {
 .ui-modal-btn.has-icon { display: inline-flex; align-items: center; gap: var(--space-1); }
 .ui-modal-btn.icon-only { justify-content: center; min-width: var(--space-8); padding-left: var(--space-2); padding-right: var(--space-2); }
 .ui-modal-btn.has-icon svg { flex: none; }
+
+/* Settings inside the hamburger drawer (280px wide): one column, no second
+   layer of padding, and every control may shrink to the drawer. */
+.ui-menu-drawer .settings-host { padding: 0; max-width: 100%; }
+.ui-menu-drawer .profile-fields { grid-template-columns: minmax(0, 1fr); }
+.ui-menu-drawer .profile-fields > div,
+.ui-menu-drawer .inline-row { min-width: 0; }
+.ui-menu-drawer .settings-input { max-width: 100%; min-width: 0; }
