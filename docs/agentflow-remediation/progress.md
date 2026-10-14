@@ -84,6 +84,7 @@ Logged per the owner's posture; candidates for the next phase alongside `.omc/pl
 - **UI rules from the Backends form review:** use toggles instead of checkboxes; reuse the shared components in `web/shared` instead of new fixtures; avoid typing. Add a "probe host" action on a backend (Ollama `GET /api/tags`, OpenAI-compatible `GET /v1/models`) that returns the model list, and let the user pick models from it. Role candidates should likewise be chosen from the backend's models, not typed.
 - **Toggle in the rose theme renders badly** (owner, 2026-10-14; shared `.ui-toggle` colours in `web/shared/css/themes.css` `[data-theme="rose"]`). Fix later.
 - **Buttons: symbols over words** (owner preference, 2026-10-14). Replace text buttons (Add candidate, Save order, Probe host for models, Remove, Up/Down ...) with icons plus tooltips. Later.
+- **Repository field should be a server-side directory picker** (owner, 2026-10-14), not a typed path. Needs an API listing directories on the server (restricted to sensible roots, git repos marked) and the shared file-tree component (`web/shared/ts/filetree.ts`) in the New project form. Later.
 - Also seen in the first live use: the page's own sign-out button duplicated the shared one (fixed in fe41760); `agentflow` is not in `auth.modules` of the live config, so the module has no login.
 
 ## API contract for the UI (Phase D, final)
