@@ -166,6 +166,16 @@ func (e *Engine) engineStage(ctx context.Context, rc golane.RunContext, st model
 	return res
 }
 
+// changed tells event stream subscribers that an effort's status just moved,
+// after the status is written: the notice sent when a stage's outcome is
+// stored comes earlier, so a view that refetches on it still sees the old
+// status.
+func (e *Engine) changed() {
+	if e.deps.Kick != nil {
+		e.deps.Kick()
+	}
+}
+
 func roleTimeout(set store.Settings, role string) time.Duration {
 	switch role {
 	case "worker", "cleanup":

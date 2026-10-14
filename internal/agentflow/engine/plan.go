@@ -545,6 +545,7 @@ func (e *Engine) finishPlan(ctx context.Context, ef model.Effort, approved bool)
 	if _, err := e.deps.Store.UpdateEffort(ctx, SystemActor, ef.ID, store.EffortPatch{Status: &ready}); err != nil {
 		return err
 	}
+	e.changed()
 	e.setPlanWaiting(ef.ID, "")
 	if approved && e.yoloGate(ctx, ef.ID) {
 		return e.approvePlanLocked(ctx, yoloActor, ef.ID)
@@ -556,6 +557,7 @@ func (e *Engine) finishPlan(ctx context.Context, ef model.Effort, approved bool)
 // returns to draft so a human can fix the cause and generate again.
 func (e *Engine) haltPlan(ctx context.Context, ef model.Effort, last model.Stage, reason string) error {
 	draft := model.EffortDraft
+	defer e.changed()
 	if _, err := e.deps.Store.UpdateEffort(ctx, SystemActor, ef.ID, store.EffortPatch{Status: &draft}); err != nil {
 		return err
 	}

@@ -142,6 +142,7 @@ func (e *Engine) advanceCompile(ctx context.Context, p store.Project, ef model.E
 	if _, err := e.deps.Store.UpdateEffort(ctx, SystemActor, ef.ID, store.EffortPatch{Status: &draft}); err != nil {
 		return err
 	}
+	e.changed()
 	e.setPlanWaiting(ef.ID, "")
 	if e.yoloGate(ctx, ef.ID) {
 		_, err := e.approveQueue(ctx, yoloActor, ef.ID, q.Hash)
@@ -153,6 +154,7 @@ func (e *Engine) advanceCompile(ctx context.Context, p store.Project, ef model.E
 // haltCompile gives up compilation: the effort goes back to where it came from
 // (a draft queue if one exists, else the approved plan) with an audit event.
 func (e *Engine) haltCompile(ctx context.Context, ef model.Effort, last model.Stage, reason string) error {
+	defer e.changed()
 	back := model.EffortPlanApproved
 	if _, err := e.deps.Store.GetQueue(ctx, ef.ID); err == nil {
 		back = model.EffortQueueDraft

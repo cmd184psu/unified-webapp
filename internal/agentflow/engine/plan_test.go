@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -343,4 +344,41 @@ func TestRP5_DeliberateModeAddsPremortemRulesAndValidation(t *testing.T) {
 			t.Fatal("critic prompt for a plain effort")
 		}
 	})
+}
+
+// A view that refetches on the engine's notice must see the new status: the
+// notice sent when a stage's outcome is stored comes before the effort moves
+// to plan_ready, so one more notice must follow the status change.
+func TestPlanReadyIsAnnouncedAfterTheStatusChanges(t *testing.T) {
+	fastPoll(t)
+	h := newHarness(t)
+	var f *planFix
+	var seenReady atomic.Int64
+	h.tweak = func(d *Deps) {
+		d.Kick = func() {
+			if f == nil {
+				return
+			}
+			if ef, err := h.st.GetEffort(context.Background(), f.effort); err == nil && ef.Status == model.EffortPlanReady {
+				seenReady.Add(1)
+			}
+		}
+	}
+	h.start()
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f = seedPlanFix(t, h, repo)
+	f.addBackend("solo", 2, false, false, "m1")
+	for _, role := range []string{"planner", "architect", "critic"} {
+		f.candidates("global", "", role, "solo/m1")
+	}
+	f.fake.Script("planner", runner.Step{Reply: planReply})
+	f.startEngine()
+	if err := f.eng.GeneratePlan(context.Background(), "alice", f.effort); err != nil {
+		t.Fatal(err)
+	}
+	f.waitStatus(model.EffortPlanReady)
+	waitFor(t, "a notice after plan_ready", func() bool { return seenReady.Load() >= 1 })
 }
