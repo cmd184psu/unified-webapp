@@ -233,3 +233,31 @@ func TestSettingsAndOpencode(t *testing.T) {
 		t.Fatalf("refresh not cached: %+v", oc)
 	}
 }
+
+// AC-OA3 (API): plugins are set per project and must be exact versions.
+func TestOA3_ProjectPluginsOverTheAPI(t *testing.T) {
+	e := newEnv(t, envOpt{})
+	e.ok("POST", "/api/projects", map[string]any{"slug": "p1", "repo_path": repo(t)}, 201)
+	e.ok("POST", "/api/projects", map[string]any{"slug": "p2", "repo_path": repo(t)}, 201)
+	v := decode[ProjectView](t, e.ok("PATCH", "/api/projects/p1", map[string]any{"plugins": []map[string]string{{"name": "notify", "version": "1.2.3"}}}, 200))
+	if len(v.Plugins) != 1 || v.Plugins[0] != (PluginView{Name: "notify", Version: "1.2.3"}) {
+		t.Fatalf("plugins = %+v", v.Plugins)
+	}
+	if v2 := decode[ProjectView](t, e.ok("GET", "/api/projects/p2", nil, 200)); v2.Plugins == nil || len(v2.Plugins) != 0 {
+		t.Fatalf("p2 plugins = %#v, want an empty list", v2.Plugins)
+	}
+	e.field("PATCH", "/api/projects/p1", map[string]any{"plugins": []map[string]string{{"name": "notify", "version": "latest"}}}, "plugins[0].version")
+	e.field("PATCH", "/api/projects/p1", map[string]any{"plugins": []map[string]string{{"name": "notify", "version": "^1.2.3"}}}, "plugins[0].version")
+	e.field("PATCH", "/api/projects/p1", map[string]any{"plugins": []map[string]string{{"name": "notify", "version": ""}}}, "plugins[0].version")
+	if v = decode[ProjectView](t, e.ok("GET", "/api/projects/p1", nil, 200)); len(v.Plugins) != 1 {
+		t.Fatalf("refused writes changed the plugins: %+v", v.Plugins)
+	}
+	v = decode[ProjectView](t, e.ok("PATCH", "/api/projects/p1", map[string]any{"cleanup_enabled": true}, 200))
+	if len(v.Plugins) != 1 {
+		t.Fatalf("an unrelated patch dropped the plugins: %+v", v.Plugins)
+	}
+	v = decode[ProjectView](t, e.ok("PATCH", "/api/projects/p1", map[string]any{"plugins": []map[string]string{}}, 200))
+	if len(v.Plugins) != 0 {
+		t.Fatalf("opt-out left plugins: %+v", v.Plugins)
+	}
+}

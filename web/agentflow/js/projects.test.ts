@@ -58,7 +58,7 @@ test('PJ1: create sends slug, repo_path, scope and the feedback commands as argv
   allByField(t.host, 'feedback_cmd')[1].value = '   ';
   button(t.host, 'Create project').click();
   await flush();
-  eq(t.bodies.create, { slug: 'demo', repo_path: '/srv/demo', model_scope: 'any', feedback_cmds: ['go test ./...'], cleanup_enabled: true });
+  eq(t.bodies.create, { slug: 'demo', repo_path: '/srv/demo', model_scope: 'any', feedback_cmds: ['go test ./...'], cleanup_enabled: true, plugins: [] });
   eq(t.done, ['demo']);
 });
 
@@ -137,7 +137,7 @@ test('edit: the slug is fixed, the save patches, and the role editor shows the g
   byField(t.host, 'repo_path').value = '/r/moved';
   button(t.host, 'Save project').click();
   await flush();
-  eq(t.bodies.patch, { repo_path: '/r/moved', model_scope: 'local', feedback_cmds: ['go vet ./...'], cleanup_enabled: false });
+  eq(t.bodies.patch, { repo_path: '/r/moved', model_scope: 'local', feedback_cmds: ['go vet ./...'], cleanup_enabled: false, plugins: [] });
   eq(t.done, ['p1']);
 });
 
@@ -168,6 +168,40 @@ test('delete asks first and a created form offers no role editor yet', async () 
   await c.form.mount();
   ok(c.host.textContent.includes('Role preferences can be set once the project exists'), 'create form note');
   eq(byAttr(c.host, 'data-role-editor', 'worker').length, 0);
+});
+
+test('OA3: plugins are sent as pinned name and version rows; a rejected version shows beside the field', async () => {
+  let reject = true;
+  const t = harness({
+    patchProject: async (slug, p) => {
+      t.log.push('patch:' + slug);
+      t.bodies.patch = p;
+      if (reject) throw new ApiError(400, 'plugin notify version "latest" must be an exact version such as 1.2.3 (no latest, no ranges)', 'plugins[0].version');
+      return view(slug);
+    },
+  }, { project: view('p1', { plugins: [{ name: 'notify', version: 'latest' }] }) });
+  await t.form.mount();
+  eq(allByField(t.host, 'plugin_name')[0].value, 'notify');
+  button(t.host, 'Save project').click();
+  await flush();
+  ok(errorsOf(t.host).some((m) => m.includes('exact version')), 'the version error is shown');
+  eq(t.done, []);
+  allByField(t.host, 'plugin_version')[0].value = ' 1.2.3 ';
+  button(t.host, 'Add plugin').click();
+  allByField(t.host, 'plugin_name')[1].value = '@acme/other';
+  allByField(t.host, 'plugin_version')[1].value = '0.4.0';
+  button(t.host, 'Add plugin').click(); // a blank row is dropped
+  reject = false;
+  button(t.host, 'Save project').click();
+  await flush();
+  eq((t.bodies.patch as ProjectInput).plugins, [{ name: 'notify', version: '1.2.3' }, { name: '@acme/other', version: '0.4.0' }]);
+  eq(t.done, ['p1']);
+});
+
+test('OA3: a project starts with no plugins', async () => {
+  const t = harness();
+  await t.form.mount();
+  eq(allByField(t.host, 'plugin_name').length, 0);
 });
 
 void run('agentflow-projects');

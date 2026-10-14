@@ -150,7 +150,7 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 // freezeConfig renders the stage's opencode configuration (BK5, OC2). The
 // engine cannot import the adapter, so the composition root hands it this.
 func freezeConfig(b engine.FrozenBackend, stageDir string) (string, error) {
-	return opencode.GenerateConfig([]opencode.BackendSpec{{Backend: b.Backend, Models: b.Models}}, stageDir)
+	return opencode.GenerateConfig([]opencode.BackendSpec{{Backend: b.Backend, Models: b.Models}}, stageDir, b.Plugins...)
 }
 
 // newOpencode builds the production runner: the real opencode binary in a

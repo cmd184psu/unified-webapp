@@ -56,7 +56,10 @@ type Request struct {
 	// SessionID, when set, continues an earlier session of the same adapter for
 	// the corrective follow-up (SO2); PromptPath then holds the new prompt.
 	SessionID string
-	Env       []string
+	// Plugins are the project's pinned, opted-in runner plugins (OA3); empty
+	// for a project that has opted into none, which is the default.
+	Plugins []Plugin
+	Env     []string
 	// OnEvent, when set, receives events as they arrive so the engine can stream
 	// them to the job log. Result.Events still holds the full list.
 	OnEvent func(Event)

@@ -6,7 +6,7 @@
 // only be passed as a plain argument.
 
 import { confirmDialog, showToast } from '@shared';
-import { api, ApiError, type Backend, type Candidate, type ProjectInput, type ProjectView } from './api.js';
+import { api, ApiError, type Backend, type Candidate, type PluginPin, type ProjectInput, type ProjectView } from './api.js';
 import { ROLES, buildRoleEditor, type CandRow } from './candidates.js';
 import { h, replace } from './dom.js';
 import { FormErrors, RowsEditor, button, checkbox, fieldRow, section, selectInput, textInput } from './forms.js';
@@ -64,6 +64,7 @@ export interface ProjectMode {
 export class ProjectForm {
   private errors = new FormErrors();
   private cmds: RowsEditor<string>;
+  private plugins: RowsEditor<PluginPin>;
   private slug: HTMLInputElement;
   private repo: HTMLInputElement;
   private scope: HTMLSelectElement;
@@ -95,6 +96,11 @@ export class ProjectForm {
       sync();
       return { el: h('div', { class: 'wizard-field' }, input, preview, warn), read: () => joinArgv(splitArgv(input.value)) };
     }, p?.feedback_cmds ?? [], () => '', 'Add command');
+    this.plugins = new RowsEditor<PluginPin>((pl) => {
+      const name = textInput('plugin_name', pl.name, { placeholder: 'package-name' });
+      const version = textInput('plugin_version', pl.version, { placeholder: '1.2.3' });
+      return { el: h('div', { class: 'row-actions' }, name, version), read: () => ({ name: name.value.trim(), version: version.value.trim() }) };
+    }, p?.plugins ?? [], () => ({ name: '', version: '' }), 'Add plugin');
   }
 
   async mount(): Promise<void> {
@@ -115,6 +121,7 @@ export class ProjectForm {
       model_scope: this.scope.value,
       feedback_cmds: this.cmds.read().filter((c) => c !== ''),
       cleanup_enabled: this.cleanup.checked,
+      plugins: this.plugins.read().filter((pl) => pl.name !== '' || pl.version !== ''),
     };
   }
 
@@ -123,7 +130,7 @@ export class ProjectForm {
     this.errors.clear();
     const body = this.body();
     const attempt = (): Promise<ProjectView> => this.mode.project
-      ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, feedback_cmds: body.feedback_cmds, cleanup_enabled: body.cleanup_enabled }, { quiet: true })
+      ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, feedback_cmds: body.feedback_cmds, cleanup_enabled: body.cleanup_enabled, plugins: body.plugins }, { quiet: true })
       : this.deps.createProject(body, { quiet: true });
     let saved: ProjectView;
     try {
@@ -224,6 +231,8 @@ export class ProjectForm {
               'After a task passes review, run a cleanup agent and verify again; if that breaks verification the cleanup is rolled back')).el),
           e.add('feedback_cmds', fieldRow('Feedback commands', this.cmds.el,
             'Run in the sandbox to verify each task, as a program and arguments, never through a shell. Blank: detected from go.mod, pyproject.toml or package.json')).el,
+          e.add('plugins', fieldRow('Runner plugins', this.plugins.el,
+            'Opt-in only: none are loaded unless listed here. Each is pinned to an exact version such as 1.2.3 (no latest, no ranges); listed plugins are fetched by the runner when a stage starts')).el,
           e.general,
           h('div', { class: 'settings-actions' },
             p ? button('Delete project', () => void this.remove(), { field: 'delete-project' }) : null,

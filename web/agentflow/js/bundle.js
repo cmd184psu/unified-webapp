@@ -2908,6 +2908,11 @@ var ProjectForm = class {
       sync();
       return { el: h("div", { class: "wizard-field" }, input, preview, warn), read: () => joinArgv(splitArgv(input.value)) };
     }, p?.feedback_cmds ?? [], () => "", "Add command");
+    this.plugins = new RowsEditor((pl) => {
+      const name = textInput("plugin_name", pl.name, { placeholder: "package-name" });
+      const version = textInput("plugin_version", pl.version, { placeholder: "1.2.3" });
+      return { el: h("div", { class: "row-actions" }, name, version), read: () => ({ name: name.value.trim(), version: version.value.trim() }) };
+    }, p?.plugins ?? [], () => ({ name: "", version: "" }), "Add plugin");
   }
   async mount() {
     if (this.mode.project) {
@@ -2924,14 +2929,15 @@ var ProjectForm = class {
       repo_path: this.repo.value.trim(),
       model_scope: this.scope.value,
       feedback_cmds: this.cmds.read().filter((c) => c !== ""),
-      cleanup_enabled: this.cleanup.checked
+      cleanup_enabled: this.cleanup.checked,
+      plugins: this.plugins.read().filter((pl) => pl.name !== "" || pl.version !== "")
     };
   }
   /** save creates or updates the project; a repo path that is not yet a repository offers git init (PJ1). */
   async save() {
     this.errors.clear();
     const body = this.body();
-    const attempt = () => this.mode.project ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, feedback_cmds: body.feedback_cmds, cleanup_enabled: body.cleanup_enabled }, { quiet: true }) : this.deps.createProject(body, { quiet: true });
+    const attempt = () => this.mode.project ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, feedback_cmds: body.feedback_cmds, cleanup_enabled: body.cleanup_enabled, plugins: body.plugins }, { quiet: true }) : this.deps.createProject(body, { quiet: true });
     let saved;
     try {
       saved = await attempt();
@@ -3038,6 +3044,11 @@ var ProjectForm = class {
             "Feedback commands",
             this.cmds.el,
             "Run in the sandbox to verify each task, as a program and arguments, never through a shell. Blank: detected from go.mod, pyproject.toml or package.json"
+          )).el,
+          e.add("plugins", fieldRow(
+            "Runner plugins",
+            this.plugins.el,
+            "Opt-in only: none are loaded unless listed here. Each is pinned to an exact version such as 1.2.3 (no latest, no ranges); listed plugins are fetched by the runner when a stage starts"
           )).el,
           e.general,
           h(

@@ -93,6 +93,8 @@ type StagePayload struct {
 type FrozenBackend struct {
 	runner.Backend
 	Models []string
+	// Plugins are the project's pinned, opted-in runner plugins (OA3).
+	Plugins []runner.Plugin
 }
 
 // Engine owns agentflow's lanes on the shared taskmaster engine.

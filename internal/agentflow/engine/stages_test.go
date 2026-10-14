@@ -556,3 +556,45 @@ func TestEngineStagesDelegateToExecutors(t *testing.T) {
 		t.Fatalf("merge without executor: %q %q", st.Outcome, st.RawOutput)
 	}
 }
+
+// AC-OA3: the project's pinned plugins reach the runner request and the frozen
+// config; a project that opted into none sends none.
+func TestOA3_OnlyTheProjectsPinnedPluginsReachTheRunner(t *testing.T) {
+	h := newHarness(t)
+	var frozen []FrozenBackend
+	h.tweak = func(d *Deps) {
+		d.FreezeConfig = func(b FrozenBackend, dir string) (string, error) {
+			frozen = append(frozen, b)
+			return filepath.Join(dir, "cfg.json"), nil
+		}
+	}
+	h.start()
+	h.fake.Script("worker", runner.Step{Reply: workerOK}, runner.Step{Reply: workerOK})
+	with := h.attemptStage("alpha", "worker")
+	without := h.attemptStage("alpha", "worker")
+	ctx := context.Background()
+	p, err := h.st.GetProject(ctx, with.payload.Project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Plugins = []runner.Plugin{{Name: "notify", Version: "1.2.3"}}
+	if err := h.st.UpdateProject(ctx, "t", p); err != nil {
+		t.Fatal(err)
+	}
+	h.run(with)
+	h.run(without)
+
+	calls := h.fake.CallsFor("worker")
+	if len(calls) != 2 {
+		t.Fatalf("calls = %d", len(calls))
+	}
+	if got := calls[0].Request.Plugins; len(got) != 1 || got[0] != (runner.Plugin{Name: "notify", Version: "1.2.3"}) {
+		t.Fatalf("opted-in request plugins = %v", got)
+	}
+	if got := calls[1].Request.Plugins; len(got) != 0 {
+		t.Fatalf("project without opt-in sent plugins %v", got)
+	}
+	if len(frozen) != 2 || len(frozen[0].Plugins) != 1 || len(frozen[1].Plugins) != 0 {
+		t.Fatalf("frozen backends = %+v", frozen)
+	}
+}

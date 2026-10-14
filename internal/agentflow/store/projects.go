@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"cmd184psu/unified-webapp/internal/agentflow/runner"
 )
 
 // Project is a registered repository (PJ1). ModelScope "local" restricts it
@@ -22,8 +24,11 @@ type Project struct {
 	Limits       map[string]string
 	// CleanupEnabled runs the optional cleanup stage after a review pass (AT11).
 	CleanupEnabled bool
-	Created        time.Time
-	Updated        time.Time
+	// Plugins are the runner plugins the project opted into, each pinned to an
+	// exact version (OA3); none by default.
+	Plugins []runner.Plugin
+	Created time.Time
+	Updated time.Time
 }
 
 func projectSlugs(ctx context.Context, q querier) ([]string, error) {
@@ -66,12 +71,35 @@ func (s *Store) validateProject(p Project) (resolved string, err error) {
 			return "", Invalid(fmt.Sprintf("feedback_cmds[%d]", i), "must not be blank")
 		}
 	}
+	if err := validatePlugins(p.Plugins); err != nil {
+		return "", err
+	}
 	for k := range p.Limits {
 		if !isLimitKey(k) {
 			return "", Invalid("limits."+k, "not an overridable limit")
 		}
 	}
 	return s.validateRepoPath(p.RepoPath)
+}
+
+// validatePlugins requires every plugin to be pinned to an exact version and
+// each name to appear once (OA3). The error names the offending entry.
+func validatePlugins(plugins []runner.Plugin) error {
+	seen := map[string]bool{}
+	for i, pl := range plugins {
+		if err := pl.Validate(); err != nil {
+			field := fmt.Sprintf("plugins[%d].version", i)
+			if strings.HasPrefix(err.Error(), "plugin name") {
+				field = fmt.Sprintf("plugins[%d].name", i)
+			}
+			return Invalid(field, err.Error())
+		}
+		if seen[pl.Name] {
+			return Invalid(fmt.Sprintf("plugins[%d].name", i), fmt.Sprintf("plugin %q is listed twice", pl.Name))
+		}
+		seen[pl.Name] = true
+	}
+	return nil
 }
 
 // checkOverrides validates p's overrides on top of the global settings, so
@@ -111,6 +139,15 @@ func writeProjectBody(ctx context.Context, tx *sql.Tx, p Project) error {
 	for _, k := range keys {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO project_limits (project, key, value) VALUES (?, ?, ?)`,
 			p.Slug, k, strings.TrimSpace(p.Limits[k])); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM project_plugins WHERE project = ?`, p.Slug); err != nil {
+		return err
+	}
+	for _, pl := range p.Plugins {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO project_plugins (project, name, version) VALUES (?, ?, ?)`,
+			p.Slug, pl.Name, pl.Version); err != nil {
 			return err
 		}
 	}
@@ -251,6 +288,23 @@ func loadProjects(ctx context.Context, q querier, slug string) ([]Project, error
 			return nil, err
 		}
 		out[i].Limits = lim
+		prows, err := q.QueryContext(ctx, `SELECT name, version FROM project_plugins WHERE project = ? ORDER BY name`, out[i].Slug)
+		if err != nil {
+			return nil, err
+		}
+		for prows.Next() {
+			var pl runner.Plugin
+			if err := prows.Scan(&pl.Name, &pl.Version); err != nil {
+				prows.Close()
+				return nil, err
+			}
+			out[i].Plugins = append(out[i].Plugins, pl)
+		}
+		if err := prows.Err(); err != nil {
+			prows.Close()
+			return nil, err
+		}
+		prows.Close()
 	}
 	return out, nil
 }
@@ -289,6 +343,7 @@ func (s *Store) DeleteProject(ctx context.Context, actor, slug string) error {
 		}
 		for _, q := range []string{
 			`DELETE FROM project_limits WHERE project = ?`,
+			`DELETE FROM project_plugins WHERE project = ?`,
 			`DELETE FROM role_candidates WHERE scope = 'project' AND project_id = ?`,
 			`DELETE FROM projects WHERE slug = ?`,
 		} {

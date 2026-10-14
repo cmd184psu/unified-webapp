@@ -21,6 +21,7 @@ type migration struct {
 //	5  F1  backend_models.max_concurrent
 //	6  F2  stages.role gains 'cleanup' (table rebuild); projects.cleanup_enabled
 //	7  F3  stages.tokens; efforts.budget_tokens, efforts.budget_seconds
+//	8  F4  project_plugins
 //
 // Later stories append the next integer; they never edit an earlier entry.
 var migrations = []migration{
@@ -31,7 +32,19 @@ var migrations = []migration{
 	{5, migration5SQL},
 	{6, migration6SQL},
 	{7, migration7SQL},
+	{8, migration8SQL},
 }
+
+// migration8SQL (F4) holds the runner plugins a project opted into (OA3). A
+// row is a pin: name and an exact version. A project with no rows uses none.
+const migration8SQL = `
+CREATE TABLE project_plugins (
+  project TEXT NOT NULL REFERENCES projects(slug),
+  name TEXT NOT NULL,
+  version TEXT NOT NULL,
+  PRIMARY KEY (project, name)
+);
+`
 
 // migration7SQL (F3) adds the runner-reported token usage of a stage and the
 // per-effort budgets (AT12); 0 budgets mean no limit.

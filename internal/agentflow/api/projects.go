@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"cmd184psu/unified-webapp/internal/agentflow/model"
+	"cmd184psu/unified-webapp/internal/agentflow/runner"
 	"cmd184psu/unified-webapp/internal/agentflow/store"
 )
 
@@ -56,6 +57,12 @@ type WorkItem struct {
 	State   string `json:"state"`
 }
 
+// PluginView is a pinned runner plugin (OA3).
+type PluginView struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
 // ProjectView is a project with what the overview shows: run state, active
 // effort, task progress and the stages in flight.
 type ProjectView struct {
@@ -65,6 +72,7 @@ type ProjectView struct {
 	FeedbackCmds []string          `json:"feedback_cmds"`
 	Limits       map[string]string `json:"limits"`
 	Cleanup      bool              `json:"cleanup_enabled"`
+	Plugins      []PluginView      `json:"plugins"`
 	Created      int64             `json:"created"`
 	Updated      int64             `json:"updated"`
 	RunState     string            `json:"run_state"`
@@ -89,6 +97,10 @@ func (a *API) projectView(ctx context.Context, p store.Project) (ProjectView, er
 	}
 	if v.Limits == nil {
 		v.Limits = map[string]string{}
+	}
+	v.Plugins = []PluginView{}
+	for _, pl := range p.Plugins {
+		v.Plugins = append(v.Plugins, PluginView{Name: pl.Name, Version: pl.Version})
 	}
 	ef, err := a.deps.Store.ActiveEffort(ctx, p.Slug)
 	if errors.Is(err, store.ErrNotFound) {
@@ -191,6 +203,7 @@ type projectBody struct {
 	FeedbackCmds *[]string          `json:"feedback_cmds"`
 	Limits       *map[string]string `json:"limits"`
 	Cleanup      *bool              `json:"cleanup_enabled"`
+	Plugins      *[]PluginView      `json:"plugins"`
 }
 
 func (b projectBody) apply(p *store.Project) {
@@ -211,6 +224,12 @@ func (b projectBody) apply(p *store.Project) {
 	}
 	if b.Cleanup != nil {
 		p.CleanupEnabled = *b.Cleanup
+	}
+	if b.Plugins != nil {
+		p.Plugins = make([]runner.Plugin, 0, len(*b.Plugins))
+		for _, pl := range *b.Plugins {
+			p.Plugins = append(p.Plugins, runner.Plugin{Name: pl.Name, Version: pl.Version})
+		}
 	}
 }
 

@@ -84,6 +84,8 @@ export interface ProjectView {
   limits: Record<string, string>;
   /** Run the optional cleanup stage after a review pass (AT11). */
   cleanup_enabled?: boolean;
+  /** Runner plugins the project opted into, each pinned to an exact version (OA3). */
+  plugins?: PluginPin[];
   created: number;
   updated: number;
   run_state: string;
@@ -95,6 +97,11 @@ export interface ProjectView {
   current: WorkItem[];
 }
 
+export interface PluginPin {
+  name: string;
+  version: string;
+}
+
 export interface ProjectInput {
   slug: string;
   repo_path: string;
@@ -102,6 +109,7 @@ export interface ProjectInput {
   feedback_cmds?: string[];
   limits?: Record<string, string | number>;
   cleanup_enabled?: boolean;
+  plugins?: PluginPin[];
 }
 
 export type ProjectPatch = Partial<ProjectInput>;

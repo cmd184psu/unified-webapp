@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"cmd184psu/unified-webapp/internal/agentflow/runner"
 )
 
 var ctx = context.Background()
@@ -858,5 +860,54 @@ func TestAT12_EffortUsageSumsTokensAndSeconds(t *testing.T) {
 	neg := int64(-1)
 	if _, err := s.UpdateEffort(ctx, "t", ef.ID, EffortPatch{BudgetSeconds: &neg}); err == nil {
 		t.Fatal("negative budget accepted")
+	}
+}
+
+// AC-OA3: a project's plugins must be exact versions; the rest are refused
+// with the entry named, and a project with none stores none.
+func TestOA3_ProjectPluginsArePinnedAndPerProject(t *testing.T) {
+	s, _ := openTemp(t)
+	good := []runner.Plugin{{Name: "@acme/notify", Version: "1.2.3"}, {Name: "beta", Version: "0.1.0-rc.1"}}
+	if err := s.CreateProject(ctx, "t", Project{Slug: "a", RepoPath: mkRepo(t), ModelScope: "local", Plugins: good}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateProject(ctx, "t", Project{Slug: "b", RepoPath: mkRepo(t), ModelScope: "local"}); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := s.GetProject(ctx, "a")
+	b, _ := s.GetProject(ctx, "b")
+	if len(a.Plugins) != 2 || a.Plugins[0].Name != "@acme/notify" || len(b.Plugins) != 0 {
+		t.Fatalf("a = %v, b = %v", a.Plugins, b.Plugins)
+	}
+	bad := []struct {
+		name string
+		p    []runner.Plugin
+		want string
+	}{
+		{"latest", []runner.Plugin{{Name: "x", Version: "latest"}}, "plugins[0].version"},
+		{"empty", []runner.Plugin{{Name: "x", Version: ""}}, "plugins[0].version"},
+		{"caret", []runner.Plugin{{Name: "ok", Version: "1.0.0"}, {Name: "x", Version: "^1.2.3"}}, "plugins[1].version"},
+		{"tilde", []runner.Plugin{{Name: "x", Version: "~1.2.3"}}, "plugins[0].version"},
+		{"partial", []runner.Plugin{{Name: "x", Version: "1.2"}}, "plugins[0].version"},
+		{"@latest in name", []runner.Plugin{{Name: "x@latest", Version: "1.0.0"}}, "plugins[0].name"},
+		{"duplicate", []runner.Plugin{{Name: "x", Version: "1.0.0"}, {Name: "x", Version: "1.0.1"}}, "plugins[1].name"},
+	}
+	for _, c := range bad {
+		a.Plugins = c.p
+		wantField(t, s.UpdateProject(ctx, "t", a), c.want)
+	}
+	a, _ = s.GetProject(ctx, "a")
+	if len(a.Plugins) != 2 {
+		t.Fatalf("a refused update changed the plugins: %v", a.Plugins)
+	}
+	a.Plugins = nil
+	if err := s.UpdateProject(ctx, "t", a); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ = s.GetProject(ctx, "a"); len(a.Plugins) != 0 {
+		t.Fatalf("opt-out kept plugins: %v", a.Plugins)
+	}
+	if n := countRows(t, s, "project_plugins"); n != 0 {
+		t.Fatalf("project_plugins rows = %d", n)
 	}
 }

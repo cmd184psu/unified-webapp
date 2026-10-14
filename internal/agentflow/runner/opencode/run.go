@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -70,14 +71,34 @@ func (a *Adapter) versionEnv() []string {
 
 // Argv returns the opencode command line for req. The prompt is never part of
 // it (OC2, S1): it goes on stdin, and no message argument is passed.
+//
+// --pure ("run without external plugins") is passed unless the project opted
+// into plugins (OA3): with it opencode would ignore the pinned plugins in the
+// generated config. Without it only those load, because the stage's config
+// dirs are private (a fresh HOME and XDG_CONFIG_HOME) and project config is
+// disabled, so nothing else can add a plugin.
 func Argv(path string, req runner.Request) []string {
-	argv := []string{path, "run", "--pure", "--format", "json", "--auto",
+	argv := []string{path, "run"}
+	if len(req.Plugins) == 0 {
+		argv = append(argv, "--pure")
+	}
+	argv = append(argv, "--format", "json", "--auto",
 		"--agent", AgentName(req.Role),
-		"--model", ModelRef(req.Backend.Name, req.Model)}
+		"--model", ModelRef(req.Backend.Name, req.Model))
 	if req.SessionID != "" {
 		argv = append(argv, "--session", req.SessionID)
 	}
 	return argv
+}
+
+// childEnv is the isolated environment of req's child process. A project that
+// opted into plugins also loses the OPENCODE_PURE backup of --pure (see Argv).
+func childEnv(req runner.Request, parent, keyEnvs []string) []string {
+	env := IsolationEnv(req.StageDir, parent, keyEnvs)
+	if len(req.Plugins) > 0 {
+		env = slices.DeleteFunc(env, func(kv string) bool { return kv == "OPENCODE_PURE=1" })
+	}
+	return append(env, req.Env...)
 }
 
 // Run executes one model call. It reads req.PromptPath onto the child's stdin,
@@ -107,7 +128,7 @@ func (a *Adapter) Run(ctx context.Context, req runner.Request) (runner.Result, e
 	defer events.Close()
 
 	argv := Argv(path, req)
-	env := append(IsolationEnv(req.StageDir, a.parentEnv(), a.KeyEnvs), req.Env...)
+	env := childEnv(req, a.parentEnv(), a.KeyEnvs)
 	var cmd *exec.Cmd
 	if a.Command != nil {
 		cmd, err = a.Command(ctx, req, argv, env)

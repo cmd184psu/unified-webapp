@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -395,6 +396,85 @@ func TestIsolationEnv(t *testing.T) {
 	for _, k := range []string{"OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG"} {
 		if _, ok := got[k]; ok {
 			t.Errorf("%s must never be set", k)
+		}
+	}
+}
+
+// AC-OA3: with no opt-in the config has no plugin entry (the golden file pins
+// that); with an opt-in exactly name@version is listed and nothing else about
+// the config changes, and another project's stage still gets none.
+func TestPluginsAppearOnlyWhenOptedIn(t *testing.T) {
+	plain, err := RenderConfig(specs())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := decode(t, plain)["plugin"]; ok {
+		t.Fatal("plugin key without an opt-in")
+	}
+	with, err := RenderConfig(specs(), runner.Plugin{Name: "zeta-plugin", Version: "2.0.1"}, runner.Plugin{Name: "@acme/notify", Version: "1.2.3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := decode(t, with)
+	got, _ := m["plugin"].([]any)
+	if len(got) != 2 || got[0] != "@acme/notify@1.2.3" || got[1] != "zeta-plugin@2.0.1" {
+		t.Fatalf("plugin = %v, want the two pinned specs sorted", m["plugin"])
+	}
+	delete(m, "plugin")
+	rest, _ := json.Marshal(m)
+	base, _ := json.Marshal(decode(t, plain))
+	if string(rest) != string(base) {
+		t.Fatal("an opted-in plugin changed something besides the plugin list")
+	}
+
+	// Per project: stage A (opted in) and stage B (not) are frozen apart.
+	stageA, stageB := t.TempDir(), t.TempDir()
+	pa, err := GenerateConfig(specs(), stageA, runner.Plugin{Name: "notify", Version: "1.0.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pb, err := GenerateConfig(specs(), stageB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	da, _ := os.ReadFile(pa)
+	db, _ := os.ReadFile(pb)
+	if !strings.Contains(string(da), `"notify@1.0.0"`) || strings.Contains(string(db), "notify") || strings.Contains(string(db), "plugin") {
+		t.Fatalf("A:\n%s\nB mentions a plugin: %v", da, strings.Contains(string(db), "plugin"))
+	}
+}
+
+func TestPluginRenderingRefusesUnpinnedAndDuplicates(t *testing.T) {
+	for _, v := range []string{"", "latest", "^1.0.0", "~1.0.0", "1.x", ">=1.0.0", "1.0"} {
+		if _, err := RenderConfig(specs(), runner.Plugin{Name: "notify", Version: v}); err == nil {
+			t.Errorf("version %q rendered", v)
+		}
+	}
+	if _, err := RenderConfig(specs(), runner.Plugin{Name: "a", Version: "1.0.0"}, runner.Plugin{Name: "a", Version: "1.0.1"}); err == nil {
+		t.Error("duplicate plugin rendered")
+	}
+}
+
+// OA3: --pure ("run without external plugins") would make opencode ignore the
+// pinned plugins, so it, and its OPENCODE_PURE backup, are dropped only for a
+// project that opted in.
+func TestPureIsDroppedOnlyForOptedInProjects(t *testing.T) {
+	stage := t.TempDir()
+	req := runner.Request{Role: "worker", Backend: runner.Backend{Name: "b"}, Model: "m", StageDir: stage}
+	if !slices.Contains(Argv("/bin/opencode", req), "--pure") || !slices.Contains(childEnv(req, []string{"PATH=/bin"}, nil), "OPENCODE_PURE=1") {
+		t.Fatal("a project without plugins must run with --pure")
+	}
+	req.Plugins = []runner.Plugin{{Name: "notify", Version: "1.0.0"}}
+	if slices.Contains(Argv("/bin/opencode", req), "--pure") {
+		t.Error("--pure kept for an opted-in project")
+	}
+	env := childEnv(req, []string{"PATH=/bin"}, nil)
+	if slices.Contains(env, "OPENCODE_PURE=1") {
+		t.Error("OPENCODE_PURE kept for an opted-in project")
+	}
+	for _, want := range []string{"OPENCODE_DISABLE_PROJECT_CONFIG=1", "XDG_CONFIG_HOME=" + filepath.Join(stage, "xdg")} {
+		if !slices.Contains(env, want) {
+			t.Errorf("isolation lost %s", want)
 		}
 	}
 }

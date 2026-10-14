@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
@@ -61,6 +62,7 @@ type configDoc struct {
 	Schema     string                 `json:"$schema"`
 	AutoUpdate bool                   `json:"autoupdate"`
 	Share      string                 `json:"share"`
+	Plugin     []string               `json:"plugin,omitempty"`
 	Provider   map[string]providerDef `json:"provider"`
 	Agent      map[string]agentDef    `json:"agent"`
 }
@@ -97,8 +99,11 @@ func renderProvider(b BackendSpec) (providerDef, error) {
 }
 
 // RenderConfig returns the opencode.json bytes for backends. It contains no
-// plugin entry, no filesystem path and no secret value.
-func RenderConfig(backends []BackendSpec) ([]byte, error) {
+// filesystem path and no secret value, and no plugin entry unless the project
+// opted into plugins (OA3): then exactly those, as pinned name@version, sorted
+// by name. A plugin that is not an exact version is refused here as well as
+// where it is stored.
+func RenderConfig(backends []BackendSpec, plugins ...runner.Plugin) ([]byte, error) {
 	doc := configDoc{
 		Schema:   "https://opencode.ai/config.json",
 		Share:    "disabled",
@@ -120,6 +125,18 @@ func RenderConfig(backends []BackendSpec) ([]byte, error) {
 		}
 		doc.Provider[b.Name] = p
 	}
+	names := map[string]bool{}
+	for _, pl := range plugins {
+		if err := pl.Validate(); err != nil {
+			return nil, fmt.Errorf("opencode: %w", err)
+		}
+		if names[pl.Name] {
+			return nil, fmt.Errorf("opencode: duplicate plugin %q", pl.Name)
+		}
+		names[pl.Name] = true
+		doc.Plugin = append(doc.Plugin, pl.Spec())
+	}
+	slices.Sort(doc.Plugin)
 	for _, role := range Roles {
 		a, err := agentFor(role)
 		if err != nil {
@@ -142,8 +159,8 @@ func RenderConfig(backends []BackendSpec) ([]byte, error) {
 // has a config, identical content is accepted (a retry) and different content
 // returns ErrFrozen; a later backend edit therefore never changes a stage that
 // already started. It returns the config path.
-func GenerateConfig(backends []BackendSpec, stageDir string) (string, error) {
-	data, err := RenderConfig(backends)
+func GenerateConfig(backends []BackendSpec, stageDir string, plugins ...runner.Plugin) (string, error) {
+	data, err := RenderConfig(backends, plugins...)
 	if err != nil {
 		return "", err
 	}

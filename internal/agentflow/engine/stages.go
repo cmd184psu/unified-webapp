@@ -266,6 +266,10 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 	if err != nil {
 		return fail(err)
 	}
+	proj, err := d.Store.GetProject(ctx, p.Project)
+	if err != nil {
+		return fail(err)
+	}
 	workdir, err := e.workdir(ctx, st, p.Project)
 	if err != nil {
 		return fail(err)
@@ -284,7 +288,7 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 	}
 	be := runner.Backend{Name: b.Name, Host: b.Host, APIType: b.APIType}
 	if d.FreezeConfig != nil {
-		fb := FrozenBackend{Backend: be}
+		fb := FrozenBackend{Backend: be, Plugins: proj.Plugins}
 		for _, m := range b.Models {
 			fb.Models = append(fb.Models, m.Model)
 		}
@@ -296,7 +300,7 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 	timeout := roleTimeout(set, st.Role)
 	req := runner.Request{
 		Role: st.Role, Backend: be, Model: st.Model,
-		Workdir: workdir, StageDir: dir, PromptPath: promptPath, Message: promptMessage,
+		Workdir: workdir, StageDir: dir, PromptPath: promptPath, Message: promptMessage, Plugins: proj.Plugins,
 		OnEvent: func(ev runner.Event) {
 			if ev.Text != "" {
 				fmt.Fprintln(rc.Log(), ev.Text)
