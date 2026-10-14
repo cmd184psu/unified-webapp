@@ -435,4 +435,28 @@ test('H5: has_key shows a key set badge in the list and the form; Clear key send
   stop();
 });
 
+test('U5 (review): the context field says unknown, and picking another probed model swaps in that model\'s window unless one was typed', async () => {
+  const t = harness({}, { probeBackend: async () => ({ models: ['m-a', 'm-b', 'm-c'], contexts: { 'm-a': 32768, 'm-b': 8192 } }) });
+  const stop = t.view.mount();
+  await flush();
+  button(t.host, 'Add backend').click();
+  eq(field(t.host, 'context_tokens').getAttribute('placeholder'), '?');
+  field(t.host, 'name').value = 'ctx2';
+  field(t.host, 'host').value = 'http://127.0.0.1:11434';
+  button(t.host, 'Probe host for models').click();
+  await flush();
+  eq(field(t.host, 'context_tokens').value, '32768');
+  field(t.host, 'model').value = 'm-b';
+  field(t.host, 'model').fire('change');
+  eq(field(t.host, 'context_tokens').value, '8192');
+  field(t.host, 'model').value = 'm-c';
+  field(t.host, 'model').fire('change');
+  eq(field(t.host, 'context_tokens').value, '');
+  field(t.host, 'context_tokens').value = '4000';
+  field(t.host, 'model').value = 'm-a';
+  field(t.host, 'model').fire('change');
+  eq(field(t.host, 'context_tokens').value, '4000');
+  stop();
+});
+
 void run('agentflow-backends');

@@ -2,6 +2,7 @@ import { test, run, eq, ok, installFakeDom, FakeEl, asEl, byField, byAttr, allBy
 import { FrdEditor, commaList, lines, type FrdDeps } from './frd-editor';
 import { Overview, type OverviewDeps } from './overview';
 import { budgetBar, deliberateTriggers } from './effort-settings';
+import { dispatch } from './events';
 import { ApiError, type DefinitionOfDone, type DocView, type DraftState, type EffortView, type FRD, type FrdPart, type ProjectView, type SizeView } from './api';
 
 installFakeDom();
@@ -441,7 +442,7 @@ test('U3: an oversized FRD highlights the meter and offers a split that shows pr
   eq(t.log.filter((l) => l === 'split').length, 1);
   eq(byAttr(t.host, 'data-role', 'progress-strip').length, 1);
   eq(findAll(t.host, (e) => e.getAttribute('aria-label') === 'Split into smaller parts').length, 0);
-  t.ctl.parts = [{ n: 1, title: 'Core', tokens: 4000, status: 'started' }, { n: 2, title: 'Extras', summary: 'the rest', tokens: 3000 }];
+  t.ctl.parts = [{ n: 1, title: 'Core', tokens: 4000, started_effort: 1 }, { n: 2, title: 'Extras', summary: 'the rest', tokens: 3000, started_effort: 0 }];
   await t.ed.load();
   eq(byAttr(t.host, 'data-role', 'progress-strip').length, 0);
   eq(byAttr(t.host, 'data-part', '2').length, 1);
@@ -467,7 +468,7 @@ test('U3: a fitting FRD shows no split; unknown contexts show only a muted hint 
 test('U3: pending parts start only when the project has no active effort; a 409 shows inline', async () => {
   const w = world();
   const t = harness(w);
-  t.ctl.parts = [{ n: 1, title: 'Core', tokens: 4000 }, { n: 2, title: 'Extras', summary: 'the rest', tokens: 3000 }, { n: 3, title: 'Done', tokens: 10, status: 'started' }];
+  t.ctl.parts = [{ n: 1, title: 'Core', tokens: 4000, started_effort: 1 }, { n: 2, title: 'Extras', summary: 'the rest', tokens: 3000, started_effort: 0 }, { n: 3, title: 'Done', tokens: 10, started_effort: 7 }];
   const stop = t.ed.mount();
   await flush();
   eq(findAll(byAttr(t.host, 'data-part', '3')[0], (e) => e.tagName === 'BUTTON').length, 0);
@@ -494,6 +495,120 @@ test('U3: pending parts start only when the project has no active effort; a 409 
   findAll(byAttr(t2.host, 'data-part', '2')[0], (e) => e.tagName === 'BUTTON')[0].click();
   await flush();
   ok(t2.log.includes('notify:Started part 2'), 'started');
+  stop2();
+});
+
+test('U1 (review): a part with started_effort > 0 shows a started mark and no start button; started_effort 0 can start', async () => {
+  const w = world();
+  w.efforts = [effort(1, 'Alpha', { status: 'complete' })];
+  const t = harness(w);
+  t.ctl.parts = [{ n: 1, title: 'Core', tokens: 10, started_effort: 4 }, { n: 2, title: 'More', tokens: 10, started_effort: 5 }, { n: 3, title: 'Last', tokens: 10, started_effort: 0 }];
+  const stop = t.ed.mount();
+  await flush();
+  const p2 = byAttr(t.host, 'data-part', '2')[0];
+  eq(findAll(p2, (e) => e.tagName === 'BUTTON').length, 0);
+  ok(p2.textContent.includes('started'), 'started mark');
+  eq(findAll(byAttr(t.host, 'data-part', '3')[0], (e) => e.tagName === 'BUTTON').length, 1);
+  stop();
+});
+
+test('U2 (review): a failed split clears the strip and shows the server error; an idle server with nothing changed shows nothing', async () => {
+  const t = harness(world());
+  t.ctl.size = { frd_tokens: 12000, budget_tokens: 8000, over: true };
+  const stop = t.ed.mount();
+  await flush();
+  button(t.host, 'Split into smaller parts').click();
+  await flush();
+  eq(byAttr(t.host, 'data-role', 'progress-strip').length, 1);
+  t.ctl.draft = { state: 'failed', purpose: 'split', started: 1, error: 'planner gave no parts' };
+  await t.ed.load();
+  eq(byAttr(t.host, 'data-role', 'progress-strip').length, 0);
+  eq(byAttr(t.host, 'data-role', 'split-error')[0].textContent, 'planner gave no parts');
+  eq(byAttr(t.host, 'data-role', 'draft-error').length, 0);
+  button(t.host, 'Split into smaller parts').click();
+  await flush();
+  eq(byAttr(t.host, 'data-role', 'progress-strip').length, 1);
+  t.ctl.draft = { state: 'idle' };
+  await t.ed.load();
+  eq(byAttr(t.host, 'data-role', 'progress-strip').length, 0);
+  eq(byAttr(t.host, 'data-role', 'split-error').length, 0);
+  stop();
+});
+
+test('U2 (review): after a reload the strip comes back from the server state, labelled by purpose', async () => {
+  for (const [purpose, label] of [['split', 'Splitting the FRD'], ['draft', 'Drafting the FRD'], ['polish', 'Tidying the FRD']] as const) {
+    const t = harness(world());
+    t.ctl.draft = { state: 'running', purpose, started: Date.now() };
+    const stop = t.ed.mount();
+    await flush();
+    const strips = byAttr(t.host, 'data-role', 'progress-strip');
+    eq(strips.length, 1);
+    ok(strips[0].textContent.includes(label), strips[0].textContent);
+    stop();
+  }
+});
+
+test('U3 (review): deleting a requirement prunes the links to it so the save carries no dead ids', async () => {
+  const w = world();
+  w.docs.set(1, [{ doc: { ...FRD0, requirements: [{ id: 'R1', description: 'one' }, { id: 'R2', description: 'two' }], acceptance_criteria: [{ id: 'AC1', requirements: ['R1', 'R2'], criterion: 'works' }, { id: 'AC2', criterion: 'free' }] }, by: 'me' }]);
+  const t = harness(w);
+  const stop = t.ed.mount();
+  await flush();
+  openEditor(t.host);
+  button((allByField(t.host, 'req_description')[1].parentNode as FakeEl).parentNode as FakeEl, 'Remove').click();
+  button(t.host, 'Save as new revision').click();
+  await flush();
+  eq(t.sent[0].requirements.map((r) => r.id), ['R1']);
+  eq(t.sent[0].acceptance_criteria.map((a) => a.requirements), [['R1'], undefined]);
+  stop();
+});
+
+test('U4 (review): a draft finishing while text is in the box refreshes the card and keeps the text and the box element', async () => {
+  const w = world();
+  w.docs.set(1, []);
+  const t = harness(w);
+  const stop = t.ed.mount();
+  await flush();
+  byField(t.host, 'description').value = 'first';
+  byField(t.host, 'description').fire('input');
+  button(t.host, 'Draft the FRD').click();
+  await flush();
+  const box = byField(t.host, 'description');
+  box.value = 'next thing';
+  box.fire('input');
+  w.docs.set(1, [{ doc: FRD1, by: 'planner' }]);
+  t.ctl.draft = { state: 'idle', purpose: 'draft' };
+  dispatch(JSON.stringify({ type: 'state.changed' }));
+  await flush();
+  eq(byAttr(t.host, 'data-role', 'frd-review').length, 1);
+  eq(byAttr(t.host, 'data-role', 'progress-strip').length, 0);
+  ok(byField(t.host, 'description') === box, 'same box element');
+  eq(box.value, 'next thing');
+  stop();
+});
+
+test('U6 (review): gauge spans have aria-labels, unknown models get a warning, and only draft efforts can be redrafted', async () => {
+  const t = harness(world());
+  t.ctl.size = { frd_tokens: 100, budget_tokens: 8000, over: false, advice: 'fits', unknown_models: [{ backend: 'b1', model: 'mystery' }] };
+  const stop = t.ed.mount();
+  await flush();
+  const size = byAttr(t.host, 'data-role', 'size')[0];
+  ok(findAll(size, (e) => e.tagName === 'SPAN' && e.getAttribute('title') !== null && e.getAttribute('aria-label') === e.getAttribute('title')).length >= 3, 'titles carry aria-labels');
+  const warn = byAttr(t.host, 'data-role', 'unknown-models')[0];
+  ok(warn.getAttribute('title')?.includes('b1/mystery') && warn.getAttribute('aria-label') === warn.getAttribute('title'), 'warning');
+  t.ctl.size = { frd_tokens: 100, budget_tokens: 8000, over: false, unknown_models: [] };
+  await t.ed.load();
+  eq(byAttr(t.host, 'data-role', 'unknown-models').length, 0);
+  stop();
+
+  const w = world();
+  w.efforts = [effort(1, 'Alpha', { status: 'plan_ready' })];
+  const ro = harness(w);
+  const stop2 = ro.ed.mount();
+  await flush();
+  eq(byAttr(ro.host, 'data-role', 'frd-review').length, 1);
+  eq(findAll(ro.host, (e) => e.getAttribute('data-field') === 'description').length, 0);
+  eq(findAll(ro.host, (e) => e.getAttribute('aria-label') === 'Edit' || e.getAttribute('aria-label') === 'Tidy the text').length, 0);
   stop2();
 });
 

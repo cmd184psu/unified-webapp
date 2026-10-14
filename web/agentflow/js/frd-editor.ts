@@ -11,7 +11,7 @@ import { alertDialog, showToast } from '@shared';
 import { api, ApiError, type DefinitionOfDone, type DocView, type DraftState, type EffortView, type FRD, type FRDAC, type FRDDecision, type FRDGroup, type FrdPart, type FRDRequirement, type SizeView } from './api.js';
 import { chooseEffort, effortBar, isFinished, rememberEffort } from './current.js';
 import { effortSettings, formatTokens } from './effort-settings.js';
-import { chip, h, replace } from './dom.js';
+import { chip, h, replace, type Child } from './dom.js';
 import { icon } from './icons.js';
 import { isTransient, startPoll, subscribe, type AgentflowEvent } from './events.js';
 import { elapsedText } from './plan-view.js';
@@ -133,6 +133,11 @@ export class FrdForm {
   read(): FRD {
     const v = (k: keyof FrdForm['f']): string => this.f[k].value.trim();
     const some = <T>(a: T[]): T[] | undefined => (a.length ? a : undefined);
+    const requirements = this.reqs.read().filter((r) => r.id || r.description);
+    // Ids are server-assigned and hidden, so a deleted requirement must not leave dead links in the criteria.
+    const ids = new Set(requirements.map((r) => r.id));
+    const acs = this.acs.read().filter((a) => a.id || a.criterion)
+      .map((a) => (a.requirements ? { ...a, requirements: a.requirements.filter((id) => ids.has(id)) } : a));
     return {
       ...this.base,
       id: v('id'),
@@ -142,8 +147,8 @@ export class FrdForm {
       context: v('context') || undefined,
       constraints: some(lines(this.f.constraints.value)),
       groups: some(this.groups.read().filter((g) => g.id || g.title)),
-      requirements: this.reqs.read().filter((r) => r.id || r.description),
-      acceptance_criteria: this.acs.read().filter((a) => a.id || a.criterion),
+      requirements,
+      acceptance_criteria: acs,
       decisions: some(this.decisions.read().filter((d) => d.id || d.decision)),
       out_of_scope: some(lines(this.f.out_of_scope.value)),
     };
@@ -165,8 +170,17 @@ export class FrdEditor {
   // Review mode shows the FRD as a card; editing swaps in the structured editor.
   private editing = false;
   private desc = '';
-  /** True while the describe box holds typed text: a refresh must not rebuild it under the cursor. */
-  private typing = false;
+  /** The description last sent for drafting; it is cleared from the box when the draft finishes unchanged. */
+  private sentDesc = '';
+  /** The describe box lives across renders so a refresh never rebuilds it under the cursor. */
+  private box: HTMLTextAreaElement | null = null;
+  private draftBtn: HTMLElement | null = null;
+  private root: HTMLElement | null = null;
+  private top = h('div', {});
+  private slot = h('div', {});
+  private slotDyn = h('div', {});
+  private slotFor = 0;
+  private bottom = h('div', {});
   private draft: DraftState | null = null;
   private draftError = '';
   private dod: DefinitionOfDone | null = null;
@@ -174,9 +188,6 @@ export class FrdEditor {
   private parts: FrdPart[] = [];
   private partErrors = new Map<number, string>();
   private splitError = '';
-  /** Start time of a split in flight (ms), else 0; it ends when the FRD revision or the parts change. */
-  private splitting = 0;
-  private splitBase = { revision: 0, parts: 0 };
   private disposed = false;
   private ticker: ReturnType<typeof setInterval> | null = null;
   private clocks: Array<{ el: HTMLElement; since: number }> = [];
@@ -186,9 +197,9 @@ export class FrdEditor {
   mount(): () => void {
     this.off = subscribe((ev: AgentflowEvent) => {
       const mine = 'project' in ev && ev.project === this.slug;
-      if (!this.dirty && !this.typing && (ev.type === 'state.changed' || mine && (ev.type === 'effort.update' || ev.type === 'project.update'))) void this.load();
+      if (!this.dirty && (ev.type === 'state.changed' || mine && (ev.type === 'effort.update' || ev.type === 'project.update'))) void this.load();
     });
-    this.stopPoll = startPoll(() => !this.dirty && !this.typing && (isTransient(this.current?.status) || this.draft?.state === 'running' || this.splitting > 0), () => this.load());
+    this.stopPoll = startPoll(() => !this.dirty && (isTransient(this.current?.status) || this.draft?.state === 'running'), () => this.load());
     void this.load();
     return () => {
       this.disposed = true;
@@ -235,13 +246,12 @@ export class FrdEditor {
         this.deps.frdParts(this.slug, ef.id, q).catch(none),
       ]);
       if (this.disposed) return;
-      if (this.draft?.state === 'running' && draft?.state === 'idle') this.desc = '';
+      if (this.draft?.state === 'running' && draft?.state === 'idle' && this.draft.purpose !== 'split' && this.draft.purpose !== 'polish' && this.desc.trim() === this.sentDesc) this.desc = '';
       this.draft = draft;
       this.draftError = '';
       this.dod = dod;
       this.size = size;
       this.parts = parts ?? [];
-      if (this.splitting > 0 && (this.latest?.revision !== this.splitBase.revision || this.parts.length !== this.splitBase.parts || Date.now() - this.splitting > 900_000)) this.splitting = 0;
       this.form = new FrdForm(this.latest?.json ?? blankFRD(this.slug, ef), () => { this.dirty = true; });
     } else {
       this.form = null;
@@ -262,8 +272,8 @@ export class FrdEditor {
       this.render();
       return;
     }
-    this.typing = false;
-    this.draft = { state: 'running', started: Date.now() };
+    this.sentDesc = description;
+    this.draft = { state: 'running', purpose: polish ? 'polish' : 'draft', started: Date.now() };
     this.render();
   }
 
@@ -278,8 +288,7 @@ export class FrdEditor {
       this.render();
       return;
     }
-    this.splitting = Date.now();
-    this.splitBase = { revision: this.latest?.revision ?? 0, parts: this.parts.length };
+    this.draft = { state: 'running', purpose: 'split', started: Date.now() };
     this.render();
   }
 
@@ -426,26 +435,27 @@ export class FrdEditor {
     }
   }
 
-  private describeBox(ef: EffortView): HTMLElement {
+  /** stripLabel names what the server is running, from the draft state's purpose. */
+  private stripLabel(): string {
+    const p = this.draft?.purpose;
+    return p === 'split' ? 'Splitting the FRD' : p === 'polish' ? 'Tidying the FRD' : 'Drafting the FRD';
+  }
+
+  /** describeBody is the part of the describe section that changes: the strip, the error and the buttons. */
+  private describeBody(): Child[] {
     const running = this.draft?.state === 'running';
-    const box = textArea('description', this.desc, 4);
-    box.setAttribute('placeholder', 'What do you want?');
+    const mine = this.draft?.purpose !== 'split';
     const draftBtn = button('Draft the FRD', () => void this.startDraft(false), { primary: true, field: 'draft-frd', icon: 'sparkle' });
-    const sync = (): void => {
-      this.desc = box.value;
-      this.typing = box.value !== '';
-      draftBtn.className = draftBtn.className.replace(' is-disabled', '') + (box.value.trim() === '' ? ' is-disabled' : '');
-    };
-    box.addEventListener('input', sync);
+    this.draftBtn = draftBtn;
     if (this.desc.trim() === '') draftBtn.className += ' is-disabled';
-    const error = this.draftError || (this.draft?.state === 'failed' ? this.draft.error ?? 'The draft failed' : '');
-    return section(`FRD for #${ef.id}`,
-      box,
-      running ? this.strip('Drafting the FRD', this.draft?.started ?? 0) : null,
+    const error = this.draftError || (this.draft?.state === 'failed' && mine ? this.draft.error ?? 'The draft failed' : '');
+    return [
+      running && mine ? this.strip(this.stripLabel(), this.draft?.started ?? 0) : null,
       error ? h('div', { class: 'field-error', attrs: { role: 'alert', 'data-role': 'draft-error' }, text: error }) : null,
       running ? null : h('div', { class: 'settings-actions' },
         this.latest ? null : button('Write it by hand', () => { this.editing = true; this.render(); }, { field: 'edit-frd', icon: 'edit' }),
-        draftBtn));
+        draftBtn),
+    ];
   }
 
   private bullets(title: string, items: string[]): HTMLElement | null {
@@ -456,6 +466,8 @@ export class FrdEditor {
   private reviewCard(doc: FRD, approvedRev: number | undefined, canApprove: boolean): HTMLElement {
     const rev = this.latest?.revision ?? 0;
     const running = this.draft?.state === 'running';
+    // Only a draft effort can be redrafted or edited; later it is read-only.
+    const open = this.current?.status === 'draft' && !running;
     return h('div', { class: 'settings-section', attrs: { 'data-role': 'frd-review' } },
       h('div', { class: 'row-actions' },
         h('h3', { text: doc.title }),
@@ -466,8 +478,8 @@ export class FrdEditor {
       this.bullets('Acceptance criteria', (doc.acceptance_criteria ?? []).map((a) => a.criterion)),
       this.bullets('Out of scope', doc.out_of_scope ?? []),
       running ? null : h('div', { class: 'settings-actions' },
-        button('Tidy the text', () => void this.startDraft(true), { field: 'polish-frd', icon: 'sparkle' }),
-        button('Edit', () => { this.editing = true; this.render(); }, { field: 'edit-frd', icon: 'edit' }),
+        open ? button('Tidy the text', () => void this.startDraft(true), { field: 'polish-frd', icon: 'sparkle' }) : null,
+        open ? button('Edit', () => { this.editing = true; this.render(); }, { field: 'edit-frd', icon: 'edit' }) : null,
         canApprove ? button(`Approve revision ${rev}`, () => void this.approve(), { primary: true, field: 'approve-frd', icon: 'approve' }) : null));
   }
 
@@ -484,21 +496,25 @@ export class FrdEditor {
     const z = this.size;
     if (!z || !(z.budget_tokens > 0) || typeof z.over !== 'boolean') {
       return h('div', { class: 'console-header', attrs: { 'data-role': 'size-unknown' } },
-        h('span', { class: 'field-hint', attrs: { title: 'Set context sizes in Backends' } }, icon('gauge')));
+        h('span', { class: 'field-hint', attrs: { title: 'Set context sizes in Backends', 'aria-label': 'Set context sizes in Backends' } }, icon('gauge')));
     }
     const pct = Math.min(100, Math.round((z.frd_tokens / z.budget_tokens) * 100));
+    const unknown = z.unknown_models ?? [];
+    const unknownTip = `Context size unknown for: ${unknown.map((m) => `${m.backend}/${m.model}`).join(', ')}`;
     return h('div', { class: 'console-header', attrs: { 'data-role': 'size' } },
-      h('span', { class: 'field-hint', attrs: { title: 'Size of the FRD against what the smallest planning model can read' } }, icon('gauge')),
+      h('span', { class: 'field-hint', attrs: { title: 'Size of the FRD against what the smallest planning model can read', 'aria-label': 'Size of the FRD against what the smallest planning model can read' } }, icon('gauge')),
+      unknown.length ? h('span', { class: 'field-hint', attrs: { 'data-role': 'unknown-models', title: unknownTip, 'aria-label': unknownTip } }, icon('warn')) : null,
       h('div', { class: 'progress-bar-wrap' }, h('div', { class: 'progress-bar' + (z.over ? ' progress-over' : ''), attrs: { style: `width: ${pct}%` } })),
-      h('span', { class: z.over ? 'progress-pct field-error' : 'progress-pct', text: `${formatTokens(z.frd_tokens)} / ${formatTokens(z.budget_tokens)} tokens`, attrs: { title: z.advice } }),
-      z.over && this.splitting === 0 ? button('Split into smaller parts', () => void this.split(), { field: 'split-frd', icon: 'split' }) : null);
+      h('span', { class: z.over ? 'progress-pct field-error' : 'progress-pct', text: `${formatTokens(z.frd_tokens)} / ${formatTokens(z.budget_tokens)} tokens`, attrs: { title: z.advice, 'aria-label': z.advice } }),
+      z.over && this.draft?.state !== 'running' ? button('Split into smaller parts', () => void this.split(), { field: 'split-frd', icon: 'split' }) : null);
   }
 
   private partsList(): HTMLElement | null {
     if (this.parts.length === 0) return null;
     const busy = this.efforts.find((e) => !isFinished(e));
     return h('div', { class: 'wizard-list', attrs: { 'data-role': 'frd-parts' } }, ...this.parts.map((p) => {
-      const pending = (p.status ?? 'pending') === 'pending' && p.n > 1;
+      const started = p.started_effort > 0;
+      const pending = !started && p.n > 1;
       const start = pending ? button('Start this part', () => void this.startPart(p.n), { field: 'start-part', icon: 'start' }) : null;
       if (start && busy) {
         start.className += ' is-disabled';
@@ -509,15 +525,41 @@ export class FrdEditor {
         h('div', { class: 'inline-row' },
           h('strong', { text: `${p.n}. ${p.title}` }),
           badge(`${formatTokens(p.tokens)} tokens`, 'muted'),
+          started ? badge('started', 'ok') : null,
           start),
         p.summary ? h('p', { class: 'field-hint', text: p.summary }) : null,
         this.partErrors.get(p.n) ? h('div', { class: 'field-error', attrs: { role: 'alert' }, text: this.partErrors.get(p.n) }) : null);
     }));
   }
 
+  /** renderDescribe keeps the describe box element across renders (so typing is never lost) and refreshes everything around it. */
+  private renderDescribe(ef: EffortView | undefined): void {
+    if (!ef) {
+      replace(this.slot);
+      this.slotFor = 0;
+      return;
+    }
+    if (!this.box) {
+      this.box = textArea('description', this.desc, 4);
+      this.box.setAttribute('placeholder', 'What do you want?');
+      this.box.addEventListener('input', () => {
+        this.desc = (this.box as HTMLTextAreaElement).value;
+        const b = this.draftBtn;
+        if (b) b.className = b.className.replace(' is-disabled', '') + (this.desc.trim() === '' ? ' is-disabled' : '');
+      });
+    }
+    if (this.box.value !== this.desc) this.box.value = this.desc;
+    replace(this.slotDyn, ...this.describeBody());
+    if (this.slotFor !== ef.id || this.slot.firstChild === null) {
+      replace(this.slot, section(`FRD for #${ef.id}`, this.box, this.slotDyn));
+      this.slotFor = ef.id;
+    }
+  }
+
   render(): void {
     if (this.disposed) return;
     if (!this.loaded) {
+      this.root = null;
       replace(this.host, h('p', { class: 'field-hint', text: 'Loading efforts…' }));
       return;
     }
@@ -535,11 +577,12 @@ export class FrdEditor {
         button('Close the editor', () => { this.editing = false; void this.loadDoc(); }, { field: 'close-editor', icon: 'cancel' }),
         button('Save as new revision', () => void this.save(), { primary: !canApprove, field: 'save-frd', icon: 'save' }),
         canApprove && this.latest ? button(`Approve revision ${this.latest.revision}`, () => void this.approve(), { primary: true, field: 'approve-frd', icon: 'approve' }) : null)) : null;
+    const splitError = this.splitError || (this.draft?.state === 'failed' && this.draft.purpose === 'split' ? this.draft.error ?? 'The split failed' : '');
     const review = ef && !this.editing && this.latest?.json ? [
       this.reviewCard(this.latest.json, approvedRev, canApprove),
       this.dodSection(),
-      this.splitting > 0 ? this.strip('Splitting the FRD', this.splitting) : this.sizeRow(),
-      this.splitError ? h('div', { class: 'field-error', attrs: { role: 'alert', 'data-role': 'split-error' }, text: this.splitError }) : null,
+      this.draft?.state === 'running' && this.draft.purpose === 'split' ? this.strip(this.stripLabel(), this.draft.started ?? 0) : this.sizeRow(),
+      splitError ? h('div', { class: 'field-error', attrs: { role: 'alert', 'data-role': 'split-error' }, text: splitError }) : null,
       this.partsList(),
     ] : [];
     // A project has one active effort at a time: show the form only when none is active, else a disabled "+" says why.
@@ -555,17 +598,22 @@ export class FrdEditor {
         },
       }));
     }
-    replace(this.host,
-      h('div', { class: 'settings-host' },
-        bar,
-        active ? null : this.efforts.length ? null : h('div', { class: 'plan-empty' }, h('h3', { text: 'No efforts yet' }), h('p', { text: 'An effort is one FRD, plan and queue. Create the first one below.' })),
-        active ? null : this.newEffortForm(),
-        ef && !this.editing && !isFinished(ef) ? this.describeBox(ef) : null,
-        ...review,
-        this.editing ? editor : null,
-        ef && !isFinished(ef) ? effortSettings(ef, this.form ? JSON.stringify(this.form.read()) : '', this.deps, () => void this.load()) : null,
-        ef ? this.revisionList() : null,
-        this.efforts.length ? section('Efforts', this.list()) : null));
+    const showDescribe = !!ef && !this.editing && ef.status === 'draft';
+    replace(this.top,
+      bar,
+      active ? null : this.efforts.length ? null : h('div', { class: 'plan-empty' }, h('h3', { text: 'No efforts yet' }), h('p', { text: 'An effort is one FRD, plan and queue. Create the first one below.' })),
+      active ? null : this.newEffortForm());
+    this.renderDescribe(showDescribe ? ef : undefined);
+    replace(this.bottom,
+      ...review,
+      this.editing ? editor : null,
+      ef && !isFinished(ef) ? effortSettings(ef, this.form ? JSON.stringify(this.form.read()) : '', this.deps, () => void this.load()) : null,
+      ef ? this.revisionList() : null,
+      this.efforts.length ? section('Efforts', this.list()) : null);
+    if (!this.root || this.host.firstChild !== this.root) {
+      this.root = h('div', { class: 'settings-host' }, this.top, this.slot, this.bottom);
+      replace(this.host, this.root);
+    }
     this.syncTicker();
   }
 }

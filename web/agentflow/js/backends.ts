@@ -152,7 +152,7 @@ export class BackendsView {
     (hosted.firstChild as HTMLInputElement).addEventListener('change', syncKey);
     syncKey();
     type ModelControl = HTMLInputElement | HTMLSelectElement;
-    type ModelRow = { model: ModelControl; paid: ToggleEl; max: HTMLInputElement; ctx: HTMLInputElement; el: HTMLElement };
+    type ModelRow = { model: ModelControl; paid: ToggleEl; max: HTMLInputElement; ctx: HTMLInputElement; auto: string; el: HTMLElement };
     const models: ModelRow[] = [];
     // Names the host reported when probed; model rows then pick from them instead of typing.
     let probed: string[] = [];
@@ -164,7 +164,12 @@ export class BackendsView {
     const modelList = h('div', { class: 'wizard-list' });
     const prefill = (row: ModelRow): void => {
       const c = contexts[row.model.value];
-      if (c > 0 && row.ctx.value === '') row.ctx.value = String(c);
+      const next = c > 0 ? String(c) : '';
+      // Fill a blank field, or swap the value a probe put there for the previously picked model; never overwrite a typed one.
+      if (row.ctx.value === '' || row.ctx.value === row.auto) {
+        row.ctx.value = next;
+        row.auto = next;
+      }
     };
     const draw = (row: ModelRow): void => {
       row.model.addEventListener('change', () => prefill(row));
@@ -183,7 +188,8 @@ export class BackendsView {
         model: modelControl(m),
         paid: checkbox('model_paid', p),
         max: textInput('max_concurrent', max > 0 ? String(max) : '', { type: 'number', placeholder: 'no limit' }),
-        ctx: textInput('context_tokens', ctx > 0 ? String(ctx) : '', { type: 'number', placeholder: 'auto' }),
+        ctx: textInput('context_tokens', ctx > 0 ? String(ctx) : '', { type: 'number', placeholder: '?' }),
+        auto: '',
         el: h('div', { class: 'inline-row', attrs: { 'data-role': 'model-row' } }),
       };
       models.push(row);

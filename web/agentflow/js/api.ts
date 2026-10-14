@@ -216,6 +216,8 @@ export interface ModelStat {
 /** DraftState is GET .../frd/draft: the FRD drafting stage (draft or polish). */
 export interface DraftState {
   state: 'idle' | 'running' | 'failed';
+  /** Which stage ran or is running; absent on older servers (read as draft). */
+  purpose?: 'draft' | 'polish' | 'split';
   /** Start time in ms. */
   started?: number;
   error?: string;
@@ -230,15 +232,17 @@ export interface SizeView {
   over?: boolean;
   models?: Array<{ backend: string; model: string; context_tokens: number }>;
   advice?: string;
+  /** Models whose context window is not known, so the budget ignores them. */
+  unknown_models?: Array<{ backend: string; model: string }>;
 }
 
-/** FrdPart is one row of GET .../frd/parts after a split; a part without status is pending. */
+/** FrdPart is one row of GET .../frd/parts after a split; started_effort 0 = not started. */
 export interface FrdPart {
   n: number;
   title: string;
   summary?: string;
   tokens: number;
-  status?: string;
+  started_effort: number;
 }
 
 export interface DocView<T = unknown> {
