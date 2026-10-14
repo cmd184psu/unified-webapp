@@ -105,6 +105,7 @@ Logged per the owner's posture; candidates for the next phase alongside `.omc/pl
 - 2026-10-13 — D1: cutover: new Build wiring (store+engine+opencode+sandbox), minimal api (/api/health), config cleanup, old agentflow code and root prompts/ deleted.
 - 2026-10-13 — D2: API for projects/backends/candidates/settings/limits/opencode version with audit actor (git-init route is POST /api/projects/git-init).
 - 2026-10-13 — D3: API for efforts/docs/plan/queue/tasks/run control + SSE event bus and stage stream.
+- 2026-10-13 — D4: export (json|md) and strict FRD import; markdown rendering escapes input.
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`

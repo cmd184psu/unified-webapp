@@ -5,12 +5,15 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"cmd184psu/unified-webapp/internal/agentflow/store"
 	"cmd184psu/unified-webapp/internal/platform/response"
 )
+
+var indexRE = regexp.MustCompile(`\.(\d+)`)
 
 // errorBody is the JSON envelope of every failed call. Field is set when one
 // request field is at fault (SV1).
@@ -72,7 +75,7 @@ func writeDecodeErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.As(err, &te):
 		if te.Field != "" {
-			body.Field = te.Field
+			body.Field = indexRE.ReplaceAllString(te.Field, "[$1]") // requirements.0.id -> requirements[0].id
 		}
 	case errors.As(err, &se):
 		body.Field = "body"
