@@ -103,7 +103,13 @@ func (e *Engine) explainHalt(ctx context.Context, c *chain) error {
 	default:
 		return nil
 	}
-	return e.deps.Store.SetWaitingReason(ctx, c.task.ID, reason)
+	if err := e.deps.Store.SetWaitingReason(ctx, c.task.ID, reason); err != nil {
+		return err
+	}
+	if st := status[c.task.Key]; st == model.StatusStuck || st == model.StatusExhausted {
+		return e.yoloRetry(ctx, c)
+	}
+	return nil
 }
 
 // handleInfra deals with an attempt whose newest stage ended in an

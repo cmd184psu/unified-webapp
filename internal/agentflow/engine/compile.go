@@ -131,7 +131,7 @@ func (e *Engine) advanceCompile(ctx context.Context, p store.Project, ef model.E
 	if err != nil {
 		return e.haltCompile(ctx, ef, last, err.Error())
 	}
-	_, err = e.deps.Store.SaveQueue(ctx, "compiler:"+last.Model, ef.ID, defs)
+	q, err := e.deps.Store.SaveQueue(ctx, "compiler:"+last.Model, ef.ID, defs)
 	if err != nil {
 		if errors.Is(err, store.ErrConflict) {
 			return e.haltCompile(ctx, ef, last, err.Error())
@@ -143,6 +143,10 @@ func (e *Engine) advanceCompile(ctx context.Context, p store.Project, ef model.E
 		return err
 	}
 	e.setPlanWaiting(ef.ID, "")
+	if e.yoloGate(ctx, ef.ID) {
+		_, err := e.approveQueue(ctx, yoloActor, ef.ID, q.Hash)
+		return err
+	}
 	return nil
 }
 
@@ -182,6 +186,11 @@ func (e *Engine) approveQueue(ctx context.Context, actor string, effort int64, e
 	}
 	if err := e.healQueueStatus(ctx, ef); err != nil {
 		return q, err
+	}
+	if e.yoloGate(ctx, effort) {
+		if err := e.runs.Start(ctx, yoloActor, ef.Project); err != nil {
+			return q, err
+		}
 	}
 	return q, nil
 }

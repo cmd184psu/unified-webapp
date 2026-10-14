@@ -546,6 +546,9 @@ func (e *Engine) finishPlan(ctx context.Context, ef model.Effort, approved bool)
 		return err
 	}
 	e.setPlanWaiting(ef.ID, "")
+	if approved && e.yoloGate(ctx, ef.ID) {
+		return e.approvePlanLocked(ctx, yoloActor, ef.ID)
+	}
 	return nil
 }
 
@@ -591,6 +594,9 @@ func (e *Engine) approvePlanLocked(ctx context.Context, actor string, effort int
 	approved := model.EffortPlanApproved
 	if _, err := s.UpdateEffort(ctx, actor, effort, store.EffortPatch{Status: &approved}); err != nil {
 		return err
+	}
+	if e.yoloGate(ctx, effort) {
+		return e.startCompileLocked(ctx, yoloActor, effort)
 	}
 	return nil
 }
