@@ -144,7 +144,22 @@ export interface CandidateInput {
   model: string;
 }
 
+/** GlobalSettings is GET /api/settings: the limits (numbers or Go durations), opencode_path, verify_slots, backend_cooldown. */
 export type Settings = Record<string, string | number>;
+
+/** ModelStat is one row of GET /api/stats/models (MB8); pass_rate is 0..1 over passed + failed stages. */
+export interface ModelStat {
+  model: string;
+  backend: string;
+  role: string;
+  stages: number;
+  passed: number;
+  failed: number;
+  infra: number;
+  pass_rate: number;
+  attempts_total: number;
+  attempts_passed: number;
+}
 
 export interface DocView<T = unknown> {
   revision: number;
@@ -354,6 +369,8 @@ export const api = {
     send('DELETE', `${proj(slug)}/candidates/${enc(role)}`),
   settings: (): Promise<Settings> => get('/api/settings'),
   putSettings: (s: Record<string, string | number>, o?: FetchOptions): Promise<Settings> => send('PUT', '/api/settings', s, o),
+
+  modelStats: (): Promise<ModelStat[]> => get('/api/stats/models'),
 
   // Efforts
   efforts: (slug: string): Promise<EffortView[]> => get(`${proj(slug)}/efforts`),

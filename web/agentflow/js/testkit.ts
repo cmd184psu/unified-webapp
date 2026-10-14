@@ -51,6 +51,11 @@ export class FakeEl {
   parentNode: FakeEl | null = null;
   childNodes: Array<FakeEl | FakeText> = [];
   attrs = new Map<string, string>();
+  /** form-control state: views read and write these like the DOM properties. */
+  value = '';
+  checked = false;
+  disabled = false;
+  files: unknown[] = [];
   listeners = new Map<string, Array<(ev: unknown) => void>>();
   constructor(public tagName: string) {}
 
@@ -67,9 +72,21 @@ export class FakeEl {
     this.childNodes.push(c);
     return c;
   }
+  removeChild<T extends FakeEl | FakeText>(c: T): T {
+    this.childNodes = this.childNodes.filter((x) => x !== c);
+    c.parentNode = null;
+    return c;
+  }
   setAttribute(k: string, v: string): void {
     this.attrs.set(k, v);
   }
+  removeAttribute(k: string): void {
+    this.attrs.delete(k);
+  }
+  hasAttribute(k: string): boolean {
+    return this.attrs.has(k);
+  }
+  focus(): void {}
   getAttribute(k: string): string | null {
     return this.attrs.has(k) ? (this.attrs.get(k) as string) : null;
   }
@@ -78,7 +95,11 @@ export class FakeEl {
   }
   /** click dispatches a click and returns once the listeners ran. */
   click(): void {
-    for (const fn of this.listeners.get('click') ?? []) fn({ preventDefault() {} });
+    this.fire('click');
+  }
+  /** fire dispatches an event of any type to the listeners. */
+  fire(type: string, ev: Record<string, unknown> = {}): void {
+    for (const fn of this.listeners.get(type) ?? []) fn({ preventDefault() {}, target: this, ...ev });
   }
 }
 
@@ -107,3 +128,25 @@ export function findAll(root: FakeEl, pred: (e: FakeEl) => boolean): FakeEl[] {
 }
 
 export const asEl = (e: FakeEl): HTMLElement => e as unknown as HTMLElement;
+
+/** byField finds the form control or field row marked data-field=name. */
+export function byField(root: FakeEl, name: string): FakeEl {
+  const found = findAll(root, (e) => e.getAttribute('data-field') === name);
+  if (found.length === 0) throw new Error(`no element with data-field=${name}`);
+  return found[0];
+}
+
+/** byAttr lists the elements whose attribute equals value. */
+export function byAttr(root: FakeEl, attr: string, value: string): FakeEl[] {
+  return findAll(root, (e) => e.getAttribute(attr) === value);
+}
+
+/** button finds a button by its exact label. */
+export function button(root: FakeEl, label: string): FakeEl {
+  const found = findAll(root, (e) => e.tagName === 'BUTTON' && e.textContent === label);
+  if (found.length === 0) throw new Error(`no button "${label}"`);
+  return found[0];
+}
+
+/** flush lets pending promise callbacks and timers run. */
+export const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));

@@ -1,0 +1,445 @@
+// backends.ts — the Backends tab: add, edit, retire and re-enable backends at
+// runtime (BK1), the ordered model candidates per role with the paid badge and
+// explicit opt-in (MB4, MB5), per-project limit overrides where blank means
+// inherit (CF2) and the per-model pass rates (MB8). With no backend the tab
+// prompts to add one (CI1). A 400 shows next to the field it names, and the
+// warnings a retire returns are shown in full (SV3). Every server- or
+// user-supplied string reaches the page through h(), so it is text.
+
+import { showToast } from '@shared';
+import {
+  api, type Backend, type BackendInput, type BackendResult, type Candidate, type CandidateInput, type ModelStat, type ProjectView,
+} from './api.js';
+import { h, replace } from './dom.js';
+import { subscribe, type AgentflowEvent } from './events.js';
+import { FormErrors, badge, button, checkbox, fieldRow, section, selectInput, textInput } from './forms.js';
+import { LIMIT_FIELDS } from './settings.js';
+
+export const ROLES = ['worker', 'reviewer', 'planner', 'architect', 'critic', 'compiler'];
+export const API_TYPES: Array<[string, string]> = [
+  ['ollama', 'ollama'],
+  ['openai_compatible', 'openai compatible'],
+  ['anthropic', 'anthropic'],
+];
+
+export type BackendsDeps = Pick<
+  typeof api,
+  'backends' | 'createBackend' | 'patchBackend' | 'retireBackend' | 'enableBackend' | 'candidates' | 'putCandidates' |
+  'projects' | 'limits' | 'putLimits' | 'settings' | 'modelStats'
+> & { notify(message: string): void };
+
+export const defaultBackendsDeps = (): BackendsDeps => ({
+  backends: api.backends,
+  createBackend: api.createBackend,
+  patchBackend: api.patchBackend,
+  retireBackend: api.retireBackend,
+  enableBackend: api.enableBackend,
+  candidates: api.candidates,
+  putCandidates: api.putCandidates,
+  projects: api.projects,
+  limits: api.limits,
+  putLimits: api.putLimits,
+  settings: api.settings,
+  modelStats: api.modelStats,
+  notify: (m) => void showToast(m, 'success'),
+});
+
+/** CandRow is one candidate being edited; optIn is the explicit consent a paid one needs (MB5). */
+export interface CandRow {
+  backend: string;
+  model: string;
+  optIn: boolean;
+}
+
+/** isPaid is true when the backend or the model is paid. */
+export function isPaid(backends: Backend[], backend: string, model: string): boolean {
+  const b = backends.find((x) => x.name === backend);
+  return !!b && (b.paid || b.models.some((m) => m.model === model && m.paid));
+}
+
+/** unconsented lists the paid candidates whose opt-in box is not ticked. */
+export function unconsented(backends: Backend[], rows: CandRow[]): CandRow[] {
+  return rows.filter((r) => isPaid(backends, r.backend, r.model) && !r.optIn);
+}
+
+/** lastForRoles lists the roles whose only candidates are on the named backend. */
+export function lastForRoles(cands: Candidate[], name: string): string[] {
+  return ROLES.filter((role) => {
+    const mine = cands.filter((c) => c.scope === 'global' && c.role === role);
+    return mine.length > 0 && mine.every((c) => c.backend === name);
+  });
+}
+
+const pct = (r: number): string => `${Math.round(r * 100)}%`;
+
+export class BackendsView {
+  backends: Backend[] = [];
+  candidates: Candidate[] = [];
+  projects: ProjectView[] = [];
+  stats: ModelStat[] = [];
+  globals: Record<string, string | number> = {};
+  warnings: string[] = [];
+  private loaded = false;
+  private adding = false;
+  private editing = new Set<string>();
+  private retiring = new Set<string>();
+  /** role -> rows being edited; present only while the role has unsaved edits. */
+  private drafts = new Map<string, CandRow[]>();
+  private limitsSlug = '';
+  private limitsHost = h('div');
+  private off: (() => void) | null = null;
+
+  constructor(private host: HTMLElement, private deps: BackendsDeps) {}
+
+  mount(): () => void {
+    this.off = subscribe((ev: AgentflowEvent) => {
+      if (['backend.update', 'candidates.update', 'state.changed', 'settings.update'].includes(ev.type) && this.idle()) void this.load();
+    });
+    void this.load();
+    return () => {
+      this.off?.();
+      this.off = null;
+    };
+  }
+
+  private idle(): boolean {
+    return !this.adding && this.editing.size === 0 && this.retiring.size === 0 && this.drafts.size === 0;
+  }
+
+  async load(): Promise<void> {
+    try {
+      const [backends, candidates, projects, stats, globals] = await Promise.all([
+        this.deps.backends(), this.deps.candidates(), this.deps.projects(), this.deps.modelStats(), this.deps.settings(),
+      ]);
+      Object.assign(this, { backends, candidates, projects, stats, globals, loaded: true });
+    } catch {
+      // apiFetch already told the user; keep what is shown.
+      if (!this.loaded) return;
+    }
+    if (!this.projects.some((p) => p.slug === this.limitsSlug)) this.limitsSlug = this.projects[0]?.slug ?? '';
+    this.render();
+    void this.drawLimits();
+  }
+
+  // ─── Backend list ────────────────────────────────────────────────────────
+
+  private showResult(res: BackendResult, what: string): void {
+    this.warnings = res.warnings ?? [];
+    this.deps.notify(what);
+  }
+
+  private backendForm(initial: Backend | null, done: () => void): HTMLElement {
+    const errors = new FormErrors();
+    const name = textInput('name', initial?.name ?? '', { readOnly: !!initial });
+    const host = textInput('host', initial?.host ?? '', { placeholder: 'http://host:port' });
+    const apiType = selectInput('api_type', API_TYPES, initial?.api_type ?? 'ollama');
+    const slots = textInput('slots', String(initial?.slots ?? 1), { type: 'number' });
+    const hosted = checkbox('hosted', initial?.hosted ?? false);
+    const paid = checkbox('paid', initial?.paid ?? false);
+    const models: Array<{ model: HTMLInputElement; paid: HTMLInputElement }> = [];
+    const modelList = h('div', { class: 'wizard-list' });
+    const addModel = (m = '', p = false): void => {
+      const row = { model: textInput('model', m, { placeholder: 'model name' }), paid: checkbox('model_paid', p) };
+      models.push(row);
+      const el = h('div', { class: 'inline-row', attrs: { 'data-role': 'model-row' } },
+        row.model,
+        h('label', { class: 'inline-check' }, row.paid, 'paid'),
+        button('Remove', () => {
+          models.splice(models.indexOf(row), 1);
+          el.parentNode?.removeChild(el);
+        }));
+      modelList.appendChild(el);
+    };
+    for (const m of initial?.models ?? []) addModel(m.model, m.paid);
+    if (!initial) addModel();
+    const modelsField = errors.add('models', fieldRow('Models', modelList,
+      'The models this backend serves; mark a paid model so it is only used when listed for a role'));
+    modelsField.el.appendChild(button('Add model', () => addModel(), { field: 'add-model' }));
+
+    const save = async (): Promise<void> => {
+      errors.clear();
+      const body: BackendInput = {
+        name: name.value.trim(),
+        host: host.value.trim(),
+        api_type: apiType.value,
+        hosted: hosted.checked,
+        paid: paid.checked,
+        slots: Number(slots.value),
+        models: models.map((m) => ({ model: m.model.value.trim(), paid: m.paid.checked })).filter((m) => m.model !== ''),
+      };
+      try {
+        const res = initial
+          ? await this.deps.patchBackend(initial.name, body, { quiet: true })
+          : await this.deps.createBackend(body, { quiet: true });
+        this.showResult(res, initial ? `Saved ${body.name}` : `Added ${body.name}`);
+      } catch (err) {
+        errors.show(err);
+        return;
+      }
+      done();
+    };
+    return h('div', { class: 'profile-card', attrs: { 'data-form': initial ? 'edit' : 'add' } },
+      h('div', { class: 'profile-fields' },
+        errors.add('name', fieldRow('Name', name, 'Letters, digits and dashes; fixed once added')).el,
+        errors.add('host', fieldRow('Host', host, 'An http or https URL')).el,
+        errors.add('api_type', fieldRow('API type', apiType)).el,
+        errors.add('slots', fieldRow('Slots', slots, 'Stages this backend runs at once')).el,
+        errors.add('hosted', fieldRow('Hosted', hosted, 'A remote service rather than your own machine')).el,
+        errors.add('paid', fieldRow('Paid', paid, 'Every model on it costs money')).el),
+      modelsField.el,
+      errors.general,
+      h('div', { class: 'settings-actions' },
+        button('Cancel', done, { field: 'cancel' }),
+        button(initial ? 'Save backend' : 'Add backend', () => void save(), { primary: true, field: 'save' })));
+  }
+
+  private retirePanel(b: Backend): HTMLElement {
+    const cancel = checkbox('cancel_running', false);
+    const last = lastForRoles(this.candidates, b.name);
+    const onlyActive = this.backends.filter((x) => !x.retired && x.name !== b.name).length === 0;
+    const notes = [
+      ...(onlyActive ? ['This is the only active backend: after it is retired nothing can be dispatched until you add or enable one.'] : []),
+      ...(last.length ? [`It is the only backend listed for: ${last.join(', ')}. Those roles will wait with no eligible backend.`] : []),
+    ];
+    const run = async (): Promise<void> => {
+      let res: BackendResult;
+      try {
+        res = await this.deps.retireBackend(b.name, cancel.checked);
+      } catch {
+        return;
+      }
+      this.retiring.delete(b.name);
+      this.showResult(res, `Retired ${b.name}`);
+      await this.load();
+    };
+    return h('div', { class: 'warn-box', attrs: { 'data-panel': 'retire' } },
+      ...notes.map((n) => h('p', { text: n })),
+      h('label', { class: 'inline-check' }, cancel, 'Cancel stages running on this backend now'),
+      h('div', { class: 'row-actions' },
+        button('Retire backend', () => void run(), { primary: true, field: 'confirm-retire' }),
+        button('Keep it', () => { this.retiring.delete(b.name); this.render(); }, { field: 'cancel-retire' })));
+  }
+
+  private card(b: Backend): HTMLElement {
+    if (this.editing.has(b.name)) {
+      return this.backendForm(b, () => { this.editing.delete(b.name); void this.load(); });
+    }
+    const models = b.models.map((m) => h('span', { class: 'row-actions' }, m.model, m.paid ? badge('paid') : null));
+    return h('div', { class: 'profile-card', attrs: { 'data-backend': b.name } },
+      h('div', { class: 'profile-header' },
+        h('span', { class: 'row-actions' },
+          h('strong', { text: b.name }),
+          b.paid ? badge('paid') : null,
+          b.hosted ? badge('hosted', 'muted') : null,
+          b.retired ? badge('retired', 'warn') : null,
+          b.down_until ? badge('unreachable', 'warn') : null),
+        h('div', { class: 'profile-actions' },
+          button('Edit', () => { this.editing.add(b.name); this.render(); }, { field: 'edit' }),
+          b.retired
+            ? button('Enable', () => void this.enable(b.name), { field: 'enable' })
+            : button('Retire', () => { this.retiring.add(b.name); this.render(); }, { field: 'retire' }))),
+      h('div', { class: 'profile-fields' },
+        h('div', {}, h('label', { text: 'Host' }), h('span', { text: b.host })),
+        h('div', {}, h('label', { text: 'API type' }), h('span', { text: b.api_type })),
+        h('div', {}, h('label', { text: 'Slots' }), h('span', { text: String(b.slots) })),
+        h('div', {}, h('label', { text: 'Models' }), ...models)),
+      this.retiring.has(b.name) ? this.retirePanel(b) : null);
+  }
+
+  private async enable(name: string): Promise<void> {
+    try {
+      this.showResult(await this.deps.enableBackend(name), `Enabled ${name}`);
+    } catch {
+      return;
+    }
+    await this.load();
+  }
+
+  private backendsSection(): HTMLElement {
+    const addForm = this.adding ? this.backendForm(null, () => { this.adding = false; void this.load(); }) : null;
+    const addBtn = button('Add backend', () => { this.adding = true; this.render(); }, { primary: true, field: 'add-backend' });
+    if (this.backends.length === 0) {
+      return h('div', { class: 'plan-empty', attrs: { 'data-role': 'no-backends' } },
+        h('h3', { text: 'No backends configured' }),
+        h('p', { text: 'Nothing is dispatched until you add a backend that serves at least one model.' }),
+        this.adding ? addForm : addBtn);
+    }
+    return section('Backends',
+      h('div', { class: 'section-header' }, h('span', { class: 'field-hint', text: `${this.backends.length} configured` }), this.adding ? null : addBtn),
+      addForm,
+      h('div', { class: 'profile-list' }, ...this.backends.map((b) => this.card(b))));
+  }
+
+  // ─── Role candidates ─────────────────────────────────────────────────────
+
+  private serverRows(role: string): CandRow[] {
+    return this.candidates
+      .filter((c) => c.scope === 'global' && c.role === role)
+      .sort((a, b) => a.position - b.position)
+      .map((c) => ({ backend: c.backend, model: c.model, optIn: true }));
+  }
+
+  private roleEditor(role: string): HTMLElement {
+    const host = h('div', { class: 'profile-card', attrs: { 'data-role-editor': role } });
+    const errors = new FormErrors();
+    const rows = (): CandRow[] => this.drafts.get(role) ?? this.serverRows(role);
+    const edit = (fn: (r: CandRow[]) => CandRow[]): void => {
+      this.drafts.set(role, fn(rows().map((r) => ({ ...r }))));
+      draw();
+    };
+    const active = this.backends.filter((b) => !b.retired);
+    const pickBackend = selectInput('backend', active.map((b) => [b.name, b.name] as [string, string]), active[0]?.name ?? '');
+    const pickModel = selectInput('model', [], '');
+    const fillModels = (): void => {
+      const b = active.find((x) => x.name === pickBackend.value);
+      replace(pickModel, ...(b?.models ?? []).map((m) => h('option', { text: m.model + (m.paid ? ' (paid)' : ''), attrs: { value: m.model } })));
+      pickModel.value = b?.models[0]?.model ?? '';
+    };
+    pickBackend.addEventListener('change', fillModels);
+    fillModels();
+
+    const save = async (): Promise<void> => {
+      errors.clear();
+      const missing = unconsented(this.backends, rows());
+      if (missing.length > 0) {
+        errors.show(new Error(`Tick the paid opt-in for: ${missing.map((m) => `${m.backend}/${m.model}`).join(', ')}`));
+        return;
+      }
+      const body: CandidateInput[] = rows().map((r) => ({ backend: r.backend, model: r.model }));
+      try {
+        this.candidates = await this.deps.putCandidates(role, body, { quiet: true });
+      } catch (err) {
+        errors.show(err);
+        return;
+      }
+      this.drafts.delete(role);
+      this.deps.notify(`Saved ${role} candidates`);
+      draw();
+    };
+
+    const draw = (): void => {
+      const list = rows();
+      replace(host,
+        h('div', { class: 'profile-header' }, h('strong', { text: role }),
+          this.drafts.has(role) ? badge('unsaved', 'warn') : null),
+        h('div', { class: 'wizard-list' }, ...(list.length === 0
+          ? [h('p', { class: 'field-hint', text: 'No candidates: this role has no eligible backend and its stages wait.' })]
+          : list.map((r, i) => {
+            const paid = isPaid(this.backends, r.backend, r.model);
+            const optIn = checkbox('opt_in', r.optIn);
+            optIn.addEventListener('change', () => edit((all) => { all[i].optIn = optIn.checked; return all; }));
+            return h('div', { class: 'inline-row', attrs: { 'data-candidate': `${role}:${i}` } },
+              h('span', { text: `${i + 1}. ${r.backend} / ${r.model}` }),
+              paid ? badge('paid') : null,
+              paid ? h('label', { class: 'inline-check' }, optIn, 'I opt in to paid use') : null,
+              button('Up', () => edit((all) => { if (i > 0) [all[i - 1], all[i]] = [all[i], all[i - 1]]; return all; }), { field: 'up' }),
+              button('Down', () => edit((all) => { if (i < all.length - 1) [all[i + 1], all[i]] = [all[i], all[i + 1]]; return all; }), { field: 'down' }),
+              button('Remove', () => edit((all) => all.filter((_, j) => j !== i)), { field: 'remove' }));
+          }))),
+        h('div', { class: 'inline-row' }, pickBackend, pickModel,
+          button('Add candidate', () => {
+            if (pickBackend.value && pickModel.value) {
+              edit((all) => [...all, { backend: pickBackend.value, model: pickModel.value, optIn: !isPaid(this.backends, pickBackend.value, pickModel.value) }]);
+            }
+          }, { field: 'add-candidate' })),
+        errors.general,
+        h('div', { class: 'settings-actions' },
+          button('Discard', () => { this.drafts.delete(role); draw(); }, { field: 'discard' }),
+          button('Save order', () => void save(), { primary: true, field: 'save-candidates' })));
+    };
+    draw();
+    return host;
+  }
+
+  private candidatesSection(): HTMLElement {
+    return section('Role candidates',
+      h('p', { class: 'field-hint', text: 'Tried in order; a paid model is used only when you list it here and opt in.' }),
+      h('div', { class: 'profile-list' }, ...ROLES.map((r) => this.roleEditor(r))));
+  }
+
+  // ─── Per-project limits ──────────────────────────────────────────────────
+
+  private async drawLimits(): Promise<void> {
+    const slug = this.limitsSlug;
+    if (!slug) {
+      replace(this.limitsHost, h('p', { class: 'field-hint', text: 'No projects yet.' }));
+      return;
+    }
+    let overrides: Record<string, string>;
+    try {
+      overrides = (await this.deps.limits(slug)).limits ?? {};
+    } catch {
+      return;
+    }
+    const errors = new FormErrors();
+    const inputs = new Map<string, HTMLInputElement>();
+    const rows = LIMIT_FIELDS.map((f) => {
+      const input = textInput(f.key, overrides[f.key] ?? '', { placeholder: `inherit (${String(this.globals[f.key] ?? '')})` });
+      inputs.set(f.key, input);
+      return errors.add(f.key, fieldRow(f.label, input, 'Blank uses the global value')).el;
+    });
+    const save = async (): Promise<void> => {
+      errors.clear();
+      const body: Record<string, string> = {};
+      for (const [k, input] of inputs) body[k] = input.value.trim();
+      try {
+        await this.deps.putLimits(slug, body, { quiet: true });
+      } catch (err) {
+        errors.show(err);
+        return;
+      }
+      this.deps.notify(`Saved limits for ${slug}`);
+    };
+    replace(this.limitsHost,
+      h('div', { class: 'profile-fields', attrs: { 'data-role': 'project-limits' } }, ...rows),
+      errors.general,
+      h('div', { class: 'settings-actions' }, button('Save project limits', () => void save(), { primary: true, field: 'save-limits' })));
+  }
+
+  private limitsSection(): HTMLElement {
+    const pick = selectInput('project', this.projects.map((p) => [p.slug, p.slug] as [string, string]), this.limitsSlug);
+    pick.addEventListener('change', () => { this.limitsSlug = pick.value; void this.drawLimits(); });
+    return section('Project limits', fieldRow('Project', pick).el, this.limitsHost);
+  }
+
+  // ─── Pass rates ──────────────────────────────────────────────────────────
+
+  private statsSection(): HTMLElement {
+    if (this.stats.length === 0) {
+      return section('Model pass rates', h('p', { class: 'field-hint', text: 'No finished stages yet.' }));
+    }
+    const head = ['Model', 'Backend', 'Role', 'Stages', 'Passed', 'Failed', 'Infra', 'Pass rate', 'Worker attempts passed'];
+    return section('Model pass rates',
+      h('table', { class: 'stats-table', attrs: { 'data-role': 'pass-rates' } },
+        h('thead', {}, h('tr', {}, ...head.map((t) => h('th', { text: t })))),
+        h('tbody', {}, ...this.stats.map((s) => h('tr', {},
+          h('td', { text: s.model }), h('td', { text: s.backend }), h('td', { text: s.role }),
+          h('td', { text: String(s.stages) }), h('td', { text: String(s.passed) }), h('td', { text: String(s.failed) }),
+          h('td', { text: String(s.infra) }), h('td', { text: s.passed + s.failed > 0 ? pct(s.pass_rate) : '-' }),
+          h('td', { text: s.role === 'worker' ? `${s.attempts_passed}/${s.attempts_total}` : '-' }))))));
+  }
+
+  // ─── Whole view ──────────────────────────────────────────────────────────
+
+  render(): void {
+    if (!this.loaded) {
+      replace(this.host, h('p', { class: 'field-hint', text: 'Loading backends…' }));
+      return;
+    }
+    const warn = this.warnings.length === 0 ? null : h('div', { class: 'warn-box', attrs: { 'data-role': 'warnings' } },
+      ...this.warnings.map((w) => h('p', { text: w })),
+      button('Dismiss', () => { this.warnings = []; this.render(); }, { field: 'dismiss' }));
+    replace(this.host,
+      h('div', { class: 'settings-host' },
+        warn,
+        this.backendsSection(),
+        this.backends.length > 0 ? this.candidatesSection() : null,
+        this.projects.length > 0 || this.backends.length > 0 ? this.limitsSection() : null,
+        this.statsSection()));
+  }
+}
+
+/** mountBackends is the Backends tab's mount. */
+export function mountBackends(host: HTMLElement): () => void {
+  return new BackendsView(host, defaultBackendsDeps()).mount();
+}

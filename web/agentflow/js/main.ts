@@ -1,13 +1,15 @@
 // main.ts — app shell for AgentFlow: the top-level tabs (Overview, Project,
 // Settings, Backends), hamburger, logout and the event stream. Views mount into
-// #panel-view and return a dispose; E2 replaces the Settings and Backends
-// placeholders, E3-E5 fill the Project sub-tabs (see projecttab.ts).
+// #panel-view and return a dispose; the Project tab's sub-tabs are in
+// projecttab.ts.
 
 import { ThemeManager, HamburgerMenu } from '@shared';
 import { h, replace } from './dom.js';
 import { startEvents } from './events.js';
 import { Overview, defaultDeps } from './overview.js';
+import { mountBackends } from './backends.js';
 import { mountProjectTab } from './projecttab.js';
+import { mountSettings } from './settings.js';
 
 const themes = new ThemeManager({ module: 'agentflow', default: 'dark' });
 themes.apply();
@@ -20,10 +22,6 @@ interface Tab {
   mount: (host: HTMLElement, arg: string) => void | (() => void);
 }
 
-function placeholder(story: string): Tab['mount'] {
-  return (host) => replace(host, h('p', { class: 'field-hint', text: `coming in ${story}` }));
-}
-
 const TABS: Tab[] = [
   {
     id: 'overview',
@@ -31,8 +29,8 @@ const TABS: Tab[] = [
     mount: (host) => new Overview(host, defaultDeps((slug) => showTab('project', slug))).mount(),
   },
   { id: 'project', label: 'Project', mount: mountProjectTab },
-  { id: 'settings', label: 'Settings', mount: placeholder('E2') },
-  { id: 'backends', label: 'Backends', mount: placeholder('E2') },
+  { id: 'settings', label: 'Settings', mount: mountSettings },
+  { id: 'backends', label: 'Backends', mount: mountBackends },
 ];
 
 let active: TabId = 'overview';

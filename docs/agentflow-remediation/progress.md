@@ -122,6 +122,7 @@ Known limits: `opencode_path` setting needs a restart; project create defaults m
 - 2026-10-13 — D3: API for efforts/docs/plan/queue/tasks/run control + SSE event bus and stage stream.
 - 2026-10-13 — D4: export (json|md) and strict FRD import; markdown rendering escapes input.
 - 2026-10-13 — E1: frontend shell (apiFetch, esc/h, SSE client, overview) + innerhtml-escape and import-cycles gates; old UI files removed.
+- 2026-10-13 — E2: Settings + Backends views, /api/stats/models.
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`

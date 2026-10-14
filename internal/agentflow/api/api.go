@@ -89,6 +89,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	a.registerProjects(mux)
 	a.registerBackends(mux)
 	a.registerSettings(mux)
+	a.registerStats(mux)
 	a.registerEfforts(mux)
 	a.registerDocs(mux)
 	a.registerQueue(mux)
