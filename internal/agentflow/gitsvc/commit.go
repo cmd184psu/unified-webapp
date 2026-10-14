@@ -125,7 +125,7 @@ func (s *Service) CommitAll(ctx context.Context, repo, wt, msg string, tr Traile
 		return "", err
 	}
 	pre := []string{"--git-dir=" + admin, "--work-tree=" + resolve(wt)}
-	if _, err := s.runIn(ctx, repo, wt, pre, nil, "add", "-A"); err != nil {
+	if _, err := s.runIn(ctx, repo, wt, pre, nil, addAllArgs...); err != nil {
 		return "", err
 	}
 	raw, err := s.runIn(ctx, repo, wt, pre, nil, "diff", "--cached", "--raw", "--no-ext-diff", "--no-textconv", "--no-renames")
@@ -153,3 +153,17 @@ func (s *Service) CommitAll(ctx context.Context, repo, wt, msg string, tr Traile
 	}
 	return s.runIn(ctx, repo, wt, pre, nil, "rev-parse", "--verify", "HEAD")
 }
+
+// toolStateDirs are directories tools write into a worktree (orchestrator and
+// agent state). They are never part of a project, so the engine never stages
+// them.
+var toolStateDirs = []string{".omc", ".claude"}
+
+// addAllArgs stages everything except toolStateDirs.
+var addAllArgs = func() []string {
+	args := []string{"add", "-A", "--", "."}
+	for _, d := range toolStateDirs {
+		args = append(args, ":(exclude)"+d)
+	}
+	return args
+}()

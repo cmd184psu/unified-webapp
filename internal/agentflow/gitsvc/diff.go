@@ -35,7 +35,7 @@ func (s *Service) Diff(ctx context.Context, repo, wt, base string, maxBytes int)
 	run := func(args ...string) (string, error) {
 		return s.exec(ctx, h.Args, env, wt, pre, nil, args)
 	}
-	for _, args := range [][]string{{"read-tree", commit}, {"add", "-A"}} {
+	for _, args := range [][]string{{"read-tree", commit}, addAllArgs} {
 		if _, err := run(args...); err != nil {
 			return "", err
 		}

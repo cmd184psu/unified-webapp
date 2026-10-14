@@ -474,3 +474,25 @@ func TestMergeWrongIntegrationBranch(t *testing.T) {
 		t.Fatal("wrong integration branch must be refused")
 	}
 }
+
+// Tool state (.omc, .claude) written into a worktree is never committed.
+func TestCommitAllNeverStagesToolState(t *testing.T) {
+	repo := newRepo(t)
+	s, _ := newSvc(t)
+	head, _ := s.Head(bg, repo)
+	wt, err := s.AddTaskWorktree(bg, repo, "p", "e", "t1", head.Commit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, wt.Path, "real.txt", "work\n")
+	write(t, wt.Path, ".omc/state/x.json", "{}\n")
+	write(t, wt.Path, ".claude/settings.local.json", "{}\n")
+	sha, err := s.CommitAll(bg, repo, wt.Path, "w", Trailers{Task: "t1", Attempt: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := tgit(t, repo, "show", "--name-only", "--format=", sha)
+	if !strings.Contains(files, "real.txt") || strings.Contains(files, ".omc") || strings.Contains(files, ".claude") {
+		t.Fatalf("commit files = %q", files)
+	}
+}

@@ -160,6 +160,10 @@ func changedFiles(ctx context.Context, gitDir, root, base string) (files, nested
 	}
 	seen := map[string]bool{}
 	add := func(p string) {
+		// Tool state (.omc, .claude) is never part of the project.
+		if top, _, _ := strings.Cut(p, "/"); top == ".omc" || top == ".claude" {
+			return
+		}
 		if p != "" && !seen[p] {
 			seen[p] = true
 			files = append(files, p)
