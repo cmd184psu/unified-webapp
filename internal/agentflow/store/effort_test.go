@@ -208,6 +208,9 @@ func TestQueueSaveRejectsVerifyAndHashes(t *testing.T) { // AC-V1, QA2
 	if err != nil || q.Status != model.QueueDraft || q.Hash != model.QueueHash(q.Tasks) || len(q.Tasks) != 3 {
 		t.Fatalf("queue = %+v, %v", q, err)
 	}
+	if q.Tasks[0].DependsOn == nil || q.Tasks[0].Acceptance == nil || q.Tasks[0].FilesTouched == nil {
+		t.Fatalf("a task list is nil and would serialize as JSON null: %+v", q.Tasks[0])
+	}
 	if _, err := s.ApprovedQueueHash(ctx, e.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("draft queue has an approved hash: %v", err)
 	}

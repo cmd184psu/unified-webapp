@@ -26,9 +26,9 @@ export const defaultQueueDeps = (): QueueDeps => ({
   notify: (m) => void showToast(m, 'success'),
 });
 
-const list = (title: string, items: string[]): HTMLElement =>
+const list = (title: string, items: string[] | null | undefined): HTMLElement =>
   h('div', { class: 'detail-section' }, h('h4', { text: title }),
-    items.length ? h('ul', { class: 'plan-review-notes' }, ...items.map((i) => h('li', { text: i }))) : h('p', { class: 'field-hint', text: 'none' }));
+    items?.length ? h('ul', { class: 'plan-review-notes' }, ...items.map((i) => h('li', { text: i }))) : h('p', { class: 'field-hint', text: 'none' }));
 
 export class QueueApproval {
   efforts: EffortView[] = [];

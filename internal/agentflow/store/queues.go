@@ -91,6 +91,14 @@ func loadTasks(ctx context.Context, q querier, queue int64) ([]model.Task, error
 	}
 	rows.Close()
 	for i := range out {
+		// JSON lists are always arrays, never null, so clients can read .length.
+		out[i].DependsOn = []string{}
+		if out[i].Acceptance == nil {
+			out[i].Acceptance = []string{}
+		}
+		if out[i].FilesTouched == nil {
+			out[i].FilesTouched = []string{}
+		}
 		drows, err := q.QueryContext(ctx, `SELECT t.task_key FROM task_deps d JOIN tasks t ON t.id = d.depends_on
 			WHERE d.task = ? ORDER BY t.task_key`, out[i].ID)
 		if err != nil {

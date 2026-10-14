@@ -282,9 +282,9 @@ export class Board {
     const title = textInput('title', d.title);
     const phase = textInput('phase', d.phase);
     const prompt = textArea('prompt', d.prompt, 6);
-    const acceptance = textArea('acceptance', d.acceptance.join('\n'), 3);
-    const files = textArea('files_touched', d.files_touched.join('\n'), 3);
-    const deps = textInput('depends_on', d.depends_on.join(', '));
+    const acceptance = textArea('acceptance', (d.acceptance ?? []).join('\n'), 3);
+    const files = textArea('files_touched', (d.files_touched ?? []).join('\n'), 3);
+    const deps = textInput('depends_on', (d.depends_on ?? []).join(', '));
     const split = (s: string): string[] => s.split('\n').map((l) => l.trim()).filter((l) => l !== '');
     const e = this.errors;
     return h('div', { attrs: { 'data-role': 'edit-task' } },
@@ -361,9 +361,9 @@ export class Board {
         this.editing ? this.editForm(d) : null,
         d.halted && !this.editing ? this.actions(d) : null,
         block('Prompt', mono(d.prompt)),
-        d.acceptance.length ? block('Acceptance', bullets(d.acceptance)) : null,
-        d.files_touched.length ? block('Files touched', mono(d.files_touched.join('\n'))) : null,
-        d.depends_on.length ? block('Depends on', h('p', { text: d.depends_on.join(', ') })) : null,
+        d.acceptance?.length ? block('Acceptance', bullets(d.acceptance ?? [])) : null,
+        d.files_touched?.length ? block('Files touched', mono((d.files_touched ?? []).join('\n'))) : null,
+        d.depends_on?.length ? block('Depends on', h('p', { text: (d.depends_on ?? []).join(', ') })) : null,
         block('Attempts', ...(d.attempt_list.length ? d.attempt_list.map((a) => this.attempt(a)) : [h('p', { class: 'field-hint', text: 'No attempts yet.' })])),
         d.progress.length ? block('Progress log', bullets(d.progress)) : null));
   }

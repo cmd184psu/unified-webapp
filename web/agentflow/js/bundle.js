@@ -1738,9 +1738,9 @@ var Board = class {
     const title = textInput("title", d.title);
     const phase = textInput("phase", d.phase);
     const prompt = textArea("prompt", d.prompt, 6);
-    const acceptance = textArea("acceptance", d.acceptance.join("\n"), 3);
-    const files = textArea("files_touched", d.files_touched.join("\n"), 3);
-    const deps = textInput("depends_on", d.depends_on.join(", "));
+    const acceptance = textArea("acceptance", (d.acceptance ?? []).join("\n"), 3);
+    const files = textArea("files_touched", (d.files_touched ?? []).join("\n"), 3);
+    const deps = textInput("depends_on", (d.depends_on ?? []).join(", "));
     const split = (s) => s.split("\n").map((l) => l.trim()).filter((l) => l !== "");
     const e = this.errors;
     return h(
@@ -1867,9 +1867,9 @@ var Board = class {
         this.editing ? this.editForm(d) : null,
         d.halted && !this.editing ? this.actions(d) : null,
         block("Prompt", mono(d.prompt)),
-        d.acceptance.length ? block("Acceptance", bullets(d.acceptance)) : null,
-        d.files_touched.length ? block("Files touched", mono(d.files_touched.join("\n"))) : null,
-        d.depends_on.length ? block("Depends on", h("p", { text: d.depends_on.join(", ") })) : null,
+        d.acceptance?.length ? block("Acceptance", bullets(d.acceptance ?? [])) : null,
+        d.files_touched?.length ? block("Files touched", mono((d.files_touched ?? []).join("\n"))) : null,
+        d.depends_on?.length ? block("Depends on", h("p", { text: (d.depends_on ?? []).join(", ") })) : null,
         block("Attempts", ...d.attempt_list.length ? d.attempt_list.map((a) => this.attempt(a)) : [h("p", { class: "field-hint", text: "No attempts yet." })]),
         d.progress.length ? block("Progress log", bullets(d.progress)) : null
       )
@@ -2733,7 +2733,7 @@ var list2 = (title, items) => h(
   "div",
   { class: "detail-section" },
   h("h4", { text: title }),
-  items.length ? h("ul", { class: "plan-review-notes" }, ...items.map((i) => h("li", { text: i }))) : h("p", { class: "field-hint", text: "none" })
+  items?.length ? h("ul", { class: "plan-review-notes" }, ...items.map((i) => h("li", { text: i }))) : h("p", { class: "field-hint", text: "none" })
 );
 var QueueApproval = class {
   constructor(host, slug, deps) {
