@@ -65,6 +65,10 @@ export function buildRoleEditor(o: RoleEditorOpts): HTMLElement {
 
   const save = async (): Promise<void> => {
     errors.clear();
+    if (o.rows().length === 0) {
+      errors.show(new Error('Nothing to save yet: pick a backend and model, press Add candidate, then Save order'));
+      return;
+    }
     const missing = unconsented(o.backends, o.rows());
     if (missing.length > 0) {
       errors.show(new Error(`Tick the paid opt-in for: ${missing.map((m) => `${m.backend}/${m.model}`).join(', ')}`));
