@@ -69,6 +69,7 @@ type ProjectView struct {
 	Updated      int64             `json:"updated"`
 	RunState     string            `json:"run_state"`
 	Remembered   string            `json:"remembered_run_state"`
+	StopReason   string            `json:"stop_reason"`
 	Effort       *model.Effort     `json:"effort"`
 	Progress     map[string]int    `json:"progress"`
 	Current      []WorkItem        `json:"current"`
@@ -80,7 +81,8 @@ func (a *API) projectView(ctx context.Context, p store.Project) (ProjectView, er
 		Slug: p.Slug, RepoPath: p.RepoPath, ModelScope: p.ModelScope, FeedbackCmds: p.FeedbackCmds, Limits: p.Limits, Cleanup: p.CleanupEnabled,
 		Created: p.Created.UnixMilli(), Updated: p.Updated.UnixMilli(),
 		RunState: a.deps.Engine.Runs().State(p.Slug), Remembered: model.RunStopped,
-		Progress: map[string]int{}, Current: []WorkItem{},
+		StopReason: a.deps.Engine.Runs().StopReason(p.Slug),
+		Progress:   map[string]int{}, Current: []WorkItem{},
 	}
 	if v.FeedbackCmds == nil {
 		v.FeedbackCmds = []string{}

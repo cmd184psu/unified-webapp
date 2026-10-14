@@ -171,15 +171,22 @@ func (d *dispatcher) pass(ctx context.Context) error {
 		return err
 	}
 	var running []store.Project
+	var errs []error
 	for _, p := range v.snap.Projects {
-		if d.e.runs.State(p.Slug) == model.RunRunning {
-			running = append(running, p)
+		if d.e.runs.State(p.Slug) != model.RunRunning {
+			continue
 		}
+		// A project whose effort has used up its budget is stopped, not run (AT12).
+		if stopped, err := d.e.enforceBudget(ctx, p.Slug); err != nil {
+			errs = append(errs, fmt.Errorf("project %s: budget: %w", p.Slug, err))
+		} else if stopped {
+			continue
+		}
+		running = append(running, p)
 	}
 	sort.Slice(running, func(i, j int) bool { return running[i].Slug < running[j].Slug })
 	start := sort.Search(len(running), func(i int) bool { return running[i].Slug > d.cursor })
 	order := append(slices.Clone(running[start:]), running[:start]...)
-	var errs []error
 	for len(order) > 0 {
 		var next []store.Project
 		for _, p := range order {
@@ -216,6 +223,12 @@ func (e *Engine) dispatchOne(ctx context.Context, v *view, p store.Project) (boo
 	}
 	if err != nil {
 		return false, err
+	}
+	// From 90% of a budget no new task attempt starts; the ones in flight go on (AT12).
+	if b, err := e.budgetGate(ctx, ef); err != nil {
+		return false, err
+	} else if b.NoNewTasks() {
+		return false, nil
 	}
 	tasks, err := s.ListTasks(ctx, ef.ID)
 	if errors.Is(err, store.ErrNotFound) {

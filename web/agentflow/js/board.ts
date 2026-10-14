@@ -10,6 +10,7 @@
 import { confirmDialog, copyText, showToast } from '@shared';
 import { api, ApiError, type Attempt, type EffortView, type Stage, type TaskDef, type TaskDetail, type TaskView } from './api.js';
 import { chooseEffort, effortBar } from './current.js';
+import { budgetBar } from './effort-settings.js';
 import { chip, h, replace, statusKey, type Child } from './dom.js';
 import { subscribe, type AgentflowEvent } from './events.js';
 import { FormErrors, badge, button, checkbox, fieldRow, textArea, textInput } from './forms.js';
@@ -97,6 +98,8 @@ export class Board {
   detail: TaskDetail | null = null;
   /** runState is the LIVE state (project.run_state); the effort's persisted run_state is only a hint. */
   runState = 'stopped';
+  /** stopReason is why the system stopped the run ("budget"), else empty. */
+  stopReason = '';
   gitLines: string[] | null = null;
   private editing = false;
   private detailEl: HTMLElement | null = null;
@@ -131,6 +134,7 @@ export class Board {
     } else if (ev.type === 'project.run_state' && ev.project === this.slug) {
       this.stateSeq++;
       this.runState = ev.state;
+      if (ev.state !== 'stopped') this.stopReason = '';
       this.render();
       void this.refresh();
     } else if ((ev.type === 'effort.update' || ev.type === 'task.update' || ev.type === 'project.update') && ev.project === this.slug) {
@@ -158,8 +162,11 @@ export class Board {
   async refresh(): Promise<void> {
     const seq = this.stateSeq;
     try {
-      const live = (await this.deps.project(this.slug)).run_state;
-      if (seq === this.stateSeq) this.runState = live;
+      const live = await this.deps.project(this.slug);
+      if (seq === this.stateSeq) {
+        this.runState = live.run_state;
+        this.stopReason = live.stop_reason ?? '';
+      }
     } catch {
       // keep the last known live state
     }
@@ -400,6 +407,10 @@ export class Board {
       h('div', { class: 'console-header' },
         h('span', { class: 'pane-title', text: 'Progress' }), bar, h('span', { class: 'progress-pct', text }), chip(this.runState), ef.run_state !== this.runState && ef.run_state === 'running'
           ? h('span', { class: 'field-hint', text: 'was running before restart', attrs: { 'data-role': 'was-running' } }) : null, ...controls),
+      ef.budget ? budgetBar(ef.budget) : null,
+      this.runState === 'stopped' && this.stopReason === 'budget'
+        ? h('div', { class: 'warn-box', attrs: { 'data-role': 'budget-stop' } },
+          h('p', { text: 'The run was stopped because the effort used up its budget. Nothing failed: raise the budget on the FRD tab and start the run again.' })) : null,
       this.gitBox(),
       h('div', { class: 'console-body' },
         h('div', { class: 'console-left' },

@@ -20,6 +20,7 @@ type migration struct {
 //	4  C8  backend_cooldown setting
 //	5  F1  backend_models.max_concurrent
 //	6  F2  stages.role gains 'cleanup' (table rebuild); projects.cleanup_enabled
+//	7  F3  stages.tokens; efforts.budget_tokens, efforts.budget_seconds
 //
 // Later stories append the next integer; they never edit an earlier entry.
 var migrations = []migration{
@@ -29,7 +30,16 @@ var migrations = []migration{
 	{4, migration4SQL},
 	{5, migration5SQL},
 	{6, migration6SQL},
+	{7, migration7SQL},
 }
+
+// migration7SQL (F3) adds the runner-reported token usage of a stage and the
+// per-effort budgets (AT12); 0 budgets mean no limit.
+const migration7SQL = `
+ALTER TABLE stages ADD COLUMN tokens INTEGER NOT NULL DEFAULT 0 CHECK (tokens >= 0);
+ALTER TABLE efforts ADD COLUMN budget_tokens INTEGER NOT NULL DEFAULT 0 CHECK (budget_tokens >= 0);
+ALTER TABLE efforts ADD COLUMN budget_seconds INTEGER NOT NULL DEFAULT 0 CHECK (budget_seconds >= 0);
+`
 
 // rebuildsTables lists the migrations that rebuild a table other tables refer
 // to. SQLite cannot widen a CHECK constraint in place, and dropping the old

@@ -14,7 +14,7 @@ import (
 // JSON: stage artifacts and per-task bookkeeping markers under the data dir.
 // Everything else lives in SQLite (DBS1). Keys are "<slash path>:<function>".
 var stateWriters = map[string]string{
-	"engine/stages.go:modelStage":                 "prompt.md and corrective.md of a stage",
+	"engine/stages.go:modelCall":                  "prompt.md and corrective.md of a stage",
 	"engine/cleanup.go:checkpoint":                "<data>/tasks/<id>/cleanup_checkpoint_<attempt> marker",
 	"engine/merge.go:recordPreMerge":              "pre_merge.json, the merge recovery marker",
 	"engine/attempt.go:prepareAttempt":            "<data>/tasks/<id>/base_commit",

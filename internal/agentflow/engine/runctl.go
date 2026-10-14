@@ -26,6 +26,9 @@ type RunEvent struct {
 	State   string `json:"state"`
 	Action  string `json:"action"`
 	Actor   string `json:"actor"`
+	// Reason is why a stop happened when the system, not a person, stopped the
+	// run ("budget"); empty otherwise.
+	Reason string `json:"reason,omitempty"`
 }
 
 // DispatchGate is what the dispatcher (C5) asks before starting a task
@@ -48,6 +51,8 @@ type ProjectRun struct {
 	State      string `json:"state"`
 	Effort     int64  `json:"effort"`
 	Remembered string `json:"remembered"`
+	// Reason is why the system stopped the run ("budget"), if it did.
+	Reason string `json:"reason,omitempty"`
 }
 
 type runEntry struct {
@@ -55,6 +60,9 @@ type runEntry struct {
 	oneShot bool
 	budget  int
 	pending int // admitted attempts whose first stage is not created yet
+	// reason is why the run was last stopped by the system; cleared when the
+	// run starts again.
+	reason string
 }
 
 // RunControl holds each project's run controller. States live only in memory
@@ -85,6 +93,17 @@ func (r *RunControl) entry(project string) *runEntry {
 	return en
 }
 
+// StopReason is why the project's run was stopped by the system ("budget"), or
+// "" while it runs or after a person stopped it.
+func (r *RunControl) StopReason(project string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if en := r.entry(project); en.state == model.RunStopped {
+		return en.reason
+	}
+	return ""
+}
+
 // State returns the project's run state; unknown projects are stopped.
 func (r *RunControl) State(project string) string {
 	r.mu.Lock()
@@ -100,7 +119,7 @@ func (r *RunControl) List(ctx context.Context) ([]ProjectRun, error) {
 	}
 	out := make([]ProjectRun, 0, len(ps))
 	for _, p := range ps {
-		pr := ProjectRun{Project: p.Slug, State: r.State(p.Slug), Remembered: model.RunStopped}
+		pr := ProjectRun{Project: p.Slug, State: r.State(p.Slug), Remembered: model.RunStopped, Reason: r.StopReason(p.Slug)}
 		if ef, err := r.e.deps.Store.ActiveEffort(ctx, p.Slug); err == nil {
 			pr.Effort, pr.Remembered = ef.ID, ef.RunState
 		} else if !errors.Is(err, store.ErrNotFound) {
@@ -136,11 +155,30 @@ func (r *RunControl) approvedEffort(ctx context.Context, project string) (model.
 // record persists a transition for display, audits it with the actor and
 // publishes it.
 func (r *RunControl) record(ctx context.Context, actor, action, project string, effort int64, state string) error {
+	return r.recordWhy(ctx, actor, action, project, effort, state, "")
+}
+
+func (r *RunControl) recordWhy(ctx context.Context, actor, action, project string, effort int64, state, reason string) error {
+	if reason != "" {
+		action += "." + reason
+	}
 	err := r.e.deps.Store.RecordRunState(context.WithoutCancel(ctx), actor, action, project, effort, state)
 	if f := r.e.deps.PublishRun; f != nil {
-		f(RunEvent{Project: project, Effort: effort, State: state, Action: action, Actor: actor})
+		f(RunEvent{Project: project, Effort: effort, State: state, Action: action, Actor: actor, Reason: reason})
 	}
 	return err
+}
+
+// budgetOpen refuses to start a run on an effort whose budget is used up.
+func (r *RunControl) budgetOpen(ctx context.Context, ef model.Effort) error {
+	b, err := r.e.budgetGate(ctx, ef)
+	if err != nil {
+		return err
+	}
+	if b.Exhausted() {
+		return fmt.Errorf("effort %d has used up its budget: raise it first: %w", ef.ID, store.ErrConflict)
+	}
+	return nil
 }
 
 // Start lets the dispatcher run the project. ErrConflict unless the active
@@ -151,13 +189,16 @@ func (r *RunControl) Start(ctx context.Context, actor, project string) error {
 	if err != nil {
 		return err
 	}
+	if err := r.budgetOpen(ctx, ef); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	en := r.entry(project)
 	if en.state == model.RunRunning && !en.oneShot {
 		r.mu.Unlock()
 		return nil
 	}
-	en.state, en.oneShot, en.budget = model.RunRunning, false, 0
+	en.state, en.oneShot, en.budget, en.reason = model.RunRunning, false, 0, ""
 	r.mu.Unlock()
 	err = r.record(ctx, actor, "run.start", project, ef.ID, model.RunRunning)
 	r.kick()
@@ -171,6 +212,9 @@ func (r *RunControl) RunOne(ctx context.Context, actor, project string) error {
 	if err != nil {
 		return err
 	}
+	if err := r.budgetOpen(ctx, ef); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	en := r.entry(project)
 	if en.state != model.RunStopped && en.state != model.RunPaused {
@@ -178,7 +222,7 @@ func (r *RunControl) RunOne(ctx context.Context, actor, project string) error {
 		r.mu.Unlock()
 		return fmt.Errorf("project %q is %s: %w", project, st, store.ErrConflict)
 	}
-	en.state, en.oneShot, en.budget = model.RunRunning, true, 1
+	en.state, en.oneShot, en.budget, en.reason = model.RunRunning, true, 1, ""
 	r.mu.Unlock()
 	err = r.record(ctx, actor, "run.one", project, ef.ID, model.RunRunning)
 	r.kick()
@@ -338,13 +382,18 @@ func (r *RunControl) settle(ctx context.Context, project string) error {
 // the job context) and closed as infra:cancel, and open attempts are
 // abandoned so they do not count (RC3). Tasks derive ready again.
 func (r *RunControl) Stop(ctx context.Context, actor, project string) error {
+	return r.stop(ctx, actor, project, "")
+}
+
+// stop is Stop with the reason the system stopped the run, if it did.
+func (r *RunControl) stop(ctx context.Context, actor, project, reason string) error {
 	s := r.e.deps.Store
 	if _, err := s.GetProject(ctx, project); err != nil {
 		return err
 	}
 	r.mu.Lock()
 	en := r.entry(project)
-	en.state, en.oneShot, en.budget = model.RunStopped, false, 0
+	en.state, en.oneShot, en.budget, en.reason = model.RunStopped, false, 0, reason
 	r.mu.Unlock()
 	// An Advance that read the previous state may still be submitting; wait
 	// for it so the snapshot below sees its stage. Later passes see stopped.
@@ -354,12 +403,12 @@ func (r *RunControl) Stop(ctx context.Context, actor, project string) error {
 	eff := r.effortID(ctx, project)
 	if eff != 0 {
 		if err := r.cancelInFlight(ctx, eff); err != nil {
-			_ = r.record(ctx, actor, "run.stop", project, eff, model.RunStopped)
+			_ = r.recordWhy(ctx, actor, "run.stop", project, eff, model.RunStopped, reason)
 			return err
 		}
 	}
 	r.kick()
-	return r.record(ctx, actor, "run.stop", project, eff, model.RunStopped)
+	return r.recordWhy(ctx, actor, "run.stop", project, eff, model.RunStopped, reason)
 }
 
 func (r *RunControl) cancelInFlight(ctx context.Context, effort int64) error {

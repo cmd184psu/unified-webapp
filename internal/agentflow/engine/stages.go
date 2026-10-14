@@ -46,6 +46,13 @@ func (e *Engine) runStage(ctx context.Context, rc golane.RunContext, p StagePayl
 			res.Outcome = OutcomeDiscarded
 		}
 	}
+	// Usage lands before the outcome: the dispatcher is kicked after the
+	// outcome and must see it when it checks the effort's budget.
+	if res.Tokens > 0 {
+		if err := e.deps.Store.RecordStageTokens(context.WithoutCancel(ctx), p.Stage, res.Tokens); err != nil {
+			fmt.Fprintf(rc.Log(), "record token usage: %v\n", err)
+		}
+	}
 	// The job context may be done (cancel, brake); the outcome must still land.
 	if err := e.deps.Store.FinishStage(context.WithoutCancel(ctx), p.Stage, res.Outcome, res.Raw, res.Parsed); err != nil && !errors.Is(err, store.ErrConflict) {
 		return nil, fmt.Errorf("stage %d: write outcome %s: %w", p.Stage, res.Outcome, err)
@@ -234,9 +241,19 @@ func (e *Engine) workdir(ctx context.Context, st model.Stage, project string) (s
 	return pr.RepoPath, nil
 }
 
-// modelStage runs a model role: prompt.md, frozen config, the runner with a
-// role timeout, one corrective follow-up, then the stored output (SO2, SO3).
+// modelStage runs a model role and reports the tokens its runner calls used
+// (AT12), whether or not the stage passed.
 func (e *Engine) modelStage(ctx context.Context, rc golane.RunContext, st model.Stage, p StagePayload) StageResult {
+	var tokens int64
+	res := e.modelCall(ctx, rc, st, p, &tokens)
+	res.Tokens = tokens
+	return res
+}
+
+// modelCall runs a model role: prompt.md, frozen config, the runner with a
+// role timeout, one corrective follow-up, then the stored output (SO2, SO3).
+// Each runner call adds its usage to *tokens.
+func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.Stage, p StagePayload, tokens *int64) StageResult {
 	d := e.deps
 	fail := func(err error) StageResult {
 		return StageResult{Outcome: OutcomeInfraCrash, Raw: err.Error(), cause: err}
@@ -298,6 +315,7 @@ func (e *Engine) modelStage(ctx context.Context, rc golane.RunContext, st model.
 			defer cancel()
 		}
 		res, err := d.Runner.Run(cctx, r)
+		*tokens += usageTokens(res.Usage)
 		return res, classifyRun(ctx, st.Role, err), err
 	}
 	failed := func(res runner.Result, outcome string, err error) StageResult {

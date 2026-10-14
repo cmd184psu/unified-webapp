@@ -166,3 +166,25 @@ func TestD4_EffortExportHasQueueAndStatuses(t *testing.T) {
 		}
 	}
 }
+
+// AT12 and RP5: an effort is created with budgets, patched later, and its view
+// carries usage against them; a bad budget names its field.
+func TestAT12_EffortBudgetAndDeliberateRoundTrip(t *testing.T) {
+	e := newEnv(t, envOpt{})
+	e.addProject("p1")
+	ef := decode[EffortView](t, e.ok("POST", "/api/projects/p1/efforts", map[string]any{"title": "x", "budget_tokens": 1000}, http.StatusCreated))
+	if ef.BudgetTokens != 1000 || ef.BudgetSeconds != 0 || ef.Budget == nil || ef.Budget.State != "ok" || ef.Budget.TokenLimit != 1000 {
+		t.Fatalf("created = %+v / %+v", ef, ef.Budget)
+	}
+	base := "/api/projects/p1/efforts/" + itoa(ef.ID)
+	ef = decode[EffortView](t, e.ok("PATCH", base, map[string]any{"budget_seconds": 3600, "deliberate": true}, http.StatusOK))
+	if ef.BudgetTokens != 1000 || ef.BudgetSeconds != 3600 || !ef.Deliberate {
+		t.Fatalf("patched = %+v", ef)
+	}
+	e.field("PATCH", base, map[string]any{"budget_tokens": -1}, "budget_tokens")
+	ef = decode[EffortView](t, e.ok("PATCH", base, map[string]any{"budget_tokens": 0, "budget_seconds": 0}, http.StatusOK))
+	if ef.Budget != nil || !ef.Deliberate {
+		t.Fatalf("limits removed = %+v", ef)
+	}
+	e.ok("PATCH", "/api/projects/other/efforts/"+itoa(ef.ID), map[string]any{}, http.StatusNotFound)
+}

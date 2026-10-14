@@ -14,6 +14,8 @@ type StageResult struct {
 	Outcome string
 	Raw     string
 	Parsed  json.RawMessage
+	// Tokens is what the stage's runner calls used (AT12).
+	Tokens int64
 
 	// cause is the failure behind an infra or timeout outcome; skip marks a
 	// stage somebody else already closed, which is left alone.

@@ -1,9 +1,12 @@
 import { test, run, eq, ok, installFakeDom, FakeEl, asEl, byField, byAttr, allByField, button, flush, findAll } from './testkit';
 import { FrdEditor, commaList, lines, type FrdDeps } from './frd-editor';
 import { Overview, type OverviewDeps } from './overview';
+import { budgetBar, deliberateTriggers } from './effort-settings';
 import { ApiError, type DocView, type EffortView, type FRD, type ProjectView } from './api';
 
 installFakeDom();
+
+const asFakeEl = (e: HTMLElement): FakeEl => e as unknown as FakeEl;
 
 const EVIL = '<img src=x onerror=alert(1)>';
 
@@ -38,6 +41,7 @@ function harness(w: World, over: Partial<FrdDeps> = {}) {
   const deps: FrdDeps = {
     efforts: async () => w.efforts.map((e) => ({ ...e, frd: { latest: w.docs.get(e.id)?.length ?? 0, approved: w.approved.get(e.id) ?? 0 } })),
     createEffort: async (_slug, title, deliberate) => { log.push(`create:${title}:${deliberate}`); const e = effort(w.efforts.length + 1, title); w.efforts.push(e); return e; },
+    patchEffort: async (_s, id, patch) => { log.push(`patch:${id}:${JSON.stringify(patch)}`); return effort(id, 'x', { deliberate: patch.deliberate === true }); },
     frd: async (_s, id) => view(id, w.docs.get(id)?.length ?? 0, true),
     putFRD: async (_s, id, frd) => {
       sent.push(frd);
@@ -193,6 +197,54 @@ test('a failed effort create (one active effort per project) is shown in the for
   await flush();
   ok(findAll(t.host, (e) => e.className === 'field-error' && e.textContent.includes('already has an active effort')).length === 1, 'shown');
   stop();
+});
+
+test('RP5: an FRD that mentions migration suggests deliberate planning; accepting it saves the toggle', async () => {
+  const w = world();
+  w.docs.set(1, [{ doc: { ...FRD0, objective: 'Run the database migration for orders' }, by: 'me' }]);
+  const t = harness(w);
+  const stop = t.ed.mount();
+  await flush();
+  const box = byAttr(t.host, 'data-role', 'deliberate-suggestion');
+  eq(box.length, 1);
+  ok(box[0].textContent.includes('migration'), 'names the matched topic');
+  button(t.host, 'Turn on deliberate planning').click();
+  await flush();
+  eq(t.log.filter((l) => l.startsWith('patch:')), ['patch:1:{"deliberate":true,"budget_tokens":0,"budget_seconds":0}']);
+  stop();
+});
+
+test('RP5: an FRD without such topics shows no suggestion; the keyword match is simple', async () => {
+  const t = harness(world());
+  const stop = t.ed.mount();
+  await flush();
+  eq(byAttr(t.host, 'data-role', 'deliberate-suggestion').length, 0);
+  for (const [text, hit] of [
+    ['Add OAuth authentication', true], ['Data MIGRATION to v2', true], ['store PII safely', true], ['personal data export', true],
+    ['rotate a password', true], ['add a button', false], ['author attribution', false], ['rename the file', false],
+  ] as Array<[string, boolean]>) eq([text, deliberateTriggers(text).length > 0], [text, hit]);
+  stop();
+});
+
+test('AT12: the effort settings send the token budget and the time budget in seconds', async () => {
+  const t = harness(world());
+  const stop = t.ed.mount();
+  await flush();
+  allByField(t.host, 'budget_tokens')[0].value = '250000';
+  allByField(t.host, 'budget_minutes')[0].value = '90';
+  button(t.host, 'Save settings').click();
+  await flush();
+  eq(t.log.filter((l) => l.startsWith('patch:')), ['patch:1:{"deliberate":false,"budget_tokens":250000,"budget_seconds":5400}']);
+  stop();
+});
+
+test('AT12: the budget bar shows usage and what 90% and 100% mean', () => {
+  const warn = asFakeEl(budgetBar({ tokens: 9500, seconds: 0, token_limit: 10000, seconds_limit: 0, fraction: 0.95, state: 'no_new_tasks' }));
+  ok(warn.textContent.includes('95%') && warn.textContent.includes('tokens 9.5k/10k') && warn.textContent.includes('no new task starts'), warn.textContent);
+  eq(findAll(warn, (e) => e.className === 'progress-bar progress-warn').length, 1);
+  const over = asFakeEl(budgetBar({ tokens: 10, seconds: 7300, token_limit: 0, seconds_limit: 7200, fraction: 1.01, state: 'exhausted' }));
+  ok(over.textContent.includes('100%') && over.textContent.includes('time 2h/2h') && over.textContent.includes('run is stopped'), over.textContent);
+  eq(findAll(over, (e) => e.className === 'progress-bar progress-over').length, 1);
 });
 
 void run('agentflow-frd');

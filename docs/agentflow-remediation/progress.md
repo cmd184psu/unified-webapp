@@ -131,6 +131,7 @@ Known limits: `opencode_path` setting needs a restart; project create defaults m
 - 2026-10-14 — Phase E review: one Sonnet review of E1-E5 (REJECT on two Board bugs: run controls driven by the persisted effort state instead of the live project state; unsaved edits wiped by SSE re-renders); fixed in one follow-up commit with tests (plus projecttab dispose race, cached YOLO invariants, quiet git-commands failure). Not fixed (review notes 2, 5, 6): FRD editor discards unsaved text on effort switch; EventSource retries forever on 401; queue Approve button silent during reload. Full gate, web-verify and test:web clean at the Phase E boundary.
 - 2026-10-13 — F1: per-model concurrency hints (max_concurrent, migration v5).
 - 2026-10-13 — F2: optional cleanup stage with checkpoint+rollback (migration v6 rebuilds stages).
+- 2026-10-13 — F3: token/time budgets (migration v7, stages.tokens, 90% hold / 100% stop with reason budget).
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`

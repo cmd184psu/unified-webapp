@@ -14,12 +14,12 @@ import (
 
 func nowMS() int64 { return time.Now().UnixMilli() }
 
-const effortCols = `id, project, title, status, run_state, integration_branch, base_commit, yolo, deliberate, created, updated`
+const effortCols = `id, project, title, status, run_state, integration_branch, base_commit, yolo, deliberate, budget_tokens, budget_seconds, created, updated`
 
 func scanEffort(r interface{ Scan(...any) error }) (model.Effort, error) {
 	var e model.Effort
 	var yolo, delib int
-	err := r.Scan(&e.ID, &e.Project, &e.Title, &e.Status, &e.RunState, &e.IntegrationBranch, &e.BaseCommit, &yolo, &delib, &e.Created, &e.Updated)
+	err := r.Scan(&e.ID, &e.Project, &e.Title, &e.Status, &e.RunState, &e.IntegrationBranch, &e.BaseCommit, &yolo, &delib, &e.BudgetTokens, &e.BudgetSeconds, &e.Created, &e.Updated)
 	e.YOLO, e.Deliberate = yolo == 1, delib == 1
 	return e, err
 }
@@ -118,6 +118,8 @@ type EffortPatch struct {
 	BaseCommit        *string
 	YOLO              *bool
 	Deliberate        *bool
+	BudgetTokens      *int64
+	BudgetSeconds     *int64
 }
 
 // UpdateEffort applies patch. Status and run state must be known values, and a
@@ -128,6 +130,12 @@ func (s *Store) UpdateEffort(ctx context.Context, actor string, id int64, p Effo
 	}
 	if p.RunState != nil && !slices.Contains(model.RunStates, *p.RunState) {
 		return model.Effort{}, Invalid("run_state", "unknown run state")
+	}
+	if p.BudgetTokens != nil && *p.BudgetTokens < 0 {
+		return model.Effort{}, Invalid("budget_tokens", "must be 0 (no limit) or more")
+	}
+	if p.BudgetSeconds != nil && *p.BudgetSeconds < 0 {
+		return model.Effort{}, Invalid("budget_seconds", "must be 0 (no limit) or more")
 	}
 	var out model.Effort
 	err := s.WithTx(ctx, func(tx *sql.Tx) error {
@@ -156,12 +164,19 @@ func (s *Store) UpdateEffort(ctx context.Context, actor string, id int64, p Effo
 		if p.Deliberate != nil {
 			e.Deliberate = *p.Deliberate
 		}
+		if p.BudgetTokens != nil {
+			e.BudgetTokens = *p.BudgetTokens
+		}
+		if p.BudgetSeconds != nil {
+			e.BudgetSeconds = *p.BudgetSeconds
+		}
 		if _, err := tx.ExecContext(ctx, `UPDATE efforts SET status = ?, run_state = ?, integration_branch = ?,
-			base_commit = ?, yolo = ?, deliberate = ?, updated = ? WHERE id = ?`,
-			e.Status, e.RunState, e.IntegrationBranch, e.BaseCommit, b2i(e.YOLO), b2i(e.Deliberate), nowMS(), id); err != nil {
+			base_commit = ?, yolo = ?, deliberate = ?, budget_tokens = ?, budget_seconds = ?, updated = ? WHERE id = ?`,
+			e.Status, e.RunState, e.IntegrationBranch, e.BaseCommit, b2i(e.YOLO), b2i(e.Deliberate), e.BudgetTokens, e.BudgetSeconds, nowMS(), id); err != nil {
 			return err
 		}
-		if _, err := AppendEvent(tx, actor, "effort.update", "effort", fmt.Sprint(id), map[string]any{"status": e.Status, "run_state": e.RunState, "yolo": e.YOLO}); err != nil {
+		if _, err := AppendEvent(tx, actor, "effort.update", "effort", fmt.Sprint(id), map[string]any{"status": e.Status, "run_state": e.RunState, "yolo": e.YOLO,
+			"deliberate": e.Deliberate, "budget_tokens": e.BudgetTokens, "budget_seconds": e.BudgetSeconds}); err != nil {
 			return err
 		}
 		out, err = requireEffort(ctx, tx, id)

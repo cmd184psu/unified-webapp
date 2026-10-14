@@ -24,12 +24,12 @@ type StageSpec struct {
 	PromptRef string
 }
 
-const stageCols = `id, COALESCE(attempt, 0), COALESCE(effort, 0), role, backend, model, lane_job_id, queue_hash, state, outcome, raw_output, parsed_json, prompt_path, started, finished`
+const stageCols = `id, COALESCE(attempt, 0), COALESCE(effort, 0), role, backend, model, lane_job_id, queue_hash, state, outcome, raw_output, parsed_json, prompt_path, started, finished, tokens`
 
 func scanStage(r interface{ Scan(...any) error }) (model.Stage, error) {
 	var st model.Stage
 	var parsed string
-	err := r.Scan(&st.ID, &st.Attempt, &st.Effort, &st.Role, &st.Backend, &st.Model, &st.LaneJobID, &st.QueueHash, &st.State, &st.Outcome, &st.RawOutput, &parsed, &st.PromptRef, &st.Started, &st.Finished)
+	err := r.Scan(&st.ID, &st.Attempt, &st.Effort, &st.Role, &st.Backend, &st.Model, &st.LaneJobID, &st.QueueHash, &st.State, &st.Outcome, &st.RawOutput, &parsed, &st.PromptRef, &st.Started, &st.Finished, &st.Tokens)
 	if parsed != "" {
 		st.Parsed = json.RawMessage(parsed)
 	}

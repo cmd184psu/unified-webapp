@@ -20,8 +20,30 @@ export interface Effort {
   base_commit: string;
   yolo: boolean;
   deliberate: boolean;
+  /** Token and stage-time budgets (AT12); 0 or absent means no limit. */
+  budget_tokens?: number;
+  budget_seconds?: number;
   created: number;
   updated: number;
+}
+
+/** An effort's usage against its budgets; state is ok, no_new_tasks (from 90%) or exhausted (100%). */
+export interface BudgetView {
+  tokens: number;
+  seconds: number;
+  token_limit: number;
+  seconds_limit: number;
+  fraction: number;
+  state: 'ok' | 'no_new_tasks' | 'exhausted';
+}
+
+export interface EffortBudgetInput {
+  budget_tokens?: number;
+  budget_seconds?: number;
+}
+
+export interface EffortPatch extends EffortBudgetInput {
+  deliberate?: boolean;
 }
 
 export interface DocInfo {
@@ -39,6 +61,7 @@ export interface EffortView extends Effort {
   frd: DocInfo;
   plan: DocInfo;
   queue: QueueInfo | null;
+  budget?: BudgetView | null;
 }
 
 /** The stage a running task is in right now (PJ5). */
@@ -65,6 +88,8 @@ export interface ProjectView {
   updated: number;
   run_state: string;
   remembered_run_state: string;
+  /** Why the system stopped the run ("budget"), else empty. */
+  stop_reason?: string;
   effort: Effort | null;
   progress: Record<string, number>;
   current: WorkItem[];
@@ -444,8 +469,10 @@ export const api = {
   // Efforts
   efforts: (slug: string): Promise<EffortView[]> => get(`${proj(slug)}/efforts`),
   effort: (slug: string, id: number): Promise<EffortView> => get(eff(slug, id)),
-  createEffort: (slug: string, title: string, deliberate: boolean, o?: FetchOptions): Promise<EffortView> =>
-    send('POST', `${proj(slug)}/efforts`, { title, deliberate }, o),
+  createEffort: (slug: string, title: string, deliberate: boolean, o?: FetchOptions, budget?: EffortBudgetInput): Promise<EffortView> =>
+    send('POST', `${proj(slug)}/efforts`, { title, deliberate, ...budget }, o),
+  patchEffort: (slug: string, id: number, patch: EffortPatch, o?: FetchOptions): Promise<EffortView> =>
+    send('PATCH', eff(slug, id), patch, o),
   importFRD: (slug: string, frdJSON: string, o?: FetchOptions): Promise<EffortView> =>
     send('POST', `${proj(slug)}/efforts/import`, frdJSON, o),
   abandonEffort: (slug: string, id: number): Promise<EffortView> => send('POST', `${eff(slug, id)}/abandon`),

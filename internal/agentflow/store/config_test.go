@@ -817,3 +817,46 @@ func TestAT11_ProjectCleanupFlagRoundTrips(t *testing.T) {
 		t.Fatal("flag not cleared")
 	}
 }
+
+// F3: EffortUsage sums tokens and stage seconds over the effort's own stages
+// and those of its attempts; a running stage counts up to now.
+func TestAT12_EffortUsageSumsTokensAndSeconds(t *testing.T) {
+	s, _ := openTemp(t)
+	if err := s.CreateProject(ctx, "t", Project{Slug: "p", RepoPath: mkRepo(t), ModelScope: "local"}); err != nil {
+		t.Fatal(err)
+	}
+	ef, err := s.CreateEffort(ctx, "t", "p", "e", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO queues (effort, revision, hash, status) VALUES (1, 1, 'h', 'approved')`,
+		`INSERT INTO tasks (queue, task_key, title, prompt, acceptance_json, files_touched_json) VALUES (1, 'T1', 't', 'p', '[]', '[]')`,
+		`INSERT INTO attempts (task, n, kind, started) VALUES (1, 1, 'normal', 1)`,
+		`INSERT INTO stages (attempt, role, state, started, finished, tokens) VALUES (1, 'worker', 'done', 1000, 11000, 300)`,
+		`INSERT INTO stages (effort, role, state, started, finished, tokens) VALUES (1, 'planner', 'done', 20000, 25000, 200)`,
+		`INSERT INTO stages (attempt, role, state, started) VALUES (1, 'reviewer', 'running', 30000)`,
+		`INSERT INTO stages (attempt, role, state) VALUES (1, 'verify', 'queued')`,
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	tokens, seconds, err := s.EffortUsage(ctx, ef.ID, 34000)
+	if err != nil || tokens != 500 || seconds != 19 { // 10 + 5 + 4 running
+		t.Fatalf("usage = %d tokens, %d s (%v), want 500 and 19", tokens, seconds, err)
+	}
+	if err := s.RecordStageTokens(ctx, 1, 400); err != nil {
+		t.Fatal(err)
+	}
+	if tokens, _, _ = s.EffortUsage(ctx, ef.ID, 34000); tokens != 600 {
+		t.Fatalf("tokens after rewrite = %d, want 600", tokens)
+	}
+	if err := s.RecordStageTokens(ctx, 99, 1); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown stage = %v", err)
+	}
+	neg := int64(-1)
+	if _, err := s.UpdateEffort(ctx, "t", ef.ID, EffortPatch{BudgetSeconds: &neg}); err == nil {
+		t.Fatal("negative budget accepted")
+	}
+}

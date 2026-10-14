@@ -7,17 +7,19 @@
 import { alertDialog, showToast } from '@shared';
 import { api, ApiError, type DocView, type EffortView, type FRD, type FRDAC, type FRDDecision, type FRDGroup, type FRDRequirement } from './api.js';
 import { chooseEffort, effortBar, isFinished, rememberEffort } from './current.js';
+import { effortSettings } from './effort-settings.js';
 import { chip, h, replace } from './dom.js';
 import { subscribe, type AgentflowEvent } from './events.js';
 import { FormErrors, RowsEditor, badge, button, checkbox, fieldRow, section, selectInput, textArea, textInput } from './forms.js';
 
-export type FrdDeps = Pick<typeof api, 'efforts' | 'createEffort' | 'frd' | 'putFRD' | 'frdRevisions' | 'frdRevision' | 'approveFRD'> & {
+export type FrdDeps = Pick<typeof api, 'efforts' | 'createEffort' | 'patchEffort' | 'frd' | 'putFRD' | 'frdRevisions' | 'frdRevision' | 'approveFRD'> & {
   notify(message: string): void;
 };
 
 export const defaultFrdDeps = (): FrdDeps => ({
   efforts: api.efforts,
   createEffort: api.createEffort,
+  patchEffort: api.patchEffort,
   frd: api.frd,
   putFRD: api.putFRD,
   frdRevisions: api.frdRevisions,
@@ -197,10 +199,13 @@ export class FrdEditor {
     this.render();
   }
 
-  private async create(title: string, deliberate: boolean): Promise<void> {
+  private async create(title: string, deliberate: boolean, tokens: string, minutes: string): Promise<void> {
     this.createErrors.clear();
     try {
-      const ef = await this.deps.createEffort(this.slug, title.trim(), deliberate, { quiet: true });
+      const ef = await this.deps.createEffort(this.slug, title.trim(), deliberate, { quiet: true }, {
+        budget_tokens: Math.max(0, Math.round(Number(tokens) || 0)),
+        budget_seconds: Math.max(0, Math.round((Number(minutes) || 0) * 60)),
+      });
       rememberEffort(this.slug, ef.id);
     } catch (err) {
       this.createErrors.show(err);
@@ -257,12 +262,16 @@ export class FrdEditor {
   private newEffortForm(): HTMLElement {
     const title = textInput('effort_title', '', { placeholder: 'What this effort delivers' });
     const deliberate = checkbox('deliberate', false);
+    const tokens = textInput('budget_tokens', '', { type: 'number', placeholder: 'no limit' });
+    const minutes = textInput('budget_minutes', '', { type: 'number', placeholder: 'no limit' });
     this.createErrors = new FormErrors();
     return section('New effort',
       this.createErrors.add('title', fieldRow('Title', title)).el,
-      fieldRow('Deliberate planning', deliberate, 'Adds a pre-mortem and test plan to the planner prompt').el,
+      fieldRow('Deliberate planning', deliberate, 'Adds a pre-mortem and test plan to the planner prompt; after the FRD is written you are told when it mentions auth, migration or personal data').el,
+      this.createErrors.add('budget_tokens', fieldRow('Token budget', tokens, 'Optional; blank is no limit')).el,
+      this.createErrors.add('budget_seconds', fieldRow('Time budget (minutes)', minutes, 'Optional; blank is no limit')).el,
       this.createErrors.general,
-      h('div', { class: 'settings-actions' }, button('Create effort', () => void this.create(title.value, deliberate.checked), { primary: true, field: 'create-effort' })));
+      h('div', { class: 'settings-actions' }, button('Create effort', () => void this.create(title.value, deliberate.checked, tokens.value, minutes.value), { primary: true, field: 'create-effort' })));
   }
 
   private list(): HTMLElement {
@@ -313,6 +322,7 @@ export class FrdEditor {
         this.efforts.length ? effortBar(this.slug, this.efforts, ef, (id) => { this.current = this.efforts.find((e) => e.id === id); void this.loadDoc(); }) : null,
         this.efforts.length ? section('FRDs', this.list()) : h('div', { class: 'plan-empty' }, h('h3', { text: 'No efforts yet' }), h('p', { text: 'An effort is one FRD, plan and queue. Create the first one below.' })),
         editor,
+        ef && !isFinished(ef) ? effortSettings(ef, this.form ? JSON.stringify(this.form.read()) : '', this.deps, () => void this.load()) : null,
         ef ? this.revisionList() : null,
         this.newEffortForm()));
   }

@@ -94,8 +94,12 @@ type Effort struct {
 	BaseCommit        string `json:"base_commit"`
 	YOLO              bool   `json:"yolo"`
 	Deliberate        bool   `json:"deliberate"`
-	Created           int64  `json:"created"`
-	Updated           int64  `json:"updated"`
+	// BudgetTokens and BudgetSeconds cap the effort's runner tokens and stage
+	// run time (AT12); 0 means no limit.
+	BudgetTokens  int64 `json:"budget_tokens"`
+	BudgetSeconds int64 `json:"budget_seconds"`
+	Created       int64 `json:"created"`
+	Updated       int64 `json:"updated"`
 }
 
 // Doc is one immutable revision of an effort's FRD, plan or review.
@@ -180,6 +184,9 @@ type Stage struct {
 	PromptRef string          `json:"prompt_path"`
 	Started   int64           `json:"started"`
 	Finished  int64           `json:"finished"`
+	// Tokens is the runner-reported token usage of the stage (AT12); 0 for
+	// engine stages and for runners that report none.
+	Tokens int64 `json:"tokens"`
 }
 
 // VerifyReport is the engine's deterministic verification of an attempt.

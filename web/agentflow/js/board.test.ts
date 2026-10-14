@@ -427,4 +427,24 @@ test('counts and the dynamic status classes', () => {
   eq(statusKey('running'), 'in-progress');
 });
 
+test('AT12: the board shows the budget bar, and a budget stop is explained as not a failure', async () => {
+  const w = mixed();
+  w.effort = effort({ budget: { tokens: 9500, seconds: 0, token_limit: 10000, seconds_limit: 0, fraction: 0.95, state: 'no_new_tasks' } });
+  w.live = 'stopped';
+  const t = harness(w, { project: async () => ({ run_state: 'stopped', stop_reason: 'budget' }) as never });
+  const stop = t.board.mount();
+  await flush();
+  eq(byAttr(t.host, 'data-role', 'budget').length, 1);
+  ok(t.host.textContent.includes('tokens 9.5k/10k'), 'usage shown');
+  eq(byAttr(t.host, 'data-role', 'budget-stop').length, 1);
+  ok(t.host.textContent.includes('Nothing failed'), 'says nothing failed');
+  stop();
+  const plain = harness(mixed());
+  const stop2 = plain.board.mount();
+  await flush();
+  eq(byAttr(plain.host, 'data-role', 'budget').length, 0);
+  eq(byAttr(plain.host, 'data-role', 'budget-stop').length, 0);
+  stop2();
+});
+
 void run('agentflow-board');

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"cmd184psu/unified-webapp/internal/agentflow/engine"
 	"cmd184psu/unified-webapp/internal/agentflow/model"
 	"cmd184psu/unified-webapp/internal/agentflow/store"
 )
@@ -13,6 +14,7 @@ func (a *API) registerEfforts(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/projects/{slug}/efforts", a.listEfforts)
 	mux.HandleFunc("POST /api/projects/{slug}/efforts", a.createEffort)
 	mux.HandleFunc("GET /api/projects/{slug}/efforts/{id}", a.getEffort)
+	mux.HandleFunc("PATCH /api/projects/{slug}/efforts/{id}", a.patchEffort)
 }
 
 // DocInfo says which revisions of a document exist: the latest, and the
@@ -29,12 +31,23 @@ type QueueInfo struct {
 	Status   string `json:"status"`
 }
 
-// EffortView is an effort with the state of its documents and queue.
+// BudgetView is an effort's usage against its token and time budgets (AT12).
+// State is ok, no_new_tasks (from 90%: in-flight work continues, nothing new
+// starts) or exhausted (from 100%: the run is stopped).
+type BudgetView struct {
+	engine.Budget
+	Fraction float64 `json:"fraction"`
+	State    string  `json:"state"`
+}
+
+// EffortView is an effort with the state of its documents and queue. Budget
+// is set only for an effort that has a budget.
 type EffortView struct {
 	model.Effort
-	FRD   DocInfo    `json:"frd"`
-	Plan  DocInfo    `json:"plan"`
-	Queue *QueueInfo `json:"queue"`
+	FRD    DocInfo     `json:"frd"`
+	Plan   DocInfo     `json:"plan"`
+	Queue  *QueueInfo  `json:"queue"`
+	Budget *BudgetView `json:"budget"`
 }
 
 func (a *API) docInfo(ctx context.Context, effort int64, kind string) (DocInfo, error) {
@@ -64,6 +77,20 @@ func (a *API) effortView(ctx context.Context, ef model.Effort) (EffortView, erro
 	}
 	if v.Plan, err = a.docInfo(ctx, ef.ID, model.DocPlan); err != nil {
 		return v, err
+	}
+	if ef.BudgetTokens > 0 || ef.BudgetSeconds > 0 {
+		b, err := a.deps.Engine.EffortBudget(ctx, ef)
+		if err != nil {
+			return v, err
+		}
+		bv := BudgetView{Budget: b, Fraction: b.Fraction(), State: "ok"}
+		switch {
+		case b.Exhausted():
+			bv.State = "exhausted"
+		case b.NoNewTasks():
+			bv.State = "no_new_tasks"
+		}
+		v.Budget = &bv
 	}
 	switch q, err := a.deps.Store.GetQueue(ctx, ef.ID); {
 	case err == nil:
@@ -133,8 +160,10 @@ func (a *API) listEfforts(w http.ResponseWriter, r *http.Request) {
 func (a *API) createEffort(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	var body struct {
-		Title      string `json:"title"`
-		Deliberate bool   `json:"deliberate"`
+		Title         string `json:"title"`
+		Deliberate    bool   `json:"deliberate"`
+		BudgetTokens  *int64 `json:"budget_tokens"`
+		BudgetSeconds *int64 `json:"budget_seconds"`
 	}
 	if !decodeBody(w, r, &body, false) {
 		return
@@ -143,6 +172,13 @@ func (a *API) createEffort(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, err)
 		return
+	}
+	if body.BudgetTokens != nil || body.BudgetSeconds != nil {
+		if _, err := a.deps.Store.UpdateEffort(r.Context(), actorOf(r), ef.ID,
+			store.EffortPatch{BudgetTokens: body.BudgetTokens, BudgetSeconds: body.BudgetSeconds}); err != nil {
+			writeErr(w, err)
+			return
+		}
 	}
 	a.emit("effort.update", map[string]any{"project": slug, "effort": ef.ID})
 	a.respondEffort(w, r, ef.ID, http.StatusCreated)
@@ -153,5 +189,30 @@ func (a *API) getEffort(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	a.respondEffort(w, r, ef.ID, http.StatusOK)
+}
+
+// patchEffort changes the settings of an active effort: the deliberate planning
+// mode (RP5) and the token and time budgets (AT12). Absent fields stay as they
+// are; a budget of 0 removes the limit.
+func (a *API) patchEffort(w http.ResponseWriter, r *http.Request) {
+	ef, ok := a.loadEffort(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Deliberate    *bool  `json:"deliberate"`
+		BudgetTokens  *int64 `json:"budget_tokens"`
+		BudgetSeconds *int64 `json:"budget_seconds"`
+	}
+	if !decodeBody(w, r, &body, false) {
+		return
+	}
+	if _, err := a.deps.Store.UpdateEffort(r.Context(), actorOf(r), ef.ID,
+		store.EffortPatch{Deliberate: body.Deliberate, BudgetTokens: body.BudgetTokens, BudgetSeconds: body.BudgetSeconds}); err != nil {
+		writeErr(w, err)
+		return
+	}
+	a.emit("effort.update", map[string]any{"project": ef.Project, "effort": ef.ID})
 	a.respondEffort(w, r, ef.ID, http.StatusOK)
 }

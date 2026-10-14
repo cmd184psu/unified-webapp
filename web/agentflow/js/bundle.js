@@ -174,7 +174,8 @@ var api = {
   // Efforts
   efforts: (slug) => get(`${proj(slug)}/efforts`),
   effort: (slug, id) => get(eff(slug, id)),
-  createEffort: (slug, title, deliberate, o) => send("POST", `${proj(slug)}/efforts`, { title, deliberate }, o),
+  createEffort: (slug, title, deliberate, o, budget) => send("POST", `${proj(slug)}/efforts`, { title, deliberate, ...budget }, o),
+  patchEffort: (slug, id, patch, o) => send("PATCH", eff(slug, id), patch, o),
   importFRD: (slug, frdJSON, o) => send("POST", `${proj(slug)}/efforts/import`, frdJSON, o),
   abandonEffort: (slug, id) => send("POST", `${eff(slug, id)}/abandon`),
   setYOLO: (slug, id, on, confirm) => send("POST", `${eff(slug, id)}/yolo`, { on, confirm }),
@@ -1276,6 +1277,103 @@ function effortBar(slug, efforts, current, onPick, yolo) {
   );
 }
 
+// web/agentflow/js/effort-settings.ts
+var DELIBERATE_PATTERNS = [
+  ["auth", /\b(oauth|auth(n|z|entication|enticate\w*|orization|orize\w*|orisation)?)\b/i],
+  ["login", /\blog-?in\b/i],
+  ["password", /\bpasswords?\b/i],
+  ["credentials", /\bcredentials?\b/i],
+  ["migration", /\bmigrat\w+/i],
+  ["PII", /\bpii\b|\bpersonal(ly)?[ -](identifiable )?(data|information)\b/i],
+  ["GDPR", /\bgdpr\b/i],
+  ["encryption", /\bencrypt\w*/i],
+  ["payment", /\bpayments?\b/i]
+];
+function deliberateTriggers(text) {
+  return DELIBERATE_PATTERNS.filter(([, re]) => re.test(text)).map(([name]) => name);
+}
+function formatTokens(n) {
+  if (n >= 1e6) return `${Number((n / 1e6).toFixed(1))}M`;
+  if (n >= 1e3) return `${Number((n / 1e3).toFixed(1))}k`;
+  return String(n);
+}
+function formatSeconds(s) {
+  if (s >= 3600) return `${Number((s / 3600).toFixed(1))}h`;
+  if (s >= 60) return `${Math.round(s / 60)}m`;
+  return `${s}s`;
+}
+function budgetText(b) {
+  const parts = [];
+  if (b.token_limit > 0) parts.push(`tokens ${formatTokens(b.tokens)}/${formatTokens(b.token_limit)}`);
+  if (b.seconds_limit > 0) parts.push(`time ${formatSeconds(b.seconds)}/${formatSeconds(b.seconds_limit)}`);
+  return parts.join(" \xB7 ");
+}
+function budgetBar(b) {
+  const pct2 = Math.min(100, Math.round(b.fraction * 100));
+  const cls = b.state === "exhausted" ? " progress-over" : b.state === "no_new_tasks" ? " progress-warn" : "";
+  const note = b.state === "exhausted" ? "budget used up: the run is stopped" : b.state === "no_new_tasks" ? "over 90%: no new task starts, running ones finish" : "";
+  return h(
+    "div",
+    { class: "console-header", attrs: { "data-role": "budget" } },
+    h("span", { class: "pane-title", text: "Budget" }),
+    h("div", { class: "progress-bar-wrap" }, h("div", { class: "progress-bar" + cls, attrs: { style: `width: ${pct2}%` } })),
+    h("span", { class: "progress-pct", text: `${pct2}% \u2014 ${budgetText(b)}` }),
+    note ? badge(note, b.state === "exhausted" ? "warn" : "muted") : null
+  );
+}
+function effortSettings(ef, frdText, deps, onSaved) {
+  const errors = new FormErrors();
+  const deliberate = checkbox("effort_deliberate", ef.deliberate);
+  const tokens = textInput("budget_tokens", ef.budget_tokens ? String(ef.budget_tokens) : "", { type: "number", placeholder: "no limit" });
+  const minutes = textInput("budget_minutes", ef.budget_seconds ? String(Number((ef.budget_seconds / 60).toFixed(2))) : "", { type: "number", placeholder: "no limit" });
+  const triggers = ef.deliberate ? [] : deliberateTriggers(frdText);
+  const suggestion = triggers.length === 0 ? null : h(
+    "div",
+    { class: "warn-box", attrs: { "data-role": "deliberate-suggestion" } },
+    h("p", { text: `This FRD mentions ${triggers.join(", ")}. Deliberate planning adds a pre-mortem and a fuller test plan, which suits this kind of work.` }),
+    button("Turn on deliberate planning", () => {
+      deliberate.checked = true;
+      void save();
+    }, { field: "accept-suggestion" })
+  );
+  const save = async () => {
+    errors.clear();
+    try {
+      await deps.patchEffort(ef.project, ef.id, {
+        deliberate: deliberate.checked,
+        budget_tokens: Math.max(0, Math.round(Number(tokens.value) || 0)),
+        budget_seconds: Math.max(0, Math.round((Number(minutes.value) || 0) * 60))
+      }, { quiet: true });
+    } catch (err) {
+      errors.show(err);
+      return;
+    }
+    deps.notify("Saved effort settings");
+    onSaved();
+  };
+  return section(
+    `Settings for #${ef.id}`,
+    suggestion,
+    errors.add("deliberate", fieldRow(
+      "Deliberate planning",
+      deliberate,
+      "The planner adds a pre-mortem (three failure scenarios) and an expanded test plan, and the critic checks for them"
+    )).el,
+    h(
+      "div",
+      { class: "profile-fields" },
+      errors.add("budget_tokens", fieldRow("Token budget", tokens, "Runner tokens for the whole effort; blank is no limit")).el,
+      errors.add("budget_seconds", fieldRow(
+        "Time budget (minutes)",
+        minutes,
+        "Total stage run time, so stages running in parallel add up; blank is no limit. From 90% no new task starts; at 100% the run stops"
+      )).el
+    ),
+    errors.general,
+    h("div", { class: "settings-actions" }, button("Save settings", () => void save(), { primary: true, field: "save-effort-settings" }))
+  );
+}
+
 // web/agentflow/js/stream.ts
 var defaultStreamDeps = () => ({ open: (url) => new EventSource(url) });
 var MAX_LINES = 2e3;
@@ -1429,6 +1527,8 @@ var Board = class {
     this.detail = null;
     /** runState is the LIVE state (project.run_state); the effort's persisted run_state is only a hint. */
     this.runState = "stopped";
+    /** stopReason is why the system stopped the run ("budget"), else empty. */
+    this.stopReason = "";
     this.gitLines = null;
     this.editing = false;
     this.detailEl = null;
@@ -1461,6 +1561,7 @@ var Board = class {
     } else if (ev.type === "project.run_state" && ev.project === this.slug) {
       this.stateSeq++;
       this.runState = ev.state;
+      if (ev.state !== "stopped") this.stopReason = "";
       this.render();
       void this.refresh();
     } else if ((ev.type === "effort.update" || ev.type === "task.update" || ev.type === "project.update") && ev.project === this.slug) {
@@ -1486,8 +1587,11 @@ var Board = class {
   async refresh() {
     const seq = this.stateSeq;
     try {
-      const live = (await this.deps.project(this.slug)).run_state;
-      if (seq === this.stateSeq) this.runState = live;
+      const live = await this.deps.project(this.slug);
+      if (seq === this.stateSeq) {
+        this.runState = live.run_state;
+        this.stopReason = live.stop_reason ?? "";
+      }
     } catch {
     }
     try {
@@ -1783,6 +1887,12 @@ var Board = class {
         ef.run_state !== this.runState && ef.run_state === "running" ? h("span", { class: "field-hint", text: "was running before restart", attrs: { "data-role": "was-running" } }) : null,
         ...controls
       ),
+      ef.budget ? budgetBar(ef.budget) : null,
+      this.runState === "stopped" && this.stopReason === "budget" ? h(
+        "div",
+        { class: "warn-box", attrs: { "data-role": "budget-stop" } },
+        h("p", { text: "The run was stopped because the effort used up its budget. Nothing failed: raise the budget on the FRD tab and start the run again." })
+      ) : null,
       this.gitBox(),
       h(
         "div",
@@ -1936,6 +2046,7 @@ import { alertDialog as alertDialog2, showToast as showToast6 } from "/shared/di
 var defaultFrdDeps = () => ({
   efforts: api.efforts,
   createEffort: api.createEffort,
+  patchEffort: api.patchEffort,
   frd: api.frd,
   putFRD: api.putFRD,
   frdRevisions: api.frdRevisions,
@@ -2102,10 +2213,13 @@ var FrdEditor = class {
     }
     this.render();
   }
-  async create(title, deliberate) {
+  async create(title, deliberate, tokens, minutes) {
     this.createErrors.clear();
     try {
-      const ef = await this.deps.createEffort(this.slug, title.trim(), deliberate, { quiet: true });
+      const ef = await this.deps.createEffort(this.slug, title.trim(), deliberate, { quiet: true }, {
+        budget_tokens: Math.max(0, Math.round(Number(tokens) || 0)),
+        budget_seconds: Math.max(0, Math.round((Number(minutes) || 0) * 60))
+      });
       rememberEffort(this.slug, ef.id);
     } catch (err) {
       this.createErrors.show(err);
@@ -2159,13 +2273,17 @@ var FrdEditor = class {
   newEffortForm() {
     const title = textInput("effort_title", "", { placeholder: "What this effort delivers" });
     const deliberate = checkbox("deliberate", false);
+    const tokens = textInput("budget_tokens", "", { type: "number", placeholder: "no limit" });
+    const minutes = textInput("budget_minutes", "", { type: "number", placeholder: "no limit" });
     this.createErrors = new FormErrors();
     return section(
       "New effort",
       this.createErrors.add("title", fieldRow("Title", title)).el,
-      fieldRow("Deliberate planning", deliberate, "Adds a pre-mortem and test plan to the planner prompt").el,
+      fieldRow("Deliberate planning", deliberate, "Adds a pre-mortem and test plan to the planner prompt; after the FRD is written you are told when it mentions auth, migration or personal data").el,
+      this.createErrors.add("budget_tokens", fieldRow("Token budget", tokens, "Optional; blank is no limit")).el,
+      this.createErrors.add("budget_seconds", fieldRow("Time budget (minutes)", minutes, "Optional; blank is no limit")).el,
       this.createErrors.general,
-      h("div", { class: "settings-actions" }, button("Create effort", () => void this.create(title.value, deliberate.checked), { primary: true, field: "create-effort" }))
+      h("div", { class: "settings-actions" }, button("Create effort", () => void this.create(title.value, deliberate.checked, tokens.value, minutes.value), { primary: true, field: "create-effort" }))
     );
   }
   list() {
@@ -2250,6 +2368,7 @@ var FrdEditor = class {
         }) : null,
         this.efforts.length ? section("FRDs", this.list()) : h("div", { class: "plan-empty" }, h("h3", { text: "No efforts yet" }), h("p", { text: "An effort is one FRD, plan and queue. Create the first one below." })),
         editor,
+        ef && !isFinished(ef) ? effortSettings(ef, this.form ? JSON.stringify(this.form.read()) : "", this.deps, () => void this.load()) : null,
         ef ? this.revisionList() : null,
         this.newEffortForm()
       )

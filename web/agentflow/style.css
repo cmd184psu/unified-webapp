@@ -165,6 +165,9 @@ body {
   transition: width var(--transition);
 }
 
+.progress-bar.progress-warn { background: var(--color-warning); }
+.progress-bar.progress-over { background: var(--color-danger); }
+
 .progress-pct {
   flex: 0 0 auto;
   font-size: var(--text-xs);
