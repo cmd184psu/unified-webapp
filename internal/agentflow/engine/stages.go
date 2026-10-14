@@ -58,6 +58,13 @@ func (e *Engine) runStage(ctx context.Context, rc golane.RunContext, p StagePayl
 	if e.deps.Kick != nil {
 		e.deps.Kick()
 	}
+	if p.Attempt == 0 {
+		// A planning-loop or compile stage: the next step follows from its
+		// outcome. A failure here is picked up again by the next tick.
+		if err := e.AdvancePlans(context.WithoutCancel(ctx)); err != nil {
+			fmt.Fprintf(rc.Log(), "advance plans: %v\n", err)
+		}
+	}
 	if e.deps.Git != nil {
 		// The outcome is durable; chain the next stage from it. A failure
 		// here is picked up again by the next Advance (tick or completion).
@@ -172,7 +179,7 @@ func (e *Engine) buildPrompt(ctx context.Context, st model.Stage, project string
 		return "", err
 	}
 	if st.Attempt == 0 {
-		return text, nil
+		return e.EffortPrompt(ctx, st)
 	}
 	if st.Role == "reviewer" {
 		ev, err := e.reviewEvidence(ctx, st.Attempt)

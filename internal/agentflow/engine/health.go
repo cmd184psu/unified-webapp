@@ -101,10 +101,9 @@ type RetireReport struct {
 }
 
 // RetireBackend retires a backend (BK3): its lane is paused and hidden, its
-// queued attempt stages are taken off the lane and submitted again on another
+// queued stages are taken off the lane and submitted again on another
 // eligible backend, and its running jobs finish unless CancelRunning (BK4).
-// Queued effort stages (planning) stay on the paused lane until it is enabled
-// again.
+// Queued planning and compile stages are rerouted the same way.
 func (e *Engine) RetireBackend(ctx context.Context, actor, name string, opt RetireOptions) (RetireReport, error) {
 	var rep RetireReport
 	s := e.deps.Store
@@ -133,14 +132,14 @@ func (e *Engine) RetireBackend(ctx context.Context, actor, name string, opt Reti
 		return rep, err
 	}
 	if len(rep.Rerouted) > 0 {
-		// Advance sees the rerouted stage as an uncounted infra stage and
-		// submits it again (handleInfra).
-		return rep, e.Advance(ctx)
+		// Advance and AdvancePlans see the rerouted stage as an uncounted
+		// infra stage and submit it again (handleInfra, effortInfra).
+		return rep, errors.Join(e.Advance(ctx), e.AdvancePlans(ctx))
 	}
 	return rep, nil
 }
 
-// drainLane removes the lane's queued attempt jobs, closing their stages as
+// drainLane removes the lane's queued jobs, closing their stages as
 // rerouted, and cancels running jobs when asked. Reconcile is held off while a
 // job is gone and its stage is not yet closed, or it would call the stage lost.
 func (e *Engine) drainLane(ctx context.Context, l golane.Lane, backend string, opt RetireOptions) (rerouted []int64, canceled []string, err error) {
@@ -163,7 +162,7 @@ func (e *Engine) drainLane(ctx context.Context, l golane.Lane, backend string, o
 				errs = append(errs, err)
 				continue
 			}
-			if st.Attempt == 0 || st.State != model.StageQueued {
+			if st.State != model.StageQueued {
 				continue
 			}
 			if err := l.Remove(j.ID); err != nil {

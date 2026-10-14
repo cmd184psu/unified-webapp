@@ -131,6 +131,12 @@ type Engine struct {
 	retryTimers map[int64]*time.Timer
 
 	health healthState
+
+	// planMu serialises the planning and compile driver (plan.go,
+	// compile.go) with the calls that start or approve them. planWaiting
+	// (guarded by mu) says why an effort's next stage is not submitted.
+	planMu      sync.Mutex
+	planWaiting map[int64]string
 }
 
 // New builds the engine, registers its lanes and leaves all of them paused
@@ -142,7 +148,7 @@ func New(d Deps) (*Engine, error) {
 	if d.Clock == nil {
 		d.Clock = time.Now
 	}
-	e := &Engine{deps: d, handles: map[string]golane.Lane{}, holding: true, retryTimers: map[int64]*time.Timer{}}
+	e := &Engine{deps: d, handles: map[string]golane.Lane{}, holding: true, retryTimers: map[int64]*time.Timer{}, planWaiting: map[int64]string{}}
 	e.runs = newRunControl(e)
 	e.disp = newDispatcher(e)
 	// Every kick, including the caller's own hook, wakes the dispatcher.
@@ -155,6 +161,7 @@ func New(d Deps) (*Engine, error) {
 	}
 	e.backendKinds = []golane.Kind{e.kind(KindWork), e.kind(KindReview), e.kind(KindPlan)}
 	e.engineKinds = []golane.Kind{e.kind(KindVerify), e.kind(KindMerge)}
+	e.tickHooks = append(e.tickHooks, func(ctx context.Context) { _ = e.AdvancePlans(ctx) })
 	if d.Git != nil {
 		if e.deps.Verify == nil {
 			e.deps.Verify = verifyExecutor{e}

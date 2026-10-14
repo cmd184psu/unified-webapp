@@ -273,6 +273,11 @@ func (e *Engine) Start(ctx context.Context) error {
 	if err := e.Resume(ctx); err != nil {
 		return err
 	}
+	// Planning and compile stages closed as lost by the reconcile above are
+	// submitted again now, not a tick later.
+	if err := e.AdvancePlans(ctx); err != nil {
+		return fmt.Errorf("advance plans at start: %w", err)
+	}
 	bg, cancel := context.WithCancel(context.Background())
 	ts := &tickerState{stop: make(chan struct{}), done: make(chan struct{}), cancel: cancel}
 	e.mu.Lock()

@@ -250,6 +250,7 @@ func (e *Engine) advanceAfter(stage int64, d time.Duration) {
 		delete(e.retryTimers, stage)
 		e.mu.Unlock()
 		_ = e.Advance(context.Background())
+		_ = e.AdvancePlans(context.Background())
 	})
 }
 
