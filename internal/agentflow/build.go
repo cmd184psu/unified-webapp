@@ -117,6 +117,7 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 	api.New(api.Deps{
 		Store:             st,
 		Engine:            eng,
+		Git:               git,
 		Version:           rn.Version,
 		SSEMaxSubscribers: cfg.SSEMaxSubscribers,
 	}).Register(mux)

@@ -103,6 +103,7 @@ Logged per the owner's posture; candidates for the next phase alongside `.omc/pl
 - 2026-10-13 — C12: YOLO (gate auto-approval with actor yolo; invariants unchanged; no auto-start after restart).
 - 2026-10-13 — Phase C review: one Sonnet review of C1-C12 (REJECT on one restart/RC1 blocker); fixes applied in a single follow-up commit. Full `omc ralph verify` gate clean at the Phase C boundary (before the fixes); engine/gitsvc/store re-run with -race by the fix builder.
 - 2026-10-13 — D1: cutover: new Build wiring (store+engine+opencode+sandbox), minimal api (/api/health), config cleanup, old agentflow code and root prompts/ deleted.
+- 2026-10-13 — D2: API for projects/backends/candidates/settings/limits/opencode version with audit actor (git-init route is POST /api/projects/git-init).
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`

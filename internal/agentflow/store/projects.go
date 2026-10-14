@@ -267,3 +267,32 @@ func (s *Store) GetProject(ctx context.Context, slug string) (Project, error) {
 func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
 	return loadProjects(ctx, s.db, "")
 }
+
+// DeleteProject removes a project's registration: its limit overrides and
+// per-project role candidates go with it. A project that has efforts keeps
+// them as history, so it cannot be deleted (ErrConflict).
+func (s *Store) DeleteProject(ctx context.Context, actor, slug string) error {
+	return s.WithTx(ctx, func(tx *sql.Tx) error {
+		if err := requireProject(ctx, tx, slug); err != nil {
+			return err
+		}
+		var n int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM efforts WHERE project = ?`, slug).Scan(&n); err != nil {
+			return err
+		}
+		if n > 0 {
+			return fmt.Errorf("project %q has %d effort(s): %w", slug, n, ErrConflict)
+		}
+		for _, q := range []string{
+			`DELETE FROM project_limits WHERE project = ?`,
+			`DELETE FROM role_candidates WHERE scope = 'project' AND project_id = ?`,
+			`DELETE FROM projects WHERE slug = ?`,
+		} {
+			if _, err := tx.ExecContext(ctx, q, slug); err != nil {
+				return err
+			}
+		}
+		_, err := AppendEvent(tx, actor, "project.delete", "project", slug, nil)
+		return err
+	})
+}

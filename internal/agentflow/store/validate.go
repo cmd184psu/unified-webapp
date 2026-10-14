@@ -163,6 +163,21 @@ func (s *Store) ValidateRepoPath(p string) (string, error) {
 }
 
 func (s *Store) validateRepoPath(p string) (string, error) {
+	resolved, err := s.ValidateRepoDir(p)
+	if err != nil {
+		return "", err
+	}
+	// .git is a directory in a clone and a file in a linked worktree.
+	if _, err := os.Stat(filepath.Join(resolved, ".git")); err != nil {
+		return "", Invalid("repo_path", pathProblem(err, "is not a git repository"))
+	}
+	return resolved, nil
+}
+
+// ValidateRepoDir applies every ValidateRepoPath check except that the
+// directory is a git repository, so the offer to run git init (PJ1) is
+// refused for the same protected directories. It returns the resolved path.
+func (s *Store) ValidateRepoDir(p string) (string, error) {
 	if p == "" || !filepath.IsAbs(p) {
 		return "", Invalid("repo_path", "must be an absolute path")
 	}
@@ -181,10 +196,6 @@ func (s *Store) validateRepoPath(p string) (string, error) {
 	}
 	if !fi.IsDir() {
 		return "", Invalid("repo_path", "is not a directory")
-	}
-	// .git is a directory in a clone and a file in a linked worktree.
-	if _, err := os.Stat(filepath.Join(resolved, ".git")); err != nil {
-		return "", Invalid("repo_path", pathProblem(err, "is not a git repository"))
 	}
 	return resolved, nil
 }

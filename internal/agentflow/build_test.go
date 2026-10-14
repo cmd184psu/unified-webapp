@@ -154,3 +154,42 @@ func TestCloseAfterHostClosed(t *testing.T) {
 		t.Errorf("second Close: %v", err)
 	}
 }
+
+// send issues a JSON request to the module and returns status and body.
+func send(t *testing.T, h http.Handler, method, path, body string) (int, string) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	h.ServeHTTP(rec, req)
+	b, _ := io.ReadAll(rec.Body)
+	return rec.Code, string(b)
+}
+
+// AC-CF1: a limit changed over HTTP survives rebuilding the module on the same
+// data_dir (CF1).
+func TestCF1_SettingsSurviveRebuild(t *testing.T) {
+	cfg := config.AgentflowConfig{StaticDir: t.TempDir(), DataDir: filepath.Join(t.TempDir(), "af")}
+	h, err := buildWith(cfg, openHost(t), runner.NewFake())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, body := send(t, h, "PUT", "/api/settings", `{"max_attempts":9}`); code != http.StatusOK {
+		t.Fatalf("PUT = %d %s", code, body)
+	}
+	if err := h.(io.Closer).Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	h2, err := buildWith(cfg, openHost(t), runner.NewFake())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h2.(io.Closer).Close()
+	code, body := send(t, h2, "GET", "/api/settings", "")
+	var s struct {
+		MaxAttempts int `json:"max_attempts"`
+	}
+	if err := json.Unmarshal([]byte(body), &s); err != nil || code != http.StatusOK || s.MaxAttempts != 9 {
+		t.Fatalf("GET after rebuild = %d %s", code, body)
+	}
+}
