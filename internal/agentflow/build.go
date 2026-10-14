@@ -29,10 +29,6 @@ import (
 	"cmd184psu/unified-webapp/internal/taskmaster/golane"
 )
 
-// keyEnvPrefix names the environment variables that carry backend API keys
-// (BK5); the generated opencode config references them as {env:NAME}.
-const keyEnvPrefix = "AGENTFLOW_KEY_"
-
 // goModBind is where the host's Go module cache is mounted read-only inside
 // the feedback sandbox. It sits outside the sandbox HOME, which is reserved.
 const goModBind = "/sandbox/gomod"
@@ -97,6 +93,7 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 		Runner:       rn,
 		DataDir:      dataDir,
 		FreezeConfig: freezeConfig,
+		KeyEnv:       opencode.KeyEnv,
 		Git:          git,
 		Sandbox:      feedbackSandbox(),
 		PublishRun: func(ev engine.RunEvent) {
@@ -154,22 +151,30 @@ func freezeConfig(b engine.FrozenBackend, stageDir string) (string, error) {
 }
 
 // newOpencode builds the production runner: the real opencode binary in a
-// bwrap sandbox, with only the AGENTFLOW_KEY_* variables forwarded.
+// bwrap sandbox. The binary comes from the opencode_path setting at every run
+// and probe, and API keys are resolved per stage by the engine, so neither
+// needs a restart.
 func newOpencode(git *gitsvc.Service, st *store.Store) *opencode.Adapter {
-	env := os.Environ()
-	var keys []string
-	for _, kv := range env {
-		if k, _, _ := strings.Cut(kv, "="); strings.HasPrefix(k, keyEnvPrefix) {
-			keys = append(keys, k)
-		}
-	}
 	return &opencode.Adapter{
-		Path:      opencodePath(),
-		Command:   opencode.SandboxCommand(gitDirs(git, st)),
-		ParentEnv: env,
-		KeyEnvs:   keys,
+		PathFunc: func() string { return resolveOpencode(st) },
+		Command:  opencode.SandboxCommand(gitDirs(git, st)),
 	}
 }
+
+// resolveOpencode reads the opencode_path setting now. The default value
+// ("opencode") means auto-detect; anything else is used as given.
+func resolveOpencode(st *store.Store) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if set, err := st.GetSettings(ctx); err == nil && set.OpencodePath != defaultOpencodePath {
+		return set.OpencodePath
+	}
+	return opencodePath()
+}
+
+// defaultOpencodePath is the seeded opencode_path: not a path to use but the
+// request to find the binary.
+const defaultOpencodePath = "opencode"
 
 // opencodePath finds the real opencode binary (spike S0): ~/.opencode/bin, then
 // PATH. The HOME-relative shim under ~/.agents fails once HOME is replaced, so

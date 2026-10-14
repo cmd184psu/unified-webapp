@@ -20,7 +20,7 @@ It is a local, single-user tool. How it works inside is in
 | The real `opencode` binary | The model runner. Install it so the binary is at `~/.opencode/bin/opencode`, or on `PATH`. |
 | A project repository that is already a git repository | See [Projects](#projects). |
 
-**Use the real opencode binary, not a shim.** At startup AgentFlow looks for
+**Use the real opencode binary, not a shim.** With `opencode_path` at its default, AgentFlow looks (at every stage and probe) for
 `~/.opencode/bin/opencode`, then for `opencode` on `PATH`. A path that contains `/.agents/`
 is refused, because wrapper shims there break once the sandbox replaces `HOME`. If no binary
 is found, `GET /api/health` reports `degraded` and the opencode error. The module still
@@ -88,25 +88,25 @@ authenticated name (`anonymous` when auth is off).
 
 ### API keys for hosted backends
 
-A backend that needs a key reads it from the **server's environment**, never from the
-database or the UI. The variable name is `AGENTFLOW_KEY_` plus the backend name in upper
-case, with `-` replaced by `_`:
+A hosted backend's key is stored in the agentflow database and applies to the next stage
+without a restart. Set it in the **Backends** tab or with the write-only `api_key` field of
+`POST /api/backends` and `PATCH /api/backends/{name}`: a string sets it, an empty string clears
+it, leaving the field out keeps the stored key. Responses never contain the key, only
+`has_key`.
+
+At each stage the key is resolved as the stored key, else the server's environment variable
+`AGENTFLOW_KEY_` plus the backend name in upper case with `-` replaced by `_`. The environment
+variable is read when the stage starts, not at boot:
 
 | Backend name | Environment variable |
 |---|---|
 | `openrouter` | `AGENTFLOW_KEY_OPENROUTER` |
 | `my-host` | `AGENTFLOW_KEY_MY_HOST` |
 
-With systemd, add it to the unit (or an `EnvironmentFile`) and restart:
-
-```ini
-[Service]
-Environment=AGENTFLOW_KEY_OPENROUTER=sk-...
-```
-
-The set of keys is read **once at boot**. Adding or changing a key needs a restart. Only
-`AGENTFLOW_KEY_*` variables are passed into the sandbox, and the generated config refers to
-them as `{env:NAME}` instead of holding the value.
+The stage's sandbox gets only that one variable, for its own backend. The generated config
+refers to it as `{env:NAME}` and never holds the value; the key does not appear in prompts,
+logs, exports, events or API responses. Keys are stored in plain text in
+`data_dir/agentflow.db`, so protect that file like the environment file it replaces.
 
 ---
 
@@ -207,11 +207,21 @@ Global settings are at `GET/PUT /api/settings`; a project overrides eight of the
 | `plan_timeout` | 30m | Per planning stage. |
 | `verify_timeout` | 15m | Per verification (and each feedback command). |
 
-Global only: `verify_slots` (default 2), `backend_cooldown` (default 2m). Durations are Go
-strings such as `30m0s`.
+Global only: `verify_slots` (default 2), `backend_cooldown` (default 2m), `opencode_path`
+and `browse_roots`. Durations are Go strings such as `30m0s`.
 
-The settings response also lists `opencode_path`, but the binary is chosen at startup as
-described under [Requirements](#requirements); changing `opencode_path` does not move it.
+Every setting is live: saving applies to the next stage or request, with no restart. A new
+`verify_slots` resizes the verify lane at once, and a new `opencode_path` re-probes the
+version for `GET /api/health` and `GET /api/opencode/version`. `opencode_path` left at
+`opencode` finds the binary as described under [Requirements](#requirements); any other value
+is used as given.
+
+`browse_roots` is a list of absolute directories (default: the server user's home) that the
+directory picker may show. `GET /api/fs/dirs?path=/abs/dir` returns
+`{"path", "parent", "dirs": [{"name", "path", "git"}]}`: subdirectories only, sorted by name,
+hidden ones left out, `git` true when the directory has a `.git` entry. Without `path` it
+starts at the first root. A path that resolves (after symlinks) outside every root is a 400
+naming `browse_roots`.
 
 ---
 
@@ -246,8 +256,10 @@ Approve with `POST /api/projects/{slug}/efforts/{id}/plan/approve`.
 
 ### 3. Compile and approve the queue
 
-Plan approval does not compile. Press **Compile** (or
-`POST /api/projects/{slug}/efforts/{id}/compile`). The compiler turns the plan into tasks with
+Approving the plan starts the compile by itself: the effort goes plan approved, compiling,
+queue draft without a second click. If no compiler candidate is available the approval still
+stands and the effort waits with a reason (shown in the Plan tab) until one is. **Compile**
+(`POST /api/projects/{slug}/efforts/{id}/compile`) stays for recompiling. The compiler turns the plan into tasks with
 dependencies, acceptance criteria and touched files. Review them in the **Queue** sub-tab
 (`GET /api/projects/{slug}/efforts/{id}/queue`).
 
@@ -327,7 +339,7 @@ anything: `branch` (the integration branch), `base` (the short sha the effort st
 
 Turn on per effort (`POST /api/projects/{slug}/efforts/{id}/yolo` with
 `{"on": true, "confirm": true}`). It clicks the gates after the FRD for you: it approves the
-plan when both reviewers approved it, compiles, approves the queue and starts the run. Auto
+plan when both reviewers approved it, approves the queue and starts the run. Auto
 steps are recorded as actor `yolo`. It also gives each stuck or exhausted task one automatic
 clean retry.
 
@@ -392,11 +404,11 @@ when the FRD text mentions things like auth, migration or PII.
 
 | Symptom | Check |
 |---|---|
-| `GET /api/health` says `degraded` | The `opencode` field gives the error. Install the real binary at `~/.opencode/bin/opencode` or on `PATH`, then restart. |
+| `GET /api/health` says `degraded` | The `opencode` field gives the error. Install the real binary at `~/.opencode/bin/opencode` or on `PATH`, or set `opencode_path`; saving the setting re-probes at once. |
 | Stages fail immediately as `infra:crash` | Run `bwrap --version`. Check that unprivileged user namespaces are enabled. |
 | Project creation says the path is protected | The repo is the server's working directory, executable directory or `data_dir` (or contains/is inside one). Use another repository. |
 | Project creation says it is not a git repository | Run `git init` and make a first commit, or use the UI offer to initialise it. |
-| A hosted backend fails with an auth error | Export `AGENTFLOW_KEY_<NAME>` for the server process and restart. Names use `_` for `-`. |
+| A hosted backend fails with an auth error | Set the backend's API key in the Backends tab (`api_key`), or export `AGENTFLOW_KEY_<NAME>` for the server process; no restart is needed. Names use `_` for `-`. |
 | Task shows a waiting reason | No eligible candidate: check role candidates, model scope (`local` skips hosted backends), paid opt-in, and whether a second model exists for review. |
 | A backend was marked unreachable | It is skipped for `backend_cooldown` (default 2 minutes). Check the host URL; retire or re-enable it on the Backends tab. |
 | Run won't start | The queue must be approved, and the effort's budget not used up. |

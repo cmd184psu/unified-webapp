@@ -133,8 +133,7 @@ func (f *flow) planAndCompile() {
 	f.ok("PUT", f.base+"/frd", frdBody, http.StatusOK)
 	f.ok("POST", f.base+"/plan/generate", nil, http.StatusAccepted)
 	f.waitStatus(model.EffortPlanReady)
-	f.ok("POST", f.base+"/plan/approve", nil, http.StatusOK)
-	f.ok("POST", f.base+"/compile", nil, http.StatusAccepted)
+	f.ok("POST", f.base+"/plan/approve", nil, http.StatusOK) // approval starts the compile
 	f.waitStatus(model.EffortQueueDraft)
 }
 
@@ -168,7 +167,7 @@ func TestD3_FRDPlanQueueFlow(t *testing.T) {
 	f.fake.Script("planner", runner.Step{Reply: planReply, Events: []runner.Event{{Type: "text", Text: "hello-stream-line"}}})
 	f.fake.Script("architect", runner.Step{Reply: approveReply})
 	f.fake.Script("critic", runner.Step{Reply: approveReply})
-	f.fake.Script("compiler", runner.Step{Reply: compileReply})
+	f.fake.Script("compiler", runner.Step{Reply: compileReply}, runner.Step{Reply: compileReply}) // approval compiles, then a recompile
 	f.ok("POST", f.base+"/plan/generate", nil, http.StatusAccepted)
 	f.waitStatus(model.EffortPlanReady)
 
@@ -205,9 +204,10 @@ func TestD3_FRDPlanQueueFlow(t *testing.T) {
 
 	// AC-DBS3 (HTTP): approve, then edit.
 	f.ok("POST", f.base+"/plan/approve", nil, http.StatusOK)
+	f.waitStatus(model.EffortQueueDraft) // approval started the compile by itself
 	ev := decode[EffortView](t, f.ok("GET", f.base, nil, http.StatusOK))
 	n := pv.Revision
-	if ev.Status != model.EffortPlanApproved || ev.Plan.Approved != n {
+	if ev.Plan.Approved != n {
 		t.Fatalf("after approve: %+v", ev)
 	}
 	before := f.ok("GET", f.base+"/plan/revisions/"+itoa(int64(n)), nil, http.StatusOK)

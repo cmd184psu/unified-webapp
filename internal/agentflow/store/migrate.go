@@ -22,6 +22,7 @@ type migration struct {
 //	6  F2  stages.role gains 'cleanup' (table rebuild); projects.cleanup_enabled
 //	7  F3  stages.tokens; efforts.budget_tokens, efforts.budget_seconds
 //	8  F4  project_plugins
+//	9  P2  backends.api_key, browse_roots setting
 //
 // Later stories append the next integer; they never edit an earlier entry.
 var migrations = []migration{
@@ -33,7 +34,16 @@ var migrations = []migration{
 	{6, migration6SQL},
 	{7, migration7SQL},
 	{8, migration8SQL},
+	{9, migration9SQL},
 }
+
+// migration9SQL (P2) keeps a hosted backend's API key in the database, so it
+// can be changed without a restart, and adds the directory picker's roots
+// (empty means the server user's home directory).
+const migration9SQL = `
+ALTER TABLE backends ADD COLUMN api_key TEXT NOT NULL DEFAULT '';
+INSERT INTO settings (key, value) VALUES ('browse_roots', '');
+`
 
 // migration8SQL (F4) holds the runner plugins a project opted into (OA3). A
 // row is a pin: name and an exact version. A project with no rows uses none.

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -500,7 +501,7 @@ func TestProjectOverridesFallBackToGlobal(t *testing.T) {
 		t.Fatalf("after global change: %+v", eff)
 	}
 	snap, _ := s.Snapshot(ctx)
-	if snap.Effective["p"] != eff || snap.Settings.MaxAttempts != 5 {
+	if !reflect.DeepEqual(snap.Effective["p"], eff) || snap.Settings.MaxAttempts != 5 {
 		t.Fatalf("snapshot effective = %+v", snap.Effective["p"])
 	}
 	// Clearing an override (blank) restores the global value.
@@ -909,5 +910,70 @@ func TestOA3_ProjectPluginsArePinnedAndPerProject(t *testing.T) {
 	}
 	if n := countRows(t, s, "project_plugins"); n != 0 {
 		t.Fatalf("project_plugins rows = %d", n)
+	}
+}
+
+func TestBrowseRootsDefaultAndValidation(t *testing.T) {
+	s, _ := openTemp(t)
+	defer s.Close()
+	home, _ := os.UserHomeDir()
+	got, err := s.GetSettings(ctx)
+	if err != nil || len(got.BrowseRoots) != 1 || got.BrowseRoots[0] != home {
+		t.Fatalf("default roots = %v (%v), want the home directory", got.BrowseRoots, err)
+	}
+	if err := s.UpdateSettings(ctx, "t", map[string]string{"browse_roots": `["/srv/a","/srv/b/"]`}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = s.GetSettings(ctx); len(got.BrowseRoots) != 2 || got.BrowseRoots[1] != "/srv/b" {
+		t.Fatalf("roots = %v", got.BrowseRoots)
+	}
+	for _, bad := range []string{`["rel"]`, `nonsense`, `[1]`} {
+		var fe *FieldError
+		if err := s.UpdateSettings(ctx, "t", map[string]string{"browse_roots": bad}); !errors.As(err, &fe) || fe.Field != "browse_roots" {
+			t.Errorf("browse_roots %s = %v, want a field error", bad, err)
+		}
+	}
+}
+
+func TestBackendKeyStoredApartAndNeverInEvents(t *testing.T) {
+	s, _ := openTemp(t)
+	defer s.Close()
+	b := Backend{Name: "hosted", Host: "http://127.0.0.1:1", APIType: "openai_compatible", Hosted: true, Slots: 1,
+		Models: []BackendModel{{Model: "m"}}}
+	if err := s.CreateBackend(ctx, "t", b); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetBackend(ctx, "hosted"); got.HasKey {
+		t.Fatal("new backend claims a key")
+	}
+	if err := s.SetBackendKey(ctx, "t", "hosted", "sk-very-secret"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.GetBackend(ctx, "hosted")
+	if !got.HasKey {
+		t.Fatal("HasKey is false after SetBackendKey")
+	}
+	// An ordinary backend update leaves the key alone.
+	b.Slots = 2
+	if err := s.UpdateBackend(ctx, "t", b); err != nil {
+		t.Fatal(err)
+	}
+	if k, _ := s.BackendKey(ctx, "hosted"); k != "sk-very-secret" {
+		t.Fatalf("key after UpdateBackend = %q", k)
+	}
+	evs, _ := s.ListEvents(ctx, "", "", 0)
+	for _, ev := range evs {
+		if strings.Contains(ev.DetailJSON, "sk-very-secret") {
+			t.Fatalf("event %s holds the key", ev.Action)
+		}
+	}
+	if err := s.SetBackendKey(ctx, "t", "hosted", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetBackend(ctx, "hosted"); got.HasKey {
+		t.Fatal("HasKey stays true after clearing")
+	}
+	if err := s.SetBackendKey(ctx, "t", "nope", "k"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown backend = %v", err)
 	}
 }

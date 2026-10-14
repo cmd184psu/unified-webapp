@@ -212,8 +212,12 @@ func TestC10_CriticApprovalStillWaitsForAHuman(t *testing.T) {
 		t.Fatal(err)
 	}
 	a, err := f.st.ApprovedRevision(ctx, f.effort, model.DocPlan)
-	if err != nil || a.Revision != 1 || a.ApprovedBy != "alice" || f.status() != model.EffortPlanApproved {
+	if err != nil || a.Revision != 1 || a.ApprovedBy != "alice" || f.status() != model.EffortCompiling {
 		t.Fatalf("approval = %+v (%v), status %s", a, err, f.status())
+	}
+	// No compiler candidate exists: the approval stands and the effort says why it waits.
+	if pv, err := f.eng.PlanView(ctx, f.effort); err != nil || pv.Waiting == "" {
+		t.Fatalf("waiting reason = %q (%v), want one", pv.Waiting, err)
 	}
 	if err := f.eng.ApprovePlan(ctx, "alice", f.effort); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("second approval = %v, want conflict", err)
@@ -381,4 +385,75 @@ func TestPlanReadyIsAnnouncedAfterTheStatusChanges(t *testing.T) {
 	}
 	f.waitStatus(model.EffortPlanReady)
 	waitFor(t, "a notice after plan_ready", func() bool { return seenReady.Load() >= 1 })
+}
+
+// Approving the plan starts the compile by itself, as the approver; the
+// queue still waits for a human to approve its hash.
+func TestP2_PlanApprovalStartsCompileAndQueueStaysHumanGated(t *testing.T) {
+	f := newPlanFix(t, false)
+	f.standardPool()
+	f.fake.Script("planner", runner.Step{Reply: planReply})
+	f.fake.Script("architect", runner.Step{Reply: approveReply})
+	f.fake.Script("critic", runner.Step{Reply: approveReply})
+	f.fake.Script("compiler", runner.Step{Reply: compileClean})
+	f.startEngine()
+	ctx := context.Background()
+	if err := f.eng.GeneratePlan(ctx, "alice", f.effort); err != nil {
+		t.Fatal(err)
+	}
+	f.waitStatus(model.EffortPlanReady)
+	if err := f.eng.ApprovePlan(ctx, "alice", f.effort); err != nil {
+		t.Fatal(err)
+	}
+	f.waitStatus(model.EffortQueueDraft)
+	if n := len(f.fake.CallsFor("compiler")); n != 1 {
+		t.Fatalf("compiler calls = %d, want 1", n)
+	}
+	evs, err := f.st.ListEvents(ctx, "", "", 100000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range evs {
+		if ev.Action == "compile.start" && ev.Actor != "alice" {
+			t.Errorf("compile.start actor = %s, want the approver", ev.Actor)
+		}
+		if ev.Action == "queue.approve" {
+			t.Errorf("the queue was approved without a human")
+		}
+	}
+	if q, err := f.st.GetQueue(ctx, f.effort); err != nil || q.Status != model.QueueDraft {
+		t.Fatalf("queue = %+v (%v), want a draft", q, err)
+	}
+}
+
+// With no compiler candidate the approval still succeeds and the effort waits
+// in compiling; once a candidate exists the next tick compiles, with no
+// second click.
+func TestP2_CompileWaitingForACandidateStartsWhenOneAppears(t *testing.T) {
+	f := newPlanFix(t, false)
+	f.addBackend("gpu", 2, false, false, "m1", "m2", "m3")
+	f.candidates("global", "", "planner", "gpu/m1")
+	f.candidates("global", "", "architect", "gpu/m2")
+	f.candidates("global", "", "critic", "gpu/m3")
+	f.fake.Script("planner", runner.Step{Reply: planReply})
+	f.fake.Script("architect", runner.Step{Reply: approveReply})
+	f.fake.Script("critic", runner.Step{Reply: approveReply})
+	f.fake.Script("compiler", runner.Step{Reply: compileClean})
+	f.startEngine()
+	ctx := context.Background()
+	if err := f.eng.GeneratePlan(ctx, "alice", f.effort); err != nil {
+		t.Fatal(err)
+	}
+	f.waitStatus(model.EffortPlanReady)
+	if err := f.eng.ApprovePlan(ctx, "alice", f.effort); err != nil {
+		t.Fatalf("approval must not fail without a compiler candidate: %v", err)
+	}
+	if pv, err := f.eng.PlanView(ctx, f.effort); err != nil || f.status() != model.EffortCompiling || pv.Waiting == "" {
+		t.Fatalf("status %s, waiting %q (%v)", f.status(), pv.Waiting, err)
+	}
+	f.candidates("global", "", "compiler", "gpu/m1")
+	if err := f.eng.AdvancePlans(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f.waitStatus(model.EffortQueueDraft)
 }

@@ -411,3 +411,26 @@ func TestNoFileAttachFlag(t *testing.T) {
 		}
 	}
 }
+
+// A changed opencode_path applies to the next run and the next probe without
+// rebuilding the adapter.
+func TestPathFuncIsReadAtUseTime(t *testing.T) {
+	first := newHarness(t, "", 0, "echo '{\"type\":\"text\",\"part\":{\"text\":\"x\"}}'")
+	second := newHarness(t, "", 0, "echo '{\"type\":\"text\",\"part\":{\"text\":\"x\"}}'")
+	use := first.bin
+	a := &Adapter{PathFunc: func() string { return use }, ParentEnv: []string{"PATH=/usr/bin:/bin", "LANG=C"}}
+
+	_, _ = a.Run(runCtx(t), second.request([]byte("p")))
+	if _, err := os.Stat(filepath.Join(second.rec, "argv")); err == nil {
+		t.Fatal("second binary ran before the path moved to it")
+	}
+	use = second.bin
+	_, _ = a.Run(runCtx(t), second.request([]byte("p")))
+	if _, err := os.Stat(filepath.Join(second.rec, "argv")); err != nil {
+		t.Fatalf("second binary did not run after the path moved: %v", err)
+	}
+	use = filepath.Join(t.TempDir(), "missing")
+	if _, err := a.Version(runCtx(t)); err == nil {
+		t.Fatal("Version used a stale path")
+	}
+}

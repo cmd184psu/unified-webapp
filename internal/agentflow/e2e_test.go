@@ -257,8 +257,7 @@ func TestE2E_FullJourneyOverHTTP(t *testing.T) {
 	}
 	e.must("POST", base+"/plan/approve", ``, 200)
 
-	// Compile and approve the queue by hash.
-	e.must("POST", base+"/compile", ``, 202)
+	// Plan approval starts the compile by itself; approve the queue by hash.
 	e.waitEffort("demo", ef.ID, model.EffortQueueDraft)
 	var q struct {
 		Hash  string

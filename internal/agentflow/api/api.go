@@ -114,6 +114,7 @@ func (a *API) Register(mux muxer) {
 	a.registerProjects(mux)
 	a.registerBackends(mux)
 	a.registerSettings(mux)
+	a.registerFS(mux)
 	a.registerStats(mux)
 	a.registerEfforts(mux)
 	a.registerDocs(mux)

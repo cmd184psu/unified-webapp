@@ -32,20 +32,22 @@ type BackendModelView struct {
 // BackendView is a backend as the API shows it. DownUntil (unix ms) is set
 // while the backend sits in its unreachable cooldown (MB7).
 type BackendView struct {
-	Name      string             `json:"name"`
-	Host      string             `json:"host"`
-	APIType   string             `json:"api_type"`
-	Hosted    bool               `json:"hosted"`
-	Paid      bool               `json:"paid"`
-	Slots     int                `json:"slots"`
-	Retired   bool               `json:"retired"`
+	Name    string `json:"name"`
+	Host    string `json:"host"`
+	APIType string `json:"api_type"`
+	Hosted  bool   `json:"hosted"`
+	Paid    bool   `json:"paid"`
+	Slots   int    `json:"slots"`
+	Retired bool   `json:"retired"`
+	// HasKey says an API key is stored; the key is write-only.
+	HasKey    bool               `json:"has_key"`
 	Models    []BackendModelView `json:"models"`
 	DownUntil int64              `json:"down_until,omitempty"`
 }
 
 func (a *API) backendView(b store.Backend) BackendView {
 	v := BackendView{Name: b.Name, Host: b.Host, APIType: b.APIType, Hosted: b.Hosted, Paid: b.Paid,
-		Slots: b.Slots, Retired: b.Retired, Models: []BackendModelView{}}
+		Slots: b.Slots, Retired: b.Retired, HasKey: b.HasKey, Models: []BackendModelView{}}
 	for _, m := range b.Models {
 		v.Models = append(v.Models, BackendModelView{Model: m.Model, Paid: m.Paid, MaxConcurrent: m.MaxConcurrent})
 	}
@@ -100,6 +102,8 @@ type backendBody struct {
 	Paid    *bool               `json:"paid"`
 	Slots   *int                `json:"slots"`
 	Models  *[]BackendModelView `json:"models"`
+	// APIKey is write-only: absent keeps the stored key, "" clears it.
+	APIKey *string `json:"api_key"`
 }
 
 func (bb backendBody) apply(b *store.Backend) {
@@ -149,8 +153,17 @@ func (a *API) createBackend(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	if body.APIKey != nil {
+		if err := store.ValidateAPIKey(*body.APIKey); err != nil {
+			writeErr(w, err)
+			return
+		}
+	}
 	if err := a.deps.Engine.AddBackend(r.Context(), actorOf(r), b); err != nil {
 		writeErr(w, err)
+		return
+	}
+	if !a.storeKey(w, r, b.Name, body.APIKey) {
 		return
 	}
 	a.emit("backend.update", map[string]any{"backend": b.Name})
@@ -177,12 +190,34 @@ func (a *API) patchBackend(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	if body.APIKey != nil {
+		if err := store.ValidateAPIKey(*body.APIKey); err != nil {
+			writeErr(w, err)
+			return
+		}
+	}
 	if err := a.deps.Engine.UpdateBackend(r.Context(), actorOf(r), b); err != nil {
 		writeErr(w, err)
 		return
 	}
+	if !a.storeKey(w, r, name, body.APIKey) {
+		return
+	}
 	a.emit("backend.update", map[string]any{"backend": name})
 	a.respondBackend(w, r.Context(), name, http.StatusOK, engine.RetireReport{})
+}
+
+// storeKey saves the write-only API key when the request carried one. It
+// writes the error response and returns false on failure.
+func (a *API) storeKey(w http.ResponseWriter, r *http.Request, name string, key *string) bool {
+	if key == nil {
+		return true
+	}
+	if err := a.deps.Store.SetBackendKey(r.Context(), actorOf(r), name, *key); err != nil {
+		writeErr(w, err)
+		return false
+	}
+	return true
 }
 
 // retireBackend retires a backend; retiring the last one for a role is

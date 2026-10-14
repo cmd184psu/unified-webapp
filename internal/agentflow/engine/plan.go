@@ -567,7 +567,9 @@ func (e *Engine) haltPlan(ctx context.Context, ef model.Effort, last model.Stage
 
 // ApprovePlan records the human approval of the presented plan revision and
 // moves the effort to plan_approved (RP3). It is ErrConflict unless the effort
-// is plan_ready. Under YOLO the compile starts at once.
+// is plan_ready. The compile then starts at once, as the approver; if it
+// cannot start (no compiler candidate) the approval stands and the effort
+// waits with a reason until the next tick can submit the stage.
 func (e *Engine) ApprovePlan(ctx context.Context, actor string, effort int64) error {
 	e.planMu.Lock()
 	defer e.planMu.Unlock()
@@ -597,8 +599,12 @@ func (e *Engine) approvePlanLocked(ctx context.Context, actor string, effort int
 	if _, err := s.UpdateEffort(ctx, actor, effort, store.EffortPatch{Status: &approved}); err != nil {
 		return err
 	}
+	compileActor := actor
 	if e.yoloGate(ctx, effort) {
-		return e.startCompileLocked(ctx, yoloActor, effort)
+		compileActor = yoloActor
+	}
+	if err := e.startCompileLocked(ctx, compileActor, effort); err != nil {
+		e.setPlanWaiting(effort, "compile did not start: "+err.Error())
 	}
 	return nil
 }

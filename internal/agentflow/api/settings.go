@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -32,7 +33,8 @@ func limitMap(s store.Settings) map[string]string {
 }
 
 // settingsView is the global settings: the overridable limits plus the
-// opencode path, verify slots and the backend cooldown.
+// opencode path, verify slots, the backend cooldown and the directory picker's
+// roots.
 func settingsView(s store.Settings) map[string]any {
 	return map[string]any{
 		"max_attempts":      s.MaxAttempts,
@@ -46,6 +48,7 @@ func settingsView(s store.Settings) map[string]any {
 		"opencode_path":     s.OpencodePath,
 		"verify_slots":      s.VerifySlots,
 		"backend_cooldown":  s.BackendCooldown.String(),
+		"browse_roots":      s.BrowseRoots,
 	}
 }
 
@@ -65,6 +68,16 @@ func (a *API) putSettings(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &body, false) {
 		return
 	}
+	// browse_roots is a list; the store keeps it as JSON text.
+	if raw, ok := body["browse_roots"]; ok {
+		var roots []string
+		if err := json.Unmarshal(raw, &roots); err != nil {
+			badRequest(w, "browse_roots", "browse_roots must be a list of absolute paths")
+			return
+		}
+		text, _ := json.Marshal(roots)
+		body["browse_roots"], _ = json.Marshal(string(text))
+	}
 	patch, ok := flexStrings(w, body, "")
 	if !ok {
 		return
@@ -73,8 +86,21 @@ func (a *API) putSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	a.applySettings(r.Context(), patch)
 	a.emit("settings.update", nil)
 	a.getSettings(w, r)
+}
+
+// applySettings makes a saved patch take effect now. Limits, cooldown and
+// browse roots are read from the store at use time; the verify lane width and
+// the opencode probe are state held elsewhere, so they are refreshed here.
+func (a *API) applySettings(ctx context.Context, patch map[string]string) {
+	if _, ok := patch["verify_slots"]; ok && a.deps.Engine != nil {
+		_ = a.deps.Engine.SyncLanes(ctx)
+	}
+	if _, ok := patch["opencode_path"]; ok {
+		a.probe(ctx)
+	}
 }
 
 // getOpencodeVersion reports the cached opencode probe; ?refresh=1 asks the

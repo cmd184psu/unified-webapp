@@ -31,6 +31,9 @@ type Backend struct {
 	Paid    bool
 	Slots   int
 	Retired bool
+	// HasKey says an API key is stored; the key itself is never loaded with
+	// the backend (see BackendKey).
+	HasKey  bool
 	Models  []BackendModel
 	Created time.Time
 	Updated time.Time
@@ -195,7 +198,7 @@ func (s *Store) EnableBackend(ctx context.Context, actor, name string) error {
 }
 
 func loadBackends(ctx context.Context, q querier, name string) ([]Backend, error) {
-	query := `SELECT name, host, api_type, hosted, paid, slots, retired, created, updated FROM backends`
+	query := `SELECT name, host, api_type, hosted, paid, slots, retired, api_key <> '', created, updated FROM backends`
 	var args []any
 	if name != "" {
 		query += ` WHERE name = ?`
@@ -208,13 +211,13 @@ func loadBackends(ctx context.Context, q querier, name string) ([]Backend, error
 	var out []Backend
 	for rows.Next() {
 		var b Backend
-		var hosted, paid, retired int
+		var hosted, paid, retired, hasKey int
 		var created, updated int64
-		if err := rows.Scan(&b.Name, &b.Host, &b.APIType, &hosted, &paid, &b.Slots, &retired, &created, &updated); err != nil {
+		if err := rows.Scan(&b.Name, &b.Host, &b.APIType, &hosted, &paid, &b.Slots, &retired, &hasKey, &created, &updated); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		b.Hosted, b.Paid, b.Retired = hosted != 0, paid != 0, retired != 0
+		b.Hosted, b.Paid, b.Retired, b.HasKey = hosted != 0, paid != 0, retired != 0, hasKey != 0
 		b.Created, b.Updated = time.UnixMilli(created), time.UnixMilli(updated)
 		out = append(out, b)
 	}
@@ -264,4 +267,44 @@ func (s *Store) GetBackend(ctx context.Context, name string) (Backend, error) {
 // ListBackends returns every backend (retired ones too), ordered by name.
 func (s *Store) ListBackends(ctx context.Context) ([]Backend, error) {
 	return loadBackends(ctx, s.db, "")
+}
+
+// ValidateAPIKey checks a key before it is stored: it travels as an
+// environment variable, so it must be one printable line. Empty clears.
+func ValidateAPIKey(key string) error {
+	if strings.TrimSpace(key) != key || strings.ContainsAny(key, "\x00\r\n") {
+		return Invalid("api_key", "must be a single line without leading or trailing whitespace")
+	}
+	return nil
+}
+
+// SetBackendKey stores a backend's API key; an empty key clears it. The audit
+// event records only that a key is set, never the value.
+func (s *Store) SetBackendKey(ctx context.Context, actor, name, key string) error {
+	if err := ValidateAPIKey(key); err != nil {
+		return err
+	}
+	return s.WithTx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE backends SET api_key = ?, updated = ? WHERE name = ?`,
+			key, time.Now().UnixMilli(), name)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return fmt.Errorf("backend %q: %w", name, ErrNotFound)
+		}
+		_, err = AppendEvent(tx, actor, "backend.key", "backend", name, map[string]any{"has_key": key != ""})
+		return err
+	})
+}
+
+// BackendKey returns a backend's stored API key, or "" when there is none.
+// It is read at stage time only, so a change applies to the next stage.
+func (s *Store) BackendKey(ctx context.Context, name string) (string, error) {
+	var key string
+	err := s.db.QueryRowContext(ctx, `SELECT api_key FROM backends WHERE name = ?`, name).Scan(&key)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("backend %q: %w", name, ErrNotFound)
+	}
+	return key, err
 }

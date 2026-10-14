@@ -244,7 +244,7 @@ FRD (approved) -> planner -> architect -> critic -> [revise round] -> plan_ready
 - **Deliberate mode** (per effort): the planner must add exactly three pre-mortem scenarios
   and a test plan. A plan without them fails validation and goes to the one corrective
   follow-up. The critic checks both.
-- **Compile.** `POST .../compile` runs the compiler. Replies are strictly parsed: unknown
+- **Compile.** Approving the plan starts the compiler by itself; `POST .../compile` recompiles. Replies are strictly parsed: unknown
   fields (including `verify`), cycles, dangling dependencies and absolute paths are rejected.
   The compiler emits no executable content; verification commands come from the project.
 - **Hash pinning.** The queue gets a SHA-256 hash over its canonical form. Approving takes the

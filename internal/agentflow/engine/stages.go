@@ -338,6 +338,19 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 	// Each call gets the full role timeout, derived here so the parent context
 	// can be checked separately: parent cancel is infra:cancel, the role
 	// deadline is a timeout (attempt failure for workers).
+	if d.KeyEnv != nil {
+		name := d.KeyEnv(b.Name)
+		key, err := d.Store.BackendKey(ctx, b.Name)
+		if err != nil {
+			return fail(err)
+		}
+		if key == "" {
+			key = os.Getenv(name)
+		}
+		if key != "" {
+			req.Env = append(req.Env, name+"="+key)
+		}
+	}
 	call := func(r runner.Request) (runner.Result, string, error) {
 		cctx := ctx
 		if timeout > 0 {

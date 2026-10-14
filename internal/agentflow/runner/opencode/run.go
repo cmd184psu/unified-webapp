@@ -27,6 +27,10 @@ type Adapter struct {
 	// Path is the opencode binary: an absolute path or a name on PATH (OC1).
 	// It must be the real binary, not a HOME-relative shim (spike findings).
 	Path string
+	// PathFunc, when set, is asked for the binary on every run and every
+	// version probe and replaces Path, so a changed setting applies to the
+	// next stage without rebuilding the adapter.
+	PathFunc func() string
 	// Command builds the process; nil runs it directly without a sandbox.
 	Command CommandFactory
 	// ParentEnv is where PATH, LANG and key variables are taken from; nil means
@@ -42,6 +46,9 @@ const stderrTail = 4 << 10
 
 func (a *Adapter) path() (string, error) {
 	p := a.Path
+	if a.PathFunc != nil {
+		p = a.PathFunc()
+	}
 	if p == "" {
 		p = "opencode"
 	}

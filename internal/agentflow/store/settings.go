@@ -3,8 +3,11 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -25,6 +28,9 @@ type Settings struct {
 	VerifySlots     int
 	// BackendCooldown is how long an unreachable backend is skipped (MB7).
 	BackendCooldown time.Duration
+	// BrowseRoots are the directories the server-side directory picker may
+	// list; an empty stored value means the server user's home directory.
+	BrowseRoots []string
 }
 
 // limitKeys are the settings a project may override.
@@ -110,7 +116,36 @@ func parseSettings(m map[string]string) (Settings, error) {
 	if s.BackendCooldown, err = validateTimeout("backend_cooldown", m["backend_cooldown"]); err != nil {
 		return s, err
 	}
+	if s.BrowseRoots, err = parseBrowseRoots(m["browse_roots"]); err != nil {
+		return s, err
+	}
 	return s, nil
+}
+
+// parseBrowseRoots reads the stored browse_roots value: a JSON list of
+// absolute paths, or empty for the server user's home directory.
+func parseBrowseRoots(v string) ([]string, error) {
+	var roots []string
+	if v != "" {
+		if err := json.Unmarshal([]byte(v), &roots); err != nil {
+			return nil, Invalid("browse_roots", "must be a list of absolute paths")
+		}
+	}
+	if len(roots) == 0 {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, Invalid("browse_roots", "no roots given and the home directory is unknown")
+		}
+		return []string{home}, nil
+	}
+	out := make([]string, 0, len(roots))
+	for _, r := range roots {
+		if !filepath.IsAbs(r) {
+			return nil, Invalid("browse_roots", fmt.Sprintf("%q is not an absolute path", r))
+		}
+		out = append(out, filepath.Clean(r))
+	}
+	return out, nil
 }
 
 func loadSettings(ctx context.Context, q querier) (Settings, error) {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -48,7 +49,7 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	fake.Script("planner", runner.Step{Reply: e2ePlan})
 	fake.Script("architect", runner.Step{Reply: e2eApprove})
 	fake.Script("critic", runner.Step{Reply: e2eApprove})
-	fake.Script("compiler", runner.Step{Reply: e2eCompile})
+	fake.Script("compiler", runner.Step{Reply: e2eCompile}, runner.Step{Reply: e2eCompile}) // approve compiles, then a recompile
 	for i := 0; i < 3; i++ {
 		fake.Script("worker", runner.Step{Reply: e2eWorker, Edit: func(r runner.Request) error {
 			name := filepath.Base(r.Workdir)
@@ -102,6 +103,10 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	// Settings, candidates, statistics.
 	ok("GET", "/api/settings", "", 200)
 	ok("PUT", "/api/settings", `{"max_attempts":3,"plan_max_rounds":3}`, 200)
+	ok("PUT", "/api/settings", `{"browse_roots":[`+strconv.Quote(repo)+`]}`, 200)
+	ok("GET", "/api/fs/dirs", "", 200)
+	ok("GET", "/api/fs/dirs?path="+url.QueryEscape(repo), "", 200)
+	ok("GET", "/api/fs/dirs?path=/", "", 400) // outside the browse roots
 	for role, m := range map[string]string{"planner": "m1", "architect": "m2", "critic": "m3", "compiler": "m1", "worker": "m1", "reviewer": "m2"} {
 		ok("PUT", "/api/candidates/"+role, `{"candidates":[{"backend":"gpu","model":"`+m+`"}]}`, 200)
 	}
@@ -158,7 +163,8 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 		ok("PUT", base+"/plan", e2ePlan, 0)
 	}
 	ok("POST", base+"/plan/approve", ``, 0)
-	ok("POST", base+"/compile", ``, 202)
+	e.waitEffort("demo", ef.ID, model.EffortQueueDraft) // approval started the compile
+	ok("POST", base+"/compile", ``, 202)                // recompile
 	e.waitEffort("demo", ef.ID, model.EffortQueueDraft)
 	ok("GET", base+"/tasks", "", 200)
 	var tk struct {

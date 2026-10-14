@@ -45,6 +45,12 @@ type Deps struct {
 	// wires the concrete adapter's generator; the engine never imports it.
 	// Nil skips freezing, for runners that need no config.
 	FreezeConfig func(backend FrozenBackend, stageDir string) (path string, err error)
+	// KeyEnv names the environment variable that carries a backend's API key
+	// (the frozen config refers to it as {env:NAME}). With it set, each model
+	// stage resolves the key when it starts, from the backend's stored key and
+	// else from that variable in the server's environment, and hands the
+	// runner only that one variable. Nil passes no key.
+	KeyEnv func(backend string) string
 	// Git is the engine git service. With it set the engine runs the attempt
 	// chain (work, verify, review, commit, merge) and, unless overridden
 	// below, the built-in verify and merge executors; without it only the
