@@ -119,6 +119,17 @@ Audit (2026-10-14), done API-only, no browser: 61 routes, 53 UI client methods; 
 - **P2 Conventions.** Settings in the hamburger and live (secrets in the DB, no restart); symbols over words with tooltips; reorder like grocery; server-side directory picker; new-effort form out of the way; auto compile on plan approval.
 - **P3 Automation.** N1 definition of done, N2 description-only FRD drafted through opencode, N3 deterministic filler, opencode clean-up of typed text (titles, objectives, backend names), and context-aware chunking: estimate tokens of FRD/plan/stage prompt against the model's context window (new per-model `context_tokens`), and offer to split an oversized FRD into phases or efforts and a complex plan into smaller phases, because qwen's context is short and long contexts cost a lot on paid models.
 
+## Phase 3 contract (automation), 2026-10-14
+
+Scope decisions: the draft/polish/split stages reuse the `planner` role (the `stages.role` CHECK list stays unchanged) with a purpose in the stage payload and their own prompts; plan-too-complex handling is estimation + FRD splitting now, compile-per-phase is a follow-up.
+
+1. `GET /api/projects/{slug}/definition-of-done` -> `{"items": [..], "source": "detected"|"project", "toolchains": ["go"]}`; project PATCH accepts `definition_of_done` (list; null clears the override). The items are attached to the worker and reviewer prompts ("## Definition of done") and shown read-only on the FRD tab. Drafted criteria must not restate them.
+2. `POST /api/projects/{slug}/efforts/{id}/frd/draft` body `{"description": str, "polish": bool}` -> 202. Runs a planner-role stage that returns an FRD (polish = tidy the existing FRD instead of drafting from the description); the result is saved as a new unapproved FRD revision and `effort.update` fires. `GET .../frd/draft` -> `{"state": "idle"|"running"|"failed", "started": ms, "error": str}`.
+3. Deterministic filler on every FRD save (PUT frd and the draft result): ids R1../AC1.. assigned when empty, an acceptance criterion with no requirement links covers all requirements, default group, status `draft`, created date. A FRD with no ids typed is valid.
+4. `GET .../efforts/{id}/size` -> `{"frd_tokens", "plan_tokens", "budget_tokens", "context_tokens_min", "over": bool, "models": [{"backend","model","context_tokens"}], "advice": str}`. Tokens are estimated (chars/4). `budget` = half of the smallest context among the candidates for the planning roles; 0 context = unknown, then no `over`.
+5. `POST .../frd/split` body `{"max_parts": int?}` -> 202 (planner-role stage returning `{"parts": [FRD..]}`); on success part 1 becomes the effort's FRD (new revision) and parts 2..N are stored. `GET .../frd/parts` -> `[{"n","title","summary","tokens"}]`; `POST .../frd/parts/{n}/start` creates a new effort from part n (409 while the project has an active effort).
+6. Backend models gain `context_tokens` (int, 0 unknown) on create/patch/view; the host probe returns the existing `models: [str]` plus `contexts: {name: tokens}` (Ollama `/api/show` model_info `*.context_length`, best effort).
+
 ## API contract for the UI (Phase D, final)
 All under `/api`; JSON errors `{"error","field"?}` (400 validation, 404, 409 ErrConflict, 503 at SSE cap). `…` = `/projects/{slug}`.
 - Health: GET /health (`{status: ok|degraded, opencode:{status,version?,error?}}`); GET /opencode/version?refresh=1.
