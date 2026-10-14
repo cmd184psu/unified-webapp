@@ -1006,7 +1006,7 @@ var DirPicker = class {
       class: "ui-modal-btn dir-row",
       attrs: { type: "button", "data-dir": d.path, title: d.git ? `${d.path} (git repository)` : d.path },
       on: { click: () => void this.go(d.path) }
-    }, d.name, d.git ? badge("git", "ok") : null)) : [h("p", { class: "field-hint", text: cur ? "No subfolders here; choose this folder or go up." : "" })]);
+    }, d.name, d.git ? badge("git", "ok") : null)) : [h("p", { class: "field-hint", text: cur ? "No subfolders" : "" })]);
   }
 };
 function pickDirectory(start = "", fsDirs = api.fsDirs) {
@@ -1122,7 +1122,6 @@ var SettingsView = class {
         h("code", { text: r }),
         button("Remove", () => edit(this.roots.filter((_, j) => j !== i)), { field: "remove-root", icon: "remove" })
       )),
-      this.roots.length === 0 ? h("p", { class: "field-hint", text: "No limit: the picker can browse any folder. Add folders to confine it." }) : null,
       button("Add folder", () => void this.addRoot(edit), { field: "add-root", icon: "add" })
     );
   }
@@ -1171,7 +1170,7 @@ var SettingsView = class {
         section("Limits", limits),
         section("Execution", exec),
         section("opencode", path2, this.ocHost),
-        section("Folders the picker may browse", this.rootsHost),
+        section("Browse limit", this.rootsHost),
         this.errors.general,
         h("div", { class: "settings-actions" }, button("Save settings", () => void this.save(), { primary: true, field: "save", icon: "save" }))
       )

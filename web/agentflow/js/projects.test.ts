@@ -273,7 +273,7 @@ test('H2: clicking a folder descends, Up returns, Choose reports the current fol
   eq(byAttr(t.el, 'data-role', 'dir-path')[0].textContent, '/srv');
   byAttr(t.el, 'data-dir', '/srv/app')[0].click();
   await flush();
-  ok(t.el.textContent.includes('No subfolders here'), 'empty note');
+  ok(t.el.textContent.includes('No subfolders'), 'empty note');
   button(t.el, 'Choose this folder').click();
   eq(t.out.chosen, '/srv/app');
   button(t.el, 'Cancel').click();

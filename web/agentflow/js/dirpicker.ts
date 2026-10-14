@@ -69,7 +69,7 @@ export class DirPicker {
         attrs: { type: 'button', 'data-dir': d.path, title: d.git ? `${d.path} (git repository)` : d.path },
         on: { click: () => void this.go(d.path) },
       }, d.name, d.git ? badge('git', 'ok') : null))
-      : [h('p', { class: 'field-hint', text: cur ? 'No subfolders here; choose this folder or go up.' : '' })]));
+      : [h('p', { class: 'field-hint', text: cur ? 'No subfolders' : '' })]));
   }
 }
 

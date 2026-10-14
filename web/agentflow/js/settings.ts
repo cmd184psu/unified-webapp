@@ -114,7 +114,6 @@ export class SettingsView {
       ...this.roots.map((r, i) => h('div', { class: 'inline-row', attrs: { 'data-root': i } },
         h('code', { text: r }),
         button('Remove', () => edit(this.roots.filter((_, j) => j !== i)), { field: 'remove-root', icon: 'remove' }))),
-      this.roots.length === 0 ? h('p', { class: 'field-hint', text: 'No limit: the picker can browse any folder. Add folders to confine it.' }) : null,
       button('Add folder', () => void this.addRoot(edit), { field: 'add-root', icon: 'add' }));
   }
 
@@ -163,7 +162,7 @@ export class SettingsView {
         section('Limits', limits),
         section('Execution', exec),
         section('opencode', path, this.ocHost),
-        section('Folders the picker may browse', this.rootsHost),
+        section('Browse limit', this.rootsHost),
         this.errors.general,
         h('div', { class: 'settings-actions' }, button('Save settings', () => void this.save(), { primary: true, field: 'save', icon: 'save' }))));
   }
