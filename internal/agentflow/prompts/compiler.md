@@ -43,5 +43,6 @@ Emit only these fields. Any other field makes the queue invalid.
 9. A task may only name files created by itself or by tasks in its dependency chain. Never reference a file to be created later.
 10. Prefer implementation and testing as separate tasks when combining them would make the prompt long or fragile.
 11. Never invent infrastructure outside the approved plan. The runner owns project-state files.
+12. Never emit a task whose only purpose is running, checking or confirming tests, the build or lint (titles such as "Run tests" or "Make sure all tests pass"). Every task must change files; the engine builds, vets and tests after every task automatically, with no task needed. Such a task is rejected.
 
 Produce the full queue now.

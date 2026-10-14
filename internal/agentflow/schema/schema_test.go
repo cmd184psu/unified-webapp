@@ -225,6 +225,23 @@ func TestCompileOutRejectsVerifyField(t *testing.T) {
 	}
 }
 
+func TestCompileOutRejectsVerificationOnlyTasks(t *testing.T) {
+	task := func(title string) string {
+		return `{"tasks":[{"id":"T003","phase":"P1","title":"` + title + `","prompt":"p","acceptance":["R1: x"],"files_touched":["a.go"]}]}`
+	}
+	for _, title := range []string{"Verify all tests pass", "Run the build", "Ensure lint and vet are clean", "check tests"} {
+		_, err := Parse[CompileOut](json.RawMessage(task(title)))
+		if err == nil || !strings.Contains(err.Error(), "T003") || !strings.Contains(err.Error(), "automatic") {
+			t.Errorf("%q: want a verification-only error naming T003, got %v", title, err)
+		}
+	}
+	for _, title := range []string{"Add parser tests", "Run migrations on startup", "Implement build tag handling"} {
+		if _, err := Parse[CompileOut](json.RawMessage(task(title))); err != nil {
+			t.Errorf("%q: %v", title, err)
+		}
+	}
+}
+
 func TestCorrectiveMessage(t *testing.T) {
 	_, err := Parse[ReviewOut](json.RawMessage(`{"verdict":"maybe","summary":"s","issues":[]}`))
 	msg := CorrectiveMessage(err)

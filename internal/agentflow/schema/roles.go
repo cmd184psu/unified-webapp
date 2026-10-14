@@ -2,6 +2,7 @@ package schema
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -245,7 +246,13 @@ func (r *PlanReviewOut) Validate() error {
 	return validateIssues("issues", r.Issues)
 }
 
-// Validate requires at least one fully described task.
+// verifyOnlyTitle matches a task title that only runs, checks or verifies
+// tests, builds, lint or vet. The engine does that for every task, and such a
+// task changes no files, so verify's no_changes check could never pass it.
+var verifyOnlyTitle = regexp.MustCompile(`(?i)^\s*(run|verify|confirm|check|ensure|validate)\b.*\b(tests?|builds?|lint|vet)\b`)
+
+// Validate requires at least one fully described task, none of which is
+// verification-only.
 func (c *CompileOut) Validate() error {
 	if len(c.Tasks) == 0 {
 		return bad("tasks", "needs at least one entry")
@@ -264,6 +271,9 @@ func (c *CompileOut) Validate() error {
 		}
 		if err := nonEmptyList(f+"files_touched", t.FilesTouched); err != nil {
 			return err
+		}
+		if verifyOnlyTitle.MatchString(t.Title) {
+			return bad(f+"title", "task %s %q only verifies tests or the build: verification is automatic for every task, so drop it or fold it into a task that changes files", t.ID, t.Title)
 		}
 	}
 	return nil

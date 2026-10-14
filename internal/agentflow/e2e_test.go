@@ -322,9 +322,24 @@ func TestE2E_FullJourneyOverHTTP(t *testing.T) {
 	}
 
 	// Push instructions are exposed now (and were a 409 before).
-	var gc struct{ Commands []string }
+	var gc struct {
+		Commands []string
+		Branch   string
+		Base     string
+		Commits  []struct{ SHA, Subject string }
+		Diffstat string
+		Files    int
+	}
 	if err := json.Unmarshal(e.must("GET", base+"/git-commands", "", 200), &gc); err != nil || !strings.Contains(strings.Join(gc.Commands, "\n"), branch) {
 		t.Errorf("git-commands = %+v (%v)", gc, err)
+	}
+	if gc.Branch != branch || gc.Base == "" || len(gc.Commits) < 3 || gc.Diffstat == "" || gc.Files < 3 {
+		t.Errorf("git-commands completion info = %+v, want branch %q, a base, 3+ commits, a diffstat and 3+ files", gc, branch)
+	}
+	for _, c := range gc.Commits {
+		if c.SHA == "" || c.Subject == "" {
+			t.Errorf("git-commands commit = %+v", c)
+		}
 	}
 
 	// Every task passed, with the worker and reviewer on different models.

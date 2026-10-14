@@ -313,7 +313,11 @@ git merge --no-ff 'agentflow/effort-1'
 git push origin 'main'
 ```
 
-Read the log first. Run the commands yourself.
+The same response carries what is being merged, so you can review it before you run
+anything: `branch` (the integration branch), `base` (the short sha the effort started from),
+`commits` (`[{sha, subject}]` for base..branch, oldest first), `diffstat` (the
+`git diff --stat` text) and `files` (the number of changed files). Tool state (`.omc`,
+`.claude`) is left out of the diffstat. Read the log first. Run the commands yourself.
 
 ---
 

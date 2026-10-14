@@ -67,7 +67,15 @@ func TestE4_GitCommandsNeedACompleteEffort(t *testing.T) {
 	if _, err := e.st.UpdateEffort(context.Background(), "test", ef.ID, store.EffortPatch{Status: &complete, IntegrationBranch: strPtr("af/integ")}); err != nil {
 		t.Fatal(err)
 	}
-	got := decode[map[string][]string](t, e.ok("GET", path, nil, http.StatusOK))["commands"]
+	body := decode[struct {
+		Commands []string
+		Branch   string
+		Commits  []any
+	}](t, e.ok("GET", path, nil, http.StatusOK))
+	got := body.Commands
+	if body.Branch != "af/integ" || body.Commits == nil {
+		t.Fatalf("branch = %q, commits = %v", body.Branch, body.Commits)
+	}
 	if len(got) != 5 || got[3] != "git merge --no-ff 'af/integ'" {
 		t.Fatalf("commands = %q", got)
 	}

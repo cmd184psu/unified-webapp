@@ -244,6 +244,12 @@ func TestC6_HappyPathLeavesTheUserTreeUntouched(t *testing.T) {
 	if err != nil || !strings.Contains(strings.Join(cmds, "\n"), "git merge --no-ff 'agentflow/") {
 		t.Fatalf("push instructions = %v (%v)", cmds, err)
 	}
+	// A completed effort leaves nothing to run: the project reads stopped, in
+	// memory and on the effort.
+	waitFor(t, "run state stopped after completion", func() bool {
+		ef, err := c.st.GetEffort(context.Background(), c.effort)
+		return err == nil && ef.RunState == model.RunStopped && c.eng.Runs().State(c.slug) == model.RunStopped
+	})
 }
 
 // V6, AT1: a verify failure (the worker changed nothing) closes the attempt as

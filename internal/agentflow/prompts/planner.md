@@ -21,7 +21,7 @@ Current repository files (relative paths, capped). When this is empty, treat the
 1. Phases run in order, respecting `depends_on`.
 2. Each phase's `tasks_description` is concrete enough to split into atomic tasks later and names the relative paths it creates or modifies.
 3. Keep phases small: one to three tasks each.
-4. The first phase establishes the foundation. The last phase is verification that can run unattended, with no manual server start or page inspection.
+4. The first phase establishes the foundation. Never create a phase or task whose only purpose is running, checking or verifying tests, the build or lint: every task must change files, and the engine builds, vets and tests after every task automatically. Put tests inside the phase that adds the behavior; keep acceptance checkable unattended, with no manual server start or page inspection.
 5. Do not plan deployment, CI/CD, or infrastructure unless the FRD requires it.
 6. State the principles guiding the plan, the decision drivers, and at least two options you considered. Choose one and record the decision in the ADR.
 {{DELIBERATE_RULES}}

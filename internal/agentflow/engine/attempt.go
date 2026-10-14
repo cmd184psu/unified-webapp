@@ -533,6 +533,27 @@ func (e *Engine) PushInstructions(ctx context.Context, effort int64) ([]string, 
 	return gitsvc.PushInstructions(proj.RepoPath, ef.IntegrationBranch, baseBranch), nil
 }
 
+// Completion summarizes a completed effort's integration branch against the
+// commit it started from: commits, diffstat and changed-file count. ErrConflict
+// unless the effort is complete; an effort that never ran has an empty summary.
+func (e *Engine) Completion(ctx context.Context, effort int64) (gitsvc.Completion, error) {
+	ef, err := e.deps.Store.GetEffort(ctx, effort)
+	if err != nil {
+		return gitsvc.Completion{}, err
+	}
+	if ef.Status != model.EffortComplete {
+		return gitsvc.Completion{}, fmt.Errorf("effort %d is %s, not complete: %w", effort, ef.Status, store.ErrConflict)
+	}
+	if ef.BaseCommit == "" || ef.IntegrationBranch == "" {
+		return gitsvc.Completion{Commits: []gitsvc.Commit{}}, nil // never ran: nothing to summarize
+	}
+	proj, err := e.deps.Store.GetProject(ctx, ef.Project)
+	if err != nil {
+		return gitsvc.Completion{}, err
+	}
+	return e.deps.Git.Completion(ctx, proj.RepoPath, ef.BaseCommit, ef.IntegrationBranch)
+}
+
 // touchedFiles are the files the attempt may be blamed for: the task's
 // declared files and what the worker reported changing.
 func (c *chain) touchedFiles() []string {

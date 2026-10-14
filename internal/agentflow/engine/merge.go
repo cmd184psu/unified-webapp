@@ -222,6 +222,8 @@ func (e *Engine) completeEffort(ctx context.Context, proj store.Project, ef mode
 		return err
 	}
 	done := model.EffortComplete
-	_, err = e.deps.Store.UpdateEffort(ctx, SystemActor, ef.ID, store.EffortPatch{Status: &done})
-	return err
+	if _, err = e.deps.Store.UpdateEffort(ctx, SystemActor, ef.ID, store.EffortPatch{Status: &done}); err != nil {
+		return err
+	}
+	return e.runs.finish(ctx, proj.Slug, ef)
 }

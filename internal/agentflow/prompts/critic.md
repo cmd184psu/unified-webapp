@@ -19,6 +19,7 @@ You are reviewing an implementation plan against its FRD. You did not write the 
 - Judge the behavior, not the wording. A requirement is covered when a phase describes that behavior; the plan need not repeat the requirement id.
 - Before filing an issue, find the phase text and look for the behavior there. If the phase already describes it, do not file the issue.
 - Each issue quotes the requirement AND the phase sentence you checked. If you cannot quote both, drop the issue.
+- A phase or task whose only purpose is running, checking or verifying tests, the build or lint (for example "verify all tests pass") is a blocking issue: every task must change files and the engine verifies each task automatically. File it with severity "blocker" and verdict "revise".
 - A "do not build X" constraint is satisfied when no phase builds X.
 - "approve" when every requirement is covered and the phases are concrete enough to compile into tasks.
 - "revise" only for a requirement that no phase covers or a phase that cannot be verified. Severity "blocker" only when a core behavior is absent; wording preferences are "minor".

@@ -278,7 +278,8 @@ func (a *API) yoloInvariants(w http.ResponseWriter, r *http.Request) {
 }
 
 // gitCommands lists the commands a human runs to merge and push a completed
-// effort's integration branch (GIT4). Agentflow runs none of them; an effort
+// effort's integration branch (GIT4), with the branch, base, commits, diffstat
+// and file count behind them. Agentflow runs none of the commands; an effort
 // that is not complete answers 409.
 func (a *API) gitCommands(w http.ResponseWriter, r *http.Request) {
 	ef, ok := a.loadEffort(w, r)
@@ -290,5 +291,13 @@ func (a *API) gitCommands(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"commands": cmds})
+	sum, err := a.deps.Engine.Completion(r.Context(), ef.ID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"commands": cmds, "branch": ef.IntegrationBranch, "base": sum.Base,
+		"commits": sum.Commits, "diffstat": sum.Diffstat, "files": sum.Files,
+	})
 }

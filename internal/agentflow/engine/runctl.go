@@ -411,6 +411,21 @@ func (r *RunControl) stop(ctx context.Context, actor, project, reason string) er
 	return r.recordWhy(ctx, actor, "run.stop", project, eff, model.RunStopped, reason)
 }
 
+// finish stops a project whose effort just completed: nothing is left to
+// dispatch, so the run state reads stopped (RC1) until a person starts the
+// next effort. No stage or attempt is open, so there is nothing to cancel.
+func (r *RunControl) finish(ctx context.Context, project string, ef model.Effort) error {
+	r.mu.Lock()
+	en := r.entry(project)
+	was := en.state
+	en.state, en.oneShot, en.budget, en.reason = model.RunStopped, false, 0, ""
+	r.mu.Unlock()
+	if was == model.RunStopped && ef.RunState == model.RunStopped {
+		return nil
+	}
+	return r.record(ctx, SystemActor, "run.complete", project, ef.ID, model.RunStopped)
+}
+
 func (r *RunControl) cancelInFlight(ctx context.Context, effort int64) error {
 	s := r.e.deps.Store
 	r.e.submitMu.Lock() // no stage row without its job while we scan
