@@ -2,6 +2,7 @@ import { test, run, eq, ok, installFakeDom, FakeEl, asEl, byField, byAttr, butto
 import { Board, counts, renderVerify, renderReviewOut, type BoardDeps } from './board';
 import { StreamPanel, MAX_LINES, type SourceLike, type StreamDeps } from './stream';
 import { statusKey } from './dom';
+import type { YoloDeps } from './yolo';
 import { dispatch } from './events';
 import { ApiError, type Attempt, type EffortView, type Stage, type TaskDetail, type TaskView } from './api';
 
@@ -70,7 +71,10 @@ function harness(w: World, over: Partial<BoardDeps> = {}) {
     ...over,
   };
   const streamDeps: StreamDeps = { open: (url) => { const s = new FakeSource(url); sources.push(s); return s; } };
-  const board = new Board(asEl(host), asEl(panel), 'p1', deps, streamDeps);
+  const yolo: YoloDeps = {
+    setYOLO: async () => effort(), yoloInvariants: async () => [], confirm: async () => true, notify: () => {},
+  };
+  const board = new Board(asEl(host), asEl(panel), 'p1', deps, streamDeps, yolo);
   return { host, panel, board, log, sources, answers };
 }
 

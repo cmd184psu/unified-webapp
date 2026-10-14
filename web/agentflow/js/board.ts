@@ -14,6 +14,7 @@ import { chip, h, replace, statusKey, type Child } from './dom.js';
 import { subscribe, type AgentflowEvent } from './events.js';
 import { FormErrors, badge, button, checkbox, fieldRow, textArea, textInput } from './forms.js';
 import { buttonsFor, progressText } from './overview.js';
+import { defaultYoloDeps, type YoloDeps } from './yolo.js';
 import { StreamPanel, defaultStreamDeps, type StreamDeps } from './stream.js';
 
 export type BoardDeps = Pick<
@@ -101,7 +102,7 @@ export class Board {
   private off: (() => void) | null = null;
   private errors = new FormErrors();
 
-  constructor(private host: HTMLElement, private panel: HTMLElement, private slug: string, private deps: BoardDeps, streamDeps: StreamDeps) {
+  constructor(private host: HTMLElement, private panel: HTMLElement, private slug: string, private deps: BoardDeps, streamDeps: StreamDeps, private yolo: YoloDeps = defaultYoloDeps()) {
     this.stream = new StreamPanel(panel, streamDeps);
   }
 
@@ -358,7 +359,7 @@ export class Board {
         attrs: { type: 'button', 'data-op': b.op }, on: { click: () => void this.control(b.op) },
       }));
     replace(this.host,
-      effortBar(this.slug, this.efforts, ef, (id) => { this.current = this.efforts.find((e) => e.id === id); void this.load(); }),
+      effortBar(this.slug, this.efforts, ef, (id) => { this.current = this.efforts.find((e) => e.id === id); void this.load(); }, { deps: this.yolo, onChanged: () => void this.refresh() }),
       h('div', { class: 'console-header' },
         h('span', { class: 'pane-title', text: 'Progress' }), bar, h('span', { class: 'progress-pct', text }), chip(this.runState), ...controls),
       this.gitBox(),

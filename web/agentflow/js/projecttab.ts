@@ -6,6 +6,7 @@
 import { api, type ProjectView } from './api.js';
 import { h, replace } from './dom.js';
 import { mountBoard } from './board.js';
+import { mountHistory } from './history.js';
 import { mountFrd } from './frd-editor.js';
 import { mountPlan } from './plan-view.js';
 import { mountQueue } from './queue.js';
@@ -21,16 +22,12 @@ export interface SubTab {
   mount: ProjectMount;
 }
 
-function placeholder(story: string): ProjectMount {
-  return (host) => replace(host, h('p', { class: 'field-hint', text: `coming in ${story}` }));
-}
-
 export const SUB_TABS: SubTab[] = [
   { id: 'frd', label: 'FRD', mount: mountFrd },
   { id: 'plan', label: 'Plan', mount: mountPlan },
   { id: 'queue', label: 'Queue', mount: mountQueue },
   { id: 'board', label: 'Board', mount: mountBoard },
-  { id: 'history', label: 'History', mount: placeholder('E5') },
+  { id: 'history', label: 'History', mount: mountHistory },
 ];
 
 const KEY = 'agentflow:project';

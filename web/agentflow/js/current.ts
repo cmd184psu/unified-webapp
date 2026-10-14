@@ -5,6 +5,7 @@
 import type { EffortView } from './api.js';
 import { chip, h } from './dom.js';
 import { selectInput } from './forms.js';
+import { yoloBadge, yoloControl, type YoloDeps } from './yolo.js';
 
 const picked = new Map<string, number>();
 
@@ -25,7 +26,13 @@ export function rememberEffort(slug: string, id: number): void {
 }
 
 /** effortBar is the picker row: a select of the project's efforts and the chosen one's status. */
-export function effortBar(slug: string, efforts: EffortView[], current: EffortView | undefined, onPick: (id: number) => void): HTMLElement {
+export function effortBar(
+  slug: string,
+  efforts: EffortView[],
+  current: EffortView | undefined,
+  onPick: (id: number) => void,
+  yolo?: { deps: YoloDeps; onChanged: () => void },
+): HTMLElement {
   const sel = selectInput('effort', efforts.map((e) => [String(e.id), `#${e.id} ${e.title}`] as [string, string]), String(current?.id ?? ''));
   sel.addEventListener('change', () => {
     rememberEffort(slug, Number(sel.value));
@@ -33,5 +40,7 @@ export function effortBar(slug: string, efforts: EffortView[], current: EffortVi
   });
   return h('div', { class: 'console-header' },
     h('span', { class: 'pane-title', text: 'Effort' }), sel,
-    current ? chip(current.status) : null);
+    current ? chip(current.status) : null,
+    current?.yolo && !yolo ? yoloBadge() : null,
+    current && yolo ? yoloControl(slug, current, yolo.deps, yolo.onChanged) : null);
 }

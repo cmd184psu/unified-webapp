@@ -125,6 +125,7 @@ Known limits: `opencode_path` setting needs a restart; project create defaults m
 - 2026-10-13 — E2: Settings + Backends views, /api/stats/models.
 - 2026-10-13 — E3: Projects + FRD editor + plan rounds views.
 - 2026-10-13 — E4: Queue + Board console + stream panel + halted actions; added git-commands route.
+- 2026-10-13 — E5: History + export/import + YOLO toggle/badge; no placeholders remain.
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`

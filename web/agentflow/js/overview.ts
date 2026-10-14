@@ -6,6 +6,7 @@ import { confirmDialog } from '@shared';
 import { api, type ProjectView, type RunOp, type WorkItem } from './api.js';
 import { chip, h, replace } from './dom.js';
 import { subscribe, type AgentflowEvent } from './events.js';
+import { yoloBadge } from './yolo.js';
 
 export interface OverviewDeps {
   list(): Promise<ProjectView[]>;
@@ -191,7 +192,8 @@ export class Overview {
         h('a', { class: 'task-item-title', text: p.slug, attrs: { href: '#', 'data-open': p.slug }, on: {
           click: (e) => { e.preventDefault(); this.deps.open(p.slug); },
         } }),
-        chip(p.run_state)),
+        chip(p.run_state),
+        ef?.yolo ? yoloBadge() : null),
       h('div', { class: 'task-item-meta', text: ef ? `${ef.title} · ${ef.status.replace(/_/g, ' ')}` : 'no active effort' }),
       bar,
       h('div', { class: 'progress-pct', text: text }),

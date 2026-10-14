@@ -92,7 +92,7 @@ function startEvents() {
 }
 
 // web/agentflow/js/overview.ts
-import { confirmDialog } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog2 } from "/shared/dist/shared.mjs";
 
 // web/agentflow/js/api.ts
 import { alertDialog } from "/shared/dist/shared.mjs";
@@ -207,15 +207,208 @@ var api = {
   // Run control: answers with the project's overview
   run: (slug, op) => send("POST", `${proj(slug)}/run/${op}`)
 };
+function exportURL(effort, format, doc, revision) {
+  const base = doc ? `/api/efforts/${effort}/${doc}/export` : `/api/efforts/${effort}/export`;
+  return `${base}?format=${format}${revision ? `&revision=${revision}` : ""}`;
+}
 function stageStreamURL(stage) {
   return `/api/stages/${stage}/stream`;
+}
+
+// web/agentflow/js/yolo.ts
+import { confirmDialog, showToast } from "/shared/dist/shared.mjs";
+
+// web/agentflow/js/forms.ts
+function textInput(name, value, opts = {}) {
+  const el = h("input", {
+    class: "settings-input",
+    attrs: { type: opts.type ?? "text", name, "data-field": name, placeholder: opts.placeholder, readonly: opts.readOnly }
+  });
+  el.value = value;
+  return el;
+}
+function textArea(name, value, rows = 4) {
+  const el = h("textarea", { class: "settings-input", attrs: { name, "data-field": name, rows } });
+  el.value = value;
+  return el;
+}
+function checkbox(name, checked) {
+  const el = h("input", { attrs: { type: "checkbox", name, "data-field": name } });
+  el.checked = checked;
+  return el;
+}
+function selectInput(name, options, value) {
+  const el = h(
+    "select",
+    { class: "settings-input", attrs: { name, "data-field": name } },
+    ...options.map(([v, label]) => h("option", { text: label, attrs: { value: v } }))
+  );
+  el.value = options.some(([v]) => v === value) ? value : options[0]?.[0] ?? "";
+  return el;
+}
+function fieldRow(label, control, hint) {
+  const err = h("div", { class: "field-error", attrs: { role: "alert", hidden: true } });
+  const row = h(
+    "div",
+    { class: "wizard-field" },
+    h("label", { text: label }),
+    control,
+    hint ? h("div", { class: "field-hint", text: hint }) : null,
+    err
+  );
+  return {
+    el: row,
+    control,
+    error(msg) {
+      err.textContent = msg;
+      if (msg) err.removeAttribute("hidden");
+      else err.setAttribute("hidden", "");
+    }
+  };
+}
+function button(label, onClick, opts = {}) {
+  return h("button", {
+    class: "ui-modal-btn" + (opts.primary ? " ui-modal-btn-primary" : ""),
+    text: label,
+    attrs: { type: "button", "data-action": opts.field },
+    on: { click: onClick }
+  });
+}
+function section(title, ...children) {
+  return h("div", { class: "settings-section" }, h("h4", { text: title }), ...children);
+}
+function badge(label, kind = "paid") {
+  return h("span", { class: `badge badge-${kind}`, text: label });
+}
+function matchKey(field, keys) {
+  if (!field) return void 0;
+  const set = new Set(keys);
+  const tries = [field, field.replace(/^limits\./, ""), field.replace(/\[.*$/, ""), field.replace(/^limits\./, "").replace(/[[.].*$/, "")];
+  return tries.find((k) => set.has(k));
+}
+var FormErrors = class {
+  constructor() {
+    this.general = h("div", { class: "field-error", attrs: { role: "alert", hidden: true } });
+    this.fields = /* @__PURE__ */ new Map();
+  }
+  add(key, f) {
+    this.fields.set(key, f);
+    return f;
+  }
+  clear() {
+    for (const f of this.fields.values()) f.error("");
+    this.setGeneral("");
+  }
+  setGeneral(msg) {
+    this.general.textContent = msg;
+    if (msg) this.general.removeAttribute("hidden");
+    else this.general.setAttribute("hidden", "");
+  }
+  /** show displays err next to its field, or in the form-level line when it names none. */
+  show(err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const key = err instanceof ApiError ? matchKey(err.field, this.fields.keys()) : void 0;
+    if (key) this.fields.get(key)?.error(message);
+    else this.setGeneral(message);
+  }
+};
+var RowsEditor = class {
+  constructor(build, items, blank, addLabel, onChange = () => {
+  }) {
+    this.build = build;
+    this.blank = blank;
+    this.onChange = onChange;
+    this.rows = [];
+    this.list = h("div", { class: "wizard-list" });
+    for (const it of items) this.addRow(it);
+    this.el = h("div", {}, this.list, button(addLabel, () => this.addRow(this.blank(), true), { field: "add-row" }));
+  }
+  addRow(item, notify = false) {
+    const ctl = this.build(item);
+    this.rows.push(ctl);
+    const row = h(
+      "div",
+      { class: "inline-row", attrs: { "data-row": this.rows.length - 1 } },
+      ctl.el,
+      button("Remove", () => {
+        this.rows.splice(this.rows.indexOf(ctl), 1);
+        this.list.removeChild(row);
+        this.onChange();
+      }, { field: "remove-row" })
+    );
+    this.list.appendChild(row);
+    if (notify) this.onChange();
+  }
+  read() {
+    return this.rows.map((r) => r.read());
+  }
+};
+
+// web/agentflow/js/yolo.ts
+var defaultYoloDeps = () => ({
+  setYOLO: api.setYOLO,
+  yoloInvariants: api.yoloInvariants,
+  confirm: (m, label = "Confirm") => confirmDialog(m, { confirmLabel: label }),
+  notify: (m) => void showToast(m, "success")
+});
+function yoloBadge() {
+  return h("span", { class: "badge badge-warn", text: "YOLO", attrs: { "data-role": "yolo-badge", title: "YOLO is on: the human gates approve themselves" } });
+}
+function confirmText(effort, invariants) {
+  return `Enable YOLO for effort #${effort.id}? The FRD-to-plan, plan-to-queue and queue approvals will happen automatically, and a stuck task is retried once. Still enforced:
+` + invariants.map((i) => `- ${i.id}: ${i.text}`).join("\n");
+}
+function yoloControl(slug, effort, deps, onChanged) {
+  const listHost = h("div", { attrs: { "data-role": "yolo-invariants" } });
+  let invariants = [];
+  const loading = deps.yoloInvariants().then((inv) => {
+    invariants = inv;
+    replace(listHost, h(
+      "details",
+      {},
+      h("summary", { text: "Always enforced, even under YOLO" }),
+      h("ul", { class: "plan-review-notes" }, ...inv.map((i) => h("li", {}, h("strong", { text: i.id }), ` ${i.text}`)))
+    ));
+  }).catch(() => void 0);
+  const toggle = async () => {
+    if (effort.yolo) {
+      try {
+        await deps.setYOLO(slug, effort.id, false, false);
+      } catch {
+        return;
+      }
+      deps.notify("YOLO disabled");
+    } else {
+      await loading;
+      if (!await deps.confirm(confirmText(effort, invariants), "Enable YOLO")) return;
+      try {
+        await deps.setYOLO(slug, effort.id, true, true);
+      } catch {
+        return;
+      }
+      deps.notify("YOLO enabled");
+    }
+    onChanged();
+  };
+  if (effort.status === "complete" || effort.status === "abandoned") return h("div", { attrs: { "data-role": "yolo" } }, effort.yolo ? yoloBadge() : null);
+  return h(
+    "div",
+    { class: "detail-section", attrs: { "data-role": "yolo" } },
+    h(
+      "div",
+      { class: "row-actions" },
+      effort.yolo ? yoloBadge() : null,
+      button(effort.yolo ? "Disable YOLO" : "Enable YOLO", () => void toggle(), { field: "toggle-yolo" })
+    ),
+    listHost
+  );
 }
 
 // web/agentflow/js/overview.ts
 var defaultDeps = (open) => ({
   list: () => api.projects(),
   run: (slug, op) => api.run(slug, op),
-  confirm: (m) => confirmDialog(m, { confirmLabel: "Stop" }),
+  confirm: (m) => confirmDialog2(m, { confirmLabel: "Stop" }),
   open
 });
 function buttonsFor(runState) {
@@ -374,7 +567,8 @@ var Overview = class {
             this.deps.open(p.slug);
           }
         } }),
-        chip(p.run_state)
+        chip(p.run_state),
+        ef?.yolo ? yoloBadge() : null
       ),
       h("div", { class: "task-item-meta", text: ef ? `${ef.title} \xB7 ${ef.status.replace(/_/g, " ")}` : "no active effort" }),
       bar,
@@ -386,133 +580,7 @@ var Overview = class {
 };
 
 // web/agentflow/js/backends.ts
-import { showToast as showToast2 } from "/shared/dist/shared.mjs";
-
-// web/agentflow/js/forms.ts
-function textInput(name, value, opts = {}) {
-  const el = h("input", {
-    class: "settings-input",
-    attrs: { type: opts.type ?? "text", name, "data-field": name, placeholder: opts.placeholder, readonly: opts.readOnly }
-  });
-  el.value = value;
-  return el;
-}
-function textArea(name, value, rows = 4) {
-  const el = h("textarea", { class: "settings-input", attrs: { name, "data-field": name, rows } });
-  el.value = value;
-  return el;
-}
-function checkbox(name, checked) {
-  const el = h("input", { attrs: { type: "checkbox", name, "data-field": name } });
-  el.checked = checked;
-  return el;
-}
-function selectInput(name, options, value) {
-  const el = h(
-    "select",
-    { class: "settings-input", attrs: { name, "data-field": name } },
-    ...options.map(([v, label]) => h("option", { text: label, attrs: { value: v } }))
-  );
-  el.value = options.some(([v]) => v === value) ? value : options[0]?.[0] ?? "";
-  return el;
-}
-function fieldRow(label, control, hint) {
-  const err = h("div", { class: "field-error", attrs: { role: "alert", hidden: true } });
-  const row = h(
-    "div",
-    { class: "wizard-field" },
-    h("label", { text: label }),
-    control,
-    hint ? h("div", { class: "field-hint", text: hint }) : null,
-    err
-  );
-  return {
-    el: row,
-    control,
-    error(msg) {
-      err.textContent = msg;
-      if (msg) err.removeAttribute("hidden");
-      else err.setAttribute("hidden", "");
-    }
-  };
-}
-function button(label, onClick, opts = {}) {
-  return h("button", {
-    class: "ui-modal-btn" + (opts.primary ? " ui-modal-btn-primary" : ""),
-    text: label,
-    attrs: { type: "button", "data-action": opts.field },
-    on: { click: onClick }
-  });
-}
-function section(title, ...children) {
-  return h("div", { class: "settings-section" }, h("h4", { text: title }), ...children);
-}
-function badge(label, kind = "paid") {
-  return h("span", { class: `badge badge-${kind}`, text: label });
-}
-function matchKey(field, keys) {
-  if (!field) return void 0;
-  const set = new Set(keys);
-  const tries = [field, field.replace(/^limits\./, ""), field.replace(/\[.*$/, ""), field.replace(/^limits\./, "").replace(/[[.].*$/, "")];
-  return tries.find((k) => set.has(k));
-}
-var FormErrors = class {
-  constructor() {
-    this.general = h("div", { class: "field-error", attrs: { role: "alert", hidden: true } });
-    this.fields = /* @__PURE__ */ new Map();
-  }
-  add(key, f) {
-    this.fields.set(key, f);
-    return f;
-  }
-  clear() {
-    for (const f of this.fields.values()) f.error("");
-    this.setGeneral("");
-  }
-  setGeneral(msg) {
-    this.general.textContent = msg;
-    if (msg) this.general.removeAttribute("hidden");
-    else this.general.setAttribute("hidden", "");
-  }
-  /** show displays err next to its field, or in the form-level line when it names none. */
-  show(err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const key = err instanceof ApiError ? matchKey(err.field, this.fields.keys()) : void 0;
-    if (key) this.fields.get(key)?.error(message);
-    else this.setGeneral(message);
-  }
-};
-var RowsEditor = class {
-  constructor(build, items, blank, addLabel, onChange = () => {
-  }) {
-    this.build = build;
-    this.blank = blank;
-    this.onChange = onChange;
-    this.rows = [];
-    this.list = h("div", { class: "wizard-list" });
-    for (const it of items) this.addRow(it);
-    this.el = h("div", {}, this.list, button(addLabel, () => this.addRow(this.blank(), true), { field: "add-row" }));
-  }
-  addRow(item, notify = false) {
-    const ctl = this.build(item);
-    this.rows.push(ctl);
-    const row = h(
-      "div",
-      { class: "inline-row", attrs: { "data-row": this.rows.length - 1 } },
-      ctl.el,
-      button("Remove", () => {
-        this.rows.splice(this.rows.indexOf(ctl), 1);
-        this.list.removeChild(row);
-        this.onChange();
-      }, { field: "remove-row" })
-    );
-    this.list.appendChild(row);
-    if (notify) this.onChange();
-  }
-  read() {
-    return this.rows.map((r) => r.read());
-  }
-};
+import { showToast as showToast3 } from "/shared/dist/shared.mjs";
 
 // web/agentflow/js/candidates.ts
 var ROLES = ["worker", "reviewer", "planner", "architect", "critic", "compiler"];
@@ -615,7 +683,7 @@ function buildRoleEditor(o) {
 }
 
 // web/agentflow/js/settings.ts
-import { showToast } from "/shared/dist/shared.mjs";
+import { showToast as showToast2 } from "/shared/dist/shared.mjs";
 var LIMIT_FIELDS = [
   { key: "max_attempts", label: "Max attempts", hint: "Whole number, 2 to 50" },
   { key: "stuck_threshold", label: "Stuck threshold", hint: "Identical failures before a task is stuck; at most max attempts" },
@@ -634,7 +702,7 @@ var defaultSettingsDeps = () => ({
   settings: api.settings,
   putSettings: api.putSettings,
   opencodeVersion: api.opencodeVersion,
-  notify: (m) => void showToast(m, "success")
+  notify: (m) => void showToast2(m, "success")
 });
 var str = (v) => v === void 0 ? "" : String(v);
 var SettingsView = class {
@@ -764,7 +832,7 @@ var defaultBackendsDeps = () => ({
   putLimits: api.putLimits,
   settings: api.settings,
   modelStats: api.modelStats,
-  notify: (m) => void showToast2(m, "success")
+  notify: (m) => void showToast3(m, "success")
 });
 function lastForRoles(cands, name) {
   return ROLES.filter((role) => {
@@ -1156,7 +1224,7 @@ function mountBackends(host) {
 }
 
 // web/agentflow/js/board.ts
-import { confirmDialog as confirmDialog2, copyText, showToast as showToast3 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog3, copyText, showToast as showToast4 } from "/shared/dist/shared.mjs";
 
 // web/agentflow/js/current.ts
 var picked = /* @__PURE__ */ new Map();
@@ -1170,7 +1238,7 @@ function chooseEffort(slug, efforts) {
 function rememberEffort(slug, id) {
   picked.set(slug, id);
 }
-function effortBar(slug, efforts, current, onPick) {
+function effortBar(slug, efforts, current, onPick, yolo) {
   const sel = selectInput("effort", efforts.map((e) => [String(e.id), `#${e.id} ${e.title}`]), String(current?.id ?? ""));
   sel.addEventListener("change", () => {
     rememberEffort(slug, Number(sel.value));
@@ -1181,7 +1249,9 @@ function effortBar(slug, efforts, current, onPick) {
     { class: "console-header" },
     h("span", { class: "pane-title", text: "Effort" }),
     sel,
-    current ? chip(current.status) : null
+    current ? chip(current.status) : null,
+    current?.yolo && !yolo ? yoloBadge() : null,
+    current && yolo ? yoloControl(slug, current, yolo.deps, yolo.onChanged) : null
   );
 }
 
@@ -1281,9 +1351,9 @@ var defaultBoardDeps = () => ({
   overrideTask: api.overrideTask,
   abandonEffort: api.abandonEffort,
   gitCommands: api.gitCommands,
-  confirm: (m, label = "Confirm") => confirmDialog2(m, { confirmLabel: label }),
+  confirm: (m, label = "Confirm") => confirmDialog3(m, { confirmLabel: label }),
   copy: (t) => void copyText(t),
-  notify: (m) => void showToast3(m, "success")
+  notify: (m) => void showToast4(m, "success")
 });
 var rec = (v) => v && typeof v === "object" ? v : {};
 var strs = (v) => Array.isArray(v) ? v.map((x) => String(x)) : [];
@@ -1325,11 +1395,12 @@ function renderReviewOut(parsed) {
   );
 }
 var Board = class {
-  constructor(host, panel, slug, deps, streamDeps) {
+  constructor(host, panel, slug, deps, streamDeps, yolo = defaultYoloDeps()) {
     this.host = host;
     this.panel = panel;
     this.slug = slug;
     this.deps = deps;
+    this.yolo = yolo;
     this.efforts = [];
     this.tasks = [];
     this.selected = "";
@@ -1638,7 +1709,7 @@ var Board = class {
       effortBar(this.slug, this.efforts, ef, (id) => {
         this.current = this.efforts.find((e) => e.id === id);
         void this.load();
-      }),
+      }, { deps: this.yolo, onChanged: () => void this.refresh() }),
       h(
         "div",
         { class: "console-header" },
@@ -1678,8 +1749,126 @@ function mountBoard(host, slug) {
   return new Board(host, panel, slug, defaultBoardDeps(), defaultStreamDeps()).mount();
 }
 
+// web/agentflow/js/history.ts
+import { showToast as showToast5 } from "/shared/dist/shared.mjs";
+var defaultHistoryDeps = () => ({
+  efforts: api.efforts,
+  importFRD: api.importFRD,
+  readFile: (f) => f.text(),
+  notify: (m) => void showToast5(m, "success")
+});
+var when = (ms) => ms ? new Date(ms).toLocaleString() : "";
+function link(label, href, name) {
+  return h("a", { class: "ui-modal-btn", text: label, attrs: { href, download: "", "data-export": name } });
+}
+var History = class {
+  constructor(host, slug, deps, yolo) {
+    this.host = host;
+    this.slug = slug;
+    this.deps = deps;
+    this.yolo = yolo;
+    this.efforts = [];
+    this.loaded = false;
+    this.errors = new FormErrors();
+    this.fileInput = h("input", { attrs: { type: "file", accept: ".json,application/json", name: "frd_file", "data-field": "frd_file" } });
+    this.off = null;
+  }
+  mount() {
+    this.off = subscribe((ev) => {
+      const mine = "project" in ev && ev.project === this.slug;
+      if (ev.type === "state.changed" || mine && (ev.type === "effort.update" || ev.type === "project.update")) void this.load();
+    });
+    void this.load();
+    return () => {
+      this.off?.();
+      this.off = null;
+    };
+  }
+  async load() {
+    try {
+      this.efforts = await this.deps.efforts(this.slug);
+    } catch {
+      if (!this.loaded) return;
+    }
+    this.loaded = true;
+    this.render();
+  }
+  /** importFile posts the chosen FRD JSON; the server validates it and names a bad field. */
+  async importFile() {
+    this.errors.clear();
+    const file = this.fileInput.files?.[0];
+    if (!file) {
+      this.errors.show(new Error("Choose a JSON file first"));
+      return;
+    }
+    try {
+      const text = await this.deps.readFile(file);
+      const ef = await this.deps.importFRD(this.slug, text, { quiet: true });
+      rememberEffort(this.slug, ef.id);
+    } catch (err) {
+      this.errors.show(err);
+      return;
+    }
+    this.deps.notify("FRD imported as a new effort");
+    await this.load();
+  }
+  row(e) {
+    return h(
+      "li",
+      { class: "profile-card", attrs: { "data-effort": e.id } },
+      h(
+        "div",
+        { class: "profile-header" },
+        h("span", { class: "row-actions" }, h("strong", { text: `#${e.id} ${e.title}` }), chip(e.status), e.yolo ? yoloBadge() : null),
+        h("span", { class: "field-hint", text: when(e.created) })
+      ),
+      h("div", { class: "task-item-meta", text: `FRD ${e.frd.latest ? `revision ${e.frd.latest}${e.frd.approved ? ` (approved ${e.frd.approved})` : ""}` : "none"} \xB7 plan ${e.plan.latest ? `revision ${e.plan.latest}${e.plan.approved ? ` (approved ${e.plan.approved})` : ""}` : "none"} \xB7 queue ${e.queue ? `revision ${e.queue.revision} ${e.queue.status}` : "none"}` }),
+      h(
+        "div",
+        { class: "row-actions" },
+        link("Effort JSON", exportURL(e.id, "json"), "effort-json"),
+        link("Effort Markdown", exportURL(e.id, "md"), "effort-md"),
+        e.frd.latest ? link("FRD JSON", exportURL(e.id, "json", "frd"), "frd-json") : null,
+        e.frd.latest ? link("FRD Markdown", exportURL(e.id, "md", "frd"), "frd-md") : null,
+        e.plan.latest ? link("Plan JSON", exportURL(e.id, "json", "plan"), "plan-json") : null,
+        e.plan.latest ? link("Plan Markdown", exportURL(e.id, "md", "plan"), "plan-md") : null
+      ),
+      yoloControl(this.slug, e, this.yolo, () => void this.load())
+    );
+  }
+  render() {
+    if (!this.loaded) {
+      replace(this.host, h("p", { class: "field-hint", text: "Loading efforts\u2026" }));
+      return;
+    }
+    this.errors = new FormErrors();
+    const fileRow = this.errors.add("body", fieldRow("FRD file", this.fileInput, "A JSON FRD, for example one exported from here; it becomes a new effort at revision 1"));
+    this.errors.add("frd", fileRow);
+    replace(
+      this.host,
+      h(
+        "div",
+        { class: "settings-host" },
+        section(
+          "Efforts",
+          this.efforts.length ? h("ul", { class: "profile-list", attrs: { "data-role": "history-list" } }, ...[...this.efforts].reverse().map((e) => this.row(e))) : h("p", { class: "field-hint", text: "No efforts yet." })
+        ),
+        section(
+          "Import an FRD",
+          fileRow.el,
+          this.errors.general,
+          h("div", { class: "settings-actions" }, button("Import FRD", () => void this.importFile(), { primary: true, field: "import-frd" }))
+        )
+      )
+    );
+  }
+};
+function mountHistory(host, slug) {
+  return new History(host, slug, defaultHistoryDeps(), defaultYoloDeps()).mount();
+}
+
 // web/agentflow/js/frd-editor.ts
-import { alertDialog as alertDialog2, showToast as showToast4 } from "/shared/dist/shared.mjs";
+import { alertDialog as alertDialog2, showToast as showToast6 } from "/shared/dist/shared.mjs";
 var defaultFrdDeps = () => ({
   efforts: api.efforts,
   createEffort: api.createEffort,
@@ -1688,12 +1877,12 @@ var defaultFrdDeps = () => ({
   frdRevisions: api.frdRevisions,
   frdRevision: api.frdRevision,
   approveFRD: api.approveFRD,
-  notify: (m) => void showToast4(m, "success")
+  notify: (m) => void showToast6(m, "success")
 });
 var PRIORITIES = [["", "(none)"], ["must", "must"], ["should", "should"], ["could", "could"], ["wont", "won't"]];
 var lines = (s) => s.split("\n").map((l) => l.trim()).filter((l) => l !== "");
 var commaList = (s) => s.split(",").map((l) => l.trim()).filter((l) => l !== "");
-var when = (ms) => ms ? new Date(ms).toLocaleString() : "";
+var when2 = (ms) => ms ? new Date(ms).toLocaleString() : "";
 function blankFRD(slug, effort) {
   return {
     id: `FRD-${slug}-${effort.id}`.toUpperCase(),
@@ -1938,7 +2127,7 @@ var FrdEditor = class {
     const rows = this.revisions.map((r) => h(
       "div",
       { class: "inline-row", attrs: { "data-revision": r.revision } },
-      h("span", { text: `Revision ${r.revision} \xB7 ${r.created_by} \xB7 ${when(r.created)}` }),
+      h("span", { text: `Revision ${r.revision} \xB7 ${r.created_by} \xB7 ${when2(r.created)}` }),
       r.approved ? badge("approved", "ok") : null,
       button("View", () => void this.view(r.revision), { field: "view-revision" })
     ));
@@ -2008,7 +2197,7 @@ function mountFrd(host, slug) {
 }
 
 // web/agentflow/js/plan-view.ts
-import { confirmDialog as confirmDialog3, showToast as showToast5 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog4, showToast as showToast7 } from "/shared/dist/shared.mjs";
 var defaultPlanDeps = () => ({
   efforts: api.efforts,
   plan: api.plan,
@@ -2017,8 +2206,8 @@ var defaultPlanDeps = () => ({
   planRevision: api.planRevision,
   generatePlan: api.generatePlan,
   approvePlan: api.approvePlan,
-  confirm: (m) => confirmDialog3(m, { confirmLabel: "Approve" }),
-  notify: (m) => void showToast5(m, "success")
+  confirm: (m) => confirmDialog4(m, { confirmLabel: "Approve" }),
+  notify: (m) => void showToast7(m, "success")
 });
 var PLAN_TABS = ["planner", "architect", "critic"];
 var list = (title, items) => items && items.length > 0 ? h("div", { class: "plan-section" }, h("h4", { text: title }), h("ul", {}, ...items.map((t) => h("li", { text: t })))) : null;
@@ -2307,14 +2496,14 @@ function mountPlan(host, slug) {
 }
 
 // web/agentflow/js/queue.ts
-import { confirmDialog as confirmDialog4, showToast as showToast6 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog5, showToast as showToast8 } from "/shared/dist/shared.mjs";
 var defaultQueueDeps = () => ({
   efforts: api.efforts,
   queue: api.queue,
   compile: api.compile,
   approveQueue: api.approveQueue,
-  confirm: (m, label = "Confirm") => confirmDialog4(m, { confirmLabel: label }),
-  notify: (m) => void showToast6(m, "success")
+  confirm: (m, label = "Confirm") => confirmDialog5(m, { confirmLabel: label }),
+  notify: (m) => void showToast8(m, "success")
 });
 var list2 = (title, items) => h(
   "div",
@@ -2477,7 +2666,7 @@ function mountQueue(host, slug) {
 }
 
 // web/agentflow/js/projects.ts
-import { confirmDialog as confirmDialog5, showToast as showToast7 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog6, showToast as showToast9 } from "/shared/dist/shared.mjs";
 var defaultProjectDeps = () => ({
   createProject: api.createProject,
   patchProject: api.patchProject,
@@ -2487,8 +2676,8 @@ var defaultProjectDeps = () => ({
   candidates: api.candidates,
   putProjectCandidates: api.putProjectCandidates,
   clearProjectCandidates: api.clearProjectCandidates,
-  confirm: (m, label = "Confirm") => confirmDialog5(m, { confirmLabel: label }),
-  notify: (m) => void showToast7(m, "success")
+  confirm: (m, label = "Confirm") => confirmDialog6(m, { confirmLabel: label }),
+  notify: (m) => void showToast9(m, "success")
 });
 function splitArgv(s) {
   return s.split(/\s+/).filter((t) => t !== "");
@@ -2683,15 +2872,12 @@ function showProjectForm(host, mode, done) {
 }
 
 // web/agentflow/js/projecttab.ts
-function placeholder(story) {
-  return (host) => replace(host, h("p", { class: "field-hint", text: `coming in ${story}` }));
-}
 var SUB_TABS = [
   { id: "frd", label: "FRD", mount: mountFrd },
   { id: "plan", label: "Plan", mount: mountPlan },
   { id: "queue", label: "Queue", mount: mountQueue },
   { id: "board", label: "Board", mount: mountBoard },
-  { id: "history", label: "History", mount: placeholder("E5") }
+  { id: "history", label: "History", mount: mountHistory }
 ];
 var KEY = "agentflow:project";
 function remembered() {
