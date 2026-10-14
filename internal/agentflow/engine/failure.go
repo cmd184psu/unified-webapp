@@ -113,10 +113,15 @@ func (e *Engine) explainHalt(ctx context.Context, c *chain) error {
 // and the strike that reaches the limit halts the task as needs_attention.
 // A stop, brake or restart (infra:cancel, infra:lost) is not the backend's
 // fault: it counts nothing and is left to reconcile, which abandons the
-// attempt. It reports whether it changed anything.
+// attempt. A stage rerouted off a retired backend (infra:rerouted) counts
+// nothing either and is submitted again at once. It reports whether it changed anything.
 func (e *Engine) handleInfra(ctx context.Context, c *chain, last model.Stage) (bool, error) {
 	if last.Outcome == OutcomeInfraCancel || last.Outcome == OutcomeInfraLost {
 		return false, nil
+	}
+	if last.Outcome == OutcomeInfraRerouted {
+		// Its backend was retired: not a failure, so no strike and no backoff.
+		return true, e.resubmit(ctx, c, last)
 	}
 	s := e.deps.Store
 	set, err := s.EffectiveSettings(ctx, c.proj.Slug)
@@ -198,8 +203,8 @@ func (e *Engine) resubmit(ctx context.Context, c *chain, last model.Stage) error
 		if err != nil {
 			return Pick{}, "", err
 		}
-		if _, ok := v.free[avoid]; ok {
-			v.free[avoid] = 0
+		if avoid != "" {
+			v.down[avoid] = true // like a backend in cooldown: try the others first
 		}
 		sticky, err := e.stickyReviewer(ctx, c.task)
 		if err != nil {

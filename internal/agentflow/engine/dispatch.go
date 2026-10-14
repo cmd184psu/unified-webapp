@@ -118,6 +118,8 @@ func (e *Engine) DispatchOnce(ctx context.Context) error {
 type view struct {
 	snap store.Snapshot
 	free map[string]int
+	// down are the backends in their unreachable cooldown (MB7).
+	down map[string]bool
 }
 
 func (e *Engine) newView(ctx context.Context) (*view, error) {
@@ -129,7 +131,10 @@ func (e *Engine) newView(ctx context.Context) (*view, error) {
 	if err != nil {
 		return nil, err
 	}
-	v := &view{snap: snap, free: map[string]int{}}
+	v := &view{snap: snap, free: map[string]int{}, down: map[string]bool{}}
+	for b := range e.health.active(e.deps.Clock()) {
+		v.down[b] = true
+	}
 	for _, b := range snap.Backends {
 		if !b.Retired {
 			v.free[b.Name] = b.Slots
@@ -400,7 +405,9 @@ func (e *Engine) stickyReviewer(ctx context.Context, t model.Task) (string, erro
 // skipReason says why candidate c cannot be used, or "" when it can. A
 // candidate exists only because it was listed explicitly, so a paid model is
 // used only when named (MB5); this also guards a candidate whose backend
-// changed since it was listed.
+// changed since it was listed. needSlot false asks only whether the candidate
+// could ever serve, so a transient lack (no free slot, in its unreachable
+// cooldown) does not count against it.
 func skipReason(v *view, p store.Project, c store.Candidate, needSlot bool) string {
 	var b *store.Backend
 	for i := range v.snap.Backends {
@@ -413,6 +420,8 @@ func skipReason(v *view, p store.Project, c store.Candidate, needSlot bool) stri
 		return "backend " + c.Backend + " is unavailable"
 	case b.Hosted && p.ModelScope == "local":
 		return "hosted under local scope"
+	case needSlot && v.down[c.Backend]:
+		return "backend " + c.Backend + " is down"
 	case needSlot && v.free[c.Backend] <= 0:
 		return "no free slot on " + c.Backend
 	}

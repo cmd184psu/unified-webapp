@@ -23,6 +23,8 @@ type Settings struct {
 	VerifyTimeout   time.Duration
 	OpencodePath    string
 	VerifySlots     int
+	// BackendCooldown is how long an unreachable backend is skipped (MB7).
+	BackendCooldown time.Duration
 }
 
 // limitKeys are the settings a project may override.
@@ -103,6 +105,9 @@ func parseSettings(m map[string]string) (Settings, error) {
 		return s, Invalid("opencode_path", "required")
 	}
 	if s.VerifySlots, err = validateInt("verify_slots", m["verify_slots"], 1, 64); err != nil {
+		return s, err
+	}
+	if s.BackendCooldown, err = validateTimeout("backend_cooldown", m["backend_cooldown"]); err != nil {
 		return s, err
 	}
 	return s, nil

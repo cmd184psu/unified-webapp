@@ -94,6 +94,7 @@ Logged per the owner's posture; candidates for the next phase alongside `.omc/pl
 - 2026-10-13 — C6: attempt chain happy path (Advance driver, verify-gated review, commit, serialized merge + post-merge verify, completion). Added gitsvc.ResetIntegration.
 - 2026-10-13 — C7: failure handling (repair loop, fingerprints, stuck/exhausted/needs_input, infra backoff+retries, progress log, policy violations -> attempt failure).
 - 2026-10-13 — C9: halted-task actions (Retry/EditTask/Override/AbandonEffort), audited.
+- 2026-10-13 — C8: backend health cooldown + retire reroute (infra:rerouted, no strike); migration v4 backend_cooldown.
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`

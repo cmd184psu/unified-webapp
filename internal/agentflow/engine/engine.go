@@ -129,6 +129,8 @@ type Engine struct {
 	// retryTimers (guarded by mu) hold the pending Advance of each infra
 	// retry waiting out its backoff, by stage id.
 	retryTimers map[int64]*time.Timer
+
+	health healthState
 }
 
 // New builds the engine, registers its lanes and leaves all of them paused
@@ -190,14 +192,7 @@ func (e *Engine) UpdateBackend(ctx context.Context, actor string, b store.Backen
 	if err := e.deps.Store.UpdateBackend(ctx, actor, b); err != nil {
 		return err
 	}
-	return e.SyncLanes(ctx)
-}
-
-// RetireBackend pauses and hides the backend's lane, keeping its handle.
-func (e *Engine) RetireBackend(ctx context.Context, actor, name string) error {
-	if err := e.deps.Store.RetireBackend(ctx, actor, name); err != nil {
-		return err
-	}
+	e.health.clear(b.Name) // the operator may have fixed what made it unreachable
 	return e.SyncLanes(ctx)
 }
 

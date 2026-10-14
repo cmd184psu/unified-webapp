@@ -327,7 +327,7 @@ func TestBK3_RetireAndReenable(t *testing.T) {
 	h.start()
 	h.mustAdd("a", 2)
 	h.mustResume()
-	if err := h.eng.RetireBackend(context.Background(), "t", "a"); err != nil {
+	if _, err := h.eng.RetireBackend(context.Background(), "t", "a", RetireOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	s := h.settings("agentflow-a")
@@ -356,7 +356,7 @@ func TestBK2_RestartKeepsRetiredAndSyncsWidth(t *testing.T) {
 	h.mustAdd("live", 1)
 	h.mustAdd("old", 2)
 	h.mustResume()
-	if err := h.eng.RetireBackend(context.Background(), "t", "old"); err != nil {
+	if _, err := h.eng.RetireBackend(context.Background(), "t", "old", RetireOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	// Slots are edited in the agentflow DB while the lane still says 1.

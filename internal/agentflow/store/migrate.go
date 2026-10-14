@@ -17,13 +17,20 @@ type migration struct {
 //	1  B1  events (audit log)
 //	2  B2  settings, backends, backend_models, role_candidates, projects, project_limits
 //	3  B3  efforts, documents, approvals, queues, tasks, task_deps, attempts, stages, ...
+//	4  C8  backend_cooldown setting
 //
 // Later stories append the next integer; they never edit an earlier entry.
 var migrations = []migration{
 	{1, migration1SQL},
 	{2, migration2SQL},
 	{3, migration3SQL},
+	{4, migration4SQL},
 }
+
+// migration4SQL (C8) adds the backend health cooldown setting (MB7).
+const migration4SQL = `
+INSERT INTO settings (key, value) VALUES ('backend_cooldown', '2m0s');
+`
 
 const migration1SQL = `
 CREATE TABLE events (

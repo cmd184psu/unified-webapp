@@ -205,8 +205,9 @@ func TestC7_ACAT3_RepairPromptCarriesEvidence_ACOC1_500KB(t *testing.T) {
 // clock), is retried on the other backend and one infra retry is counted.
 func TestC7_ACAT2_UnreachableRetriesOnAnotherBackend(t *testing.T) {
 	c := newChainRun(t, nil, chainDefs()[:1])
-	c.addBackend("gpu2", 1, false, false, "m3")
+	c.addBackend("gpu2", 1, false, false, "m3", "m4")
 	c.candidates("global", "", "worker", "gpu/m1", "gpu2/m3")
+	c.candidates("global", "", "reviewer", "gpu/m2", "gpu2/m4") // gpu is in its cooldown by then (MB7)
 	var skew atomic.Int64
 	c.eng.deps.Clock = func() time.Time { return time.Now().Add(time.Duration(skew.Load())) }
 	c.fake.Script("worker",
@@ -260,6 +261,9 @@ func TestC7_AT7_InfraRetriesExhaustNeedsAttention(t *testing.T) {
 	c.fake.Script("worker", crash, crash, crash)
 	c.run()
 	waitFor(t, "needs_attention", func() bool { return c.taskStatus() == model.StatusNeedsAttention })
+	// The status flips when the last strike is recorded; the attempt is
+	// abandoned a moment later.
+	waitFor(t, "attempt abandoned", func() bool { as := c.attempts(0); return len(as) == 1 && as[0].Outcome != "" })
 	if n := len(c.fake.CallsFor("worker")); n != 2 {
 		t.Fatalf("worker calls = %d, want 2", n)
 	}

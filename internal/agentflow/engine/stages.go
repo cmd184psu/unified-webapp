@@ -50,6 +50,11 @@ func (e *Engine) runStage(ctx context.Context, rc golane.RunContext, p StagePayl
 	if err := e.deps.Store.FinishStage(context.WithoutCancel(ctx), p.Stage, res.Outcome, res.Raw, res.Parsed); err != nil && !errors.Is(err, store.ErrConflict) {
 		return nil, fmt.Errorf("stage %d: write outcome %s: %w", p.Stage, res.Outcome, err)
 	}
+	if res.Outcome == OutcomeInfraUnreachable {
+		if err := e.markUnreachable(context.WithoutCancel(ctx), p.Stage); err != nil {
+			fmt.Fprintf(rc.Log(), "mark backend down: %v\n", err)
+		}
+	}
 	if e.deps.Kick != nil {
 		e.deps.Kick()
 	}
