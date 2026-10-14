@@ -72,6 +72,12 @@ export class FakeEl {
     this.childNodes.push(c);
     return c;
   }
+  append(...cs: Array<FakeEl | FakeText>): void {
+    for (const c of cs) this.appendChild(c);
+  }
+  get firstChild(): FakeEl | FakeText | null {
+    return this.childNodes[0] ?? null;
+  }
   removeChild<T extends FakeEl | FakeText>(c: T): T {
     this.childNodes = this.childNodes.filter((x) => x !== c);
     c.parentNode = null;

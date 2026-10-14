@@ -139,6 +139,7 @@ at once (`slots`) and which models it offers.
 | `models` | List of `{model, paid, max_concurrent}`. `max_concurrent` is a per-model cap below the slots (0 = no extra cap). |
 
 Create and manage them in the **Backends** tab or with `POST /api/backends`,
+`POST /api/backends/probe` (lists the models a host serves, so the form can offer them),
 `PATCH /api/backends/{name}`, `POST /api/backends/{name}/retire` (optionally cancelling
 running stages) and `POST /api/backends/{name}/enable`.
 

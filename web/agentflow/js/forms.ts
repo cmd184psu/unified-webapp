@@ -3,6 +3,7 @@
 // the mapping of a 400 response's field name onto the right row (UI2, UI5).
 // Everything is built with h(), so values and server messages are text.
 
+import { createToggle } from '@shared';
 import { ApiError } from './api.js';
 import { h, type Child } from './dom.js';
 
@@ -32,11 +33,17 @@ export function textArea(name: string, value: string, rows = 4): HTMLTextAreaEle
   return el;
 }
 
-/** checkbox builds a checkbox marked data-field=name. */
-export function checkbox(name: string, checked: boolean): HTMLInputElement {
-  const el = h('input', { attrs: { type: 'checkbox', name, 'data-field': name } }) as HTMLInputElement;
-  el.checked = checked;
-  return el;
+/** A shared toggle switch that reads and writes like a checkbox. */
+export type ToggleEl = HTMLElement & { checked: boolean };
+
+/** checkbox builds the shared toggle switch (never a bare checkbox), marked data-field=name. */
+export function checkbox(name: string, checked: boolean): ToggleEl {
+  const wrap = createToggle({ checked, onChange: () => undefined }) as unknown as ToggleEl;
+  const input = wrap.firstChild as HTMLInputElement;
+  input.setAttribute('name', name);
+  wrap.setAttribute('data-field', name);
+  Object.defineProperty(wrap, 'checked', { get: () => input.checked, set: (v: boolean) => { input.checked = v; } });
+  return wrap;
 }
 
 /** selectInput builds a select from [value, label] pairs; an unknown value selects the first. */

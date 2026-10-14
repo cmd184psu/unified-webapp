@@ -13,7 +13,7 @@ import { chooseEffort, effortBar } from './current.js';
 import { budgetBar } from './effort-settings.js';
 import { chip, h, replace, statusKey, type Child } from './dom.js';
 import { subscribe, type AgentflowEvent } from './events.js';
-import { FormErrors, badge, button, checkbox, fieldRow, textArea, textInput } from './forms.js';
+import { FormErrors, badge, button, checkbox, type ToggleEl, fieldRow, textArea, textInput } from './forms.js';
 import { buttonsFor, progressText } from './overview.js';
 import { defaultYoloDeps, type YoloDeps } from './yolo.js';
 import { StreamPanel, defaultStreamDeps, type StreamDeps } from './stream.js';
@@ -104,7 +104,7 @@ export class Board {
   private editing = false;
   private detailEl: HTMLElement | null = null;
   private reasonEl: HTMLTextAreaElement | null = null;
-  private cleanEl: HTMLInputElement | null = null;
+  private cleanEl: ToggleEl | null = null;
   private fresh = true; // rebuild the detail pane on the next render
   private stateSeq = 0; // bumped by run-state events so a slower fetch cannot overwrite them
   private gitFailed: number | null = null; // effort id whose git commands failed
@@ -313,7 +313,7 @@ export class Board {
     const reasonRow = this.errors.add('reason', fieldRow('Override reason', reason, 'Recorded with your name when you mark the task passed'));
     return h('div', { class: 'detail-section', attrs: { 'data-panid': 'actions' } },
       h('h4', { text: 'Halted: choose how to continue' }),
-      h('label', { class: 'inline-check' }, clean, 'Recreate the worktree clean when retrying'),
+      h('span', { class: 'inline-check' }, clean, 'Recreate the worktree clean when retrying'),
       button('Retry', () => void this.retry(d.key, clean.checked), { field: 'retry' }),
       button('Edit task', () => { this.editing = true; this.fresh = true; this.render(); }, { field: 'edit' }),
       reasonRow.el,

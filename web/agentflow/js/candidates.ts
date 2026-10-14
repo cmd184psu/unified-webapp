@@ -93,7 +93,7 @@ export function buildRoleEditor(o: RoleEditorOpts): HTMLElement {
           return h('div', { class: 'inline-row', attrs: { 'data-candidate': `${role}:${i}` } },
             h('span', { text: `${i + 1}. ${r.backend} / ${r.model}` }),
             paid ? badge('paid') : null,
-            paid ? h('label', { class: 'inline-check' }, optIn, 'I opt in to paid use') : null,
+            paid ? h('span', { class: 'inline-check' }, optIn, 'I opt in to paid use') : null,
             button('Up', () => edit((all) => { if (i > 0) [all[i - 1], all[i]] = [all[i], all[i - 1]]; return all; }), { field: 'up' }),
             button('Down', () => edit((all) => { if (i < all.length - 1) [all[i + 1], all[i]] = [all[i], all[i + 1]]; return all; }), { field: 'down' }),
             button('Remove', () => edit((all) => all.filter((_, j) => j !== i)), { field: 'remove' }));

@@ -37,6 +37,7 @@ function harness(init: Partial<State> = {}, over: Partial<BackendsDeps> = {}) {
     settings: async () => ({ worker_timeout: '30m0s', max_attempts: 5 }),
     limits: async () => ({ limits: { max_attempts: '9' }, effective: {} }),
     putLimits: async (slug, limits) => { log.push('limits:' + slug); bodies.limits = limits; return { limits: {}, effective: {} } as never; },
+    probeBackend: async () => ({ models: ['m-a', 'm-b'] }),
     createBackend: async (b: BackendInput) => { log.push('create:' + b.name); bodies.create = b; return result(be(b.name)); },
     patchBackend: async (name, b) => { log.push('patch:' + name); bodies.patch = b; return result(be(name)); },
     retireBackend: async (name, cancel) => { log.push(`retire:${name}:${cancel}`); return result(be(name, { retired: true }), ['retired the last backend for worker; project p1 is running']); },
@@ -66,6 +67,20 @@ test('CI1: with no backends the tab prompts to add one', async () => {
   eq(byAttr(t.host, 'data-role', 'no-backends').length, 1);
   button(t.host, 'Add backend').click();
   ok(byAttr(t.host, 'data-form', 'add').length === 1, 'add form opened');
+  stop();
+});
+
+test('probing the host turns the model box into a picker of the names it reported', async () => {
+  const t = harness({});
+  const stop = t.view.mount();
+  await flush();
+  button(t.host, 'Add backend').click();
+  field(t.host, 'host').value = 'http://127.0.0.1:11434';
+  button(t.host, 'Probe host for models').click();
+  await flush();
+  const pick = field(t.host, 'model');
+  eq(pick.tagName, 'SELECT');
+  eq(pick.childNodes.length, 2);
   stop();
 });
 

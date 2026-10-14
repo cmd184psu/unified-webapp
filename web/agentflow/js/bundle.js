@@ -161,6 +161,7 @@ var api = {
   // Backends, candidates, settings
   backends: () => get("/api/backends"),
   createBackend: (b, o) => send("POST", "/api/backends", b, o),
+  probeBackend: (host, apiType) => send("POST", "/api/backends/probe", { host, api_type: apiType }, { quiet: true }),
   patchBackend: (name, b, o) => send("PATCH", `/api/backends/${enc(name)}`, b, o),
   retireBackend: (name, cancelRunning) => send("POST", `/api/backends/${enc(name)}/retire`, { cancel_running: cancelRunning }),
   enableBackend: (name) => send("POST", `/api/backends/${enc(name)}/enable`),
@@ -220,6 +221,7 @@ function stageStreamURL(stage) {
 import { confirmDialog, showToast } from "/shared/dist/shared.mjs";
 
 // web/agentflow/js/forms.ts
+import { createToggle } from "/shared/dist/shared.mjs";
 function textInput(name, value, opts = {}) {
   const el = h("input", {
     class: "settings-input",
@@ -234,9 +236,14 @@ function textArea(name, value, rows = 4) {
   return el;
 }
 function checkbox(name, checked) {
-  const el = h("input", { attrs: { type: "checkbox", name, "data-field": name } });
-  el.checked = checked;
-  return el;
+  const wrap = createToggle({ checked, onChange: () => void 0 });
+  const input = wrap.firstChild;
+  input.setAttribute("name", name);
+  wrap.setAttribute("data-field", name);
+  Object.defineProperty(wrap, "checked", { get: () => input.checked, set: (v) => {
+    input.checked = v;
+  } });
+  return wrap;
 }
 function selectInput(name, options, value) {
   const el = h(
@@ -653,7 +660,7 @@ function buildRoleEditor(o) {
           { class: "inline-row", attrs: { "data-candidate": `${role}:${i}` } },
           h("span", { text: `${i + 1}. ${r.backend} / ${r.model}` }),
           paid ? badge("paid") : null,
-          paid ? h("label", { class: "inline-check" }, optIn, "I opt in to paid use") : null,
+          paid ? h("span", { class: "inline-check" }, optIn, "I opt in to paid use") : null,
           button("Up", () => edit((all) => {
             if (i > 0) [all[i - 1], all[i]] = [all[i], all[i - 1]];
             return all;
@@ -833,6 +840,7 @@ var API_TYPES = [
 var defaultBackendsDeps = () => ({
   backends: api.backends,
   createBackend: api.createBackend,
+  probeBackend: api.probeBackend,
   patchBackend: api.patchBackend,
   retireBackend: api.retireBackend,
   enableBackend: api.enableBackend,
@@ -916,34 +924,63 @@ var BackendsView = class {
     const hosted = checkbox("hosted", initial?.hosted ?? false);
     const paid = checkbox("paid", initial?.paid ?? false);
     const models = [];
+    let probed = [];
+    const modelControl = (m) => probed.length > 0 ? selectInput("model", probed.map((n) => [n, n]), m) : textInput("model", m, { placeholder: "model name (or Probe host)" });
     const modelList = h("div", { class: "wizard-list" });
     const addModel = (m = "", p = false, max = 0) => {
       const row = {
-        model: textInput("model", m, { placeholder: "model name" }),
+        model: modelControl(m),
         paid: checkbox("model_paid", p),
-        max: textInput("max_concurrent", max > 0 ? String(max) : "", { type: "number", placeholder: "no limit" })
+        max: textInput("max_concurrent", max > 0 ? String(max) : "", { type: "number", placeholder: "no limit" }),
+        el: h("div", { class: "inline-row", attrs: { "data-role": "model-row" } })
       };
       models.push(row);
-      const el = h(
-        "div",
-        { class: "inline-row", attrs: { "data-role": "model-row" } },
+      const draw = () => replace(
+        row.el,
         row.model,
-        h("label", { class: "inline-check" }, row.paid, "paid"),
-        h("label", { class: "inline-check" }, "at once", row.max),
+        h("span", { class: "inline-check" }, row.paid, "paid"),
+        h("span", { class: "inline-check" }, "at once", row.max),
         button("Remove", () => {
           models.splice(models.indexOf(row), 1);
-          el.parentNode?.removeChild(el);
+          row.el.parentNode?.removeChild(row.el);
         })
       );
-      modelList.appendChild(el);
+      draw();
+      modelList.appendChild(row.el);
     };
     for (const m of initial?.models ?? []) addModel(m.model, m.paid, m.max_concurrent);
     if (!initial) addModel();
+    const probe = async () => {
+      errors.clear();
+      try {
+        const res = await this.deps.probeBackend(host.value.trim(), apiType.value);
+        probed = res.models;
+        if (probed.length === 0) throw new Error("the host reported no models");
+        for (const row of models) {
+          const keep = row.model.value;
+          row.model = modelControl(keep);
+          replace(
+            row.el,
+            row.model,
+            h("span", { class: "inline-check" }, row.paid, "paid"),
+            h("span", { class: "inline-check" }, "at once", row.max),
+            button("Remove", () => {
+              models.splice(models.indexOf(row), 1);
+              row.el.parentNode?.removeChild(row.el);
+            })
+          );
+        }
+        this.deps.notify(`${probed.length} model(s) found on ${host.value.trim()}`);
+      } catch (err) {
+        errors.show(err);
+      }
+    };
     const modelsField = errors.add("models", fieldRow(
       "Models",
       modelList,
-      'The models this backend serves; mark a paid model so it is only used when listed for a role. "At once" caps how many stages run that model together (blank = only the slots limit it)'
+      'Probe host for models lists what the host serves so you can pick exact names. Mark a paid model so it is only used when listed for a role. "At once" caps how many stages run that model together (blank = only the slots limit it)'
     ));
+    modelsField.el.appendChild(button("Probe host for models", () => void probe(), { field: "probe-host" }));
     modelsField.el.appendChild(button("Add model", () => addModel(), { field: "add-model" }));
     const save = async () => {
       errors.clear();
@@ -1011,7 +1048,7 @@ var BackendsView = class {
       "div",
       { class: "warn-box", attrs: { "data-panel": "retire" } },
       ...notes.map((n) => h("p", { text: n })),
-      h("label", { class: "inline-check" }, cancel, "Cancel stages running on this backend now"),
+      h("span", { class: "inline-check" }, cancel, "Cancel stages running on this backend now"),
       h(
         "div",
         { class: "row-actions" },
@@ -1743,7 +1780,7 @@ var Board = class {
       "div",
       { class: "detail-section", attrs: { "data-panid": "actions" } },
       h("h4", { text: "Halted: choose how to continue" }),
-      h("label", { class: "inline-check" }, clean, "Recreate the worktree clean when retrying"),
+      h("span", { class: "inline-check" }, clean, "Recreate the worktree clean when retrying"),
       button("Retry", () => void this.retry(d.key, clean.checked), { field: "retry" }),
       button("Edit task", () => {
         this.editing = true;

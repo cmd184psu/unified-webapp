@@ -12,6 +12,7 @@ import (
 func (a *API) registerBackends(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/backends", a.listBackends)
 	mux.HandleFunc("POST /api/backends", a.createBackend)
+	mux.HandleFunc("POST /api/backends/probe", a.probeBackend)
 	mux.HandleFunc("PATCH /api/backends/{name}", a.patchBackend)
 	mux.HandleFunc("POST /api/backends/{name}/retire", a.retireBackend)
 	mux.HandleFunc("POST /api/backends/{name}/enable", a.enableBackend)

@@ -9,7 +9,7 @@ import { confirmDialog, showToast } from '@shared';
 import { api, ApiError, type Backend, type Candidate, type PluginPin, type ProjectInput, type ProjectView } from './api.js';
 import { ROLES, buildRoleEditor, type CandRow } from './candidates.js';
 import { h, replace } from './dom.js';
-import { FormErrors, RowsEditor, button, checkbox, fieldRow, section, selectInput, textInput } from './forms.js';
+import { FormErrors, RowsEditor, button, checkbox, type ToggleEl, fieldRow, section, selectInput, textInput } from './forms.js';
 
 export type ProjectDeps = Pick<
   typeof api,
@@ -68,7 +68,7 @@ export class ProjectForm {
   private slug: HTMLInputElement;
   private repo: HTMLInputElement;
   private scope: HTMLSelectElement;
-  private cleanup: HTMLInputElement;
+  private cleanup: ToggleEl;
   private backends: Backend[] = [];
   private cands: Candidate[] = [];
   private drafts = new Map<string, CandRow[]>();
