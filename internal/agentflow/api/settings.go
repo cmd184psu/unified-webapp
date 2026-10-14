@@ -9,7 +9,7 @@ import (
 	"cmd184psu/unified-webapp/internal/agentflow/store"
 )
 
-func (a *API) registerSettings(mux *http.ServeMux) {
+func (a *API) registerSettings(mux muxer) {
 	mux.HandleFunc("GET /api/settings", a.getSettings)
 	mux.HandleFunc("PUT /api/settings", a.putSettings)
 	mux.HandleFunc("GET /api/opencode/version", a.getOpencodeVersion)

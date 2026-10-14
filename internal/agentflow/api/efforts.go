@@ -10,7 +10,7 @@ import (
 	"cmd184psu/unified-webapp/internal/agentflow/store"
 )
 
-func (a *API) registerEfforts(mux *http.ServeMux) {
+func (a *API) registerEfforts(mux muxer) {
 	mux.HandleFunc("GET /api/projects/{slug}/efforts", a.listEfforts)
 	mux.HandleFunc("POST /api/projects/{slug}/efforts", a.createEffort)
 	mux.HandleFunc("GET /api/projects/{slug}/efforts/{id}", a.getEffort)

@@ -9,7 +9,7 @@ import (
 	"cmd184psu/unified-webapp/internal/agentflow/store"
 )
 
-func (a *API) registerBackends(mux *http.ServeMux) {
+func (a *API) registerBackends(mux muxer) {
 	mux.HandleFunc("GET /api/backends", a.listBackends)
 	mux.HandleFunc("POST /api/backends", a.createBackend)
 	mux.HandleFunc("POST /api/backends/probe", a.probeBackend)

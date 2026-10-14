@@ -13,7 +13,7 @@ import (
 	"cmd184psu/unified-webapp/internal/agentflow/store"
 )
 
-func (a *API) registerDocs(mux *http.ServeMux) {
+func (a *API) registerDocs(mux muxer) {
 	const e = "/api/projects/{slug}/efforts/{id}"
 	mux.HandleFunc("GET "+e+"/frd", a.getDoc(model.DocFRD, false))
 	mux.HandleFunc("PUT "+e+"/frd", a.putFRD)

@@ -4,7 +4,7 @@ import (
 	"net/http"
 )
 
-func (a *API) registerQueue(mux *http.ServeMux) {
+func (a *API) registerQueue(mux muxer) {
 	const e = "/api/projects/{slug}/efforts/{id}"
 	mux.HandleFunc("POST "+e+"/compile", a.compile)
 	mux.HandleFunc("GET "+e+"/queue", a.getQueue)

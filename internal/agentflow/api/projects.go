@@ -14,7 +14,7 @@ import (
 	"cmd184psu/unified-webapp/internal/agentflow/store"
 )
 
-func (a *API) registerProjects(mux *http.ServeMux) {
+func (a *API) registerProjects(mux muxer) {
 	mux.HandleFunc("GET /api/projects", a.listProjects)
 	mux.HandleFunc("POST /api/projects", a.createProject)
 	mux.HandleFunc("POST /api/projects/git-init", a.gitInit)

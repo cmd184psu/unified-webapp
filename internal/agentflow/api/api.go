@@ -82,9 +82,34 @@ func (a *API) openCode() OpenCodeStatus {
 	return a.oc
 }
 
+// muxer is the part of *http.ServeMux the route tables use.
+type muxer interface {
+	HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request))
+}
+
+type recorder struct{ patterns []string }
+
+func (r *recorder) HandleFunc(pattern string, _ func(http.ResponseWriter, *http.Request)) {
+	r.patterns = append(r.patterns, pattern)
+}
+
+// Patterns lists every route pattern ("METHOD /path") the API registers,
+// without the /api/ catch-all, so a test can prove each one is exercised.
+func Patterns() []string {
+	rec := &recorder{}
+	New(Deps{}).Register(rec)
+	var out []string
+	for _, p := range rec.patterns {
+		if p != "/api/" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // Register adds the routes to mux. Every path under /api/ that no route claims
 // answers a JSON 404 instead of falling through to the static handler.
-func (a *API) Register(mux *http.ServeMux) {
+func (a *API) Register(mux muxer) {
 	mux.HandleFunc("GET /api/health", a.health)
 	a.registerProjects(mux)
 	a.registerBackends(mux)

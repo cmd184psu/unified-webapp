@@ -15,7 +15,7 @@ import (
 // carries its own "type".
 const eventName = "agentflow"
 
-func (a *API) registerEvents(mux *http.ServeMux) {
+func (a *API) registerEvents(mux muxer) {
 	mux.HandleFunc("GET /api/events", a.bus.ServeSSE(eventName, a.snapshot))
 	mux.HandleFunc("GET /api/stages/{id}/stream", a.streamStage)
 }

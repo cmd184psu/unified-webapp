@@ -12,7 +12,7 @@ import (
 	"cmd184psu/unified-webapp/internal/agentflow/store"
 )
 
-func (a *API) registerExport(mux *http.ServeMux) {
+func (a *API) registerExport(mux muxer) {
 	mux.HandleFunc("GET /api/efforts/{id}/export", a.exportEffort)
 	mux.HandleFunc("GET /api/efforts/{id}/frd/export", a.exportDoc(model.DocFRD))
 	mux.HandleFunc("GET /api/efforts/{id}/plan/export", a.exportDoc(model.DocPlan))

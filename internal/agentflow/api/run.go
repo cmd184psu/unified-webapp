@@ -4,7 +4,7 @@ import (
 	"net/http"
 )
 
-func (a *API) registerRun(mux *http.ServeMux) {
+func (a *API) registerRun(mux muxer) {
 	mux.HandleFunc("POST /api/projects/{slug}/run/{op}", a.runControl)
 }
 

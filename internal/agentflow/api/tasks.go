@@ -9,7 +9,7 @@ import (
 	"cmd184psu/unified-webapp/internal/agentflow/store"
 )
 
-func (a *API) registerTasks(mux *http.ServeMux) {
+func (a *API) registerTasks(mux muxer) {
 	const e = "/api/projects/{slug}/efforts/{id}"
 	mux.HandleFunc("GET "+e+"/tasks", a.listTasks)
 	mux.HandleFunc("GET "+e+"/tasks/{key}", a.getTask)

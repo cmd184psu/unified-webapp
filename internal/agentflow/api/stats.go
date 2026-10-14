@@ -22,7 +22,7 @@ type ModelStat struct {
 	AttemptsPassed int     `json:"attempts_passed"`
 }
 
-func (a *API) registerStats(mux *http.ServeMux) {
+func (a *API) registerStats(mux muxer) {
 	mux.HandleFunc("GET /api/stats/models", a.modelStats)
 }
 
