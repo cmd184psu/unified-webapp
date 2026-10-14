@@ -178,10 +178,14 @@ func (s Spec) validate() error {
 			return fmt.Errorf("sandbox: %s must be an absolute, clean path, got %q", name, p)
 		}
 	}
-	if within(s.Worktree, s.RepoGitDir) || within(s.RepoGitDir, s.Worktree) {
+	// A read-only stage may run in the repository itself (planning stages):
+	// the worktree is then the repo, its .git is inside it, and both git dirs
+	// are that .git.
+	inRepo := s.ReadOnlyWorktree && s.WorktreeGitDir == s.RepoGitDir && s.RepoGitDir == filepath.Join(s.Worktree, ".git")
+	if !inRepo && (within(s.Worktree, s.RepoGitDir) || within(s.RepoGitDir, s.Worktree)) {
 		return fmt.Errorf("sandbox: Worktree %q and RepoGitDir %q must not contain each other", s.Worktree, s.RepoGitDir)
 	}
-	if !within(filepath.Join(s.RepoGitDir, "worktrees"), s.WorktreeGitDir) || s.WorktreeGitDir == filepath.Join(s.RepoGitDir, "worktrees") {
+	if !inRepo && (!within(filepath.Join(s.RepoGitDir, "worktrees"), s.WorktreeGitDir) || s.WorktreeGitDir == filepath.Join(s.RepoGitDir, "worktrees")) {
 		return fmt.Errorf("sandbox: WorktreeGitDir %q must be under %s/worktrees", s.WorktreeGitDir, s.RepoGitDir)
 	}
 	for _, b := range s.ExtraROBinds {

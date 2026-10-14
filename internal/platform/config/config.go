@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"time"
 )
 
 const DefaultConfigPath = "~/.unified-webapp.json"
@@ -570,32 +569,13 @@ const (
 )
 
 // AgentflowConfig holds configuration specific to the agentflow module.
+// Everything else (backends, models, limits, projects) lives in the module's
+// own database under DataDir.
 type AgentflowConfig struct {
-	StaticDir          string          `json:"static_dir"`
-	ProjectPath        string          `json:"project_path"`
-	SSEMaxSubscribers  int             `json:"-"`
-	PromptDir          string          `json:"prompt_dir"`           // optional override for prompt templates
-	DefaultProfile     string          `json:"default_profile"`      // e.g., "m5"
-	Profiles           []ProfileConfig `json:"profiles"`             // model profiles
-	DefaultTimeoutSecs int             `json:"default_timeout_secs"` // default 300
+	StaticDir         string `json:"static_dir"`
+	DataDir           string `json:"data_dir"`
+	SSEMaxSubscribers int    `json:"-"`
 }
-
-// ProfileConfig defines a named model profile (knife switch).
-type ProfileConfig struct {
-	Name             string        `json:"name"`                   // e.g., "m5", "m4", "windows"
-	OllamaHost       string        `json:"ollama_host"`            // e.g., "http://192.168.1.239:11434"
-	WorkerModel      string        `json:"worker_model"`           // e.g., "qwen3.6:35b-a3b-mxfp8"
-	PlannerModel     string        `json:"planner_model"`          // e.g., "qwen3.6:35b-a3b-mxfp8"
-	ReviewModel      string        `json:"review_model"`           // e.g., "mistral-small3.2"
-	TimeoutSecs      int           `json:"timeout_secs,omitempty"` // default 300
-	PromptDir        string        `json:"prompt_dir,omitempty"`   // optional override
-	EffectiveTimeout time.Duration `json:"-"`                      // computed at runtime
-}
-
-// DefaultAgentflowProjectPath is the default project root directory — the
-// directory that contains `.agentflow` — when project_path is unset
-// (0-length) in the config file.
-const DefaultAgentflowProjectPath = "./data/agentflow"
 
 // DefaultConfig returns a Config populated with safe defaults.
 func DefaultConfig() *Config {
@@ -708,38 +688,9 @@ func DefaultConfig() *Config {
 			ExpiryWarnDays: DefaultHaproxyExpiryWarnDays,
 		},
 		Agentflow: AgentflowConfig{
-			StaticDir:          "./web/agentflow",
-			ProjectPath:        DefaultAgentflowProjectPath,
-			SSEMaxSubscribers:  DefaultSSEMaxSubscribers,
-			PromptDir:          "./prompts",
-			DefaultProfile:     "m5",
-			DefaultTimeoutSecs: 300,
-			Profiles: []ProfileConfig{
-				{
-					Name:         "m5",
-					OllamaHost:   "http://192.168.1.239:11434",
-					WorkerModel:  "qwen3.6:35b-a3b-mxfp8",
-					PlannerModel: "qwen3.6:35b-a3b-mxfp8",
-					ReviewModel:  "mistral-small3.2",
-					TimeoutSecs:  300,
-				},
-				{
-					Name:         "m4",
-					OllamaHost:   "http://192.168.1.11:11434",
-					WorkerModel:  "qwen3.6:27b-q4_K_M",
-					PlannerModel: "qwen3.6:27b-q4_K_M",
-					ReviewModel:  "qwen2.5-coder:14b",
-					TimeoutSecs:  300,
-				},
-				{
-					Name:         "windows",
-					OllamaHost:   "http://windows.cmdhome.net:11434",
-					WorkerModel:  "qwen3-coder:30b",
-					PlannerModel: "qwen3-coder:30b",
-					ReviewModel:  "mistral-small3.2",
-					TimeoutSecs:  300,
-				},
-			},
+			StaticDir:         "./web/agentflow",
+			DataDir:           "./data/agentflow",
+			SSEMaxSubscribers: DefaultSSEMaxSubscribers,
 		},
 		IssueTracker: IssueTrackerConfig{
 			StaticDir: "./web/issuetracker",
@@ -1150,19 +1101,8 @@ func expandAgentflowPaths(a *AgentflowConfig) error {
 	if a.StaticDir, err = ExpandPath(a.StaticDir); err != nil {
 		return err
 	}
-	if a.ProjectPath, err = ExpandPath(a.ProjectPath); err != nil {
+	if a.DataDir, err = ExpandPath(a.DataDir); err != nil {
 		return err
-	}
-	if a.PromptDir, err = ExpandPath(a.PromptDir); err != nil {
-		return err
-	}
-	for i := range a.Profiles {
-		if a.Profiles[i].OllamaHost, err = ExpandPath(a.Profiles[i].OllamaHost); err != nil {
-			return err
-		}
-		if a.Profiles[i].PromptDir, err = ExpandPath(a.Profiles[i].PromptDir); err != nil {
-			return err
-		}
 	}
 	return nil
 }

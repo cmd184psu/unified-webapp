@@ -483,3 +483,19 @@ func TestUserNamespacesDisabled(t *testing.T) {
 		t.Errorf("sanity: %v %s", err, out)
 	}
 }
+
+// A planning stage runs in the project repository itself: the worktree is the
+// repo, both git dirs are its .git, and nothing in it is writable.
+func TestReadOnlyRepoStage(t *testing.T) {
+	f := newFixture(t)
+	s := f.spec("/bin/sh", "-c", `git status --short >/dev/null && ! echo x > a.txt && ! echo x > .git/HEAD`)
+	s.Worktree, s.WorktreeGitDir, s.ReadOnlyWorktree = f.repo, f.gitDir, true
+	if out, err := f.run(t, s); err != nil {
+		t.Fatalf("repo stage: %v: %s", err, out)
+	}
+	// Without ReadOnlyWorktree the overlap stays rejected.
+	s.ReadOnlyWorktree = false
+	if _, err := Command(context.Background(), s); err == nil {
+		t.Error("writable repo-as-worktree accepted")
+	}
+}

@@ -1,159 +1,156 @@
-package agentflow_test
+package agentflow
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
+	"strings"
 	"testing"
-	"time"
 
-	"cmd184psu/unified-webapp/internal/agentflow"
+	"cmd184psu/unified-webapp/internal/agentflow/runner"
 	"cmd184psu/unified-webapp/internal/platform/config"
+	"cmd184psu/unified-webapp/internal/taskmaster"
 )
 
-const testPrompts = `# Planner Prompt Template
-
-You are a software implementation planner.
-
-## Input
-
-{{FRD_JSON}}
-
-## Your Task
-
-Produce a JSON implementation plan.
-
-## Rules
-
-Output ONLY the JSON.
-`
-
-func setupPromptDir(t *testing.T) string {
-	promptDir := t.TempDir()
-	prompts := []string{"planner.md", "worker.md", "reviewer.md", "plan-reviewer.md", "task-compiler.md"}
-	for _, p := range prompts {
-		if err := os.WriteFile(filepath.Join(promptDir, p), []byte(testPrompts), 0o644); err != nil {
-			t.Fatal(err)
-		}
+// openHost opens a real taskmaster engine on a temp database.
+func openHost(t *testing.T) *taskmaster.Engine {
+	t.Helper()
+	cfg := config.DefaultConfig().Taskmaster
+	cfg.DBPath = filepath.Join(t.TempDir(), "taskmaster.db")
+	cfg.StaticDir = t.TempDir()
+	e, err := taskmaster.Open(cfg, taskmaster.OpenOptions{})
+	if err != nil {
+		t.Fatalf("taskmaster.Open: %v", err)
 	}
-	return promptDir
+	t.Cleanup(func() { _ = e.Close() })
+	return e
 }
 
-func TestBuild_Success(t *testing.T) {
-	staticDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(staticDir, "index.html"), []byte("test"), 0o644); err != nil {
+func get(t *testing.T, h http.Handler, path string) (int, string) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	b, _ := io.ReadAll(rec.Body)
+	return rec.Code, string(b)
+}
+
+// AC-ST1: a clean clone (no data/, no prompts/, cwd = an empty directory)
+// boots and answers /api/health. The project, effort and FRD calls join this
+// test once D3 has the routes.
+func TestCleanCloneBoot(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	static := filepath.Join(dir, "web")
+	if err := os.MkdirAll(static, 0o755); err != nil {
 		t.Fatal(err)
 	}
-
-	promptDir := setupPromptDir(t)
-	projectPath := filepath.Join(t.TempDir(), "agentflow")
-
-	cfg := config.AgentflowConfig{
-		StaticDir:         staticDir,
-		ProjectPath:       projectPath,
-		SSEMaxSubscribers: 64,
-		PromptDir:         promptDir,
+	if err := os.WriteFile(filepath.Join(static, "index.html"), []byte("AF INDEX"), 0o644); err != nil {
+		t.Fatal(err)
 	}
+	fake := runner.NewFake()
+	fake.SetVersion("9.9.9")
 
-	h, err := agentflow.Build(cfg)
+	h, err := buildWith(config.AgentflowConfig{StaticDir: static, DataDir: "./data/agentflow", SSEMaxSubscribers: 4}, openHost(t), fake)
 	if err != nil {
-		t.Fatalf("Build failed: %v", err)
+		t.Fatalf("Build: %v", err)
 	}
-	if h == nil {
-		t.Fatal("Build returned nil handler")
+	defer h.(io.Closer).Close()
+
+	code, body := get(t, h, "/api/health")
+	if code != http.StatusOK {
+		t.Fatalf("GET /api/health = %d %s", code, body)
 	}
-
-	// Test that the static file is served
-	srv := httptest.NewServer(h)
-	defer srv.Close()
-
-	resp, err := http.Get(srv.URL + "/")
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
+	var hr struct {
+		Status   string
+		Opencode struct{ Status, Version string }
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	if err := json.Unmarshal([]byte(body), &hr); err != nil {
+		t.Fatal(err)
+	}
+	if hr.Status != "ok" || hr.Opencode.Status != "ok" || hr.Opencode.Version != "9.9.9" {
+		t.Errorf("health = %s", body)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "data", "agentflow", "agentflow.db")); err != nil {
+		t.Errorf("database not created under data_dir: %v", err)
+	}
+	if code, body := get(t, h, "/"); code != http.StatusOK || body != "AF INDEX" {
+		t.Errorf("GET / = %d %q", code, body)
+	}
+	if code, _ := get(t, h, "/api/nope"); code != http.StatusNotFound {
+		t.Errorf("unknown /api path = %d, want 404", code)
 	}
 }
 
-func TestBuild_Error_UnwritableProjectPath(t *testing.T) {
-	promptDir := setupPromptDir(t)
-	// A regular file used as the parent "directory" makes MkdirAll fail
-	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+// OC1: a missing opencode is a health status, never a Build failure.
+func TestBuildToleratesMissingOpencode(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	h, err := Build(config.AgentflowConfig{StaticDir: t.TempDir(), DataDir: filepath.Join(t.TempDir(), "af")}, openHost(t))
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer h.(io.Closer).Close()
+	code, body := get(t, h, "/api/health")
+	if code != http.StatusOK {
+		t.Fatalf("health = %d", code)
+	}
+	var hr struct {
+		Status   string
+		Opencode struct{ Status, Error string }
+	}
+	if err := json.Unmarshal([]byte(body), &hr); err != nil {
+		t.Fatal(err)
+	}
+	if hr.Status != "degraded" || hr.Opencode.Status != "unavailable" || !strings.Contains(hr.Opencode.Error, "opencode") {
+		t.Errorf("health = %s", body)
+	}
+}
+
+// ST2: an unusable data_dir is an error that names the path.
+func TestBuildDataDirError(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-
-	cfg := config.AgentflowConfig{
-		StaticDir:   t.TempDir(),
-		ProjectPath: filepath.Join(blocker, "sub", "agentflow"),
-		PromptDir:   promptDir,
+	want := filepath.Join(blocker, "af")
+	_, err := buildWith(config.AgentflowConfig{DataDir: want}, openHost(t), runner.NewFake())
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("Build error = %v, want it to name %s", err, want)
 	}
 
-	h, err := agentflow.Build(cfg)
-	if err == nil {
-		t.Fatal("expected error for unwritable project path, got nil")
-	}
-	if h != nil {
-		t.Fatalf("expected nil handler on error, got %v", h)
+	if os.Geteuid() != 0 {
+		parent := t.TempDir()
+		if err := os.Chmod(parent, 0o500); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(parent, 0o700) })
+		want := filepath.Join(parent, "af")
+		_, err := buildWith(config.AgentflowConfig{DataDir: want}, openHost(t), runner.NewFake())
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("read-only parent: error = %v, want it to name %s", err, want)
+		}
 	}
 }
 
-func TestBuild_DefaultsProjectPath(t *testing.T) {
-	promptDir := setupPromptDir(t)
-	staticDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(staticDir, "index.html"), []byte("test"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg := config.AgentflowConfig{
-		StaticDir: staticDir,
-		PromptDir: promptDir,
-		// ProjectPath left empty - should default
-	}
-
-	h, err := agentflow.Build(cfg)
+// The dispatcher closes the taskmaster engine before this handler. Close must
+// cope with the host already gone, and with being called twice.
+func TestCloseAfterHostClosed(t *testing.T) {
+	host := openHost(t)
+	h, err := buildWith(config.AgentflowConfig{StaticDir: t.TempDir(), DataDir: filepath.Join(t.TempDir(), "af")}, host, runner.NewFake())
 	if err != nil {
-		t.Fatalf("Build failed with default ProjectPath: %v", err)
-	}
-	if h == nil {
-		t.Fatal("Build returned nil handler")
-	}
-}
-func TestBuildStartsNoWorker(t *testing.T) {
-	promptDir := setupPromptDir(t)
-	projectPath := filepath.Join(t.TempDir(), "agentflow")
-	// A ready task that the old worker would have picked up within its 5 s tick.
-	qdir := filepath.Join(projectPath, ".agentflow")
-	if err := os.MkdirAll(qdir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	q := `{"tasks":[{"id":"t1","title":"x","status":"ready","verify":"touch ` + filepath.Join(projectPath, "ran") + `"}]}`
-	if err := os.WriteFile(filepath.Join(qdir, "queue.json"), []byte(q), 0o644); err != nil {
+	if err := host.Close(); err != nil {
 		t.Fatal(err)
 	}
-
-	before := runtime.NumGoroutine()
-	if _, err := agentflow.Build(config.AgentflowConfig{
-		StaticDir:   t.TempDir(),
-		ProjectPath: projectPath,
-		PromptDir:   promptDir,
-	}); err != nil {
-		t.Fatalf("Build failed: %v", err)
+	c := h.(io.Closer)
+	if err := c.Close(); err != nil {
+		t.Errorf("Close after host closed: %v", err)
 	}
-	time.Sleep(2 * time.Second)
-
-	if _, err := os.Stat(filepath.Join(qdir, "lock")); !os.IsNotExist(err) {
-		t.Fatalf("lock file exists or unexpected stat error: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(projectPath, "ran")); !os.IsNotExist(err) {
-		t.Fatalf("a task ran: %v", err)
-	}
-	if after := runtime.NumGoroutine(); after > before+2 {
-		t.Fatalf("goroutines grew from %d to %d; a worker is running", before, after)
+	if err := c.Close(); err != nil {
+		t.Errorf("second Close: %v", err)
 	}
 }

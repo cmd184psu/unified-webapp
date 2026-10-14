@@ -122,23 +122,10 @@
   "sampler": {
     "static_dir": "./web/sampler"
   },
-    "agentflow": {
-      "static_dir": "./web/agentflow",
-      "project_path": "./data/agentflow",
-      "prompt_dir": "./prompts",
-      "default_profile": "m5",
-      "default_timeout_secs": 300,
-      "profiles": [
-        {
-          "name": "m5",
-          "ollama_host": "http://192.168.1.239:11434",
-          "worker_model": "qwen3.6:35b-a3b-mxfp8",
-          "planner_model": "qwen3.6:35b-a3b-mxfp8",
-          "review_model": "mistral-small3.2",
-          "timeout_secs": 300
-        }
-      ]
-    },
+  "agentflow": {
+    "static_dir": "./web/agentflow",
+    "data_dir": "./data/agentflow"
+  },
     "haproxy": {
       "static_dir": "./web/haproxy",
     "data_dir": "./data/haproxy",

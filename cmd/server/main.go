@@ -428,7 +428,7 @@ func moduleIsRouted(routing map[string]string, module string) bool {
 
 // moduleDeps carries per-dispatcher-build state that buildModule needs
 // beyond cfg and svc. Today it exists solely to memoise the one shared
-// *taskmaster.Engine that both the "taskmaster" and "utuber" cases open
+// *taskmaster.Engine that both the "taskmaster", "utuber" and "agentflow" cases open
 // through (plan A1): whichever of them builds first opens the engine, and
 // the other reuses it, so build-order (a random map iteration,
 // buildDispatcher's `for host, module := range cfg.Routing`) never matters
@@ -464,7 +464,11 @@ func (d *moduleDeps) taskmasterEngine() (*taskmaster.Engine, error) {
 func buildModule(module string, cfg *config.Config, svc *auth.Service, deps *moduleDeps) (http.Handler, error) {
 	switch module {
 	case "agentflow":
-		return agentflow.Build(cfg.Agentflow)
+		e, err := deps.taskmasterEngine()
+		if err != nil {
+			return nil, fmt.Errorf("agentflow needs the taskmaster engine: %w", err)
+		}
+		return agentflow.Build(cfg.Agentflow, e)
 	case "grocery":
 		return grocery.Build(cfg.Grocery)
 	case "todo":
