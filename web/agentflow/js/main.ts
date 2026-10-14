@@ -1,5 +1,5 @@
 // main.ts — app shell for AgentFlow: the top-level tabs (Overview, Project,
-// Settings, Backends), hamburger, logout and the event stream. Views mount into
+// Settings, Backends), hamburger and the event stream. Views mount into
 // #panel-view and return a dispose; the Project tab's sub-tabs are in
 // projecttab.ts.
 
@@ -72,16 +72,6 @@ function initHamburger(): void {
   trigger.appendChild(hamburger.trigger);
 }
 
-function initLogout(): void {
-  const btn = document.getElementById('logout-btn');
-  if (!btn) return;
-  btn.removeAttribute('hidden');
-  btn.addEventListener('click', () => {
-    window.location.href = '/logout';
-  });
-}
-
 initHamburger();
-initLogout();
 startEvents();
 showTab('overview');

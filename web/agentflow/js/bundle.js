@@ -3225,15 +3225,6 @@ function initHamburger() {
   });
   trigger.appendChild(hamburger.trigger);
 }
-function initLogout() {
-  const btn = document.getElementById("logout-btn");
-  if (!btn) return;
-  btn.removeAttribute("hidden");
-  btn.addEventListener("click", () => {
-    window.location.href = "/logout";
-  });
-}
 initHamburger();
-initLogout();
 startEvents();
 showTab("overview");
