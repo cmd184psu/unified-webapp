@@ -64,6 +64,16 @@ function harness(w: World, over: Partial<FrdDeps> = {}) {
 
 const world = (): World => ({ efforts: [effort(1, 'Alpha')], docs: new Map([[1, [{ doc: FRD0, by: 'me' }]]]), approved: new Map() });
 
+test('an FRD without acceptance_criteria or requirements still renders the form', async () => {
+  const w = world();
+  const { acceptance_criteria: _a, requirements: _r, ...bare } = FRD0;
+  w.docs.set(1, [{ doc: bare as unknown as FRD, by: 'me' }]);
+  const t = harness(w);
+  t.ed.mount();
+  await flush();
+  ok(byAttr(t.host, 'data-role', 'frd-form').length === 1, 'form rendered');
+});
+
 test('helpers split lines and comma lists', () => {
   eq(lines(' a \n\n b\n'), ['a', 'b']);
   eq(commaList('R1, R2 ,,R3'), ['R1', 'R2', 'R3']);

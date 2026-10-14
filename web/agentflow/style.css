@@ -1210,3 +1210,16 @@ body {
   letter-spacing: 0.02em;
   color: var(--color-text-muted);
 }
+
+/* Overview project link: theme accent, not the browser's default blue. */
+.task-item-title,
+.task-item-title:visited {
+  color: var(--color-primary);
+  text-decoration: none;
+  font-weight: 600;
+}
+.task-item-title:hover,
+.task-item-title:focus-visible {
+  color: var(--color-primary-hover);
+  text-decoration: underline;
+}

@@ -2072,10 +2072,10 @@ var FrdForm = class {
     this.base = base;
     this.errors = new FormErrors();
     this.f = {
-      id: textInput("id", base.id),
-      title: textInput("title", base.title),
+      id: textInput("id", base.id ?? ""),
+      title: textInput("title", base.title ?? ""),
       status: textInput("status", base.status ?? ""),
-      objective: textArea("objective", base.objective, 3),
+      objective: textArea("objective", base.objective ?? "", 3),
       context: textArea("context", base.context ?? "", 3),
       constraints: textArea("constraints", (base.constraints ?? []).join("\n"), 3),
       out_of_scope: textArea("out_of_scope", (base.out_of_scope ?? []).join("\n"), 3)
@@ -2096,7 +2096,7 @@ var FrdForm = class {
         el: h("div", { class: "wizard-field" }, h("div", { class: "row-actions" }, id, group, prio), desc),
         read: () => ({ ...r, id: id.value.trim(), group: group.value.trim() || void 0, priority: prio.value || void 0, description: desc.value.trim() })
       };
-    }, base.requirements, () => ({ id: "", description: "" }), "Add requirement", onChange);
+    }, base.requirements ?? [], () => ({ id: "", description: "" }), "Add requirement", onChange);
     this.acs = new RowsEditor((a) => {
       const id = textInput("ac_id", a.id, { placeholder: "id" });
       const reqs = textInput("ac_requirements", (a.requirements ?? []).join(", "), { placeholder: "R1, R2" });
@@ -2105,7 +2105,7 @@ var FrdForm = class {
         el: h("div", { class: "wizard-field" }, h("div", { class: "row-actions" }, id, reqs), crit),
         read: () => ({ id: id.value.trim(), requirements: commaList(reqs.value), criterion: crit.value.trim() })
       };
-    }, base.acceptance_criteria, () => ({ id: "", criterion: "" }), "Add acceptance criterion", onChange);
+    }, base.acceptance_criteria ?? [], () => ({ id: "", criterion: "" }), "Add acceptance criterion", onChange);
     this.decisions = new RowsEditor((d) => {
       const id = textInput("decision_id", d.id, { placeholder: "id" });
       const dec = textInput("decision_text", d.decision, { placeholder: "decision" });
@@ -2500,8 +2500,8 @@ var PlanViewer = class {
           this.deps.planRevisions(this.slug, ef.id)
         ]);
         this.state = state;
-        this.rounds = rounds.rounds ?? [];
-        this.revisions = revisions;
+        this.rounds = (rounds.rounds ?? []).map((r) => ({ ...r, reviews: r.reviews ?? [] }));
+        this.revisions = revisions ?? [];
         this.state = { ...state, warnings: rounds.warnings ?? state.warnings, waiting: rounds.waiting ?? state.waiting };
       } catch {
       }

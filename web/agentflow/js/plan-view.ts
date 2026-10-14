@@ -114,8 +114,8 @@ export class PlanViewer {
           this.deps.plan(this.slug, ef.id), this.deps.planRounds(this.slug, ef.id), this.deps.planRevisions(this.slug, ef.id),
         ]);
         this.state = state;
-        this.rounds = rounds.rounds ?? [];
-        this.revisions = revisions;
+        this.rounds = (rounds.rounds ?? []).map((r) => ({ ...r, reviews: r.reviews ?? [] }));
+        this.revisions = revisions ?? [];
         this.state = { ...state, warnings: rounds.warnings ?? state.warnings, waiting: rounds.waiting ?? state.waiting };
       } catch {
         // apiFetch already told the user.

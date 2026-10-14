@@ -54,6 +54,16 @@ function harness(o: Opts = {}) {
 
 const tab = (host: FakeEl, name: string): FakeEl => byAttr(host, 'data-plan-tab', name)[0];
 
+test('a plan-less effort (null rounds, reviews and revisions) renders without throwing', async () => {
+  const t = harness({ state: { revision: 0, rounds: 0, plan: undefined, reviews: null as unknown as PlanReview[], warnings: null }, effort: effort({ plan: { latest: 0, approved: 0 } }) });
+  const origRounds = t.v as unknown as { deps: PlanDeps };
+  origRounds.deps.planRounds = async () => ({ rounds: null, revision: 0, not_critic_approved: false, warnings: null } as never);
+  origRounds.deps.planRevisions = async () => null as never;
+  t.v.mount();
+  await flush();
+  ok(t.host.textContent.includes('No plan yet'), 'empty state shown');
+});
+
 test('RP2: rounds with planner, architect and critic tabs and verdict chips', async () => {
   const t = harness();
   const stop = t.v.mount();
