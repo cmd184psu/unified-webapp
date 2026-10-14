@@ -191,6 +191,25 @@ Project settings (`PATCH /api/projects/{slug}`):
 | `cleanup_enabled` | Turn on the [cleanup pass](#cleanup). |
 | `plugins` | [Opencode plugins](#plugins). |
 
+### Unregister a project
+
+`DELETE /api/projects/{slug}` (the trash button in Edit project and on each Overview row)
+unregisters a project. It is allowed only when the run is **stopped** and the project has
+**no active effort**; otherwise it answers 409 and says which ("stop the run", or "finish or
+abandon the active effort first").
+
+- **Removed:** the project's AgentFlow records, in one transaction: all its efforts and
+  everything under them (FRDs, plans and approvals, queues, tasks, attempts, stages,
+  baselines, resets, retries, progress notes, FRD parts), its limit overrides, plugins and
+  role candidates. Afterwards its working files under `data_dir` are removed too
+  (`worktrees/<slug>`, the stage, task and baseline folders), and stale worktree
+  registrations in the repository are pruned. Audit events stay; one `project.delete` event
+  is added. The slug can be registered again later with a clean slate.
+- **Not touched:** your repository, its files and its branches. AgentFlow never deletes
+  your branches, so the answer lists the ones still there:
+  `{"deleted": "slug", "branches": [...], "commands": ["git -C <repo> branch -D <branch>", ...]}`.
+  The UI shows the commands with copy buttons; run them yourself if you want the branches gone.
+
 ### Definition of done
 
 Every task is held to one standard, shown by `GET /api/projects/{slug}/definition-of-done` as

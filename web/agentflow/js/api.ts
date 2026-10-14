@@ -97,6 +97,13 @@ export interface ProjectView {
   current: WorkItem[];
 }
 
+/** Unregistered is DELETE /api/projects/{slug}: the repository's leftover branches and the commands that delete them. */
+export interface Unregistered {
+  deleted: string;
+  branches: string[];
+  commands: string[];
+}
+
 export interface PluginPin {
   name: string;
   version: string;
@@ -514,7 +521,7 @@ export const api = {
     send('POST', '/api/projects/git-init', { repo_path: repoPath, confirm: true }),
   patchProject: (slug: string, p: ProjectPatch, o?: FetchOptions): Promise<ProjectView> =>
     send('PATCH', proj(slug), p, o),
-  deleteProject: (slug: string): Promise<void> => send('DELETE', proj(slug)),
+  deleteProject: (slug: string): Promise<Unregistered> => send('DELETE', proj(slug)),
   definitionOfDone: (slug: string, o?: FetchOptions): Promise<DefinitionOfDone> => get(`${proj(slug)}/definition-of-done`, o),
   limits: (slug: string): Promise<LimitsView> => get(`${proj(slug)}/limits`),
   putLimits: (slug: string, limits: Record<string, string | number>, o?: FetchOptions): Promise<LimitsView> =>

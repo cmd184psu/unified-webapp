@@ -81,3 +81,21 @@ func (s *Service) Completion(ctx context.Context, repo, base, branch string) (Co
 	}
 	return out, nil
 }
+
+// ExistingBranches returns those of names that still exist as local branches
+// of repo, in order. Read-only.
+func (s *Service) ExistingBranches(ctx context.Context, repo string, names []string) []string {
+	var out []string
+	for _, n := range names {
+		if n != "" && !strings.HasPrefix(n, "-") && s.branchExists(ctx, repo, n) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// DeleteBranchCommand is the command a human runs to delete a leftover
+// branch. Nothing in agentflow executes it.
+func DeleteBranchCommand(repoPath, branch string) string {
+	return "git -C " + shQuote(repoPath) + " branch -D " + shQuote(branch)
+}

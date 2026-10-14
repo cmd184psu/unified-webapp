@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -274,4 +275,109 @@ func (e *Engine) cancelAttemptStages(ctx context.Context, attempt int64) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// Unregistered is what UnregisterProject leaves for the human: the project's
+// branches that still exist in the repository, and the commands that delete
+// them. The engine never deletes them.
+type Unregistered struct {
+	Branches []string
+	Commands []string
+}
+
+// UnregisterProject removes a stopped project with no active effort: its
+// AgentFlow records in one transaction, then (best effort, logged) its
+// working files under the data directory and its stale worktree
+// registrations. The repository and its branches are not touched.
+func (e *Engine) UnregisterProject(ctx context.Context, actor, slug string) (Unregistered, error) {
+	s := e.deps.Store
+	proj, err := s.GetProject(ctx, slug)
+	if err != nil {
+		return Unregistered{}, err
+	}
+	defer e.runs.kick()
+	e.runs.mu.Lock()
+	defer e.runs.mu.Unlock()
+	if st := e.runs.entry(slug).state; st != model.RunStopped {
+		return Unregistered{}, fmt.Errorf("project %q is %s: stop the run first: %w", slug, st, store.ErrConflict)
+	}
+	// Collect what the rows will no longer tell us once they are gone.
+	efforts, err := s.ListEfforts(ctx, slug)
+	if err != nil {
+		return Unregistered{}, err
+	}
+	stageIDs, err := s.ProjectStageIDs(ctx, slug)
+	if err != nil {
+		return Unregistered{}, err
+	}
+	var names []string
+	var taskIDs []int64
+	for _, ef := range efforts {
+		if ef.IntegrationBranch != "" {
+			names = append(names, ef.IntegrationBranch)
+		} else {
+			names = append(names, gitsvc.IntegrationBranch(effortName(ef.ID), ""))
+		}
+		tasks, err := s.ListTasks(ctx, ef.ID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return Unregistered{}, err
+		}
+		for _, t := range tasks {
+			names = append(names, gitsvc.TaskBranch(effortName(ef.ID), taskName(t)))
+			taskIDs = append(taskIDs, t.ID)
+		}
+	}
+	if err := s.DeleteProject(ctx, actor, slug); err != nil {
+		return Unregistered{}, err
+	}
+	delete(e.runs.runs, slug)
+
+	e.mu.Lock()
+	for _, ef := range efforts {
+		delete(e.planWaiting, ef.ID)
+	}
+	for _, id := range stageIDs {
+		if t := e.retryTimers[id]; t != nil {
+			t.Stop()
+			delete(e.retryTimers, id)
+		}
+	}
+	e.mu.Unlock()
+
+	// Best-effort file cleanup, only below the data directory.
+	var paths []string
+	paths = append(paths, filepath.Join(e.worktreeRoot(), slug))
+	for _, ef := range efforts {
+		paths = append(paths, filepath.Join(e.deps.DataDir, "baselines", strconv.FormatInt(ef.ID, 10)))
+	}
+	for _, id := range taskIDs {
+		paths = append(paths, filepath.Join(e.deps.DataDir, "tasks", strconv.FormatInt(id, 10)))
+	}
+	for _, id := range stageIDs {
+		paths = append(paths, e.StageDir(id))
+	}
+	for _, p := range paths {
+		if err := os.RemoveAll(p); err != nil {
+			log.Printf("agentflow: unregister %s: remove %s: %v", slug, p, err)
+		}
+	}
+	out := Unregistered{Branches: []string{}, Commands: []string{}}
+	if g := e.deps.Git; g != nil {
+		if err := g.PruneWorktrees(ctx, proj.RepoPath); err != nil {
+			log.Printf("agentflow: unregister %s: prune worktrees: %v", slug, err)
+		}
+		seen := map[string]bool{}
+		var uniq []string
+		for _, n := range names {
+			if !seen[n] {
+				seen[n] = true
+				uniq = append(uniq, n)
+			}
+		}
+		out.Branches = append(out.Branches, g.ExistingBranches(ctx, proj.RepoPath, uniq)...)
+		for _, b := range out.Branches {
+			out.Commands = append(out.Commands, gitsvc.DeleteBranchCommand(proj.RepoPath, b))
+		}
+	}
+	return out, nil
 }

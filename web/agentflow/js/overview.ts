@@ -10,6 +10,7 @@ import type { IconName } from './icons.js';
 import { isTransient, startPoll, subscribe, type AgentflowEvent } from './events.js';
 import { mergeCard } from './merge-card.js';
 import { yoloBadge } from './yolo.js';
+import { defaultUnregisterDeps, unregister, unregisterBlock } from './unregister.js';
 
 export interface OverviewDeps {
   list(): Promise<ProjectView[]>;
@@ -21,6 +22,8 @@ export interface OverviewDeps {
   efforts?: typeof api.efforts;
   gitCommands?: typeof api.gitCommands;
   copy?(text: string): void;
+  /** Optional: unregisters a project after asking; true when it is gone. */
+  unregister?(slug: string): Promise<boolean>;
 }
 
 export const defaultDeps = (open: (slug: string) => void): OverviewDeps => ({
@@ -31,6 +34,7 @@ export const defaultDeps = (open: (slug: string) => void): OverviewDeps => ({
   efforts: api.efforts,
   gitCommands: api.gitCommands,
   copy: (t) => void copyText(t),
+  unregister: (slug) => unregister(defaultUnregisterDeps(), slug),
 });
 
 interface Button {
@@ -209,6 +213,12 @@ export class Overview {
     replace(this.host, h('ul', { class: 'task-list' }, ...this.rows.map((r) => this.row(r))));
   }
 
+  private async unregisterRow(slug: string): Promise<void> {
+    const row = this.rows.find((r) => r.slug === slug);
+    if (!row || unregisterBlock(row) || !(await this.deps.unregister?.(slug))) return;
+    await this.refresh();
+  }
+
   private row(p: ProjectView): HTMLElement {
     const { pct, text } = progressText(p.progress ?? {});
     const ef = p.effort;
@@ -218,6 +228,11 @@ export class Overview {
       : [h('div', { class: 'task-item-meta', text: ef ? 'no stage running' : 'no active effort' })];
     const buttons = buttonsFor(p.run_state).map((b) =>
       button(b.label, () => void this.control(p.slug, b.op), { primary: b.primary, op: b.op, icon: b.icon, word: b.word }));
+    const why = unregisterBlock(p);
+    const trash = this.deps.unregister
+      ? button(why ? `Unregister: ${why}` : 'Unregister', () => void this.unregisterRow(p.slug), { field: 'unregister-project', icon: 'trash' })
+      : null;
+    if (trash && why) (trash as HTMLButtonElement).disabled = true;
     return h('li', { class: 'task-item', attrs: { 'data-project': p.slug } },
       h('div', { class: 'task-item-meta' },
         h('a', { class: 'task-item-title', text: p.slug, attrs: { href: '#', 'data-open': p.slug }, on: {
@@ -229,7 +244,7 @@ export class Overview {
       bar,
       h('div', { class: 'progress-pct', text: text }),
       ...work,
-      h('div', { class: 'task-item-meta' }, ...buttons),
+      h('div', { class: 'task-item-meta' }, ...buttons, trash),
       this.done.has(p.slug) ? mergeCard(this.done.get(p.slug) as Effort, this.git.get((this.done.get(p.slug) as Effort).id) ?? null, (t) => this.deps.copy?.(t)) : null);
   }
 }

@@ -127,7 +127,7 @@ func TestDBS3_EveryWriteIsAttributed(t *testing.T) {
 	do(alice, "DELETE", "/api/projects/p1/candidates/worker", nil, 204)
 	do(alice, "POST", "/api/backends/b1/retire", nil, 200)
 	do(alice, "POST", "/api/backends/b1/enable", nil, 200)
-	do(alice, "DELETE", "/api/projects/p1", nil, 204)
+	do(alice, "DELETE", "/api/projects/p1", nil, 200)
 	do(nil, "POST", "/api/projects", map[string]any{"slug": "p2", "repo_path": repo(t)}, 201)
 	do(&auth.Principal{Method: "apikey", Subject: "ci"}, "PATCH", "/api/projects/p2", map[string]any{"model_scope": "any"}, 200)
 
@@ -187,7 +187,7 @@ func TestProjectsCRUDAndLimits(t *testing.T) {
 	if list := decode[[]ProjectView](t, e.ok("GET", "/api/projects", nil, 200)); len(list) != 1 {
 		t.Fatalf("list = %+v", list)
 	}
-	e.ok("DELETE", "/api/projects/p1", nil, 204)
+	e.ok("DELETE", "/api/projects/p1", nil, 200)
 	e.ok("DELETE", "/api/projects/p1", nil, 404)
 }
 

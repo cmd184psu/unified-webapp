@@ -37,6 +37,7 @@ function harness(initial: ProjectView[]) {
     },
     confirm: async (m: string) => { calls.push('confirm:' + m); return true; },
     open: (s: string) => { calls.push('open:' + s); },
+    unregister: async (slug: string) => { calls.push('unregister:' + slug); return true; },
   };
   const ov = new Overview(asEl(host), deps);
   return { host, ov, calls, efforts, setRows: (r: ProjectView[]) => { rows = r; }, listCalls: () => listCalls };
@@ -189,6 +190,25 @@ test('F4: the health banner is hidden when ok and shows the server message when 
   eq(host.textContent, '');
   ok(host.hasAttribute('hidden'), 'hidden when ok');
   eq(healthMessage(hl), '');
+  stop();
+});
+
+
+test('a row offers Unregister only when its run is stopped with no active effort', async () => {
+  const t = harness([proj('busy'), proj('idle', { effort: null, current: [] })]);
+  const stop = t.ov.mount();
+  await flush();
+  const trash = findAll(t.host, (e) => e.getAttribute('data-action') === 'unregister-project') as unknown as Array<{ disabled: boolean; getAttribute(k: string): string | null; click(): void }>;
+  eq(trash.length, 2);
+  eq(trash[0].disabled, true);
+  ok((trash[0].getAttribute('aria-label') ?? '').includes('Finish or abandon the active effort first'), 'reason on the disabled one');
+  eq(trash[1].disabled, false);
+  t.setRows([proj('busy')]);
+  trash[1].click();
+  await flush();
+  await flush();
+  eq(t.calls.filter((c) => c.startsWith('unregister:')), ['unregister:idle']);
+  ok(!t.host.textContent.includes('idle'), 'row gone after a refresh');
   stop();
 });
 

@@ -23,7 +23,7 @@ function harness(over: Partial<ProjectDeps> = {}, mode: { project?: ProjectView 
     createProject: async (p: ProjectInput) => { log.push('create:' + p.slug); bodies.create = p; return view(p.slug); },
     patchProject: async (slug, p) => { log.push('patch:' + slug); bodies.patch = p; return view(slug); },
     gitInit: async (path) => { log.push('git-init:' + path); return { repo_path: path }; },
-    deleteProject: async (slug) => { log.push('delete:' + slug); },
+    deleteProject: async (slug) => { log.push('delete:' + slug); return { deleted: slug, branches: [], commands: [] }; },
     backends: async () => [backend],
     candidates: async () => cands,
     putProjectCandidates: async (slug, role, list) => { log.push(`put:${slug}:${role}`); bodies.put = list; cands = [...cands.filter((c) => c.role !== role), ...list.map((c, i) => cand('project', role, i, slug))]; return cands; },
@@ -180,13 +180,40 @@ test('role preferences: a project override is saved per role and can be cleared 
   eq(t.log.filter((l) => l.startsWith('clear:')), ['clear:p1:critic']);
 });
 
-test('delete asks first and a created form offers no role editor yet', async () => {
-  const t = harness({}, { project: view('p1') });
+test('unregister asks first, deletes, and shows the branch commands', async () => {
+  const shown: string[][] = [];
+  const t = harness({
+    deleteProject: async (slug) => { t.log.push('delete:' + slug); return { deleted: slug, branches: ['agentflow/effort-1'], commands: ["git -C '/r/p1' branch -D 'agentflow/effort-1'"] }; },
+    showCommands: (_slug, commands) => { shown.push(commands); },
+  }, { project: view('p1') });
   await t.form.mount();
-  button(t.host, 'Delete project').click();
+  const b = button(t.host, 'Unregister');
+  eq((b as unknown as { disabled: boolean }).disabled, false);
+  b.click();
   await flush();
-  ok(t.log.some((l) => l.startsWith('confirm:Delete project p1')), 'asked');
+  ok(t.log.includes('confirm:Unregister p1? Its history is removed; the repository is not touched.'), 'asked: ' + t.log.join('|'));
   eq(t.log.filter((l) => l.startsWith('delete:')), ['delete:p1']);
+  eq(shown, [["git -C '/r/p1' branch -D 'agentflow/effort-1'"]]);
+  eq(t.done, ['']);
+});
+
+test('unregister is disabled with a reason while the run is not stopped or an effort is active', async () => {
+  for (const [over, reason] of [
+    [{ run_state: 'running' }, 'Stop the run first'],
+    [{ effort: { id: 1 } as never }, 'Finish or abandon the active effort first'],
+  ] as const) {
+    const t = harness({}, { project: view('p1', over) });
+    await t.form.mount();
+    const b = byAttr(t.host, 'data-action', 'delete-project')[0];
+    eq((b as unknown as { disabled: boolean }).disabled, true);
+    eq(b.getAttribute('title'), reason);
+    b.click();
+    await flush();
+    eq(t.log.filter((l) => l.startsWith('delete:') || l.startsWith('confirm:')), []);
+  }
+});
+
+test('a created form offers no role editor yet', async () => {
   const c = harness();
   await c.form.mount();
   ok(c.host.textContent.includes('Role preferences can be set once the project exists'), 'create form note');

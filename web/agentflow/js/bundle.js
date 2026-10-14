@@ -286,7 +286,7 @@ var HealthBanner = class {
 };
 
 // web/agentflow/js/overview.ts
-import { confirmDialog as confirmDialog2, copyText } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog3, copyText as copyText2 } from "/shared/dist/shared.mjs";
 
 // web/agentflow/js/forms.ts
 import { createToggle } from "/shared/dist/shared.mjs";
@@ -580,15 +580,58 @@ function yoloControl(slug, effort, deps, onChanged) {
   );
 }
 
+// web/agentflow/js/unregister.ts
+import { confirmDialog as confirmDialog2, copyText, openModal, showToast as showToast2 } from "/shared/dist/shared.mjs";
+var defaultUnregisterDeps = () => ({
+  deleteProject: api.deleteProject,
+  confirm: (m, label = "Confirm") => confirmDialog2(m, { confirmLabel: label }),
+  notify: (m) => void showToast2(m, "success"),
+  showCommands: (slug, commands) => showBranchCommands(slug, commands, (t) => void copyText(t))
+});
+function unregisterBlock(p) {
+  if (p.run_state !== "stopped") return "Stop the run first";
+  if (p.effort) return "Finish or abandon the active effort first";
+  return "";
+}
+async function unregister(deps, slug) {
+  if (!await deps.confirm(`Unregister ${slug}? Its history is removed; the repository is not touched.`, "Unregister")) return false;
+  let res;
+  try {
+    res = await deps.deleteProject(slug);
+  } catch {
+    return false;
+  }
+  deps.notify(`Unregistered ${slug}`);
+  if (res.commands?.length) deps.showCommands(slug, res.commands);
+  return true;
+}
+function branchCommands(slug, commands, copy) {
+  return h(
+    "div",
+    { attrs: { "data-role": "branch-commands" } },
+    h("p", { text: `${slug} is unregistered. Its branches are still in the repository; to delete them, run:` }),
+    ...commands.map((c) => h(
+      "div",
+      { class: "merge-command" },
+      h("pre", { class: "detail-mono", text: c }),
+      h("button", { class: "icon-btn", attrs: { type: "button", title: "Copy this command", "aria-label": "Copy this command", "data-action": "copy-command" }, on: { click: () => copy(c) } }, icon("copy"))
+    ))
+  );
+}
+function showBranchCommands(slug, commands, copy) {
+  openModal(branchCommands(slug, commands, copy), { title: "Branches left behind" });
+}
+
 // web/agentflow/js/overview.ts
 var defaultDeps = (open) => ({
   list: () => api.projects(),
   run: (slug, op) => api.run(slug, op),
-  confirm: (m) => confirmDialog2(m, { confirmLabel: "Stop" }),
+  confirm: (m) => confirmDialog3(m, { confirmLabel: "Stop" }),
   open,
   efforts: api.efforts,
   gitCommands: api.gitCommands,
-  copy: (t) => void copyText(t)
+  copy: (t) => void copyText2(t),
+  unregister: (slug) => unregister(defaultUnregisterDeps(), slug)
 });
 function buttonsFor(runState) {
   switch (runState) {
@@ -744,12 +787,20 @@ var Overview = class {
     }
     replace(this.host, h("ul", { class: "task-list" }, ...this.rows.map((r) => this.row(r))));
   }
+  async unregisterRow(slug) {
+    const row = this.rows.find((r) => r.slug === slug);
+    if (!row || unregisterBlock(row) || !await this.deps.unregister?.(slug)) return;
+    await this.refresh();
+  }
   row(p) {
     const { pct: pct2, text } = progressText(p.progress ?? {});
     const ef = p.effort;
     const bar = h("div", { class: "progress-bar-wrap" }, h("div", { class: "progress-bar", attrs: { style: `width: ${pct2}%` } }));
     const work = (p.current ?? []).length > 0 ? (p.current ?? []).map((w) => h("div", { class: "task-item-meta", text: workLine(w) })) : [h("div", { class: "task-item-meta", text: ef ? "no stage running" : "no active effort" })];
     const buttons = buttonsFor(p.run_state).map((b) => button(b.label, () => void this.control(p.slug, b.op), { primary: b.primary, op: b.op, icon: b.icon, word: b.word }));
+    const why = unregisterBlock(p);
+    const trash = this.deps.unregister ? button(why ? `Unregister: ${why}` : "Unregister", () => void this.unregisterRow(p.slug), { field: "unregister-project", icon: "trash" }) : null;
+    if (trash && why) trash.disabled = true;
     return h(
       "li",
       { class: "task-item", attrs: { "data-project": p.slug } },
@@ -769,14 +820,14 @@ var Overview = class {
       bar,
       h("div", { class: "progress-pct", text }),
       ...work,
-      h("div", { class: "task-item-meta" }, ...buttons),
+      h("div", { class: "task-item-meta" }, ...buttons, trash),
       this.done.has(p.slug) ? mergeCard(this.done.get(p.slug), this.git.get(this.done.get(p.slug).id) ?? null, (t) => this.deps.copy?.(t)) : null
     );
   }
 };
 
 // web/agentflow/js/backends.ts
-import { showToast as showToast3 } from "/shared/dist/shared.mjs";
+import { showToast as showToast4 } from "/shared/dist/shared.mjs";
 
 // web/agentflow/js/candidates.ts
 var ROLES = ["worker", "reviewer", "planner", "architect", "critic", "compiler"];
@@ -950,10 +1001,10 @@ function buildRoleEditor(o) {
 }
 
 // web/agentflow/js/settings.ts
-import { showToast as showToast2 } from "/shared/dist/shared.mjs";
+import { showToast as showToast3 } from "/shared/dist/shared.mjs";
 
 // web/agentflow/js/dirpicker.ts
-import { openModal } from "/shared/dist/shared.mjs";
+import { openModal as openModal2 } from "/shared/dist/shared.mjs";
 var DirPicker = class {
   constructor(fsDirs, start, onChoose, onCancel) {
     this.fsDirs = fsDirs;
@@ -1024,7 +1075,7 @@ function pickDirectory(start = "", fsDirs = api.fsDirs) {
   return new Promise((resolve) => {
     let picked2 = null;
     const body = h("div", {});
-    const modal = openModal(body, { title: "Choose a folder", onClose: () => resolve(picked2) });
+    const modal = openModal2(body, { title: "Choose a folder", onClose: () => resolve(picked2) });
     const picker = new DirPicker(fsDirs, start, (p) => {
       picked2 = p;
       modal.close();
@@ -1054,7 +1105,7 @@ var defaultSettingsDeps = () => ({
   putSettings: api.putSettings,
   opencodeVersion: api.opencodeVersion,
   pickDir: (start) => pickDirectory(start),
-  notify: (m) => void showToast2(m, "success")
+  notify: (m) => void showToast3(m, "success")
 });
 var str = (v) => v === void 0 || Array.isArray(v) ? "" : String(v);
 var SettingsView = class {
@@ -1315,7 +1366,7 @@ var defaultBackendsDeps = () => ({
   putLimits: api.putLimits,
   settings: api.settings,
   modelStats: api.modelStats,
-  notify: (m) => void showToast3(m, "success")
+  notify: (m) => void showToast4(m, "success")
 });
 function lastForRoles(cands, name) {
   return ROLES.filter((role) => {
@@ -1785,7 +1836,7 @@ function mountBackends(host) {
 }
 
 // web/agentflow/js/board.ts
-import { confirmDialog as confirmDialog3, copyText as copyText2, showToast as showToast4 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog4, copyText as copyText3, showToast as showToast5 } from "/shared/dist/shared.mjs";
 
 // web/agentflow/js/current.ts
 var picked = /* @__PURE__ */ new Map();
@@ -1913,9 +1964,9 @@ var defaultBoardDeps = () => ({
   overrideTask: api.overrideTask,
   abandonEffort: api.abandonEffort,
   gitCommands: api.gitCommands,
-  confirm: (m, label = "Confirm") => confirmDialog3(m, { confirmLabel: label }),
-  copy: (t) => void copyText2(t),
-  notify: (m) => void showToast4(m, "success")
+  confirm: (m, label = "Confirm") => confirmDialog4(m, { confirmLabel: label }),
+  copy: (t) => void copyText3(t),
+  notify: (m) => void showToast5(m, "success")
 });
 var rec = (v) => v && typeof v === "object" ? v : {};
 var strs = (v) => Array.isArray(v) ? v.map((x) => String(x)) : [];
@@ -2352,12 +2403,12 @@ function mountBoard(host, slug) {
 }
 
 // web/agentflow/js/history.ts
-import { showToast as showToast5 } from "/shared/dist/shared.mjs";
+import { showToast as showToast6 } from "/shared/dist/shared.mjs";
 var defaultHistoryDeps = () => ({
   efforts: api.efforts,
   importFRD: api.importFRD,
   readFile: (f) => f.text(),
-  notify: (m) => void showToast5(m, "success")
+  notify: (m) => void showToast6(m, "success")
 });
 var when = (ms) => ms ? new Date(ms).toLocaleString() : "";
 function link(label, href, name) {
@@ -2474,10 +2525,10 @@ function mountHistory(host, slug) {
 }
 
 // web/agentflow/js/frd-editor.ts
-import { alertDialog as alertDialog2, showToast as showToast7 } from "/shared/dist/shared.mjs";
+import { alertDialog as alertDialog2, showToast as showToast8 } from "/shared/dist/shared.mjs";
 
 // web/agentflow/js/plan-view.ts
-import { confirmDialog as confirmDialog4, showToast as showToast6 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog5, showToast as showToast7 } from "/shared/dist/shared.mjs";
 var defaultPlanDeps = () => ({
   efforts: api.efforts,
   plan: api.plan,
@@ -2486,8 +2537,8 @@ var defaultPlanDeps = () => ({
   planRevision: api.planRevision,
   generatePlan: api.generatePlan,
   approvePlan: api.approvePlan,
-  confirm: (m) => confirmDialog4(m, { confirmLabel: "Approve" }),
-  notify: (m) => void showToast6(m, "success")
+  confirm: (m) => confirmDialog5(m, { confirmLabel: "Approve" }),
+  notify: (m) => void showToast7(m, "success")
 });
 var PLAN_TABS = ["planner", "architect", "critic"];
 var list = (title, items) => items && items.length > 0 ? h("div", { class: "plan-section" }, h("h4", { text: title }), h("ul", {}, ...items.map((t) => h("li", { text: t })))) : null;
@@ -2875,7 +2926,7 @@ var defaultFrdDeps = () => ({
   splitFRD: api.splitFRD,
   frdParts: api.frdParts,
   startPart: api.startPart,
-  notify: (m) => void showToast7(m, "success")
+  notify: (m) => void showToast8(m, "success")
 });
 var PRIORITIES = [["", "(none)"], ["must", "must"], ["should", "should"], ["could", "could"], ["wont", "won't"]];
 var lines = (s) => s.split("\n").map((l) => l.trim()).filter((l) => l !== "");
@@ -3501,14 +3552,14 @@ function mountFrd(host, slug) {
 }
 
 // web/agentflow/js/queue.ts
-import { confirmDialog as confirmDialog5, showToast as showToast8 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog6, showToast as showToast9 } from "/shared/dist/shared.mjs";
 var defaultQueueDeps = () => ({
   efforts: api.efforts,
   queue: api.queue,
   compile: api.compile,
   approveQueue: api.approveQueue,
-  confirm: (m, label = "Confirm") => confirmDialog5(m, { confirmLabel: label }),
-  notify: (m) => void showToast8(m, "success")
+  confirm: (m, label = "Confirm") => confirmDialog6(m, { confirmLabel: label }),
+  notify: (m) => void showToast9(m, "success")
 });
 var list2 = (title, items) => h(
   "div",
@@ -3677,7 +3728,7 @@ function mountQueue(host, slug) {
 }
 
 // web/agentflow/js/projects.ts
-import { confirmDialog as confirmDialog6, showToast as showToast9 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog7, showToast as showToast10 } from "/shared/dist/shared.mjs";
 var defaultProjectDeps = () => ({
   createProject: api.createProject,
   patchProject: api.patchProject,
@@ -3688,9 +3739,10 @@ var defaultProjectDeps = () => ({
   putProjectCandidates: api.putProjectCandidates,
   clearProjectCandidates: api.clearProjectCandidates,
   definitionOfDone: api.definitionOfDone,
-  confirm: (m, label = "Confirm") => confirmDialog6(m, { confirmLabel: label }),
+  confirm: (m, label = "Confirm") => confirmDialog7(m, { confirmLabel: label }),
   pickDir: (start) => pickDirectory(start),
-  notify: (m) => void showToast9(m, "success")
+  notify: (m) => void showToast10(m, "success"),
+  showCommands: defaultUnregisterDeps().showCommands
 });
 function splitArgv(s) {
   return s.split(/\s+/).filter((t) => t !== "");
@@ -3820,14 +3872,10 @@ var ProjectForm = class {
   }
   async remove() {
     const p = this.mode.project;
-    if (!p || !await this.deps.confirm(`Delete project ${p.slug}? Its history is kept only if it has none; a project with efforts cannot be deleted.`, "Delete")) return;
-    try {
-      await this.deps.deleteProject(p.slug);
-    } catch {
-      return;
-    }
-    this.deps.notify(`Deleted ${p.slug}`);
-    this.done("");
+    if (!p || unregisterBlock(p)) return;
+    const showCommands = this.deps.showCommands ?? (() => {
+    });
+    if (await unregister({ ...this.deps, showCommands }, p.slug)) this.done("");
   }
   // ─── Definition of done: detected from the toolchain, optionally overridden per project ───
   startDod(items) {
@@ -3906,6 +3954,16 @@ var ProjectForm = class {
     this.drafts.delete(role);
     this.drawRoles();
   }
+  unregisterButton(p) {
+    const why = unregisterBlock(p);
+    const b = button("Unregister", () => void this.remove(), { field: "delete-project", icon: "trash", word: true });
+    if (why) {
+      b.disabled = true;
+      b.setAttribute("title", why);
+      b.setAttribute("aria-label", `Unregister: ${why}`);
+    }
+    return b;
+  }
   render() {
     const p = this.mode.project;
     const e = this.errors;
@@ -3945,7 +4003,7 @@ var ProjectForm = class {
           h(
             "div",
             { class: "settings-actions" },
-            p ? button("Delete project", () => void this.remove(), { field: "delete-project", icon: "trash", word: true }) : null,
+            p ? this.unregisterButton(p) : null,
             button("Cancel", () => this.done(p?.slug ?? ""), { field: "cancel", icon: "cancel" }),
             button(p ? "Save project" : "Create project", () => void this.save(), { primary: true, field: "save-project", icon: p ? "save" : "add" })
           )

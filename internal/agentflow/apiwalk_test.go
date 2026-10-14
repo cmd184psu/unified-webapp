@@ -278,7 +278,15 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	} else {
 		ok("POST", base+"/abandon", `{"confirm":true}`, 0)
 	}
-	ok("DELETE", "/api/projects/other", "", 0)
+	var gone struct {
+		Deleted  string   `json:"deleted"`
+		Branches []string `json:"branches"`
+		Commands []string `json:"commands"`
+	}
+	if err := json.Unmarshal(ok("DELETE", "/api/projects/other", "", 200), &gone); err != nil || gone.Deleted != "other" || gone.Branches == nil || gone.Commands == nil {
+		t.Errorf("DELETE project body = %+v (%v), want deleted=other and empty (non-null) branches and commands", gone, err)
+	}
+	ok("GET", "/api/projects/other", "", 404)
 
 	var missing []string
 	for _, p := range api.Patterns() {

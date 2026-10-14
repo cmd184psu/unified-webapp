@@ -358,22 +358,48 @@ func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
 	return loadProjects(ctx, s.db, "")
 }
 
-// DeleteProject removes a project's registration: its limit overrides and
-// per-project role candidates go with it. A project that has efforts keeps
-// them as history, so it cannot be deleted (ErrConflict).
+// ProjectStageIDs lists every stage of every effort of a project (effort-level
+// and attempt-level), so the engine can remove their working directories
+// before the rows go.
+func (s *Store) ProjectStageIDs(ctx context.Context, slug string) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT st.id FROM stages st
+		WHERE st.effort IN (SELECT id FROM efforts WHERE project = ?)
+		OR st.attempt IN (SELECT a.id FROM attempts a JOIN tasks t ON t.id = a.task
+			JOIN queues q ON q.id = t.queue JOIN efforts e ON e.id = q.effort WHERE e.project = ?)
+		ORDER BY st.id`, slug, slug)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// DeleteProject unregisters a project and removes its AgentFlow records: its
+// efforts with everything under them (documents, queues, tasks, attempts,
+// stages, baselines and the rest cascade from the effort), limit overrides,
+// plugins and per-project role candidates, in one transaction. A project with
+// an active effort cannot be deleted (ErrConflict). Audit events about the
+// deleted subjects stay as history.
 func (s *Store) DeleteProject(ctx context.Context, actor, slug string) error {
 	return s.WithTx(ctx, func(tx *sql.Tx) error {
 		if err := requireProject(ctx, tx, slug); err != nil {
 			return err
 		}
-		var n int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM efforts WHERE project = ?`, slug).Scan(&n); err != nil {
+		if id, err := activeEffort(ctx, tx, slug, 0); err != nil {
 			return err
-		}
-		if n > 0 {
-			return fmt.Errorf("project %q has %d effort(s): %w", slug, n, ErrConflict)
+		} else if id != 0 {
+			return fmt.Errorf("project %q has active effort %d: finish or abandon the active effort first: %w", slug, id, ErrConflict)
 		}
 		for _, q := range []string{
+			`DELETE FROM efforts WHERE project = ?`,
 			`DELETE FROM project_limits WHERE project = ?`,
 			`DELETE FROM project_plugins WHERE project = ?`,
 			`DELETE FROM role_candidates WHERE scope = 'project' AND project_id = ?`,

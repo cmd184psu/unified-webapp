@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -403,6 +404,49 @@ func TestE2E_FullJourneyOverHTTP(t *testing.T) {
 	if n := len(fake2.Calls()); n != 0 {
 		t.Errorf("%d runner calls after restart, want none", n)
 	}
+
+	// A completed effort's project can be unregistered: its records and its
+	// working files go, the repository and its branches stay, and the response
+	// lists the branches with the commands that delete them.
+	var unreg struct {
+		Deleted  string   `json:"deleted"`
+		Branches []string `json:"branches"`
+		Commands []string `json:"commands"`
+	}
+	if err := json.Unmarshal(again.must("DELETE", "/api/projects/demo", "", 200), &unreg); err != nil || unreg.Deleted != "demo" {
+		t.Fatalf("unregister body = %+v (%v)", unreg, err)
+	}
+	if !slices.Contains(unreg.Branches, branch) || !strings.Contains(strings.Join(unreg.Commands, "\n"), "branch -D '"+branch+"'") {
+		t.Errorf("unregister lists branches %v commands %v, want %s", unreg.Branches, unreg.Commands, branch)
+	}
+	again.must("GET", "/api/projects/demo", "", 404)
+	again.must("GET", base, "", 404)
+	for _, d := range []string{"worktrees/demo", "baselines"} {
+		if _, err := os.Stat(filepath.Join(dataDir, d)); !os.IsNotExist(err) {
+			if ents, _ := os.ReadDir(filepath.Join(dataDir, d)); len(ents) != 0 {
+				t.Errorf("%s still has %d entries after unregister", d, len(ents))
+			}
+		}
+	}
+	if ents, _ := os.ReadDir(filepath.Join(dataDir, "stages")); len(ents) != 0 {
+		t.Errorf("stages/ still has %d entries after unregister", len(ents))
+	}
+	if after := userTree(t, repo); after != before {
+		t.Errorf("unregister changed the user's repository")
+	}
+	if e2eGit(t, repo, "rev-parse", "--verify", "refs/heads/"+branch) == "" {
+		t.Errorf("integration branch %s was deleted by unregister", branch)
+	}
+	// The slug can be registered again with a clean slate.
+	again.must("POST", "/api/projects", `{"slug":"demo","repo_path":`+strconv.Quote(repo)+`}`, 201)
+	var reg struct {
+		RunState string `json:"run_state"`
+	}
+	if err := json.Unmarshal(again.must("GET", "/api/projects/demo", "", 200), &reg); err != nil || reg.RunState != model.RunStopped {
+		t.Errorf("re-registered project = %+v (%v)", reg, err)
+	}
+	again.must("DELETE", "/api/projects/demo", "", 200)
+	again.must("POST", "/api/projects", `{"slug":"demo","repo_path":`+strconv.Quote(repo)+`,"feedback_cmds":["sh check.sh"]}`, 201)
 }
 
 func waitUntil(t *testing.T, what string, cond func() bool) {

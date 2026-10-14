@@ -6,6 +6,7 @@
 // only be passed as a plain argument.
 
 import { confirmDialog, showToast } from '@shared';
+import { defaultUnregisterDeps, unregister, unregisterBlock, type UnregisterDeps } from './unregister.js';
 import { api, ApiError, type Backend, type Candidate, type PluginPin, type ProjectInput, type ProjectView } from './api.js';
 import { ROLES, buildRoleEditor, type CandRow } from './candidates.js';
 import { h, replace } from './dom.js';
@@ -15,7 +16,7 @@ import { FormErrors, RowsEditor, button, checkbox, type ToggleEl, fieldRow, sect
 export type ProjectDeps = Pick<
   typeof api,
   'createProject' | 'patchProject' | 'gitInit' | 'deleteProject' | 'backends' | 'candidates' | 'putProjectCandidates' | 'clearProjectCandidates' | 'definitionOfDone'
-> & {
+> & Partial<Pick<UnregisterDeps, 'showCommands'>> & {
   confirm(message: string, confirmLabel?: string): Promise<boolean>;
   /** Opens the directory picker at start; the chosen path, or null when cancelled. */
   pickDir(start: string): Promise<string | null>;
@@ -35,6 +36,7 @@ export const defaultProjectDeps = (): ProjectDeps => ({
   confirm: (m, label = 'Confirm') => confirmDialog(m, { confirmLabel: label }),
   pickDir: (start) => pickDirectory(start),
   notify: (m) => void showToast(m, 'success'),
+  showCommands: defaultUnregisterDeps().showCommands,
 });
 
 /** splitArgv splits a command line on whitespace into its argv; there is no quoting. */
@@ -194,14 +196,9 @@ export class ProjectForm {
 
   private async remove(): Promise<void> {
     const p = this.mode.project;
-    if (!p || !(await this.deps.confirm(`Delete project ${p.slug}? Its history is kept only if it has none; a project with efforts cannot be deleted.`, 'Delete'))) return;
-    try {
-      await this.deps.deleteProject(p.slug);
-    } catch {
-      return;
-    }
-    this.deps.notify(`Deleted ${p.slug}`);
-    this.done('');
+    if (!p || unregisterBlock(p)) return;
+    const showCommands = this.deps.showCommands ?? (() => {});
+    if (await unregister({ ...this.deps, showCommands }, p.slug)) this.done('');
   }
 
   // ─── Definition of done: detected from the toolchain, optionally overridden per project ───
@@ -278,6 +275,17 @@ export class ProjectForm {
     this.drawRoles();
   }
 
+  private unregisterButton(p: ProjectView): HTMLElement {
+    const why = unregisterBlock(p);
+    const b = button('Unregister', () => void this.remove(), { field: 'delete-project', icon: 'trash', word: true });
+    if (why) {
+      (b as HTMLButtonElement).disabled = true;
+      b.setAttribute('title', why);
+      b.setAttribute('aria-label', `Unregister: ${why}`);
+    }
+    return b;
+  }
+
   render(): void {
     const p = this.mode.project;
     const e = this.errors;
@@ -299,7 +307,7 @@ export class ProjectForm {
             'Opt-in only: none are loaded unless listed here. Each is pinned to an exact version such as 1.2.3 (no latest, no ranges); listed plugins are fetched by the runner when a stage starts')).el,
           e.general,
           h('div', { class: 'settings-actions' },
-            p ? button('Delete project', () => void this.remove(), { field: 'delete-project', icon: 'trash', word: true }) : null,
+            p ? this.unregisterButton(p) : null,
             button('Cancel', () => this.done(p?.slug ?? ''), { field: 'cancel', icon: 'cancel' }),
             button(p ? 'Save project' : 'Create project', () => void this.save(), { primary: true, field: 'save-project', icon: p ? 'save' : 'add' }))),
         p ? section('Role preferences',

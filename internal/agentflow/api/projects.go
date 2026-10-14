@@ -293,12 +293,13 @@ func (a *API) patchProject(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) deleteProject(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
-	if err := a.deps.Store.DeleteProject(r.Context(), actorOf(r), slug); err != nil {
+	left, err := a.deps.Engine.UnregisterProject(r.Context(), actorOf(r), slug)
+	if err != nil {
 		writeErr(w, err)
 		return
 	}
 	a.emit("project.delete", map[string]any{"project": slug})
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": slug, "branches": left.Branches, "commands": left.Commands})
 }
 
 // gitInit runs git init on a directory that is not a repository yet, after

@@ -273,13 +273,13 @@ func TestD3_FRDPlanQueueFlow(t *testing.T) {
 		t.Fatalf("invariants = %v", inv)
 	}
 
-	// Abandoning ends the effort; a project with history cannot be deleted.
+	// Abandoning ends the effort; a project with an active effort cannot be unregistered.
 	f.ok("POST", f.base+"/abandon", nil, http.StatusOK)
 	if s := f.effortStatus(); s != model.EffortAbandoned {
 		t.Fatalf("status = %s", s)
 	}
-	f.ok("DELETE", "/api/projects/p1", nil, http.StatusConflict)
 	f.ok("POST", "/api/projects/p1/efforts", map[string]any{"title": "again"}, http.StatusCreated)
+	f.ok("DELETE", "/api/projects/p1", nil, http.StatusConflict)
 	if list := decode[[]EffortView](t, f.ok("GET", "/api/projects/p1/efforts", nil, http.StatusOK)); len(list) != 2 || list[1].Status != model.EffortAbandoned {
 		t.Fatalf("efforts = %+v", list)
 	}
