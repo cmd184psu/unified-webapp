@@ -77,9 +77,10 @@ func classifyRun(parent context.Context, role string, err error) string {
 	return OutcomeInfraCrash
 }
 
-// parseFinal extracts and validates the role's final message. It returns the
+// parseFinal extracts and validates the role's final message; deliberate
+// (RP5) makes a planner's plan need its pre-mortem. It returns the
 // parsed JSON and the outcome the verdict implies.
-func parseFinal(role, final string) (json.RawMessage, string, error) {
+func parseFinal(role, final string, deliberate bool) (json.RawMessage, string, error) {
 	raw, err := schema.ExtractFinal(final)
 	if err != nil {
 		return nil, "", err
@@ -105,7 +106,7 @@ func parseFinal(role, final string) (json.RawMessage, string, error) {
 			return raw, OutcomeRepair, nil
 		}
 	case "planner":
-		_, err = schema.Parse[schema.PlanOut](raw)
+		_, err = schema.ParsePlan(raw, deliberate)
 	case "architect", "critic":
 		_, err = schema.Parse[schema.PlanReviewOut](raw)
 	case "compiler":

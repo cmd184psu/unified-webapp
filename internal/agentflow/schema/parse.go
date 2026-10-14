@@ -99,6 +99,17 @@ func Parse[T any](raw json.RawMessage) (T, error) {
 	return v, nil
 }
 
+// ParsePlan is Parse[PlanOut] with the deliberate-mode check (RP5) when
+// deliberate is set; its error goes to the same corrective follow-up as any
+// other invalid reply.
+func ParsePlan(raw json.RawMessage, deliberate bool) (PlanOut, error) {
+	p, err := Parse[PlanOut](raw)
+	if err != nil || !deliberate {
+		return p, err
+	}
+	return p, p.ValidateDeliberate()
+}
+
 // CorrectiveMessage builds the single follow-up sent to the same model after
 // its reply failed to parse or validate.
 func CorrectiveMessage(err error) string {

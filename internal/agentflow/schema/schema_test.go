@@ -244,3 +244,32 @@ func TestRawAndParsedReturnedTogether(t *testing.T) {
 		t.Fatalf("%s %+v %v", raw, r, err)
 	}
 }
+
+// AC-RP5: in deliberate mode a plan needs exactly three pre-mortem scenarios;
+// outside it the pre-mortem stays optional.
+func TestRP5_DeliberatePlanNeedsThreePremortemScenarios(t *testing.T) {
+	plan := func(premortem string) json.RawMessage {
+		return json.RawMessage(`{"principles":["p"],"drivers":["d"],"options":[{"name":"A","description":"a"},{"name":"B","description":"b"}],` +
+			`"phases":[{"id":"P1","name":"n","tasks_description":"t"}],"adr":{"decision":"d","drivers":["x"],"alternatives":["y"],"why":"w","consequences":["c"],"followups":["f"]}` + premortem + `}`)
+	}
+	three := `,"premortem":["a: cause, effect, fix","b: cause, effect, fix","c: cause, effect, fix"],"test_plan":["unit","e2e"]`
+	if _, err := ParsePlan(plan(three), true); err != nil {
+		t.Fatalf("three scenarios rejected: %v", err)
+	}
+	for name, pm := range map[string]string{
+		"none":  "",
+		"two":   `,"premortem":["a","b"]`,
+		"four":  `,"premortem":["a","b","c","d"]`,
+		"blank": `,"premortem":["a","  ","c"]`,
+		"empty": `,"premortem":[]`,
+	} {
+		_, err := ParsePlan(plan(pm), true)
+		var ve *ValidationError
+		if !errors.As(err, &ve) || !strings.HasPrefix(ve.Field, "premortem") {
+			t.Errorf("%s: err = %v, want a premortem validation error", name, err)
+		}
+		if _, err := ParsePlan(plan(pm), false); err != nil {
+			t.Errorf("%s: a plain plan must not need a pre-mortem: %v", name, err)
+		}
+	}
+}

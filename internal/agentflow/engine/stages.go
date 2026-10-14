@@ -274,6 +274,14 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 	if err != nil {
 		return fail(err)
 	}
+	deliberate := false
+	if st.Role == "planner" {
+		ef, err := d.Store.GetEffort(ctx, st.Effort)
+		if err != nil {
+			return fail(err)
+		}
+		deliberate = ef.Deliberate
+	}
 	prompt, err := e.buildPrompt(ctx, st, p.Project)
 	if err != nil {
 		return fail(err)
@@ -335,7 +343,7 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 	if outcome != "" {
 		return failed(res, outcome, err)
 	}
-	parsed, verdict, perr := parseFinal(st.Role, res.Final)
+	parsed, verdict, perr := parseFinal(st.Role, res.Final, deliberate)
 	if perr == nil {
 		return StageResult{Outcome: verdict, Raw: res.Final, Parsed: parsed}
 	}
@@ -360,7 +368,7 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 	if outcome != "" {
 		return failed(res2, outcome, err)
 	}
-	parsed, verdict, perr2 := parseFinal(st.Role, res2.Final)
+	parsed, verdict, perr2 := parseFinal(st.Role, res2.Final, deliberate)
 	if perr2 != nil {
 		return failed(res2, OutcomeInfraUnparseable, perr2)
 	}

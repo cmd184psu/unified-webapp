@@ -133,6 +133,7 @@ Known limits: `opencode_path` setting needs a restart; project create defaults m
 - 2026-10-13 — F2: optional cleanup stage with checkpoint+rollback (migration v6 rebuilds stages).
 - 2026-10-13 — F3: token/time budgets (migration v7, stages.tokens, 90% hold / 100% stop with reason budget).
 - 2026-10-13 — F4: pinned per-project plugins (migration v8); --pure dropped only for opted-in projects.
+- 2026-10-13 — F5: deliberate planning mode (pre-mortem validation, critic checks, UI toggle + keyword suggestion).
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`

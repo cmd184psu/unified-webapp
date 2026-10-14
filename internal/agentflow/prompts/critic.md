@@ -24,6 +24,7 @@ You are reviewing an implementation plan against its FRD. You did not write the 
 - "revise" only for a requirement that no phase covers or a phase that cannot be verified. Severity "blocker" only when a core behavior is absent; wording preferences are "minor".
 - "reject" when the plan cannot satisfy the FRD.
 
+{{DELIBERATE_CHECKS}}
 ## Output
 
 Your final message must be exactly one JSON object and nothing else: no markdown fence, no text before or after.

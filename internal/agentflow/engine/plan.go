@@ -601,6 +601,18 @@ func (e *Engine) approvePlanLocked(ctx context.Context, actor string, effort int
 	return nil
 }
 
+// Deliberate mode (RP5) adds a pre-mortem and an expanded test plan to the
+// planner's job. The planner's reply is rejected without the pre-mortem
+// (schema.PlanOut.ValidateDeliberate, which feeds the SO2 corrective), and the
+// critic is told to check both.
+const deliberatePlannerRules = "7. Deliberate mode is on. Add `premortem`: exactly three scenarios in which this plan fails, each one string naming the cause, the effect and the mitigation. " +
+	"Add `test_plan`: an expanded test plan with entries for unit tests, integration tests, end-to-end tests and observability (what proves it works in operation), each tied to the phase that delivers it."
+
+const deliberateCriticChecks = "## Deliberate mode\n\n" +
+	"This plan was written in deliberate mode. Also check: `premortem` holds exactly three failure scenarios and each names a cause, an effect and a mitigation that a phase carries out; " +
+	"`test_plan` covers unit, integration, end-to-end and observability checks for the behavior the FRD asks for. " +
+	"A missing or hollow pre-mortem or test plan is a \"revise\" with severity \"major\".\n"
+
 // EffortPrompt builds the prompt of a planning-loop or compiler stage: the role
 // prompt with its inputs filled in. The critic gets the FRD and the plan only,
 // never the architect's review (RP1). A custom Deps.Prompt serving effort
@@ -628,8 +640,10 @@ func (e *Engine) EffortPrompt(ctx context.Context, st model.Stage) (string, erro
 		"{{DELIBERATE_RULES}}": "",
 		"{{PLAN_JSON}}":        "null",
 	}
+	rep["{{DELIBERATE_CHECKS}}"] = ""
 	if ef.Deliberate {
-		rep["{{DELIBERATE_RULES}}"] = "7. Deliberate mode: add `premortem` with three failure scenarios (cause, effect, mitigation) and `test_plan` with an expanded plan (unit, integration, end-to-end, observability)."
+		rep["{{DELIBERATE_RULES}}"] = deliberatePlannerRules
+		rep["{{DELIBERATE_CHECKS}}"] = deliberateCriticChecks
 	}
 	switch st.Role {
 	case "planner":

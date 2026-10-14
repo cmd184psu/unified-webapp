@@ -1,6 +1,9 @@
 package schema
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Issue is a defect reported by a reviewer, critic or architect.
 type Issue struct {
@@ -63,6 +66,26 @@ type PlanOut struct {
 	ADR        ADR          `json:"adr"`
 	Premortem  []string     `json:"premortem,omitempty"`
 	TestPlan   []string     `json:"test_plan,omitempty"`
+}
+
+// PremortemScenarios is how many failure scenarios a deliberate plan carries (RP5).
+const PremortemScenarios = 3
+
+// ValidateDeliberate is Validate plus the deliberate-mode requirement (RP5): a
+// pre-mortem of exactly three failure scenarios, none of them blank.
+func (p *PlanOut) ValidateDeliberate() error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	if len(p.Premortem) != PremortemScenarios {
+		return bad("premortem", "deliberate mode needs exactly %d failure scenarios (cause, effect, mitigation), got %d", PremortemScenarios, len(p.Premortem))
+	}
+	for i, s := range p.Premortem {
+		if strings.TrimSpace(s) == "" {
+			return bad(fmt.Sprintf("premortem[%d]", i), "is blank")
+		}
+	}
+	return nil
 }
 
 // PlanReviewOut is the architect's or critic's final message.

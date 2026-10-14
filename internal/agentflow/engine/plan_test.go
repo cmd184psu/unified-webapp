@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -281,4 +282,65 @@ func TestC10_PlanStagesSurviveBackendRetireAndRestart(t *testing.T) {
 	if f.status() != model.EffortPlanning {
 		t.Fatalf("status = %s, want planning", f.status())
 	}
+}
+
+// AC-RP5: in deliberate mode the planner prompt carries the pre-mortem and
+// test-plan rules, a plan without three scenarios goes to the SO2 corrective
+// (one extra call on the same model), and the critic is told to check both.
+// A plain effort sees none of it.
+func TestRP5_DeliberateModeAddsPremortemRulesAndValidation(t *testing.T) {
+	deliberatePlan := strings.TrimSuffix(planReply, "}") + `,"premortem":["s1: cause, effect, mitigation","s2: cause, effect, mitigation","s3: cause, effect, mitigation"],"test_plan":["unit","integration","e2e","observability"]}`
+	run := func(t *testing.T, deliberate bool, planner ...runner.Step) *planFix {
+		f := newPlanFix(t, false)
+		f.standardPool()
+		on := deliberate
+		if _, err := f.st.UpdateEffort(context.Background(), "t", f.effort, store.EffortPatch{Deliberate: &on}); err != nil {
+			t.Fatal(err)
+		}
+		f.fake.Script("planner", planner...)
+		f.startEngine()
+		if err := f.eng.GeneratePlan(context.Background(), "alice", f.effort); err != nil {
+			t.Fatal(err)
+		}
+		f.waitStatus(model.EffortPlanReady)
+		return f
+	}
+
+	t.Run("deliberate", func(t *testing.T) {
+		f := run(t, true, runner.Step{Reply: planReply}, runner.Step{Reply: deliberatePlan})
+		calls := f.fake.CallsFor("planner")
+		if len(calls) != 2 {
+			t.Fatalf("planner calls = %d, want the plan and one corrective", len(calls))
+		}
+		if !strings.Contains(calls[0].Prompt, "exactly three scenarios") || !strings.Contains(calls[0].Prompt, "observability") {
+			t.Fatalf("planner prompt lacks the deliberate rules:\n%s", calls[0].Prompt)
+		}
+		if !strings.Contains(calls[1].Prompt, "premortem: deliberate mode needs exactly 3 failure scenarios") {
+			t.Fatalf("corrective does not name the missing pre-mortem:\n%s", calls[1].Prompt)
+		}
+		if calls[1].Request.Model != calls[0].Request.Model {
+			t.Fatal("the corrective must go to the same model")
+		}
+		crit := f.fake.CallsFor("critic")
+		if len(crit) == 0 || !strings.Contains(crit[0].Prompt, "premortem") || !strings.Contains(crit[0].Prompt, "unit, integration, end-to-end and observability") {
+			t.Fatalf("critic prompt lacks the deliberate checks")
+		}
+		v, err := f.eng.PlanView(context.Background(), f.effort)
+		var pd struct {
+			Premortem []string `json:"premortem"`
+		}
+		if err != nil || json.Unmarshal(v.Plan, &pd) != nil || len(pd.Premortem) != 3 {
+			t.Fatalf("plan view = %s (%v), want three scenarios", v.Plan, err)
+		}
+	})
+	t.Run("plain", func(t *testing.T) {
+		f := run(t, false, runner.Step{Reply: planReply})
+		calls := f.fake.CallsFor("planner")
+		if len(calls) != 1 || strings.Contains(calls[0].Prompt, "Deliberate mode") || strings.Contains(calls[0].Prompt, "{{") {
+			t.Fatalf("a plain effort must get no deliberate text and no raw placeholder: %d calls", len(calls))
+		}
+		if c := f.fake.CallsFor("critic"); len(c) == 0 || strings.Contains(c[0].Prompt, "Deliberate mode") || strings.Contains(c[0].Prompt, "{{") {
+			t.Fatal("critic prompt for a plain effort")
+		}
+	})
 }
