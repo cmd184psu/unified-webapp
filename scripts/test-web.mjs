@@ -69,6 +69,9 @@ const suites = [
   { name: "agentflow-overview", entry: "web/agentflow/js/overview.test.ts", runner: "esbuild-cjs" },
   { name: "agentflow-settings", entry: "web/agentflow/js/settings.test.ts", runner: "esbuild-cjs" },
   { name: "agentflow-backends", entry: "web/agentflow/js/backends.test.ts", runner: "esbuild-cjs" },
+  { name: "agentflow-projects", entry: "web/agentflow/js/projects.test.ts", runner: "esbuild-cjs" },
+  { name: "agentflow-frd", entry: "web/agentflow/js/frd-editor.test.ts", runner: "esbuild-cjs" },
+  { name: "agentflow-plan", entry: "web/agentflow/js/plan-view.test.ts", runner: "esbuild-cjs" },
   { name: "grocery", entry: "web/grocery/js/main.test.ts", runner: "node-test" },
 ];
 

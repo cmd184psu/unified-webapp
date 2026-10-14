@@ -162,7 +162,10 @@ export class Overview {
         this.host,
         h('div', { class: 'plan-empty' },
           h('h3', { text: 'No projects yet' }),
-          h('p', { text: 'Create a project to get started (coming in E3).' })),
+          h('p', { text: 'Create a project to get started.' }),
+          h('button', { class: 'ui-modal-btn ui-modal-btn-primary', text: 'New project', attrs: { type: 'button', 'data-op': 'new-project' }, on: {
+            click: () => this.deps.open('+new'),
+          } })),
       );
       return;
     }

@@ -8,14 +8,17 @@
 
 import { showToast } from '@shared';
 import {
-  api, type Backend, type BackendInput, type BackendResult, type Candidate, type CandidateInput, type ModelStat, type ProjectView,
+  api, type Backend, type BackendInput, type BackendResult, type Candidate, type ModelStat, type ProjectView,
 } from './api.js';
 import { h, replace } from './dom.js';
 import { subscribe, type AgentflowEvent } from './events.js';
 import { FormErrors, badge, button, checkbox, fieldRow, section, selectInput, textInput } from './forms.js';
+import { ROLES, buildRoleEditor, isPaid, unconsented, type CandRow } from './candidates.js';
 import { LIMIT_FIELDS } from './settings.js';
 
-export const ROLES = ['worker', 'reviewer', 'planner', 'architect', 'critic', 'compiler'];
+export { ROLES, isPaid, unconsented };
+export type { CandRow };
+
 export const API_TYPES: Array<[string, string]> = [
   ['ollama', 'ollama'],
   ['openai_compatible', 'openai compatible'],
@@ -43,24 +46,6 @@ export const defaultBackendsDeps = (): BackendsDeps => ({
   modelStats: api.modelStats,
   notify: (m) => void showToast(m, 'success'),
 });
-
-/** CandRow is one candidate being edited; optIn is the explicit consent a paid one needs (MB5). */
-export interface CandRow {
-  backend: string;
-  model: string;
-  optIn: boolean;
-}
-
-/** isPaid is true when the backend or the model is paid. */
-export function isPaid(backends: Backend[], backend: string, model: string): boolean {
-  const b = backends.find((x) => x.name === backend);
-  return !!b && (b.paid || b.models.some((m) => m.model === model && m.paid));
-}
-
-/** unconsented lists the paid candidates whose opt-in box is not ticked. */
-export function unconsented(backends: Backend[], rows: CandRow[]): CandRow[] {
-  return rows.filter((r) => isPaid(backends, r.backend, r.model) && !r.optIn);
-}
 
 /** lastForRoles lists the roles whose only candidates are on the named backend. */
 export function lastForRoles(cands: Candidate[], name: string): string[] {
@@ -280,75 +265,18 @@ export class BackendsView {
   }
 
   private roleEditor(role: string): HTMLElement {
-    const host = h('div', { class: 'profile-card', attrs: { 'data-role-editor': role } });
-    const errors = new FormErrors();
-    const rows = (): CandRow[] => this.drafts.get(role) ?? this.serverRows(role);
-    const edit = (fn: (r: CandRow[]) => CandRow[]): void => {
-      this.drafts.set(role, fn(rows().map((r) => ({ ...r }))));
-      draw();
-    };
-    const active = this.backends.filter((b) => !b.retired);
-    const pickBackend = selectInput('backend', active.map((b) => [b.name, b.name] as [string, string]), active[0]?.name ?? '');
-    const pickModel = selectInput('model', [], '');
-    const fillModels = (): void => {
-      const b = active.find((x) => x.name === pickBackend.value);
-      replace(pickModel, ...(b?.models ?? []).map((m) => h('option', { text: m.model + (m.paid ? ' (paid)' : ''), attrs: { value: m.model } })));
-      pickModel.value = b?.models[0]?.model ?? '';
-    };
-    pickBackend.addEventListener('change', fillModels);
-    fillModels();
-
-    const save = async (): Promise<void> => {
-      errors.clear();
-      const missing = unconsented(this.backends, rows());
-      if (missing.length > 0) {
-        errors.show(new Error(`Tick the paid opt-in for: ${missing.map((m) => `${m.backend}/${m.model}`).join(', ')}`));
-        return;
-      }
-      const body: CandidateInput[] = rows().map((r) => ({ backend: r.backend, model: r.model }));
-      try {
+    return buildRoleEditor({
+      role,
+      backends: this.backends,
+      rows: () => this.drafts.get(role) ?? this.serverRows(role),
+      hasDraft: () => this.drafts.has(role),
+      setDraft: (rows) => { if (rows) this.drafts.set(role, rows); else this.drafts.delete(role); },
+      save: async (body) => {
         this.candidates = await this.deps.putCandidates(role, body, { quiet: true });
-      } catch (err) {
-        errors.show(err);
-        return;
-      }
-      this.drafts.delete(role);
-      this.deps.notify(`Saved ${role} candidates`);
-      draw();
-    };
-
-    const draw = (): void => {
-      const list = rows();
-      replace(host,
-        h('div', { class: 'profile-header' }, h('strong', { text: role }),
-          this.drafts.has(role) ? badge('unsaved', 'warn') : null),
-        h('div', { class: 'wizard-list' }, ...(list.length === 0
-          ? [h('p', { class: 'field-hint', text: 'No candidates: this role has no eligible backend and its stages wait.' })]
-          : list.map((r, i) => {
-            const paid = isPaid(this.backends, r.backend, r.model);
-            const optIn = checkbox('opt_in', r.optIn);
-            optIn.addEventListener('change', () => edit((all) => { all[i].optIn = optIn.checked; return all; }));
-            return h('div', { class: 'inline-row', attrs: { 'data-candidate': `${role}:${i}` } },
-              h('span', { text: `${i + 1}. ${r.backend} / ${r.model}` }),
-              paid ? badge('paid') : null,
-              paid ? h('label', { class: 'inline-check' }, optIn, 'I opt in to paid use') : null,
-              button('Up', () => edit((all) => { if (i > 0) [all[i - 1], all[i]] = [all[i], all[i - 1]]; return all; }), { field: 'up' }),
-              button('Down', () => edit((all) => { if (i < all.length - 1) [all[i + 1], all[i]] = [all[i], all[i + 1]]; return all; }), { field: 'down' }),
-              button('Remove', () => edit((all) => all.filter((_, j) => j !== i)), { field: 'remove' }));
-          }))),
-        h('div', { class: 'inline-row' }, pickBackend, pickModel,
-          button('Add candidate', () => {
-            if (pickBackend.value && pickModel.value) {
-              edit((all) => [...all, { backend: pickBackend.value, model: pickModel.value, optIn: !isPaid(this.backends, pickBackend.value, pickModel.value) }]);
-            }
-          }, { field: 'add-candidate' })),
-        errors.general,
-        h('div', { class: 'settings-actions' },
-          button('Discard', () => { this.drafts.delete(role); draw(); }, { field: 'discard' }),
-          button('Save order', () => void save(), { primary: true, field: 'save-candidates' })));
-    };
-    draw();
-    return host;
+        this.deps.notify(`Saved ${role} candidates`);
+      },
+      emptyNote: 'No candidates: this role has no eligible backend and its stages wait.',
+    });
   }
 
   private candidatesSection(): HTMLElement {

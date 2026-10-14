@@ -64,6 +64,10 @@ const CHIP_ALIAS: Record<string, string> = {
   running: 'in-progress',
   pausing: 'review',
   paused: 'review',
+  // Plan review verdicts (RP2).
+  approve: 'passed',
+  revise: 'repair',
+  reject: 'failed',
 };
 
 /** chip builds a status chip; needs_input gets status-needs-input, running reuses status-in-progress. */

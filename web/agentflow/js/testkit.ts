@@ -150,3 +150,8 @@ export function button(root: FakeEl, label: string): FakeEl {
 
 /** flush lets pending promise callbacks and timers run. */
 export const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+/** allByField lists every element marked data-field=name, in document order. */
+export function allByField(root: FakeEl, name: string): FakeEl[] {
+  return byAttr(root, 'data-field', name);
+}

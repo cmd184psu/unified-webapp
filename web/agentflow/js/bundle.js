@@ -34,12 +34,9 @@ var CHIP_ALIAS = {
   revise: "repair",
   reject: "failed"
 };
-function statusKey(status) {
-  const key = status.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-  return CHIP_ALIAS[key] ?? key;
-}
 function chip(status) {
-  return h("span", { class: `status-chip status-${statusKey(status)}`, text: status.replace(/_/g, " ") });
+  const key = status.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  return h("span", { class: `status-chip status-${CHIP_ALIAS[key] ?? key}`, text: status.replace(/_/g, " ") });
 }
 
 // web/agentflow/js/events.ts
@@ -92,7 +89,7 @@ function startEvents() {
 }
 
 // web/agentflow/js/overview.ts
-import { confirmDialog as confirmDialog2 } from "/shared/dist/shared.mjs";
+import { confirmDialog } from "/shared/dist/shared.mjs";
 
 // web/agentflow/js/api.ts
 import { alertDialog } from "/shared/dist/shared.mjs";
@@ -194,221 +191,22 @@ var api = {
   approvePlan: (slug, id) => send("POST", `${eff(slug, id)}/plan/approve`),
   // Queue and tasks
   compile: (slug, id) => send("POST", `${eff(slug, id)}/compile`),
-  queue: (slug, id, o) => get(`${eff(slug, id)}/queue`, o),
-  /** gitCommands lists the commands to merge and push a complete effort's branch; agentflow runs none of them (GIT4). */
-  gitCommands: (slug, id) => get(`${eff(slug, id)}/git-commands`),
-  approveQueue: (slug, id, hash, o) => send("POST", `${eff(slug, id)}/queue/approve`, { hash }, o),
+  queue: (slug, id) => get(`${eff(slug, id)}/queue`),
+  approveQueue: (slug, id, hash) => send("POST", `${eff(slug, id)}/queue/approve`, { hash }),
   tasks: (slug, id) => get(`${eff(slug, id)}/tasks`),
   task: (slug, id, key) => get(`${eff(slug, id)}/tasks/${enc(key)}`),
-  /** editTask answers with the queue, which is back in draft until it is approved again (AT9). */
   editTask: (slug, id, key, def, o) => send("PUT", `${eff(slug, id)}/tasks/${enc(key)}`, def, o),
   retryTask: (slug, id, key, clean) => send("POST", `${eff(slug, id)}/tasks/${enc(key)}/retry`, { clean }),
   overrideTask: (slug, id, key, reason) => send("POST", `${eff(slug, id)}/tasks/${enc(key)}/override`, { reason }),
   // Run control: answers with the project's overview
   run: (slug, op) => send("POST", `${proj(slug)}/run/${op}`)
 };
-function exportURL(effort, format, doc, revision) {
-  const base = doc ? `/api/efforts/${effort}/${doc}/export` : `/api/efforts/${effort}/export`;
-  return `${base}?format=${format}${revision ? `&revision=${revision}` : ""}`;
-}
-function stageStreamURL(stage) {
-  return `/api/stages/${stage}/stream`;
-}
-
-// web/agentflow/js/yolo.ts
-import { confirmDialog, showToast } from "/shared/dist/shared.mjs";
-
-// web/agentflow/js/forms.ts
-function textInput(name, value, opts = {}) {
-  const el = h("input", {
-    class: "settings-input",
-    attrs: { type: opts.type ?? "text", name, "data-field": name, placeholder: opts.placeholder, readonly: opts.readOnly }
-  });
-  el.value = value;
-  return el;
-}
-function textArea(name, value, rows = 4) {
-  const el = h("textarea", { class: "settings-input", attrs: { name, "data-field": name, rows } });
-  el.value = value;
-  return el;
-}
-function checkbox(name, checked) {
-  const el = h("input", { attrs: { type: "checkbox", name, "data-field": name } });
-  el.checked = checked;
-  return el;
-}
-function selectInput(name, options, value) {
-  const el = h(
-    "select",
-    { class: "settings-input", attrs: { name, "data-field": name } },
-    ...options.map(([v, label]) => h("option", { text: label, attrs: { value: v } }))
-  );
-  el.value = options.some(([v]) => v === value) ? value : options[0]?.[0] ?? "";
-  return el;
-}
-function fieldRow(label, control, hint) {
-  const err = h("div", { class: "field-error", attrs: { role: "alert", hidden: true } });
-  const row = h(
-    "div",
-    { class: "wizard-field" },
-    h("label", { text: label }),
-    control,
-    hint ? h("div", { class: "field-hint", text: hint }) : null,
-    err
-  );
-  return {
-    el: row,
-    control,
-    error(msg) {
-      err.textContent = msg;
-      if (msg) err.removeAttribute("hidden");
-      else err.setAttribute("hidden", "");
-    }
-  };
-}
-function button(label, onClick, opts = {}) {
-  return h("button", {
-    class: "ui-modal-btn" + (opts.primary ? " ui-modal-btn-primary" : ""),
-    text: label,
-    attrs: { type: "button", "data-action": opts.field },
-    on: { click: onClick }
-  });
-}
-function section(title, ...children) {
-  return h("div", { class: "settings-section" }, h("h4", { text: title }), ...children);
-}
-function badge(label, kind = "paid") {
-  return h("span", { class: `badge badge-${kind}`, text: label });
-}
-function matchKey(field, keys) {
-  if (!field) return void 0;
-  const set = new Set(keys);
-  const tries = [field, field.replace(/^limits\./, ""), field.replace(/\[.*$/, ""), field.replace(/^limits\./, "").replace(/[[.].*$/, "")];
-  return tries.find((k) => set.has(k));
-}
-var FormErrors = class {
-  constructor() {
-    this.general = h("div", { class: "field-error", attrs: { role: "alert", hidden: true } });
-    this.fields = /* @__PURE__ */ new Map();
-  }
-  add(key, f) {
-    this.fields.set(key, f);
-    return f;
-  }
-  clear() {
-    for (const f of this.fields.values()) f.error("");
-    this.setGeneral("");
-  }
-  setGeneral(msg) {
-    this.general.textContent = msg;
-    if (msg) this.general.removeAttribute("hidden");
-    else this.general.setAttribute("hidden", "");
-  }
-  /** show displays err next to its field, or in the form-level line when it names none. */
-  show(err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const key = err instanceof ApiError ? matchKey(err.field, this.fields.keys()) : void 0;
-    if (key) this.fields.get(key)?.error(message);
-    else this.setGeneral(message);
-  }
-};
-var RowsEditor = class {
-  constructor(build, items, blank, addLabel, onChange = () => {
-  }) {
-    this.build = build;
-    this.blank = blank;
-    this.onChange = onChange;
-    this.rows = [];
-    this.list = h("div", { class: "wizard-list" });
-    for (const it of items) this.addRow(it);
-    this.el = h("div", {}, this.list, button(addLabel, () => this.addRow(this.blank(), true), { field: "add-row" }));
-  }
-  addRow(item, notify = false) {
-    const ctl = this.build(item);
-    this.rows.push(ctl);
-    const row = h(
-      "div",
-      { class: "inline-row", attrs: { "data-row": this.rows.length - 1 } },
-      ctl.el,
-      button("Remove", () => {
-        this.rows.splice(this.rows.indexOf(ctl), 1);
-        this.list.removeChild(row);
-        this.onChange();
-      }, { field: "remove-row" })
-    );
-    this.list.appendChild(row);
-    if (notify) this.onChange();
-  }
-  read() {
-    return this.rows.map((r) => r.read());
-  }
-};
-
-// web/agentflow/js/yolo.ts
-var defaultYoloDeps = () => ({
-  setYOLO: api.setYOLO,
-  yoloInvariants: api.yoloInvariants,
-  confirm: (m, label = "Confirm") => confirmDialog(m, { confirmLabel: label }),
-  notify: (m) => void showToast(m, "success")
-});
-function yoloBadge() {
-  return h("span", { class: "badge badge-warn", text: "YOLO", attrs: { "data-role": "yolo-badge", title: "YOLO is on: the human gates approve themselves" } });
-}
-function confirmText(effort, invariants) {
-  return `Enable YOLO for effort #${effort.id}? The FRD-to-plan, plan-to-queue and queue approvals will happen automatically, and a stuck task is retried once. Still enforced:
-` + invariants.map((i) => `- ${i.id}: ${i.text}`).join("\n");
-}
-function yoloControl(slug, effort, deps, onChanged) {
-  const listHost = h("div", { attrs: { "data-role": "yolo-invariants" } });
-  let invariants = [];
-  const loading = deps.yoloInvariants().then((inv) => {
-    invariants = inv;
-    replace(listHost, h(
-      "details",
-      {},
-      h("summary", { text: "Always enforced, even under YOLO" }),
-      h("ul", { class: "plan-review-notes" }, ...inv.map((i) => h("li", {}, h("strong", { text: i.id }), ` ${i.text}`)))
-    ));
-  }).catch(() => void 0);
-  const toggle = async () => {
-    if (effort.yolo) {
-      try {
-        await deps.setYOLO(slug, effort.id, false, false);
-      } catch {
-        return;
-      }
-      deps.notify("YOLO disabled");
-    } else {
-      await loading;
-      if (!await deps.confirm(confirmText(effort, invariants), "Enable YOLO")) return;
-      try {
-        await deps.setYOLO(slug, effort.id, true, true);
-      } catch {
-        return;
-      }
-      deps.notify("YOLO enabled");
-    }
-    onChanged();
-  };
-  if (effort.status === "complete" || effort.status === "abandoned") return h("div", { attrs: { "data-role": "yolo" } }, effort.yolo ? yoloBadge() : null);
-  return h(
-    "div",
-    { class: "detail-section", attrs: { "data-role": "yolo" } },
-    h(
-      "div",
-      { class: "row-actions" },
-      effort.yolo ? yoloBadge() : null,
-      button(effort.yolo ? "Disable YOLO" : "Enable YOLO", () => void toggle(), { field: "toggle-yolo" })
-    ),
-    listHost
-  );
-}
 
 // web/agentflow/js/overview.ts
 var defaultDeps = (open) => ({
   list: () => api.projects(),
   run: (slug, op) => api.run(slug, op),
-  confirm: (m) => confirmDialog2(m, { confirmLabel: "Stop" }),
+  confirm: (m) => confirmDialog(m, { confirmLabel: "Stop" }),
   open
 });
 function buttonsFor(runState) {
@@ -567,8 +365,7 @@ var Overview = class {
             this.deps.open(p.slug);
           }
         } }),
-        chip(p.run_state),
-        ef?.yolo ? yoloBadge() : null
+        chip(p.run_state)
       ),
       h("div", { class: "task-item-meta", text: ef ? `${ef.title} \xB7 ${ef.status.replace(/_/g, " ")}` : "no active effort" }),
       bar,
@@ -580,7 +377,133 @@ var Overview = class {
 };
 
 // web/agentflow/js/backends.ts
-import { showToast as showToast3 } from "/shared/dist/shared.mjs";
+import { showToast as showToast2 } from "/shared/dist/shared.mjs";
+
+// web/agentflow/js/forms.ts
+function textInput(name, value, opts = {}) {
+  const el = h("input", {
+    class: "settings-input",
+    attrs: { type: opts.type ?? "text", name, "data-field": name, placeholder: opts.placeholder, readonly: opts.readOnly }
+  });
+  el.value = value;
+  return el;
+}
+function textArea(name, value, rows = 4) {
+  const el = h("textarea", { class: "settings-input", attrs: { name, "data-field": name, rows } });
+  el.value = value;
+  return el;
+}
+function checkbox(name, checked) {
+  const el = h("input", { attrs: { type: "checkbox", name, "data-field": name } });
+  el.checked = checked;
+  return el;
+}
+function selectInput(name, options, value) {
+  const el = h(
+    "select",
+    { class: "settings-input", attrs: { name, "data-field": name } },
+    ...options.map(([v, label]) => h("option", { text: label, attrs: { value: v } }))
+  );
+  el.value = options.some(([v]) => v === value) ? value : options[0]?.[0] ?? "";
+  return el;
+}
+function fieldRow(label, control, hint) {
+  const err = h("div", { class: "field-error", attrs: { role: "alert", hidden: true } });
+  const row = h(
+    "div",
+    { class: "wizard-field" },
+    h("label", { text: label }),
+    control,
+    hint ? h("div", { class: "field-hint", text: hint }) : null,
+    err
+  );
+  return {
+    el: row,
+    control,
+    error(msg) {
+      err.textContent = msg;
+      if (msg) err.removeAttribute("hidden");
+      else err.setAttribute("hidden", "");
+    }
+  };
+}
+function button(label, onClick, opts = {}) {
+  return h("button", {
+    class: "ui-modal-btn" + (opts.primary ? " ui-modal-btn-primary" : ""),
+    text: label,
+    attrs: { type: "button", "data-action": opts.field },
+    on: { click: onClick }
+  });
+}
+function section(title, ...children) {
+  return h("div", { class: "settings-section" }, h("h4", { text: title }), ...children);
+}
+function badge(label, kind = "paid") {
+  return h("span", { class: `badge badge-${kind}`, text: label });
+}
+function matchKey(field, keys) {
+  if (!field) return void 0;
+  const set = new Set(keys);
+  const tries = [field, field.replace(/^limits\./, ""), field.replace(/\[.*$/, ""), field.replace(/^limits\./, "").replace(/[[.].*$/, "")];
+  return tries.find((k) => set.has(k));
+}
+var FormErrors = class {
+  constructor() {
+    this.general = h("div", { class: "field-error", attrs: { role: "alert", hidden: true } });
+    this.fields = /* @__PURE__ */ new Map();
+  }
+  add(key, f) {
+    this.fields.set(key, f);
+    return f;
+  }
+  clear() {
+    for (const f of this.fields.values()) f.error("");
+    this.setGeneral("");
+  }
+  setGeneral(msg) {
+    this.general.textContent = msg;
+    if (msg) this.general.removeAttribute("hidden");
+    else this.general.setAttribute("hidden", "");
+  }
+  /** show displays err next to its field, or in the form-level line when it names none. */
+  show(err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const key = err instanceof ApiError ? matchKey(err.field, this.fields.keys()) : void 0;
+    if (key) this.fields.get(key)?.error(message);
+    else this.setGeneral(message);
+  }
+};
+var RowsEditor = class {
+  constructor(build, items, blank, addLabel, onChange = () => {
+  }) {
+    this.build = build;
+    this.blank = blank;
+    this.onChange = onChange;
+    this.rows = [];
+    this.list = h("div", { class: "wizard-list" });
+    for (const it of items) this.addRow(it);
+    this.el = h("div", {}, this.list, button(addLabel, () => this.addRow(this.blank(), true), { field: "add-row" }));
+  }
+  addRow(item, notify = false) {
+    const ctl = this.build(item);
+    this.rows.push(ctl);
+    const row = h(
+      "div",
+      { class: "inline-row", attrs: { "data-row": this.rows.length - 1 } },
+      ctl.el,
+      button("Remove", () => {
+        this.rows.splice(this.rows.indexOf(ctl), 1);
+        this.list.removeChild(row);
+        this.onChange();
+      }, { field: "remove-row" })
+    );
+    this.list.appendChild(row);
+    if (notify) this.onChange();
+  }
+  read() {
+    return this.rows.map((r) => r.read());
+  }
+};
 
 // web/agentflow/js/candidates.ts
 var ROLES = ["worker", "reviewer", "planner", "architect", "critic", "compiler"];
@@ -626,11 +549,11 @@ function buildRoleEditor(o) {
     draw();
   };
   const draw = () => {
-    const list3 = o.rows();
+    const list2 = o.rows();
     replace(
       host,
       h("div", { class: "profile-header" }, h("strong", { text: role }), o.hasDraft() ? badge("unsaved", "warn") : null),
-      h("div", { class: "wizard-list" }, ...list3.length === 0 ? [h("p", { class: "field-hint", text: o.emptyNote })] : list3.map((r, i) => {
+      h("div", { class: "wizard-list" }, ...list2.length === 0 ? [h("p", { class: "field-hint", text: o.emptyNote })] : list2.map((r, i) => {
         const paid = isPaid(o.backends, r.backend, r.model);
         const optIn = checkbox("opt_in", r.optIn);
         optIn.addEventListener("change", () => edit((all) => {
@@ -683,7 +606,7 @@ function buildRoleEditor(o) {
 }
 
 // web/agentflow/js/settings.ts
-import { showToast as showToast2 } from "/shared/dist/shared.mjs";
+import { showToast } from "/shared/dist/shared.mjs";
 var LIMIT_FIELDS = [
   { key: "max_attempts", label: "Max attempts", hint: "Whole number, 2 to 50" },
   { key: "stuck_threshold", label: "Stuck threshold", hint: "Identical failures before a task is stuck; at most max attempts" },
@@ -702,7 +625,7 @@ var defaultSettingsDeps = () => ({
   settings: api.settings,
   putSettings: api.putSettings,
   opencodeVersion: api.opencodeVersion,
-  notify: (m) => void showToast2(m, "success")
+  notify: (m) => void showToast(m, "success")
 });
 var str = (v) => v === void 0 ? "" : String(v);
 var SettingsView = class {
@@ -832,7 +755,7 @@ var defaultBackendsDeps = () => ({
   putLimits: api.putLimits,
   settings: api.settings,
   modelStats: api.modelStats,
-  notify: (m) => void showToast3(m, "success")
+  notify: (m) => void showToast2(m, "success")
 });
 function lastForRoles(cands, name) {
   return ROLES.filter((role) => {
@@ -1223,8 +1146,8 @@ function mountBackends(host) {
   return new BackendsView(host, defaultBackendsDeps()).mount();
 }
 
-// web/agentflow/js/board.ts
-import { confirmDialog as confirmDialog3, copyText, showToast as showToast4 } from "/shared/dist/shared.mjs";
+// web/agentflow/js/frd-editor.ts
+import { alertDialog as alertDialog2, showToast as showToast3 } from "/shared/dist/shared.mjs";
 
 // web/agentflow/js/current.ts
 var picked = /* @__PURE__ */ new Map();
@@ -1238,7 +1161,7 @@ function chooseEffort(slug, efforts) {
 function rememberEffort(slug, id) {
   picked.set(slug, id);
 }
-function effortBar(slug, efforts, current, onPick, yolo) {
+function effortBar(slug, efforts, current, onPick) {
   const sel = selectInput("effort", efforts.map((e) => [String(e.id), `#${e.id} ${e.title}`]), String(current?.id ?? ""));
   sel.addEventListener("change", () => {
     rememberEffort(slug, Number(sel.value));
@@ -1249,626 +1172,11 @@ function effortBar(slug, efforts, current, onPick, yolo) {
     { class: "console-header" },
     h("span", { class: "pane-title", text: "Effort" }),
     sel,
-    current ? chip(current.status) : null,
-    current?.yolo && !yolo ? yoloBadge() : null,
-    current && yolo ? yoloControl(slug, current, yolo.deps, yolo.onChanged) : null
+    current ? chip(current.status) : null
   );
-}
-
-// web/agentflow/js/stream.ts
-var defaultStreamDeps = () => ({ open: (url) => new EventSource(url) });
-var MAX_LINES = 2e3;
-var StreamPanel = class {
-  constructor(panel, deps) {
-    this.panel = panel;
-    this.deps = deps;
-    this.source = null;
-    this.out = h("div", { class: "stream-output", attrs: { "data-role": "stream-output" } });
-    this.status = h("span", { class: "stream-status", attrs: { "data-role": "stream-status" } });
-    this.lines = 0;
-    /** The stage being shown; 0 when closed. */
-    this.stageId = 0;
-  }
-  /** open shows a stage: live output for a running one, the stored output otherwise. */
-  open(st) {
-    this.closeSource();
-    this.stageId = st.id;
-    this.lines = 0;
-    replace(this.out);
-    replace(
-      this.panel,
-      h(
-        "div",
-        { class: "stream-header" },
-        h("strong", { text: `${st.role} \xB7 ${st.backend}/${st.model}` }),
-        this.status,
-        h("button", { class: "icon-btn detail-close-btn", text: "Close", attrs: { type: "button", "data-action": "close-stream" }, on: { click: () => this.close() } })
-      ),
-      this.out
-    );
-    this.panel.removeAttribute("hidden");
-    if (st.state === "running") {
-      this.setStatus("running", "running");
-      const es = this.deps.open(stageStreamURL(st.id));
-      this.source = es;
-      es.addEventListener("output", (ev) => this.onOutput(ev.data ?? ""));
-      es.addEventListener("status", (ev) => this.setStatus(ev.data ?? "", ev.data === "completed" ? "completed" : "running"));
-      es.addEventListener("done", () => {
-        this.setStatus("finished", "completed");
-        this.closeSource();
-      });
-      es.addEventListener("error", () => {
-        this.setStatus("stream ended", "");
-        this.closeSource();
-      });
-    } else {
-      this.setStatus(st.outcome || st.state, st.outcome === "pass" ? "completed" : "");
-      this.append(st.raw_output || "(no output recorded)");
-    }
-  }
-  close() {
-    this.closeSource();
-    this.stageId = 0;
-    this.panel.setAttribute("hidden", "");
-    replace(this.panel);
-  }
-  closeSource() {
-    this.source?.close();
-    this.source = null;
-  }
-  setStatus(text, cls) {
-    this.status.textContent = text;
-    this.status.className = "stream-status" + (cls ? " " + cls : "");
-  }
-  onOutput(data) {
-    let line = data;
-    try {
-      const parsed = JSON.parse(data);
-      if (typeof parsed.line === "string") line = parsed.line;
-    } catch {
-    }
-    this.append(line);
-  }
-  append(text) {
-    this.out.appendChild(document.createTextNode(text + "\n"));
-    this.lines++;
-    while (this.lines > MAX_LINES && this.out.childNodes.length > 0) {
-      this.out.removeChild(this.out.childNodes[0]);
-      this.lines--;
-    }
-    this.out.scrollTop = this.out.scrollHeight;
-  }
-};
-
-// web/agentflow/js/board.ts
-var defaultBoardDeps = () => ({
-  efforts: api.efforts,
-  tasks: api.tasks,
-  task: api.task,
-  run: api.run,
-  retryTask: api.retryTask,
-  editTask: api.editTask,
-  overrideTask: api.overrideTask,
-  abandonEffort: api.abandonEffort,
-  gitCommands: api.gitCommands,
-  confirm: (m, label = "Confirm") => confirmDialog3(m, { confirmLabel: label }),
-  copy: (t) => void copyText(t),
-  notify: (m) => void showToast4(m, "success")
-});
-var rec = (v) => v && typeof v === "object" ? v : {};
-var strs = (v) => Array.isArray(v) ? v.map((x) => String(x)) : [];
-function counts(tasks) {
-  const out = { total: tasks.length };
-  for (const t of tasks) out[t.status] = (out[t.status] ?? 0) + 1;
-  return out;
-}
-var stageOf = (a, role) => a.stages.filter((s) => s.role === role).pop();
-function block(title, ...children) {
-  return h("div", { class: "detail-section" }, h("h4", { text: title }), ...children);
-}
-var mono = (text) => h("pre", { class: "detail-mono", text });
-var bullets = (items) => h("ul", { class: "plan-review-notes" }, ...items.map((i) => h("li", { text: i })));
-function renderVerify(parsed) {
-  const r = rec(parsed);
-  const checks = Array.isArray(r.checks) ? r.checks : [];
-  return h(
-    "div",
-    { attrs: { "data-role": "verify-report" } },
-    h("div", { class: "row-actions" }, chip(r.pass === false ? "failed" : "passed"), h("span", { class: "field-hint", text: `${checks.length} check${checks.length === 1 ? "" : "s"}` })),
-    checks.length ? h("ul", { class: "plan-review-notes" }, ...checks.map((c) => h("li", {}, h("strong", { text: String(c.name ?? "") }), ` ${c.pass ? "passed" : "failed"}`, c.detail ? ` \u2014 ${String(c.detail)}` : null))) : null,
-    strs(r.new_failures).length ? block("New failures", bullets(strs(r.new_failures))) : null,
-    strs(r.baseline_failures).length ? block("Baseline failures", bullets(strs(r.baseline_failures))) : null,
-    strs(r.warnings).length ? block("Warnings", bullets(strs(r.warnings))) : null
-  );
-}
-function renderReviewOut(parsed) {
-  const r = rec(parsed);
-  const issues = Array.isArray(r.issues) ? r.issues : [];
-  return h(
-    "div",
-    { attrs: { "data-role": "reviewer-report" } },
-    h("div", { class: "row-actions" }, r.verdict ? chip(String(r.verdict)) : null),
-    r.summary ? h("p", { text: String(r.summary) }) : null,
-    issues.length ? h("ul", { class: "plan-review-notes" }, ...issues.map((i) => h("li", {}, h("strong", { text: String(i.severity ?? "") }), ` ${String(i.description ?? "")}`, i.file ? ` (${String(i.file)}${i.line ? ":" + String(i.line) : ""})` : null))) : null,
-    r.repair_prompt ? block("Repair prompt", mono(String(r.repair_prompt))) : null,
-    r.blocked ? h("p", { text: `Blocked: ${String(r.blocked)}` }) : null
-  );
-}
-var Board = class {
-  constructor(host, panel, slug, deps, streamDeps, yolo = defaultYoloDeps()) {
-    this.host = host;
-    this.panel = panel;
-    this.slug = slug;
-    this.deps = deps;
-    this.yolo = yolo;
-    this.efforts = [];
-    this.tasks = [];
-    this.selected = "";
-    this.detail = null;
-    this.runState = "stopped";
-    this.gitLines = null;
-    this.editing = false;
-    this.loaded = false;
-    this.off = null;
-    this.errors = new FormErrors();
-    this.stream = new StreamPanel(panel, streamDeps);
-  }
-  mount() {
-    this.off = subscribe((ev) => this.handle(ev));
-    void this.load();
-    return () => {
-      this.off?.();
-      this.off = null;
-      this.stream.close();
-    };
-  }
-  /** handle applies one stream event: a run-state change shows at once, the rest refetch. */
-  handle(ev) {
-    if (ev.type === "state.changed") {
-      void this.refresh();
-    } else if (ev.type === "project.run_state" && ev.project === this.slug) {
-      this.runState = ev.state;
-      this.render();
-      void this.refresh();
-    } else if ((ev.type === "effort.update" || ev.type === "task.update" || ev.type === "project.update") && ev.project === this.slug) {
-      void this.refresh();
-    }
-  }
-  async load() {
-    try {
-      this.efforts = await this.deps.efforts(this.slug);
-    } catch {
-      if (!this.loaded) return;
-    }
-    this.loaded = true;
-    this.current = chooseEffort(this.slug, this.efforts);
-    this.selected = "";
-    this.detail = null;
-    this.gitLines = null;
-    this.stream.close();
-    await this.refresh();
-  }
-  /** refresh refetches the efforts, the task list and the open task. */
-  async refresh() {
-    try {
-      this.efforts = await this.deps.efforts(this.slug);
-      this.current = this.efforts.find((e) => e.id === this.current?.id) ?? chooseEffort(this.slug, this.efforts);
-      this.loaded = true;
-      const ef = this.current;
-      this.tasks = ef ? await this.deps.tasks(this.slug, ef.id) : [];
-      if (ef) this.runState = ef.run_state;
-      if (ef && this.selected && this.tasks.some((t) => t.key === this.selected)) this.detail = await this.deps.task(this.slug, ef.id, this.selected);
-      if (ef?.status === "complete" && !this.gitLines) this.gitLines = (await this.deps.gitCommands(this.slug, ef.id)).commands;
-    } catch {
-    }
-    this.render();
-  }
-  async select(key) {
-    const ef = this.current;
-    if (!ef) return;
-    this.selected = key;
-    this.editing = false;
-    try {
-      this.detail = await this.deps.task(this.slug, ef.id, key);
-    } catch {
-      return;
-    }
-    this.render();
-  }
-  async control(op) {
-    if (op === "stop" && !await this.deps.confirm(`Stop ${this.slug}? Running stages are cancelled.`, "Stop")) return;
-    try {
-      await this.deps.run(this.slug, op);
-    } catch {
-      return;
-    }
-    await this.refresh();
-  }
-  // ─── Halted-task actions (AT9) ───────────────────────────────────────────
-  async retry(key, clean) {
-    const ef = this.current;
-    if (!ef || !await this.deps.confirm(`Retry ${key}? Its attempt counters are reset${clean ? " and its worktree is recreated clean" : ""}.`, "Retry")) return;
-    try {
-      await this.deps.retryTask(this.slug, ef.id, key, clean);
-    } catch {
-      return;
-    }
-    this.deps.notify(`Retrying ${key}`);
-    await this.refresh();
-  }
-  async override(key, reason) {
-    const ef = this.current;
-    if (!ef) return;
-    if (reason.trim() === "") {
-      this.errors.show(new ApiError(400, "A reason is required", "reason"));
-      return;
-    }
-    if (!await this.deps.confirm(`Mark ${key} as passed without a passing attempt? The reason is recorded.`, "Override")) return;
-    try {
-      await this.deps.overrideTask(this.slug, ef.id, key, reason.trim());
-    } catch {
-      return;
-    }
-    this.deps.notify(`Overrode ${key}`);
-    await this.refresh();
-  }
-  async abandon() {
-    const ef = this.current;
-    if (!ef || !await this.deps.confirm(`Abandon effort #${ef.id}? It ends the effort; its tasks and history stay for reference.`, "Abandon")) return;
-    try {
-      await this.deps.abandonEffort(this.slug, ef.id);
-    } catch {
-      return;
-    }
-    this.deps.notify("Effort abandoned");
-    await this.refresh();
-  }
-  async saveEdit(def) {
-    const ef = this.current;
-    if (!ef) return;
-    this.errors.clear();
-    if (!await this.deps.confirm(`Save ${def.key}? The queue returns to draft and must be approved again before anything runs.`, "Save task")) return;
-    try {
-      await this.deps.editTask(this.slug, ef.id, def.key, def, { quiet: true });
-    } catch (err) {
-      this.errors.show(err);
-      return;
-    }
-    this.editing = false;
-    this.deps.notify(`Saved ${def.key}; approve the queue again`);
-    await this.refresh();
-  }
-  editForm(d) {
-    this.errors = new FormErrors();
-    const title = textInput("title", d.title);
-    const phase = textInput("phase", d.phase);
-    const prompt = textArea("prompt", d.prompt, 6);
-    const acceptance = textArea("acceptance", d.acceptance.join("\n"), 3);
-    const files = textArea("files_touched", d.files_touched.join("\n"), 3);
-    const deps = textInput("depends_on", d.depends_on.join(", "));
-    const split = (s) => s.split("\n").map((l) => l.trim()).filter((l) => l !== "");
-    const e = this.errors;
-    return h(
-      "div",
-      { attrs: { "data-role": "edit-task" } },
-      e.add("title", fieldRow("Title", title)).el,
-      e.add("phase", fieldRow("Phase", phase)).el,
-      e.add("prompt", fieldRow("Prompt", prompt)).el,
-      e.add("acceptance", fieldRow("Acceptance criteria", acceptance, "One per line")).el,
-      e.add("files_touched", fieldRow("Files touched", files, "One path per line")).el,
-      e.add("depends_on", fieldRow("Depends on", deps, "Task keys, comma separated")).el,
-      e.general,
-      h(
-        "div",
-        { class: "row-actions" },
-        button("Save task", () => void this.saveEdit({
-          key: d.key,
-          title: title.value.trim(),
-          phase: phase.value.trim(),
-          prompt: prompt.value,
-          acceptance: split(acceptance.value),
-          files_touched: split(files.value),
-          depends_on: deps.value.split(",").map((s) => s.trim()).filter((s) => s !== "")
-        }), { primary: true, field: "save-task" }),
-        button("Cancel", () => {
-          this.editing = false;
-          this.render();
-        }, { field: "cancel-edit" })
-      )
-    );
-  }
-  actions(d) {
-    const clean = checkbox("clean_worktree", false);
-    const reason = textArea("override_reason", "", 2);
-    this.errors = new FormErrors();
-    const reasonRow = this.errors.add("reason", fieldRow("Override reason", reason, "Recorded with your name when you mark the task passed"));
-    return h(
-      "div",
-      { class: "detail-section", attrs: { "data-panid": "actions" } },
-      h("h4", { text: "Halted: choose how to continue" }),
-      h("label", { class: "inline-check" }, clean, "Recreate the worktree clean when retrying"),
-      button("Retry", () => void this.retry(d.key, clean.checked), { field: "retry" }),
-      button("Edit task", () => {
-        this.editing = true;
-        this.render();
-      }, { field: "edit" }),
-      reasonRow.el,
-      button("Override as passed", () => void this.override(d.key, reason.value), { field: "override" }),
-      button("Abandon effort", () => void this.abandon(), { field: "abandon" }),
-      this.errors.general
-    );
-  }
-  // ─── Detail pane ─────────────────────────────────────────────────────────
-  attempt(a) {
-    const verify = stageOf(a, "verify");
-    const review = stageOf(a, "reviewer");
-    const worker = stageOf(a, "worker");
-    return h(
-      "div",
-      { class: "profile-card", attrs: { "data-attempt": a.n } },
-      h(
-        "div",
-        { class: "row-actions" },
-        h("strong", { text: `Attempt ${a.n}` }),
-        a.kind === "repair" ? badge("repair", "warn") : null,
-        chip(a.outcome || "running"),
-        h("span", { class: "field-hint", text: `worker ${a.worker_model || "-"} \xB7 reviewer ${a.reviewer_model || "-"}` })
-      ),
-      h("div", { class: "wizard-list" }, ...a.stages.map((s) => h(
-        "div",
-        { class: "inline-row", attrs: { "data-stage": s.id } },
-        h("span", { text: `${s.role} \xB7 ${s.backend ? `${s.backend}/${s.model}` : "engine"} \xB7 ${s.outcome || s.state}` }),
-        button("Output", () => this.stream.open(s), { field: "open-stream" })
-      ))),
-      worker?.parsed ? block("Worker summary", h("p", { text: String(rec(worker.parsed).summary ?? "") })) : null,
-      verify?.parsed ? block("VerifyReport", renderVerify(verify.parsed)) : null,
-      review?.parsed ? block("Reviewer", renderReviewOut(review.parsed)) : null
-    );
-  }
-  detailPane() {
-    const d = this.detail;
-    if (!d) return h("div", { class: "console-right", attrs: { "data-role": "detail-pane", hidden: true } });
-    const cur = d.current;
-    return h(
-      "div",
-      { class: "console-right", attrs: { "data-role": "detail-pane" } },
-      h(
-        "div",
-        { class: "detail-body" },
-        h(
-          "div",
-          { class: "detail-header" },
-          h("h3", { text: `${d.key} \xB7 ${d.title}` }),
-          chip(d.status),
-          h("button", { class: "icon-btn detail-close-btn", text: "Close", attrs: { type: "button", "data-action": "close-detail" }, on: {
-            click: () => {
-              this.selected = "";
-              this.detail = null;
-              this.editing = false;
-              this.render();
-            }
-          } })
-        ),
-        h("div", { class: "detail-attempts", text: `Attempts: ${d.attempts}` }),
-        d.waiting_reason ? block("Waiting", h("p", { text: d.waiting_reason, attrs: { "data-role": "waiting-reason" } })) : null,
-        cur ? block(
-          "Running now",
-          h("p", { text: `${cur.role} \xB7 ${cur.backend}/${cur.model} \xB7 ${cur.state}` }),
-          h("div", { class: "row-actions" }, button("Watch live", () => this.stream.open({
-            id: cur.stage,
-            role: cur.role,
-            backend: cur.backend,
-            model: cur.model,
-            state: cur.state === "running" ? "running" : cur.state,
-            outcome: "",
-            raw_output: ""
-          }), { field: "watch-live" }))
-        ) : null,
-        this.editing ? this.editForm(d) : null,
-        d.halted && !this.editing ? this.actions(d) : null,
-        block("Prompt", mono(d.prompt)),
-        d.acceptance.length ? block("Acceptance", bullets(d.acceptance)) : null,
-        d.files_touched.length ? block("Files touched", mono(d.files_touched.join("\n"))) : null,
-        d.depends_on.length ? block("Depends on", h("p", { text: d.depends_on.join(", ") })) : null,
-        block("Attempts", ...d.attempt_list.length ? d.attempt_list.map((a) => this.attempt(a)) : [h("p", { class: "field-hint", text: "No attempts yet." })]),
-        d.progress.length ? block("Progress log", bullets(d.progress)) : null
-      )
-    );
-  }
-  gitBox() {
-    if (!this.gitLines) return null;
-    const text = this.gitLines.join("\n");
-    return h(
-      "div",
-      { class: "detail-section", attrs: { "data-role": "git-commands" } },
-      h("h4", { text: "Merge and push (run these yourself; agentflow never pushes)" }),
-      mono(text),
-      button("Copy commands", () => this.deps.copy(text), { field: "copy-git" })
-    );
-  }
-  render() {
-    if (!this.loaded) {
-      replace(this.host, h("p", { class: "field-hint", text: "Loading board\u2026" }));
-      return;
-    }
-    const ef = this.current;
-    if (!ef) {
-      replace(this.host, h("div", { class: "plan-empty" }, h("h3", { text: "No effort yet" }), h("p", { text: "Create an effort on the FRD tab; its tasks appear here once the queue is approved." })));
-      return;
-    }
-    const { pct: pct2, text } = progressText(counts(this.tasks));
-    const bar = h("div", { class: "progress-bar-wrap" }, h("div", { class: "progress-bar", attrs: { style: `width: ${pct2}%` } }));
-    const controls = buttonsFor(this.runState).map((b) => h("button", {
-      class: "ui-modal-btn" + (b.primary ? " ui-modal-btn-primary" : ""),
-      text: b.label,
-      attrs: { type: "button", "data-op": b.op },
-      on: { click: () => void this.control(b.op) }
-    }));
-    replace(
-      this.host,
-      effortBar(this.slug, this.efforts, ef, (id) => {
-        this.current = this.efforts.find((e) => e.id === id);
-        void this.load();
-      }, { deps: this.yolo, onChanged: () => void this.refresh() }),
-      h(
-        "div",
-        { class: "console-header" },
-        h("span", { class: "pane-title", text: "Progress" }),
-        bar,
-        h("span", { class: "progress-pct", text }),
-        chip(this.runState),
-        ...controls
-      ),
-      this.gitBox(),
-      h(
-        "div",
-        { class: "console-body" },
-        h(
-          "div",
-          { class: "console-left" },
-          h("h3", { class: "pane-title", text: "Tasks" }),
-          this.tasks.length === 0 ? h("p", { class: "field-hint", text: ef.queue ? "The queue has no tasks." : "No queue yet: plan, compile and approve the queue first." }) : h("ul", { class: "task-list" }, ...this.tasks.map((t) => h(
-            "li",
-            { class: `task-item status-${statusKey(t.status)}` + (t.key === this.selected ? " selected" : ""), attrs: { "data-task": t.key }, on: {
-              click: () => void this.select(t.key)
-            } },
-            h("div", { class: "task-item-title", text: t.title }),
-            h("div", { class: "task-item-meta" }, chip(t.status), h("span", { text: `${t.key} \xB7 attempts ${t.attempts}` })),
-            t.waiting_reason ? h("div", { class: "task-item-meta", text: t.waiting_reason }) : null,
-            t.current ? h("div", { class: "task-item-meta", text: `${t.current.role} \xB7 ${t.current.backend}/${t.current.model}` }) : null
-          )))
-        ),
-        this.detailPane()
-      )
-    );
-  }
-};
-function mountBoard(host, slug) {
-  const panel = document.getElementById("stream-panel");
-  if (!panel) throw new Error("board: #stream-panel is missing from the page");
-  return new Board(host, panel, slug, defaultBoardDeps(), defaultStreamDeps()).mount();
-}
-
-// web/agentflow/js/history.ts
-import { showToast as showToast5 } from "/shared/dist/shared.mjs";
-var defaultHistoryDeps = () => ({
-  efforts: api.efforts,
-  importFRD: api.importFRD,
-  readFile: (f) => f.text(),
-  notify: (m) => void showToast5(m, "success")
-});
-var when = (ms) => ms ? new Date(ms).toLocaleString() : "";
-function link(label, href, name) {
-  return h("a", { class: "ui-modal-btn", text: label, attrs: { href, download: "", "data-export": name } });
-}
-var History = class {
-  constructor(host, slug, deps, yolo) {
-    this.host = host;
-    this.slug = slug;
-    this.deps = deps;
-    this.yolo = yolo;
-    this.efforts = [];
-    this.loaded = false;
-    this.errors = new FormErrors();
-    this.fileInput = h("input", { attrs: { type: "file", accept: ".json,application/json", name: "frd_file", "data-field": "frd_file" } });
-    this.off = null;
-  }
-  mount() {
-    this.off = subscribe((ev) => {
-      const mine = "project" in ev && ev.project === this.slug;
-      if (ev.type === "state.changed" || mine && (ev.type === "effort.update" || ev.type === "project.update")) void this.load();
-    });
-    void this.load();
-    return () => {
-      this.off?.();
-      this.off = null;
-    };
-  }
-  async load() {
-    try {
-      this.efforts = await this.deps.efforts(this.slug);
-    } catch {
-      if (!this.loaded) return;
-    }
-    this.loaded = true;
-    this.render();
-  }
-  /** importFile posts the chosen FRD JSON; the server validates it and names a bad field. */
-  async importFile() {
-    this.errors.clear();
-    const file = this.fileInput.files?.[0];
-    if (!file) {
-      this.errors.show(new Error("Choose a JSON file first"));
-      return;
-    }
-    try {
-      const text = await this.deps.readFile(file);
-      const ef = await this.deps.importFRD(this.slug, text, { quiet: true });
-      rememberEffort(this.slug, ef.id);
-    } catch (err) {
-      this.errors.show(err);
-      return;
-    }
-    this.deps.notify("FRD imported as a new effort");
-    await this.load();
-  }
-  row(e) {
-    return h(
-      "li",
-      { class: "profile-card", attrs: { "data-effort": e.id } },
-      h(
-        "div",
-        { class: "profile-header" },
-        h("span", { class: "row-actions" }, h("strong", { text: `#${e.id} ${e.title}` }), chip(e.status), e.yolo ? yoloBadge() : null),
-        h("span", { class: "field-hint", text: when(e.created) })
-      ),
-      h("div", { class: "task-item-meta", text: `FRD ${e.frd.latest ? `revision ${e.frd.latest}${e.frd.approved ? ` (approved ${e.frd.approved})` : ""}` : "none"} \xB7 plan ${e.plan.latest ? `revision ${e.plan.latest}${e.plan.approved ? ` (approved ${e.plan.approved})` : ""}` : "none"} \xB7 queue ${e.queue ? `revision ${e.queue.revision} ${e.queue.status}` : "none"}` }),
-      h(
-        "div",
-        { class: "row-actions" },
-        link("Effort JSON", exportURL(e.id, "json"), "effort-json"),
-        link("Effort Markdown", exportURL(e.id, "md"), "effort-md"),
-        e.frd.latest ? link("FRD JSON", exportURL(e.id, "json", "frd"), "frd-json") : null,
-        e.frd.latest ? link("FRD Markdown", exportURL(e.id, "md", "frd"), "frd-md") : null,
-        e.plan.latest ? link("Plan JSON", exportURL(e.id, "json", "plan"), "plan-json") : null,
-        e.plan.latest ? link("Plan Markdown", exportURL(e.id, "md", "plan"), "plan-md") : null
-      ),
-      yoloControl(this.slug, e, this.yolo, () => void this.load())
-    );
-  }
-  render() {
-    if (!this.loaded) {
-      replace(this.host, h("p", { class: "field-hint", text: "Loading efforts\u2026" }));
-      return;
-    }
-    this.errors = new FormErrors();
-    const fileRow = this.errors.add("body", fieldRow("FRD file", this.fileInput, "A JSON FRD, for example one exported from here; it becomes a new effort at revision 1"));
-    this.errors.add("frd", fileRow);
-    replace(
-      this.host,
-      h(
-        "div",
-        { class: "settings-host" },
-        section(
-          "Efforts",
-          this.efforts.length ? h("ul", { class: "profile-list", attrs: { "data-role": "history-list" } }, ...[...this.efforts].reverse().map((e) => this.row(e))) : h("p", { class: "field-hint", text: "No efforts yet." })
-        ),
-        section(
-          "Import an FRD",
-          fileRow.el,
-          this.errors.general,
-          h("div", { class: "settings-actions" }, button("Import FRD", () => void this.importFile(), { primary: true, field: "import-frd" }))
-        )
-      )
-    );
-  }
-};
-function mountHistory(host, slug) {
-  return new History(host, slug, defaultHistoryDeps(), defaultYoloDeps()).mount();
 }
 
 // web/agentflow/js/frd-editor.ts
-import { alertDialog as alertDialog2, showToast as showToast6 } from "/shared/dist/shared.mjs";
 var defaultFrdDeps = () => ({
   efforts: api.efforts,
   createEffort: api.createEffort,
@@ -1877,12 +1185,12 @@ var defaultFrdDeps = () => ({
   frdRevisions: api.frdRevisions,
   frdRevision: api.frdRevision,
   approveFRD: api.approveFRD,
-  notify: (m) => void showToast6(m, "success")
+  notify: (m) => void showToast3(m, "success")
 });
 var PRIORITIES = [["", "(none)"], ["must", "must"], ["should", "should"], ["could", "could"], ["wont", "won't"]];
 var lines = (s) => s.split("\n").map((l) => l.trim()).filter((l) => l !== "");
 var commaList = (s) => s.split(",").map((l) => l.trim()).filter((l) => l !== "");
-var when2 = (ms) => ms ? new Date(ms).toLocaleString() : "";
+var when = (ms) => ms ? new Date(ms).toLocaleString() : "";
 function blankFRD(slug, effort) {
   return {
     id: `FRD-${slug}-${effort.id}`.toUpperCase(),
@@ -2127,7 +1435,7 @@ var FrdEditor = class {
     const rows = this.revisions.map((r) => h(
       "div",
       { class: "inline-row", attrs: { "data-revision": r.revision } },
-      h("span", { text: `Revision ${r.revision} \xB7 ${r.created_by} \xB7 ${when2(r.created)}` }),
+      h("span", { text: `Revision ${r.revision} \xB7 ${r.created_by} \xB7 ${when(r.created)}` }),
       r.approved ? badge("approved", "ok") : null,
       button("View", () => void this.view(r.revision), { field: "view-revision" })
     ));
@@ -2197,7 +1505,7 @@ function mountFrd(host, slug) {
 }
 
 // web/agentflow/js/plan-view.ts
-import { confirmDialog as confirmDialog4, showToast as showToast7 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog2, showToast as showToast4 } from "/shared/dist/shared.mjs";
 var defaultPlanDeps = () => ({
   efforts: api.efforts,
   plan: api.plan,
@@ -2206,8 +1514,8 @@ var defaultPlanDeps = () => ({
   planRevision: api.planRevision,
   generatePlan: api.generatePlan,
   approvePlan: api.approvePlan,
-  confirm: (m) => confirmDialog4(m, { confirmLabel: "Approve" }),
-  notify: (m) => void showToast7(m, "success")
+  confirm: (m) => confirmDialog2(m, { confirmLabel: "Approve" }),
+  notify: (m) => void showToast4(m, "success")
 });
 var PLAN_TABS = ["planner", "architect", "critic"];
 var list = (title, items) => items && items.length > 0 ? h("div", { class: "plan-section" }, h("h4", { text: title }), h("ul", {}, ...items.map((t) => h("li", { text: t })))) : null;
@@ -2495,178 +1803,8 @@ function mountPlan(host, slug) {
   return new PlanViewer(host, slug, defaultPlanDeps()).mount();
 }
 
-// web/agentflow/js/queue.ts
-import { confirmDialog as confirmDialog5, showToast as showToast8 } from "/shared/dist/shared.mjs";
-var defaultQueueDeps = () => ({
-  efforts: api.efforts,
-  queue: api.queue,
-  compile: api.compile,
-  approveQueue: api.approveQueue,
-  confirm: (m, label = "Confirm") => confirmDialog5(m, { confirmLabel: label }),
-  notify: (m) => void showToast8(m, "success")
-});
-var list2 = (title, items) => h(
-  "div",
-  { class: "detail-section" },
-  h("h4", { text: title }),
-  items.length ? h("ul", { class: "plan-review-notes" }, ...items.map((i) => h("li", { text: i }))) : h("p", { class: "field-hint", text: "none" })
-);
-var QueueApproval = class {
-  constructor(host, slug, deps) {
-    this.host = host;
-    this.slug = slug;
-    this.deps = deps;
-    this.efforts = [];
-    this.queue = null;
-    this.loaded = false;
-    this.errors = new FormErrors();
-    this.off = null;
-  }
-  mount() {
-    this.off = subscribe((ev) => {
-      const mine = "project" in ev && ev.project === this.slug;
-      if (ev.type === "state.changed" || mine && (ev.type === "effort.update" || ev.type === "task.update")) void this.refresh();
-    });
-    void this.load();
-    return () => {
-      this.off?.();
-      this.off = null;
-    };
-  }
-  async load() {
-    try {
-      this.efforts = await this.deps.efforts(this.slug);
-    } catch {
-      if (!this.loaded) return;
-    }
-    this.loaded = true;
-    this.current = chooseEffort(this.slug, this.efforts);
-    await this.loadQueue();
-  }
-  async refresh() {
-    try {
-      this.efforts = await this.deps.efforts(this.slug);
-      this.current = this.efforts.find((e) => e.id === this.current?.id) ?? chooseEffort(this.slug, this.efforts);
-    } catch {
-      return;
-    }
-    await this.loadQueue();
-  }
-  async loadQueue() {
-    const ef = this.current;
-    this.queue = null;
-    if (ef) {
-      try {
-        this.queue = await this.deps.queue(this.slug, ef.id, { quiet: true });
-      } catch (err) {
-        if (!(err instanceof ApiError && (err.status === 404 || err.status === 409))) this.errors.show(err);
-      }
-    }
-    this.render();
-  }
-  async compile() {
-    const ef = this.current;
-    if (!ef) return;
-    try {
-      await this.deps.compile(this.slug, ef.id);
-    } catch {
-      return;
-    }
-    this.deps.notify("Compiling the plan into tasks");
-    await this.refresh();
-  }
-  /** approve sends the hash of the queue on screen; a 409 means it changed, so it reloads for another review. */
-  async approve() {
-    const ef = this.current;
-    const q = this.queue;
-    if (!ef || !q) return;
-    if (!await this.deps.confirm(`Approve all ${q.tasks.length} task${q.tasks.length === 1 ? "" : "s"} of revision ${q.revision}? Once approved the queue can run.`, "Approve queue")) return;
-    this.errors.clear();
-    try {
-      await this.deps.approveQueue(this.slug, ef.id, q.hash, { quiet: true });
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        this.deps.notify("The queue changed since you opened it; review it again");
-        await this.refresh();
-        this.errors.show(new Error(`The queue changed while you were reviewing it, so nothing was approved. (${err.message})`));
-        return;
-      }
-      this.errors.show(err);
-      return;
-    }
-    this.deps.notify("Queue approved; start the run from the Board tab");
-    await this.refresh();
-  }
-  taskCard(t) {
-    return h(
-      "div",
-      { class: "profile-card", attrs: { "data-task": t.key } },
-      h("div", { class: "profile-header" }, h("strong", { text: `${t.key} \xB7 ${t.title}` }), t.phase ? badge(t.phase, "muted") : null),
-      t.waiting_reason ? h("p", { class: "field-hint", text: t.waiting_reason }) : null,
-      h("div", { class: "detail-section" }, h("h4", { text: "Prompt" }), h("pre", { class: "detail-mono", text: t.prompt })),
-      list2("Acceptance criteria", t.acceptance),
-      list2("Files touched", t.files_touched),
-      list2("Depends on", t.depends_on)
-    );
-  }
-  render() {
-    if (!this.loaded) {
-      replace(this.host, h("p", { class: "field-hint", text: "Loading efforts\u2026" }));
-      return;
-    }
-    const ef = this.current;
-    if (!ef) {
-      replace(this.host, h("div", { class: "plan-empty" }, h("h3", { text: "No effort yet" }), h("p", { text: "Create an effort on the FRD tab first." })));
-      return;
-    }
-    const q = this.queue;
-    const canCompile = ef.status === "plan_approved" || ef.status === "queue_draft" && !!q;
-    const draft = !!q && q.status === "draft";
-    replace(
-      this.host,
-      h(
-        "div",
-        { class: "settings-host" },
-        effortBar(this.slug, this.efforts, ef, (id) => {
-          this.current = this.efforts.find((e) => e.id === id);
-          void this.loadQueue();
-        }),
-        q ? h(
-          "div",
-          { class: "plan-header", attrs: { "data-role": "queue-header" } },
-          h(
-            "div",
-            { class: "plan-meta" },
-            chip(q.status),
-            h("span", { class: "plan-frd-id", text: `revision ${q.revision} \xB7 ${q.tasks.length} task${q.tasks.length === 1 ? "" : "s"}` }),
-            h("code", { class: "plan-frd-id", text: `hash ${q.hash.slice(0, 12)}`, attrs: { "data-role": "queue-hash" } }),
-            q.approved_by ? badge(`approved by ${q.approved_by}`, "ok") : null
-          ),
-          h(
-            "div",
-            { class: "plan-actions" },
-            canCompile ? button("Recompile", () => void this.compile(), { field: "compile" }) : null,
-            draft ? button("Approve whole queue", () => void this.approve(), { primary: true, field: "approve-queue" }) : null
-          )
-        ) : h(
-          "div",
-          { class: "plan-empty" },
-          h("h3", { text: "No queue yet" }),
-          h("p", { text: ef.status === "plan_approved" ? "The plan is approved. Compile it into tasks to review." : "Approve a plan first, then compile it into tasks." }),
-          ef.status === "plan_approved" ? button("Compile plan", () => void this.compile(), { primary: true, field: "compile" }) : null
-        ),
-        this.errors.general,
-        q ? section("Tasks", h("div", { class: "profile-list" }, ...q.tasks.map((t) => this.taskCard(t)))) : null
-      )
-    );
-  }
-};
-function mountQueue(host, slug) {
-  return new QueueApproval(host, slug, defaultQueueDeps()).mount();
-}
-
 // web/agentflow/js/projects.ts
-import { confirmDialog as confirmDialog6, showToast as showToast9 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog3, showToast as showToast5 } from "/shared/dist/shared.mjs";
 var defaultProjectDeps = () => ({
   createProject: api.createProject,
   patchProject: api.patchProject,
@@ -2676,8 +1814,8 @@ var defaultProjectDeps = () => ({
   candidates: api.candidates,
   putProjectCandidates: api.putProjectCandidates,
   clearProjectCandidates: api.clearProjectCandidates,
-  confirm: (m, label = "Confirm") => confirmDialog6(m, { confirmLabel: label }),
-  notify: (m) => void showToast9(m, "success")
+  confirm: (m, label = "Confirm") => confirmDialog3(m, { confirmLabel: label }),
+  notify: (m) => void showToast5(m, "success")
 });
 function splitArgv(s) {
   return s.split(/\s+/).filter((t) => t !== "");
@@ -2872,12 +2010,15 @@ function showProjectForm(host, mode, done) {
 }
 
 // web/agentflow/js/projecttab.ts
+function placeholder(story) {
+  return (host) => replace(host, h("p", { class: "field-hint", text: `coming in ${story}` }));
+}
 var SUB_TABS = [
   { id: "frd", label: "FRD", mount: mountFrd },
   { id: "plan", label: "Plan", mount: mountPlan },
-  { id: "queue", label: "Queue", mount: mountQueue },
-  { id: "board", label: "Board", mount: mountBoard },
-  { id: "history", label: "History", mount: mountHistory }
+  { id: "queue", label: "Queue", mount: placeholder("E4") },
+  { id: "board", label: "Board", mount: placeholder("E4") },
+  { id: "history", label: "History", mount: placeholder("E5") }
 ];
 var KEY = "agentflow:project";
 function remembered() {

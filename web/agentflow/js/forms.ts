@@ -127,3 +127,43 @@ export class FormErrors {
     else this.setGeneral(message);
   }
 }
+
+export interface RowCtl<T> {
+  el: HTMLElement;
+  read(): T;
+}
+
+/** RowsEditor edits a list of items as removable rows with an "add" button. */
+export class RowsEditor<T> {
+  readonly el: HTMLElement;
+  private rows: RowCtl<T>[] = [];
+  private list = h('div', { class: 'wizard-list' });
+
+  constructor(
+    private build: (item: T) => RowCtl<T>,
+    items: T[],
+    private blank: () => T,
+    addLabel: string,
+    private onChange: () => void = () => {},
+  ) {
+    for (const it of items) this.addRow(it);
+    this.el = h('div', {}, this.list, button(addLabel, () => this.addRow(this.blank(), true), { field: 'add-row' }));
+  }
+
+  private addRow(item: T, notify = false): void {
+    const ctl = this.build(item);
+    this.rows.push(ctl);
+    const row = h('div', { class: 'inline-row', attrs: { 'data-row': this.rows.length - 1 } }, ctl.el,
+      button('Remove', () => {
+        this.rows.splice(this.rows.indexOf(ctl), 1);
+        this.list.removeChild(row);
+        this.onChange();
+      }, { field: 'remove-row' }));
+    this.list.appendChild(row);
+    if (notify) this.onChange();
+  }
+
+  read(): T[] {
+    return this.rows.map((r) => r.read());
+  }
+}

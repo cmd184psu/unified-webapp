@@ -169,8 +169,46 @@ export interface DocView<T = unknown> {
   json?: T;
 }
 
+// ─── FRD (mirrors model.FRD; state_model, findings and planning_spikes ride along untouched) ───
+
+export interface FRDGroup { id: string; title: string; summary?: string }
+export interface FRDRequirement { id: string; group?: string; priority?: string; findings?: unknown; description: string }
+export interface FRDAC { id: string; requirements?: string[]; criterion: string }
+export interface FRDDecision { id: string; decision: string; rationale?: string }
+
+export interface FRD {
+  id: string;
+  title: string;
+  status?: string;
+  created?: string;
+  approved_date?: string;
+  objective: string;
+  context?: string;
+  constraints?: string[];
+  groups?: FRDGroup[];
+  state_model?: unknown;
+  requirements: FRDRequirement[];
+  acceptance_criteria: FRDAC[];
+  decisions?: FRDDecision[];
+  findings?: unknown;
+  out_of_scope?: string[];
+  planning_spikes?: unknown;
+}
+
+// ─── Plan (mirrors schema.PlanOut and engine.PlanView) ───
+
+export interface PlanIssue { description: string; severity: string; file?: string; line?: number }
+
+/** PlanReview is one architect or critic review. */
 export interface PlanReview {
-  [field: string]: unknown;
+  revision: number;
+  role: string;
+  round: number;
+  plan_revision: number;
+  stage: number;
+  verdict: string;
+  summary?: string;
+  issues: PlanIssue[];
 }
 
 export interface PlanRound {
@@ -178,12 +216,38 @@ export interface PlanRound {
   reviews: PlanReview[];
 }
 
+export interface PlanDoc {
+  principles: string[];
+  drivers: string[];
+  options: Array<{ name: string; description: string; pros?: string[]; cons?: string[] }>;
+  phases: Array<{ id: string; name: string; tasks_description: string; depends_on?: string[] }>;
+  adr: { decision: string; drivers: string[]; alternatives: string[]; why: string; consequences: string[]; followups: string[] };
+  premortem?: string[];
+  test_plan?: string[];
+  round?: number;
+  stage?: number;
+}
+
+/** PlanRounds is GET .../plan/rounds: the reviews grouped by round. */
 export interface PlanRounds {
   rounds: PlanRound[];
   revision: number;
   not_critic_approved: boolean;
   warnings: string[] | null;
-  waiting: unknown;
+  waiting?: string;
+}
+
+/** PlanView is GET .../plan: the presented plan revision and the planning state. */
+export interface PlanView {
+  effort: number;
+  status: string;
+  rounds: number;
+  revision: number;
+  plan?: PlanDoc;
+  not_critic_approved: boolean;
+  reviews: PlanReview[];
+  warnings: string[] | null;
+  waiting?: string;
 }
 
 export interface TaskDef {
@@ -385,21 +449,21 @@ export const api = {
   yoloInvariants: (): Promise<Invariant[]> => get('/api/yolo/invariants'),
 
   // FRD and plan documents
-  frd: <T = unknown>(slug: string, id: number): Promise<DocView<T>> => get(`${eff(slug, id)}/frd`),
-  putFRD: <T = unknown>(slug: string, id: number, frd: T, o?: FetchOptions): Promise<DocView<T>> =>
+  frd: (slug: string, id: number, o?: FetchOptions): Promise<DocView<FRD>> => get(`${eff(slug, id)}/frd`, o),
+  putFRD: (slug: string, id: number, frd: FRD, o?: FetchOptions): Promise<DocView<FRD>> =>
     send('PUT', `${eff(slug, id)}/frd`, frd, o),
   frdRevisions: (slug: string, id: number): Promise<DocView[]> => get(`${eff(slug, id)}/frd/revisions`),
-  frdRevision: <T = unknown>(slug: string, id: number, n: number): Promise<DocView<T>> =>
+  frdRevision: (slug: string, id: number, n: number): Promise<DocView<FRD>> =>
     get(`${eff(slug, id)}/frd/revisions/${n}`),
   approveFRD: (slug: string, id: number, revision?: number): Promise<EffortView> =>
     send('POST', `${eff(slug, id)}/frd/approve`, revision === undefined ? {} : { revision }),
   generatePlan: (slug: string, id: number): Promise<EffortView> => send('POST', `${eff(slug, id)}/plan/generate`),
-  plan: <T = unknown>(slug: string, id: number): Promise<DocView<T>> => get(`${eff(slug, id)}/plan`),
-  putPlan: <T = unknown>(slug: string, id: number, plan: T, o?: FetchOptions): Promise<DocView<T>> =>
+  plan: (slug: string, id: number, o?: FetchOptions): Promise<PlanView> => get(`${eff(slug, id)}/plan`, o),
+  putPlan: (slug: string, id: number, plan: PlanDoc, o?: FetchOptions): Promise<DocView<PlanDoc>> =>
     send('PUT', `${eff(slug, id)}/plan`, plan, o),
   planRounds: (slug: string, id: number): Promise<PlanRounds> => get(`${eff(slug, id)}/plan/rounds`),
   planRevisions: (slug: string, id: number): Promise<DocView[]> => get(`${eff(slug, id)}/plan/revisions`),
-  planRevision: <T = unknown>(slug: string, id: number, n: number): Promise<DocView<T>> =>
+  planRevision: (slug: string, id: number, n: number): Promise<DocView<PlanDoc>> =>
     get(`${eff(slug, id)}/plan/revisions/${n}`),
   approvePlan: (slug: string, id: number): Promise<EffortView> => send('POST', `${eff(slug, id)}/plan/approve`),
 
