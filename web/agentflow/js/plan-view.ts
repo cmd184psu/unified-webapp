@@ -260,8 +260,8 @@ export class PlanViewer {
         st.not_critic_approved ? badge('not critic-approved', 'warn') : null,
         approved ? badge(`revision ${approved} approved`, 'ok') : null),
       h('div', { class: 'plan-actions' },
-        canGenerate ? button(st.revision > 0 ? 'Regenerate plan' : 'Generate plan', () => void this.generate(), { field: 'generate-plan' }) : null,
-        canApprove ? button('Approve plan', () => void this.approve(), { primary: true, field: 'approve-plan' }) : null));
+        canGenerate ? button(st.revision > 0 ? 'Regenerate plan' : 'Generate plan', () => void this.generate(), { field: 'generate-plan', icon: 'refresh' }) : null,
+        canApprove ? button('Approve plan', () => void this.approve(), { primary: true, field: 'approve-plan', icon: 'approve' }) : null));
   }
 
   /** strip is the live indicator shown while the engine plans or compiles (compiling starts by itself once the plan is approved): stage, and time since the effort last changed. */
@@ -310,12 +310,12 @@ export class PlanViewer {
           h('div', { class: 'inline-row', attrs: { 'data-revision': r.revision } },
             h('span', { text: `Revision ${r.revision} · ${r.created_by}` }),
             r.approved ? badge('approved', 'ok') : null,
-            button('View', () => void this.viewRevision(r.revision), { field: 'view-revision' }))))
+            button('View', () => void this.viewRevision(r.revision), { field: 'view-revision', icon: 'view' }))))
         : h('p', { class: 'field-hint', text: 'No revisions yet.' }),
       v ? h('div', { attrs: { 'data-role': 'revision-view' } },
         h('h4', { text: `Revision ${v.revision}${v.approved ? ' (approved)' : ''}` }),
         v.json ? renderPlan(v.json) : null,
-        button('Close', () => { this.viewing = null; this.render(); }, { field: 'close-revision' })) : null);
+        button('Close', () => { this.viewing = null; this.render(); }, { field: 'close-revision', icon: 'cancel' })) : null);
   }
 
   render(): void {

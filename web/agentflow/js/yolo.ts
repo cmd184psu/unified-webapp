@@ -80,6 +80,6 @@ export function yoloControl(slug: string, effort: EffortView, deps: YoloDeps, on
   return h('div', { class: 'detail-section', attrs: { 'data-role': 'yolo' } },
     h('div', { class: 'row-actions' },
       effort.yolo ? yoloBadge() : null,
-      button(effort.yolo ? 'Disable YOLO' : 'Enable YOLO', () => void toggle(), { field: 'toggle-yolo' })),
+      button(effort.yolo ? 'Disable YOLO' : 'Enable YOLO', () => void toggle(), { field: 'toggle-yolo', icon: effort.yolo ? 'cancel' : 'approve', word: true })),
     listHost);
 }

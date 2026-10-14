@@ -1,5 +1,7 @@
 import { test, run, eq, ok, installFakeDom, FakeEl, descendants, asEl } from './testkit';
 import { esc, h, replace, chip } from './dom';
+import { button as iconButton } from './forms';
+import { button as findButton } from './testkit';
 
 installFakeDom();
 
@@ -25,6 +27,25 @@ test('AC-UI1: a <script> payload renders as literal text, not an element', () =>
   replace(asEl(root), h('li', { text: SCRIPT }), chip(SCRIPT));
   ok(root.textContent.includes(SCRIPT), 'script text is present literally');
   ok(descendants(root).every((e) => e.tagName !== 'SCRIPT'), 'no script element');
+});
+
+test('icon button: glyph only, label as tooltip and aria-label, text never markup', () => {
+  const root = new FakeEl('DIV');
+  let clicks = 0;
+  replace(asEl(root), iconButton(IMG, () => { clicks++; }, { icon: 'save', field: 'save' }), iconButton('Retire', () => undefined, { icon: 'trash', word: true, field: 'retire' }));
+  const [only, withWord] = descendants(root).filter((e) => e.tagName === 'BUTTON');
+  eq(only.textContent, '');
+  eq(only.getAttribute('title'), IMG);
+  eq(only.getAttribute('aria-label'), IMG);
+  eq(only.getAttribute('data-action'), 'save');
+  ok(descendants(only).every((e) => e.tagName !== 'IMG'), 'no img element from the label');
+  eq(descendants(only).map((e) => e.tagName), ['SVG', 'PATH', 'POLYLINE', 'POLYLINE']);
+  eq(withWord.textContent, 'Retire');
+  eq(withWord.getAttribute('title'), 'Retire');
+  eq(withWord.getAttribute('aria-label'), null);
+  ok(findButton(root, IMG) === only, 'found by aria-label');
+  findButton(root, IMG).click();
+  eq(clicks, 1);
 });
 
 test('h refuses on* attributes but accepts listeners through props.on', () => {

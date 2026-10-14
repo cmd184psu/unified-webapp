@@ -15,8 +15,8 @@ function fail(err, quiet) {
   if (!quiet) void alertDialog(err.message);
   throw err;
 }
-async function apiFetch(path, opts = {}) {
-  if (!path.startsWith("/api/")) throw new Error(`apiFetch: ${path} is not an /api path`);
+async function apiFetch(path2, opts = {}) {
+  if (!path2.startsWith("/api/")) throw new Error(`apiFetch: ${path2} is not an /api path`);
   const init = { method: opts.method ?? "GET" };
   if (opts.body !== void 0) {
     init.headers = { "Content-Type": "application/json" };
@@ -24,7 +24,7 @@ async function apiFetch(path, opts = {}) {
   }
   let resp;
   try {
-    resp = await fetch(path, init);
+    resp = await fetch(path2, init);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return fail(new ApiError(0, "Network error contacting the server: " + msg), opts.quiet);
@@ -50,13 +50,13 @@ async function apiFetch(path, opts = {}) {
 var enc = encodeURIComponent;
 var proj = (slug) => `/api/projects/${enc(slug)}`;
 var eff = (slug, id) => `${proj(slug)}/efforts/${id}`;
-var get = (path, o) => apiFetch(path, o);
-var send = (method, path, body, o) => apiFetch(path, { ...o, method, body });
+var get = (path2, o) => apiFetch(path2, o);
+var send = (method, path2, body, o) => apiFetch(path2, { ...o, method, body });
 var api = {
   // Health and opencode
   health: (o) => get("/api/health", o),
   opencodeVersion: (refresh = false) => get(`/api/opencode/version${refresh ? "?refresh=1" : ""}`),
-  fsDirs: (path = "") => get(`/api/fs/dirs${path ? `?path=${encodeURIComponent(path)}` : ""}`, { quiet: true }),
+  fsDirs: (path2 = "") => get(`/api/fs/dirs${path2 ? `?path=${encodeURIComponent(path2)}` : ""}`, { quiet: true }),
   // Projects
   projects: () => get("/api/projects"),
   project: (slug) => get(proj(slug)),
@@ -281,44 +281,58 @@ var HealthBanner = class {
 // web/agentflow/js/overview.ts
 import { confirmDialog as confirmDialog2, copyText } from "/shared/dist/shared.mjs";
 
-// web/agentflow/js/merge-card.ts
-function mergeBranch(ef, git) {
-  return git?.branch || ef.integration_branch || `agentflow/effort-${ef.id}`;
-}
-function mergeCard(ef, git, copy) {
-  const branch = mergeBranch(ef, git);
-  const files = git?.files;
-  return h(
-    "div",
-    { class: "merge-card", attrs: { "data-role": "git-commands" } },
-    h("h4", { text: `Ready to merge: ${ef.title}` }),
-    h("p", { text: `Nothing was merged into main. The finished work is on the branch ${branch}; main is unchanged until you merge it yourself. agentflow never merges into main and never pushes.` }),
-    git?.commits?.length ? h("ul", { class: "plan-review-notes", attrs: { "data-role": "merge-commits" } }, ...git.commits.map((c) => h("li", { text: `${c.sha.slice(0, 7)} ${c.subject}` }))) : null,
-    files !== void 0 || git?.diffstat ? h(
-      "div",
-      { attrs: { "data-role": "merge-diffstat" } },
-      files !== void 0 ? h("p", { class: "field-hint", text: `${files} file${files === 1 ? "" : "s"} changed` }) : null,
-      git?.diffstat ? h("pre", { class: "detail-mono", text: git.diffstat }) : null
-    ) : null,
-    git?.commands.length ? h(
-      "div",
-      {},
-      h("p", { text: "To merge it, run:" }),
-      ...git.commands.map((c) => h(
-        "div",
-        { class: "merge-command" },
-        h("pre", { class: "detail-mono", text: c }),
-        h("button", { class: "icon-btn", text: "\u29C9", attrs: { type: "button", title: "Copy this command", "aria-label": "Copy this command", "data-action": "copy-command" }, on: { click: () => copy(c) } })
-      ))
-    ) : h("p", { class: "field-hint", text: `The commands could not be loaded. To merge, run: git merge --no-ff ${branch}` })
-  );
-}
-
-// web/agentflow/js/yolo.ts
-import { confirmDialog, showToast } from "/shared/dist/shared.mjs";
-
 // web/agentflow/js/forms.ts
 import { createToggle } from "/shared/dist/shared.mjs";
+
+// web/agentflow/js/icons.ts
+var SVG_NS = "http://www.w3.org/2000/svg";
+var line = (x1, y1, x2, y2) => ["line", { x1: String(x1), y1: String(y1), x2: String(x2), y2: String(y2) }];
+var poly = (points) => ["polyline", { points }];
+var path = (d) => ["path", { d }];
+var SHAPES = {
+  save: [path("M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"), poly("17 21 17 13 7 13 7 21"), poly("7 3 7 8 15 8")],
+  add: [line(12, 5, 12, 19), line(5, 12, 19, 12)],
+  remove: [line(6, 6, 18, 18), line(18, 6, 6, 18)],
+  trash: [poly("3 6 5 6 21 6"), path("M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"), path("M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2")],
+  edit: [path("M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z")],
+  cancel: [line(6, 6, 18, 18), line(18, 6, 6, 18)],
+  approve: [poly("20 6 9 17 4 12")],
+  start: [poly("6 4 20 12 6 20")],
+  pause: [line(8, 5, 8, 19), line(16, 5, 16, 19)],
+  stop: [["rect", { x: "6", y: "6", width: "12", height: "12", rx: "1" }]],
+  retry: [poly("1 4 1 10 7 10"), path("M3.51 15a9 9 0 1 0 2.13-9.36L1 10")],
+  refresh: [poly("23 4 23 10 17 10"), poly("1 20 1 14 7 14"), path("M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15")],
+  copy: [["rect", { x: "9", y: "9", width: "13", height: "13", rx: "2" }], path("M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1")],
+  up: [line(12, 19, 12, 5), poly("5 12 12 5 19 12")],
+  folder: [path("M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z")],
+  probe: [["circle", { cx: "11", cy: "11", r: "8" }], line(21, 21, 16.65, 16.65)],
+  view: [path("M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"), ["circle", { cx: "12", cy: "12", r: "3" }]],
+  import: [path("M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"), poly("17 8 12 3 7 8"), line(12, 3, 12, 15)]
+};
+function icon(name) {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  const attrs = {
+    viewBox: "0 0 24 24",
+    width: "1em",
+    height: "1em",
+    "aria-hidden": "true",
+    focusable: "false",
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": "2",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round"
+  };
+  for (const [k, v] of Object.entries(attrs)) svg.setAttribute(k, v);
+  for (const [tag, a] of SHAPES[name]) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(a)) node.setAttribute(k, v);
+    svg.append(node);
+  }
+  return svg;
+}
+
+// web/agentflow/js/forms.ts
 function textInput(name, value, opts = {}) {
   const el = h("input", {
     class: "settings-input",
@@ -372,12 +386,14 @@ function fieldRow(label, control, hint) {
   };
 }
 function button(label, onClick, opts = {}) {
+  const glyph = opts.icon !== void 0;
+  const asIcon = glyph && !opts.word;
   return h("button", {
-    class: "ui-modal-btn" + (opts.primary ? " ui-modal-btn-primary" : ""),
-    text: label,
-    attrs: { type: "button", "data-action": opts.field },
+    class: "ui-modal-btn" + (opts.primary ? " ui-modal-btn-primary" : "") + (glyph ? " has-icon" : "") + (asIcon ? " icon-only" : ""),
+    text: glyph ? void 0 : label,
+    attrs: { type: "button", "data-action": opts.field, "data-op": opts.op, title: glyph ? label : void 0, "aria-label": asIcon ? label : void 0 },
     on: { click: onClick }
-  });
+  }, glyph ? icon(opts.icon) : null, glyph && opts.word ? h("span", { text: label }) : null);
 }
 function section(title, ...children) {
   return h("div", { class: "settings-section" }, h("h4", { text: title }), ...children);
@@ -426,7 +442,7 @@ var RowsEditor = class {
     this.rows = [];
     this.list = h("div", { class: "wizard-list" });
     for (const it of items) this.addRow(it);
-    this.el = h("div", {}, this.list, button(addLabel, () => this.addRow(this.blank(), true), { field: "add-row" }));
+    this.el = h("div", {}, this.list, button(addLabel, () => this.addRow(this.blank(), true), { field: "add-row", icon: "add" }));
   }
   addRow(item, notify = false) {
     const ctl = this.build(item);
@@ -439,7 +455,7 @@ var RowsEditor = class {
         this.rows.splice(this.rows.indexOf(ctl), 1);
         this.list.removeChild(row);
         this.onChange();
-      }, { field: "remove-row" })
+      }, { field: "remove-row", icon: "remove" })
     );
     this.list.appendChild(row);
     if (notify) this.onChange();
@@ -449,7 +465,41 @@ var RowsEditor = class {
   }
 };
 
+// web/agentflow/js/merge-card.ts
+function mergeBranch(ef, git) {
+  return git?.branch || ef.integration_branch || `agentflow/effort-${ef.id}`;
+}
+function mergeCard(ef, git, copy) {
+  const branch = mergeBranch(ef, git);
+  const files = git?.files;
+  return h(
+    "div",
+    { class: "merge-card", attrs: { "data-role": "git-commands" } },
+    h("h4", { text: `Ready to merge: ${ef.title}` }),
+    h("p", { text: `Nothing was merged into main. The finished work is on the branch ${branch}; main is unchanged until you merge it yourself. agentflow never merges into main and never pushes.` }),
+    git?.commits?.length ? h("ul", { class: "plan-review-notes", attrs: { "data-role": "merge-commits" } }, ...git.commits.map((c) => h("li", { text: `${c.sha.slice(0, 7)} ${c.subject}` }))) : null,
+    files !== void 0 || git?.diffstat ? h(
+      "div",
+      { attrs: { "data-role": "merge-diffstat" } },
+      files !== void 0 ? h("p", { class: "field-hint", text: `${files} file${files === 1 ? "" : "s"} changed` }) : null,
+      git?.diffstat ? h("pre", { class: "detail-mono", text: git.diffstat }) : null
+    ) : null,
+    git?.commands.length ? h(
+      "div",
+      {},
+      h("p", { text: "To merge it, run:" }),
+      ...git.commands.map((c) => h(
+        "div",
+        { class: "merge-command" },
+        h("pre", { class: "detail-mono", text: c }),
+        h("button", { class: "icon-btn", attrs: { type: "button", title: "Copy this command", "aria-label": "Copy this command", "data-action": "copy-command" }, on: { click: () => copy(c) } }, icon("copy"))
+      ))
+    ) : h("p", { class: "field-hint", text: `The commands could not be loaded. To merge, run: git merge --no-ff ${branch}` })
+  );
+}
+
 // web/agentflow/js/yolo.ts
+import { confirmDialog, showToast } from "/shared/dist/shared.mjs";
 var defaultYoloDeps = () => ({
   setYOLO: api.setYOLO,
   yoloInvariants: api.yoloInvariants,
@@ -513,7 +563,7 @@ function yoloControl(slug, effort, deps, onChanged) {
       "div",
       { class: "row-actions" },
       effort.yolo ? yoloBadge() : null,
-      button(effort.yolo ? "Disable YOLO" : "Enable YOLO", () => void toggle(), { field: "toggle-yolo" })
+      button(effort.yolo ? "Disable YOLO" : "Enable YOLO", () => void toggle(), { field: "toggle-yolo", icon: effort.yolo ? "cancel" : "approve", word: true })
     ),
     listHost
   );
@@ -532,17 +582,17 @@ var defaultDeps = (open) => ({
 function buttonsFor(runState) {
   switch (runState) {
     case "running":
-      return [{ op: "pause", label: "Pause" }, { op: "stop", label: "Stop" }];
+      return [{ op: "pause", label: "Pause", icon: "pause" }, { op: "stop", label: "Stop", icon: "stop" }];
     case "pausing":
-      return [{ op: "start", label: "Resume", primary: true }, { op: "stop", label: "Stop" }];
+      return [{ op: "start", label: "Resume", primary: true, icon: "start" }, { op: "stop", label: "Stop", icon: "stop" }];
     case "paused":
       return [
-        { op: "start", label: "Resume", primary: true },
-        { op: "run-one", label: "Run one" },
-        { op: "stop", label: "Stop" }
+        { op: "start", label: "Resume", primary: true, icon: "start" },
+        { op: "run-one", label: "Run one", icon: "start", word: true },
+        { op: "stop", label: "Stop", icon: "stop" }
       ];
     default:
-      return [{ op: "start", label: "Start", primary: true }, { op: "run-one", label: "Run one" }];
+      return [{ op: "start", label: "Start", primary: true, icon: "start" }, { op: "run-one", label: "Run one", icon: "start", word: true }];
   }
 }
 function progressText(progress) {
@@ -676,9 +726,7 @@ var Overview = class {
           { class: "plan-empty" },
           h("h3", { text: "No projects yet" }),
           h("p", { text: "Create a project to get started." }),
-          h("button", { class: "ui-modal-btn ui-modal-btn-primary", text: "New project", attrs: { type: "button", "data-op": "new-project" }, on: {
-            click: () => this.deps.open("+new")
-          } })
+          button("New project", () => this.deps.open("+new"), { primary: true, op: "new-project", icon: "add" })
         )
       );
       return;
@@ -690,12 +738,7 @@ var Overview = class {
     const ef = p.effort;
     const bar = h("div", { class: "progress-bar-wrap" }, h("div", { class: "progress-bar", attrs: { style: `width: ${pct2}%` } }));
     const work = (p.current ?? []).length > 0 ? (p.current ?? []).map((w) => h("div", { class: "task-item-meta", text: workLine(w) })) : [h("div", { class: "task-item-meta", text: ef ? "no stage running" : "no active effort" })];
-    const buttons = buttonsFor(p.run_state).map((b) => h("button", {
-      class: "ui-modal-btn" + (b.primary ? " ui-modal-btn-primary" : ""),
-      text: b.label,
-      attrs: { type: "button", "data-op": b.op },
-      on: { click: () => void this.control(p.slug, b.op) }
-    }));
+    const buttons = buttonsFor(p.run_state).map((b) => button(b.label, () => void this.control(p.slug, b.op), { primary: b.primary, op: b.op, icon: b.icon, word: b.word }));
     return h(
       "li",
       { class: "task-item", attrs: { "data-project": p.slug } },
@@ -861,7 +904,7 @@ function buildRoleEditor(o) {
           h("span", { text: `${i + 1}. ${r.backend} / ${r.model}` }),
           paid ? badge("paid") : null,
           paid ? h("span", { class: "inline-check" }, optIn, "I opt in to paid use") : null,
-          button("Remove", () => edit((all) => all.filter((_, j) => j !== i)), { field: "remove" })
+          button("Remove", () => edit((all) => all.filter((_, j) => j !== i)), { field: "remove", icon: "remove" })
         );
         return row;
       })),
@@ -874,7 +917,7 @@ function buildRoleEditor(o) {
           if (pickBackend.value && pickModel.value) {
             edit((all) => [...all, { backend: pickBackend.value, model: pickModel.value, optIn: !isPaid(o.backends, pickBackend.value, pickModel.value) }]);
           }
-        }, { field: "add-candidate" })
+        }, { field: "add-candidate", icon: "add" })
       ),
       errors.general,
       h(
@@ -884,8 +927,8 @@ function buildRoleEditor(o) {
         button("Discard", () => {
           o.setDraft(null);
           draw();
-        }, { field: "discard" }),
-        button("Save order", () => void save(), { primary: true, field: "save-candidates" })
+        }, { field: "discard", icon: "cancel" }),
+        button("Save order", () => void save(), { primary: true, field: "save-candidates", icon: "save" })
       )
     );
     if (focusIdx >= 0) handles[focusIdx]?.focus();
@@ -911,10 +954,9 @@ var DirPicker = class {
     this.list = h("div", { class: "wizard-list", attrs: { "data-role": "dir-list" } });
     this.where = h("code", { attrs: { "data-role": "dir-path" } });
     this.err = h("div", { class: "field-error", attrs: { role: "alert", hidden: true } });
-    this.up = button("Up", () => void this.go(this.cur?.parent ?? ""), { field: "dir-up" });
+    this.up = button("Parent folder", () => void this.go(this.cur?.parent ?? ""), { field: "dir-up", icon: "up" });
     /** Bumped per request so a slow answer cannot overwrite a newer one. */
     this.seq = 0;
-    this.up.setAttribute("title", "Parent folder");
     this.el = h(
       "div",
       { class: "dir-picker", attrs: { "data-role": "dir-picker" } },
@@ -924,10 +966,10 @@ var DirPicker = class {
       h(
         "div",
         { class: "settings-actions" },
-        button("Cancel", () => this.onCancel(), { field: "dir-cancel" }),
+        button("Cancel", () => this.onCancel(), { field: "dir-cancel", icon: "cancel" }),
         button("Choose this folder", () => {
           if (this.cur) this.onChoose(this.cur.path);
-        }, { primary: true, field: "dir-choose" })
+        }, { primary: true, field: "dir-choose", icon: "folder" })
       )
     );
   }
@@ -936,10 +978,10 @@ var DirPicker = class {
     if (!await this.go(this.start) && this.start) await this.go("");
   }
   /** go lists path; false (with the error shown) when the server refuses it. */
-  async go(path) {
+  async go(path2) {
     const mine = ++this.seq;
     try {
-      const res = await this.fsDirs(path);
+      const res = await this.fsDirs(path2);
       if (mine !== this.seq) return true;
       this.cur = res;
       this.error = "";
@@ -1062,7 +1104,7 @@ var SettingsView = class {
           attrs: { "data-role": "oc-version" },
           text: oc ? oc.version ? `version ${oc.version}` : oc.error ?? "" : "not probed yet"
         }),
-        button("Refresh", () => void this.refreshVersion(), { field: "oc-refresh" })
+        button("Refresh", () => void this.refreshVersion(), { field: "oc-refresh", icon: "refresh" })
       )
     );
   }
@@ -1078,10 +1120,10 @@ var SettingsView = class {
         "div",
         { class: "inline-row", attrs: { "data-root": i } },
         h("code", { text: r }),
-        button("Remove", () => edit(this.roots.filter((_, j) => j !== i)), { field: "remove-root" })
+        button("Remove", () => edit(this.roots.filter((_, j) => j !== i)), { field: "remove-root", icon: "remove" })
       )),
       this.roots.length === 0 ? h("p", { class: "field-hint", text: "No folders chosen: the picker starts at the server default." }) : null,
-      button("Add folder", () => void this.addRoot(edit), { field: "add-root" })
+      button("Add folder", () => void this.addRoot(edit), { field: "add-root", icon: "add" })
     );
   }
   async addRoot(edit) {
@@ -1118,7 +1160,7 @@ var SettingsView = class {
     this.errors = new FormErrors();
     const limits = h("div", { class: "profile-fields" }, ...LIMIT_FIELDS.map((f) => this.row(f)));
     const exec = h("div", { class: "profile-fields" }, ...EXECUTION_FIELDS.map((f) => this.row(f)));
-    const path = this.row({ key: "opencode_path", label: "opencode path", hint: "Program to run" });
+    const path2 = this.row({ key: "opencode_path", label: "opencode path", hint: "Program to run" });
     this.renderOpenCode();
     this.renderRoots();
     replace(
@@ -1128,10 +1170,10 @@ var SettingsView = class {
         { class: "settings-host" },
         section("Limits", limits),
         section("Execution", exec),
-        section("opencode", path, this.ocHost),
+        section("opencode", path2, this.ocHost),
         section("Folders the picker may browse", this.rootsHost),
         this.errors.general,
-        h("div", { class: "settings-actions" }, button("Save settings", () => void this.save(), { primary: true, field: "save" }))
+        h("div", { class: "settings-actions" }, button("Save settings", () => void this.save(), { primary: true, field: "save", icon: "save" }))
       )
     );
   }
@@ -1248,7 +1290,7 @@ var BackendsView = class {
       initial?.has_key ? button(clearKey ? "Keep key" : "Clear key", () => {
         clearKey = !clearKey;
         drawKey();
-      }, { field: "clear-key" }) : null
+      }, { field: "clear-key", icon: clearKey ? "cancel" : "remove", word: true }) : null
     );
     drawKey();
     const keyField = errors.add("api_key", fieldRow(
@@ -1282,7 +1324,7 @@ var BackendsView = class {
         button("Remove", () => {
           models.splice(models.indexOf(row), 1);
           row.el.parentNode?.removeChild(row.el);
-        })
+        }, { field: "remove-model", icon: "remove" })
       );
       draw();
       modelList.appendChild(row.el);
@@ -1306,7 +1348,7 @@ var BackendsView = class {
             button("Remove", () => {
               models.splice(models.indexOf(row), 1);
               row.el.parentNode?.removeChild(row.el);
-            })
+            }, { field: "remove-model", icon: "remove" })
           );
         }
         this.deps.notify(`${probed.length} model(s) found on ${host.value.trim()}`);
@@ -1317,10 +1359,10 @@ var BackendsView = class {
     const modelsField = errors.add("models", fieldRow(
       "Models",
       modelList,
-      'Probe host for models lists what the host serves so you can pick exact names. Mark a paid model so it is only used when listed for a role. "At once" caps how many stages run that model together (blank = only the slots limit it)'
+      'Probe lists what the host serves. A paid model is only used when listed for a role. "At once" caps how many stages run it together (blank = the slots limit)'
     ));
-    modelsField.el.appendChild(button("Probe host for models", () => void probe(), { field: "probe-host" }));
-    modelsField.el.appendChild(button("Add model", () => addModel(), { field: "add-model" }));
+    modelsField.el.appendChild(button("Probe host for models", () => void probe(), { field: "probe-host", icon: "probe" }));
+    modelsField.el.appendChild(button("Add model", () => addModel(), { field: "add-model", icon: "add" }));
     const save = async () => {
       errors.clear();
       const body = {
@@ -1362,8 +1404,8 @@ var BackendsView = class {
       h(
         "div",
         { class: "settings-actions" },
-        button("Cancel", done, { field: "cancel" }),
-        button(initial ? "Save backend" : "Add backend", () => void save(), { primary: true, field: "save" })
+        button("Cancel", done, { field: "cancel", icon: "cancel" }),
+        button(initial ? "Save backend" : "Add backend", () => void save(), { primary: true, field: "save", icon: initial ? "save" : "add" })
       )
     );
   }
@@ -1394,11 +1436,11 @@ var BackendsView = class {
       h(
         "div",
         { class: "row-actions" },
-        button("Retire backend", () => void run(), { primary: true, field: "confirm-retire" }),
+        button("Retire backend", () => void run(), { primary: true, field: "confirm-retire", icon: "trash", word: true }),
         button("Keep it", () => {
           this.retiring.delete(b.name);
           this.render();
-        }, { field: "cancel-retire" })
+        }, { field: "cancel-retire", icon: "cancel", word: true })
       )
     );
   }
@@ -1439,11 +1481,11 @@ var BackendsView = class {
           button("Edit", () => {
             this.editing.add(b.name);
             this.render();
-          }, { field: "edit" }),
-          b.retired ? button("Enable", () => void this.enable(b.name), { field: "enable" }) : button("Retire", () => {
+          }, { field: "edit", icon: "edit" }),
+          b.retired ? button("Enable", () => void this.enable(b.name), { field: "enable", icon: "approve", word: true }) : button("Retire", () => {
             this.retiring.add(b.name);
             this.render();
-          }, { field: "retire" })
+          }, { field: "retire", icon: "trash", word: true })
         )
       ),
       h(
@@ -1473,7 +1515,7 @@ var BackendsView = class {
     const addBtn = button("Add backend", () => {
       this.adding = true;
       this.render();
-    }, { primary: true, field: "add-backend" });
+    }, { primary: true, field: "add-backend", icon: "add" });
     if (this.backends.length === 0) {
       return h(
         "div",
@@ -1554,7 +1596,7 @@ var BackendsView = class {
       this.limitsHost,
       h("div", { class: "profile-fields", attrs: { "data-role": "project-limits" } }, ...rows),
       errors.general,
-      h("div", { class: "settings-actions" }, button("Save project limits", () => void save(), { primary: true, field: "save-limits" }))
+      h("div", { class: "settings-actions" }, button("Save project limits", () => void save(), { primary: true, field: "save-limits", icon: "save" }))
     );
   }
   limitsSection() {
@@ -1606,7 +1648,7 @@ var BackendsView = class {
       button("Dismiss", () => {
         this.warnings = [];
         this.render();
-      }, { field: "dismiss" })
+      }, { field: "dismiss", icon: "remove" })
     );
     replace(
       this.host,
@@ -1715,7 +1757,7 @@ function effortSettings(ef, frdText, deps, onSaved) {
     button("Turn on deliberate planning", () => {
       deliberate.checked = true;
       void save();
-    }, { field: "accept-suggestion" })
+    }, { field: "accept-suggestion", icon: "approve", word: true })
   );
   const save = async () => {
     errors.clear();
@@ -1751,7 +1793,7 @@ function effortSettings(ef, frdText, deps, onSaved) {
       )).el
     ),
     errors.general,
-    h("div", { class: "settings-actions" }, button("Save settings", () => void save(), { primary: true, field: "save-effort-settings" }))
+    h("div", { class: "settings-actions" }, button("Save settings", () => void save(), { primary: true, field: "save-effort-settings", icon: "save" }))
   );
 }
 
@@ -1782,7 +1824,7 @@ var StreamPanel = class {
         { class: "stream-header" },
         h("strong", { text: `${st.role} \xB7 ${st.backend}/${st.model}` }),
         this.status,
-        h("button", { class: "icon-btn detail-close-btn", text: "Close", attrs: { type: "button", "data-action": "close-stream" }, on: { click: () => this.close() } })
+        button("Close", () => this.close(), { field: "close-stream", icon: "cancel" })
       ),
       this.out
     );
@@ -1821,13 +1863,13 @@ var StreamPanel = class {
     this.status.className = "stream-status" + (cls ? " " + cls : "");
   }
   onOutput(data) {
-    let line = data;
+    let line2 = data;
     try {
       const parsed = JSON.parse(data);
-      if (typeof parsed.line === "string") line = parsed.line;
+      if (typeof parsed.line === "string") line2 = parsed.line;
     } catch {
     }
-    this.append(line);
+    this.append(line2);
   }
   append(text) {
     this.out.appendChild(document.createTextNode(text + "\n"));
@@ -2108,12 +2150,12 @@ var Board = class {
           acceptance: split(acceptance.value),
           files_touched: split(files.value),
           depends_on: deps.value.split(",").map((s) => s.trim()).filter((s) => s !== "")
-        }), { primary: true, field: "save-task" }),
+        }), { primary: true, field: "save-task", icon: "save" }),
         button("Cancel", () => {
           this.editing = false;
           this.fresh = true;
           this.render();
-        }, { field: "cancel-edit" })
+        }, { field: "cancel-edit", icon: "cancel" })
       )
     );
   }
@@ -2123,21 +2165,21 @@ var Board = class {
     this.errors = new FormErrors();
     this.reasonEl = reason;
     this.cleanEl = clean;
-    const reasonRow = this.errors.add("reason", fieldRow("Override reason", reason, "Recorded with your name when you mark the task passed"));
+    const reasonRow = this.errors.add("reason", fieldRow("Override reason", reason, "Recorded when you mark the task passed"));
     return h(
       "div",
       { class: "detail-section", attrs: { "data-panid": "actions" } },
-      h("h4", { text: "Halted: choose how to continue" }),
-      h("span", { class: "inline-check" }, clean, "Recreate the worktree clean when retrying"),
-      button("Retry", () => void this.retry(d.key, clean.checked), { field: "retry" }),
+      h("h4", { text: "Halted" }),
+      h("span", { class: "inline-check" }, clean, "Clean worktree on retry"),
+      button("Retry", () => void this.retry(d.key, clean.checked), { field: "retry", icon: "retry" }),
       button("Edit task", () => {
         this.editing = true;
         this.fresh = true;
         this.render();
-      }, { field: "edit" }),
+      }, { field: "edit", icon: "edit" }),
       reasonRow.el,
-      button("Override as passed", () => void this.override(d.key, reason.value), { field: "override" }),
-      button("Abandon effort", () => void this.abandon(), { field: "abandon" }),
+      button("Override as passed", () => void this.override(d.key, reason.value), { field: "override", icon: "approve", word: true }),
+      button("Abandon effort", () => void this.abandon(), { field: "abandon", icon: "trash", word: true }),
       this.errors.general
     );
   }
@@ -2161,7 +2203,7 @@ var Board = class {
         "div",
         { class: "inline-row", attrs: { "data-stage": s.id } },
         h("span", { text: `${s.role} \xB7 ${s.backend ? `${s.backend}/${s.model}` : "engine"} \xB7 ${s.outcome || s.state}` }),
-        button("Output", () => this.stream.open(s), { field: "open-stream" })
+        button("Output", () => this.stream.open(s), { field: "open-stream", icon: "view" })
       ))),
       worker?.parsed ? block("Worker summary", h("p", { text: String(rec(worker.parsed).summary ?? "") })) : null,
       verify?.parsed ? block("VerifyReport", renderVerify(verify.parsed)) : null,
@@ -2183,15 +2225,13 @@ var Board = class {
           { class: "detail-header" },
           h("h3", { text: `${d.key} \xB7 ${d.title}` }),
           chip(d.status),
-          h("button", { class: "icon-btn detail-close-btn", text: "Close", attrs: { type: "button", "data-action": "close-detail" }, on: {
-            click: () => {
-              this.selected = "";
-              this.detail = null;
-              this.editing = false;
-              this.fresh = true;
-              this.render();
-            }
-          } })
+          button("Close", () => {
+            this.selected = "";
+            this.detail = null;
+            this.editing = false;
+            this.fresh = true;
+            this.render();
+          }, { field: "close-detail", icon: "cancel" })
         ),
         h("div", { class: "detail-attempts", text: `Attempts: ${d.attempts}` }),
         d.waiting_reason ? block("Waiting", h("p", { text: d.waiting_reason, attrs: { "data-role": "waiting-reason" } })) : null,
@@ -2206,7 +2246,7 @@ var Board = class {
             state: cur.state === "running" ? "running" : cur.state,
             outcome: "",
             raw_output: ""
-          }), { field: "watch-live" }))
+          }), { field: "watch-live", icon: "view" }))
         ) : null,
         this.editing ? this.editForm(d) : null,
         d.halted && !this.editing ? this.actions(d) : null,
@@ -2239,12 +2279,7 @@ var Board = class {
       this.detailEl = this.detailPane();
     }
     this.fresh = false;
-    const controls = buttonsFor(this.runState).map((b) => h("button", {
-      class: "ui-modal-btn" + (b.primary ? " ui-modal-btn-primary" : ""),
-      text: b.label,
-      attrs: { type: "button", "data-op": b.op },
-      on: { click: () => void this.control(b.op) }
-    }));
+    const controls = buttonsFor(this.runState).map((b) => button(b.label, () => void this.control(b.op), { primary: b.primary, op: b.op, icon: b.icon, word: b.word }));
     replace(
       this.host,
       effortBar(this.slug, this.efforts, ef, (id) => {
@@ -2409,7 +2444,7 @@ var History = class {
           "Import an FRD",
           fileRow.el,
           this.errors.general,
-          h("div", { class: "settings-actions" }, button("Import FRD", () => void this.importFile(), { primary: true, field: "import-frd" }))
+          h("div", { class: "settings-actions" }, button("Import FRD", () => void this.importFile(), { primary: true, field: "import-frd", icon: "import" }))
         )
       )
     );
@@ -2665,7 +2700,7 @@ var FrdEditor = class {
       this.createErrors.add("budget_tokens", fieldRow("Token budget", tokens, "Optional; blank is no limit")).el,
       this.createErrors.add("budget_seconds", fieldRow("Time budget (minutes)", minutes, "Optional; blank is no limit")).el,
       this.createErrors.general,
-      h("div", { class: "settings-actions" }, button("Create effort", () => void this.create(title.value, deliberate.checked, tokens.value, minutes.value), { primary: true, field: "create-effort" }))
+      h("div", { class: "settings-actions" }, button("Create effort", () => void this.create(title.value, deliberate.checked, tokens.value, minutes.value), { primary: true, field: "create-effort", icon: "add", word: true }))
     );
   }
   list() {
@@ -2693,7 +2728,7 @@ var FrdEditor = class {
       { class: "inline-row", attrs: { "data-revision": r.revision } },
       h("span", { text: `Revision ${r.revision} \xB7 ${r.created_by} \xB7 ${when2(r.created)}` }),
       r.approved ? badge("approved", "ok") : null,
-      button("View", () => void this.view(r.revision), { field: "view-revision" })
+      button("View", () => void this.view(r.revision), { field: "view-revision", icon: "view" })
     ));
     const viewing = this.viewing;
     return section(
@@ -2707,11 +2742,11 @@ var FrdEditor = class {
         h(
           "div",
           { class: "row-actions" },
-          button("Load into editor", () => viewing.json && this.loadIntoEditor(viewing.json), { field: "load-revision" }),
+          button("Load into editor", () => viewing.json && this.loadIntoEditor(viewing.json), { field: "load-revision", icon: "import", word: true }),
           button("Close", () => {
             this.viewing = null;
             this.render();
-          }, { field: "close-revision" })
+          }, { field: "close-revision", icon: "cancel" })
         )
       ) : null
     );
@@ -2736,8 +2771,8 @@ var FrdEditor = class {
       h(
         "div",
         { class: "settings-actions" },
-        button("Save as new revision", () => void this.save(), { primary: !canApprove, field: "save-frd" }),
-        canApprove && this.latest ? button(`Approve revision ${this.latest.revision}`, () => void this.approve(), { primary: true, field: "approve-frd" }) : null
+        button("Save as new revision", () => void this.save(), { primary: !canApprove, field: "save-frd", icon: "save" }),
+        canApprove && this.latest ? button(`Approve revision ${this.latest.revision}`, () => void this.approve(), { primary: true, field: "approve-frd", icon: "approve" }) : null
       )
     ) : null;
     const active2 = this.efforts.find((e) => !isFinished(e));
@@ -3035,8 +3070,8 @@ var PlanViewer = class {
       h(
         "div",
         { class: "plan-actions" },
-        canGenerate ? button(st.revision > 0 ? "Regenerate plan" : "Generate plan", () => void this.generate(), { field: "generate-plan" }) : null,
-        canApprove ? button("Approve plan", () => void this.approve(), { primary: true, field: "approve-plan" }) : null
+        canGenerate ? button(st.revision > 0 ? "Regenerate plan" : "Generate plan", () => void this.generate(), { field: "generate-plan", icon: "refresh" }) : null,
+        canApprove ? button("Approve plan", () => void this.approve(), { primary: true, field: "approve-plan", icon: "approve" }) : null
       )
     );
   }
@@ -3099,7 +3134,7 @@ var PlanViewer = class {
         { class: "inline-row", attrs: { "data-revision": r.revision } },
         h("span", { text: `Revision ${r.revision} \xB7 ${r.created_by}` }),
         r.approved ? badge("approved", "ok") : null,
-        button("View", () => void this.viewRevision(r.revision), { field: "view-revision" })
+        button("View", () => void this.viewRevision(r.revision), { field: "view-revision", icon: "view" })
       ))) : h("p", { class: "field-hint", text: "No revisions yet." }),
       v ? h(
         "div",
@@ -3109,7 +3144,7 @@ var PlanViewer = class {
         button("Close", () => {
           this.viewing = null;
           this.render();
-        }, { field: "close-revision" })
+        }, { field: "close-revision", icon: "cancel" })
       ) : null
     );
   }
@@ -3306,15 +3341,15 @@ var QueueApproval = class {
           h(
             "div",
             { class: "plan-actions" },
-            canCompile ? button("Recompile", () => void this.compile(), { field: "compile" }) : null,
-            draft ? button("Approve whole queue", () => void this.approve(), { primary: true, field: "approve-queue" }) : null
+            canCompile ? button("Recompile", () => void this.compile(), { field: "compile", icon: "refresh" }) : null,
+            draft ? button("Approve whole queue", () => void this.approve(), { primary: true, field: "approve-queue", icon: "approve" }) : null
           )
         ) : h(
           "div",
           { class: "plan-empty" },
           h("h3", { text: "No queue yet" }),
           h("p", { attrs: { "data-role": "queue-note" }, text: compiling ? "Compiling the plan into tasks..." : "Approve a plan first; it is compiled into tasks automatically." }),
-          ef.status === "plan_approved" ? button("Recompile", () => void this.compile(), { field: "compile" }) : null
+          ef.status === "plan_approved" ? button("Recompile", () => void this.compile(), { field: "compile", icon: "refresh" }) : null
         ),
         this.errors.general,
         q ? section("Tasks", h("div", { class: "profile-list" }, ...q.tasks.map((t) => this.taskCard(t)))) : null
@@ -3495,7 +3530,7 @@ var ProjectForm = class {
             this.deps.notify(`Saved ${role} override for ${p.slug}`);
           },
           emptyNote: global.length ? `Uses the global list: ${global.map((c) => `${c.backend}/${c.model}`).join(", ")}` : "Uses the global list, which is empty.",
-          extra: overridden ? [button("Use global list", () => void this.clearRole(role), { field: "clear-override" })] : []
+          extra: overridden ? [button("Use global list", () => void this.clearRole(role), { field: "clear-override", icon: "retry", word: true })] : []
         })
       );
     }));
@@ -3549,9 +3584,9 @@ var ProjectForm = class {
           h(
             "div",
             { class: "settings-actions" },
-            p ? button("Delete project", () => void this.remove(), { field: "delete-project" }) : null,
-            button("Cancel", () => this.done(p?.slug ?? ""), { field: "cancel" }),
-            button(p ? "Save project" : "Create project", () => void this.save(), { primary: true, field: "save-project" })
+            p ? button("Delete project", () => void this.remove(), { field: "delete-project", icon: "trash", word: true }) : null,
+            button("Cancel", () => this.done(p?.slug ?? ""), { field: "cancel", icon: "cancel" }),
+            button(p ? "Save project" : "Create project", () => void this.save(), { primary: true, field: "save-project", icon: p ? "save" : "add" })
           )
         ),
         p ? section(
@@ -3656,11 +3691,11 @@ function mountProjectTab(host, wanted2) {
       { class: "console-header" },
       h("span", { class: "pane-title", text: "Project" }),
       picker,
-      button("New project", () => showForm(), { field: "new-project" }),
+      button("New project", () => showForm(), { field: "new-project", icon: "add" }),
       button("Edit project", () => {
         const cur = projects.find((p) => p.slug === slug);
         if (cur) showForm(cur);
-      }, { field: "edit-project" })
+      }, { field: "edit-project", icon: "edit" })
     ),
     bar,
     body

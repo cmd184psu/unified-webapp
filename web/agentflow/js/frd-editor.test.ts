@@ -155,7 +155,7 @@ test('AC-DBS3 (UI): the approved revision stays viewable after an edit', async (
   const stop = t.ed.mount();
   await flush();
   ok(t.host.textContent.includes('revision 1 approved'), 'approved shown');
-  eq(findAll(t.host, (e) => e.textContent === 'Approve revision 1').length, 0);
+  eq(findAll(t.host, (e) => e.getAttribute('aria-label') === 'Approve revision 1').length, 0);
   byField(t.host, 'objective').value = 'Do it better';
   button(t.host, 'Save as new revision').click();
   await flush();
@@ -178,7 +178,7 @@ test('approve targets the latest saved revision and is offered only when it is n
   button(t.host, 'Approve revision 1').click();
   await flush();
   eq(t.log.filter((l) => l.startsWith('approve:')), ['approve:1:1']);
-  eq(findAll(t.host, (e) => e.textContent === 'Approve revision 1').length, 0);
+  eq(findAll(t.host, (e) => e.getAttribute('aria-label') === 'Approve revision 1').length, 0);
   stop();
 });
 

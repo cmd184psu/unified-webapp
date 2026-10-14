@@ -256,7 +256,7 @@ test('H2: the picker lists the first root, marks git repositories and shows name
   eq(t.rows(), ['appgit', 'docs']);
   eq(byAttr(t.el, 'data-role', 'dir-path')[0].textContent, '/srv');
   ok(byAttr(t.el, 'data-dir', '/srv/app')[0].getAttribute('title')?.includes('git repository'), 'git tooltip');
-  ok(button(t.el, 'Up').hasAttribute('disabled'), 'no parent at a root');
+  ok(button(t.el, 'Parent folder').hasAttribute('disabled'), 'no parent at a root');
 });
 
 test('H2: clicking a folder descends, Up returns, Choose reports the current folder', async () => {
@@ -267,8 +267,8 @@ test('H2: clicking a folder descends, Up returns, Choose reports the current fol
   eq(byAttr(t.el, 'data-role', 'dir-path')[0].textContent, '/srv/docs');
   eq(t.rows(), ['<b>x</b>']);
   ok(findAll(t.el, (e) => e.tagName === 'B').length === 0, 'name is not markup');
-  ok(!button(t.el, 'Up').hasAttribute('disabled'), 'up enabled');
-  button(t.el, 'Up').click();
+  ok(!button(t.el, 'Parent folder').hasAttribute('disabled'), 'up enabled');
+  button(t.el, 'Parent folder').click();
   await flush();
   eq(byAttr(t.el, 'data-role', 'dir-path')[0].textContent, '/srv');
   byAttr(t.el, 'data-dir', '/srv/app')[0].click();

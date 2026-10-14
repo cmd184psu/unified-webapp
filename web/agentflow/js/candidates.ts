@@ -177,7 +177,7 @@ export function buildRoleEditor(o: RoleEditorOpts): HTMLElement {
             h('span', { text: `${i + 1}. ${r.backend} / ${r.model}` }),
             paid ? badge('paid') : null,
             paid ? h('span', { class: 'inline-check' }, optIn, 'I opt in to paid use') : null,
-            button('Remove', () => edit((all) => all.filter((_, j) => j !== i)), { field: 'remove' }));
+            button('Remove', () => edit((all) => all.filter((_, j) => j !== i)), { field: 'remove', icon: 'remove' }));
           return row;
         }))),
       h('div', { class: 'inline-row' }, pickBackend, pickModel,
@@ -185,12 +185,12 @@ export function buildRoleEditor(o: RoleEditorOpts): HTMLElement {
           if (pickBackend.value && pickModel.value) {
             edit((all) => [...all, { backend: pickBackend.value, model: pickModel.value, optIn: !isPaid(o.backends, pickBackend.value, pickModel.value) }]);
           }
-        }, { field: 'add-candidate' })),
+        }, { field: 'add-candidate', icon: 'add' })),
       errors.general,
       h('div', { class: 'settings-actions' },
         ...(o.extra ?? []),
-        button('Discard', () => { o.setDraft(null); draw(); }, { field: 'discard' }),
-        button('Save order', () => void save(), { primary: true, field: 'save-candidates' })));
+        button('Discard', () => { o.setDraft(null); draw(); }, { field: 'discard', icon: 'cancel' }),
+        button('Save order', () => void save(), { primary: true, field: 'save-candidates', icon: 'save' })));
     // A keyboard move redraws the list; keep the focus on the handle that moved.
     if (focusIdx >= 0) handles[focusIdx]?.focus();
     focusIdx = -1;

@@ -115,8 +115,8 @@ export function mountProjectTab(host: HTMLElement, wanted: string): () => void {
   replace(host,
     h('div', { class: 'console-header' },
       h('span', { class: 'pane-title', text: 'Project' }), picker,
-      button('New project', () => showForm(), { field: 'new-project' }),
-      button('Edit project', () => { const cur = projects.find((p) => p.slug === slug); if (cur) showForm(cur); }, { field: 'edit-project' })),
+      button('New project', () => showForm(), { field: 'new-project', icon: 'add' }),
+      button('Edit project', () => { const cur = projects.find((p) => p.slug === slug); if (cur) showForm(cur); }, { field: 'edit-project', icon: 'edit' })),
     bar, body);
 
   if (wanted === '+new') showForm();

@@ -305,8 +305,8 @@ export class Board {
           key: d.key, title: title.value.trim(), phase: phase.value.trim(), prompt: prompt.value,
           acceptance: split(acceptance.value), files_touched: split(files.value),
           depends_on: deps.value.split(',').map((s) => s.trim()).filter((s) => s !== ''),
-        }), { primary: true, field: 'save-task' }),
-        button('Cancel', () => { this.editing = false; this.fresh = true; this.render(); }, { field: 'cancel-edit' })));
+        }), { primary: true, field: 'save-task', icon: 'save' }),
+        button('Cancel', () => { this.editing = false; this.fresh = true; this.render(); }, { field: 'cancel-edit', icon: 'cancel' })));
   }
 
   private actions(d: TaskDetail): HTMLElement {
@@ -315,15 +315,15 @@ export class Board {
     this.errors = new FormErrors();
     this.reasonEl = reason;
     this.cleanEl = clean;
-    const reasonRow = this.errors.add('reason', fieldRow('Override reason', reason, 'Recorded with your name when you mark the task passed'));
+    const reasonRow = this.errors.add('reason', fieldRow('Override reason', reason, 'Recorded when you mark the task passed'));
     return h('div', { class: 'detail-section', attrs: { 'data-panid': 'actions' } },
-      h('h4', { text: 'Halted: choose how to continue' }),
-      h('span', { class: 'inline-check' }, clean, 'Recreate the worktree clean when retrying'),
-      button('Retry', () => void this.retry(d.key, clean.checked), { field: 'retry' }),
-      button('Edit task', () => { this.editing = true; this.fresh = true; this.render(); }, { field: 'edit' }),
+      h('h4', { text: 'Halted' }),
+      h('span', { class: 'inline-check' }, clean, 'Clean worktree on retry'),
+      button('Retry', () => void this.retry(d.key, clean.checked), { field: 'retry', icon: 'retry' }),
+      button('Edit task', () => { this.editing = true; this.fresh = true; this.render(); }, { field: 'edit', icon: 'edit' }),
       reasonRow.el,
-      button('Override as passed', () => void this.override(d.key, reason.value), { field: 'override' }),
-      button('Abandon effort', () => void this.abandon(), { field: 'abandon' }),
+      button('Override as passed', () => void this.override(d.key, reason.value), { field: 'override', icon: 'approve', word: true }),
+      button('Abandon effort', () => void this.abandon(), { field: 'abandon', icon: 'trash', word: true }),
       this.errors.general);
   }
 
@@ -341,7 +341,7 @@ export class Board {
       h('div', { class: 'wizard-list' }, ...a.stages.map((s) =>
         h('div', { class: 'inline-row', attrs: { 'data-stage': s.id } },
           h('span', { text: `${s.role} · ${s.backend ? `${s.backend}/${s.model}` : 'engine'} · ${s.outcome || s.state}` }),
-          button('Output', () => this.stream.open(s), { field: 'open-stream' })))),
+          button('Output', () => this.stream.open(s), { field: 'open-stream', icon: 'view' })))),
       worker?.parsed ? block('Worker summary', h('p', { text: String(rec(worker.parsed).summary ?? '') })) : null,
       verify?.parsed ? block('VerifyReport', renderVerify(verify.parsed)) : null,
       review?.parsed ? block('Reviewer', renderReviewOut(review.parsed)) : null);
@@ -354,15 +354,13 @@ export class Board {
     return h('div', { class: 'console-right', attrs: { 'data-role': 'detail-pane' } },
       h('div', { class: 'detail-body' },
         h('div', { class: 'detail-header' }, h('h3', { text: `${d.key} · ${d.title}` }), chip(d.status),
-          h('button', { class: 'icon-btn detail-close-btn', text: 'Close', attrs: { type: 'button', 'data-action': 'close-detail' }, on: {
-            click: () => { this.selected = ''; this.detail = null; this.editing = false; this.fresh = true; this.render(); },
-          } })),
+          button('Close', () => { this.selected = ''; this.detail = null; this.editing = false; this.fresh = true; this.render(); }, { field: 'close-detail', icon: 'cancel' })),
         h('div', { class: 'detail-attempts', text: `Attempts: ${d.attempts}` }),
         d.waiting_reason ? block('Waiting', h('p', { text: d.waiting_reason, attrs: { 'data-role': 'waiting-reason' } })) : null,
         cur ? block('Running now', h('p', { text: `${cur.role} · ${cur.backend}/${cur.model} · ${cur.state}` }),
           h('div', { class: 'row-actions' }, button('Watch live', () => this.stream.open({
             id: cur.stage, role: cur.role, backend: cur.backend, model: cur.model, state: cur.state === 'running' ? 'running' : cur.state, outcome: '', raw_output: '',
-          }), { field: 'watch-live' }))) : null,
+          }), { field: 'watch-live', icon: 'view' }))) : null,
         this.editing ? this.editForm(d) : null,
         d.halted && !this.editing ? this.actions(d) : null,
         block('Prompt', mono(d.prompt)),
@@ -394,10 +392,7 @@ export class Board {
     }
     this.fresh = false;
     const controls = buttonsFor(this.runState).map((b) =>
-      h('button', {
-        class: 'ui-modal-btn' + (b.primary ? ' ui-modal-btn-primary' : ''), text: b.label,
-        attrs: { type: 'button', 'data-op': b.op }, on: { click: () => void this.control(b.op) },
-      }));
+      button(b.label, () => void this.control(b.op), { primary: b.primary, op: b.op, icon: b.icon, word: b.word }));
     replace(this.host,
       effortBar(this.slug, this.efforts, ef, (id) => { this.current = this.efforts.find((e) => e.id === id); void this.load(); }, { deps: this.yolo, onChanged: () => void this.refresh() }),
       h('div', { class: 'console-header' },

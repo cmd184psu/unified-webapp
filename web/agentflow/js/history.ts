@@ -121,7 +121,7 @@ export class History {
             ? h('ul', { class: 'profile-list', attrs: { 'data-role': 'history-list' } }, ...[...this.efforts].reverse().map((e) => this.row(e)))
             : h('p', { class: 'field-hint', text: 'No efforts yet.' })),
         section('Import an FRD', fileRow.el, this.errors.general,
-          h('div', { class: 'settings-actions' }, button('Import FRD', () => void this.importFile(), { primary: true, field: 'import-frd' })))));
+          h('div', { class: 'settings-actions' }, button('Import FRD', () => void this.importFile(), { primary: true, field: 'import-frd', icon: 'import' })))));
   }
 }
 

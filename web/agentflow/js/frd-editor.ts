@@ -276,7 +276,7 @@ export class FrdEditor {
       this.createErrors.add('budget_tokens', fieldRow('Token budget', tokens, 'Optional; blank is no limit')).el,
       this.createErrors.add('budget_seconds', fieldRow('Time budget (minutes)', minutes, 'Optional; blank is no limit')).el,
       this.createErrors.general,
-      h('div', { class: 'settings-actions' }, button('Create effort', () => void this.create(title.value, deliberate.checked, tokens.value, minutes.value), { primary: true, field: 'create-effort' })));
+      h('div', { class: 'settings-actions' }, button('Create effort', () => void this.create(title.value, deliberate.checked, tokens.value, minutes.value), { primary: true, field: 'create-effort', icon: 'add', word: true })));
   }
 
   private list(): HTMLElement {
@@ -294,7 +294,7 @@ export class FrdEditor {
       h('div', { class: 'inline-row', attrs: { 'data-revision': r.revision } },
         h('span', { text: `Revision ${r.revision} · ${r.created_by} · ${when(r.created)}` }),
         r.approved ? badge('approved', 'ok') : null,
-        button('View', () => void this.view(r.revision), { field: 'view-revision' })));
+        button('View', () => void this.view(r.revision), { field: 'view-revision', icon: 'view' })));
     const viewing = this.viewing;
     return section('Revisions',
       rows.length ? h('div', { class: 'wizard-list' }, ...rows) : h('p', { class: 'field-hint', text: 'No revisions yet.' }),
@@ -302,8 +302,8 @@ export class FrdEditor {
         h('h4', { text: `Revision ${viewing.revision}${viewing.approved ? ' (approved)' : ''}` }),
         h('pre', { class: 'detail-mono', text: JSON.stringify(viewing.json, null, 2) }),
         h('div', { class: 'row-actions' },
-          button('Load into editor', () => viewing.json && this.loadIntoEditor(viewing.json), { field: 'load-revision' }),
-          button('Close', () => { this.viewing = null; this.render(); }, { field: 'close-revision' }))) : null);
+          button('Load into editor', () => viewing.json && this.loadIntoEditor(viewing.json), { field: 'load-revision', icon: 'import', word: true }),
+          button('Close', () => { this.viewing = null; this.render(); }, { field: 'close-revision', icon: 'cancel' }))) : null);
   }
 
   render(): void {
@@ -321,8 +321,8 @@ export class FrdEditor {
         this.dirty ? badge('unsaved', 'warn') : null),
       this.form.el,
       h('div', { class: 'settings-actions' },
-        button('Save as new revision', () => void this.save(), { primary: !canApprove, field: 'save-frd' }),
-        canApprove && this.latest ? button(`Approve revision ${this.latest.revision}`, () => void this.approve(), { primary: true, field: 'approve-frd' }) : null)) : null;
+        button('Save as new revision', () => void this.save(), { primary: !canApprove, field: 'save-frd', icon: 'save' }),
+        canApprove && this.latest ? button(`Approve revision ${this.latest.revision}`, () => void this.approve(), { primary: true, field: 'approve-frd', icon: 'approve' }) : null)) : null;
     // A project has one active effort at a time: show the form only when none is active, else a disabled "+" says why.
     const active = this.efforts.find((e) => !isFinished(e));
     const bar = this.efforts.length ? effortBar(this.slug, this.efforts, ef, (id) => { this.current = this.efforts.find((e) => e.id === id); void this.loadDoc(); }) : null;

@@ -1269,3 +1269,8 @@ body {
 .drag-handle:focus-visible { outline: 2px solid var(--color-primary); border-radius: var(--radius-sm); }
 .inline-row.dragging { opacity: 0.6; }
 .ui-modal-btn.is-disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Symbol buttons: a glyph alone (label in the tooltip) or beside a short word. */
+.ui-modal-btn.has-icon { display: inline-flex; align-items: center; gap: var(--space-1); }
+.ui-modal-btn.icon-only { justify-content: center; min-width: var(--space-8); padding-left: var(--space-2); padding-right: var(--space-2); }
+.ui-modal-btn.has-icon svg { flex: none; }

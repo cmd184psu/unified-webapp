@@ -105,7 +105,7 @@ export class SettingsView {
         oc ? badge(oc.status === 'ok' ? 'available' : 'unavailable', oc.status === 'ok' ? 'ok' : 'warn') : null,
         h('span', { class: 'field-hint', attrs: { 'data-role': 'oc-version' },
           text: oc ? (oc.version ? `version ${oc.version}` : oc.error ?? '') : 'not probed yet' }),
-        button('Refresh', () => void this.refreshVersion(), { field: 'oc-refresh' })));
+        button('Refresh', () => void this.refreshVersion(), { field: 'oc-refresh', icon: 'refresh' })));
   }
 
   private renderRoots(): void {
@@ -113,9 +113,9 @@ export class SettingsView {
     replace(this.rootsHost,
       ...this.roots.map((r, i) => h('div', { class: 'inline-row', attrs: { 'data-root': i } },
         h('code', { text: r }),
-        button('Remove', () => edit(this.roots.filter((_, j) => j !== i)), { field: 'remove-root' }))),
+        button('Remove', () => edit(this.roots.filter((_, j) => j !== i)), { field: 'remove-root', icon: 'remove' }))),
       this.roots.length === 0 ? h('p', { class: 'field-hint', text: 'No folders chosen: the picker starts at the server default.' }) : null,
-      button('Add folder', () => void this.addRoot(edit), { field: 'add-root' }));
+      button('Add folder', () => void this.addRoot(edit), { field: 'add-root', icon: 'add' }));
   }
 
   private async addRoot(edit: (next: string[]) => void): Promise<void> {
@@ -165,6 +165,6 @@ export class SettingsView {
         section('opencode', path, this.ocHost),
         section('Folders the picker may browse', this.rootsHost),
         this.errors.general,
-        h('div', { class: 'settings-actions' }, button('Save settings', () => void this.save(), { primary: true, field: 'save' }))));
+        h('div', { class: 'settings-actions' }, button('Save settings', () => void this.save(), { primary: true, field: 'save', icon: 'save' }))));
   }
 }

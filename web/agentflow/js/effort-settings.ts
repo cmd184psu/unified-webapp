@@ -72,7 +72,7 @@ export function effortSettings(ef: EffortView, frdText: string, deps: EffortSett
   const triggers = ef.deliberate ? [] : deliberateTriggers(frdText);
   const suggestion = triggers.length === 0 ? null : h('div', { class: 'warn-box', attrs: { 'data-role': 'deliberate-suggestion' } },
     h('p', { text: `This FRD mentions ${triggers.join(', ')}. Deliberate planning adds a pre-mortem and a fuller test plan, which suits this kind of work.` }),
-    button('Turn on deliberate planning', () => { deliberate.checked = true; void save(); }, { field: 'accept-suggestion' }));
+    button('Turn on deliberate planning', () => { deliberate.checked = true; void save(); }, { field: 'accept-suggestion', icon: 'approve', word: true }));
   const save = async (): Promise<void> => {
     errors.clear();
     try {
@@ -97,5 +97,5 @@ export function effortSettings(ef: EffortView, frdText: string, deps: EffortSett
       errors.add('budget_seconds', fieldRow('Time budget (minutes)', minutes,
         'Total stage run time, so stages running in parallel add up; blank is no limit. From 90% no new task starts; at 100% the run stops')).el),
     errors.general,
-    h('div', { class: 'settings-actions' }, button('Save settings', () => void save(), { primary: true, field: 'save-effort-settings' })));
+    h('div', { class: 'settings-actions' }, button('Save settings', () => void save(), { primary: true, field: 'save-effort-settings', icon: 'save' })));
 }

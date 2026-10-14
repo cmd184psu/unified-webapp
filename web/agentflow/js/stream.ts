@@ -6,6 +6,7 @@
 
 import { stageStreamURL, type Stage } from './api.js';
 import { h, replace } from './dom.js';
+import { button } from './forms.js';
 
 /** The part of EventSource the panel uses, so tests can drive it. */
 export interface SourceLike {
@@ -45,7 +46,7 @@ export class StreamPanel {
       h('div', { class: 'stream-header' },
         h('strong', { text: `${st.role} · ${st.backend}/${st.model}` }),
         this.status,
-        h('button', { class: 'icon-btn detail-close-btn', text: 'Close', attrs: { type: 'button', 'data-action': 'close-stream' }, on: { click: () => this.close() } })),
+        button('Close', () => this.close(), { field: 'close-stream', icon: 'cancel' })),
       this.out);
     this.panel.removeAttribute('hidden');
     if (st.state === 'running') {

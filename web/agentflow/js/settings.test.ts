@@ -116,7 +116,7 @@ test('H1: browse roots are listed, added through the picker (no typing), removed
   const t = harness({ settings: async () => ({ ...SETTINGS, browse_roots: ['/srv'] }) });
   const stop = t.view.mount();
   await flush();
-  eq(findAll(t.host, (e) => e.getAttribute('data-root') !== null).map((e) => e.textContent), ['/srvRemove']);
+  eq(findAll(t.host, (e) => e.getAttribute('data-root') !== null).map((e) => e.textContent), ['/srv']);
   eq(findAll(t.host, (e) => e.getAttribute('data-field') === 'browse_roots').length, 0);
   t.picked.path = '/home/me';
   button(t.host, 'Add folder').click();

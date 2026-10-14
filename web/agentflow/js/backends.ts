@@ -140,7 +140,7 @@ export class BackendsView {
     const keyState = h('span', { class: 'row-actions', attrs: { 'data-role': 'key-state' } });
     const drawKey = (): void => replace(keyState,
       initial?.has_key ? (clearKey ? badge('key cleared on save', 'warn') : badge('key set', 'ok')) : null,
-      initial?.has_key ? button(clearKey ? 'Keep key' : 'Clear key', () => { clearKey = !clearKey; drawKey(); }, { field: 'clear-key' }) : null);
+      initial?.has_key ? button(clearKey ? 'Keep key' : 'Clear key', () => { clearKey = !clearKey; drawKey(); }, { field: 'clear-key', icon: clearKey ? 'cancel' : 'remove', word: true }) : null);
     drawKey();
     const keyField = errors.add('api_key', fieldRow('API key', h('div', { class: 'row-actions' }, apiKey, keyState),
       'Sent to the hosted service as the credential. Leave blank to keep the stored key'));
@@ -173,7 +173,7 @@ export class BackendsView {
         button('Remove', () => {
           models.splice(models.indexOf(row), 1);
           row.el.parentNode?.removeChild(row.el);
-        }));
+        }, { field: 'remove-model', icon: 'remove' }));
       draw();
       modelList.appendChild(row.el);
     };
@@ -191,7 +191,7 @@ export class BackendsView {
           row.model = modelControl(keep);
           replace(row.el, row.model, h('span', { class: 'inline-check' }, row.paid, 'paid'),
             h('span', { class: 'inline-check' }, 'at once', row.max),
-            button('Remove', () => { models.splice(models.indexOf(row), 1); row.el.parentNode?.removeChild(row.el); }));
+            button('Remove', () => { models.splice(models.indexOf(row), 1); row.el.parentNode?.removeChild(row.el); }, { field: 'remove-model', icon: 'remove' }));
         }
         this.deps.notify(`${probed.length} model(s) found on ${host.value.trim()}`);
       } catch (err) {
@@ -199,9 +199,9 @@ export class BackendsView {
       }
     };
     const modelsField = errors.add('models', fieldRow('Models', modelList,
-      'Probe host for models lists what the host serves so you can pick exact names. Mark a paid model so it is only used when listed for a role. "At once" caps how many stages run that model together (blank = only the slots limit it)'));
-    modelsField.el.appendChild(button('Probe host for models', () => void probe(), { field: 'probe-host' }));
-    modelsField.el.appendChild(button('Add model', () => addModel(), { field: 'add-model' }));
+      'Probe lists what the host serves. A paid model is only used when listed for a role. "At once" caps how many stages run it together (blank = the slots limit)'));
+    modelsField.el.appendChild(button('Probe host for models', () => void probe(), { field: 'probe-host', icon: 'probe' }));
+    modelsField.el.appendChild(button('Add model', () => addModel(), { field: 'add-model', icon: 'add' }));
 
     const save = async (): Promise<void> => {
       errors.clear();
@@ -239,8 +239,8 @@ export class BackendsView {
       modelsField.el,
       errors.general,
       h('div', { class: 'settings-actions' },
-        button('Cancel', done, { field: 'cancel' }),
-        button(initial ? 'Save backend' : 'Add backend', () => void save(), { primary: true, field: 'save' })));
+        button('Cancel', done, { field: 'cancel', icon: 'cancel' }),
+        button(initial ? 'Save backend' : 'Add backend', () => void save(), { primary: true, field: 'save', icon: initial ? 'save' : 'add' })));
   }
 
   private retirePanel(b: Backend): HTMLElement {
@@ -266,8 +266,8 @@ export class BackendsView {
       ...notes.map((n) => h('p', { text: n })),
       h('span', { class: 'inline-check' }, cancel, 'Cancel stages running on this backend now'),
       h('div', { class: 'row-actions' },
-        button('Retire backend', () => void run(), { primary: true, field: 'confirm-retire' }),
-        button('Keep it', () => { this.retiring.delete(b.name); this.render(); }, { field: 'cancel-retire' })));
+        button('Retire backend', () => void run(), { primary: true, field: 'confirm-retire', icon: 'trash', word: true }),
+        button('Keep it', () => { this.retiring.delete(b.name); this.render(); }, { field: 'cancel-retire', icon: 'cancel', word: true })));
   }
 
   private card(b: Backend): HTMLElement {
@@ -287,10 +287,10 @@ export class BackendsView {
           b.retired ? badge('retired', 'warn') : null,
           b.down_until ? badge('unreachable', 'warn') : null),
         h('div', { class: 'profile-actions' },
-          button('Edit', () => { this.editing.add(b.name); this.render(); }, { field: 'edit' }),
+          button('Edit', () => { this.editing.add(b.name); this.render(); }, { field: 'edit', icon: 'edit' }),
           b.retired
-            ? button('Enable', () => void this.enable(b.name), { field: 'enable' })
-            : button('Retire', () => { this.retiring.add(b.name); this.render(); }, { field: 'retire' }))),
+            ? button('Enable', () => void this.enable(b.name), { field: 'enable', icon: 'approve', word: true })
+            : button('Retire', () => { this.retiring.add(b.name); this.render(); }, { field: 'retire', icon: 'trash', word: true }))),
       h('div', { class: 'profile-fields' },
         h('div', {}, h('label', { text: 'Host' }), h('span', { text: b.host })),
         h('div', {}, h('label', { text: 'API type' }), h('span', { text: b.api_type })),
@@ -310,7 +310,7 @@ export class BackendsView {
 
   private backendsSection(): HTMLElement {
     const addForm = this.adding ? this.backendForm(null, () => { this.adding = false; void this.load(); }) : null;
-    const addBtn = button('Add backend', () => { this.adding = true; this.render(); }, { primary: true, field: 'add-backend' });
+    const addBtn = button('Add backend', () => { this.adding = true; this.render(); }, { primary: true, field: 'add-backend', icon: 'add' });
     if (this.backends.length === 0) {
       return h('div', { class: 'plan-empty', attrs: { 'data-role': 'no-backends' } },
         h('h3', { text: 'No backends configured' }),
@@ -389,7 +389,7 @@ export class BackendsView {
     replace(this.limitsHost,
       h('div', { class: 'profile-fields', attrs: { 'data-role': 'project-limits' } }, ...rows),
       errors.general,
-      h('div', { class: 'settings-actions' }, button('Save project limits', () => void save(), { primary: true, field: 'save-limits' })));
+      h('div', { class: 'settings-actions' }, button('Save project limits', () => void save(), { primary: true, field: 'save-limits', icon: 'save' })));
   }
 
   private limitsSection(): HTMLElement {
@@ -424,7 +424,7 @@ export class BackendsView {
     }
     const warn = this.warnings.length === 0 ? null : h('div', { class: 'warn-box', attrs: { 'data-role': 'warnings' } },
       ...this.warnings.map((w) => h('p', { text: w })),
-      button('Dismiss', () => { this.warnings = []; this.render(); }, { field: 'dismiss' }));
+      button('Dismiss', () => { this.warnings = []; this.render(); }, { field: 'dismiss', icon: 'remove' }));
     replace(this.host,
       h('div', { class: 'settings-host' },
         warn,

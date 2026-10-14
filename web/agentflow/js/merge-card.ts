@@ -6,6 +6,7 @@
 
 import type { Effort, GitCommands } from './api.js';
 import { h } from './dom.js';
+import { icon } from './icons.js';
 
 type Merged = Pick<Effort, 'id' | 'title' | 'integration_branch'>;
 
@@ -34,6 +35,6 @@ export function mergeCard(ef: Merged, git: GitCommands | null, copy: (text: stri
         h('p', { text: 'To merge it, run:' }),
         ...git.commands.map((c) => h('div', { class: 'merge-command' },
           h('pre', { class: 'detail-mono', text: c }),
-          h('button', { class: 'icon-btn', text: '⧉', attrs: { type: 'button', title: 'Copy this command', 'aria-label': 'Copy this command', 'data-action': 'copy-command' }, on: { click: () => copy(c) } }))))
+          h('button', { class: 'icon-btn', attrs: { type: 'button', title: 'Copy this command', 'aria-label': 'Copy this command', 'data-action': 'copy-command' }, on: { click: () => copy(c) } }, icon('copy')))))
       : h('p', { class: 'field-hint', text: `The commands could not be loaded. To merge, run: git merge --no-ff ${branch}` }));
 }

@@ -122,7 +122,7 @@ test('buttons follow the run state; stop asks for confirmation; start does not',
   btn('stop').click();
   await flush();
   ok(t.calls[0].startsWith('confirm:') && t.calls[1] === 'alpha:stop', 'stop confirmed then sent: ' + t.calls.join('|'));
-  ok(t.host.textContent.includes('Start'), 'row re-rendered from the response (stopped)');
+  ok(btn('start') !== undefined, 'row re-rendered from the response (stopped)');
   btn('start').click();
   await flush();
   eq(t.calls.slice(2), ['alpha:start']);

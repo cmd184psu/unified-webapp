@@ -5,6 +5,8 @@
 import { confirmDialog, copyText } from '@shared';
 import { api, type Effort, type GitCommands, type ProjectView, type RunOp, type WorkItem } from './api.js';
 import { chip, h, replace } from './dom.js';
+import { button } from './forms.js';
+import type { IconName } from './icons.js';
 import { isTransient, startPoll, subscribe, type AgentflowEvent } from './events.js';
 import { mergeCard } from './merge-card.js';
 import { yoloBadge } from './yolo.js';
@@ -35,23 +37,26 @@ interface Button {
   op: RunOp;
   label: string;
   primary?: boolean;
+  icon: IconName;
+  /** keep the label beside the glyph where the glyph alone is ambiguous */
+  word?: boolean;
 }
 
 /** buttonsFor lists the run controls that make sense in a run state. */
 export function buttonsFor(runState: string): Button[] {
   switch (runState) {
     case 'running':
-      return [{ op: 'pause', label: 'Pause' }, { op: 'stop', label: 'Stop' }];
+      return [{ op: 'pause', label: 'Pause', icon: 'pause' }, { op: 'stop', label: 'Stop', icon: 'stop' }];
     case 'pausing':
-      return [{ op: 'start', label: 'Resume', primary: true }, { op: 'stop', label: 'Stop' }];
+      return [{ op: 'start', label: 'Resume', primary: true, icon: 'start' }, { op: 'stop', label: 'Stop', icon: 'stop' }];
     case 'paused':
       return [
-        { op: 'start', label: 'Resume', primary: true },
-        { op: 'run-one', label: 'Run one' },
-        { op: 'stop', label: 'Stop' },
+        { op: 'start', label: 'Resume', primary: true, icon: 'start' },
+        { op: 'run-one', label: 'Run one', icon: 'start', word: true },
+        { op: 'stop', label: 'Stop', icon: 'stop' },
       ];
     default:
-      return [{ op: 'start', label: 'Start', primary: true }, { op: 'run-one', label: 'Run one' }];
+      return [{ op: 'start', label: 'Start', primary: true, icon: 'start' }, { op: 'run-one', label: 'Run one', icon: 'start', word: true }];
   }
 }
 
@@ -197,9 +202,7 @@ export class Overview {
         h('div', { class: 'plan-empty' },
           h('h3', { text: 'No projects yet' }),
           h('p', { text: 'Create a project to get started.' }),
-          h('button', { class: 'ui-modal-btn ui-modal-btn-primary', text: 'New project', attrs: { type: 'button', 'data-op': 'new-project' }, on: {
-            click: () => this.deps.open('+new'),
-          } })),
+          button('New project', () => this.deps.open('+new'), { primary: true, op: 'new-project', icon: 'add' })),
       );
       return;
     }
@@ -214,12 +217,7 @@ export class Overview {
       ? (p.current ?? []).map((w) => h('div', { class: 'task-item-meta', text: workLine(w) }))
       : [h('div', { class: 'task-item-meta', text: ef ? 'no stage running' : 'no active effort' })];
     const buttons = buttonsFor(p.run_state).map((b) =>
-      h('button', {
-        class: 'ui-modal-btn' + (b.primary ? ' ui-modal-btn-primary' : ''),
-        text: b.label,
-        attrs: { type: 'button', 'data-op': b.op },
-        on: { click: () => void this.control(p.slug, b.op) },
-      }));
+      button(b.label, () => void this.control(p.slug, b.op), { primary: b.primary, op: b.op, icon: b.icon, word: b.word }));
     return h('li', { class: 'task-item', attrs: { 'data-project': p.slug } },
       h('div', { class: 'task-item-meta' },
         h('a', { class: 'task-item-title', text: p.slug, attrs: { href: '#', 'data-open': p.slug }, on: {

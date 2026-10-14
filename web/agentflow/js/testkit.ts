@@ -113,6 +113,7 @@ export function installFakeDom(): void {
   Object.defineProperty(globalThis, 'document', {
     value: {
       createElement: (tag: string) => new FakeEl(tag.toUpperCase()),
+      createElementNS: (_ns: string, tag: string) => new FakeEl(tag.toUpperCase()),
       createTextNode: (s: string) => new FakeText(s),
     },
     writable: true,
@@ -147,9 +148,9 @@ export function byAttr(root: FakeEl, attr: string, value: string): FakeEl[] {
   return findAll(root, (e) => e.getAttribute(attr) === value);
 }
 
-/** button finds a button by its exact label. */
+/** button finds a button by its exact label: its text or, for an icon button, its aria-label. */
 export function button(root: FakeEl, label: string): FakeEl {
-  const found = findAll(root, (e) => e.tagName === 'BUTTON' && e.textContent === label);
+  const found = findAll(root, (e) => e.tagName === 'BUTTON' && (e.textContent === label || e.getAttribute('aria-label') === label));
   if (found.length === 0) throw new Error(`no button "${label}"`);
   return found[0];
 }

@@ -6,6 +6,7 @@
 import { createToggle } from '@shared';
 import { ApiError } from './api.js';
 import { h, type Child } from './dom.js';
+import { icon, type IconName } from './icons.js';
 
 export interface Field {
   /** The row: label, control, hint and error. */
@@ -73,14 +74,20 @@ export function fieldRow(label: string, control: Control | HTMLElement, hint?: s
   };
 }
 
-/** button builds a plain or primary button. */
-export function button(label: string, onClick: () => void, opts: { primary?: boolean; field?: string } = {}): HTMLElement {
+/**
+ * button builds a plain or primary button. With opts.icon it shows the glyph
+ * and keeps the label as its tooltip and accessible name; opts.word also keeps
+ * the label as text beside the glyph (for ambiguous or destructive actions).
+ */
+export function button(label: string, onClick: () => void, opts: { primary?: boolean; field?: string; op?: string; icon?: IconName; word?: boolean } = {}): HTMLElement {
+  const glyph = opts.icon !== undefined;
+  const asIcon = glyph && !opts.word;
   return h('button', {
-    class: 'ui-modal-btn' + (opts.primary ? ' ui-modal-btn-primary' : ''),
-    text: label,
-    attrs: { type: 'button', 'data-action': opts.field },
+    class: 'ui-modal-btn' + (opts.primary ? ' ui-modal-btn-primary' : '') + (glyph ? ' has-icon' : '') + (asIcon ? ' icon-only' : ''),
+    text: glyph ? undefined : label,
+    attrs: { type: 'button', 'data-action': opts.field, 'data-op': opts.op, title: glyph ? label : undefined, 'aria-label': asIcon ? label : undefined },
     on: { click: onClick },
-  });
+  }, glyph ? icon(opts.icon as IconName) : null, glyph && opts.word ? h('span', { text: label }) : null);
 }
 
 /** section is a titled block. */
@@ -154,7 +161,7 @@ export class RowsEditor<T> {
     private onChange: () => void = () => {},
   ) {
     for (const it of items) this.addRow(it);
-    this.el = h('div', {}, this.list, button(addLabel, () => this.addRow(this.blank(), true), { field: 'add-row' }));
+    this.el = h('div', {}, this.list, button(addLabel, () => this.addRow(this.blank(), true), { field: 'add-row', icon: 'add' }));
   }
 
   private addRow(item: T, notify = false): void {
@@ -165,7 +172,7 @@ export class RowsEditor<T> {
         this.rows.splice(this.rows.indexOf(ctl), 1);
         this.list.removeChild(row);
         this.onChange();
-      }, { field: 'remove-row' }));
+      }, { field: 'remove-row', icon: 'remove' }));
     this.list.appendChild(row);
     if (notify) this.onChange();
   }

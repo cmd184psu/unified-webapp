@@ -17,20 +17,19 @@ export class DirPicker {
   private list = h('div', { class: 'wizard-list', attrs: { 'data-role': 'dir-list' } });
   private where = h('code', { attrs: { 'data-role': 'dir-path' } });
   private err = h('div', { class: 'field-error', attrs: { role: 'alert', hidden: true } });
-  private up = button('Up', () => void this.go(this.cur?.parent ?? ''), { field: 'dir-up' });
+  private up = button('Parent folder', () => void this.go(this.cur?.parent ?? ''), { field: 'dir-up', icon: 'up' });
   /** Bumped per request so a slow answer cannot overwrite a newer one. */
   private seq = 0;
   readonly el: HTMLElement;
 
   constructor(private fsDirs: FsDirsFn, private start: string, private onChoose: (path: string) => void, private onCancel: () => void) {
-    this.up.setAttribute('title', 'Parent folder');
     this.el = h('div', { class: 'dir-picker', attrs: { 'data-role': 'dir-picker' } },
       h('div', { class: 'row-actions' }, this.up, this.where),
       this.err,
       this.list,
       h('div', { class: 'settings-actions' },
-        button('Cancel', () => this.onCancel(), { field: 'dir-cancel' }),
-        button('Choose this folder', () => { if (this.cur) this.onChoose(this.cur.path); }, { primary: true, field: 'dir-choose' })));
+        button('Cancel', () => this.onCancel(), { field: 'dir-cancel', icon: 'cancel' }),
+        button('Choose this folder', () => { if (this.cur) this.onChoose(this.cur.path); }, { primary: true, field: 'dir-choose', icon: 'folder' })));
   }
 
   /** mount shows the start directory, or the first browse root when it cannot be listed. */

@@ -160,12 +160,12 @@ export class QueueApproval {
             h('code', { class: 'plan-frd-id', text: `hash ${q.hash.slice(0, 12)}`, attrs: { 'data-role': 'queue-hash' } }),
             q.approved_by ? badge(`approved by ${q.approved_by}`, 'ok') : null),
           h('div', { class: 'plan-actions' },
-            canCompile ? button('Recompile', () => void this.compile(), { field: 'compile' }) : null,
-            draft ? button('Approve whole queue', () => void this.approve(), { primary: true, field: 'approve-queue' }) : null))
+            canCompile ? button('Recompile', () => void this.compile(), { field: 'compile', icon: 'refresh' }) : null,
+            draft ? button('Approve whole queue', () => void this.approve(), { primary: true, field: 'approve-queue', icon: 'approve' }) : null))
           : h('div', { class: 'plan-empty' },
             h('h3', { text: 'No queue yet' }),
             h('p', { attrs: { 'data-role': 'queue-note' }, text: compiling ? 'Compiling the plan into tasks...' : 'Approve a plan first; it is compiled into tasks automatically.' }),
-            ef.status === 'plan_approved' ? button('Recompile', () => void this.compile(), { field: 'compile' }) : null),
+            ef.status === 'plan_approved' ? button('Recompile', () => void this.compile(), { field: 'compile', icon: 'refresh' }) : null),
         this.errors.general,
         q ? section('Tasks', h('div', { class: 'profile-list' }, ...q.tasks.map((t) => this.taskCard(t)))) : null));
   }

@@ -221,7 +221,7 @@ export class ProjectForm {
           emptyNote: global.length
             ? `Uses the global list: ${global.map((c) => `${c.backend}/${c.model}`).join(', ')}`
             : 'Uses the global list, which is empty.',
-          extra: overridden ? [button('Use global list', () => void this.clearRole(role), { field: 'clear-override' })] : [],
+          extra: overridden ? [button('Use global list', () => void this.clearRole(role), { field: 'clear-override', icon: 'retry', word: true })] : [],
         }));
     }));
   }
@@ -258,9 +258,9 @@ export class ProjectForm {
             'Opt-in only: none are loaded unless listed here. Each is pinned to an exact version such as 1.2.3 (no latest, no ranges); listed plugins are fetched by the runner when a stage starts')).el,
           e.general,
           h('div', { class: 'settings-actions' },
-            p ? button('Delete project', () => void this.remove(), { field: 'delete-project' }) : null,
-            button('Cancel', () => this.done(p?.slug ?? ''), { field: 'cancel' }),
-            button(p ? 'Save project' : 'Create project', () => void this.save(), { primary: true, field: 'save-project' }))),
+            p ? button('Delete project', () => void this.remove(), { field: 'delete-project', icon: 'trash', word: true }) : null,
+            button('Cancel', () => this.done(p?.slug ?? ''), { field: 'cancel', icon: 'cancel' }),
+            button(p ? 'Save project' : 'Create project', () => void this.save(), { primary: true, field: 'save-project', icon: p ? 'save' : 'add' }))),
         p ? section('Role preferences',
           h('p', { class: 'field-hint', text: 'Override the global candidate list for one role in this project; a role without an override uses the global list.' }),
           this.rolesHost) : h('p', { class: 'field-hint', text: 'Role preferences can be set once the project exists.' })));

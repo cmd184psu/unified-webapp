@@ -92,7 +92,7 @@ test('an approved queue shows who approved it and offers no approve button', asy
   const stop = t.v.mount();
   await flush();
   ok(byAttr(t.host, 'data-role', 'queue-header')[0].textContent.includes('approved by alice'), 'approver');
-  eq(findAll(t.host, (e) => e.tagName === 'BUTTON' && e.textContent === 'Approve whole queue').length, 0);
+  eq(findAll(t.host, (e) => e.tagName === 'BUTTON' && e.getAttribute('aria-label') === 'Approve whole queue').length, 0);
   stop();
 });
 
@@ -102,7 +102,7 @@ test('H3: with an approved plan and no queue the view says compiling and only of
   await flush();
   ok(t.host.textContent.includes('No queue yet'), 'empty state');
   ok(byAttr(t.host, 'data-role', 'queue-note')[0].textContent.includes('Compiling the plan into tasks'), 'compiling note');
-  eq(findAll(t.host, (e) => e.tagName === 'BUTTON' && e.textContent === 'Compile plan').length, 0);
+  eq(findAll(t.host, (e) => e.tagName === 'BUTTON' && e.getAttribute('aria-label') === 'Compile plan').length, 0);
   button(t.host, 'Recompile').click();
   await flush();
   eq(t.log.filter((l) => l === 'compile'), ['compile']);
@@ -124,7 +124,7 @@ test('F1: the queue refetches on project.update and polls while compiling, then 
   t.setQueue(queue('hash-1'));
   o.effort = effort({ status: 'queue_draft' });
   await new Promise((r) => setTimeout(r, 80));
-  ok(t.host.textContent.includes('Approve whole queue'), 'the finished queue is shown without a reload');
+  ok(byAttr(t.host, 'data-action', 'approve-queue').length === 1, 'the finished queue is shown without a reload');
   const settled = t.calls.queue;
   await new Promise((r) => setTimeout(r, 120));
   eq(t.calls.queue, settled);
