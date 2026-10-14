@@ -19,6 +19,8 @@ You are reviewing one finished task. You did not write the code. Judge the worke
 - If the task is correct, the verdict is "pass" and `issues` is `[]`.
 - If the task is incomplete but fixable, the verdict is "repair" and `repair_prompt` tells the worker exactly what to change.
 
+If the prompt ends with "The worker says nothing needs changing", the worker changed no files: pass only when the FILES section already satisfies every acceptance criterion.
+
 ## Output
 
 Your final message must be exactly one JSON object and nothing else: no markdown fence, no text before or after.

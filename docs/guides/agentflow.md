@@ -369,6 +369,12 @@ Watch progress on the Board, in live stage output
 | `needs_input` | The worker or reviewer says it needs a human decision. |
 | `needs_attention` | Too many infrastructure failures or git policy violations. |
 
+A worker may find that an earlier task already did the work. It then changes nothing and sets
+`no_changes_reason` naming the evidence. If the tree really is unchanged, verify passes with a
+warning, the reviewer judges whether the files already meet every acceptance criterion, and a
+passing review completes the attempt as passed with no commit and no merge (event
+`attempt.no_changes`). Without a reason an unchanged tree still fails `no_changes`.
+
 The last four are **halted**. Only that task and its dependents wait; the rest of the queue
 keeps going. Act on a halted task from the Board:
 

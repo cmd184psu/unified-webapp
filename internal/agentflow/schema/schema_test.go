@@ -334,3 +334,14 @@ func TestFRDSplitValidate(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkerOutNoChangesReason(t *testing.T) {
+	w, err := Parse[WorkerOut]([]byte(`{"summary":"s","files_changed":[],"learnings":[],"no_changes_reason":"lib.go F exists"}`))
+	if err != nil || w.NoChangesReason != "lib.go F exists" {
+		t.Fatalf("%+v %v", w, err)
+	}
+	w, err = Parse[WorkerOut]([]byte(`{"summary":"s","files_changed":[],"learnings":[]}`))
+	if err != nil || w.NoChangesReason != "" {
+		t.Fatalf("%+v %v", w, err)
+	}
+}

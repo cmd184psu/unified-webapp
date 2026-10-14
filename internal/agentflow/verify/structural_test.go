@@ -370,3 +370,23 @@ func TestFinalizeRecomputesPass(t *testing.T) {
 		t.Fatal("new failure must fail")
 	}
 }
+
+func TestNoChangesDeclaredPassesWithWarning(t *testing.T) {
+	dir, base := newRepo(t)
+	rep, err := Structural(context.Background(), Input{Worktree: dir, GitDir: filepath.Join(dir, ".git"), BaseCommit: base, FilesTouched: []string{"a.go"}, NoChangesReason: "a.go F exists"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Pass || rep.Failed(CheckNoChanges) || len(rep.Warnings) != 1 || rep.Warnings[0] != "worker declares nothing to change: a.go F exists" {
+		t.Fatalf("got %+v", rep)
+	}
+}
+
+func TestNoChangesReasonIgnoredWhenFilesChanged(t *testing.T) {
+	dir, base := newRepo(t)
+	write(t, dir, "a.go", "package a\n\nfunc F() {}\n")
+	rep, err := Structural(context.Background(), Input{Worktree: dir, GitDir: filepath.Join(dir, ".git"), BaseCommit: base, FilesTouched: []string{"a.go"}, NoChangesReason: "x"})
+	if err != nil || !rep.Pass || len(rep.Warnings) != 0 {
+		t.Fatalf("got %+v %v", rep, err)
+	}
+}

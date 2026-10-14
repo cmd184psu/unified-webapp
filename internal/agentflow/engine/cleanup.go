@@ -48,6 +48,15 @@ func (e *Engine) afterReview(ctx context.Context, c *chain, last model.Stage) (b
 		}
 		return false, err
 	}
+	// Nothing to clean when the worker declared nothing to change and the
+	// checkpoint found nothing to commit.
+	if reason := c.noChangesReason(); reason != "" {
+		if none, err := e.atBase(ctx, c); err != nil {
+			return false, err
+		} else if none {
+			return true, e.completeNoChanges(ctx, c, reason)
+		}
+	}
 	pk, reason, err := e.pickBackend(ctx, "worker", c.task, c.proj, "")
 	if err != nil || reason != "" {
 		return false, err // the reason is on the task; the next Advance tries again

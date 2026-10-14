@@ -68,6 +68,7 @@ func (x verifyExecutor) Execute(ctx context.Context, rc golane.RunContext, st mo
 	}
 	rep, err := verify.Structural(ctx, verify.Input{
 		Worktree: c.att.Worktree, GitDir: admin, BaseCommit: strings.TrimSpace(string(base)), FilesTouched: c.task.FilesTouched,
+		NoChangesReason: c.noChangesReason(),
 	})
 	if err != nil {
 		return StageResult{}, err

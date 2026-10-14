@@ -237,6 +237,13 @@ func (e *Engine) buildPrompt(ctx context.Context, st model.Stage, project string
 	}
 	if st.Role == "reviewer" {
 		b.WriteString(e.reviewFiles(ctx, att, task))
+		stages, err := e.deps.Store.ListAttemptStages(ctx, att.ID)
+		if err != nil {
+			return "", err
+		}
+		if reason := (&chain{stages: stages}).noChangesReason(); reason != "" {
+			fmt.Fprintf(&b, "\n## The worker says nothing needs changing\n\nThe worker reports: %s\n\nJudge whether the FILES section already satisfies every acceptance criterion. If it does, the verdict is \"pass\" and the summary cites the evidence (file and symbol). If not, the verdict is \"repair\" and the repair prompt lists the exact missing items.\n", reason)
+		}
 	}
 	if st.Role == "worker" {
 		wc, err := e.WorkerContext(ctx, project, att.ID)

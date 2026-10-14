@@ -20,6 +20,9 @@ type WorkerOut struct {
 	FilesChanged []string `json:"files_changed"`
 	Learnings    []string `json:"learnings"`
 	Blocked      string   `json:"blocked,omitempty"`
+	// NoChangesReason is set when the files already satisfy the task, so the
+	// worker changed nothing; it names the evidence.
+	NoChangesReason string `json:"no_changes_reason,omitempty"`
 }
 
 // ReviewOut is the task reviewer's final message.

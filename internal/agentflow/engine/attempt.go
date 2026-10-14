@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -103,6 +104,16 @@ func (c *chain) workerOut() (schema.WorkerOut, bool) {
 		}
 	}
 	return schema.WorkerOut{}, false
+}
+
+// noChangesReason is what the attempt's newest worker stage declared when it
+// found nothing to change, or "".
+func (c *chain) noChangesReason() string {
+	w, ok := c.workerOut()
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(w.NoChangesReason)
 }
 
 // FailureKind says why an attempt's chain stopped short of a pass.
@@ -328,12 +339,47 @@ func (e *Engine) commitAndMerge(ctx context.Context, c *chain, last model.Stage)
 	switch {
 	case errors.Is(err, gitsvc.ErrNothingToCommit):
 		// Committed by an earlier pass that died before queueing the merge.
+		if reason := c.noChangesReason(); reason != "" {
+			if none, err := e.atBase(ctx, c); err != nil {
+				return false, err
+			} else if none {
+				return true, e.completeNoChanges(ctx, c, reason)
+			}
+		}
 	case errors.Is(err, gitsvc.ErrGitlink):
 		return true, e.fail(ctx, c, Failure{Kind: FailCommit, Stage: last})
 	case err != nil:
 		return false, err
 	}
 	return true, e.submit(ctx, c, MergeLane, "merge", mergeBackend, "", last.QueueHash)
+}
+
+// atBase reports whether the task worktree's HEAD is still the commit it was
+// forked from, so nothing of this attempt was ever committed.
+func (e *Engine) atBase(ctx context.Context, c *chain) (bool, error) {
+	b, err := os.ReadFile(e.baseCommitFile(c.task.ID))
+	if err != nil {
+		return false, fmt.Errorf("task base commit: %w", err)
+	}
+	h, err := e.deps.Git.Head(ctx, c.att.Worktree)
+	if err != nil {
+		return false, err
+	}
+	return h.Commit == strings.TrimSpace(string(b)), nil
+}
+
+// completeNoChanges ends an attempt whose worker declared nothing to change,
+// the tree is unchanged and the reviewer agreed: no commit, no merge stage.
+func (e *Engine) completeNoChanges(ctx context.Context, c *chain, reason string) error {
+	err := e.deps.Store.WithTx(ctx, func(tx *sql.Tx) error {
+		_, err := store.AppendEvent(tx, SystemActor, "attempt.no_changes", "attempt", strconv.FormatInt(c.att.ID, 10),
+			map[string]any{"task": c.task.Key, "attempt": c.att.N, "reason": reason})
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	return e.completeAttempt(ctx, c)
 }
 
 // policedStage runs a model stage of an attempt. A worker first gets its

@@ -42,6 +42,9 @@ type Input struct {
 	GitDir       string
 	BaseCommit   string
 	FilesTouched []string
+	// NoChangesReason is the worker's declaration that the files already
+	// satisfy the task; it lets an unchanged tree pass no_changes.
+	NoChangesReason string
 }
 
 // Structural runs the in-process checks over the worktree diff. It returns an
@@ -61,6 +64,12 @@ func Structural(ctx context.Context, in Input) (VerifyReport, error) {
 	}
 
 	rep := VerifyReport{Warnings: []string{}, NewFailures: []string{}, BaselineFailures: []string{}}
+	if len(files) == 0 && len(nested) == 0 && in.NoChangesReason != "" {
+		rep.Checks = []Check{{Name: CheckNoChanges, Pass: true}}
+		rep.Warnings = append(rep.Warnings, "worker declares nothing to change: "+in.NoChangesReason)
+		rep.Finalize()
+		return rep, nil
+	}
 	if len(files) == 0 && len(nested) == 0 {
 		rep.Checks = []Check{{Name: CheckNoChanges, Pass: false, Details: []string{"the worker stage changed no files"}}}
 		return rep, nil
