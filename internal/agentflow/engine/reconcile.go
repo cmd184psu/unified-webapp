@@ -179,8 +179,13 @@ func (e *Engine) reconcile(ctx context.Context, fromPrevious bool) (ReconcileRep
 			continue
 		}
 		rep.Lost = append(rep.Lost, st.ID)
+		if fromPrevious && st.Role == "merge" {
+			if err := e.undoLostMerge(ctx, st.ID); err != nil {
+				errs = append(errs, err)
+			}
+		}
 	}
-	ab, err := e.abandonInterrupted(ctx)
+	ab, err := e.abandonInterrupted(ctx, fromPrevious)
 	rep.Abandoned = ab
 	if err != nil {
 		errs = append(errs, err)
@@ -191,7 +196,10 @@ func (e *Engine) reconcile(ctx context.Context, fromPrevious bool) (ReconcileRep
 // abandonInterrupted closes, as non-counting, every open attempt whose newest
 // stage ended infra:cancel or infra:lost and has nothing left in flight: the
 // operator or a restart interrupted it, and the task becomes eligible again.
-func (e *Engine) abandonInterrupted(ctx context.Context) ([]int64, error) {
+// At start (orphans) it also closes every open attempt with nothing in flight,
+// stage-less ones included: every project boots stopped (RC1), so such an
+// attempt was left by the previous process and must not resume by itself.
+func (e *Engine) abandonInterrupted(ctx context.Context, orphans bool) ([]int64, error) {
 	s := e.deps.Store
 	projects, err := s.ListProjects(ctx)
 	if err != nil {
@@ -226,7 +234,11 @@ func (e *Engine) abandonInterrupted(ctx context.Context) ([]int64, error) {
 				if err != nil {
 					return out, err
 				}
-				if len(stages) == 0 || !interrupted(stages) {
+				if orphans {
+					if !allDone(stages) {
+						continue
+					}
+				} else if len(stages) == 0 || !interrupted(stages) {
 					continue
 				}
 				if err := s.FinishAttempt(ctx, a.ID, model.OutcomeAbandoned, "", ""); err != nil {
@@ -242,11 +254,18 @@ func (e *Engine) abandonInterrupted(ctx context.Context) ([]int64, error) {
 	return out, nil
 }
 
-func interrupted(stages []model.Stage) bool {
+func allDone(stages []model.Stage) bool {
 	for _, st := range stages {
 		if st.State != model.StageDone {
 			return false
 		}
+	}
+	return true
+}
+
+func interrupted(stages []model.Stage) bool {
+	if !allDone(stages) {
+		return false
 	}
 	last := stages[len(stages)-1].Outcome
 	return last == OutcomeInfraCancel || last == OutcomeInfraLost
@@ -282,6 +301,7 @@ func (e *Engine) Start(ctx context.Context) error {
 	ts := &tickerState{stop: make(chan struct{}), done: make(chan struct{}), cancel: cancel}
 	e.mu.Lock()
 	e.ticker = ts
+	e.closed = false
 	e.mu.Unlock()
 	ticks := e.deps.Tick
 	var stopTicker func()
@@ -320,6 +340,7 @@ func (e *Engine) Close() {
 	e.mu.Lock()
 	ts := e.ticker
 	e.ticker = nil
+	e.closed = true
 	for id, t := range e.retryTimers {
 		t.Stop()
 		delete(e.retryTimers, id)

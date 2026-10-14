@@ -169,3 +169,31 @@ func (s *Store) UpdateEffort(ctx context.Context, actor string, id int64, p Effo
 	})
 	return out, err
 }
+
+// UpdateEffortStatusIf sets the effort's status to next only while it is
+// still expected, so a writer holding a stale read cannot overwrite a newer
+// transition. It reports whether the write happened.
+func (s *Store) UpdateEffortStatusIf(ctx context.Context, actor string, id int64, expected, next string) (bool, error) {
+	if !slices.Contains(model.EffortStatuses, next) {
+		return false, Invalid("status", "unknown effort status")
+	}
+	changed := false
+	err := s.WithTx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE efforts SET status = ?, updated = ? WHERE id = ? AND status = ?`, next, nowMS(), id, expected)
+		if err != nil {
+			return err
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			return nil
+		}
+		changed = true
+		e, err := requireEffort(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		_, err = AppendEvent(tx, actor, "effort.update", "effort", fmt.Sprint(id), map[string]any{"status": e.Status, "run_state": e.RunState, "yolo": e.YOLO})
+		return err
+	})
+	return changed, err
+}

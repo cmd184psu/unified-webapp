@@ -200,6 +200,13 @@ func (e *Engine) advanceAttempt(ctx context.Context, c *chain) (bool, error) {
 		}
 	}
 	c.stages = stages
+	// A stopped project submits nothing (RC1): what a stop or a restart left
+	// between stages is abandoned. Pausing and paused projects keep draining.
+	// Stop waits for advMu after it flips the state, so no step that read
+	// "running" is still submitting once Stop takes its snapshot.
+	if e.runs.State(c.proj.Slug) == model.RunStopped {
+		return true, e.finishAttempt(ctx, c, model.OutcomeAbandoned)
+	}
 	last := stages[len(stages)-1]
 	if last.Outcome == OutcomeDiscarded {
 		return true, e.finishAttempt(ctx, c, model.OutcomeAbandoned)
@@ -390,7 +397,7 @@ func (e *Engine) prepareAttempt(ctx context.Context, proj store.Project, att mod
 	}
 	name, tname := effortName(p.Effort), taskName(task)
 	if _, err := g.ReuseWorktree(ctx, proj.RepoPath, proj.Slug, name, tname); err == nil {
-		return nil
+		return e.prepareConflictRepair(ctx, proj, att, task, p.Effort)
 	}
 	head, err := g.Head(ctx, intWT)
 	if err != nil {
@@ -408,6 +415,54 @@ func (e *Engine) prepareAttempt(ctx context.Context, proj store.Project, att mod
 		return err
 	}
 	return os.WriteFile(f, []byte(head.Commit), 0o600)
+}
+
+// prepareConflictRepair merges the integration branch into the worktree of a
+// repair attempt whose predecessor ended in a merge conflict, so the worker
+// finds the conflicting content with markers (PX3). It runs once per attempt
+// (a marker file records it): a retried worker stage keeps what the worker
+// already did.
+func (e *Engine) prepareConflictRepair(ctx context.Context, proj store.Project, att model.Attempt, task model.Task, effort int64) error {
+	if att.Kind != model.AttemptRepair {
+		return nil
+	}
+	s := e.deps.Store
+	marker := filepath.Join(filepath.Dir(e.baseCommitFile(task.ID)), "conflict_prepared_"+strconv.FormatInt(att.ID, 10))
+	if _, err := os.Stat(marker); err == nil {
+		return nil
+	}
+	atts, err := s.ListAttempts(ctx, task.ID)
+	if err != nil {
+		return err
+	}
+	var prev *model.Attempt
+	for i := range atts {
+		if a := atts[i]; a.N < att.N && a.Outcome != "" && a.Outcome != model.OutcomeAbandoned {
+			prev = &atts[i]
+		}
+	}
+	if prev == nil {
+		return nil
+	}
+	stages, err := s.ListAttemptStages(ctx, prev.ID)
+	if err != nil {
+		return err
+	}
+	if len(stages) == 0 || stages[len(stages)-1].Role != "merge" {
+		return nil
+	}
+	var m mergeReport
+	if json.Unmarshal(stages[len(stages)-1].Parsed, &m) != nil || m.Kind != "conflict" {
+		return nil
+	}
+	ef, err := s.GetEffort(ctx, effort)
+	if err != nil {
+		return err
+	}
+	if _, err := e.deps.Git.PrepareConflictRepair(ctx, proj.RepoPath, att.Worktree, ef.IntegrationBranch); err != nil {
+		return err
+	}
+	return os.WriteFile(marker, nil, 0o600)
 }
 
 // ensureIntegration creates the effort's integration branch at the project's

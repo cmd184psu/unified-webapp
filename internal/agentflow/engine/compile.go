@@ -211,8 +211,7 @@ func (e *Engine) healQueueStatus(ctx context.Context, ef model.Effort) error {
 	if err != nil || cur.Status != model.EffortQueueDraft {
 		return err
 	}
-	appr := model.EffortQueueAppr
-	_, err = s.UpdateEffort(ctx, q.ApprovedBy, ef.ID, store.EffortPatch{Status: &appr})
+	_, err = s.UpdateEffortStatusIf(ctx, q.ApprovedBy, ef.ID, model.EffortQueueDraft, model.EffortQueueAppr)
 	return err
 }
 

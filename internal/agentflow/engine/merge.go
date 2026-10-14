@@ -57,6 +57,9 @@ func (x mergeExecutor) Execute(ctx context.Context, rc golane.RunContext, st mod
 	if err != nil {
 		return StageResult{}, err
 	}
+	if err := e.recordPreMerge(st.ID, p, before.Commit); err != nil {
+		return StageResult{}, err
+	}
 	merged, err := g.Merge(ctx, repo, intWT, branch, gitsvc.TaskBranch(name, taskName(c.task)))
 	var conflict *gitsvc.ConflictError
 	if errors.As(err, &conflict) {
@@ -82,6 +85,71 @@ func (x mergeExecutor) Execute(ctx context.Context, rc golane.RunContext, st mod
 		return StageResult{}, err
 	}
 	return mergeResult(OutcomeRepair, "post-merge verify failed: "+failingChecks(rep), mergeReport{Kind: "verify", Report: &rep})
+}
+
+// preMerge is what a merge stage writes into its stage directory before it
+// touches the integration branch, so reconcile can undo a merge whose stage
+// was lost to a crash.
+type preMerge struct {
+	Project string `json:"project"`
+	Effort  int64  `json:"effort"`
+	Commit  string `json:"commit"`
+}
+
+func (e *Engine) preMergeFile(stage int64) string {
+	return filepath.Join(e.StageDir(stage), "pre_merge.json")
+}
+
+func (e *Engine) recordPreMerge(stage int64, p StagePayload, commit string) error {
+	b, err := json.Marshal(preMerge{Project: p.Project, Effort: p.Effort, Commit: commit})
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(e.StageDir(stage), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(e.preMergeFile(stage), b, 0o600)
+}
+
+// undoLostMerge resets the integration branch to the commit recorded before a
+// merge stage that was closed infra:lost, so an unverified (or unrecorded)
+// merge commit does not stay on it. A stage that never started its merge has
+// no record and nothing to undo.
+func (e *Engine) undoLostMerge(ctx context.Context, stage int64) error {
+	g := e.deps.Git
+	if g == nil {
+		return nil
+	}
+	b, err := os.ReadFile(e.preMergeFile(stage))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var pm preMerge
+	if err := json.Unmarshal(b, &pm); err != nil {
+		return err
+	}
+	proj, err := e.deps.Store.GetProject(ctx, pm.Project)
+	if err != nil {
+		return err
+	}
+	ef, err := e.deps.Store.GetEffort(ctx, pm.Effort)
+	if err != nil {
+		return err
+	}
+	intWT, err := g.IntegrationPath(proj.Slug, effortName(ef.ID))
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(intWT); err != nil {
+		return nil // effort already cleaned up
+	}
+	if err := g.ResetIntegration(ctx, proj.RepoPath, intWT, ef.IntegrationBranch, pm.Commit); err != nil {
+		return fmt.Errorf("reset integration after lost merge stage %d: %w", stage, err)
+	}
+	return os.Remove(e.preMergeFile(stage))
 }
 
 // verifyMerged runs the feedback commands on the integrated tree against the

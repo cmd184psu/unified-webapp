@@ -67,6 +67,21 @@ func (e *Engine) Retry(ctx context.Context, actor string, task int64, clean bool
 	if err != nil {
 		return err
 	}
+	if clean {
+		// Halted tasks have no open attempt, so nothing can start in the
+		// worktree between its removal and the reset. Check halted first so a
+		// refused retry removes nothing.
+		status, err := s.TaskStatuses(ctx, ef.ID, e.limitsFor(set))
+		if err != nil {
+			return err
+		}
+		if st := status[t.Key]; !st.Halted() {
+			return fmt.Errorf("task %d is %s, not halted: %w", task, st, store.ErrConflict)
+		}
+		if err := e.removeTaskWork(ctx, proj, ef, t); err != nil {
+			return err
+		}
+	}
 	if err := s.ResetTask(ctx, actor, task, clean, e.limitsFor(set)); err != nil {
 		return err
 	}
@@ -81,11 +96,6 @@ func (e *Engine) Retry(ctx context.Context, actor string, task int64, clean bool
 	if err := s.SetWaitingReason(ctx, task, ""); err != nil {
 		return err
 	}
-	if clean {
-		if err := e.removeTaskWork(ctx, proj, ef, t); err != nil {
-			return err
-		}
-	}
 	e.runs.kick()
 	return nil
 }
@@ -99,16 +109,24 @@ func (e *Engine) EditTask(ctx context.Context, actor string, effort int64, def m
 	if err != nil {
 		return q, err
 	}
-	ef, err := e.deps.Store.GetEffort(ctx, effort)
-	if err != nil {
-		return q, err
+	for range 3 {
+		ef, err := e.deps.Store.GetEffort(ctx, effort)
+		if err != nil {
+			return q, err
+		}
+		switch ef.Status {
+		case model.EffortQueueAppr, model.EffortRunning, model.EffortPaused:
+		default:
+			return q, nil
+		}
+		// Conditional on the status just read, so a concurrent transition is
+		// re-read rather than overwritten.
+		changed, err := e.deps.Store.UpdateEffortStatusIf(ctx, actor, effort, ef.Status, model.EffortQueueDraft)
+		if err != nil || changed {
+			return q, err
+		}
 	}
-	switch ef.Status {
-	case model.EffortQueueAppr, model.EffortRunning, model.EffortPaused:
-		draft := model.EffortQueueDraft
-		_, err = e.deps.Store.UpdateEffort(ctx, actor, effort, store.EffortPatch{Status: &draft})
-	}
-	return q, err
+	return q, nil
 }
 
 // Override marks a halted task passed by a human decision (AT9). Its

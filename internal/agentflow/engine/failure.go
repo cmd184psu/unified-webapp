@@ -248,7 +248,7 @@ func (e *Engine) resubmit(ctx context.Context, c *chain, last model.Stage) error
 func (e *Engine) advanceAfter(stage int64, d time.Duration) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.retryTimers == nil || e.retryTimers[stage] != nil {
+	if e.closed || e.retryTimers == nil || e.retryTimers[stage] != nil {
 		return
 	}
 	e.retryTimers[stage] = time.AfterFunc(d, func() {

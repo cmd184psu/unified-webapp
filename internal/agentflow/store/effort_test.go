@@ -335,3 +335,23 @@ func TestGetDocRejectsNegativeRevision(t *testing.T) {
 	_, err := s.GetDoc(ctx, e.ID, model.DocPlan, -1)
 	wantField(t, err, "revision")
 }
+
+func TestUpdateEffortStatusIfIsConditional(t *testing.T) {
+	s, _ := openTemp(t)
+	newProject(t, s, "proj")
+	e := newEffort(t, s, "proj")
+	ok, err := s.UpdateEffortStatusIf(ctx, "t", e.ID, model.EffortQueueDraft, model.EffortRunning)
+	if err != nil || ok {
+		t.Fatalf("stale expectation: ok=%v err=%v, want false and nil", ok, err)
+	}
+	if got, _ := s.GetEffort(ctx, e.ID); got.Status != e.Status {
+		t.Fatalf("status changed to %s", got.Status)
+	}
+	ok, err = s.UpdateEffortStatusIf(ctx, "t", e.ID, e.Status, model.EffortQueueDraft)
+	if err != nil || !ok {
+		t.Fatalf("matching expectation: ok=%v err=%v", ok, err)
+	}
+	if got, _ := s.GetEffort(ctx, e.ID); got.Status != model.EffortQueueDraft {
+		t.Fatalf("status = %s", got.Status)
+	}
+}

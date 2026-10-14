@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -112,6 +113,10 @@ func (e *Engine) WorkerContext(ctx context.Context, project string, attemptID in
 			b.WriteString("\n### Verify report\n\n```json\n" + string(st.Parsed) + "\n```\n")
 		case st.Role == "merge" && len(st.Parsed) > 0 && st.Outcome != OutcomePass:
 			b.WriteString("\n### Merge result (the integration branch was left unchanged)\n\n```json\n" + string(st.Parsed) + "\n```\n")
+			var m mergeReport
+			if json.Unmarshal(st.Parsed, &m) == nil && m.Kind == "conflict" {
+				b.WriteString("\nThe integration branch has been merged into your worktree and the files listed above contain conflict markers. Resolve them, keeping the intent of both sides.\n")
+			}
 		case st.Role == "reviewer" && st.Outcome == OutcomeRepair:
 			if r, err := schema.Parse[schema.ReviewOut](st.Parsed); err == nil {
 				writeReview(&b, r)

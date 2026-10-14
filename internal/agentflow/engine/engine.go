@@ -129,6 +129,8 @@ type Engine struct {
 	// retryTimers (guarded by mu) hold the pending Advance of each infra
 	// retry waiting out its backoff, by stage id.
 	retryTimers map[int64]*time.Timer
+	// closed (guarded by mu) stops advanceAfter arming timers after Close.
+	closed bool
 
 	health healthState
 

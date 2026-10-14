@@ -346,6 +346,10 @@ func (r *RunControl) Stop(ctx context.Context, actor, project string) error {
 	en := r.entry(project)
 	en.state, en.oneShot, en.budget = model.RunStopped, false, 0
 	r.mu.Unlock()
+	// An Advance that read the previous state may still be submitting; wait
+	// for it so the snapshot below sees its stage. Later passes see stopped.
+	r.e.advMu.Lock()
+	r.e.advMu.Unlock() //nolint:staticcheck // barrier, not a critical section
 
 	eff := r.effortID(ctx, project)
 	if eff != 0 {
