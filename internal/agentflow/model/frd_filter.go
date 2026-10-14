@@ -30,6 +30,13 @@ var (
 		regexp.MustCompile(`^new (?:code|functionality|behaviou?r) (?:has|have|is covered by|includes?|is tested by|comes with) (?:unit |automated )?tests?$`),
 		regexp.MustCompile(`^no (?:new )?(?:secrets?|credentials?)(?: or credentials?)?(?: (?:are |is )?(?:added|committed|introduced|leaked))?$`),
 	}
+	// "go test reports all tests pass": the suite runner as subject.
+	restateReports = regexp.MustCompile(`^(?:(?:run|running|ensure|make sure|verify|confirm)(?: that)? )?(?:the )?(?:go test|pytest|npm test|test suite)(?: -[a-z]+)*(?: \./\.\.\.)? ` +
+		`(?:reports|shows|prints|says|confirms)(?: that)? (?:all |every )?(?:the )?(?:tests?|checks?) (?:pass|passes|passed|succeed|succeeds|are green)$`)
+	// A generic tail such as ", including the new subtract and multiply tests"
+	// adds nothing the definition of done does not already require; a tail that
+	// names a specific test or scenario is not matched and keeps the criterion.
+	restateTail   = regexp.MustCompile(`,? (?:including|with|covering) (?:the )?(?:new|added|existing) [\w ,&-]*tests?$`)
 	restateSpaces = regexp.MustCompile(`\s+`)
 )
 
@@ -49,8 +56,11 @@ func restatesDoD(criterion string, norm map[string]bool) bool {
 	if c == "" {
 		return false
 	}
-	if norm[c] || restatePhrase.MatchString(c) || restateNoFailures.MatchString(c) {
-		return true
+	base := restateTail.ReplaceAllString(c, "")
+	for _, x := range []string{c, base} {
+		if norm[x] || restatePhrase.MatchString(x) || restateNoFailures.MatchString(x) || restateReports.MatchString(x) {
+			return true
+		}
 	}
 	for _, re := range restateFixed {
 		if re.MatchString(c) {

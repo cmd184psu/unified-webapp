@@ -128,10 +128,15 @@ func TestDropRestatedCriteria_GenericVersusSpecific(t *testing.T) {
 		"No files outside of the task's declared files were changed", "no unrelated files changed", "No unrelated files were modified",
 		"tests continue to pass", "Tests should pass", "all tests must pass", "go test -race ./... passes", "`go test -race -count=1 ./...` succeeds",
 		"gofmt reports no diff", "The code is gofmt-clean", "gofmt -l reports no files",
+		// Seen from the real model in the live API-only run.
+		"Running go test reports all tests pass, including the new Subtract and Multiply tests.",
+		"go test reports that all tests pass",
 	}
 	specific := []string{
 		"No files outside internal/agentflow/engine are changed",
 		"go test ./calc -run TestAdd covers negatives",
+		"All tests pass, including TestOverflowReturnsError for values above MaxInt",
+		"Calling Subtract with 10 and 3 returns 7.",
 	}
 	f := FRD{}
 	for _, c := range append(append([]string{}, restated...), specific...) {
