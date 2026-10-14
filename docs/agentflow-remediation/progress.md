@@ -67,6 +67,17 @@ Logged per the owner's posture; candidates for the next phase alongside `.omc/pl
 - opencode adapter (B7 review notes): `Incomplete` only when final text is empty (a rejected ask after earlier text returns stale text); token usage summed per step is unverified on multi-step streams; in the sandbox the frozen config is copied to `<stage>/home/.config/opencode/` each run (opencode writes next to its config).
 - verify: 5000-file cap applied after git lists everything; files over 8 MiB pass `parse` with a warning; TOCTOU between containment check and read.
 
+## API contract for the UI (Phase D, final)
+All under `/api`; JSON errors `{"error","field"?}` (400 validation, 404, 409 ErrConflict, 503 at SSE cap). `…` = `/projects/{slug}`.
+- Health: GET /health (`{status: ok|degraded, opencode:{status,version?,error?}}`); GET /opencode/version?refresh=1.
+- Projects: GET/POST /projects (overview rows: run_state, effort, progress, current[] with open stage id/role/backend/model); POST /projects/git-init `{repo_path, confirm:true}` (no slug yet); GET/PATCH/DELETE /projects/{slug}; GET/PUT …/limits (blank = inherit; numbers or strings; durations as Go strings e.g. "30m0s").
+- Backends/settings: GET/POST /backends; PATCH /backends/{name}; POST /backends/{name}/retire `{cancel_running}` | /enable (responses carry SV3 warnings); GET /candidates (flat list with `paid`); PUT /candidates/{role} `{candidates:[{backend,model}]}`; PUT/DELETE …/candidates/{role} (project override/clear); GET/PUT /settings.
+- Efforts: GET/POST …/efforts (`{title, deliberate}`); POST …/efforts/import (body = FRD JSON); GET …/efforts/{id}; GET/PUT …/efforts/{id}/frd; GET …/frd/revisions[/{n}]; POST …/frd/approve `{revision?}`; POST …/plan/generate (202); GET/PUT …/plan; GET …/plan/rounds; GET …/plan/revisions[/{n}]; POST …/plan/approve; POST …/compile (202, explicit; plan approve does not auto-compile except under YOLO); GET …/queue (QueueView + hash); POST …/queue/approve `{hash}`; GET …/tasks; GET/PUT …/tasks/{key}; POST …/tasks/{key}/retry `{clean}` | /override `{reason}`; POST …/efforts/{id}/abandon | /yolo `{on, confirm}`; GET /yolo/invariants.
+- Run control: POST /projects/{slug}/run/{start|pause|stop|run-one} (returns the overview).
+- Streams: GET /stages/{id}/stream (SSE proxy to lane.StreamOutput; 409 if the stage hasn't started); GET /events (SSE event name `agentflow`; first frame `{"type":"snapshot","projects":[...]}`; then `project.run_state`, `project.update`, `project.delete`, `effort.update`, `task.update`, `backend.update`, `candidates.update`, `settings.update`, `state.changed` — refetch what is shown on state.changed).
+- Export: GET /efforts/{id}/export?format=json|md; GET /efforts/{id}/frd/export and /plan/export (?format=, ?revision=).
+Known limits: `opencode_path` setting needs a restart; project create defaults model_scope=local; SV3 warnings only from RetireBackend when a running project is affected.
+
 ## Log
 - 2026-10-12 — FRD written (frd.json canonical, frd.md generated). Owner added UI6: keep existing look and feel.
 - 2026-10-12 — OMC 5.7.1 installed mid-session; owner chose to run ralplan/ralph from a fresh session so OMC hooks, state tools and agent types are active.
