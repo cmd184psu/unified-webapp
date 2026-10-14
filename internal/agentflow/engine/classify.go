@@ -65,7 +65,7 @@ func classifyRun(parent context.Context, role string, err error) string {
 	case runner.ErrUnreachable:
 		return OutcomeInfraUnreachable
 	case runner.ErrTimeout:
-		if role == "worker" {
+		if role == "worker" || role == "cleanup" {
 			return OutcomeTimeout
 		}
 		return OutcomeInfraTimeout
@@ -85,7 +85,7 @@ func parseFinal(role, final string) (json.RawMessage, string, error) {
 		return nil, "", err
 	}
 	switch role {
-	case "worker":
+	case "worker", "cleanup":
 		w, err := schema.Parse[schema.WorkerOut](raw)
 		if err != nil {
 			return nil, "", err

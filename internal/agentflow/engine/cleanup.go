@@ -1,0 +1,143 @@
+package engine
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"cmd184psu/unified-webapp/internal/agentflow/gitsvc"
+	"cmd184psu/unified-webapp/internal/agentflow/model"
+)
+
+// The optional cleanup ("deslop") pass (AT11). After a review pass, and only
+// for a project with cleanup_enabled, the engine commits the reviewed tree as
+// a checkpoint on the task branch, a cleanup stage edits the worktree, and
+// verify runs again. If that verify fails, or the cleanup stage itself does
+// not finish, the engine resets the worktree to the checkpoint and carries on
+// with the reviewed version: cleanup can never cost a task its pass.
+
+// cleanupCheckpointFile records the checkpoint commit of an attempt. It lives
+// outside the worktree, like base_commit.
+func (e *Engine) cleanupCheckpointFile(c *chain) string {
+	return filepath.Join(e.deps.DataDir, "tasks", strconv.FormatInt(c.task.ID, 10), "cleanup_checkpoint_"+strconv.FormatInt(c.att.ID, 10))
+}
+
+// hasStage reports whether the attempt has a stage of role.
+func (c *chain) hasStage(role string) bool {
+	for _, st := range c.stages {
+		if st.Role == role {
+			return true
+		}
+	}
+	return false
+}
+
+// afterReview takes the step after a passing review: straight to commit and
+// merge, or through the cleanup pass when the project enables it.
+func (e *Engine) afterReview(ctx context.Context, c *chain, last model.Stage) (bool, error) {
+	if !c.proj.CleanupEnabled || c.hasStage("cleanup") {
+		return e.commitAndMerge(ctx, c, last)
+	}
+	if err := e.checkpoint(ctx, c); err != nil {
+		if errors.Is(err, gitsvc.ErrGitlink) {
+			return true, e.fail(ctx, c, Failure{Kind: FailCommit, Stage: last})
+		}
+		return false, err
+	}
+	pk, reason, err := e.pickBackend(ctx, "worker", c.task, c.proj, "")
+	if err != nil || reason != "" {
+		return false, err // the reason is on the task; the next Advance tries again
+	}
+	if err := e.submit(ctx, c, BackendLane(pk.Backend), "cleanup", pk.Backend, pk.Model, last.QueueHash); err != nil {
+		return false, err
+	}
+	if c.task.WaitingReason != "" {
+		return true, e.deps.Store.SetWaitingReason(ctx, c.task.ID, "")
+	}
+	return true, nil
+}
+
+// checkpoint commits the reviewed worktree as the engine and records the
+// commit, once per attempt.
+func (e *Engine) checkpoint(ctx context.Context, c *chain) error {
+	f := e.cleanupCheckpointFile(c)
+	if _, err := os.Stat(f); err == nil {
+		return nil
+	}
+	sha, err := e.deps.Git.CommitAll(ctx, c.proj.RepoPath, c.att.Worktree,
+		c.task.Key+": "+c.task.Title+" (before cleanup)", gitsvc.Trailers{Task: taskName(c.task), Attempt: c.att.N})
+	if errors.Is(err, gitsvc.ErrNothingToCommit) {
+		var h gitsvc.HeadInfo
+		if h, err = e.deps.Git.Head(ctx, c.att.Worktree); err == nil {
+			sha = h.Commit
+		}
+	}
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(f, []byte(sha), 0o600)
+}
+
+// afterCleanup takes the step after a cleanup stage that finished: verify the
+// cleaned tree. Any other end of the stage (blocked, timed out, a policy
+// violation, an infrastructure failure) drops the cleanup.
+func (e *Engine) afterCleanup(ctx context.Context, c *chain, last model.Stage) (bool, error) {
+	if last.Outcome == OutcomePass {
+		return true, e.submitVerify(ctx, c, last)
+	}
+	return e.dropCleanup(ctx, c, last, "the cleanup stage ended "+last.Outcome)
+}
+
+// afterCleanupVerify takes the step after the verify that follows a cleanup
+// stage: a green report goes on to commit and merge, a red one rolls the
+// cleanup back first.
+func (e *Engine) afterCleanupVerify(ctx context.Context, c *chain, last model.Stage) (bool, error) {
+	if verifyPassed(last) {
+		return e.commitAndMerge(ctx, c, last)
+	}
+	return e.dropCleanup(ctx, c, last, "verify failed after cleanup")
+}
+
+// dropCleanup resets the worktree to the pre-cleanup checkpoint (an
+// engine-owned write), notes why in the task's progress log and continues
+// with the reviewed version.
+func (e *Engine) dropCleanup(ctx context.Context, c *chain, last model.Stage, why string) (bool, error) {
+	b, err := os.ReadFile(e.cleanupCheckpointFile(c))
+	if err != nil {
+		return false, fmt.Errorf("cleanup checkpoint: %w", err)
+	}
+	if err := e.deps.Git.ResetTask(ctx, c.proj.RepoPath, c.att.Worktree, strings.TrimSpace(string(b))); err != nil {
+		return false, fmt.Errorf("roll back cleanup: %w", err)
+	}
+	if err := e.deps.Store.AppendProgress(ctx, c.task.ID, c.att.ID, "cleanup rolled back ("+why+"); merging the reviewed version"); err != nil {
+		return false, err
+	}
+	return e.commitAndMerge(ctx, c, last)
+}
+
+// cleanupDropsOn says whether the newest stage belongs to the cleanup pass and
+// ended in a way that is not a plain pass: a cleanup stage that did not finish,
+// or the verify after it (a red report is a verify outcome of repair, which
+// the generic path would turn into a failed attempt). A stop, restart or
+// retired backend (cancel, lost, rerouted) keeps its own handling, as does an
+// infrastructure failure of the verify itself, which is simply repeated.
+func cleanupDropsOn(c *chain, st model.Stage) bool {
+	switch st.Outcome {
+	case OutcomeInfraCancel, OutcomeInfraLost, OutcomeInfraRerouted:
+		return false
+	}
+	switch st.Role {
+	case "cleanup":
+		return st.Outcome != OutcomePass
+	case "verify":
+		return c.hasStage("cleanup") && !IsInfra(st.Outcome)
+	}
+	return false
+}

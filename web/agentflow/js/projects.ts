@@ -9,7 +9,7 @@ import { confirmDialog, showToast } from '@shared';
 import { api, ApiError, type Backend, type Candidate, type ProjectInput, type ProjectView } from './api.js';
 import { ROLES, buildRoleEditor, type CandRow } from './candidates.js';
 import { h, replace } from './dom.js';
-import { FormErrors, RowsEditor, button, fieldRow, section, selectInput, textInput } from './forms.js';
+import { FormErrors, RowsEditor, button, checkbox, fieldRow, section, selectInput, textInput } from './forms.js';
 
 export type ProjectDeps = Pick<
   typeof api,
@@ -67,6 +67,7 @@ export class ProjectForm {
   private slug: HTMLInputElement;
   private repo: HTMLInputElement;
   private scope: HTMLSelectElement;
+  private cleanup: HTMLInputElement;
   private backends: Backend[] = [];
   private cands: Candidate[] = [];
   private drafts = new Map<string, CandRow[]>();
@@ -77,6 +78,7 @@ export class ProjectForm {
     this.slug = textInput('slug', p?.slug ?? '', { readOnly: !!p, placeholder: 'my-project' });
     this.repo = textInput('repo_path', p?.repo_path ?? '', { placeholder: '/absolute/path/to/repository' });
     this.scope = selectInput('model_scope', SCOPES, p?.model_scope ?? 'local');
+    this.cleanup = checkbox('cleanup_enabled', p?.cleanup_enabled ?? false);
     this.cmds = new RowsEditor<string>((c) => {
       const input = textInput('feedback_cmd', c, { placeholder: 'go test ./...' });
       const preview = h('code', { class: 'field-hint', attrs: { 'data-role': 'argv' } });
@@ -112,6 +114,7 @@ export class ProjectForm {
       repo_path: this.repo.value.trim(),
       model_scope: this.scope.value,
       feedback_cmds: this.cmds.read().filter((c) => c !== ''),
+      cleanup_enabled: this.cleanup.checked,
     };
   }
 
@@ -120,7 +123,7 @@ export class ProjectForm {
     this.errors.clear();
     const body = this.body();
     const attempt = (): Promise<ProjectView> => this.mode.project
-      ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, feedback_cmds: body.feedback_cmds }, { quiet: true })
+      ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, feedback_cmds: body.feedback_cmds, cleanup_enabled: body.cleanup_enabled }, { quiet: true })
       : this.deps.createProject(body, { quiet: true });
     let saved: ProjectView;
     try {
@@ -216,7 +219,9 @@ export class ProjectForm {
           h('div', { class: 'profile-fields' },
             e.add('slug', fieldRow('Slug', this.slug, 'Lowercase letters, digits and dashes; fixed once created')).el,
             e.add('repo_path', fieldRow('Repository path', this.repo, 'Absolute path of an existing git repository; if it is not one you are offered git init')).el,
-            e.add('model_scope', fieldRow('Model scope', this.scope, 'local keeps this project off hosted backends')).el),
+            e.add('model_scope', fieldRow('Model scope', this.scope, 'local keeps this project off hosted backends')).el,
+            e.add('cleanup_enabled', fieldRow('Cleanup pass', this.cleanup,
+              'After a task passes review, run a cleanup agent and verify again; if that breaks verification the cleanup is rolled back')).el),
           e.add('feedback_cmds', fieldRow('Feedback commands', this.cmds.el,
             'Run in the sandbox to verify each task, as a program and arguments, never through a shell. Blank: detected from go.mod, pyproject.toml or package.json')).el,
           e.general,

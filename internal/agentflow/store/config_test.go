@@ -749,3 +749,71 @@ func TestPX5_MaxConcurrentRoundTripsAndRejectsNegative(t *testing.T) {
 	b.Models[0].MaxConcurrent = -1
 	wantField(t, s.UpdateBackend(ctx, "t", b), "models")
 }
+
+// F2: the stages rebuild keeps every row and the rows that point at them, and
+// afterwards a stage can have the cleanup role.
+func TestMigration6RebuildsStagesKeepingRows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agentflow.db")
+	s1, err := openWith(path, migrations[:5])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO projects (slug, repo_path, model_scope, created, updated) VALUES ('p', '/r', 'local', 1, 1)`,
+		`INSERT INTO efforts (project, title, status, created, updated) VALUES ('p', 'e', 'running', 1, 1)`,
+		`INSERT INTO queues (effort, revision, hash, status) VALUES (1, 1, 'h', 'approved')`,
+		`INSERT INTO tasks (queue, task_key, title, prompt, acceptance_json, files_touched_json) VALUES (1, 'T1', 't', 'p', '[]', '[]')`,
+		`INSERT INTO attempts (task, n, kind, started) VALUES (1, 1, 'normal', 1)`,
+		`INSERT INTO stages (attempt, role, backend, model, state, outcome, raw_output) VALUES (1, 'worker', 'b', 'm', 'done', 'pass', 'raw text')`,
+		`INSERT INTO infra_retries (task, stage, reason, at) VALUES (1, 1, 'r', 1)`,
+	} {
+		if _, err := s1.db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	s1.Close()
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	defer s2.Close()
+	var raw string
+	var stage sql.NullInt64
+	if err := s2.db.QueryRow(`SELECT raw_output FROM stages WHERE id = 1`).Scan(&raw); err != nil || raw != "raw text" {
+		t.Fatalf("stage row lost: %q %v", raw, err)
+	}
+	if err := s2.db.QueryRow(`SELECT stage FROM infra_retries`).Scan(&stage); err != nil || !stage.Valid || stage.Int64 != 1 {
+		t.Fatalf("infra_retries.stage = %+v (%v), want 1", stage, err)
+	}
+	var fk int
+	if err := s2.db.QueryRow(`PRAGMA foreign_keys`).Scan(&fk); err != nil || fk != 1 {
+		t.Fatalf("foreign_keys = %d (%v), want on again", fk, err)
+	}
+	if _, err := s2.CreateStage(ctx, StageSpec{Attempt: 1, Role: "cleanup", Backend: "b", Model: "m"}); err != nil {
+		t.Fatalf("cleanup stage rejected: %v", err)
+	}
+	var autoinc int
+	if err := s2.db.QueryRow(`SELECT id FROM stages WHERE role = 'cleanup'`).Scan(&autoinc); err != nil || autoinc != 2 {
+		t.Fatalf("new stage id = %d (%v), want 2 (sequence kept)", autoinc, err)
+	}
+}
+
+// F2: cleanup_enabled round-trips through the store.
+func TestAT11_ProjectCleanupFlagRoundTrips(t *testing.T) {
+	s, _ := openTemp(t)
+	p := Project{Slug: "p", RepoPath: mkRepo(t), ModelScope: "local", CleanupEnabled: true}
+	if err := s.CreateProject(ctx, "t", p); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetProject(ctx, "p")
+	if err != nil || !got.CleanupEnabled {
+		t.Fatalf("created project = %+v (%v)", got, err)
+	}
+	got.CleanupEnabled = false
+	if err := s.UpdateProject(ctx, "t", got); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = s.GetProject(ctx, "p"); got.CleanupEnabled {
+		t.Fatal("flag not cleared")
+	}
+}

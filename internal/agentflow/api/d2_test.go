@@ -166,6 +166,13 @@ func TestProjectsCRUDAndLimits(t *testing.T) {
 	if v.FeedbackCmds[0] != "make" || v.RepoPath == "" {
 		t.Fatalf("patched = %+v", v)
 	}
+	if v.Cleanup {
+		t.Fatalf("cleanup must default off: %+v", v)
+	}
+	v = decode[ProjectView](t, e.ok("PATCH", "/api/projects/p1", map[string]any{"cleanup_enabled": true}, 200))
+	if !v.Cleanup || v.FeedbackCmds[0] != "make" {
+		t.Fatalf("cleanup patch = %+v", v)
+	}
 	lv := decode[LimitsView](t, e.ok("GET", "/api/projects/p1/limits", nil, 200))
 	if len(lv.Limits) != 0 || lv.Effective["max_attempts"] != "5" {
 		t.Fatalf("limits = %+v", lv)

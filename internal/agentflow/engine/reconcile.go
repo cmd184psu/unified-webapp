@@ -76,7 +76,7 @@ func (e *Engine) indexJobs() (map[int64][]jobRef, error) {
 // kindForRole is the lane kind that runs a stage role.
 func kindForRole(role string) string {
 	switch role {
-	case "worker":
+	case "worker", "cleanup":
 		return KindWork
 	case "reviewer":
 		return KindReview

@@ -105,7 +105,7 @@ func TestEffectivePolicy(t *testing.T) {
 		rs := permissionFor(role).Bash
 		for _, c := range cases {
 			want := c.other
-			if role == "worker" {
+			if writesWorktree(role) {
 				want = c.worker
 			}
 			if got := allowed(rs, c.cmd); got != want {

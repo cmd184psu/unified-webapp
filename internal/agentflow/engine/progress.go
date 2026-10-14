@@ -50,7 +50,7 @@ func (e *Engine) appendProgress(ctx context.Context, c *chain, result string) er
 // blockedReason is what a blocked worker or reviewer asked a human for.
 func blockedReason(st model.Stage) string {
 	switch st.Role {
-	case "worker":
+	case "worker", "cleanup":
 		if w, err := schema.Parse[schema.WorkerOut](st.Parsed); err == nil && w.Blocked != "" {
 			return w.Blocked
 		}

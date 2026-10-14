@@ -160,7 +160,7 @@ func (e *Engine) engineStage(ctx context.Context, rc golane.RunContext, st model
 
 func roleTimeout(set store.Settings, role string) time.Duration {
 	switch role {
-	case "worker":
+	case "worker", "cleanup":
 		return set.WorkerTimeout
 	case "reviewer":
 		return set.ReviewTimeout

@@ -147,3 +147,25 @@ func (s *Service) ResetIntegration(ctx context.Context, repo, integrationWT, int
 	_, err = s.runIn(ctx, repo, integrationWT, pre, nil, "reset", "--hard", "-q", c)
 	return err
 }
+
+// ResetTask moves a task worktree and its branch back to commit, discarding
+// every tracked change and untracked file made since (F2: a cleanup stage that
+// broke verify). commit is one the engine recorded earlier; only the task
+// worktree and its branch are touched.
+func (s *Service) ResetTask(ctx context.Context, repo, taskWT, commit string) error {
+	unlock := s.lockRepo(ctx, repo)
+	defer unlock()
+	pre, _, err := s.wtPre(ctx, repo, taskWT)
+	if err != nil {
+		return err
+	}
+	c, err := s.resolveCommit(ctx, repo, commit)
+	if err != nil {
+		return err
+	}
+	if _, err := s.runIn(ctx, repo, taskWT, pre, nil, "reset", "--hard", "-q", c); err != nil {
+		return err
+	}
+	_, err = s.runIn(ctx, repo, taskWT, pre, nil, "clean", "-fdq")
+	return err
+}

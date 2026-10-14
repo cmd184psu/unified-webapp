@@ -162,7 +162,7 @@ func TestEveryRoleHasAnAgent(t *testing.T) {
 func TestEditPermission(t *testing.T) {
 	for _, r := range Roles {
 		want := "deny"
-		if r == "worker" {
+		if writesWorktree(r) {
 			want = "allow"
 		}
 		if got := agentPerm(t, r)["edit"]; got != want {
@@ -242,7 +242,7 @@ func TestRuleOrder(t *testing.T) {
 				t.Errorf("%s: %q must come after \"git *\"", r, p)
 			}
 		}
-		if (r == "worker") != (rs[0].Action == "allow") {
+		if writesWorktree(r) != (rs[0].Action == "allow") {
 			t.Errorf("%s: catch-all action %s", r, rs[0].Action)
 		}
 	}
@@ -250,7 +250,7 @@ func TestRuleOrder(t *testing.T) {
 
 func TestReadOnlyRolesBashIsReadOnly(t *testing.T) {
 	for _, r := range Roles {
-		if r == "worker" {
+		if writesWorktree(r) {
 			continue
 		}
 		rs := ordered(t, r)

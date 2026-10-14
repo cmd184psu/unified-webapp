@@ -812,3 +812,43 @@ func TestMessageStripsAgentflowLines(t *testing.T) {
 		t.Fatalf("message = %q", m)
 	}
 }
+
+// TestResetTaskRestoresCheckpoint covers F2: a hard reset of the task worktree
+// to the checkpoint commit drops later edits, new files and later commits.
+func TestResetTaskRestoresCheckpoint(t *testing.T) {
+	repo := newRepo(t)
+	s, _ := newSvc(t)
+	head, _ := s.Head(bg, repo)
+	wt, err := s.AddTaskWorktree(bg, repo, "p", "e", "t", head.Commit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, wt.Path, "f.txt", "reviewed\n")
+	cp, err := s.CommitAll(bg, repo, wt.Path, "checkpoint", Trailers{Task: "t", Attempt: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, wt.Path, "f.txt", "cleaned\n")
+	write(t, wt.Path, "extra.txt", "new\n")
+	if _, err := s.CommitAll(bg, repo, wt.Path, "later", Trailers{Task: "t", Attempt: 1}); err != nil {
+		t.Fatal(err)
+	}
+	write(t, wt.Path, "untracked.txt", "u\n")
+	if err := s.ResetTask(bg, repo, wt.Path, cp); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(wt.Path, "f.txt")); string(b) != "reviewed\n" {
+		t.Fatalf("f.txt = %q", b)
+	}
+	for _, gone := range []string{"extra.txt", "untracked.txt"} {
+		if _, err := os.Stat(filepath.Join(wt.Path, gone)); err == nil {
+			t.Fatalf("%s survived the reset", gone)
+		}
+	}
+	if got := tgit(t, repo, "rev-parse", wt.Branch); got != cp {
+		t.Fatalf("branch = %s, want checkpoint %s", got, cp)
+	}
+	if err := s.ResetTask(bg, repo, t.TempDir(), cp); err == nil {
+		t.Fatal("reset outside the data dir accepted")
+	}
+}

@@ -211,6 +211,12 @@ func (e *Engine) advanceAttempt(ctx context.Context, c *chain) (bool, error) {
 	if last.Outcome == OutcomeDiscarded {
 		return true, e.finishAttempt(ctx, c, model.OutcomeAbandoned)
 	}
+	if cleanupDropsOn(c, last) {
+		if last.Role == "verify" {
+			return e.afterCleanupVerify(ctx, c, last)
+		}
+		return e.afterCleanup(ctx, c, last)
+	}
 	if IsInfra(last.Outcome) {
 		handled, err := e.handleInfra(ctx, c, last)
 		return handled, err
@@ -221,10 +227,12 @@ func (e *Engine) advanceAttempt(ctx context.Context, c *chain) (bool, error) {
 	switch last.Role {
 	case "worker":
 		return true, e.submitVerify(ctx, c, last)
+	case "cleanup":
+		return e.afterCleanup(ctx, c, last)
 	case "verify":
 		return e.submitReview(ctx, c, last)
 	case "reviewer":
-		return e.commitAndMerge(ctx, c, last)
+		return e.afterReview(ctx, c, last)
 	case "merge":
 		return true, e.completeAttempt(ctx, c)
 	}

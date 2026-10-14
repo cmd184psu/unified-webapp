@@ -27,7 +27,7 @@ import (
 var agentFS embed.FS
 
 // Roles are the agent roles agentflow ships definitions for (OA1).
-var Roles = []string{"worker", "reviewer", "planner", "architect", "critic", "compiler"}
+var Roles = []string{"worker", "reviewer", "planner", "architect", "critic", "compiler", "cleanup"}
 
 // AgentName is the opencode agent name for a role. The adapter selects it with
 // --agent in B7.
@@ -142,6 +142,10 @@ var findWriters = []string{"find *-exec*", "find *-execdir*", "find *-delete*", 
 // readOnlyFlagDenies are write or exec flags of the read-only commands.
 var readOnlyFlagDenies = []string{"rg *--pre*", "tree *-o*", "file *-C*", "file *--compile*"}
 
+// writesWorktree reports whether the role edits the worktree: the worker and
+// the optional cleanup pass (AT11). Every other role is read-only.
+func writesWorktree(role string) bool { return role == "worker" || role == "cleanup" }
+
 // permissionFor builds the permission block for a role. Rules are ordered for
 // last-match-wins: catch-all first, then denies, then the specific allows.
 func permissionFor(role string) permission {
@@ -151,7 +155,7 @@ func permissionFor(role string) permission {
 			bash = append(bash, rule{p, action})
 		}
 	}
-	if role == "worker" {
+	if writesWorktree(role) {
 		add("allow", "*")
 	} else {
 		add("deny", "*")
@@ -165,7 +169,7 @@ func permissionFor(role string) permission {
 	add("deny", gitFlagDenies...)
 	add("deny", otherDenies...)
 	edit := "deny"
-	if role == "worker" {
+	if writesWorktree(role) {
 		edit = "allow"
 	} else {
 		// edit: deny removes the edit tools but not shell writes, so shell

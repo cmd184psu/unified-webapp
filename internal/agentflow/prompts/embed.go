@@ -11,7 +11,7 @@ import (
 var files embed.FS
 
 // Roles lists the embedded prompt names, one per agent role.
-var Roles = []string{"worker", "reviewer", "planner", "architect", "critic", "compiler"}
+var Roles = []string{"worker", "reviewer", "planner", "architect", "critic", "compiler", "cleanup"}
 
 // Load returns the prompt text for a role.
 func Load(role string) (string, error) {

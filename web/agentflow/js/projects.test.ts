@@ -51,13 +51,14 @@ test('PJ1: create sends slug, repo_path, scope and the feedback commands as argv
   byField(t.host, 'slug').value = ' demo ';
   byField(t.host, 'repo_path').value = '/srv/demo';
   byField(t.host, 'model_scope').value = 'any';
+  byField(t.host, 'cleanup_enabled').checked = true;
   button(t.host, 'Add command').click();
   allByField(t.host, 'feedback_cmd')[0].value = '  go   test ./... ';
   button(t.host, 'Add command').click();
   allByField(t.host, 'feedback_cmd')[1].value = '   ';
   button(t.host, 'Create project').click();
   await flush();
-  eq(t.bodies.create, { slug: 'demo', repo_path: '/srv/demo', model_scope: 'any', feedback_cmds: ['go test ./...'] });
+  eq(t.bodies.create, { slug: 'demo', repo_path: '/srv/demo', model_scope: 'any', feedback_cmds: ['go test ./...'], cleanup_enabled: true });
   eq(t.done, ['demo']);
 });
 
@@ -136,7 +137,7 @@ test('edit: the slug is fixed, the save patches, and the role editor shows the g
   byField(t.host, 'repo_path').value = '/r/moved';
   button(t.host, 'Save project').click();
   await flush();
-  eq(t.bodies.patch, { repo_path: '/r/moved', model_scope: 'local', feedback_cmds: ['go vet ./...'] });
+  eq(t.bodies.patch, { repo_path: '/r/moved', model_scope: 'local', feedback_cmds: ['go vet ./...'], cleanup_enabled: false });
   eq(t.done, ['p1']);
 });
 

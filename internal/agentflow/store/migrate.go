@@ -19,6 +19,7 @@ type migration struct {
 //	3  B3  efforts, documents, approvals, queues, tasks, task_deps, attempts, stages, ...
 //	4  C8  backend_cooldown setting
 //	5  F1  backend_models.max_concurrent
+//	6  F2  stages.role gains 'cleanup' (table rebuild); projects.cleanup_enabled
 //
 // Later stories append the next integer; they never edit an earlier entry.
 var migrations = []migration{
@@ -27,7 +28,46 @@ var migrations = []migration{
 	{3, migration3SQL},
 	{4, migration4SQL},
 	{5, migration5SQL},
+	{6, migration6SQL},
 }
+
+// rebuildsTables lists the migrations that rebuild a table other tables refer
+// to. SQLite cannot widen a CHECK constraint in place, and dropping the old
+// table with foreign keys on would fire the referencing rows' ON DELETE
+// actions, so these run with foreign keys off (the documented procedure) and
+// are checked with foreign_key_check before they commit.
+var rebuildsTables = map[int]bool{6: true}
+
+// migration6SQL (F2) lets a stage have the cleanup role (AT11) and adds the
+// per-project cleanup switch. stages is rebuilt with the same columns, so rows
+// copy in order.
+const migration6SQL = `
+CREATE TABLE stages_new (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  attempt INTEGER REFERENCES attempts(id) ON DELETE CASCADE,
+  effort INTEGER REFERENCES efforts(id) ON DELETE CASCADE,
+  role TEXT NOT NULL CHECK (role IN ('worker', 'reviewer', 'planner', 'architect', 'critic', 'compiler', 'verify', 'merge', 'cleanup')),
+  backend TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  lane_job_id TEXT NOT NULL DEFAULT '',
+  queue_hash TEXT NOT NULL DEFAULT '',
+  state TEXT NOT NULL CHECK (state IN ('queued', 'running', 'done')),
+  outcome TEXT NOT NULL DEFAULT '',
+  raw_output TEXT NOT NULL DEFAULT '',
+  parsed_json TEXT NOT NULL DEFAULT '',
+  prompt_path TEXT NOT NULL DEFAULT '',
+  started INTEGER NOT NULL DEFAULT 0,
+  finished INTEGER NOT NULL DEFAULT 0,
+  CHECK ((attempt IS NULL) <> (effort IS NULL))
+);
+INSERT INTO stages_new SELECT * FROM stages;
+DROP TABLE stages;
+ALTER TABLE stages_new RENAME TO stages;
+CREATE INDEX idx_stages_attempt ON stages(attempt);
+CREATE INDEX idx_stages_effort ON stages(effort);
+CREATE INDEX idx_stages_open ON stages(state) WHERE state <> 'done';
+ALTER TABLE projects ADD COLUMN cleanup_enabled INTEGER NOT NULL DEFAULT 0 CHECK (cleanup_enabled IN (0, 1));
+`
 
 // migration5SQL (F1) adds the per-model concurrency hint (PX5): 0 means no
 // limit beyond the backend's slots.
@@ -291,6 +331,14 @@ func migrate(db *sql.DB, migs []migration) error {
 // applyMigrationTx runs one migration's SQL and its version bump in one
 // transaction, so a failure leaves the schema and version unchanged.
 func applyMigrationTx(db *sql.DB, m migration) error {
+	if rebuildsTables[m.version] {
+		// The pool holds one connection, so the pragma and the transaction
+		// below share it.
+		if _, err := db.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+			return fmt.Errorf("migration %d: %w", m.version, err)
+		}
+		defer db.Exec(`PRAGMA foreign_keys = ON`)
+	}
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("migration %d: %w", m.version, err)
@@ -298,6 +346,13 @@ func applyMigrationTx(db *sql.DB, m migration) error {
 	if _, err := tx.Exec(m.sql); err != nil {
 		tx.Rollback()
 		return fmt.Errorf("migration %d: %w", m.version, err)
+	}
+	if rebuildsTables[m.version] {
+		var bad int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM pragma_foreign_key_check`).Scan(&bad); err != nil || bad > 0 {
+			tx.Rollback()
+			return fmt.Errorf("migration %d: foreign key check failed (%d violations): %v", m.version, bad, err)
+		}
 	}
 	if _, err := tx.Exec(`INSERT INTO schema_version (version) VALUES (?)`, m.version); err != nil {
 		tx.Rollback()

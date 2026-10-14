@@ -64,6 +64,7 @@ type ProjectView struct {
 	ModelScope   string            `json:"model_scope"`
 	FeedbackCmds []string          `json:"feedback_cmds"`
 	Limits       map[string]string `json:"limits"`
+	Cleanup      bool              `json:"cleanup_enabled"`
 	Created      int64             `json:"created"`
 	Updated      int64             `json:"updated"`
 	RunState     string            `json:"run_state"`
@@ -76,7 +77,7 @@ type ProjectView struct {
 // projectView assembles the overview of one project.
 func (a *API) projectView(ctx context.Context, p store.Project) (ProjectView, error) {
 	v := ProjectView{
-		Slug: p.Slug, RepoPath: p.RepoPath, ModelScope: p.ModelScope, FeedbackCmds: p.FeedbackCmds, Limits: p.Limits,
+		Slug: p.Slug, RepoPath: p.RepoPath, ModelScope: p.ModelScope, FeedbackCmds: p.FeedbackCmds, Limits: p.Limits, Cleanup: p.CleanupEnabled,
 		Created: p.Created.UnixMilli(), Updated: p.Updated.UnixMilli(),
 		RunState: a.deps.Engine.Runs().State(p.Slug), Remembered: model.RunStopped,
 		Progress: map[string]int{}, Current: []WorkItem{},
@@ -187,6 +188,7 @@ type projectBody struct {
 	ModelScope   *string            `json:"model_scope"`
 	FeedbackCmds *[]string          `json:"feedback_cmds"`
 	Limits       *map[string]string `json:"limits"`
+	Cleanup      *bool              `json:"cleanup_enabled"`
 }
 
 func (b projectBody) apply(p *store.Project) {
@@ -204,6 +206,9 @@ func (b projectBody) apply(p *store.Project) {
 	}
 	if b.Limits != nil {
 		p.Limits = *b.Limits
+	}
+	if b.Cleanup != nil {
+		p.CleanupEnabled = *b.Cleanup
 	}
 }
 

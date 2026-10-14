@@ -59,6 +59,8 @@ export interface ProjectView {
   model_scope: string;
   feedback_cmds: string[];
   limits: Record<string, string>;
+  /** Run the optional cleanup stage after a review pass (AT11). */
+  cleanup_enabled?: boolean;
   created: number;
   updated: number;
   run_state: string;
@@ -74,6 +76,7 @@ export interface ProjectInput {
   model_scope?: string;
   feedback_cmds?: string[];
   limits?: Record<string, string | number>;
+  cleanup_enabled?: boolean;
 }
 
 export type ProjectPatch = Partial<ProjectInput>;

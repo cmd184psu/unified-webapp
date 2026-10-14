@@ -2772,6 +2772,7 @@ var ProjectForm = class {
     this.slug = textInput("slug", p?.slug ?? "", { readOnly: !!p, placeholder: "my-project" });
     this.repo = textInput("repo_path", p?.repo_path ?? "", { placeholder: "/absolute/path/to/repository" });
     this.scope = selectInput("model_scope", SCOPES, p?.model_scope ?? "local");
+    this.cleanup = checkbox("cleanup_enabled", p?.cleanup_enabled ?? false);
     this.cmds = new RowsEditor((c) => {
       const input = textInput("feedback_cmd", c, { placeholder: "go test ./..." });
       const preview = h("code", { class: "field-hint", attrs: { "data-role": "argv" } });
@@ -2803,14 +2804,15 @@ var ProjectForm = class {
       slug: this.slug.value.trim(),
       repo_path: this.repo.value.trim(),
       model_scope: this.scope.value,
-      feedback_cmds: this.cmds.read().filter((c) => c !== "")
+      feedback_cmds: this.cmds.read().filter((c) => c !== ""),
+      cleanup_enabled: this.cleanup.checked
     };
   }
   /** save creates or updates the project; a repo path that is not yet a repository offers git init (PJ1). */
   async save() {
     this.errors.clear();
     const body = this.body();
-    const attempt = () => this.mode.project ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, feedback_cmds: body.feedback_cmds }, { quiet: true }) : this.deps.createProject(body, { quiet: true });
+    const attempt = () => this.mode.project ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, feedback_cmds: body.feedback_cmds, cleanup_enabled: body.cleanup_enabled }, { quiet: true }) : this.deps.createProject(body, { quiet: true });
     let saved;
     try {
       saved = await attempt();
@@ -2906,7 +2908,12 @@ var ProjectForm = class {
             { class: "profile-fields" },
             e.add("slug", fieldRow("Slug", this.slug, "Lowercase letters, digits and dashes; fixed once created")).el,
             e.add("repo_path", fieldRow("Repository path", this.repo, "Absolute path of an existing git repository; if it is not one you are offered git init")).el,
-            e.add("model_scope", fieldRow("Model scope", this.scope, "local keeps this project off hosted backends")).el
+            e.add("model_scope", fieldRow("Model scope", this.scope, "local keeps this project off hosted backends")).el,
+            e.add("cleanup_enabled", fieldRow(
+              "Cleanup pass",
+              this.cleanup,
+              "After a task passes review, run a cleanup agent and verify again; if that breaks verification the cleanup is rolled back"
+            )).el
           ),
           e.add("feedback_cmds", fieldRow(
             "Feedback commands",

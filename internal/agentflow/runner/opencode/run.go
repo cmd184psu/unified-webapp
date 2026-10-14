@@ -242,7 +242,7 @@ func SandboxCommand(gitDirs GitDirs) CommandFactory {
 		}
 		return sandbox.Command(ctx, sandbox.Spec{
 			Worktree:         req.Workdir,
-			ReadOnlyWorktree: req.Role != "worker",
+			ReadOnlyWorktree: !writesWorktree(req.Role),
 			RepoGitDir:       repo,
 			WorktreeGitDir:   wt,
 			StageHome:        HomeDir(req.StageDir),
