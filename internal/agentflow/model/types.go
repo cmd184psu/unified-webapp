@@ -6,7 +6,9 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
+	"time"
 )
 
 // Effort statuses (state_model.effort_statuses). An effort in complete or
@@ -272,15 +274,15 @@ type FRDDecision struct {
 	Rationale string `json:"rationale,omitempty"`
 }
 
-// ParseFRD decodes and validates an FRD document.
+// ParseFRD decodes and validates an FRD document. Ids are optional (FillFRD
+// assigns them on save), but an id that is given must be unique, and a link
+// from a criterion to a requirement must name a requirement of the document.
 func ParseFRD(raw []byte) (FRD, error) {
 	var f FRD
 	if err := json.Unmarshal(raw, &f); err != nil {
 		return FRD{}, fmt.Errorf("frd: %w", err)
 	}
 	switch {
-	case strings.TrimSpace(f.ID) == "":
-		return FRD{}, fmt.Errorf("frd: id is required")
 	case strings.TrimSpace(f.Title) == "":
 		return FRD{}, fmt.Errorf("frd: title is required")
 	case strings.TrimSpace(f.Objective) == "":
@@ -290,17 +292,17 @@ func ParseFRD(raw []byte) (FRD, error) {
 	}
 	reqs := map[string]bool{}
 	for i, r := range f.Requirements {
-		if r.ID == "" || strings.TrimSpace(r.Description) == "" {
-			return FRD{}, fmt.Errorf("frd: requirements[%d] needs an id and a description", i)
+		if strings.TrimSpace(r.Description) == "" {
+			return FRD{}, fmt.Errorf("frd: requirements[%d] needs a description", i)
 		}
-		if reqs[r.ID] {
+		if r.ID != "" && reqs[r.ID] {
 			return FRD{}, fmt.Errorf("frd: duplicate requirement %q", r.ID)
 		}
 		reqs[r.ID] = true
 	}
 	for i, ac := range f.AcceptanceCriteria {
-		if ac.ID == "" || strings.TrimSpace(ac.Criterion) == "" {
-			return FRD{}, fmt.Errorf("frd: acceptance_criteria[%d] needs an id and a criterion", i)
+		if strings.TrimSpace(ac.Criterion) == "" {
+			return FRD{}, fmt.Errorf("frd: acceptance_criteria[%d] needs a criterion", i)
 		}
 		for _, r := range ac.Requirements {
 			if !reqs[r] {
@@ -309,4 +311,59 @@ func ParseFRD(raw []byte) (FRD, error) {
 		}
 	}
 	return f, nil
+}
+
+// FillFRD completes what code can decide, so nobody types it: the id defaults
+// to FRD-<effort>, requirements and criteria without an id get R1.. and AC1..
+// (skipping ids already used), a criterion with no requirement links covers
+// every requirement, and status and created date default to draft and today.
+// It never changes a value that is already set, so a filled FRD fills to
+// itself.
+func FillFRD(f *FRD, effort int64, today time.Time) {
+	if strings.TrimSpace(f.ID) == "" {
+		f.ID = fmt.Sprintf("FRD-%d", effort)
+	}
+	if f.Status == "" {
+		f.Status = "draft"
+	}
+	if f.Created == "" {
+		f.Created = today.Format("2006-01-02")
+	}
+	used := map[string]bool{}
+	for _, r := range f.Requirements {
+		used[r.ID] = true
+	}
+	next := func(prefix string, n *int) string {
+		for {
+			*n++
+			if id := fmt.Sprintf("%s%d", prefix, *n); !used[id] {
+				used[id] = true
+				return id
+			}
+		}
+	}
+	n := 0
+	for i := range f.Requirements {
+		if f.Requirements[i].ID == "" {
+			f.Requirements[i].ID = next("R", &n)
+		}
+	}
+	all := make([]string, len(f.Requirements))
+	for i, r := range f.Requirements {
+		all[i] = r.ID
+	}
+	used = map[string]bool{}
+	for _, ac := range f.AcceptanceCriteria {
+		used[ac.ID] = true
+	}
+	n = 0
+	for i := range f.AcceptanceCriteria {
+		ac := &f.AcceptanceCriteria[i]
+		if ac.ID == "" {
+			ac.ID = next("AC", &n)
+		}
+		if len(ac.Requirements) == 0 {
+			ac.Requirements = slices.Clone(all)
+		}
+	}
 }

@@ -228,6 +228,13 @@ func (e *Engine) buildPrompt(ctx context.Context, st model.Stage, project string
 			b.WriteString("- " + a + "\n")
 		}
 	}
+	if st.Role == "worker" || st.Role == "reviewer" {
+		dod, err := e.dodSection(ctx, st.Role, project, att)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(dod)
+	}
 	if st.Role == "reviewer" {
 		b.WriteString(e.reviewFiles(ctx, att, task))
 	}
@@ -237,6 +244,31 @@ func (e *Engine) buildPrompt(ctx context.Context, st model.Stage, project string
 			return "", err
 		}
 		b.WriteString(wc)
+	}
+	return b.String(), nil
+}
+
+// dodSection is the "Definition of done" section of a worker or reviewer
+// prompt: the project's standard for every task. It is read from the
+// attempt's worktree, which has the files the task has built so far.
+func (e *Engine) dodSection(ctx context.Context, role, project string, att model.Attempt) (string, error) {
+	p, err := e.deps.Store.GetProject(ctx, project)
+	if err != nil {
+		return "", err
+	}
+	dir := att.Worktree
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		dir = p.RepoPath
+	}
+	var b strings.Builder
+	b.WriteString("\n## Definition of done\n\nEvery task is held to this standard; the engine runs the commands after each task.\n")
+	for _, it := range definitionOfDone(p, dir).Items {
+		b.WriteString("- " + it + "\n")
+	}
+	if role == "reviewer" {
+		b.WriteString("\nJudge the work against this standard as well as the task's acceptance criteria.\n")
+	} else {
+		b.WriteString("\nLeave the code meeting it; running these commands is not a task of its own.\n")
 	}
 	return b.String(), nil
 }
@@ -304,6 +336,15 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 	prompt, err := e.buildPrompt(ctx, st, p.Project)
 	if err != nil {
 		return fail(err)
+	}
+	// parse reads the stage's reply; an FRD draft, polish or split is a
+	// planner-role stage with its own reply shape.
+	purpose := draftPurpose(st)
+	parse := func(final string) (json.RawMessage, string, error) {
+		if purpose != "" {
+			return parseDraft(purpose, final)
+		}
+		return parseFinal(st.Role, final, deliberate)
 	}
 	dir := e.StageDir(st.ID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -375,7 +416,7 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 	if outcome != "" {
 		return failed(res, outcome, err)
 	}
-	parsed, verdict, perr := parseFinal(st.Role, res.Final, deliberate)
+	parsed, verdict, perr := parse(res.Final)
 	if perr == nil {
 		return StageResult{Outcome: verdict, Raw: res.Final, Parsed: parsed}
 	}
@@ -400,7 +441,7 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 	if outcome != "" {
 		return failed(res2, outcome, err)
 	}
-	parsed, verdict, perr2 := parseFinal(st.Role, res2.Final, deliberate)
+	parsed, verdict, perr2 := parse(res2.Final)
 	if perr2 != nil {
 		return failed(res2, OutcomeInfraUnparseable, perr2)
 	}

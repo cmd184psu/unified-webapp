@@ -92,7 +92,7 @@ func TestD4_InvalidImportNamesTheField(t *testing.T) {
 	const imp = "/api/projects/p1/efforts/import"
 	e.field("POST", imp, `{"id":"X","title":"t","objective":"o","requirements":[{"id":"R1","description":5}]}`, "requirements[0].description")
 	e.field("POST", imp, `{"id":"X","title":"t","objective":"o","requirements":[{"id":"R1","description":"d"}],"bogus":true}`, "bogus")
-	e.field("POST", imp, `{"title":"t","objective":"o","requirements":[{"id":"R1","description":"d"}]}`, "id")
+	e.field("POST", imp, `{"id":"X","title":"t","objective":"o","requirements":[{"description":""}]}`, "requirements[0]")
 	e.field("POST", imp, `{"id":"X","title":"t","requirements":[{"id":"R1","description":"d"}]}`, "objective")
 	e.field("POST", imp, `{"id":"X","title":"t","objective":"o","requirements":[]}`, "requirements")
 	e.field("POST", imp, `{"id":"X","title":"t","objective":"o","requirements":[{"id":"R1","description":"d"},{"id":"R1","description":"e"}]}`, "requirements")
@@ -102,6 +102,15 @@ func TestD4_InvalidImportNamesTheField(t *testing.T) {
 	e.field("POST", imp, `[1,2]`, "body")
 	if list := decode[[]EffortView](t, e.ok("GET", "/api/projects/p1/efforts", nil, 200)); len(list) != 0 {
 		t.Fatalf("failed imports left efforts: %+v", list)
+	}
+	// N3: no id has to be typed; the filler gives the FRD its id, requirement
+	// and criterion ids, the links and the defaults.
+	ef := decode[EffortView](t, e.ok("POST", imp, `{"title":"t","objective":"o","requirements":[{"description":"d"}],"acceptance_criteria":[{"criterion":"c"}]}`, http.StatusCreated))
+	doc := decode[DocView](t, e.ok("GET", "/api/projects/p1/efforts/"+itoa(ef.ID)+"/frd", nil, 200))
+	for _, want := range []string{`"id":"FRD-` + itoa(ef.ID) + `"`, `"status":"draft"`, `"id":"R1"`, `"id":"AC1"`, `"requirements":["R1"]`} {
+		if !strings.Contains(string(doc.JSON), want) {
+			t.Fatalf("filled FRD lacks %s: %s", want, doc.JSON)
+		}
 	}
 }
 

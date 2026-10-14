@@ -118,6 +118,7 @@ func (a *API) Register(mux muxer) {
 	a.registerStats(mux)
 	a.registerEfforts(mux)
 	a.registerDocs(mux)
+	a.registerFRDTools(mux)
 	a.registerQueue(mux)
 	a.registerTasks(mux)
 	a.registerRun(mux)

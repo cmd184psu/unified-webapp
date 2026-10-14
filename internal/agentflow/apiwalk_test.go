@@ -21,6 +21,13 @@ import (
 	"cmd184psu/unified-webapp/internal/taskmaster/worker"
 )
 
+// Drafter replies for the walk: a draft, a polish and a split into two parts.
+const (
+	walkDraft = `{"title":"walk","objective":"Walk the API.","requirements":[{"description":"Every route answers"}],"acceptance_criteria":[{"criterion":"A route answers with JSON"},{"criterion":"go test passes"}]}`
+	walkSplit = `{"parts":[{"title":"first half","objective":"Do the first half.","requirements":[{"description":"First half works"}],"acceptance_criteria":[{"criterion":"First half answers"}]},` +
+		`{"title":"second half","objective":"Do the second half.","requirements":[{"description":"Second half works"}],"acceptance_criteria":[{"criterion":"Second half answers"}]}]}`
+)
+
 // TestAPIWalk_EveryRouteIsExercised is the API-only equivalent of clicking
 // through every tab. It drives the module the way the web UI does, over HTTP
 // with the scripted fake runner (no browser), and fails if any registered
@@ -46,7 +53,9 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	e2eGit(t, repo, "commit", "-q", "-m", "initial")
 
 	fake := runner.NewFake()
-	fake.Script("planner", runner.Step{Reply: e2ePlan})
+	// The planner role also serves the FRD drafter: draft, polish and split come
+	// first, then the plan.
+	fake.Script("planner", runner.Step{Reply: walkDraft}, runner.Step{Reply: walkDraft}, runner.Step{Reply: walkSplit}, runner.Step{Reply: e2ePlan})
 	fake.Script("architect", runner.Step{Reply: e2eApprove})
 	fake.Script("critic", runner.Step{Reply: e2eApprove})
 	fake.Script("compiler", runner.Step{Reply: e2eCompile}, runner.Step{Reply: e2eCompile}) // approve compiles, then a recompile
@@ -89,11 +98,17 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 
 	// Backends: a host to probe, add, edit, retire, enable.
 	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/show" {
+			_, _ = w.Write([]byte(`{"model_info":{"general.architecture":"x","x.context_length":8192}}`))
+			return
+		}
 		_, _ = w.Write([]byte(`{"models":[{"name":"m1"},{"name":"m2"},{"name":"m3"}]}`))
 	}))
 	t.Cleanup(ollama.Close)
-	ok("POST", "/api/backends/probe", `{"host":`+strconv.Quote(ollama.URL)+`,"api_type":"ollama"}`, 200)
-	ok("POST", "/api/backends", `{"name":"gpu","host":"http://127.0.0.1:11434","api_type":"ollama","slots":2,"models":[{"model":"m1"},{"model":"m2"},{"model":"m3"}]}`, 201)
+	if out := ok("POST", "/api/backends/probe", `{"host":`+strconv.Quote(ollama.URL)+`,"api_type":"ollama"}`, 200); !strings.Contains(string(out), `"m1":8192`) {
+		t.Fatalf("probe answered no context size: %s", out)
+	}
+	ok("POST", "/api/backends", `{"name":"gpu","host":"http://127.0.0.1:11434","api_type":"ollama","slots":2,"models":[{"model":"m1","context_tokens":8192},{"model":"m2","context_tokens":8192},{"model":"m3"}]}`, 201)
 	ok("POST", "/api/backends", `{"name":"spare","host":"http://127.0.0.1:11435","api_type":"ollama","slots":1,"models":[{"model":"m1"}]}`, 201)
 	ok("GET", "/api/backends", "", 200)
 	ok("PATCH", "/api/backends/spare", `{"slots":2}`, 200)
@@ -122,6 +137,14 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	ok("GET", "/api/projects", "", 200)
 	ok("GET", "/api/projects/demo", "", 200)
 	ok("PATCH", "/api/projects/demo", `{"cleanup_enabled":false}`, 200)
+	if out := ok("GET", "/api/projects/demo/definition-of-done", "", 200); !strings.Contains(string(out), `"source":"detected"`) {
+		t.Fatalf("definition of done: %s", out)
+	}
+	ok("PATCH", "/api/projects/demo", `{"definition_of_done":["The changelog is updated."]}`, 200)
+	if out := ok("GET", "/api/projects/demo/definition-of-done", "", 200); !strings.Contains(string(out), `"source":"project"`) {
+		t.Fatalf("definition of done override: %s", out)
+	}
+	ok("PATCH", "/api/projects/demo", `{"definition_of_done":null}`, 200)
 	ok("GET", "/api/projects/demo/limits", "", 200)
 	ok("PUT", "/api/projects/demo/limits", `{"limits":{"max_attempts":"4"}}`, 200)
 	ok("PUT", "/api/projects/demo/candidates/worker", `{"candidates":[{"backend":"gpu","model":"m1"}]}`, 200)
@@ -139,6 +162,34 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	ok("PATCH", base, `{"deliberate":false}`, 200)
 	ok("PUT", base+"/frd", `{"id":"FRD-W","title":"walk","objective":"o","requirements":[{"id":"R1","description":"d"}],"acceptance_criteria":[{"id":"AC1","criterion":"c"}]}`, 200)
 	ok("GET", base+"/frd", "", 200)
+	// FRD automation: draft, polish, split into two parts, size.
+	waitDraft := func() {
+		t.Helper()
+		deadline := time.Now().Add(20 * time.Second)
+		for time.Now().Before(deadline) {
+			var d struct{ State, Error string }
+			if err := json.Unmarshal(ok("GET", base+"/frd/draft", "", 200), &d); err == nil && d.State != "running" {
+				if d.State != "idle" {
+					t.Fatalf("draft state %s: %s", d.State, d.Error)
+				}
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatal("draft never finished")
+	}
+	ok("GET", base+"/frd/draft", "", 200)
+	ok("GET", base+"/size", "", 200)
+	ok("POST", base+"/frd/draft", `{"description":"walk the API"}`, 202)
+	waitDraft()
+	ok("POST", base+"/frd/draft", `{"description":"","polish":true}`, 202)
+	waitDraft()
+	ok("POST", base+"/frd/split", `{"max_parts":2}`, 202)
+	waitDraft()
+	if out := ok("GET", base+"/frd/parts", "", 200); !strings.Contains(string(out), `"n":2`) {
+		t.Fatalf("parts: %s", out)
+	}
+	ok("POST", base+"/frd/parts/2/start", ``, 409) // this effort is still active
 	ok("POST", base+"/frd/approve", ``, 200)
 	ok("GET", base+"/frd/revisions", "", 200)
 	ok("GET", base+"/frd/revisions/1", "", 200)
@@ -210,6 +261,14 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	ok("POST", "/api/projects/demo/run/run-one", ``, 409) // nothing left to run
 	ok("GET", base+"/git-commands", "", 200)
 	ok("GET", "/api/efforts/"+id+"/export", "", 200)
+
+	// The second half of the split FRD becomes an effort of its own.
+	var part struct{ ID int64 }
+	if err := json.Unmarshal(ok("POST", base+"/frd/parts/2/start", ``, 201), &part); err != nil || part.ID == 0 {
+		t.Fatalf("start part: %v", err)
+	}
+	ok("POST", base+"/frd/parts/2/start", ``, 409) // already started
+	ok("POST", "/api/projects/demo/efforts/"+strconv.FormatInt(part.ID, 10)+"/abandon", `{"confirm":true}`, 0)
 
 	// A second effort: import an FRD, then abandon it.
 	imp := ok("POST", "/api/projects/demo/efforts/import", `{"id":"FRD-I","title":"imported","objective":"o","requirements":[{"id":"R1","description":"d"}],"acceptance_criteria":[{"id":"AC1","criterion":"c"}]}`, 0)

@@ -21,7 +21,10 @@ type Project struct {
 	RepoPath     string
 	ModelScope   string
 	FeedbackCmds []string
-	Limits       map[string]string
+	// DefinitionOfDone overrides the items derived from the toolchain; nil
+	// means derive them.
+	DefinitionOfDone []string
+	Limits           map[string]string
 	// CleanupEnabled runs the optional cleanup stage after a review pass (AT11).
 	CleanupEnabled bool
 	// Plugins are the runner plugins the project opted into, each pinned to an
@@ -69,6 +72,11 @@ func (s *Store) validateProject(p Project) (resolved string, err error) {
 	for i, c := range p.FeedbackCmds {
 		if strings.TrimSpace(c) == "" {
 			return "", Invalid(fmt.Sprintf("feedback_cmds[%d]", i), "must not be blank")
+		}
+	}
+	for i, c := range p.DefinitionOfDone {
+		if strings.TrimSpace(c) == "" {
+			return "", Invalid(fmt.Sprintf("definition_of_done[%d]", i), "must not be blank")
 		}
 	}
 	if err := validatePlugins(p.Plugins); err != nil {
@@ -154,6 +162,16 @@ func writeProjectBody(ctx context.Context, tx *sql.Tx, p Project) error {
 	return nil
 }
 
+// dodJSON stores a definition-of-done override; none (derive) is the empty
+// string.
+func dodJSON(items []string) (string, error) {
+	if len(items) == 0 {
+		return "", nil
+	}
+	b, err := json.Marshal(items)
+	return string(b), err
+}
+
 func feedbackJSON(cmds []string) (string, error) {
 	if cmds == nil {
 		cmds = []string{}
@@ -186,6 +204,10 @@ func (s *Store) CreateProject(ctx context.Context, actor string, p Project) erro
 	if err != nil {
 		return Invalid("feedback_cmds", "not JSON-encodable")
 	}
+	dod, err := dodJSON(p.DefinitionOfDone)
+	if err != nil {
+		return Invalid("definition_of_done", "not JSON-encodable")
+	}
 	return s.WithTx(ctx, func(tx *sql.Tx) error {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects WHERE slug = ?`, p.Slug).Scan(&n); err != nil {
@@ -202,8 +224,8 @@ func (s *Store) CreateProject(ctx context.Context, actor string, p Project) erro
 		}
 		now := time.Now().UnixMilli()
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO projects (slug, repo_path, model_scope, feedback_cmds_json, cleanup_enabled, created, updated)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`, p.Slug, repo, p.ModelScope, fb, b2i(p.CleanupEnabled), now, now); err != nil {
+			INSERT INTO projects (slug, repo_path, model_scope, feedback_cmds_json, definition_of_done_json, cleanup_enabled, created, updated)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, p.Slug, repo, p.ModelScope, fb, dod, b2i(p.CleanupEnabled), now, now); err != nil {
 			return err
 		}
 		if err := writeProjectBody(ctx, tx, p); err != nil {
@@ -225,6 +247,10 @@ func (s *Store) UpdateProject(ctx context.Context, actor string, p Project) erro
 	if err != nil {
 		return Invalid("feedback_cmds", "not JSON-encodable")
 	}
+	dod, err := dodJSON(p.DefinitionOfDone)
+	if err != nil {
+		return Invalid("definition_of_done", "not JSON-encodable")
+	}
 	return s.WithTx(ctx, func(tx *sql.Tx) error {
 		if err := requireProject(ctx, tx, p.Slug); err != nil {
 			return err
@@ -236,8 +262,8 @@ func (s *Store) UpdateProject(ctx context.Context, actor string, p Project) erro
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE projects SET repo_path = ?, model_scope = ?, feedback_cmds_json = ?, cleanup_enabled = ?, updated = ?
-			WHERE slug = ?`, repo, p.ModelScope, fb, b2i(p.CleanupEnabled), time.Now().UnixMilli(), p.Slug); err != nil {
+			UPDATE projects SET repo_path = ?, model_scope = ?, feedback_cmds_json = ?, definition_of_done_json = ?, cleanup_enabled = ?, updated = ?
+			WHERE slug = ?`, repo, p.ModelScope, fb, dod, b2i(p.CleanupEnabled), time.Now().UnixMilli(), p.Slug); err != nil {
 			return err
 		}
 		if err := writeProjectBody(ctx, tx, p); err != nil {
@@ -249,7 +275,7 @@ func (s *Store) UpdateProject(ctx context.Context, actor string, p Project) erro
 }
 
 func loadProjects(ctx context.Context, q querier, slug string) ([]Project, error) {
-	query := `SELECT slug, repo_path, model_scope, feedback_cmds_json, cleanup_enabled, created, updated FROM projects`
+	query := `SELECT slug, repo_path, model_scope, feedback_cmds_json, definition_of_done_json, cleanup_enabled, created, updated FROM projects`
 	var args []any
 	if slug != "" {
 		query += ` WHERE slug = ?`
@@ -262,16 +288,22 @@ func loadProjects(ctx context.Context, q querier, slug string) ([]Project, error
 	var out []Project
 	for rows.Next() {
 		var p Project
-		var fb string
+		var fb, dod string
 		var cleanup int
 		var created, updated int64
-		if err := rows.Scan(&p.Slug, &p.RepoPath, &p.ModelScope, &fb, &cleanup, &created, &updated); err != nil {
+		if err := rows.Scan(&p.Slug, &p.RepoPath, &p.ModelScope, &fb, &dod, &cleanup, &created, &updated); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(fb), &p.FeedbackCmds); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("project %q feedback commands: %w", p.Slug, err)
+		}
+		if dod != "" {
+			if err := json.Unmarshal([]byte(dod), &p.DefinitionOfDone); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("project %q definition of done: %w", p.Slug, err)
+			}
 		}
 		p.CleanupEnabled = cleanup != 0
 		p.Created, p.Updated = time.UnixMilli(created), time.UnixMilli(updated)

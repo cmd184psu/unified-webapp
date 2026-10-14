@@ -17,6 +17,8 @@ type BackendModel struct {
 	// MaxConcurrent caps how many stages may run this model at once on the
 	// backend (PX5); 0 means only the backend's slots limit it.
 	MaxConcurrent int
+	// ContextTokens is the model's context window; 0 means unknown.
+	ContextTokens int
 }
 
 // Backend is a model server in agentflow's own terms (AR3): where it is, which
@@ -60,6 +62,9 @@ func validateBackend(b Backend) error {
 		if m.MaxConcurrent < 0 {
 			return Invalid("models", fmt.Sprintf("model %q: max_concurrent must be 0 (no limit) or more", m.Model))
 		}
+		if m.ContextTokens < 0 {
+			return Invalid("models", fmt.Sprintf("model %q: context_tokens must be 0 (unknown) or more", m.Model))
+		}
 		if seen[m.Model] {
 			return Invalid("models", fmt.Sprintf("duplicate model %q", m.Model))
 		}
@@ -85,8 +90,8 @@ func b2i(b bool) int {
 
 func insertModels(ctx context.Context, tx *sql.Tx, b Backend) error {
 	for _, m := range b.Models {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO backend_models (backend, model, paid, max_concurrent) VALUES (?, ?, ?, ?)`,
-			b.Name, m.Model, b2i(m.Paid), m.MaxConcurrent); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO backend_models (backend, model, paid, max_concurrent, context_tokens) VALUES (?, ?, ?, ?, ?)`,
+			b.Name, m.Model, b2i(m.Paid), m.MaxConcurrent, m.ContextTokens); err != nil {
 			return err
 		}
 	}
@@ -229,14 +234,14 @@ func loadBackends(ctx context.Context, q querier, name string) ([]Backend, error
 	// The single connection serves one result set at a time, so models are
 	// read after the backend rows are closed.
 	for i := range out {
-		mrows, err := q.QueryContext(ctx, `SELECT model, paid, max_concurrent FROM backend_models WHERE backend = ? ORDER BY model`, out[i].Name)
+		mrows, err := q.QueryContext(ctx, `SELECT model, paid, max_concurrent, context_tokens FROM backend_models WHERE backend = ? ORDER BY model`, out[i].Name)
 		if err != nil {
 			return nil, err
 		}
 		for mrows.Next() {
 			var m BackendModel
 			var paid int
-			if err := mrows.Scan(&m.Model, &paid, &m.MaxConcurrent); err != nil {
+			if err := mrows.Scan(&m.Model, &paid, &m.MaxConcurrent, &m.ContextTokens); err != nil {
 				mrows.Close()
 				return nil, err
 			}

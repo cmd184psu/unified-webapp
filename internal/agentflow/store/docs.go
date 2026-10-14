@@ -6,10 +6,30 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
+	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/model"
 )
+
+// fillFRDJSON runs model.FillFRD over a stored FRD body. A body that needs
+// nothing filled is returned byte for byte, so FRDs saved before the filler
+// existed are not rewritten.
+func fillFRDJSON(raw []byte, effort int64, now time.Time) ([]byte, error) {
+	var f, filled model.FRD
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return nil, fmt.Errorf("frd: %w", err)
+	}
+	if err := json.Unmarshal(raw, &filled); err != nil {
+		return nil, fmt.Errorf("frd: %w", err)
+	}
+	model.FillFRD(&filled, effort, now)
+	if reflect.DeepEqual(f, filled) {
+		return raw, nil
+	}
+	return json.Marshal(filled)
+}
 
 func validDocJSON(kind string, raw []byte) error {
 	if !slices.Contains([]string{model.DocFRD, model.DocPlan, model.DocReview}, kind) {
@@ -32,6 +52,13 @@ func validDocJSON(kind string, raw []byte) error {
 // Revisions are immutable: an edit after approval is a new revision and leaves
 // the approved one untouched (DBS4).
 func (s *Store) SaveDoc(ctx context.Context, actor string, effort int64, kind string, raw []byte) (model.Doc, error) {
+	if kind == model.DocFRD {
+		filled, err := fillFRDJSON(raw, effort, time.UnixMilli(nowMS()).UTC())
+		if err != nil {
+			return model.Doc{}, Invalid("json", err.Error())
+		}
+		raw = filled
+	}
 	if err := validDocJSON(kind, raw); err != nil {
 		return model.Doc{}, err
 	}

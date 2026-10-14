@@ -290,3 +290,48 @@ func TestRP5_DeliberatePlanNeedsThreePremortemScenarios(t *testing.T) {
 		}
 	}
 }
+
+func TestFRDDraftValidate(t *testing.T) {
+	good := `{"title":"t","objective":"o","requirements":[{"description":"d","priority":"must"},{"description":"e"}],` +
+		`"acceptance_criteria":[{"criterion":"c"},{"criterion":"c2","requirements":["R2"]}],"out_of_scope":["x"]}`
+	if _, err := Parse[FRDDraft](json.RawMessage(good)); err != nil {
+		t.Fatalf("good draft rejected: %v", err)
+	}
+	for name, c := range map[string]struct{ in, field string }{
+		"no objective":      {`{"requirements":[{"description":"d"}]}`, "objective"},
+		"no requirements":   {`{"objective":"o","requirements":[]}`, "requirements"},
+		"blank requirement": {`{"objective":"o","requirements":[{"description":" "}]}`, "requirements[0].description"},
+		"bad priority":      {`{"objective":"o","requirements":[{"description":"d","priority":"urgent"}]}`, "requirements[0].priority"},
+		"blank criterion":   {`{"objective":"o","requirements":[{"description":"d"}],"acceptance_criteria":[{"criterion":""}]}`, "acceptance_criteria[0].criterion"},
+		"dangling link":     {`{"objective":"o","requirements":[{"description":"d"}],"acceptance_criteria":[{"criterion":"c","requirements":["R5"]}]}`, "acceptance_criteria"},
+	} {
+		_, err := Parse[FRDDraft](json.RawMessage(c.in))
+		var ve *ValidationError
+		if !errors.As(err, &ve) || ve.Field != c.field {
+			t.Errorf("%s: err = %v, want a validation error on %q", name, err, c.field)
+		}
+	}
+	if _, err := Parse[FRDDraft](json.RawMessage(`{"objective":"o","requirements":[{"description":"d"}],"surprise":1}`)); err == nil {
+		t.Error("an unknown field was accepted")
+	}
+}
+
+func TestFRDSplitValidate(t *testing.T) {
+	part := func(title string) string {
+		return `{"title":"` + title + `","objective":"o","requirements":[{"description":"d"}]}`
+	}
+	if _, err := Parse[FRDSplit](json.RawMessage(`{"parts":[` + part("one") + `,` + part("two") + `]}`)); err != nil {
+		t.Fatalf("good split rejected: %v", err)
+	}
+	for name, c := range map[string]struct{ in, field string }{
+		"no parts":      {`{"parts":[]}`, "parts"},
+		"untitled part": {`{"parts":[` + part("one") + `,` + part("") + `]}`, "parts[1].title"},
+		"bad part":      {`{"parts":[{"title":"t","objective":"o","requirements":[]}]}`, "parts[0].requirements"},
+	} {
+		_, err := Parse[FRDSplit](json.RawMessage(c.in))
+		var ve *ValidationError
+		if !errors.As(err, &ve) || ve.Field != c.field {
+			t.Errorf("%s: err = %v, want a validation error on %q", name, err, c.field)
+		}
+	}
+}

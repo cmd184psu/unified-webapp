@@ -136,10 +136,12 @@ at once (`slots`) and which models it offers.
 | `hosted` | `true` for a remote service. Hosted backends are never used under model scope `local`. |
 | `paid` | `true` if the backend bills per use. |
 | `slots` | Concurrent stages, at least 1. |
-| `models` | List of `{model, paid, max_concurrent}`. `max_concurrent` is a per-model cap below the slots (0 = no extra cap). |
+| `models` | List of `{model, paid, max_concurrent, context_tokens}`. `max_concurrent` is a per-model cap below the slots (0 = no extra cap). `context_tokens` is the model's context window (0 = unknown); it feeds the [size check](#size-and-splitting-a-large-frd). |
 
 Create and manage them in the **Backends** tab or with `POST /api/backends`,
-`POST /api/backends/probe` (lists the models a host serves, so the form can offer them),
+`POST /api/backends/probe` (lists the models a host serves, so the form can offer them; for an
+Ollama host the answer also has `contexts`, a map of model name to the context window the host
+states, leaving out any model that does not answer),
 `PATCH /api/backends/{name}`, `POST /api/backends/{name}/retire` (optionally cancelling
 running stages) and `POST /api/backends/{name}/enable`.
 
@@ -185,8 +187,20 @@ Project settings (`PATCH /api/projects/{slug}`):
 | `model_scope` | `local` (default) or `any`. |
 | `feedback_cmds` | Commands that verify each task, as strings split on whitespace. No quoting, no shell, no expansion: wrap anything fancy in a script in your repo. When empty, AgentFlow detects: `go build/vet/test ./...` for `go.mod`, `python -m pytest -q` for `pyproject.toml`, `npm test --silent` when `package.json` has a test script. |
 | `limits` | Per-project overrides of the global limits (below). Blank inherits. |
+| `definition_of_done` | Optional list of lines that replaces the [derived definition of done](#definition-of-done). `null` (or an empty list) goes back to the derived one. |
 | `cleanup_enabled` | Turn on the [cleanup pass](#cleanup). |
 | `plugins` | [Opencode plugins](#plugins). |
+
+### Definition of done
+
+Every task is held to one standard, shown by `GET /api/projects/{slug}/definition-of-done` as
+`{"items": [...], "source": "detected" | "project", "toolchains": [...]}`. Detected items are the
+commands the engine runs after every task (your `feedback_cmds`, else the commands found for the
+repository's toolchain: Go, Python, npm) plus three fixed lines: no files outside the task's scope
+change, new code has tests, no secrets are added. A `definition_of_done` set on the project replaces
+them. The worker and reviewer prompts carry the list, and the reviewer is told to judge against it.
+Because the engine already enforces it, nobody writes "the tests pass" as an acceptance criterion
+and the drafter below never does.
 
 Feedback commands are the only commands run to verify work. They come from you, never from a
 model: compiled queues containing a `verify` field are rejected.
@@ -242,6 +256,37 @@ or import an existing one with `POST /api/projects/{slug}/efforts/import` (the b
 JSON; it is strictly validated). Every save is a numbered revision
 (`GET /api/projects/{slug}/efforts/{id}/frd/revisions`). Approve it with
 `POST /api/projects/{slug}/efforts/{id}/frd/approve`. **You always approve the FRD yourself.**
+
+You do not have to type the structure. The ids (`R1`, `AC1`, ...), the links from criteria to
+requirements (a criterion with none covers every requirement), the status (`draft`), the created date and
+the FRD id (`FRD-<effort id>`) are filled in on every save, so an FRD with only an objective,
+requirements and criteria is valid. A link you do give must name a requirement of the same FRD.
+
+**Draft from a description.** `POST /api/projects/{slug}/efforts/{id}/frd/draft` with
+`{"description": "what you want, in plain words", "polish": false}` runs a planner-role stage and
+answers 202. The result is saved as a new, unapproved FRD revision. With `"polish": true` the stage
+tidies the existing FRD instead (shorter wording, duplicates merged, the id and constraints kept).
+Criteria that only restate the [definition of done](#definition-of-done) are removed by code after the
+reply is read. `GET .../frd/draft` gives `{"state": "idle" | "running" | "failed", "started": ms, "error": "..."}`;
+a failed draft leaves the FRD as it was. The effort must be a draft with no stage in flight: a second
+request while one runs, or a request after the plan has started, is 409.
+
+### Size and splitting a large FRD
+
+A model with a short context cannot plan a large FRD, and a long context costs a lot on a paid model.
+`GET /api/projects/{slug}/efforts/{id}/size` estimates the FRD and the plan in tokens (a quarter of
+their JSON length) and sets them against a budget: half of the smallest known `context_tokens`
+among the models the planner, architect, critic and compiler roles may use for the project (global
+lists, or the project's own). It answers `{"frd_tokens", "plan_tokens", "budget_tokens",
+"context_tokens_min", "over", "models": [{"backend", "model", "context_tokens"}], "advice"}`;
+`over` is only ever true when a context size is known.
+
+`POST .../frd/split` with an optional `{"max_parts": n}` asks the drafter to cut the FRD into the fewest
+ordered, self-contained parts that fit the budget. Part 1 becomes this effort's FRD (a new revision);
+parts 2 and up are stored: `GET .../frd/parts` lists them as
+`[{"n", "title", "summary", "tokens", "started_effort"}]`, and `POST .../frd/parts/{n}/start` creates a
+new effort from part n, the way an import does. That is a 409 while the project has an active effort,
+so finish or abandon this one first, and for a part that was started already.
 
 ### 2. Plan
 

@@ -169,7 +169,7 @@ func (e *Engine) loadPlanSession(ctx context.Context, effort int64) (*planSessio
 		return nil, err
 	}
 	for _, st := range all {
-		if st.ID > floor && slices.Contains(planRoles, st.Role) {
+		if st.ID > floor && slices.Contains(planRoles, st.Role) && draftPurpose(st) == "" {
 			sess.stages = append(sess.stages, st)
 		}
 	}
@@ -384,6 +384,11 @@ func (e *Engine) GeneratePlan(ctx context.Context, actor string, effort int64) e
 	} else if err != nil {
 		return err
 	}
+	if cur, err := e.DraftState(ctx, effort); err != nil {
+		return err
+	} else if cur.State == "running" {
+		return fmt.Errorf("effort %d is still drafting its FRD: %w", effort, store.ErrConflict)
+	}
 	floor, err := e.maxStageID(ctx, effort)
 	if err != nil {
 		return err
@@ -420,6 +425,8 @@ func (e *Engine) AdvancePlans(ctx context.Context) error {
 			continue
 		}
 		switch ef.Status {
+		case model.EffortDraft:
+			err = e.advanceDraft(ctx, p, ef)
 		case model.EffortPlanning:
 			err = e.advancePlan(ctx, p, ef)
 		case model.EffortCompiling:
@@ -648,6 +655,9 @@ const deliberateCriticChecks = "## Deliberate mode\n\n" +
 // never the architect's review (RP1). A custom Deps.Prompt serving effort
 // stages delegates here.
 func (e *Engine) EffortPrompt(ctx context.Context, st model.Stage) (string, error) {
+	if purpose := draftPurpose(st); purpose != "" {
+		return e.draftPrompt(ctx, st, purpose)
+	}
 	text, err := prompts.Load(st.Role)
 	if err != nil {
 		return "", err

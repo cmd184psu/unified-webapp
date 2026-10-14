@@ -23,6 +23,7 @@ type migration struct {
 //	7  F3  stages.tokens; efforts.budget_tokens, efforts.budget_seconds
 //	8  F4  project_plugins
 //	9  P2  backends.api_key, browse_roots setting
+//	10 P3  backend_models.context_tokens, projects.definition_of_done_json, frd_parts
 //
 // Later stories append the next integer; they never edit an earlier entry.
 var migrations = []migration{
@@ -35,7 +36,27 @@ var migrations = []migration{
 	{7, migration7SQL},
 	{8, migration8SQL},
 	{9, migration9SQL},
+	{10, migration10SQL},
 }
+
+// migration10SQL (P3) adds what the FRD automation needs: a model's context
+// window (0 means unknown), a project's optional definition-of-done override
+// (empty means derive it from the toolchain), and the parts a split FRD is
+// stored in. started_effort is the effort a part was started as (0 = not yet).
+const migration10SQL = `
+ALTER TABLE backend_models ADD COLUMN context_tokens INTEGER NOT NULL DEFAULT 0 CHECK (context_tokens >= 0);
+ALTER TABLE projects ADD COLUMN definition_of_done_json TEXT NOT NULL DEFAULT '';
+CREATE TABLE frd_parts (
+  effort INTEGER NOT NULL REFERENCES efforts(id) ON DELETE CASCADE,
+  n INTEGER NOT NULL CHECK (n >= 1),
+  title TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '',
+  json TEXT NOT NULL,
+  tokens INTEGER NOT NULL DEFAULT 0,
+  started_effort INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (effort, n)
+);
+`
 
 // migration9SQL (P2) keeps a hosted backend's API key in the database, so it
 // can be changed without a restart, and adds the directory picker's roots

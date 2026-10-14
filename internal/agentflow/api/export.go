@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -225,23 +226,31 @@ func (a *API) importFRD(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	f, err := model.ParseFRD(raw)
+	ef, err := a.effortFromFRD(r.Context(), actorOf(r), slug, raw)
 	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	actor := actorOf(r)
-	ef, err := a.deps.Store.CreateEffort(r.Context(), actor, slug, f.Title, false)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	if _, err := a.deps.Store.SaveDoc(r.Context(), actor, ef.ID, model.DocFRD, raw); err != nil {
-		abandoned := model.EffortAbandoned // do not leave an empty effort holding the project
-		_, _ = a.deps.Store.UpdateEffort(r.Context(), actor, ef.ID, store.EffortPatch{Status: &abandoned})
 		writeErr(w, err)
 		return
 	}
 	a.emit("effort.update", map[string]any{"project": slug, "effort": ef.ID})
 	a.respondEffort(w, r, ef.ID, http.StatusCreated)
+}
+
+// effortFromFRD creates an effort titled after the FRD and saves the FRD as
+// its revision 1. It is shared by the import route and by starting a part of
+// a split FRD.
+func (a *API) effortFromFRD(ctx context.Context, actor, slug string, raw []byte) (model.Effort, error) {
+	f, err := model.ParseFRD(raw)
+	if err != nil {
+		return model.Effort{}, err
+	}
+	ef, err := a.deps.Store.CreateEffort(ctx, actor, slug, f.Title, false)
+	if err != nil {
+		return ef, err
+	}
+	if _, err := a.deps.Store.SaveDoc(ctx, actor, ef.ID, model.DocFRD, raw); err != nil {
+		abandoned := model.EffortAbandoned // do not leave an empty effort holding the project
+		_, _ = a.deps.Store.UpdateEffort(ctx, actor, ef.ID, store.EffortPatch{Status: &abandoned})
+		return ef, err
+	}
+	return ef, nil
 }

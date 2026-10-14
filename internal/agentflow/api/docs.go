@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/engine"
 	"cmd184psu/unified-webapp/internal/agentflow/model"
@@ -151,7 +152,16 @@ func readFRD(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 	}
 	raw, err := json.Marshal(f)
 	if err == nil {
-		_, err = model.ParseFRD(raw)
+		// Ids the author left out are filled on save, so a link to R1 is
+		// checked against the ids the filler will assign.
+		var probe model.FRD
+		if err = json.Unmarshal(raw, &probe); err == nil {
+			model.FillFRD(&probe, 0, time.Time{})
+			var filled []byte
+			if filled, err = json.Marshal(probe); err == nil {
+				_, err = model.ParseFRD(filled)
+			}
+		}
 	}
 	if err != nil {
 		badRequest(w, frdField(err.Error()), strings.TrimPrefix(err.Error(), "frd: "))

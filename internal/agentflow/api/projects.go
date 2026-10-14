@@ -23,6 +23,7 @@ func (a *API) registerProjects(mux muxer) {
 	mux.HandleFunc("DELETE /api/projects/{slug}", a.deleteProject)
 	mux.HandleFunc("GET /api/projects/{slug}/limits", a.getLimits)
 	mux.HandleFunc("PUT /api/projects/{slug}/limits", a.putLimits)
+	mux.HandleFunc("GET /api/projects/{slug}/definition-of-done", a.getDefinitionOfDone)
 }
 
 // flexStrings converts a JSON object of numbers and strings to the text the
@@ -66,27 +67,29 @@ type PluginView struct {
 // ProjectView is a project with what the overview shows: run state, active
 // effort, task progress and the stages in flight.
 type ProjectView struct {
-	Slug         string            `json:"slug"`
-	RepoPath     string            `json:"repo_path"`
-	ModelScope   string            `json:"model_scope"`
-	FeedbackCmds []string          `json:"feedback_cmds"`
-	Limits       map[string]string `json:"limits"`
-	Cleanup      bool              `json:"cleanup_enabled"`
-	Plugins      []PluginView      `json:"plugins"`
-	Created      int64             `json:"created"`
-	Updated      int64             `json:"updated"`
-	RunState     string            `json:"run_state"`
-	Remembered   string            `json:"remembered_run_state"`
-	StopReason   string            `json:"stop_reason"`
-	Effort       *model.Effort     `json:"effort"`
-	Progress     map[string]int    `json:"progress"`
-	Current      []WorkItem        `json:"current"`
+	Slug         string   `json:"slug"`
+	RepoPath     string   `json:"repo_path"`
+	ModelScope   string   `json:"model_scope"`
+	FeedbackCmds []string `json:"feedback_cmds"`
+	// DefinitionOfDone is the project's override, null when it is derived.
+	DefinitionOfDone []string          `json:"definition_of_done"`
+	Limits           map[string]string `json:"limits"`
+	Cleanup          bool              `json:"cleanup_enabled"`
+	Plugins          []PluginView      `json:"plugins"`
+	Created          int64             `json:"created"`
+	Updated          int64             `json:"updated"`
+	RunState         string            `json:"run_state"`
+	Remembered       string            `json:"remembered_run_state"`
+	StopReason       string            `json:"stop_reason"`
+	Effort           *model.Effort     `json:"effort"`
+	Progress         map[string]int    `json:"progress"`
+	Current          []WorkItem        `json:"current"`
 }
 
 // projectView assembles the overview of one project.
 func (a *API) projectView(ctx context.Context, p store.Project) (ProjectView, error) {
 	v := ProjectView{
-		Slug: p.Slug, RepoPath: p.RepoPath, ModelScope: p.ModelScope, FeedbackCmds: p.FeedbackCmds, Limits: p.Limits, Cleanup: p.CleanupEnabled,
+		Slug: p.Slug, RepoPath: p.RepoPath, ModelScope: p.ModelScope, FeedbackCmds: p.FeedbackCmds, DefinitionOfDone: p.DefinitionOfDone, Limits: p.Limits, Cleanup: p.CleanupEnabled,
 		Created: p.Created.UnixMilli(), Updated: p.Updated.UnixMilli(),
 		RunState: a.deps.Engine.Runs().State(p.Slug), Remembered: model.RunStopped,
 		StopReason: a.deps.Engine.Runs().StopReason(p.Slug),
@@ -204,9 +207,11 @@ type projectBody struct {
 	Limits       *map[string]string `json:"limits"`
 	Cleanup      *bool              `json:"cleanup_enabled"`
 	Plugins      *[]PluginView      `json:"plugins"`
+	// DefinitionOfDone is a list, or null to go back to the derived one.
+	DefinitionOfDone json.RawMessage `json:"definition_of_done"`
 }
 
-func (b projectBody) apply(p *store.Project) {
+func (b projectBody) apply(p *store.Project) error {
 	if b.Slug != nil {
 		p.Slug = *b.Slug
 	}
@@ -231,6 +236,14 @@ func (b projectBody) apply(p *store.Project) {
 			p.Plugins = append(p.Plugins, runner.Plugin{Name: pl.Name, Version: pl.Version})
 		}
 	}
+	if len(b.DefinitionOfDone) > 0 {
+		var items []string
+		if err := json.Unmarshal(b.DefinitionOfDone, &items); err != nil {
+			return store.Invalid("definition_of_done", "must be a list of strings, or null")
+		}
+		p.DefinitionOfDone = items
+	}
+	return nil
 }
 
 func (a *API) createProject(w http.ResponseWriter, r *http.Request) {
@@ -239,7 +252,10 @@ func (a *API) createProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := store.Project{ModelScope: "local"} // local models only until the owner opts in (PP1)
-	body.apply(&p)
+	if err := body.apply(&p); err != nil {
+		writeErr(w, err)
+		return
+	}
 	if err := a.deps.Store.CreateProject(r.Context(), actorOf(r), p); err != nil {
 		writeErr(w, err)
 		return
@@ -263,7 +279,10 @@ func (a *API) patchProject(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	body.apply(&p)
+	if err := body.apply(&p); err != nil {
+		writeErr(w, err)
+		return
+	}
 	if err := a.deps.Store.UpdateProject(r.Context(), actorOf(r), p); err != nil {
 		writeErr(w, err)
 		return
@@ -388,4 +407,15 @@ func (a *API) putLimits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
+}
+
+// getDefinitionOfDone shows the standard every task of the project is held to:
+// the project's override, else what the repository's toolchain implies.
+func (a *API) getDefinitionOfDone(w http.ResponseWriter, r *http.Request) {
+	d, err := a.deps.Engine.DefinitionOfDone(r.Context(), r.PathValue("slug"))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, d)
 }
