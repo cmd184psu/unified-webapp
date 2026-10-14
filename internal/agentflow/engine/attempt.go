@@ -83,6 +83,17 @@ func (c *chain) reviewerModel() string {
 	return ""
 }
 
+// workerModel is the model of the attempt's newest worker stage (a retried
+// worker stage may have moved to another model), else the attempt's own.
+func (c *chain) workerModel() string {
+	for i := len(c.stages) - 1; i >= 0; i-- {
+		if c.stages[i].Role == "worker" {
+			return c.stages[i].Model
+		}
+	}
+	return c.att.WorkerModel
+}
+
 // workerOut is the parsed output of the attempt's newest worker stage.
 func (c *chain) workerOut() (schema.WorkerOut, bool) {
 	for i := len(c.stages) - 1; i >= 0; i-- {
@@ -111,20 +122,6 @@ const (
 type Failure struct {
 	Kind  FailureKind
 	Stage model.Stage
-}
-
-// handleFailure is the seam for the failure policy (C7: repair loop, stuck,
-// exhausted, needs_input, progress log). It reports whether it dealt with the
-// failure; the C6 default (false) closes the attempt as failed.
-func (e *Engine) handleFailure(ctx context.Context, c *chain, f Failure) (bool, error) {
-	return false, nil
-}
-
-// handleInfra is the seam for infrastructure outcomes (C7 retries with
-// backoff, C8 reroute). Not handled leaves the attempt open with nothing in
-// flight; reconcile abandons it when the stop was a cancel or a lost job.
-func (e *Engine) handleInfra(ctx context.Context, c *chain, last model.Stage) (bool, error) {
-	return false, nil
 }
 
 // Advance moves every open attempt of every active effort one step along the
@@ -247,21 +244,10 @@ func failureOf(st model.Stage) Failure {
 	return f
 }
 
-// fail ends the chain at f. The failure policy gets the first say; unhandled,
-// the attempt is closed as failed (blocked and policy violations keep their
-// own outcome) and no later stage is called.
+// fail ends the chain at f: the attempt is closed by the failure policy
+// (failure.go) and no later stage is called.
 func (e *Engine) fail(ctx context.Context, c *chain, f Failure) error {
-	if handled, err := e.handleFailure(ctx, c, f); handled || err != nil {
-		return err
-	}
-	out := model.OutcomeFailed
-	switch f.Kind {
-	case FailBlocked:
-		out = model.OutcomeBlocked
-	case FailViolation:
-		out = model.OutcomePolicyViolation
-	}
-	return e.finishAttempt(ctx, c, out)
+	return e.failAttempt(ctx, c, f)
 }
 
 // finishAttempt closes the attempt, tolerating one that is already closed.
@@ -293,7 +279,7 @@ func (e *Engine) submitReview(ctx context.Context, c *chain, last model.Stage) (
 	if !verifyPassed(last) {
 		return true, e.fail(ctx, c, Failure{Kind: FailVerify, Stage: last})
 	}
-	pk, reason, err := e.pickBackend(ctx, "reviewer", c.task, c.proj, c.att.WorkerModel)
+	pk, reason, err := e.pickBackend(ctx, "reviewer", c.task, c.proj, c.workerModel())
 	if err != nil || reason != "" {
 		return false, err
 	}
@@ -365,6 +351,11 @@ func (e *Engine) policedStage(ctx context.Context, rc golane.RunContext, st mode
 	viols, err := g.DetectAndRevert(context.WithoutCancel(ctx), snap)
 	if err != nil {
 		return fail(fmt.Errorf("revert policy violation: %w", err))
+	}
+	if len(viols) > 0 {
+		if err := e.auditViolations(context.WithoutCancel(ctx), st, viols); err != nil {
+			return fail(fmt.Errorf("audit policy violation: %w", err))
+		}
 	}
 	if len(viols) > 0 && !IsInfra(res.Outcome) {
 		var b strings.Builder

@@ -158,7 +158,7 @@ func roleTimeout(set store.Settings, role string) time.Duration {
 	return set.PlanTimeout
 }
 
-func (e *Engine) buildPrompt(ctx context.Context, st model.Stage) (string, error) {
+func (e *Engine) buildPrompt(ctx context.Context, st model.Stage, project string) (string, error) {
 	if e.deps.Prompt != nil {
 		return e.deps.Prompt(ctx, st)
 	}
@@ -192,6 +192,13 @@ func (e *Engine) buildPrompt(ctx context.Context, st model.Stage) (string, error
 		for _, a := range task.Acceptance {
 			b.WriteString("- " + a + "\n")
 		}
+	}
+	if st.Role == "worker" {
+		wc, err := e.WorkerContext(ctx, project, att.ID)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(wc)
 	}
 	return b.String(), nil
 }
@@ -234,7 +241,7 @@ func (e *Engine) modelStage(ctx context.Context, rc golane.RunContext, st model.
 	if err != nil {
 		return fail(err)
 	}
-	prompt, err := e.buildPrompt(ctx, st)
+	prompt, err := e.buildPrompt(ctx, st, p.Project)
 	if err != nil {
 		return fail(err)
 	}

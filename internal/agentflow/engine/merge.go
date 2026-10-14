@@ -117,6 +117,9 @@ func (e *Engine) completeAttempt(ctx context.Context, c *chain) error {
 	if err := os.RemoveAll(filepath.Dir(e.baseCommitFile(c.task.ID))); err != nil {
 		return err
 	}
+	if err := e.appendProgress(ctx, c, "passed"); err != nil {
+		return err
+	}
 	if err := e.deps.Store.FinishAttempt(ctx, c.att.ID, model.OutcomePassed, "", c.reviewerModel()); err != nil && !errors.Is(err, store.ErrConflict) {
 		return err
 	}
@@ -133,8 +136,7 @@ func (e *Engine) completeEffort(ctx context.Context, proj store.Project, ef mode
 	if err != nil {
 		return err
 	}
-	lim := model.Limits{MaxAttempts: set.MaxAttempts, StuckThreshold: set.StuckThreshold, MaxInfraRetries: set.MaxInfraRetries}
-	status, err := e.deps.Store.TaskStatuses(ctx, ef.ID, lim)
+	status, err := e.deps.Store.TaskStatuses(ctx, ef.ID, e.limitsFor(set))
 	if err != nil {
 		return err
 	}

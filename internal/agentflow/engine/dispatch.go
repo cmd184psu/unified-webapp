@@ -207,8 +207,7 @@ func (e *Engine) dispatchOne(ctx context.Context, v *view, p store.Project) (boo
 		return false, err
 	}
 	eff := v.snap.Effective[p.Slug]
-	lim := model.Limits{MaxAttempts: eff.MaxAttempts, StuckThreshold: eff.StuckThreshold, MaxInfraRetries: eff.MaxInfraRetries}
-	status, err := s.TaskStatuses(ctx, ef.ID, lim)
+	status, err := s.TaskStatuses(ctx, ef.ID, e.limitsFor(eff))
 	if err != nil {
 		return false, err
 	}
@@ -220,7 +219,7 @@ func (e *Engine) dispatchOne(ctx context.Context, v *view, p store.Project) (boo
 	}
 	var errs []error
 	for _, t := range tasks {
-		if status[t.Key] != model.StatusReady || coScheduleConflict(tasks, t, inflight) {
+		if st := status[t.Key]; (st != model.StatusReady && st != model.StatusRepair) || coScheduleConflict(tasks, t, inflight) {
 			continue
 		}
 		sticky, err := e.stickyReviewer(ctx, t)
@@ -237,7 +236,7 @@ func (e *Engine) dispatchOne(ctx context.Context, v *view, p store.Project) (boo
 		if !ok {
 			return false, errors.Join(errs...)
 		}
-		err = e.submitWork(ctx, v, ef, hash, p, t, pk)
+		err = e.submitWork(ctx, v, ef, hash, p, t, pk, status[t.Key] == model.StatusRepair)
 		done()
 		if err != nil {
 			errs = append(errs, err)
@@ -256,11 +255,17 @@ func (e *Engine) dispatchOne(ctx context.Context, v *view, p store.Project) (boo
 
 // submitWork opens the task's attempt and submits its work stage on the
 // chosen backend's lane. The worktree path is the task's planned location in
-// gitsvc's layout; the work stage creates the worktree when it starts (C6).
-func (e *Engine) submitWork(ctx context.Context, v *view, ef model.Effort, hash string, p store.Project, t model.Task, pk Pick) error {
+// gitsvc's layout; the work stage creates the worktree when it starts (C6). A
+// repair attempt (AT2) is the same call with kind repair: the planned path is
+// the previous attempt's worktree, which the work stage reuses.
+func (e *Engine) submitWork(ctx context.Context, v *view, ef model.Effort, hash string, p store.Project, t model.Task, pk Pick, repair bool) error {
 	s := e.deps.Store
 	wt := e.taskWorktreePath(p.Slug, ef.ID, t)
-	att, err := s.StartAttempt(ctx, t.ID, model.AttemptNormal, wt, pk.Model)
+	kind := model.AttemptNormal
+	if repair {
+		kind = model.AttemptRepair
+	}
+	att, err := s.StartAttempt(ctx, t.ID, kind, wt, pk.Model)
 	if err != nil {
 		return err
 	}

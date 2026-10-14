@@ -315,6 +315,10 @@ func (e *Engine) Close() {
 	e.mu.Lock()
 	ts := e.ticker
 	e.ticker = nil
+	for id, t := range e.retryTimers {
+		t.Stop()
+		delete(e.retryTimers, id)
+	}
 	e.mu.Unlock()
 	if ts == nil {
 		return

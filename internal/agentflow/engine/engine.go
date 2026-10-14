@@ -70,6 +70,9 @@ type Deps struct {
 	DispatchEvery time.Duration
 	// PublishRun receives every run-state transition (D3 wires the bus).
 	PublishRun func(RunEvent)
+	// MaxPolicyViolations is how many git-policy violations halt a task as
+	// needs_attention; 0 means DefaultMaxPolicyViolations.
+	MaxPolicyViolations int
 	// TestWidthZero registers every agentflow lane at width 0 and never raises
 	// it, so no job runs unless a test sets a width itself.
 	TestWidthZero bool
@@ -122,6 +125,10 @@ type Engine struct {
 	// baseline.
 	advMu  sync.Mutex
 	prepMu sync.Mutex
+
+	// retryTimers (guarded by mu) hold the pending Advance of each infra
+	// retry waiting out its backoff, by stage id.
+	retryTimers map[int64]*time.Timer
 }
 
 // New builds the engine, registers its lanes and leaves all of them paused
@@ -133,7 +140,7 @@ func New(d Deps) (*Engine, error) {
 	if d.Clock == nil {
 		d.Clock = time.Now
 	}
-	e := &Engine{deps: d, handles: map[string]golane.Lane{}, holding: true}
+	e := &Engine{deps: d, handles: map[string]golane.Lane{}, holding: true, retryTimers: map[int64]*time.Timer{}}
 	e.runs = newRunControl(e)
 	e.disp = newDispatcher(e)
 	// Every kick, including the caller's own hook, wakes the dispatcher.
