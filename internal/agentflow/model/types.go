@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -314,11 +315,13 @@ func ParseFRD(raw []byte) (FRD, error) {
 }
 
 // FillFRD completes what code can decide, so nobody types it: the id defaults
-// to FRD-<effort>, requirements and criteria without an id get R1.. and AC1..
-// (skipping ids already used), a criterion with no requirement links covers
-// every requirement, and status and created date default to draft and today.
-// It never changes a value that is already set, so a filled FRD fills to
-// itself.
+// to FRD-<effort>, requirements and criteria without an id get R<n> and AC<n>
+// with n above every number already used in the document (an id is never
+// reused, so a criterion linking a deleted requirement cannot silently point
+// at a new one), a link to a requirement that does not exist is dropped, a
+// criterion with no links covers every requirement, and status and created
+// date default to draft and today. It never changes a value that is already
+// set otherwise, so a filled FRD fills to itself.
 func FillFRD(f *FRD, effort int64, today time.Time) {
 	if strings.TrimSpace(f.ID) == "" {
 		f.ID = fmt.Sprintf("FRD-%d", effort)
@@ -330,8 +333,10 @@ func FillFRD(f *FRD, effort int64, today time.Time) {
 		f.Created = today.Format("2006-01-02")
 	}
 	used := map[string]bool{}
+	n := 0
 	for _, r := range f.Requirements {
 		used[r.ID] = true
+		n = max(n, idNumber("R", r.ID))
 	}
 	next := func(prefix string, n *int) string {
 		for {
@@ -342,28 +347,67 @@ func FillFRD(f *FRD, effort int64, today time.Time) {
 			}
 		}
 	}
-	n := 0
 	for i := range f.Requirements {
 		if f.Requirements[i].ID == "" {
 			f.Requirements[i].ID = next("R", &n)
 		}
 	}
 	all := make([]string, len(f.Requirements))
+	exists := map[string]bool{}
 	for i, r := range f.Requirements {
 		all[i] = r.ID
+		exists[r.ID] = true
 	}
 	used = map[string]bool{}
+	n = 0
 	for _, ac := range f.AcceptanceCriteria {
 		used[ac.ID] = true
+		n = max(n, idNumber("AC", ac.ID))
 	}
-	n = 0
 	for i := range f.AcceptanceCriteria {
 		ac := &f.AcceptanceCriteria[i]
 		if ac.ID == "" {
 			ac.ID = next("AC", &n)
 		}
+		if len(ac.Requirements) > 0 {
+			kept := ac.Requirements[:0:0]
+			for _, r := range ac.Requirements {
+				if exists[r] {
+					kept = append(kept, r)
+				}
+			}
+			ac.Requirements = kept
+		}
 		if len(ac.Requirements) == 0 {
 			ac.Requirements = slices.Clone(all)
 		}
 	}
+}
+
+// idNumber is n for an id of the form prefix+n, else 0.
+func idNumber(prefix, id string) int {
+	rest, ok := strings.CutPrefix(id, prefix)
+	if !ok {
+		return 0
+	}
+	n, err := strconv.Atoi(rest)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
+// ParseFilledFRD is ParseFRD after FillFRD, the order every save uses: ids the
+// author left out are assigned before links are checked.
+func ParseFilledFRD(raw []byte) (FRD, error) {
+	var f FRD
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return FRD{}, fmt.Errorf("frd: %w", err)
+	}
+	FillFRD(&f, 0, time.Time{})
+	filled, err := json.Marshal(f)
+	if err != nil {
+		return FRD{}, err
+	}
+	return ParseFRD(filled)
 }

@@ -260,14 +260,18 @@ JSON; it is strictly validated). Every save is a numbered revision
 You do not have to type the structure. The ids (`R1`, `AC1`, ...), the links from criteria to
 requirements (a criterion with none covers every requirement), the status (`draft`), the created date and
 the FRD id (`FRD-<effort id>`) are filled in on every save, so an FRD with only an objective,
-requirements and criteria is valid. A link you do give must name a requirement of the same FRD.
+requirements and criteria is valid (an import takes the same shortcuts as a save). New ids are numbered above
+the highest one in the FRD and never reused, so deleting R1 does not let a new requirement take its place. A link
+to a requirement that no longer exists is dropped on save; a criterion left with no links covers every requirement.
 
 **Draft from a description.** `POST /api/projects/{slug}/efforts/{id}/frd/draft` with
 `{"description": "what you want, in plain words", "polish": false}` runs a planner-role stage and
 answers 202. The result is saved as a new, unapproved FRD revision. With `"polish": true` the stage
 tidies the existing FRD instead (shorter wording, duplicates merged, the id and constraints kept).
-Criteria that only restate the [definition of done](#definition-of-done) are removed by code after the
-reply is read. `GET .../frd/draft` gives `{"state": "idle" | "running" | "failed", "started": ms, "error": "..."}`;
+Criteria that only restate the [definition of done](#definition-of-done) (generic wording such as "tests
+continue to pass", "go test -race ./... passes", "gofmt reports no diff", "no unrelated files changed") are removed by
+code after the reply is read; specific ones such as "no files outside internal/x are changed" stay, and if every
+criterion would go they are all kept (the event records `kept_all_restated`). `GET .../frd/draft` gives `{"state": "idle" | "running" | "failed", "started": ms, "error": "..."}`;
 a failed draft leaves the FRD as it was. The effort must be a draft with no stage in flight: a second
 request while one runs, or a request after the plan has started, is 409.
 
@@ -278,12 +282,14 @@ A model with a short context cannot plan a large FRD, and a long context costs a
 their JSON length) and sets them against a budget: half of the smallest known `context_tokens`
 among the models the planner, architect, critic and compiler roles may use for the project (global
 lists, or the project's own). It answers `{"frd_tokens", "plan_tokens", "budget_tokens",
-"context_tokens_min", "over", "models": [{"backend", "model", "context_tokens"}], "advice"}`;
-`over` is only ever true when a context size is known.
+"context_tokens_min", "over", "models": [{"backend", "model", "context_tokens"}],
+"unknown_models": [{"backend", "model"}], "advice"}`; `over` is only ever true when a context size is known and
+is computed from the known sizes only, so `unknown_models` (models with `context_tokens` 0) is there to warn
+that the check does not cover them; `advice` names them.
 
 `POST .../frd/split` with an optional `{"max_parts": n}` asks the drafter to cut the FRD into the fewest
 ordered, self-contained parts that fit the budget. Part 1 becomes this effort's FRD (a new revision);
-parts 2 and up are stored: `GET .../frd/parts` lists them as
+parts 2 and up are stored (a later split keeps the parts already stored, started or not, and appends its own after them): `GET .../frd/parts` lists them as
 `[{"n", "title", "summary", "tokens", "started_effort"}]`, and `POST .../frd/parts/{n}/start` creates a
 new effort from part n, the way an import does. That is a 409 while the project has an active effort,
 so finish or abandon this one first, and for a part that was started already.

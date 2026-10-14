@@ -239,7 +239,7 @@ func (a *API) importFRD(w http.ResponseWriter, r *http.Request) {
 // its revision 1. It is shared by the import route and by starting a part of
 // a split FRD.
 func (a *API) effortFromFRD(ctx context.Context, actor, slug string, raw []byte) (model.Effort, error) {
-	f, err := model.ParseFRD(raw)
+	f, err := model.ParseFilledFRD(raw)
 	if err != nil {
 		return model.Effort{}, err
 	}

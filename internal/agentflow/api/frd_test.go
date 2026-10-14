@@ -133,7 +133,7 @@ func TestN2_FRDDraftSplitAndPartRoutes(t *testing.T) {
 	// Parts: stored by a split, started under the one-active-effort rule.
 	ctx := context.Background()
 	frd := `{"title":"part two","objective":"o","requirements":[{"description":"d"}],"acceptance_criteria":[{"criterion":"c"}]}`
-	if err := e.st.ReplaceFRDParts(ctx, "t", ef.ID, []store.FRDPart{{N: 2, Title: "part two", Summary: "o", JSON: []byte(frd), Tokens: 12}}); err != nil {
+	if err := e.st.AddFRDParts(ctx, "t", ef.ID, []store.FRDPart{{N: 2, Title: "part two", Summary: "o", JSON: []byte(frd), Tokens: 12}}); err != nil {
 		t.Fatal(err)
 	}
 	parts := decode[[]PartView](t, e.ok("GET", base+"/frd/parts", nil, 200))
@@ -157,4 +157,12 @@ func TestN2_FRDDraftSplitAndPartRoutes(t *testing.T) {
 	}
 	e.ok("POST", "/api/projects/p/efforts/"+itoa(started.ID)+"/abandon", `{"confirm":true}`, 200)
 	e.ok("POST", base+"/frd/parts/2/start", nil, http.StatusConflict) // already started
+}
+
+// B6: an import takes links without ids, as PUT does.
+func TestB6_ImportAcceptsLinksWithoutIds(t *testing.T) {
+	e := newEnv(t, envOpt{widthZero: true})
+	e.ok("POST", "/api/projects", map[string]any{"slug": "p", "repo_path": repo(t)}, http.StatusCreated)
+	raw := `{"title":"imp","objective":"o","requirements":[{"description":"a"}],"acceptance_criteria":[{"requirements":["R1"],"criterion":"c"}]}`
+	e.ok("POST", "/api/projects/p/efforts/import", raw, http.StatusCreated)
 }

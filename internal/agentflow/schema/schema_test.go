@@ -303,7 +303,6 @@ func TestFRDDraftValidate(t *testing.T) {
 		"blank requirement": {`{"objective":"o","requirements":[{"description":" "}]}`, "requirements[0].description"},
 		"bad priority":      {`{"objective":"o","requirements":[{"description":"d","priority":"urgent"}]}`, "requirements[0].priority"},
 		"blank criterion":   {`{"objective":"o","requirements":[{"description":"d"}],"acceptance_criteria":[{"criterion":""}]}`, "acceptance_criteria[0].criterion"},
-		"dangling link":     {`{"objective":"o","requirements":[{"description":"d"}],"acceptance_criteria":[{"criterion":"c","requirements":["R5"]}]}`, "acceptance_criteria"},
 	} {
 		_, err := Parse[FRDDraft](json.RawMessage(c.in))
 		var ve *ValidationError

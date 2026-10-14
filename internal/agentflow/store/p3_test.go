@@ -1,6 +1,8 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -44,7 +46,7 @@ func TestMigration10UpgradesAnExistingDatabase(t *testing.T) {
 	if err != nil || p.DefinitionOfDone != nil {
 		t.Fatalf("project after upgrade = %+v (%v)", p, err)
 	}
-	if err := s2.ReplaceFRDParts(ctx, "t", 1, []FRDPart{{N: 2, Title: "two", JSON: []byte(`{}`), Tokens: 3}}); err != nil {
+	if err := s2.AddFRDParts(ctx, "t", 1, []FRDPart{{N: 2, Title: "two", JSON: []byte(`{}`), Tokens: 3}}); err != nil {
 		t.Fatalf("frd_parts: %v", err)
 	}
 	if _, err := s2.db.Exec(`INSERT INTO frd_parts (effort, n, title, json) VALUES (1, 0, 't', '{}')`); err == nil {
@@ -126,10 +128,11 @@ func TestN3_SaveDocFillsTheFRD(t *testing.T) {
 	if err != nil || string(d.JSON) != full {
 		t.Fatalf("complete FRD was rewritten: %s (%v)", d.JSON, err)
 	}
-	wantField(t, func() error {
-		_, err := s.SaveDoc(ctx, "t", ef.ID, model.DocFRD, []byte(`{"title":"t","objective":"o","requirements":[{"description":"a"}],"acceptance_criteria":[{"requirements":["R9"],"criterion":"c"}]}`))
-		return err
-	}(), "json")
+	// A link to a requirement that does not exist is dropped, not refused.
+	d, err = s.SaveDoc(ctx, "t", ef.ID, model.DocFRD, []byte(`{"title":"t","objective":"o","requirements":[{"description":"a"}],"acceptance_criteria":[{"requirements":["R9"],"criterion":"c"}]}`))
+	if err != nil || !strings.Contains(string(d.JSON), `"requirements":["R1"]`) {
+		t.Fatalf("dead link: %s (%v)", d.JSON, err)
+	}
 }
 
 func TestN4_PartsStoreReplaceListGetStart(t *testing.T) {
@@ -139,7 +142,7 @@ func TestN4_PartsStoreReplaceListGetStart(t *testing.T) {
 	}
 	ef, _ := s.CreateEffort(ctx, "t", "p", "e", false)
 	parts := []FRDPart{{N: 2, Title: "b", Summary: "sb", JSON: []byte(`{"a":1}`), Tokens: 5}, {N: 3, Title: "c", JSON: []byte(`{}`)}}
-	if err := s.ReplaceFRDParts(ctx, "t", ef.ID, parts); err != nil {
+	if err := s.AddFRDParts(ctx, "t", ef.ID, parts); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.ListFRDParts(ctx, ef.ID)
@@ -155,10 +158,52 @@ func TestN4_PartsStoreReplaceListGetStart(t *testing.T) {
 	if _, err := s.GetFRDPart(ctx, ef.ID, 9); err == nil {
 		t.Fatal("missing part found")
 	}
-	if err := s.ReplaceFRDParts(ctx, "t", ef.ID, parts[:1]); err != nil {
+	// A second split appends after the stored parts and keeps the started one.
+	if err := s.AddFRDParts(ctx, "t", ef.ID, []FRDPart{{N: 2, Title: "d", JSON: []byte(`{}`)}}); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ = s.ListFRDParts(ctx, ef.ID); len(got) != 1 || got[0].StartedEffort != 0 {
-		t.Fatalf("a new split must replace the old one: %+v", got)
+	got, _ = s.ListFRDParts(ctx, ef.ID)
+	if len(got) != 3 || got[0].Title != "b" || got[0].StartedEffort != 77 || got[1].Title != "c" || got[2].Title != "d" || got[2].N != 4 || got[2].StartedEffort != 0 {
+		t.Fatalf("a re-split must keep the earlier parts and append: %+v", got)
+	}
+}
+
+// B2: the revision and the parts of a split commit together or not at all.
+func TestB2_SplitSaveIsAtomic(t *testing.T) {
+	s, _ := openTemp(t)
+	if err := s.CreateProject(ctx, "t", Project{Slug: "p", RepoPath: mkRepo(t), ModelScope: "local"}); err != nil {
+		t.Fatal(err)
+	}
+	ef, _ := s.CreateEffort(ctx, "t", "p", "e", false)
+	frd := []byte(`{"title":"t","objective":"o","requirements":[{"description":"a"}]}`)
+	_, err := s.SaveDocWith(ctx, "t", ef.ID, model.DocFRD, frd, func(tx *sql.Tx, d model.Doc) error {
+		return AddFRDPartsTx(ctx, tx, "t", ef.ID, []FRDPart{{Title: "x", JSON: []byte(`{}`)}})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SaveDocWith(ctx, "t", ef.ID, model.DocFRD, frd, func(tx *sql.Tx, d model.Doc) error {
+		if err := AddFRDPartsTx(ctx, tx, "t", ef.ID, []FRDPart{{Title: "y", JSON: []byte(`{}`)}}); err != nil {
+			return err
+		}
+		return errors.New("boom")
+	})
+	if err == nil {
+		t.Fatal("expected the failure")
+	}
+	if d, _ := s.GetDoc(ctx, ef.ID, model.DocFRD, 0); d.Revision != 1 {
+		t.Fatalf("revision after a failed apply = %d", d.Revision)
+	}
+	if got, _ := s.ListFRDParts(ctx, ef.ID); len(got) != 1 || got[0].Title != "x" {
+		t.Fatalf("parts after a failed apply: %+v", got)
+	}
+	// SaveDoc failing (invalid FRD) leaves the parts alone too.
+	if _, err := s.SaveDocWith(ctx, "t", ef.ID, model.DocFRD, []byte(`{}`), func(tx *sql.Tx, d model.Doc) error {
+		return AddFRDPartsTx(ctx, tx, "t", ef.ID, []FRDPart{{Title: "z", JSON: []byte(`{}`)}})
+	}); err == nil {
+		t.Fatal("invalid FRD saved")
+	}
+	if got, _ := s.ListFRDParts(ctx, ef.ID); len(got) != 1 {
+		t.Fatalf("parts after an invalid save: %+v", got)
 	}
 }

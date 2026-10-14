@@ -21,25 +21,32 @@ type FRDPart struct {
 	StartedEffort int64
 }
 
-// ReplaceFRDParts stores the parts of a split FRD, replacing any earlier
-// split of the effort.
-func (s *Store) ReplaceFRDParts(ctx context.Context, actor string, effort int64, parts []FRDPart) error {
-	return s.WithTx(ctx, func(tx *sql.Tx) error {
-		if _, err := requireEffort(ctx, tx, effort); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM frd_parts WHERE effort = ?`, effort); err != nil {
-			return err
-		}
-		for _, p := range parts {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO frd_parts (effort, n, title, summary, json, tokens) VALUES (?, ?, ?, ?, ?, ?)`,
-				effort, p.N, p.Title, p.Summary, string(p.JSON), p.Tokens); err != nil {
-				return err
-			}
-		}
-		_, err := AppendEvent(tx, actor, "frd.split", "effort", fmt.Sprint(effort), map[string]any{"parts": len(parts)})
+// AddFRDPartsTx stores the parts of a split inside the caller's transaction.
+// Parts already stored are kept as they are, started or not: the new parts
+// are appended after the highest stored number (their N is ignored, they are
+// numbered in order), so a re-split of part 1 never loses a pending part or
+// the record of one that was started.
+func AddFRDPartsTx(ctx context.Context, tx *sql.Tx, actor string, effort int64, parts []FRDPart) error {
+	if _, err := requireEffort(ctx, tx, effort); err != nil {
 		return err
-	})
+	}
+	var top int
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(n), 1) FROM frd_parts WHERE effort = ?`, effort).Scan(&top); err != nil {
+		return err
+	}
+	for i, p := range parts {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO frd_parts (effort, n, title, summary, json, tokens) VALUES (?, ?, ?, ?, ?, ?)`,
+			effort, top+1+i, p.Title, p.Summary, string(p.JSON), p.Tokens); err != nil {
+			return err
+		}
+	}
+	_, err := AppendEvent(tx, actor, "frd.split", "effort", fmt.Sprint(effort), map[string]any{"parts": len(parts)})
+	return err
+}
+
+// AddFRDParts is AddFRDPartsTx in a transaction of its own.
+func (s *Store) AddFRDParts(ctx context.Context, actor string, effort int64, parts []FRDPart) error {
+	return s.WithTx(ctx, func(tx *sql.Tx) error { return AddFRDPartsTx(ctx, tx, actor, effort, parts) })
 }
 
 // ListFRDParts returns the effort's stored parts in order.

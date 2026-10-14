@@ -27,10 +27,10 @@ func TestFillFRD_AssignsIdsLinksAndDefaults(t *testing.T) {
 	for _, r := range f.Requirements {
 		reqs = append(reqs, r.ID)
 	}
-	if !reflect.DeepEqual(reqs, []string{"R1", "R2", "R3"}) {
+	if !reflect.DeepEqual(reqs, []string{"R3", "R2", "R4"}) {
 		t.Fatalf("requirement ids = %v", reqs)
 	}
-	// AC1 is taken by the second criterion, so the others skip it.
+	// Ids go above the highest one in use (R2, AC1), never into a gap.
 	var acs []string
 	for _, ac := range f.AcceptanceCriteria {
 		acs = append(acs, ac.ID)
@@ -96,7 +96,10 @@ func TestDropRestatedCriteria(t *testing.T) {
 		f.AcceptanceCriteria = append(f.AcceptanceCriteria, FRDAC{Criterion: c})
 	}
 	dod := []string{"`go test ./...` succeeds."}
-	dropped := DropRestatedCriteria(&f, dod)
+	dropped, keptAll := DropRestatedCriteria(&f, dod)
+	if keptAll {
+		t.Fatal("keptAll set although specific criteria remain")
+	}
 	if !reflect.DeepEqual(dropped, restated) {
 		t.Fatalf("dropped:\n%q\nwant:\n%q", dropped, restated)
 	}
@@ -116,4 +119,72 @@ func mustJSON(t *testing.T, v any) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// B4: only generic wording is a restatement; specific scope and test criteria
+// stay, and the filter never empties the criteria.
+func TestDropRestatedCriteria_GenericVersusSpecific(t *testing.T) {
+	restated := []string{
+		"No files outside of the task's declared files were changed", "no unrelated files changed", "No unrelated files were modified",
+		"tests continue to pass", "Tests should pass", "all tests must pass", "go test -race ./... passes", "`go test -race -count=1 ./...` succeeds",
+		"gofmt reports no diff", "The code is gofmt-clean", "gofmt -l reports no files",
+	}
+	specific := []string{
+		"No files outside internal/agentflow/engine are changed",
+		"go test ./calc -run TestAdd covers negatives",
+	}
+	f := FRD{}
+	for _, c := range append(append([]string{}, restated...), specific...) {
+		f.AcceptanceCriteria = append(f.AcceptanceCriteria, FRDAC{Criterion: c})
+	}
+	dropped, keptAll := DropRestatedCriteria(&f, nil)
+	if keptAll || !reflect.DeepEqual(dropped, restated) || len(f.AcceptanceCriteria) != len(specific) {
+		t.Fatalf("dropped %q keptAll %v kept %+v", dropped, keptAll, f.AcceptanceCriteria)
+	}
+
+	all := FRD{AcceptanceCriteria: []FRDAC{{Criterion: "go test passes"}, {Criterion: "tests continue to pass"}}}
+	dropped, keptAll = DropRestatedCriteria(&all, nil)
+	if !keptAll || len(dropped) != 0 || len(all.AcceptanceCriteria) != 2 {
+		t.Fatalf("every criterion was removed: dropped %q keptAll %v kept %+v", dropped, keptAll, all.AcceptanceCriteria)
+	}
+}
+
+// B3: ids are never reused and links to deleted requirements are dropped.
+func TestFillFRD_NeverReusesIdsAndDropsDeadLinks(t *testing.T) {
+	f := FRD{
+		Title: "t", Objective: "o",
+		Requirements: []FRDRequirement{{ID: "R2", Description: "b"}, {ID: "R6", Description: "f"}, {Description: "new"}},
+		AcceptanceCriteria: []FRDAC{
+			{ID: "AC4", Requirements: []string{"R1"}, Criterion: "linked to deleted R1"},
+			{ID: "AC1", Requirements: []string{"R1", "R6"}, Criterion: "partly dead"},
+			{Criterion: "new"},
+		},
+	}
+	FillFRD(&f, 1, fillDay)
+	if f.Requirements[2].ID != "R7" {
+		t.Fatalf("new requirement id = %s, want R7", f.Requirements[2].ID)
+	}
+	if f.AcceptanceCriteria[2].ID != "AC5" {
+		t.Fatalf("new criterion id = %s, want AC5", f.AcceptanceCriteria[2].ID)
+	}
+	if !reflect.DeepEqual(f.AcceptanceCriteria[0].Requirements, []string{"R2", "R6", "R7"}) {
+		t.Fatalf("all-dead links must cover all: %v", f.AcceptanceCriteria[0].Requirements)
+	}
+	if !reflect.DeepEqual(f.AcceptanceCriteria[1].Requirements, []string{"R6"}) {
+		t.Fatalf("partly dead links: %v", f.AcceptanceCriteria[1].Requirements)
+	}
+	raw, _ := json.Marshal(f)
+	if _, err := ParseFRD(raw); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestParseFilledFRD_AcceptsLinksWithoutIds(t *testing.T) {
+	raw := `{"title":"t","objective":"o","requirements":[{"description":"a"}],"acceptance_criteria":[{"requirements":["R1"],"criterion":"c"}]}`
+	if _, err := ParseFRD([]byte(raw)); err == nil {
+		t.Fatal("ParseFRD alone should still reject a link to an id that is not there yet")
+	}
+	if _, err := ParseFilledFRD([]byte(raw)); err != nil {
+		t.Fatal(err)
+	}
 }

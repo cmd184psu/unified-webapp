@@ -2,12 +2,14 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"cmd184psu/unified-webapp/internal/agentflow/model"
@@ -112,16 +114,15 @@ func (e *Engine) latestDraftRun(ctx context.Context, effort int64) (*draftRun, e
 	if err := json.Unmarshal([]byte(last.DetailJSON), &run.start); err != nil {
 		return nil, err
 	}
+	// A result closes the run when it was written after the run's start event;
+	// after_stage cannot tell runs apart, a failed run and its retry share it.
 	for _, action := range []string{eventDraftDone, eventDraftFailed} {
 		results, err := e.effortEvents(ctx, effort, action)
 		if err != nil {
 			return nil, err
 		}
 		for _, ev := range results {
-			var d struct {
-				After int64 `json:"after_stage"`
-			}
-			if json.Unmarshal([]byte(ev.DetailJSON), &d) == nil && d.After == run.start.After {
+			if ev.ID > last.ID && (run.result == nil || ev.ID > run.result.ID) {
 				ev := ev
 				run.result = &ev
 			}
@@ -276,18 +277,16 @@ func (e *Engine) advanceDraft(ctx context.Context, p store.Project, ef model.Eff
 	if last.Outcome != OutcomePass {
 		return e.failDraft(ctx, ef.ID, run.start.After, last.ID, "stage ended "+last.Outcome)
 	}
-	var applied map[string]any
 	if run.start.Purpose == PurposeSplit {
-		applied, err = e.applySplit(ctx, p, ef, last)
+		err = e.applySplit(ctx, p, ef, last, run.start.After)
 	} else {
-		applied, err = e.applyDraft(ctx, p, ef, run.start.Purpose, last)
+		err = e.applyDraft(ctx, p, ef, run.start.Purpose, last, run.start.After)
 	}
+	defer e.changed()
 	if err != nil {
 		return e.failDraft(ctx, ef.ID, run.start.After, last.ID, err.Error())
 	}
-	applied["after_stage"], applied["stage"] = run.start.After, last.ID
-	defer e.changed()
-	return e.noteEffort(ctx, SystemActor, eventDraftDone, ef.ID, applied)
+	return nil
 }
 
 // failDraft closes the run as failed; the FRD is left as it was.
@@ -315,21 +314,21 @@ func (e *Engine) DefinitionOfDone(ctx context.Context, slug string) (verify.DoD,
 // Criteria that only restate the definition of done are dropped; ids, links,
 // status and date are filled by SaveDoc. A polish keeps what the drafter does
 // not write (constraints, decisions, the id) from the FRD it tidied.
-func (e *Engine) applyDraft(ctx context.Context, p store.Project, ef model.Effort, purpose string, st model.Stage) (map[string]any, error) {
+func (e *Engine) applyDraft(ctx context.Context, p store.Project, ef model.Effort, purpose string, st model.Stage, after int64) error {
 	out, err := schema.Parse[schema.FRDDraft](st.Parsed)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	drafted := out.FRD
-	dropped := model.DropRestatedCriteria(&drafted, definitionOfDone(p, p.RepoPath).Items)
+	dropped, keptAll := model.DropRestatedCriteria(&drafted, definitionOfDone(p, p.RepoPath).Items)
 	f := model.FRD{Title: ef.Title}
 	if purpose == PurposePolish {
 		cur, err := e.deps.Store.GetDoc(ctx, ef.ID, model.DocFRD, 0)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if f, err = model.ParseFRD(cur.JSON); err != nil {
-			return nil, err
+			return err
 		}
 		f.Status, f.ApprovedDate, f.Groups = "", "", nil
 	}
@@ -345,47 +344,58 @@ func (e *Engine) applyDraft(ctx context.Context, p store.Project, ef model.Effor
 	}
 	raw, err := json.Marshal(f)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	doc, err := e.deps.Store.SaveDoc(ctx, "drafter:"+st.Model, ef.ID, model.DocFRD, raw)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{"revision": doc.Revision, "dropped": dropped}, nil
+	_, err = e.deps.Store.SaveDocWith(ctx, "drafter:"+st.Model, ef.ID, model.DocFRD, raw, func(tx *sql.Tx, d model.Doc) error {
+		return doneEvent(tx, ef.ID, after, st.ID, map[string]any{"revision": d.Revision, "dropped": dropped, "kept_all_restated": keptAll})
+	})
+	return err
 }
 
 // applySplit turns a passed split stage into the effort's FRD (part 1, a new
-// revision) and the stored parts 2..N.
-func (e *Engine) applySplit(ctx context.Context, p store.Project, ef model.Effort, st model.Stage) (map[string]any, error) {
+// revision) and the stored parts. New parts are appended to the parts already
+// stored. The revision, the parts and the done event commit together, so a
+// crash cannot leave a half-applied split or apply it twice.
+func (e *Engine) applySplit(ctx context.Context, p store.Project, ef model.Effort, st model.Stage, after int64) error {
 	out, err := schema.Parse[schema.FRDSplit](st.Parsed)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	dod := definitionOfDone(p, p.RepoPath).Items
 	var dropped []string
+	var keptAll bool
 	var first []byte
 	var parts []store.FRDPart
 	for i, part := range out.Parts {
 		f := part.FRD
-		dropped = append(dropped, model.DropRestatedCriteria(&f, dod)...)
+		d, k := model.DropRestatedCriteria(&f, dod)
+		dropped, keptAll = append(dropped, d...), keptAll || k
 		raw, err := json.Marshal(f)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if i == 0 {
 			first = raw
 			continue
 		}
-		parts = append(parts, store.FRDPart{N: i + 1, Title: f.Title, Summary: clip(f.Objective, partSummaryLen), JSON: raw, Tokens: estimateTokens(raw)})
+		parts = append(parts, store.FRDPart{Title: f.Title, Summary: clip(f.Objective, partSummaryLen), JSON: raw, Tokens: estimateTokens(raw)})
 	}
-	if err := e.deps.Store.ReplaceFRDParts(ctx, "drafter:"+st.Model, ef.ID, parts); err != nil {
-		return nil, err
-	}
-	doc, err := e.deps.Store.SaveDoc(ctx, "drafter:"+st.Model, ef.ID, model.DocFRD, first)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{"revision": doc.Revision, "parts": len(out.Parts), "dropped": dropped}, nil
+	actor := "drafter:" + st.Model
+	_, err = e.deps.Store.SaveDocWith(ctx, actor, ef.ID, model.DocFRD, first, func(tx *sql.Tx, d model.Doc) error {
+		if err := store.AddFRDPartsTx(ctx, tx, actor, ef.ID, parts); err != nil {
+			return err
+		}
+		return doneEvent(tx, ef.ID, after, st.ID, map[string]any{"revision": d.Revision, "parts": len(out.Parts), "dropped": dropped, "kept_all_restated": keptAll})
+	})
+	return err
+}
+
+// doneEvent writes the run's result event inside the transaction that saved
+// its revision.
+func doneEvent(tx *sql.Tx, effort, after, stage int64, detail map[string]any) error {
+	detail["after_stage"], detail["stage"] = after, stage
+	_, err := store.AppendEvent(tx, SystemActor, eventDraftDone, "effort", strconv.FormatInt(effort, 10), detail)
+	return err
 }
 
 // estimateTokens is the rough size of a document in model tokens.
@@ -398,17 +408,24 @@ type SizeModel struct {
 	ContextTokens int    `json:"context_tokens"`
 }
 
+// UnknownModel is a planning model whose context size is not known.
+type UnknownModel struct {
+	Backend string `json:"backend"`
+	Model   string `json:"model"`
+}
+
 // SizeView compares the size of an effort's FRD and plan with what the
 // planning models can read. A context of 0 is unknown; Over is only ever set
 // when a context is known.
 type SizeView struct {
-	FRDTokens        int         `json:"frd_tokens"`
-	PlanTokens       int         `json:"plan_tokens"`
-	BudgetTokens     int         `json:"budget_tokens"`
-	ContextTokensMin int         `json:"context_tokens_min"`
-	Over             bool        `json:"over"`
-	Models           []SizeModel `json:"models"`
-	Advice           string      `json:"advice"`
+	FRDTokens        int            `json:"frd_tokens"`
+	PlanTokens       int            `json:"plan_tokens"`
+	BudgetTokens     int            `json:"budget_tokens"`
+	ContextTokensMin int            `json:"context_tokens_min"`
+	Over             bool           `json:"over"`
+	Models           []SizeModel    `json:"models"`
+	UnknownModels    []UnknownModel `json:"unknown_models"`
+	Advice           string         `json:"advice"`
 }
 
 // sizeRoles are the roles whose prompts carry the FRD or the plan.
@@ -424,7 +441,7 @@ func (e *Engine) FRDSize(ctx context.Context, effort int64) (SizeView, error) {
 	if err != nil {
 		return SizeView{}, err
 	}
-	v := SizeView{Models: []SizeModel{}}
+	v := SizeView{Models: []SizeModel{}, UnknownModels: []UnknownModel{}}
 	for kind, dst := range map[string]*int{model.DocFRD: &v.FRDTokens, model.DocPlan: &v.PlanTokens} {
 		d, err := s.GetDoc(ctx, effort, kind, 0)
 		if errors.Is(err, store.ErrNotFound) {
@@ -455,6 +472,9 @@ func (e *Engine) FRDSize(ctx context.Context, effort int64) (SizeView, error) {
 			seen[key] = true
 			ctxTokens := known[key]
 			v.Models = append(v.Models, SizeModel{Backend: c.Backend, Model: c.Model, ContextTokens: ctxTokens})
+			if ctxTokens == 0 {
+				v.UnknownModels = append(v.UnknownModels, UnknownModel{Backend: c.Backend, Model: c.Model})
+			}
 			if ctxTokens > 0 && (v.ContextTokensMin == 0 || ctxTokens < v.ContextTokensMin) {
 				v.ContextTokensMin = ctxTokens
 			}
@@ -462,6 +482,10 @@ func (e *Engine) FRDSize(ctx context.Context, effort int64) (SizeView, error) {
 	}
 	sort.Slice(v.Models, func(i, j int) bool {
 		a, b := v.Models[i], v.Models[j]
+		return a.Backend+"/"+a.Model < b.Backend+"/"+b.Model
+	})
+	sort.Slice(v.UnknownModels, func(i, j int) bool {
+		a, b := v.UnknownModels[i], v.UnknownModels[j]
 		return a.Backend+"/"+a.Model < b.Backend+"/"+b.Model
 	})
 	v.BudgetTokens = v.ContextTokensMin / 2
@@ -477,6 +501,13 @@ func (e *Engine) FRDSize(ctx context.Context, effort int64) (SizeView, error) {
 		v.Advice = fmt.Sprintf("The FRD is about %d tokens against a budget of %d: split it into parts.", v.FRDTokens, v.BudgetTokens)
 	default:
 		v.Advice = fmt.Sprintf("Fits: the FRD is about %d tokens against a budget of %d.", v.FRDTokens, v.BudgetTokens)
+	}
+	if len(v.UnknownModels) > 0 && v.ContextTokensMin > 0 {
+		names := make([]string, len(v.UnknownModels))
+		for i, m := range v.UnknownModels {
+			names[i] = m.Backend + "/" + m.Model
+		}
+		v.Advice += " The context size is unknown for " + strings.Join(names, ", ") + ", so the check does not cover them."
 	}
 	return v, nil
 }

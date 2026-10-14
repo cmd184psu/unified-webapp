@@ -145,7 +145,6 @@ func TestD3_FRDPlanQueueFlow(t *testing.T) {
 	f.ok("GET", f.base+"/frd", nil, http.StatusNotFound)
 	f.field("PUT", f.base+"/frd", `{"id":"X","title":"t","requirements":[{"id":"R1","description":"d"}]}`, "objective")
 	f.field("PUT", f.base+"/frd", `{"id":"X","title":"t","objective":"o","requirements":[],"surprise":1}`, "surprise")
-	f.field("PUT", f.base+"/frd", `{"id":"X","title":"t","objective":"o","requirements":[{"id":"R1","description":"d"}],"acceptance_criteria":[{"id":"A","requirements":["R9"],"criterion":"c"}]}`, "acceptance_criteria")
 	f.field("PUT", f.base+"/frd", `{"id":"X","title":5}`, "title")
 	f.ok("POST", "/api/projects/p1/efforts", map[string]any{"title": "second"}, http.StatusConflict) // PJ4
 	f.ok("GET", "/api/projects/other/efforts/"+itoa(f.effort), nil, http.StatusNotFound)

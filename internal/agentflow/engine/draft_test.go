@@ -405,3 +405,133 @@ func TestN1_PromptsCarryTheDefinitionOfDone(t *testing.T) {
 		t.Fatalf("override prompt:\n%s", op)
 	}
 }
+
+// B1: a retry after a stage-less failure writes a start event with the same
+// after_stage; the old failed event must not close the new run.
+func TestB1_RetryAfterStagelessFailureIsAppliedAndNotShownFailed(t *testing.T) {
+	f := newPlanFix(t, false)
+	ctx := context.Background()
+	f.fake.Script("planner", runner.Step{Reply: draftReply})
+	if err := f.eng.noteEffort(ctx, "alice", eventDraftStart, f.effort, draftDetail{Purpose: PurposeDraft, Description: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := f.st.GetProject(ctx, f.slug)
+	ef, _ := f.st.GetEffort(ctx, f.effort)
+	f.eng.planMu.Lock()
+	err := f.eng.advanceDraft(ctx, p, ef) // no model is eligible: closes the run as failed
+	f.eng.planMu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := f.draftState(); v.State != "failed" || !strings.Contains(v.Error, "no model can draft") {
+		t.Fatalf("state = %+v", v)
+	}
+	f.standardPool()
+	f.startEngine()
+	if err := f.eng.StartDraft(ctx, "alice", f.effort, DraftRequest{Purpose: PurposeDraft, Description: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if v := f.draftState(); v.State == "failed" {
+		t.Fatalf("the old failure closed the retry: %+v", v)
+	}
+	f.waitDraft("idle")
+	if _, rev := f.latestFRD(); rev != 2 {
+		t.Fatalf("revision after the retry = %d, want 2", rev)
+	}
+}
+
+// B7: the revision and its done event commit together, so running the driver
+// again after the apply (as after a restart) does not apply the draft twice.
+func TestB7_ApplyIsIdempotent(t *testing.T) {
+	f := newPlanFix(t, false)
+	f.standardPool()
+	ctx := context.Background()
+	f.fake.Script("planner", runner.Step{Reply: draftReply})
+	f.startEngine()
+	if err := f.eng.StartDraft(ctx, "alice", f.effort, DraftRequest{Purpose: PurposeDraft, Description: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	f.waitDraft("idle")
+	p, _ := f.st.GetProject(ctx, f.slug)
+	ef, _ := f.st.GetEffort(ctx, f.effort)
+	for i := 0; i < 2; i++ {
+		f.eng.planMu.Lock()
+		err := f.eng.advanceDraft(ctx, p, ef)
+		f.eng.planMu.Unlock()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, rev := f.latestFRD(); rev != 2 {
+		t.Fatalf("revision = %d, want 2", rev)
+	}
+	done, _ := f.eng.effortEvents(ctx, f.effort, eventDraftDone)
+	if len(done) != 1 {
+		t.Fatalf("done events = %d", len(done))
+	}
+}
+
+// B2: a re-split keeps the earlier pending parts and the record of a started
+// one; the new parts go after them.
+func TestB2_ResplitKeepsEarlierParts(t *testing.T) {
+	f := newPlanFix(t, false)
+	f.standardPool()
+	ctx := context.Background()
+	f.fake.Script("planner", runner.Step{Reply: splitReply}, runner.Step{Reply: splitReply})
+	f.startEngine()
+	for i := 0; i < 2; i++ {
+		if i == 1 {
+			if err := f.st.MarkFRDPartStarted(ctx, "t", f.effort, 2, 99); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := f.eng.StartDraft(ctx, "alice", f.effort, DraftRequest{Purpose: PurposeSplit}); err != nil {
+			t.Fatal(err)
+		}
+		f.waitDraft("idle")
+		waitFor(t, "split applied", func() bool {
+			_, rev := f.latestFRD()
+			return rev == 2+i
+		})
+	}
+	parts, _ := f.st.ListFRDParts(ctx, f.effort)
+	if len(parts) != 4 || parts[0].N != 2 || parts[0].StartedEffort != 99 || parts[1].N != 3 || parts[2].N != 4 || parts[3].N != 5 || parts[2].StartedEffort != 0 {
+		t.Fatalf("parts = %+v", parts)
+	}
+}
+
+// B4: when every criterion restates the definition of done they are kept and
+// the event says so.
+func TestB4_FilterNeverEmptiesTheCriteria(t *testing.T) {
+	f := newPlanFix(t, false)
+	f.standardPool()
+	ctx := context.Background()
+	f.fake.Script("planner", runner.Step{Reply: `{"title":"T","objective":"o","requirements":[{"description":"a"}],"acceptance_criteria":[{"criterion":"go test passes"},{"criterion":"tests continue to pass"}]}`})
+	f.startEngine()
+	if err := f.eng.StartDraft(ctx, "alice", f.effort, DraftRequest{Purpose: PurposeDraft, Description: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	f.waitDraft("idle")
+	frd, _ := f.latestFRD()
+	if len(frd.AcceptanceCriteria) != 2 {
+		t.Fatalf("criteria = %+v", frd.AcceptanceCriteria)
+	}
+	done, _ := f.eng.effortEvents(ctx, f.effort, eventDraftDone)
+	if len(done) != 1 || !strings.Contains(done[0].DetailJSON, `"kept_all_restated":true`) {
+		t.Fatalf("done = %+v", done)
+	}
+}
+
+// B5: models with an unknown context are listed, and over uses the known ones.
+func TestB5_SizeListsUnknownModels(t *testing.T) {
+	f := newPlanFix(t, true)
+	f.standardPool()
+	f.setContext("gpu", "m1", 1000) // planner and compiler known; architect and critic unknown
+	v := f.size()
+	if len(v.UnknownModels) != 2 || v.UnknownModels[0].Model != "m2" || v.UnknownModels[1].Model != "m3" || v.ContextTokensMin != 1000 {
+		t.Fatalf("size = %+v", v)
+	}
+	if !strings.Contains(v.Advice, "unknown for gpu/m2, gpu/m3") {
+		t.Fatalf("advice = %q", v.Advice)
+	}
+}

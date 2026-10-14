@@ -52,6 +52,13 @@ func validDocJSON(kind string, raw []byte) error {
 // Revisions are immutable: an edit after approval is a new revision and leaves
 // the approved one untouched (DBS4).
 func (s *Store) SaveDoc(ctx context.Context, actor string, effort int64, kind string, raw []byte) (model.Doc, error) {
+	return s.SaveDocWith(ctx, actor, effort, kind, raw, nil)
+}
+
+// SaveDocWith is SaveDoc that runs also in the same transaction once the
+// revision is written: if it fails nothing is saved, and what it writes
+// commits with the revision.
+func (s *Store) SaveDocWith(ctx context.Context, actor string, effort int64, kind string, raw []byte, also func(tx *sql.Tx, d model.Doc) error) (model.Doc, error) {
 	if kind == model.DocFRD {
 		filled, err := fillFRDJSON(raw, effort, time.UnixMilli(nowMS()).UTC())
 		if err != nil {
@@ -80,6 +87,9 @@ func (s *Store) SaveDoc(ctx context.Context, actor string, effort int64, kind st
 			return err
 		}
 		out = model.Doc{Effort: effort, Kind: kind, Revision: rev, JSON: raw, CreatedBy: actor, Created: now}
+		if also != nil {
+			return also(tx, out)
+		}
 		return nil
 	})
 	return out, err

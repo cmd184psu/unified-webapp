@@ -13,8 +13,8 @@ import (
 var (
 	restateSubject = `(?:(?:the |all |any |every |existing |new |unit |integration |full |whole |entire |project |go |python |npm )*` +
 		`(?:go test|go build|go vet|gofmt|pytest|npm test|tests?|test suite|builds?|lint(?:ing)?|vet|compilation|static analysis|type ?check(?:s|ing)?)` +
-		`(?: \./\.\.\.| -q)?(?: suite)?|(?:the )?(?:project|code ?base|code|repo(?:sitory)?|module|package))`
-	restateVerb = `(?:all |still |both )*(?:pass(?:es|ing)?|succeed(?:s)?|compile(?:s)?|build(?:s)?|run(?:s)? (?:clean(?:ly)?|successfully|without errors?)|` +
+		`(?: -[a-z]+(?:=\S+)?)*(?: \./\.\.\.)?(?: suite)?|(?:the )?(?:project|code ?base|code|repo(?:sitory)?|module|package))`
+	restateVerb = `(?:all |still |both |should |must |will |continues? to )*(?:pass(?:es|ing)?|succeed(?:s)?|compile(?:s)?|build(?:s)?|run(?:s)? (?:clean(?:ly)?|successfully|without errors?)|` +
 		`(?:is|are) (?:green|clean|successful|passing)|(?:complete|finish)(?:es)? (?:successfully|without errors?)|exit(?:s)? (?:with )?(?:code )?0|` +
 		`(?:report(?:s)? )?no (?:errors?|failures?|warnings?)|without (?:errors?|failures?))` +
 		`(?: (?:with no (?:errors?|failures?)|without (?:errors?|failures?)|successfully|cleanly))*`
@@ -23,7 +23,10 @@ var (
 		restateClause + `(?:(?: and |, | ?, and )` + restateClause + `)*$`)
 	restateNoFailures = regexp.MustCompile(`^(?:there (?:are|is) )?no (?:(?:test|build|compile|compilation|vet|lint) )?(?:failures?|errors?|warnings?)(?: (?:in|from) (?:the )?(?:tests?|build|vet|lint))?$`)
 	restateFixed      = []*regexp.Regexp{
-		regexp.MustCompile(`^no (?:unrelated |other |extra |stray )?files (?:outside|beyond|other than)(?: of)? .*(?:changed|modified|touched)$`),
+		regexp.MustCompile(`^no unrelated files (?:were |are )?(?:changed|modified|touched)$`),
+		regexp.MustCompile(`^no files (?:outside|beyond|other than)(?: of)? the tasks?(?: declared)?(?: scope| files) (?:were |are )?(?:changed|modified|touched)$`),
+		regexp.MustCompile(`^gofmt(?: -[a-z]+)* (?:reports|shows|finds|produces) no (?:diff|differences|changes|output|issues|files)$`),
+		regexp.MustCompile(`^(?:the |all )?(?:code|project|repo(?:sitory)?|changed files|files) (?:is|are) gofmt[- ]clean$`),
 		regexp.MustCompile(`^new (?:code|functionality|behaviou?r) (?:has|have|is covered by|includes?|is tested by|comes with) (?:unit |automated )?tests?$`),
 		regexp.MustCompile(`^no (?:new )?(?:secrets?|credentials?)(?: or credentials?)?(?: (?:are |is )?(?:added|committed|introduced|leaked))?$`),
 	}
@@ -58,13 +61,14 @@ func restatesDoD(criterion string, norm map[string]bool) bool {
 }
 
 // DropRestatedCriteria removes the acceptance criteria that restate the
-// definition of done (dod are its items) and returns the dropped texts.
-func DropRestatedCriteria(f *FRD, dod []string) []string {
+// definition of done (dod are its items) and returns the dropped texts. It
+// never removes every criterion: when all would go they are kept, nothing is
+// returned as dropped and keptAll is true, so the caller can record it.
+func DropRestatedCriteria(f *FRD, dod []string) (dropped []string, keptAll bool) {
 	norm := map[string]bool{}
 	for _, it := range dod {
 		norm[normalizeCriterion(it)] = true
 	}
-	var dropped []string
 	kept := f.AcceptanceCriteria[:0:0]
 	for _, ac := range f.AcceptanceCriteria {
 		if restatesDoD(ac.Criterion, norm) {
@@ -73,6 +77,9 @@ func DropRestatedCriteria(f *FRD, dod []string) []string {
 		}
 		kept = append(kept, ac)
 	}
+	if len(kept) == 0 && len(dropped) > 0 {
+		return nil, true
+	}
 	f.AcceptanceCriteria = kept
-	return dropped
+	return dropped, false
 }

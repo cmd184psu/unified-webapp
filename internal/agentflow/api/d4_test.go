@@ -96,7 +96,6 @@ func TestD4_InvalidImportNamesTheField(t *testing.T) {
 	e.field("POST", imp, `{"id":"X","title":"t","requirements":[{"id":"R1","description":"d"}]}`, "objective")
 	e.field("POST", imp, `{"id":"X","title":"t","objective":"o","requirements":[]}`, "requirements")
 	e.field("POST", imp, `{"id":"X","title":"t","objective":"o","requirements":[{"id":"R1","description":"d"},{"id":"R1","description":"e"}]}`, "requirements")
-	e.field("POST", imp, `{"id":"X","title":"t","objective":"o","requirements":[{"id":"R1","description":"d"}],"acceptance_criteria":[{"id":"A","requirements":["R2"],"criterion":"c"}]}`, "acceptance_criteria")
 	e.field("POST", imp, `{"id":`, "body")
 	e.field("POST", imp, ``, "body")
 	e.field("POST", imp, `[1,2]`, "body")
