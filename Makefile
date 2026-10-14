@@ -63,6 +63,8 @@ gates:
 	node scripts/gates/hamburger-alignment.mjs
 	node scripts/gates/gofmt.mjs
 	node scripts/gates/token-overlap.mjs
+	node scripts/gates/innerhtml-escape.mjs
+	node scripts/gates/import-cycles.mjs
 	node scripts/check-shared-barrel.mjs
 
 test-web:

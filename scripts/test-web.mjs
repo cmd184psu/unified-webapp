@@ -65,6 +65,8 @@ const suites = [
   { name: "haproxy-livefeed", entry: "web/haproxy/src/livefeed.test.ts", runner: "esbuild-cjs" },
   { name: "haproxy-statsview", entry: "web/haproxy/src/statsview.test.ts", runner: "esbuild-cjs" },
   { name: "haproxy-sourceguard", entry: "web/haproxy/src/sourceguard.test.ts", runner: "esbuild-cjs" },
+  { name: "agentflow-dom", entry: "web/agentflow/js/dom.test.ts", runner: "esbuild-cjs" },
+  { name: "agentflow-overview", entry: "web/agentflow/js/overview.test.ts", runner: "esbuild-cjs" },
   { name: "grocery", entry: "web/grocery/js/main.test.ts", runner: "node-test" },
 ];
 

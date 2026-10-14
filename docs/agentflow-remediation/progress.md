@@ -69,6 +69,8 @@ Logged per the owner's posture; candidates for the next phase alongside `.omc/pl
 
 - Phase D review notes (non-blocking, not fixed): `PUT …/plan` with body `null` is accepted (should be 400); `PATCH /projects/{slug}` limits are strings-only (PUT limits accepts numbers via flexStrings); task detail embeds full stage RawOutput/ParsedJSON for every attempt and `getTask` recomputes the whole effort (N+1); SSE snapshot is computed before subscribe (event in the gap is lost — refetch on `state.changed`); git-init audit row is a separate tx from `Git.Init`; FRD import is two txs with compensating abandon; a failed Build after `engine.New` leaves lanes registered; decodeBody 413 mapping lost on the trailing-token check. API gaps for the UI (add only if a UI story needs them): audit/events listing endpoint, `GET /stages/{id}` detail, finished-stage raw output once the lane job is retained out (use task detail's `RawOutput`), backend/model discovery, project-scoped candidates GET (filter `/candidates` client-side).
 
+- **Frontend shell (E1):** `api.ts` = one `apiFetch` + typed wrappers for the whole contract (write calls accept `{quiet:true}` to suppress the alert dialog and handle field errors inline; `ApiError` has `.status`/`.field`; `exportURL()`, `stageStreamURL()`); `dom.ts` = `esc`, `h(tag,{class,text,attrs,on},...children)` (refuses on* attrs), `append`, `replace`, `chip(status)`; `events.ts` = `subscribe(fn)` over `EventSource('/api/events')` with 1s->30s backoff, started once in main.ts; top-level tabs = `TABS` in main.ts (`mount(host,arg)` -> optional dispose; Settings/Backends are placeholders for E2); project sub-tabs = `SUB_TABS` in projecttab.ts (`mount(host, slug)`; FRD/Plan placeholders E3, Queue/Board E4, History E5). Gates added: `innerhtml-escape.mjs` (ESCAPE_GATED=["agentflow"]), `import-cycles.mjs` (DFS; overview.ts must not import main/projecttab). `testkit.ts` = test runner + FakeEl for suites registered in scripts/test-web.mjs. YOLO badge on the overview card is E5's job. `make web-verify` diffs against HEAD, so it only passes after bundle.js is committed. Settings/PlanReview/FRD body types are loose — tighten in E2/E3.
+
 ## API contract for the UI (Phase D, final)
 All under `/api`; JSON errors `{"error","field"?}` (400 validation, 404, 409 ErrConflict, 503 at SSE cap). `…` = `/projects/{slug}`.
 - Health: GET /health (`{status: ok|degraded, opencode:{status,version?,error?}}`); GET /opencode/version?refresh=1.
@@ -119,6 +121,7 @@ Known limits: `opencode_path` setting needs a restart; project create defaults m
 - 2026-10-13 — D2: API for projects/backends/candidates/settings/limits/opencode version with audit actor (git-init route is POST /api/projects/git-init).
 - 2026-10-13 — D3: API for efforts/docs/plan/queue/tasks/run control + SSE event bus and stage stream.
 - 2026-10-13 — D4: export (json|md) and strict FRD import; markdown rendering escapes input.
+- 2026-10-13 — E1: frontend shell (apiFetch, esc/h, SSE client, overview) + innerhtml-escape and import-cycles gates; old UI files removed.
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`

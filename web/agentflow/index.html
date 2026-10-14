@@ -31,32 +31,8 @@
 
     <!-- ── Main Content ────────────────────────────────────────────────────── -->
     <main id="app" class="console-app">
-        <!-- Tab Panels ────────────────────────────────────────────────────── -->
-        
-        <!-- FRD Wizard Tab -->
-        <section class="tab-panel" id="panel-frd" role="tabpanel" hidden>
-            <div id="frd-wizard"></div>
-        </section>
-
-        <!-- Plan Generation Tab -->
-        <section class="tab-panel" id="panel-plan" role="tabpanel" hidden>
-            <div id="plan-gen"></div>
-        </section>
-
-        <!-- Task Compiler Tab -->
-        <section class="tab-panel" id="panel-compile" role="tabpanel" hidden>
-            <div id="task-compiler"></div>
-        </section>
-
-        <!-- Queue Dashboard Tab -->
-        <section class="tab-panel" id="panel-queue" role="tabpanel" hidden>
-            <!-- Queue dashboard content injected by queue-dashboard.ts -->
-        </section>
-
-        <!-- Settings Tab -->
-        <section class="tab-panel" id="panel-settings" role="tabpanel" hidden>
-            <div id="settings-host"></div>
-        </section>
+        <!-- The active tab's view is mounted here by js/main.ts -->
+        <section class="tab-panel" id="panel-view" role="tabpanel"></section>
 
         <!-- Live Stream Panel (shared, slides in from right) -->
         <aside class="console-right" id="stream-panel" hidden></aside>

@@ -1107,3 +1107,16 @@ body {
     right: 0;
   }
 }
+/* ── Extra status chips (engine statuses added after the original console) ── */
+
+.task-item.status-stuck,
+.task-item.status-exhausted { border-left-color: var(--color-danger); }
+.task-item.status-needs-input,
+.task-item.status-needs-attention { border-left-color: var(--color-warning); }
+.task-item.status-overridden { border-left-color: var(--color-success); }
+
+.status-chip.status-stuck { color: var(--color-danger); }
+.status-chip.status-exhausted { color: var(--color-danger); }
+.status-chip.status-needs-input { color: var(--color-warning); }
+.status-chip.status-needs-attention { color: var(--color-warning); }
+.status-chip.status-overridden { color: var(--color-success); }
