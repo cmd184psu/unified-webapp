@@ -462,6 +462,9 @@ const (
 func (e *Engine) reviewFiles(ctx context.Context, att model.Attempt, task model.Task) string {
 	var b strings.Builder
 	names := append([]string{}, task.FilesTouched...)
+	// Files of the tasks this one depends on are context: code a test calls may
+	// live there, and a reviewer that cannot see it reports it as missing.
+	ctxNames := e.dependencyFiles(ctx, att, task)
 	if stages, err := e.deps.Store.ListAttemptStages(ctx, att.ID); err == nil {
 		for i := len(stages) - 1; i >= 0; i-- {
 			st := stages[i]
@@ -485,7 +488,10 @@ func (e *Engine) reviewFiles(ctx context.Context, att model.Attempt, task model.
 	}
 	b.WriteString("\n\n## FILES (read from the worktree after the worker finished)\n")
 	seen, total := map[string]bool{}, 0
-	for _, n := range names {
+	for i, n := range append(names, ctxNames...) {
+		if i == len(names) && len(ctxNames) > 0 {
+			b.WriteString("\n## Files of the tasks this task depends on (context, not part of this task)\n")
+		}
 		rel := filepath.Clean(n)
 		if rel == "." || filepath.IsAbs(rel) || strings.HasPrefix(rel, "..") || seen[rel] {
 			continue
@@ -506,4 +512,27 @@ func (e *Engine) reviewFiles(ctx context.Context, att model.Attempt, task model.
 		}
 	}
 	return b.String()
+}
+
+// dependencyFiles lists the files the tasks this task depends on touch, for
+// the reviewer's context. Errors just mean less context.
+func (e *Engine) dependencyFiles(ctx context.Context, att model.Attempt, task model.Task) []string {
+	if len(task.DependsOn) == 0 {
+		return nil
+	}
+	all, err := e.deps.Store.ListQueueTasks(ctx, task.Queue)
+	if err != nil {
+		return nil
+	}
+	want := map[string]bool{}
+	for _, k := range task.DependsOn {
+		want[k] = true
+	}
+	var out []string
+	for _, d := range all {
+		if want[d.Key] {
+			out = append(out, d.FilesTouched...)
+		}
+	}
+	return out
 }

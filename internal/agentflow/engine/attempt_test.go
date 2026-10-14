@@ -373,3 +373,30 @@ func TestReviewerPromptCarriesTheFiles(t *testing.T) {
 		t.Errorf("reviewer prompt has an unfilled placeholder or an escaped path:\n%s", p)
 	}
 }
+
+// A reviewer of a task that depends on another is shown that task's files as
+// context: a test calling code defined there must not look like it calls
+// something missing.
+func TestReviewerPromptCarriesTheDependencyFiles(t *testing.T) {
+	defs := []model.TaskDef{
+		{Key: "A", Phase: "P", Title: "impl", Prompt: "do", Acceptance: []string{"ok"}, FilesTouched: []string{"A.txt"}},
+		{Key: "B", Phase: "P", Title: "tests", Prompt: "do", Acceptance: []string{"ok"}, FilesTouched: []string{"B.txt"}, DependsOn: []string{"A"}},
+	}
+	c := newChainRun(t, nil, defs)
+	c.script(2, reviewPass, nil)
+	c.run()
+	waitFor(t, "both reviewed", func() bool { return len(c.fake.CallsFor("reviewer")) >= 2 })
+	var forB string
+	for _, call := range c.fake.CallsFor("reviewer") {
+		raw, err := os.ReadFile(call.Request.PromptPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "## Task: tests") {
+			forB = string(raw)
+		}
+	}
+	if !strings.Contains(forB, "### B.txt") || !strings.Contains(forB, "Files of the tasks this task depends on") || !strings.Contains(forB, "### A.txt") {
+		t.Fatalf("reviewer prompt for the dependent task lacks the dependency's file:\n%s", forB)
+	}
+}

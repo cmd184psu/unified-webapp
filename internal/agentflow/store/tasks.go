@@ -40,6 +40,12 @@ func (s *Store) ListTasks(ctx context.Context, effort int64) ([]model.Task, erro
 	return loadTasks(ctx, s.db, qid)
 }
 
+// ListQueueTasks returns the tasks of one queue by queue id, for callers that
+// hold a task (which knows its queue) and not the effort.
+func (s *Store) ListQueueTasks(ctx context.Context, queue int64) ([]model.Task, error) {
+	return loadTasks(ctx, s.db, queue)
+}
+
 // SetWaitingReason sets (or with "" clears) the task's mutable waiting reason,
 // shown when the dispatcher cannot place it (SV3).
 func (s *Store) SetWaitingReason(ctx context.Context, taskID int64, reason string) error {

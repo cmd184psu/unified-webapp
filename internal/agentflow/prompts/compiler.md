@@ -41,7 +41,7 @@ Emit only these fields. Any other field makes the queue invalid.
 7. Keep `files_touched` minimal and accurate. It is never empty, and every path in it is named in `prompt` with backticks.
 8. A file appears in `files_touched` of more than one task only when each later task depends on the earlier owner.
 9. A task may only name files created by itself or by tasks in its dependency chain. Never reference a file to be created later.
-10. Prefer implementation and testing as separate tasks when combining them would make the prompt long or fragile.
+10. Put code and the tests that cover it in the SAME task: the worker writes both, and a task that only adds tests for code another task wrote finds nothing to do. Make a tests-only task only for tests that span several tasks' code (end-to-end or cross-package); it depends on those tasks and names the test files.
 11. Never invent infrastructure outside the approved plan. The runner owns project-state files.
 12. Never emit a task whose only purpose is running, checking or confirming tests, the build or lint (titles such as "Run tests" or "Make sure all tests pass"). Every task must change files; the engine builds, vets and tests after every task automatically, with no task needed. Such a task is rejected.
 
