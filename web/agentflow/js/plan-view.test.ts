@@ -255,6 +255,7 @@ test('F2: a failed refetch keeps the rounds on screen instead of resetting to th
 test('F2: stageName and elapsedText', () => {
   const rv = (role: string, rev: number) => review(role, 1, 'revise', 's', rev);
   eq(stageName('compiling', [], 1), 'Compiler: turning the plan into tasks');
+  eq(stageName('plan_approved', [], 1), 'Plan approved: the compiler is starting');
   eq(stageName('plan_ready', [], 1), '');
   eq(stageName('planning', [], 0), 'Planner: drafting the first plan');
   eq(stageName('planning', [], 1), 'Architect: reviewing plan revision 1');

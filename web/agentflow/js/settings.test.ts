@@ -13,19 +13,21 @@ const SETTINGS: Settings = {
 function harness(over: Partial<SettingsDeps> = {}) {
   const host = new FakeEl('DIV');
   const calls: string[] = [];
-  const sent: Record<string, string>[] = [];
+  const sent: Record<string, unknown>[] = [];
+  const picked: { path: string | null } = { path: null };
   const deps: SettingsDeps = {
     settings: async () => ({ ...SETTINGS }),
-    putSettings: async (s) => { sent.push(s as Record<string, string>); return { ...SETTINGS, ...s }; },
+    putSettings: async (s) => { sent.push(s); return { ...SETTINGS, ...s }; },
     opencodeVersion: async (refresh) => {
       calls.push('oc:' + !!refresh);
       return refresh ? { status: 'ok', version: '2.0.0' } : { status: 'ok', version: '1.0.0' };
     },
+    pickDir: async (start) => { calls.push('pick:' + start); return picked.path; },
     notify: (m) => { calls.push('notify:' + m); },
     ...over,
   };
   const view = new SettingsView(asEl(host), deps);
-  return { host, view, calls, sent };
+  return { host, view, calls, sent, picked };
 }
 
 test('CF1: every limit, verify slots, cooldown and the opencode path are shown with their values', async () => {
@@ -99,6 +101,49 @@ test('an error that names no field lands in the form-level line', async () => {
   button(t.host, 'Save settings').click();
   await flush();
   eq(findAll(t.host, (e) => e.className === 'field-error' && e.textContent !== '').map((e) => e.textContent), ['disk full']);
+  stop();
+});
+
+test('H1: no text asks for a restart; saving applies at once', async () => {
+  const t = harness();
+  const stop = t.view.mount();
+  await flush();
+  ok(!/restart/i.test(t.host.textContent), 'no restart text');
+  stop();
+});
+
+test('H1: browse roots are listed, added through the picker (no typing), removed, and saved as a list', async () => {
+  const t = harness({ settings: async () => ({ ...SETTINGS, browse_roots: ['/srv'] }) });
+  const stop = t.view.mount();
+  await flush();
+  eq(findAll(t.host, (e) => e.getAttribute('data-root') !== null).map((e) => e.textContent), ['/srvRemove']);
+  eq(findAll(t.host, (e) => e.getAttribute('data-field') === 'browse_roots').length, 0);
+  t.picked.path = '/home/me';
+  button(t.host, 'Add folder').click();
+  await flush();
+  eq(t.calls.filter((c) => c.startsWith('pick:')), ['pick:/srv']);
+  t.picked.path = '/srv';
+  button(t.host, 'Add folder').click();
+  await flush();
+  eq(findAll(t.host, (e) => e.getAttribute('data-root') !== null).length, 2);
+  button(t.host, 'Save settings').click();
+  await flush();
+  eq(t.sent[0].browse_roots, ['/srv', '/home/me']);
+  button(t.host, 'Remove').click();
+  await flush();
+  button(t.host, 'Save settings').click();
+  await flush();
+  eq(t.sent[1].browse_roots, ['/home/me']);
+  stop();
+});
+
+test('H1: a cancelled picker adds nothing', async () => {
+  const t = harness();
+  const stop = t.view.mount();
+  await flush();
+  button(t.host, 'Add folder').click();
+  await flush();
+  eq(findAll(t.host, (e) => e.getAttribute('data-root') !== null).length, 0);
   stop();
 });
 

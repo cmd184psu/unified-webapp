@@ -313,23 +313,38 @@ export class FrdEditor {
     }
     const ef = this.current;
     const approvedRev = this.revisions.find((r) => r.approved)?.revision;
+    // The one obvious next step: approving a saved, unedited revision; otherwise saving.
+    const canApprove = !!ef && !!this.latest && this.latest.revision !== approvedRev && !this.dirty && !isFinished(ef);
     const editor = ef && this.form ? section(`FRD for #${ef.id}`,
       h('div', { class: 'row-actions' },
         h('span', { class: 'field-hint', text: this.latest ? `Latest revision ${this.latest.revision}${approvedRev ? `; revision ${approvedRev} approved` : '; not approved'}` : 'Not saved yet' }),
         this.dirty ? badge('unsaved', 'warn') : null),
       this.form.el,
       h('div', { class: 'settings-actions' },
-        button('Save as new revision', () => void this.save(), { primary: true, field: 'save-frd' }),
-        this.latest && this.latest.revision !== approvedRev && !this.dirty && !isFinished(ef)
-          ? button(`Approve revision ${this.latest.revision}`, () => void this.approve(), { field: 'approve-frd' }) : null)) : null;
+        button('Save as new revision', () => void this.save(), { primary: !canApprove, field: 'save-frd' }),
+        canApprove && this.latest ? button(`Approve revision ${this.latest.revision}`, () => void this.approve(), { primary: true, field: 'approve-frd' }) : null)) : null;
+    // A project has one active effort at a time: show the form only when none is active, else a disabled "+" says why.
+    const active = this.efforts.find((e) => !isFinished(e));
+    const bar = this.efforts.length ? effortBar(this.slug, this.efforts, ef, (id) => { this.current = this.efforts.find((e) => e.id === id); void this.loadDoc(); }) : null;
+    if (bar && active) {
+      bar.appendChild(h('button', {
+        class: 'ui-modal-btn is-disabled',
+        text: '+',
+        attrs: {
+          type: 'button', 'data-action': 'new-effort', 'aria-disabled': 'true', 'aria-label': 'New effort',
+          title: `New effort is unavailable: a project has one active effort at a time. Finish or abandon #${active.id} (${active.status.replace(/_/g, ' ')}) first.`,
+        },
+      }));
+    }
     replace(this.host,
       h('div', { class: 'settings-host' },
-        this.efforts.length ? effortBar(this.slug, this.efforts, ef, (id) => { this.current = this.efforts.find((e) => e.id === id); void this.loadDoc(); }) : null,
-        this.efforts.length ? section('FRDs', this.list()) : h('div', { class: 'plan-empty' }, h('h3', { text: 'No efforts yet' }), h('p', { text: 'An effort is one FRD, plan and queue. Create the first one below.' })),
+        bar,
+        active ? null : this.efforts.length ? null : h('div', { class: 'plan-empty' }, h('h3', { text: 'No efforts yet' }), h('p', { text: 'An effort is one FRD, plan and queue. Create the first one below.' })),
+        active ? null : this.newEffortForm(),
         editor,
         ef && !isFinished(ef) ? effortSettings(ef, this.form ? JSON.stringify(this.form.read()) : '', this.deps, () => void this.load()) : null,
         ef ? this.revisionList() : null,
-        this.newEffortForm()));
+        this.efforts.length ? section('Efforts', this.list()) : null));
   }
 }
 

@@ -9,6 +9,7 @@ import { confirmDialog, showToast } from '@shared';
 import { api, ApiError, type Backend, type Candidate, type PluginPin, type ProjectInput, type ProjectView } from './api.js';
 import { ROLES, buildRoleEditor, type CandRow } from './candidates.js';
 import { h, replace } from './dom.js';
+import { pickDirectory } from './dirpicker.js';
 import { FormErrors, RowsEditor, button, checkbox, type ToggleEl, fieldRow, section, selectInput, textInput } from './forms.js';
 
 export type ProjectDeps = Pick<
@@ -16,6 +17,8 @@ export type ProjectDeps = Pick<
   'createProject' | 'patchProject' | 'gitInit' | 'deleteProject' | 'backends' | 'candidates' | 'putProjectCandidates' | 'clearProjectCandidates'
 > & {
   confirm(message: string, confirmLabel?: string): Promise<boolean>;
+  /** Opens the directory picker at start; the chosen path, or null when cancelled. */
+  pickDir(start: string): Promise<string | null>;
   notify(message: string): void;
 };
 
@@ -29,6 +32,7 @@ export const defaultProjectDeps = (): ProjectDeps => ({
   putProjectCandidates: api.putProjectCandidates,
   clearProjectCandidates: api.clearProjectCandidates,
   confirm: (m, label = 'Confirm') => confirmDialog(m, { confirmLabel: label }),
+  pickDir: (start) => pickDirectory(start),
   notify: (m) => void showToast(m, 'success'),
 });
 
@@ -66,7 +70,8 @@ export class ProjectForm {
   private cmds: RowsEditor<string>;
   private plugins: RowsEditor<PluginPin>;
   private slug: HTMLInputElement;
-  private repo: HTMLInputElement;
+  private repoPath: string;
+  private repoBtn: HTMLElement;
   private scope: HTMLSelectElement;
   private cleanup: ToggleEl;
   private backends: Backend[] = [];
@@ -77,7 +82,13 @@ export class ProjectForm {
   constructor(private host: HTMLElement, private deps: ProjectDeps, private mode: ProjectMode, private done: (slug: string) => void) {
     const p = mode.project;
     this.slug = textInput('slug', p?.slug ?? '', { readOnly: !!p, placeholder: 'my-project' });
-    this.repo = textInput('repo_path', p?.repo_path ?? '', { placeholder: '/absolute/path/to/repository' });
+    this.repoPath = p?.repo_path ?? '';
+    this.repoBtn = h('button', {
+      class: 'ui-modal-btn repo-pick',
+      attrs: { type: 'button', 'data-field': 'repo_path', title: 'Choose the repository folder' },
+      on: { click: () => void this.pickRepo() },
+    });
+    this.drawRepo();
     this.scope = selectInput('model_scope', SCOPES, p?.model_scope ?? 'local');
     this.cleanup = checkbox('cleanup_enabled', p?.cleanup_enabled ?? false);
     this.cmds = new RowsEditor<string>((c) => {
@@ -103,6 +114,18 @@ export class ProjectForm {
     }, p?.plugins ?? [], () => ({ name: '', version: '' }), 'Add plugin');
   }
 
+  private drawRepo(): void {
+    this.repoBtn.textContent = this.repoPath || 'Choose a folder...';
+  }
+
+  /** pickRepo lets the user choose the repository folder on the server. */
+  async pickRepo(): Promise<void> {
+    const chosen = await this.deps.pickDir(this.repoPath);
+    if (chosen === null) return;
+    this.repoPath = chosen;
+    this.drawRepo();
+  }
+
   async mount(): Promise<void> {
     if (this.mode.project) {
       try {
@@ -117,7 +140,7 @@ export class ProjectForm {
   private body(): ProjectInput {
     return {
       slug: this.slug.value.trim(),
-      repo_path: this.repo.value.trim(),
+      repo_path: this.repoPath,
       model_scope: this.scope.value,
       feedback_cmds: this.cmds.read().filter((c) => c !== ''),
       cleanup_enabled: this.cleanup.checked,
@@ -225,7 +248,7 @@ export class ProjectForm {
         section(p ? `Edit ${p.slug}` : 'New project',
           h('div', { class: 'profile-fields' },
             e.add('slug', fieldRow('Slug', this.slug, 'Lowercase letters, digits and dashes; fixed once created')).el,
-            e.add('repo_path', fieldRow('Repository path', this.repo, 'Absolute path of an existing git repository; if it is not one you are offered git init')).el,
+            e.add('repo_path', fieldRow('Repository', this.repoBtn, 'A git repository on this machine; if the folder is not one you are offered git init')).el,
             e.add('model_scope', fieldRow('Model scope', this.scope, 'local keeps this project off hosted backends')).el,
             e.add('cleanup_enabled', fieldRow('Cleanup pass', this.cleanup,
               'After a task passes review, run a cleanup agent and verify again; if that breaks verification the cleanup is rolled back')).el),

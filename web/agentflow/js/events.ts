@@ -97,7 +97,7 @@ export function stopEvents(): void {
 }
 
 /** Effort statuses the engine changes by itself; a view polls while its effort is in one. */
-const TRANSIENT = new Set(['planning', 'compiling', 'running']);
+const TRANSIENT = new Set(['planning', 'plan_approved', 'compiling', 'running']);
 
 /** isTransient is true while the engine is still working on an effort (status is about to change). */
 export function isTransient(status: string | undefined): boolean {

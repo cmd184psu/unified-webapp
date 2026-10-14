@@ -133,6 +133,23 @@ export class BackendsView {
     const slots = textInput('slots', String(initial?.slots ?? 1), { type: 'number' });
     const hosted = checkbox('hosted', initial?.hosted ?? false);
     const paid = checkbox('paid', initial?.paid ?? false);
+    // The API key is write-only: typed text is sent, an untouched field keeps the stored key, Clear key removes it.
+    const apiKey = textInput('api_key', '', { type: 'password', placeholder: initial?.has_key ? 'unchanged' : 'API key' });
+    apiKey.setAttribute('autocomplete', 'new-password');
+    let clearKey = false;
+    const keyState = h('span', { class: 'row-actions', attrs: { 'data-role': 'key-state' } });
+    const drawKey = (): void => replace(keyState,
+      initial?.has_key ? (clearKey ? badge('key cleared on save', 'warn') : badge('key set', 'ok')) : null,
+      initial?.has_key ? button(clearKey ? 'Keep key' : 'Clear key', () => { clearKey = !clearKey; drawKey(); }, { field: 'clear-key' }) : null);
+    drawKey();
+    const keyField = errors.add('api_key', fieldRow('API key', h('div', { class: 'row-actions' }, apiKey, keyState),
+      'Sent to the hosted service as the credential. Leave blank to keep the stored key'));
+    const syncKey = (): void => {
+      if (hosted.checked) keyField.el.removeAttribute('hidden');
+      else keyField.el.setAttribute('hidden', '');
+    };
+    (hosted.firstChild as HTMLInputElement).addEventListener('change', syncKey);
+    syncKey();
     type ModelControl = HTMLInputElement | HTMLSelectElement;
     const models: Array<{ model: ModelControl; paid: ToggleEl; max: HTMLInputElement; el: HTMLElement }> = [];
     // Names the host reported when probed; model rows then pick from them instead of typing.
@@ -197,6 +214,8 @@ export class BackendsView {
         slots: Number(slots.value),
         models: models.map((m) => ({ model: m.model.value.trim(), paid: m.paid.checked, max_concurrent: Number(m.max.value) || 0 })).filter((m) => m.model !== ''),
       };
+      if (hosted.checked && apiKey.value !== '') body.api_key = apiKey.value;
+      else if (clearKey) body.api_key = '';
       try {
         const res = initial
           ? await this.deps.patchBackend(initial.name, body, { quiet: true })
@@ -215,7 +234,8 @@ export class BackendsView {
         errors.add('api_type', fieldRow('API type', apiType)).el,
         errors.add('slots', fieldRow('Slots', slots, 'Stages this backend runs at once')).el,
         errors.add('hosted', fieldRow('Hosted', hosted, 'A remote service rather than your own machine')).el,
-        errors.add('paid', fieldRow('Paid', paid, 'Every model on it costs money')).el),
+        errors.add('paid', fieldRow('Paid', paid, 'Every model on it costs money')).el,
+        keyField.el),
       modelsField.el,
       errors.general,
       h('div', { class: 'settings-actions' },
@@ -262,6 +282,7 @@ export class BackendsView {
           h('strong', { text: b.name }),
           b.paid ? badge('paid') : null,
           b.hosted ? badge('hosted', 'muted') : null,
+          b.has_key ? badge('key set', 'ok') : null,
           b.hosted && isPrivateHost(b.host) ? h('span', { class: 'badge badge-warn', text: '\u26A0 hosted?', attrs: { title: 'Flagged hosted, but the host is a private or local address: it may be mis-flagged. Edit the backend and untick Hosted if it runs on your own machine or network.', 'data-role': 'hosted-warning' } }) : null,
           b.retired ? badge('retired', 'warn') : null,
           b.down_until ? badge('unreachable', 'warn') : null),

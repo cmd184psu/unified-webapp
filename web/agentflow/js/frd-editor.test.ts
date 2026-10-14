@@ -200,6 +200,7 @@ test('an effort without an FRD starts from a template; the new-effort form creat
 
 test('a failed effort create (one active effort per project) is shown in the form', async () => {
   const w = world();
+  w.efforts = [effort(1, 'Alpha', { status: 'complete' })];
   const t = harness(w, { createEffort: async () => { throw new ApiError(409, 'project p1 already has an active effort'); } });
   const stop = t.ed.mount();
   await flush();
@@ -207,6 +208,51 @@ test('a failed effort create (one active effort per project) is shown in the for
   button(t.host, 'Create effort').click();
   await flush();
   ok(findAll(t.host, (e) => e.className === 'field-error' && e.textContent.includes('already has an active effort')).length === 1, 'shown');
+  stop();
+});
+
+test('H3: while an effort is active the new-effort form is gone and a disabled + explains why', async () => {
+  const w = world();
+  const t = harness(w);
+  const stop = t.ed.mount();
+  await flush();
+  eq(findAll(t.host, (e) => e.getAttribute('data-field') === 'effort_title').length, 0);
+  const plus = byAttr(t.host, 'data-action', 'new-effort');
+  eq(plus.length, 1);
+  eq(plus[0].getAttribute('aria-disabled'), 'true');
+  ok(plus[0].getAttribute('title')?.includes('one active effort at a time'), 'reason');
+  ok(plus[0].getAttribute('title')?.includes('#1'), 'names the active effort');
+  plus[0].click();
+  eq(findAll(t.host, (e) => e.getAttribute('data-field') === 'effort_title').length, 0);
+  stop();
+});
+
+test('H3: the current effort comes before the efforts list and its next action is the primary button', async () => {
+  const w = world();
+  const t = harness(w);
+  const stop = t.ed.mount();
+  await flush();
+  const order = findAll(t.host, (e) => e.getAttribute('data-role') === 'frd-form' || e.getAttribute('data-role') === 'frd-list');
+  eq(order.map((e) => e.getAttribute('data-role')), ['frd-form', 'frd-list']);
+  ok(button(t.host, 'Approve revision 1').className.includes('primary'), 'a saved, unapproved revision: approve is primary');
+  ok(!button(t.host, 'Save as new revision').className.includes('primary'), 'save is secondary then');
+  w.approved.set(1, 1);
+  const done = harness(w);
+  const stop2 = done.ed.mount();
+  await flush();
+  ok(button(done.host, 'Save as new revision').className.includes('primary'), 'nothing to approve: save is primary');
+  stop2();
+  stop();
+});
+
+test('H3: with only finished efforts the form is shown, and the + is absent', async () => {
+  const w = world();
+  w.efforts = [effort(1, 'Alpha', { status: 'abandoned' })];
+  const t = harness(w);
+  const stop = t.ed.mount();
+  await flush();
+  eq(findAll(t.host, (e) => e.getAttribute('data-field') === 'effort_title').length, 1);
+  eq(byAttr(t.host, 'data-action', 'new-effort').length, 0);
   stop();
 });
 

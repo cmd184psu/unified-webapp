@@ -1,6 +1,7 @@
 import { test, run, eq, ok, installFakeDom, FakeEl, asEl, byField, byAttr, allByField, button, flush, findAll } from './testkit';
+import { DirPicker } from './dirpicker';
 import { ProjectForm, splitArgv, joinArgv, shellOperators, isNotARepo, type ProjectDeps } from './projects';
-import { ApiError, type Backend, type Candidate, type ProjectInput, type ProjectView } from './api';
+import { ApiError, type FsDirs, type Backend, type Candidate, type ProjectInput, type ProjectView } from './api';
 
 installFakeDom();
 
@@ -15,6 +16,7 @@ const cand = (scope: string, role: string, position: number, project?: string): 
 function harness(over: Partial<ProjectDeps> = {}, mode: { project?: ProjectView } = {}) {
   const host = new FakeEl('DIV');
   const log: string[] = [];
+  const chosen: { path: string | null } = { path: null };
   const bodies: Record<string, unknown> = {};
   let cands: Candidate[] = [cand('global', 'worker', 0), cand('project', 'critic', 0, 'p1')];
   const deps: ProjectDeps = {
@@ -27,12 +29,20 @@ function harness(over: Partial<ProjectDeps> = {}, mode: { project?: ProjectView 
     putProjectCandidates: async (slug, role, list) => { log.push(`put:${slug}:${role}`); bodies.put = list; cands = [...cands.filter((c) => c.role !== role), ...list.map((c, i) => cand('project', role, i, slug))]; return cands; },
     clearProjectCandidates: async (slug, role) => { log.push(`clear:${slug}:${role}`); cands = cands.filter((c) => !(c.scope === 'project' && c.role === role)); },
     confirm: async (m) => { log.push('confirm:' + m); return true; },
+    pickDir: async (start) => { log.push('pick:' + start); return chosen.path; },
     notify: (m) => { log.push('notify:' + m); },
     ...over,
   };
   const done: string[] = [];
   const form = new ProjectForm(asEl(host), deps, mode, (s) => { done.push(s); });
-  return { host, form, log, bodies, done };
+  return { host, form, log, bodies, done, chosen };
+}
+
+/** pick drives the Repository button: the picker is stubbed to answer path. */
+async function pick(t: ReturnType<typeof harness>, path: string | null): Promise<void> {
+  t.chosen.path = path;
+  byField(t.host, 'repo_path').click();
+  await flush();
 }
 
 const errorsOf = (host: FakeEl): string[] => findAll(host, (e) => e.className === 'field-error' && e.textContent !== '').map((e) => e.textContent);
@@ -49,7 +59,7 @@ test('PJ1: create sends slug, repo_path, scope and the feedback commands as argv
   const t = harness();
   await t.form.mount();
   byField(t.host, 'slug').value = ' demo ';
-  byField(t.host, 'repo_path').value = '/srv/demo';
+  await pick(t, '/srv/demo');
   byField(t.host, 'model_scope').value = 'any';
   byField(t.host, 'cleanup_enabled').checked = true;
   button(t.host, 'Add command').click();
@@ -60,6 +70,18 @@ test('PJ1: create sends slug, repo_path, scope and the feedback commands as argv
   await flush();
   eq(t.bodies.create, { slug: 'demo', repo_path: '/srv/demo', model_scope: 'any', feedback_cmds: ['go test ./...'], cleanup_enabled: true, plugins: [] });
   eq(t.done, ['demo']);
+});
+
+test('H2: the Repository field is a button showing the placeholder, then the chosen path; cancelling keeps it', async () => {
+  const t = harness();
+  await t.form.mount();
+  eq(byField(t.host, 'repo_path').tagName, 'BUTTON');
+  eq(byField(t.host, 'repo_path').textContent, 'Choose a folder...');
+  await pick(t, '/srv/one');
+  eq(byField(t.host, 'repo_path').textContent, '/srv/one');
+  await pick(t, null);
+  eq(byField(t.host, 'repo_path').textContent, '/srv/one');
+  ok(t.log.includes('pick:/srv/one'), 'the picker starts at the current path');
 });
 
 test('the argv preview shows the split and a shell operator is flagged, never executed as shell', async () => {
@@ -83,7 +105,7 @@ test('PJ1: a repo path that is not a repository offers git init; declining keeps
   });
   await t.form.mount();
   byField(t.host, 'slug').value = 'new';
-  byField(t.host, 'repo_path').value = '/srv/new';
+  await pick(t, '/srv/new');
   button(t.host, 'Create project').click();
   await flush();
   ok(t.log.some((l) => l.startsWith('confirm:') && l.includes('git init')), 'offered');
@@ -104,7 +126,7 @@ test('PJ1: accepting the offer runs git init through the confirmed endpoint and 
   });
   await t.form.mount();
   byField(t.host, 'slug').value = 'new';
-  byField(t.host, 'repo_path').value = '/srv/new';
+  await pick(t, '/srv/new');
   button(t.host, 'Create project').click();
   await flush();
   eq(t.log.filter((l) => l.startsWith('git-init:')), ['git-init:/srv/new']);
@@ -134,7 +156,7 @@ test('edit: the slug is fixed, the save patches, and the role editor shows the g
   eq(allByField(t.host, 'feedback_cmd')[0].value, 'go vet ./...');
   const worker = byAttr(t.host, 'data-role-editor', 'worker')[0];
   ok(worker.textContent.includes('Uses the global list: b1/m1'), 'fallback note: ' + worker.textContent);
-  byField(t.host, 'repo_path').value = '/r/moved';
+  await pick(t, '/r/moved');
   button(t.host, 'Save project').click();
   await flush();
   eq(t.bodies.patch, { repo_path: '/r/moved', model_scope: 'local', feedback_cmds: ['go vet ./...'], cleanup_enabled: false, plugins: [] });
@@ -202,6 +224,77 @@ test('OA3: a project starts with no plugins', async () => {
   const t = harness();
   await t.form.mount();
   eq(allByField(t.host, 'plugin_name').length, 0);
+});
+
+// ─── H2: the server-side directory picker ───
+
+const TREE: Record<string, FsDirs> = {
+  '/srv': { path: '/srv', parent: '', dirs: [{ name: 'app', path: '/srv/app', git: true }, { name: 'docs', path: '/srv/docs', git: false }] },
+  '/srv/app': { path: '/srv/app', parent: '/srv', dirs: [] },
+  '/srv/docs': { path: '/srv/docs', parent: '/srv', dirs: [{ name: '<b>x</b>', path: '/srv/docs/x', git: false }] },
+};
+
+function picker(start = '', over: { fsDirs?: (p?: string) => Promise<FsDirs> } = {}) {
+  const asked: string[] = [];
+  const out = { chosen: null as string | null, cancelled: false };
+  const fsDirs = over.fsDirs ?? (async (p = ''): Promise<FsDirs> => {
+    asked.push(p);
+    const r = TREE[p || '/srv'];
+    if (!r) throw new ApiError(404, p + ' is outside the browse roots', 'path');
+    return r;
+  });
+  const dp = new DirPicker(fsDirs, start, (p) => { out.chosen = p; }, () => { out.cancelled = true; });
+  const el = dp.el as unknown as FakeEl;
+  const rows = (): string[] => findAll(el, (e) => e.getAttribute('data-dir') !== null).map((e) => e.textContent);
+  return { dp, el, asked, out, rows };
+}
+
+test('H2: the picker lists the first root, marks git repositories and shows names as text', async () => {
+  const t = picker();
+  await t.dp.mount();
+  eq(t.asked, ['']);
+  eq(t.rows(), ['appgit', 'docs']);
+  eq(byAttr(t.el, 'data-role', 'dir-path')[0].textContent, '/srv');
+  ok(byAttr(t.el, 'data-dir', '/srv/app')[0].getAttribute('title')?.includes('git repository'), 'git tooltip');
+  ok(button(t.el, 'Up').hasAttribute('disabled'), 'no parent at a root');
+});
+
+test('H2: clicking a folder descends, Up returns, Choose reports the current folder', async () => {
+  const t = picker();
+  await t.dp.mount();
+  byAttr(t.el, 'data-dir', '/srv/docs')[0].click();
+  await flush();
+  eq(byAttr(t.el, 'data-role', 'dir-path')[0].textContent, '/srv/docs');
+  eq(t.rows(), ['<b>x</b>']);
+  ok(findAll(t.el, (e) => e.tagName === 'B').length === 0, 'name is not markup');
+  ok(!button(t.el, 'Up').hasAttribute('disabled'), 'up enabled');
+  button(t.el, 'Up').click();
+  await flush();
+  eq(byAttr(t.el, 'data-role', 'dir-path')[0].textContent, '/srv');
+  byAttr(t.el, 'data-dir', '/srv/app')[0].click();
+  await flush();
+  ok(t.el.textContent.includes('No subfolders here'), 'empty note');
+  button(t.el, 'Choose this folder').click();
+  eq(t.out.chosen, '/srv/app');
+  button(t.el, 'Cancel').click();
+  ok(t.out.cancelled, 'cancel reported');
+});
+
+test('H2: a start path the server refuses falls back to the first root; a later refusal shows its message and keeps the listing', async () => {
+  const t = picker('/etc');
+  await t.dp.mount();
+  eq(t.asked, ['/etc', '']);
+  eq(t.rows(), ['appgit', 'docs']);
+  eq(errorsOf(t.el), []);
+  const bad = picker('', { fsDirs: async (p = '') => { if (p === '/srv/app') throw new ApiError(404, 'no such directory'); return TREE['/srv']; } });
+  await bad.dp.mount();
+  byAttr(bad.el, 'data-dir', '/srv/app')[0].click();
+  await flush();
+  eq(errorsOf(bad.el), ['no such directory']);
+  eq(bad.rows(), ['appgit', 'docs']);
+  byAttr(bad.el, 'data-dir', '/srv/docs')[0].click();
+  await flush();
+  eq(errorsOf(bad.el), []);
 });
 
 void run('agentflow-projects');

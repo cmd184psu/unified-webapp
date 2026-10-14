@@ -1,4 +1,4 @@
-// queue.ts — the Queue sub-tab (QA3): compile the approved plan, review every
+// queue.ts — the Queue sub-tab (QA3): the approved plan is compiled automatically; review every
 // task of the draft queue (prompt, files_touched, acceptance criteria and
 // dependencies) and approve the whole queue at once. The approval sends the
 // hash of the queue that was reviewed; if the queue changed since, the server
@@ -146,7 +146,9 @@ export class QueueApproval {
       return;
     }
     const q = this.queue;
-    const canCompile = ef.status === 'plan_approved' || (ef.status === 'queue_draft' && !!q);
+    // Compiling starts by itself when the plan is approved; Recompile redoes it from a draft queue.
+    const canCompile = ef.status === 'queue_draft' && !!q;
+    const compiling = ef.status === 'plan_approved' || ef.status === 'compiling';
     const draft = !!q && q.status === 'draft';
     replace(this.host,
       h('div', { class: 'settings-host' },
@@ -162,8 +164,8 @@ export class QueueApproval {
             draft ? button('Approve whole queue', () => void this.approve(), { primary: true, field: 'approve-queue' }) : null))
           : h('div', { class: 'plan-empty' },
             h('h3', { text: 'No queue yet' }),
-            h('p', { text: ef.status === 'plan_approved' ? 'The plan is approved. Compile it into tasks to review.' : 'Approve a plan first, then compile it into tasks.' }),
-            ef.status === 'plan_approved' ? button('Compile plan', () => void this.compile(), { primary: true, field: 'compile' }) : null),
+            h('p', { attrs: { 'data-role': 'queue-note' }, text: compiling ? 'Compiling the plan into tasks...' : 'Approve a plan first; it is compiled into tasks automatically.' }),
+            ef.status === 'plan_approved' ? button('Recompile', () => void this.compile(), { field: 'compile' }) : null),
         this.errors.general,
         q ? section('Tasks', h('div', { class: 'profile-list' }, ...q.tasks.map((t) => this.taskCard(t)))) : null));
   }

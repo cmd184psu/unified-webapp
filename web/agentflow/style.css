@@ -1257,3 +1257,15 @@ body {
   color: var(--color-primary-hover);
   text-decoration: underline;
 }
+
+/* Directory picker rows and the repository button. */
+.dir-picker { display: flex; flex-direction: column; gap: var(--space-3); min-width: min(32rem, 80vw); }
+.dir-picker .wizard-list { max-height: 50vh; overflow-y: auto; }
+.dir-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); width: 100%; text-align: left; }
+.repo-pick { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+
+/* Reorder handle (candidates) and a control that is shown but unavailable. */
+.drag-handle { cursor: grab; user-select: none; touch-action: none; padding: 0 var(--space-1); color: var(--color-text-muted); }
+.drag-handle:focus-visible { outline: 2px solid var(--color-primary); border-radius: var(--radius-sm); }
+.inline-row.dragging { opacity: 0.6; }
+.ui-modal-btn.is-disabled { opacity: 0.5; cursor: not-allowed; }

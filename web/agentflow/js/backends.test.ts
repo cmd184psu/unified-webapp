@@ -1,5 +1,6 @@
 import { test, run, eq, ok, installFakeDom, FakeEl, asEl, byField, byAttr, button, flush, findAll } from './testkit';
 import { BackendsView, isPaid, isPrivateHost, lastForRoles, unconsented, type BackendsDeps } from './backends';
+import { moveItem, dropIndex } from './candidates';
 import { dispatch } from './events';
 import { ApiError, type Backend, type BackendInput, type BackendResult, type Candidate, type ModelStat, type ProjectView } from './api';
 
@@ -238,13 +239,48 @@ test('candidates reorder and remove locally before saving', async () => {
   await flush();
   const ed = (): FakeEl => byAttr(t.host, 'data-role-editor', 'critic')[0];
   const row = (i: number): FakeEl => byAttr(ed(), 'data-candidate', 'critic:' + i)[0];
-  button(row(1), 'Up').click();
+  const handle = (i: number): FakeEl => byAttr(row(i), 'data-action', 'reorder')[0];
+  handle(1).fire('keydown', { key: 'ArrowUp' });
   ok(row(0).textContent.includes('b2 / m1'), 'moved up');
   button(row(1), 'Remove').click();
   button(ed(), 'Save order').click();
   await flush();
   eq(t.bodies.cands, [{ backend: 'b2', model: 'm1' }]);
   stop();
+});
+
+test('H4: the reorder handle is a focusable labelled control; arrow keys move a candidate and the ends are no-ops', async () => {
+  const t = harness({ backends: [be('b1'), be('b2'), be('b3')], candidates: [cand('critic', 0, 'b1', 'm1'), cand('critic', 1, 'b2', 'm1'), cand('critic', 2, 'b3', 'm1')] });
+  const stop = t.view.mount();
+  await flush();
+  const ed = (): FakeEl => byAttr(t.host, 'data-role-editor', 'critic')[0];
+  const row = (i: number): FakeEl => byAttr(ed(), 'data-candidate', 'critic:' + i)[0];
+  const handle = (i: number): FakeEl => byAttr(row(i), 'data-action', 'reorder')[0];
+  eq(handle(0).getAttribute('tabindex'), '0');
+  ok(handle(0).getAttribute('aria-label')?.includes('b1 / m1'), 'labelled with the candidate');
+  eq(findAll(ed(), (e) => e.tagName === 'BUTTON' && (e.textContent === 'Up' || e.textContent === 'Down')).length, 0);
+  handle(0).fire('keydown', { key: 'ArrowUp' });
+  ok(row(0).textContent.includes('b1 / m1'), 'first row cannot move up');
+  handle(0).fire('keydown', { key: 'ArrowDown' });
+  handle(1).fire('keydown', { key: 'ArrowDown' });
+  handle(2).fire('keydown', { key: 'a' });
+  eq([0, 1, 2].map((i) => /b\d/.exec(row(i).textContent)?.[0]), ['b2', 'b3', 'b1']);
+  button(ed(), 'Save order').click();
+  await flush();
+  eq(t.bodies.cands, [{ backend: 'b2', model: 'm1' }, { backend: 'b3', model: 'm1' }, { backend: 'b1', model: 'm1' }]);
+  stop();
+});
+
+test('H4: moveItem and dropIndex place a dragged row by the pointer', () => {
+  eq(moveItem(['a', 'b', 'c'], 0, 2), ['b', 'c', 'a']);
+  eq(moveItem(['a', 'b', 'c'], 2, 0), ['c', 'a', 'b']);
+  eq(moveItem(['a', 'b', 'c'], 1, 9), ['a', 'c', 'b']);
+  eq(moveItem(['a', 'b'], 5, 0), ['a', 'b']);
+  const mids = [10, 30, 50];
+  eq(dropIndex(mids, 0, 40), 1);
+  eq(dropIndex(mids, 0, 60), 2);
+  eq(dropIndex(mids, 2, 0), 0);
+  eq(dropIndex(mids, 1, 31), 1);
 });
 
 test('isPaid, unconsented and lastForRoles', () => {
@@ -311,6 +347,70 @@ test('an unsaved candidate draft survives a backend.update event; an idle view r
   dispatch(JSON.stringify({ type: 'backend.update', backend: 'b2' }));
   await flush();
   ok(t.host.textContent.includes('b2'), 'refetched once idle');
+  stop();
+});
+
+// ─── H5: the write-only API key ───
+
+const keyRow = (host: FakeEl): FakeEl => field(host, 'api_key').parentNode?.parentNode as FakeEl;
+const setHosted = (host: FakeEl, on: boolean): void => {
+  const toggle = field(host, 'hosted');
+  toggle.checked = on;
+  (toggle.firstChild as FakeEl).fire('change');
+};
+const SECRET = 'sk-secret-123';
+
+test('H5: the API key input is masked and shown only while Hosted is on', async () => {
+  const t = harness();
+  const stop = t.view.mount();
+  await flush();
+  button(t.host, 'Add backend').click();
+  eq(field(t.host, 'api_key').getAttribute('type'), 'password');
+  ok(keyRow(t.host).hasAttribute('hidden'), 'hidden while not hosted');
+  setHosted(t.host, true);
+  ok(!keyRow(t.host).hasAttribute('hidden'), 'shown when hosted');
+  setHosted(t.host, false);
+  ok(keyRow(t.host).hasAttribute('hidden'), 'hidden again');
+  stop();
+});
+
+test('H5: a typed key is sent as api_key; an untouched field sends none', async () => {
+  const t = harness({ backends: [be('cloud', { hosted: true, has_key: true })] });
+  const stop = t.view.mount();
+  await flush();
+  button(t.host, 'Edit').click();
+  button(t.host, 'Save backend').click();
+  await flush();
+  ok(!('api_key' in (t.bodies.patch as object)), 'absent keeps the stored key');
+  button(t.host, 'Edit').click();
+  field(t.host, 'api_key').value = SECRET;
+  button(t.host, 'Save backend').click();
+  await flush();
+  eq((t.bodies.patch as BackendInput).api_key, SECRET);
+  ok(!t.log.some((l) => l.includes(SECRET)), 'the key is not in any toast');
+  ok(!t.host.textContent.includes(SECRET), 'the key is not in the page text');
+  stop();
+});
+
+test('H5: has_key shows a key set badge in the list and the form; Clear key sends an empty api_key, Keep key undoes it', async () => {
+  const t = harness({ backends: [be('cloud', { hosted: true, has_key: true }), be('plain', { hosted: true })] });
+  const stop = t.view.mount();
+  await flush();
+  eq(findAll(byAttr(t.host, 'data-backend', 'cloud')[0], (e) => e.textContent === 'key set').length, 1);
+  eq(findAll(byAttr(t.host, 'data-backend', 'plain')[0], (e) => e.textContent === 'key set').length, 0);
+  button(byAttr(t.host, 'data-backend', 'cloud')[0], 'Edit').click();
+  eq(byAttr(t.host, 'data-role', 'key-state')[0].textContent, 'key setClear key');
+  button(t.host, 'Clear key').click();
+  ok(t.host.textContent.includes('key cleared on save'), 'pending clear shown');
+  button(t.host, 'Keep key').click();
+  button(t.host, 'Save backend').click();
+  await flush();
+  ok(!('api_key' in (t.bodies.patch as object)), 'kept');
+  button(t.host, 'Edit').click();
+  button(t.host, 'Clear key').click();
+  button(t.host, 'Save backend').click();
+  await flush();
+  eq((t.bodies.patch as BackendInput).api_key, '');
   stop();
 });
 

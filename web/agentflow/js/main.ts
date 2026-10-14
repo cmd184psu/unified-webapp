@@ -1,5 +1,5 @@
 // main.ts — app shell for AgentFlow: the top-level tabs (Overview, Project,
-// Settings, Backends), hamburger and the event stream. Views mount into
+// Backends), hamburger and the event stream. Views mount into
 // #panel-view and return a dispose; the Project tab's sub-tabs are in
 // projecttab.ts.
 
@@ -11,12 +11,12 @@ import { HealthBanner } from './health.js';
 import { Overview, defaultDeps } from './overview.js';
 import { mountBackends } from './backends.js';
 import { mountProjectTab } from './projecttab.js';
-import { mountSettings } from './settings.js';
+import { SettingsView, defaultSettingsDeps } from './settings.js';
 
 const themes = new ThemeManager({ module: 'agentflow', default: 'dark' });
 themes.apply();
 
-type TabId = 'overview' | 'project' | 'settings' | 'backends';
+type TabId = 'overview' | 'project' | 'backends';
 
 interface Tab {
   id: TabId;
@@ -31,7 +31,6 @@ const TABS: Tab[] = [
     mount: (host) => new Overview(host, defaultDeps((slug) => showTab('project', slug))).mount(),
   },
   { id: 'project', label: 'Project', mount: mountProjectTab },
-  { id: 'settings', label: 'Settings', mount: mountSettings },
   { id: 'backends', label: 'Backends', mount: mountBackends },
 ];
 
@@ -66,7 +65,11 @@ function initHamburger(): void {
   if (!trigger) return;
   const hamburger = new HamburgerMenu({
     title: 'AgentFlow',
-    items: [{ section: 'AgentFlow' }],
+    items: [
+      { section: 'Settings' },
+      // Settings apply as soon as they are saved; the view lives as long as the drawer.
+      { id: 'settings', render: (host: HTMLElement) => { new SettingsView(host, defaultSettingsDeps()).mount(); } },
+    ],
     themePicker: true,
     themes,
     side: 'right',

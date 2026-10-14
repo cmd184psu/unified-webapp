@@ -56,6 +56,7 @@ var api = {
   // Health and opencode
   health: (o) => get("/api/health", o),
   opencodeVersion: (refresh = false) => get(`/api/opencode/version${refresh ? "?refresh=1" : ""}`),
+  fsDirs: (path = "") => get(`/api/fs/dirs${path ? `?path=${encodeURIComponent(path)}` : ""}`, { quiet: true }),
   // Projects
   projects: () => get("/api/projects"),
   project: (slug) => get(proj(slug)),
@@ -213,7 +214,7 @@ function startEvents() {
   wanted = true;
   connect();
 }
-var TRANSIENT = /* @__PURE__ */ new Set(["planning", "compiling", "running"]);
+var TRANSIENT = /* @__PURE__ */ new Set(["planning", "plan_approved", "compiling", "running"]);
 function isTransient(status) {
   return status !== void 0 && TRANSIENT.has(status);
 }
@@ -732,10 +733,57 @@ function isPaid(backends, backend, model) {
 function unconsented(backends, rows) {
   return rows.filter((r) => isPaid(backends, r.backend, r.model) && !r.optIn);
 }
+function moveItem(list3, from, to) {
+  const out = list3.slice();
+  if (from < 0 || from >= out.length) return out;
+  const [it] = out.splice(from, 1);
+  out.splice(Math.max(0, Math.min(out.length, to)), 0, it);
+  return out;
+}
+function dropIndex(mids, from, y) {
+  return mids.filter((m, i) => i !== from && m < y).length;
+}
+function attachDrag(handle, row, getMove) {
+  const release = (y) => {
+    if (!Number.isFinite(y)) return;
+    row.classList.remove("dragging");
+    const rows = Array.from(row.parentElement?.children ?? []);
+    const mids = rows.map((r) => {
+      const b = r.getBoundingClientRect();
+      return b.top + b.height / 2;
+    });
+    getMove()(dropIndex(mids, rows.indexOf(row), y));
+  };
+  handle.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    row.classList.add("dragging");
+    const onUp = (ev) => {
+      document.removeEventListener("mouseup", onUp);
+      release(ev.clientY);
+    };
+    document.addEventListener("mouseup", onUp);
+  });
+  handle.addEventListener("touchstart", () => {
+    row.classList.add("dragging");
+    let y = NaN;
+    const onMove = (ev) => {
+      y = ev.touches[0].clientY;
+      ev.preventDefault();
+    };
+    const onEnd = () => {
+      handle.removeEventListener("touchmove", onMove);
+      handle.removeEventListener("touchend", onEnd);
+      release(y);
+    };
+    handle.addEventListener("touchmove", onMove, { passive: false });
+    handle.addEventListener("touchend", onEnd);
+  }, { passive: true });
+}
 function buildRoleEditor(o) {
   const { role } = o;
   const host = h("div", { class: "profile-card", attrs: { "data-role-editor": role } });
   const errors = new FormErrors();
+  let focusIdx = -1;
   const edit = (fn) => {
     o.setDraft(fn(o.rows().map((r) => ({ ...r }))));
     draw();
@@ -774,8 +822,10 @@ function buildRoleEditor(o) {
     o.setDraft(null);
     draw();
   };
+  const handles = [];
   const draw = () => {
     const list3 = o.rows();
+    handles.length = 0;
     replace(
       host,
       h("div", { class: "profile-header" }, h("strong", { text: role }), o.hasDraft() ? badge("unsaved", "warn") : null),
@@ -786,22 +836,34 @@ function buildRoleEditor(o) {
           all[i].optIn = optIn.checked;
           return all;
         }));
-        return h(
-          "div",
-          { class: "inline-row", attrs: { "data-candidate": `${role}:${i}` } },
+        const row = h("div", { class: "inline-row", attrs: { "data-candidate": `${role}:${i}` } });
+        const handle = h("span", {
+          class: "drag-handle",
+          text: "\u283F",
+          attrs: { role: "button", tabindex: 0, "data-action": "reorder", "aria-label": `Reorder ${r.backend} / ${r.model}: drag, or press the up and down arrow keys`, title: "Drag to reorder (or use the up and down arrow keys)" }
+        });
+        handles.push(handle);
+        const moveTo = (to) => {
+          if (to < 0 || to >= list3.length || to === i) return;
+          focusIdx = to;
+          edit((all) => moveItem(all, i, to));
+        };
+        handle.addEventListener("keydown", (ev) => {
+          const key = ev.key;
+          if (key !== "ArrowUp" && key !== "ArrowDown") return;
+          ev.preventDefault();
+          moveTo(i + (key === "ArrowUp" ? -1 : 1));
+        });
+        attachDrag(handle, row, () => moveTo);
+        replace(
+          row,
+          handle,
           h("span", { text: `${i + 1}. ${r.backend} / ${r.model}` }),
           paid ? badge("paid") : null,
           paid ? h("span", { class: "inline-check" }, optIn, "I opt in to paid use") : null,
-          button("Up", () => edit((all) => {
-            if (i > 0) [all[i - 1], all[i]] = [all[i], all[i - 1]];
-            return all;
-          }), { field: "up" }),
-          button("Down", () => edit((all) => {
-            if (i < all.length - 1) [all[i + 1], all[i]] = [all[i], all[i + 1]];
-            return all;
-          }), { field: "down" }),
           button("Remove", () => edit((all) => all.filter((_, j) => j !== i)), { field: "remove" })
         );
+        return row;
       })),
       h(
         "div",
@@ -826,6 +888,8 @@ function buildRoleEditor(o) {
         button("Save order", () => void save(), { primary: true, field: "save-candidates" })
       )
     );
+    if (focusIdx >= 0) handles[focusIdx]?.focus();
+    focusIdx = -1;
   };
   draw();
   return host;
@@ -833,6 +897,91 @@ function buildRoleEditor(o) {
 
 // web/agentflow/js/settings.ts
 import { showToast as showToast2 } from "/shared/dist/shared.mjs";
+
+// web/agentflow/js/dirpicker.ts
+import { openModal } from "/shared/dist/shared.mjs";
+var DirPicker = class {
+  constructor(fsDirs, start, onChoose, onCancel) {
+    this.fsDirs = fsDirs;
+    this.start = start;
+    this.onChoose = onChoose;
+    this.onCancel = onCancel;
+    this.cur = null;
+    this.error = "";
+    this.list = h("div", { class: "wizard-list", attrs: { "data-role": "dir-list" } });
+    this.where = h("code", { attrs: { "data-role": "dir-path" } });
+    this.err = h("div", { class: "field-error", attrs: { role: "alert", hidden: true } });
+    this.up = button("Up", () => void this.go(this.cur?.parent ?? ""), { field: "dir-up" });
+    /** Bumped per request so a slow answer cannot overwrite a newer one. */
+    this.seq = 0;
+    this.up.setAttribute("title", "Parent folder");
+    this.el = h(
+      "div",
+      { class: "dir-picker", attrs: { "data-role": "dir-picker" } },
+      h("div", { class: "row-actions" }, this.up, this.where),
+      this.err,
+      this.list,
+      h(
+        "div",
+        { class: "settings-actions" },
+        button("Cancel", () => this.onCancel(), { field: "dir-cancel" }),
+        button("Choose this folder", () => {
+          if (this.cur) this.onChoose(this.cur.path);
+        }, { primary: true, field: "dir-choose" })
+      )
+    );
+  }
+  /** mount shows the start directory, or the first browse root when it cannot be listed. */
+  async mount() {
+    if (!await this.go(this.start) && this.start) await this.go("");
+  }
+  /** go lists path; false (with the error shown) when the server refuses it. */
+  async go(path) {
+    const mine = ++this.seq;
+    try {
+      const res = await this.fsDirs(path);
+      if (mine !== this.seq) return true;
+      this.cur = res;
+      this.error = "";
+    } catch (err) {
+      if (mine !== this.seq) return false;
+      this.error = err instanceof Error ? err.message : String(err);
+      this.draw();
+      return false;
+    }
+    this.draw();
+    return true;
+  }
+  draw() {
+    const cur = this.cur;
+    this.where.textContent = cur?.path ?? "";
+    this.err.textContent = this.error;
+    if (this.error) this.err.removeAttribute("hidden");
+    else this.err.setAttribute("hidden", "");
+    if (cur?.parent) this.up.removeAttribute("disabled");
+    else this.up.setAttribute("disabled", "");
+    replace(this.list, ...cur && cur.dirs.length > 0 ? cur.dirs.map((d) => h("button", {
+      class: "ui-modal-btn dir-row",
+      attrs: { type: "button", "data-dir": d.path, title: d.git ? `${d.path} (git repository)` : d.path },
+      on: { click: () => void this.go(d.path) }
+    }, d.name, d.git ? badge("git", "ok") : null)) : [h("p", { class: "field-hint", text: cur ? "No subfolders here; choose this folder or go up." : "" })]);
+  }
+};
+function pickDirectory(start = "", fsDirs = api.fsDirs) {
+  return new Promise((resolve) => {
+    let picked2 = null;
+    const body = h("div", {});
+    const modal = openModal(body, { title: "Choose a folder", onClose: () => resolve(picked2) });
+    const picker = new DirPicker(fsDirs, start, (p) => {
+      picked2 = p;
+      modal.close();
+    }, () => modal.close());
+    body.appendChild(picker.el);
+    void picker.mount();
+  });
+}
+
+// web/agentflow/js/settings.ts
 var LIMIT_FIELDS = [
   { key: "max_attempts", label: "Max attempts", hint: "Whole number, 2 to 50" },
   { key: "stuck_threshold", label: "Stuck threshold", hint: "Identical failures before a task is stuck; at most max attempts" },
@@ -851,9 +1000,10 @@ var defaultSettingsDeps = () => ({
   settings: api.settings,
   putSettings: api.putSettings,
   opencodeVersion: api.opencodeVersion,
+  pickDir: (start) => pickDirectory(start),
   notify: (m) => void showToast2(m, "success")
 });
-var str = (v) => v === void 0 ? "" : String(v);
+var str = (v) => v === void 0 || Array.isArray(v) ? "" : String(v);
 var SettingsView = class {
   constructor(host, deps) {
     this.host = host;
@@ -863,6 +1013,8 @@ var SettingsView = class {
     this.errors = new FormErrors();
     this.oc = null;
     this.ocHost = h("div");
+    this.roots = [];
+    this.rootsHost = h("div", { class: "wizard-list", attrs: { "data-role": "browse-roots" } });
     this.dirty = false;
     this.off = null;
   }
@@ -882,6 +1034,7 @@ var SettingsView = class {
       const [settings, oc] = await Promise.all([this.deps.settings(), this.deps.opencodeVersion(false)]);
       this.values = settings;
       this.oc = oc;
+      this.roots = Array.isArray(settings.browse_roots) ? [...settings.browse_roots] : [];
     } catch {
       if (Object.keys(this.values).length === 0) return;
     }
@@ -913,6 +1066,28 @@ var SettingsView = class {
       )
     );
   }
+  renderRoots() {
+    const edit = (next) => {
+      this.roots = next;
+      this.dirty = true;
+      this.renderRoots();
+    };
+    replace(
+      this.rootsHost,
+      ...this.roots.map((r, i) => h(
+        "div",
+        { class: "inline-row", attrs: { "data-root": i } },
+        h("code", { text: r }),
+        button("Remove", () => edit(this.roots.filter((_, j) => j !== i)), { field: "remove-root" })
+      )),
+      this.roots.length === 0 ? h("p", { class: "field-hint", text: "No folders chosen: the picker starts at the server default." }) : null,
+      button("Add folder", () => void this.addRoot(edit), { field: "add-root" })
+    );
+  }
+  async addRoot(edit) {
+    const chosen = await this.deps.pickDir(this.roots[this.roots.length - 1] ?? "");
+    if (chosen !== null && !this.roots.includes(chosen)) edit([...this.roots, chosen]);
+  }
   /** refreshVersion asks the server to probe opencode again (OC1). */
   async refreshVersion() {
     try {
@@ -927,6 +1102,7 @@ var SettingsView = class {
     this.errors.clear();
     const body = {};
     for (const [key, input] of this.inputs) body[key] = input.value.trim();
+    if ("browse_roots" in this.values || this.roots.length > 0) body.browse_roots = this.roots;
     try {
       this.values = await this.deps.putSettings(body, { quiet: true });
     } catch (err) {
@@ -942,8 +1118,9 @@ var SettingsView = class {
     this.errors = new FormErrors();
     const limits = h("div", { class: "profile-fields" }, ...LIMIT_FIELDS.map((f) => this.row(f)));
     const exec = h("div", { class: "profile-fields" }, ...EXECUTION_FIELDS.map((f) => this.row(f)));
-    const path = this.row({ key: "opencode_path", label: "opencode path", hint: "Program to run; a change takes effect after a restart" });
+    const path = this.row({ key: "opencode_path", label: "opencode path", hint: "Program to run" });
     this.renderOpenCode();
+    this.renderRoots();
     replace(
       this.host,
       h(
@@ -952,15 +1129,13 @@ var SettingsView = class {
         section("Limits", limits),
         section("Execution", exec),
         section("opencode", path, this.ocHost),
+        section("Folders the picker may browse", this.rootsHost),
         this.errors.general,
         h("div", { class: "settings-actions" }, button("Save settings", () => void this.save(), { primary: true, field: "save" }))
       )
     );
   }
 };
-function mountSettings(host) {
-  return new SettingsView(host, defaultSettingsDeps()).mount();
-}
 
 // web/agentflow/js/backends.ts
 function isPrivateHost(host) {
@@ -1063,6 +1238,30 @@ var BackendsView = class {
     const slots = textInput("slots", String(initial?.slots ?? 1), { type: "number" });
     const hosted = checkbox("hosted", initial?.hosted ?? false);
     const paid = checkbox("paid", initial?.paid ?? false);
+    const apiKey = textInput("api_key", "", { type: "password", placeholder: initial?.has_key ? "unchanged" : "API key" });
+    apiKey.setAttribute("autocomplete", "new-password");
+    let clearKey = false;
+    const keyState = h("span", { class: "row-actions", attrs: { "data-role": "key-state" } });
+    const drawKey = () => replace(
+      keyState,
+      initial?.has_key ? clearKey ? badge("key cleared on save", "warn") : badge("key set", "ok") : null,
+      initial?.has_key ? button(clearKey ? "Keep key" : "Clear key", () => {
+        clearKey = !clearKey;
+        drawKey();
+      }, { field: "clear-key" }) : null
+    );
+    drawKey();
+    const keyField = errors.add("api_key", fieldRow(
+      "API key",
+      h("div", { class: "row-actions" }, apiKey, keyState),
+      "Sent to the hosted service as the credential. Leave blank to keep the stored key"
+    ));
+    const syncKey = () => {
+      if (hosted.checked) keyField.el.removeAttribute("hidden");
+      else keyField.el.setAttribute("hidden", "");
+    };
+    hosted.firstChild.addEventListener("change", syncKey);
+    syncKey();
     const models = [];
     let probed = [];
     const modelControl = (m) => probed.length > 0 ? selectInput("model", probed.map((n) => [n, n]), m) : textInput("model", m, { placeholder: "model name (or Probe host)" });
@@ -1133,6 +1332,8 @@ var BackendsView = class {
         slots: Number(slots.value),
         models: models.map((m) => ({ model: m.model.value.trim(), paid: m.paid.checked, max_concurrent: Number(m.max.value) || 0 })).filter((m) => m.model !== "")
       };
+      if (hosted.checked && apiKey.value !== "") body.api_key = apiKey.value;
+      else if (clearKey) body.api_key = "";
       try {
         const res = initial ? await this.deps.patchBackend(initial.name, body, { quiet: true }) : await this.deps.createBackend(body, { quiet: true });
         this.showResult(res, initial ? `Saved ${body.name}` : `Added ${body.name}`);
@@ -1153,7 +1354,8 @@ var BackendsView = class {
         errors.add("api_type", fieldRow("API type", apiType)).el,
         errors.add("slots", fieldRow("Slots", slots, "Stages this backend runs at once")).el,
         errors.add("hosted", fieldRow("Hosted", hosted, "A remote service rather than your own machine")).el,
-        errors.add("paid", fieldRow("Paid", paid, "Every model on it costs money")).el
+        errors.add("paid", fieldRow("Paid", paid, "Every model on it costs money")).el,
+        keyField.el
       ),
       modelsField.el,
       errors.general,
@@ -1226,6 +1428,7 @@ var BackendsView = class {
           h("strong", { text: b.name }),
           b.paid ? badge("paid") : null,
           b.hosted ? badge("hosted", "muted") : null,
+          b.has_key ? badge("key set", "ok") : null,
           b.hosted && isPrivateHost(b.host) ? h("span", { class: "badge badge-warn", text: "\u26A0 hosted?", attrs: { title: "Flagged hosted, but the host is a private or local address: it may be mis-flagged. Edit the backend and untick Hosted if it runs on your own machine or network.", "data-role": "hosted-warning" } }) : null,
           b.retired ? badge("retired", "warn") : null,
           b.down_until ? badge("unreachable", "warn") : null
@@ -2520,6 +2723,7 @@ var FrdEditor = class {
     }
     const ef = this.current;
     const approvedRev = this.revisions.find((r) => r.approved)?.revision;
+    const canApprove = !!ef && !!this.latest && this.latest.revision !== approvedRev && !this.dirty && !isFinished(ef);
     const editor = ef && this.form ? section(
       `FRD for #${ef.id}`,
       h(
@@ -2532,24 +2736,40 @@ var FrdEditor = class {
       h(
         "div",
         { class: "settings-actions" },
-        button("Save as new revision", () => void this.save(), { primary: true, field: "save-frd" }),
-        this.latest && this.latest.revision !== approvedRev && !this.dirty && !isFinished(ef) ? button(`Approve revision ${this.latest.revision}`, () => void this.approve(), { field: "approve-frd" }) : null
+        button("Save as new revision", () => void this.save(), { primary: !canApprove, field: "save-frd" }),
+        canApprove && this.latest ? button(`Approve revision ${this.latest.revision}`, () => void this.approve(), { primary: true, field: "approve-frd" }) : null
       )
     ) : null;
+    const active2 = this.efforts.find((e) => !isFinished(e));
+    const bar = this.efforts.length ? effortBar(this.slug, this.efforts, ef, (id) => {
+      this.current = this.efforts.find((e) => e.id === id);
+      void this.loadDoc();
+    }) : null;
+    if (bar && active2) {
+      bar.appendChild(h("button", {
+        class: "ui-modal-btn is-disabled",
+        text: "+",
+        attrs: {
+          type: "button",
+          "data-action": "new-effort",
+          "aria-disabled": "true",
+          "aria-label": "New effort",
+          title: `New effort is unavailable: a project has one active effort at a time. Finish or abandon #${active2.id} (${active2.status.replace(/_/g, " ")}) first.`
+        }
+      }));
+    }
     replace(
       this.host,
       h(
         "div",
         { class: "settings-host" },
-        this.efforts.length ? effortBar(this.slug, this.efforts, ef, (id) => {
-          this.current = this.efforts.find((e) => e.id === id);
-          void this.loadDoc();
-        }) : null,
-        this.efforts.length ? section("FRDs", this.list()) : h("div", { class: "plan-empty" }, h("h3", { text: "No efforts yet" }), h("p", { text: "An effort is one FRD, plan and queue. Create the first one below." })),
+        bar,
+        active2 ? null : this.efforts.length ? null : h("div", { class: "plan-empty" }, h("h3", { text: "No efforts yet" }), h("p", { text: "An effort is one FRD, plan and queue. Create the first one below." })),
+        active2 ? null : this.newEffortForm(),
         editor,
         ef && !isFinished(ef) ? effortSettings(ef, this.form ? JSON.stringify(this.form.read()) : "", this.deps, () => void this.load()) : null,
         ef ? this.revisionList() : null,
-        this.newEffortForm()
+        this.efforts.length ? section("Efforts", this.list()) : null
       )
     );
   }
@@ -2633,6 +2853,7 @@ function elapsedText(ms) {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
 }
 function stageName(status, rounds, latestRevision) {
+  if (status === "plan_approved") return "Plan approved: the compiler is starting";
   if (status === "compiling") return "Compiler: turning the plan into tasks";
   if (status !== "planning") return "";
   const reviewed = Math.max(0, ...rounds.flatMap((r) => r.reviews.map((x) => x.plan_revision)));
@@ -2819,9 +3040,9 @@ var PlanViewer = class {
       )
     );
   }
-  /** strip is the live indicator shown while the engine plans or compiles: stage, and time since the effort last changed. */
+  /** strip is the live indicator shown while the engine plans or compiles (compiling starts by itself once the plan is approved): stage, and time since the effort last changed. */
   strip(ef) {
-    if (ef.status !== "planning" && ef.status !== "compiling") {
+    if (ef.status !== "planning" && ef.status !== "plan_approved" && ef.status !== "compiling") {
       this.stopTicker();
       return null;
     }
@@ -3059,7 +3280,8 @@ var QueueApproval = class {
       return;
     }
     const q = this.queue;
-    const canCompile = ef.status === "plan_approved" || ef.status === "queue_draft" && !!q;
+    const canCompile = ef.status === "queue_draft" && !!q;
+    const compiling = ef.status === "plan_approved" || ef.status === "compiling";
     const draft = !!q && q.status === "draft";
     replace(
       this.host,
@@ -3091,8 +3313,8 @@ var QueueApproval = class {
           "div",
           { class: "plan-empty" },
           h("h3", { text: "No queue yet" }),
-          h("p", { text: ef.status === "plan_approved" ? "The plan is approved. Compile it into tasks to review." : "Approve a plan first, then compile it into tasks." }),
-          ef.status === "plan_approved" ? button("Compile plan", () => void this.compile(), { primary: true, field: "compile" }) : null
+          h("p", { attrs: { "data-role": "queue-note" }, text: compiling ? "Compiling the plan into tasks..." : "Approve a plan first; it is compiled into tasks automatically." }),
+          ef.status === "plan_approved" ? button("Recompile", () => void this.compile(), { field: "compile" }) : null
         ),
         this.errors.general,
         q ? section("Tasks", h("div", { class: "profile-list" }, ...q.tasks.map((t) => this.taskCard(t)))) : null
@@ -3116,6 +3338,7 @@ var defaultProjectDeps = () => ({
   putProjectCandidates: api.putProjectCandidates,
   clearProjectCandidates: api.clearProjectCandidates,
   confirm: (m, label = "Confirm") => confirmDialog6(m, { confirmLabel: label }),
+  pickDir: (start) => pickDirectory(start),
   notify: (m) => void showToast9(m, "success")
 });
 function splitArgv(s) {
@@ -3145,7 +3368,13 @@ var ProjectForm = class {
     this.rolesHost = h("div");
     const p = mode.project;
     this.slug = textInput("slug", p?.slug ?? "", { readOnly: !!p, placeholder: "my-project" });
-    this.repo = textInput("repo_path", p?.repo_path ?? "", { placeholder: "/absolute/path/to/repository" });
+    this.repoPath = p?.repo_path ?? "";
+    this.repoBtn = h("button", {
+      class: "ui-modal-btn repo-pick",
+      attrs: { type: "button", "data-field": "repo_path", title: "Choose the repository folder" },
+      on: { click: () => void this.pickRepo() }
+    });
+    this.drawRepo();
     this.scope = selectInput("model_scope", SCOPES, p?.model_scope ?? "local");
     this.cleanup = checkbox("cleanup_enabled", p?.cleanup_enabled ?? false);
     this.cmds = new RowsEditor((c) => {
@@ -3170,6 +3399,16 @@ var ProjectForm = class {
       return { el: h("div", { class: "row-actions" }, name, version), read: () => ({ name: name.value.trim(), version: version.value.trim() }) };
     }, p?.plugins ?? [], () => ({ name: "", version: "" }), "Add plugin");
   }
+  drawRepo() {
+    this.repoBtn.textContent = this.repoPath || "Choose a folder...";
+  }
+  /** pickRepo lets the user choose the repository folder on the server. */
+  async pickRepo() {
+    const chosen = await this.deps.pickDir(this.repoPath);
+    if (chosen === null) return;
+    this.repoPath = chosen;
+    this.drawRepo();
+  }
   async mount() {
     if (this.mode.project) {
       try {
@@ -3182,7 +3421,7 @@ var ProjectForm = class {
   body() {
     return {
       slug: this.slug.value.trim(),
-      repo_path: this.repo.value.trim(),
+      repo_path: this.repoPath,
       model_scope: this.scope.value,
       feedback_cmds: this.cmds.read().filter((c) => c !== ""),
       cleanup_enabled: this.cleanup.checked,
@@ -3288,7 +3527,7 @@ var ProjectForm = class {
             "div",
             { class: "profile-fields" },
             e.add("slug", fieldRow("Slug", this.slug, "Lowercase letters, digits and dashes; fixed once created")).el,
-            e.add("repo_path", fieldRow("Repository path", this.repo, "Absolute path of an existing git repository; if it is not one you are offered git init")).el,
+            e.add("repo_path", fieldRow("Repository", this.repoBtn, "A git repository on this machine; if the folder is not one you are offered git init")).el,
             e.add("model_scope", fieldRow("Model scope", this.scope, "local keeps this project off hosted backends")).el,
             e.add("cleanup_enabled", fieldRow(
               "Cleanup pass",
@@ -3444,7 +3683,6 @@ var TABS = [
     mount: (host) => new Overview(host, defaultDeps((slug) => showTab("project", slug))).mount()
   },
   { id: "project", label: "Project", mount: mountProjectTab },
-  { id: "settings", label: "Settings", mount: mountSettings },
   { id: "backends", label: "Backends", mount: mountBackends }
 ];
 var active = "overview";
@@ -3474,7 +3712,13 @@ function initHamburger() {
   if (!trigger) return;
   const hamburger = new HamburgerMenu({
     title: "AgentFlow",
-    items: [{ section: "AgentFlow" }],
+    items: [
+      { section: "Settings" },
+      // Settings apply as soon as they are saved; the view lives as long as the drawer.
+      { id: "settings", render: (host) => {
+        new SettingsView(host, defaultSettingsDeps()).mount();
+      } }
+    ],
     themePicker: true,
     themes,
     side: "right"

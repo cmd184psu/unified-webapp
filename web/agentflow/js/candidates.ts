@@ -28,6 +28,20 @@ export function unconsented(backends: Backend[], rows: CandRow[]): CandRow[] {
   return rows.filter((r) => isPaid(backends, r.backend, r.model) && !r.optIn);
 }
 
+/** moveItem returns list with the item at from moved to index to (clamped); the input is not changed. */
+export function moveItem<T>(list: T[], from: number, to: number): T[] {
+  const out = list.slice();
+  if (from < 0 || from >= out.length) return out;
+  const [it] = out.splice(from, 1);
+  out.splice(Math.max(0, Math.min(out.length, to)), 0, it);
+  return out;
+}
+
+/** dropIndex is where a dragged row lands: the number of other rows whose midpoint is above y. */
+export function dropIndex(mids: number[], from: number, y: number): number {
+  return mids.filter((m, i) => i !== from && m < y).length;
+}
+
 export interface RoleEditorOpts {
   role: string;
   backends: Backend[];
@@ -43,11 +57,48 @@ export interface RoleEditorOpts {
   extra?: HTMLElement[];
 }
 
+/**
+ * attachDrag lets a handle drag its row among its siblings (mouse and touch, as
+ * the grocery group list does): on release the row is moved to where the pointer
+ * is. getMove returns the move function of the current draw.
+ */
+function attachDrag(handle: HTMLElement, row: HTMLElement, getMove: () => (to: number) => void): void {
+  const release = (y: number): void => {
+    if (!Number.isFinite(y)) return;
+    row.classList.remove('dragging');
+    const rows = Array.from(row.parentElement?.children ?? []);
+    const mids = rows.map((r) => { const b = r.getBoundingClientRect(); return b.top + b.height / 2; });
+    getMove()(dropIndex(mids, rows.indexOf(row), y));
+  };
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    row.classList.add('dragging');
+    const onUp = (ev: MouseEvent): void => {
+      document.removeEventListener('mouseup', onUp);
+      release(ev.clientY);
+    };
+    document.addEventListener('mouseup', onUp);
+  });
+  handle.addEventListener('touchstart', () => {
+    row.classList.add('dragging');
+    let y = NaN;
+    const onMove = (ev: TouchEvent): void => { y = ev.touches[0].clientY; ev.preventDefault(); };
+    const onEnd = (): void => {
+      handle.removeEventListener('touchmove', onMove);
+      handle.removeEventListener('touchend', onEnd);
+      release(y);
+    };
+    handle.addEventListener('touchmove', onMove, { passive: false });
+    handle.addEventListener('touchend', onEnd);
+  }, { passive: true });
+}
+
 /** buildRoleEditor returns a card that edits one role's candidate list. */
 export function buildRoleEditor(o: RoleEditorOpts): HTMLElement {
   const { role } = o;
   const host = h('div', { class: 'profile-card', attrs: { 'data-role-editor': role } });
   const errors = new FormErrors();
+  let focusIdx = -1;
   const edit = (fn: (r: CandRow[]) => CandRow[]): void => {
     o.setDraft(fn(o.rows().map((r) => ({ ...r }))));
     draw();
@@ -89,8 +140,11 @@ export function buildRoleEditor(o: RoleEditorOpts): HTMLElement {
     draw();
   };
 
+  const handles: HTMLElement[] = [];
+
   const draw = (): void => {
     const list = o.rows();
+    handles.length = 0;
     replace(host,
       h('div', { class: 'profile-header' }, h('strong', { text: role }), o.hasDraft() ? badge('unsaved', 'warn') : null),
       h('div', { class: 'wizard-list' }, ...(list.length === 0
@@ -99,13 +153,32 @@ export function buildRoleEditor(o: RoleEditorOpts): HTMLElement {
           const paid = isPaid(o.backends, r.backend, r.model);
           const optIn = checkbox('opt_in', r.optIn);
           optIn.addEventListener('change', () => edit((all) => { all[i].optIn = optIn.checked; return all; }));
-          return h('div', { class: 'inline-row', attrs: { 'data-candidate': `${role}:${i}` } },
+          const row = h('div', { class: 'inline-row', attrs: { 'data-candidate': `${role}:${i}` } });
+          const handle = h('span', {
+            class: 'drag-handle',
+            text: '\u283F',
+            attrs: { role: 'button', tabindex: 0, 'data-action': 'reorder', 'aria-label': `Reorder ${r.backend} / ${r.model}: drag, or press the up and down arrow keys`, title: 'Drag to reorder (or use the up and down arrow keys)' },
+          });
+          handles.push(handle);
+          const moveTo = (to: number): void => {
+            if (to < 0 || to >= list.length || to === i) return;
+            focusIdx = to;
+            edit((all) => moveItem(all, i, to));
+          };
+          handle.addEventListener('keydown', (ev) => {
+            const key = (ev as KeyboardEvent).key;
+            if (key !== 'ArrowUp' && key !== 'ArrowDown') return;
+            ev.preventDefault();
+            moveTo(i + (key === 'ArrowUp' ? -1 : 1));
+          });
+          attachDrag(handle, row, () => moveTo);
+          replace(row,
+            handle,
             h('span', { text: `${i + 1}. ${r.backend} / ${r.model}` }),
             paid ? badge('paid') : null,
             paid ? h('span', { class: 'inline-check' }, optIn, 'I opt in to paid use') : null,
-            button('Up', () => edit((all) => { if (i > 0) [all[i - 1], all[i]] = [all[i], all[i - 1]]; return all; }), { field: 'up' }),
-            button('Down', () => edit((all) => { if (i < all.length - 1) [all[i + 1], all[i]] = [all[i], all[i + 1]]; return all; }), { field: 'down' }),
             button('Remove', () => edit((all) => all.filter((_, j) => j !== i)), { field: 'remove' }));
+          return row;
         }))),
       h('div', { class: 'inline-row' }, pickBackend, pickModel,
         button('Add candidate', () => {
@@ -118,6 +191,9 @@ export function buildRoleEditor(o: RoleEditorOpts): HTMLElement {
         ...(o.extra ?? []),
         button('Discard', () => { o.setDraft(null); draw(); }, { field: 'discard' }),
         button('Save order', () => void save(), { primary: true, field: 'save-candidates' })));
+    // A keyboard move redraws the list; keep the focus on the handle that moved.
+    if (focusIdx >= 0) handles[focusIdx]?.focus();
+    focusIdx = -1;
   };
   draw();
   return host;

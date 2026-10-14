@@ -145,11 +145,15 @@ export interface Backend {
   paid: boolean;
   slots: number;
   retired: boolean;
+  /** True when an API key is stored; the key itself is never sent to the UI. */
+  has_key?: boolean;
   models: BackendModel[];
   down_until?: number;
 }
 
 export interface BackendInput {
+  /** Write-only: absent keeps the stored key; the server never returns it. */
+  api_key?: string;
   name: string;
   host: string;
   api_type: string;
@@ -183,7 +187,7 @@ export interface CandidateInput {
 }
 
 /** GlobalSettings is GET /api/settings: the limits (numbers or Go durations), opencode_path, verify_slots, backend_cooldown. */
-export type Settings = Record<string, string | number>;
+export type Settings = Record<string, string | number | string[]>;
 
 /** ModelStat is one row of GET /api/stats/models (MB8); pass_rate is 0..1 over passed + failed stages. */
 export interface ModelStat {
@@ -442,6 +446,14 @@ const get = <T>(path: string, o?: FetchOptions): Promise<T> => apiFetch<T>(path,
 const send = <T>(method: string, path: string, body?: unknown, o?: FetchOptions): Promise<T> =>
   apiFetch<T>(path, { ...o, method, body });
 
+/** FsDirs is GET /api/fs/dirs: the subdirectories of one directory under the browse roots. */
+export interface FsDirs {
+  path: string;
+  /** Empty when path is a browse root (nothing above it may be shown). */
+  parent: string;
+  dirs: Array<{ name: string; path: string; git: boolean }>;
+}
+
 // ─── Typed endpoints ────────────────────────────────────────────────────────
 
 export const api = {
@@ -449,6 +461,8 @@ export const api = {
   health: (o?: FetchOptions): Promise<Health> => get('/api/health', o),
   opencodeVersion: (refresh = false): Promise<OpenCodeStatus> =>
     get(`/api/opencode/version${refresh ? '?refresh=1' : ''}`),
+
+  fsDirs: (path = ''): Promise<FsDirs> => get(`/api/fs/dirs${path ? `?path=${encodeURIComponent(path)}` : ''}`, { quiet: true }),
 
   // Projects
   projects: (): Promise<ProjectView[]> => get('/api/projects'),
@@ -481,7 +495,7 @@ export const api = {
   clearProjectCandidates: (slug: string, role: string): Promise<void> =>
     send('DELETE', `${proj(slug)}/candidates/${enc(role)}`),
   settings: (): Promise<Settings> => get('/api/settings'),
-  putSettings: (s: Record<string, string | number>, o?: FetchOptions): Promise<Settings> => send('PUT', '/api/settings', s, o),
+  putSettings: (s: Settings, o?: FetchOptions): Promise<Settings> => send('PUT', '/api/settings', s, o),
 
   modelStats: (): Promise<ModelStat[]> => get('/api/stats/models'),
 

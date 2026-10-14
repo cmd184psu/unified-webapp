@@ -72,6 +72,7 @@ export function elapsedText(ms: number): string {
 
 /** stageName says what the engine is doing now, from the effort status and the plan rounds so far. */
 export function stageName(status: string, rounds: PlanRound[], latestRevision: number): string {
+  if (status === 'plan_approved') return 'Plan approved: the compiler is starting';
   if (status === 'compiling') return 'Compiler: turning the plan into tasks';
   if (status !== 'planning') return '';
   const reviewed = Math.max(0, ...rounds.flatMap((r) => r.reviews.map((x) => x.plan_revision)));
@@ -263,9 +264,9 @@ export class PlanViewer {
         canApprove ? button('Approve plan', () => void this.approve(), { primary: true, field: 'approve-plan' }) : null));
   }
 
-  /** strip is the live indicator shown while the engine plans or compiles: stage, and time since the effort last changed. */
+  /** strip is the live indicator shown while the engine plans or compiles (compiling starts by itself once the plan is approved): stage, and time since the effort last changed. */
   private strip(ef: EffortView): HTMLElement | null {
-    if (ef.status !== 'planning' && ef.status !== 'compiling') {
+    if (ef.status !== 'planning' && ef.status !== 'plan_approved' && ef.status !== 'compiling') {
       this.stopTicker();
       return null;
     }
