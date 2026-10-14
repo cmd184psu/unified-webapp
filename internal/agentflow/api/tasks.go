@@ -291,9 +291,11 @@ func (a *API) gitCommands(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	// The commands are the answer; the summary is extra, so a branch that is
+	// gone (merged and deleted) still gets its commands.
 	sum, err := a.deps.Engine.Completion(r.Context(), ef.ID)
 	if err != nil {
-		writeErr(w, err)
+		writeJSON(w, http.StatusOK, map[string]any{"commands": cmds, "branch": ef.IntegrationBranch, "commits": []any{}, "diffstat": "", "files": 0})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

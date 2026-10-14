@@ -249,7 +249,11 @@ func (r *PlanReviewOut) Validate() error {
 // verifyOnlyTitle matches a task title that only runs, checks or verifies
 // tests, builds, lint or vet. The engine does that for every task, and such a
 // task changes no files, so verify's no_changes check could never pass it.
-var verifyOnlyTitle = regexp.MustCompile(`(?i)^\s*(run|verify|confirm|check|ensure|validate)\b.*\b(tests?|builds?|lint|vet)\b`)
+//
+// The whole title must be a verification phrase ("Verify all tests pass",
+// "Run the Go test suite", "Make sure the build succeeds"); a title that adds
+// work ("Validate input and add unit tests") is not matched.
+var verifyOnlyTitle = regexp.MustCompile(`(?i)^\s*(run|verify|confirm|check|ensure|validate|make sure)\s+(that\s+)?(all\s+|the\s+|every\s+)*(unit\s+|go\s+|existing\s+|integration\s+)*(tests?|builds?|lint|vet)(\s+(suite|passes?|pass|succeeds?|succeed|results?|runs?|clean|green|still))*\s*\.?\s*$`)
 
 // Validate requires at least one fully described task, none of which is
 // verification-only.

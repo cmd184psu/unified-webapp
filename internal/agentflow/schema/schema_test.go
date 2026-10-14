@@ -229,13 +229,13 @@ func TestCompileOutRejectsVerificationOnlyTasks(t *testing.T) {
 	task := func(title string) string {
 		return `{"tasks":[{"id":"T003","phase":"P1","title":"` + title + `","prompt":"p","acceptance":["R1: x"],"files_touched":["a.go"]}]}`
 	}
-	for _, title := range []string{"Verify all tests pass", "Run the build", "Ensure lint and vet are clean", "check tests"} {
+	for _, title := range []string{"Verify all tests pass", "Run the build", "check tests", "Make sure all tests pass", "Run the Go test suite", "Ensure the build succeeds"} {
 		_, err := Parse[CompileOut](json.RawMessage(task(title)))
 		if err == nil || !strings.Contains(err.Error(), "T003") || !strings.Contains(err.Error(), "automatic") {
 			t.Errorf("%q: want a verification-only error naming T003, got %v", title, err)
 		}
 	}
-	for _, title := range []string{"Add parser tests", "Run migrations on startup", "Implement build tag handling"} {
+	for _, title := range []string{"Add parser tests", "Run migrations on startup", "Implement build tag handling", "Validate input and add unit tests for the parser", "Check for nil in Build() and add a guard", "Run migration to add tests table", "Ensure the login form builds the redirect URL", "Validate request body and add lint rule for it"} {
 		if _, err := Parse[CompileOut](json.RawMessage(task(title))); err != nil {
 			t.Errorf("%q: %v", title, err)
 		}

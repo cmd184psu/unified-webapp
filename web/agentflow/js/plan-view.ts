@@ -95,6 +95,8 @@ export class PlanViewer {
   /** The newest plan document the snapshot knows: the presented plan, else the latest revision. */
   private latestDoc: PlanDoc | undefined;
   private loaded = false;
+  // Set on dispose: a fetch still in flight must not draw or start a timer afterwards.
+  private disposed = false;
   private off: (() => void) | null = null;
   private stopPoll: (() => void) | null = null;
   private ticker: ReturnType<typeof setInterval> | null = null;
@@ -111,6 +113,7 @@ export class PlanViewer {
     this.stopPoll = startPoll(() => isTransient(this.current?.status), () => this.load());
     void this.load();
     return () => {
+      this.disposed = true;
       this.off?.();
       this.off = null;
       this.stopPoll?.();
@@ -315,6 +318,7 @@ export class PlanViewer {
   }
 
   render(): void {
+    if (this.disposed) return;
     if (!this.loaded) {
       replace(this.host, h('p', { class: 'field-hint', text: 'Loading efforts…' }));
       return;

@@ -68,6 +68,22 @@ test('a plan-less effort (null rounds, reviews and revisions) renders without th
   stop();
 });
 
+test('a view disposed while a fetch is in flight neither draws nor starts a timer', async () => {
+  const t = harness({ effort: effort({ status: 'planning' }), state: { status: 'planning' } });
+  const deps = (t.v as unknown as { deps: PlanDeps }).deps;
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((r) => { release = r; });
+  const slow = deps.plan;
+  deps.plan = async (...a) => { await gate; return slow(...a); };
+  const stop = t.v.mount();
+  await flush();
+  stop();
+  release();
+  await flush();
+  eq(byAttr(t.host, 'data-role', 'progress-strip').length, 0);
+  eq((t.v as unknown as { ticker: unknown }).ticker, null);
+});
+
 test('RP2: rounds with planner, architect and critic tabs and verdict chips', async () => {
   const t = harness();
   const stop = t.v.mount();

@@ -2656,6 +2656,8 @@ var PlanViewer = class {
     this.docs = /* @__PURE__ */ new Map();
     this.viewing = null;
     this.loaded = false;
+    // Set on dispose: a fetch still in flight must not draw or start a timer afterwards.
+    this.disposed = false;
     this.off = null;
     this.stopPoll = null;
     this.ticker = null;
@@ -2670,6 +2672,7 @@ var PlanViewer = class {
     this.stopPoll = startPoll(() => isTransient(this.current?.status), () => this.load());
     void this.load();
     return () => {
+      this.disposed = true;
       this.off?.();
       this.off = null;
       this.stopPoll?.();
@@ -2890,6 +2893,7 @@ var PlanViewer = class {
     );
   }
   render() {
+    if (this.disposed) return;
     if (!this.loaded) {
       replace(this.host, h("p", { class: "field-hint", text: "Loading efforts\u2026" }));
       return;
