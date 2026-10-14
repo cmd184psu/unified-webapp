@@ -26,11 +26,16 @@ func TestFSDirs_ListsConfinesAndFollowsTheLiveSetting(t *testing.T) {
 	}
 	resolved, _ := filepath.EvalSymlinks(root)
 
-	// The default root is the server user's home.
+	// By default nothing is confined: the listing starts at the server user's
+	// home and Up can leave it, all the way to "/".
 	home, _ := os.UserHomeDir()
 	got := decode[DirListing](t, e.ok("GET", "/api/fs/dirs", nil, 200))
-	if want, _ := filepath.EvalSymlinks(home); got.Path != want {
-		t.Fatalf("default listing starts at %q, want the home directory %q", got.Path, want)
+	if want, _ := filepath.EvalSymlinks(home); got.Path != want || got.Parent == "" {
+		t.Fatalf("default listing = %+v, want home %q with a parent", got, want)
+	}
+	top := decode[DirListing](t, e.ok("GET", "/api/fs/dirs?path=/", nil, 200))
+	if top.Path != "/" || top.Parent != "" {
+		t.Fatalf("root listing = %+v", top)
 	}
 
 	// Saving browse_roots applies to the very next call.

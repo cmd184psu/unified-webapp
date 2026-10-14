@@ -29,9 +29,10 @@ type DirListing struct {
 	Dirs   []DirEntry `json:"dirs"`
 }
 
-// listDirs lists the subdirectories of ?path, confined to the browse_roots
-// setting (read now, so a saved change applies to the next call). An empty
-// path starts at the first root.
+// listDirs lists the subdirectories of ?path. By default any folder may be
+// browsed; saved browse_roots narrow it (read now, so a saved change applies
+// to the next call). An empty path starts at the first root, or at the home
+// directory when browsing is unrestricted.
 func (a *API) listDirs(w http.ResponseWriter, r *http.Request) {
 	set, err := a.deps.Store.GetSettings(r.Context())
 	if err != nil {
@@ -51,6 +52,10 @@ func (a *API) listDirs(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if path == "" {
 		path = roots[0]
+		// Unrestricted browsing starts at the server user's home, not at "/".
+		if home, err := os.UserHomeDir(); err == nil && path == "/" {
+			path = home
+		}
 	}
 	if !filepath.IsAbs(path) {
 		badRequest(w, "path", "must be an absolute path")

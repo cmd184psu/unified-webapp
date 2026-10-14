@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -123,7 +122,8 @@ func parseSettings(m map[string]string) (Settings, error) {
 }
 
 // parseBrowseRoots reads the stored browse_roots value: a JSON list of
-// absolute paths, or empty for the server user's home directory.
+// absolute paths, or empty for the whole filesystem ("/"): the picker is
+// unrestricted until the owner narrows it.
 func parseBrowseRoots(v string) ([]string, error) {
 	var roots []string
 	if v != "" {
@@ -132,11 +132,7 @@ func parseBrowseRoots(v string) ([]string, error) {
 		}
 	}
 	if len(roots) == 0 {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, Invalid("browse_roots", "no roots given and the home directory is unknown")
-		}
-		return []string{home}, nil
+		return []string{"/"}, nil
 	}
 	out := make([]string, 0, len(roots))
 	for _, r := range roots {

@@ -916,10 +916,9 @@ func TestOA3_ProjectPluginsArePinnedAndPerProject(t *testing.T) {
 func TestBrowseRootsDefaultAndValidation(t *testing.T) {
 	s, _ := openTemp(t)
 	defer s.Close()
-	home, _ := os.UserHomeDir()
 	got, err := s.GetSettings(ctx)
-	if err != nil || len(got.BrowseRoots) != 1 || got.BrowseRoots[0] != home {
-		t.Fatalf("default roots = %v (%v), want the home directory", got.BrowseRoots, err)
+	if err != nil || len(got.BrowseRoots) != 1 || got.BrowseRoots[0] != "/" {
+		t.Fatalf("default roots = %v (%v), want the whole filesystem", got.BrowseRoots, err)
 	}
 	if err := s.UpdateSettings(ctx, "t", map[string]string{"browse_roots": `["/srv/a","/srv/b/"]`}); err != nil {
 		t.Fatal(err)

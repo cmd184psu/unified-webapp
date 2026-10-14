@@ -1122,7 +1122,7 @@ var SettingsView = class {
         h("code", { text: r }),
         button("Remove", () => edit(this.roots.filter((_, j) => j !== i)), { field: "remove-root", icon: "remove" })
       )),
-      this.roots.length === 0 ? h("p", { class: "field-hint", text: "No folders chosen: the picker starts at the server default." }) : null,
+      this.roots.length === 0 ? h("p", { class: "field-hint", text: "No limit: the picker can browse any folder. Add folders to confine it." }) : null,
       button("Add folder", () => void this.addRoot(edit), { field: "add-root", icon: "add" })
     );
   }

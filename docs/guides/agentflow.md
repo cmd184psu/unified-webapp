@@ -216,8 +216,8 @@ version for `GET /api/health` and `GET /api/opencode/version`. `opencode_path` l
 `opencode` finds the binary as described under [Requirements](#requirements); any other value
 is used as given.
 
-`browse_roots` is a list of absolute directories (default: the server user's home) that the
-directory picker may show. `GET /api/fs/dirs?path=/abs/dir` returns
+`browse_roots` is an optional list of absolute directories that confines the directory picker
+(default: empty, so any folder can be browsed; the picker starts at the server user's home). `GET /api/fs/dirs?path=/abs/dir` returns
 `{"path", "parent", "dirs": [{"name", "path", "git"}]}` (`parent` is empty at a browse root): subdirectories only, sorted by name,
 hidden ones left out, `git` true when the directory has a `.git` entry. Without `path` it
 starts at the first root. A path that resolves (after symlinks) outside every root is a 400
