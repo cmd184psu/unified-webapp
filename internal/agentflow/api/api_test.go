@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/engine"
 	"cmd184psu/unified-webapp/internal/agentflow/gitsvc"
@@ -17,6 +18,7 @@ import (
 	"cmd184psu/unified-webapp/internal/platform/auth"
 	"cmd184psu/unified-webapp/internal/platform/config"
 	"cmd184psu/unified-webapp/internal/taskmaster"
+	"cmd184psu/unified-webapp/internal/taskmaster/worker"
 )
 
 // env is a real store, taskmaster and engine in temp dirs with the fake
@@ -35,11 +37,16 @@ type env struct {
 type envOpt struct {
 	maxSubs   int
 	widthZero bool
-	publish   func(engine.RunEvent)
+	// fastPoll makes taskmaster's worker poll every 20 ms instead of 5 s.
+	fastPoll bool
 }
 
 func newEnv(t *testing.T, opt envOpt) *env {
 	t.Helper()
+	if opt.fastPoll {
+		worker.SetPollIntervalForTest(20 * time.Millisecond)
+		t.Cleanup(func() { worker.SetPollIntervalForTest(5 * time.Second) })
+	}
 	e := &env{t: t, dataDir: t.TempDir(), fake: runner.NewFake()}
 	cfg := config.TaskmasterConfig{StaticDir: t.TempDir(), DBPath: filepath.Join(t.TempDir(), "taskmaster.db"), ProgressIntervalMs: 50}
 	if err := os.WriteFile(filepath.Join(cfg.StaticDir, "index.html"), []byte("index"), 0o644); err != nil {
@@ -62,9 +69,6 @@ func newEnv(t *testing.T, opt envOpt) *env {
 		PublishRun: func(ev engine.RunEvent) {
 			if api != nil {
 				api.PublishRun(ev)
-			}
-			if opt.publish != nil {
-				opt.publish(ev)
 			}
 		},
 		Kick: func() {
@@ -166,3 +170,14 @@ func newRecorder() *httptest.ResponseRecorder { return httptest.NewRecorder() }
 func newRequest(method, path string) *http.Request { return httptest.NewRequest(method, path, nil) }
 
 func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
+
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

@@ -89,6 +89,12 @@ func (a *API) Register(mux *http.ServeMux) {
 	a.registerProjects(mux)
 	a.registerBackends(mux)
 	a.registerSettings(mux)
+	a.registerEfforts(mux)
+	a.registerDocs(mux)
+	a.registerQueue(mux)
+	a.registerTasks(mux)
+	a.registerRun(mux)
+	a.registerEvents(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	})

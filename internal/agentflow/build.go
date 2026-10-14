@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/api"
@@ -87,6 +88,9 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 	if rn == nil {
 		rn = newOpencode(git, st)
 	}
+	// The engine exists before the API, so the event hooks reach it through a
+	// pointer set once the API is built (D3). A notice before then is dropped.
+	var events atomic.Pointer[api.API]
 	eng, err := engine.New(engine.Deps{
 		Store:        st,
 		Host:         host,
@@ -95,10 +99,21 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 		FreezeConfig: freezeConfig,
 		Git:          git,
 		Sandbox:      feedbackSandbox(),
-		// Prompt, Verify, Merge and Kick stay nil: the engine's defaults
-		// already delegate effort stages to EffortPrompt, append the worker
-		// context and the reviewer's evidence, run the built-in verify and
-		// merge executors, and wake its own dispatcher.
+		PublishRun: func(ev engine.RunEvent) {
+			if a := events.Load(); a != nil {
+				a.PublishRun(ev)
+			}
+		},
+		Kick: func() {
+			if a := events.Load(); a != nil {
+				a.Notify()
+			}
+		},
+		// Prompt, Verify and Merge stay nil: the engine's defaults already
+		// delegate effort stages to EffortPrompt, append the worker context
+		// and the reviewer's evidence, and run the built-in verify and merge
+		// executors. Kick only adds the event stream notice to the engine's
+		// own dispatcher wake-up.
 	})
 	if err != nil {
 		st.Close()
@@ -114,13 +129,15 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 	}
 
 	mux := http.NewServeMux()
-	api.New(api.Deps{
+	a := api.New(api.Deps{
 		Store:             st,
 		Engine:            eng,
 		Git:               git,
 		Version:           rn.Version,
 		SSEMaxSubscribers: cfg.SSEMaxSubscribers,
-	}).Register(mux)
+	})
+	a.Register(mux)
+	events.Store(a)
 	mux.Handle("/", static.NewHandler(cfg.StaticDir))
 
 	log.Printf("agentflow: data %s, static %s", dataDir, cfg.StaticDir)

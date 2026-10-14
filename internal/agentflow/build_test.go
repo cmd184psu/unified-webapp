@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -38,8 +40,8 @@ func get(t *testing.T, h http.Handler, path string) (int, string) {
 }
 
 // AC-ST1: a clean clone (no data/, no prompts/, cwd = an empty directory)
-// boots and answers /api/health. The project, effort and FRD calls join this
-// test once D3 has the routes.
+// boots, answers /api/health, registers a project over a temp git repository
+// and takes an effort with an FRD.
 func TestCleanCloneBoot(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
@@ -81,6 +83,23 @@ func TestCleanCloneBoot(t *testing.T) {
 	}
 	if code, _ := get(t, h, "/api/nope"); code != http.StatusNotFound {
 		t.Errorf("unknown /api path = %d, want 404", code)
+	}
+
+	repo := t.TempDir()
+	if out, err := exec.Command("git", "-C", repo, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
+	if code, body := send(t, h, "POST", "/api/projects", `{"slug":"demo","repo_path":`+strconv.Quote(repo)+`}`); code != http.StatusCreated {
+		t.Fatalf("POST /api/projects = %d %s", code, body)
+	}
+	code, body = send(t, h, "POST", "/api/projects/demo/efforts", `{"title":"first"}`)
+	var ef struct{ ID int64 }
+	if err := json.Unmarshal([]byte(body), &ef); err != nil || code != http.StatusCreated || ef.ID == 0 {
+		t.Fatalf("POST efforts = %d %s", code, body)
+	}
+	frd := `{"id":"F","title":"t","objective":"o","requirements":[{"id":"R1","description":"d"}]}`
+	if code, body := send(t, h, "PUT", "/api/projects/demo/efforts/"+strconv.FormatInt(ef.ID, 10)+"/frd", frd); code != http.StatusOK {
+		t.Fatalf("PUT frd = %d %s", code, body)
 	}
 }
 
