@@ -125,3 +125,25 @@ func (s *Service) PrepareConflictRepair(ctx context.Context, repo, taskWT, integ
 	}
 	return nil, errors.Join(err, s.abortMerge(ctx, repo, taskWT, pre, admin))
 }
+
+// ResetIntegration moves the integration branch back to commit with a hard
+// reset in the integration worktree, undoing a merge whose post-merge verify
+// failed (PX3). commit must be an ancestor the caller recorded before the
+// merge; only the engine-owned integration worktree and branch are touched.
+func (s *Service) ResetIntegration(ctx context.Context, repo, integrationWT, integrationBranch, commit string) error {
+	unlock := s.lockRepo(ctx, repo)
+	defer unlock()
+	pre, _, err := s.wtPre(ctx, repo, integrationWT)
+	if err != nil {
+		return err
+	}
+	if e, err := s.registered(ctx, repo, integrationWT); err != nil || e.Branch != integrationBranch || integrationBranch == "" {
+		return fmt.Errorf("gitsvc: %s is not on integration branch %q", integrationWT, integrationBranch)
+	}
+	c, err := s.resolveCommit(ctx, repo, commit)
+	if err != nil {
+		return err
+	}
+	_, err = s.runIn(ctx, repo, integrationWT, pre, nil, "reset", "--hard", "-q", c)
+	return err
+}

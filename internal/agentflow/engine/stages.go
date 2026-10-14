@@ -53,6 +53,13 @@ func (e *Engine) runStage(ctx context.Context, rc golane.RunContext, p StagePayl
 	if e.deps.Kick != nil {
 		e.deps.Kick()
 	}
+	if e.deps.Git != nil {
+		// The outcome is durable; chain the next stage from it. A failure
+		// here is picked up again by the next Advance (tick or completion).
+		if err := e.Advance(context.WithoutCancel(ctx)); err != nil {
+			fmt.Fprintf(rc.Log(), "advance: %v\n", err)
+		}
+	}
 	if IsInfra(res.Outcome) || res.Outcome == OutcomeTimeout {
 		if res.cause == nil {
 			return nil, fmt.Errorf("stage %d: %s", p.Stage, res.Outcome)
@@ -112,10 +119,13 @@ func (e *Engine) execute(ctx context.Context, rc golane.RunContext, p StagePaylo
 	case "verify", "merge":
 		return e.engineStage(ctx, rc, st, p)
 	}
+	if e.deps.Git != nil && st.Attempt != 0 {
+		return e.policedStage(ctx, rc, st, p)
+	}
 	return e.modelStage(ctx, rc, st, p)
 }
 
-// engineStage delegates verify and merge to their executors (filled by C6).
+// engineStage delegates verify and merge to their executors.
 func (e *Engine) engineStage(ctx context.Context, rc golane.RunContext, st model.Stage, p StagePayload) StageResult {
 	ex := e.deps.Verify
 	if st.Role == "merge" {
@@ -158,6 +168,13 @@ func (e *Engine) buildPrompt(ctx context.Context, st model.Stage) (string, error
 	}
 	if st.Attempt == 0 {
 		return text, nil
+	}
+	if st.Role == "reviewer" {
+		ev, err := e.reviewEvidence(ctx, st.Attempt)
+		if err != nil {
+			return "", err
+		}
+		text += ev
 	}
 	att, err := e.deps.Store.GetAttempt(ctx, st.Attempt)
 	if err != nil {

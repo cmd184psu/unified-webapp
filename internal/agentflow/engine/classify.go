@@ -20,6 +20,9 @@ const (
 	OutcomeBlocked   = "blocked"
 	OutcomeTimeout   = "timeout"
 	OutcomeDiscarded = "discarded"
+	// OutcomePolicyViolation closes a model stage that changed git state it
+	// may not touch (GIT5 layer 2); the change was reverted.
+	OutcomePolicyViolation = "policy_violation"
 
 	OutcomeInfraRateLimit   = "infra:rate_limit"
 	OutcomeInfraUnreachable = "infra:unreachable"

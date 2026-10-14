@@ -120,14 +120,14 @@ func (h *harness) finish(st model.Stage) {
 }
 
 // projectOf reads the project from the attempt's planned worktree path
-// (<data>/worktrees/<project>/task-N).
+// (<data>/worktrees/<project>/<effort>/<task>).
 func (h *harness) projectOf(st model.Stage) string {
 	h.t.Helper()
 	a, err := h.st.GetAttempt(context.Background(), st.Attempt)
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	return filepath.Base(filepath.Dir(a.Worktree))
+	return filepath.Base(filepath.Dir(filepath.Dir(a.Worktree)))
 }
 
 // standard sets one free backend serving m1 and m2 with both roles listed.

@@ -9,8 +9,10 @@ import (
 	"sync"
 	"time"
 
+	"cmd184psu/unified-webapp/internal/agentflow/gitsvc"
 	"cmd184psu/unified-webapp/internal/agentflow/model"
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
+	"cmd184psu/unified-webapp/internal/agentflow/sandbox"
 	"cmd184psu/unified-webapp/internal/agentflow/store"
 	"cmd184psu/unified-webapp/internal/taskmaster/golane"
 )
@@ -43,7 +45,17 @@ type Deps struct {
 	// wires the concrete adapter's generator; the engine never imports it.
 	// Nil skips freezing, for runners that need no config.
 	FreezeConfig func(backend FrozenBackend, stageDir string) (path string, err error)
-	// Verify and Merge run the engine-owned stages (C6 fills them in).
+	// Git is the engine git service. With it set the engine runs the attempt
+	// chain (work, verify, review, commit, merge) and, unless overridden
+	// below, the built-in verify and merge executors; without it only the
+	// stage runtime and the dispatcher run (C2 to C5 tests).
+	Git *gitsvc.Service
+	// Sandbox is the template for feedback commands: extra read-only binds
+	// (a Go module cache), PATH dirs and environment. The engine fills in the
+	// worktree and git dirs; feedback commands never get a writable worktree.
+	Sandbox sandbox.Spec
+	// Verify and Merge run the engine-owned stages. Nil uses the built-in
+	// executors when Git is set.
 	Verify, Merge Executor
 	// Kick wakes the dispatcher after a stage's outcome is written (C5).
 	Kick func()
@@ -104,6 +116,12 @@ type Engine struct {
 
 	runs *RunControl
 	disp *dispatcher
+
+	// advMu serialises chain advancement (attempt.go); prepMu serialises
+	// first-use setup of an effort's integration branch, worktree and
+	// baseline.
+	advMu  sync.Mutex
+	prepMu sync.Mutex
 }
 
 // New builds the engine, registers its lanes and leaves all of them paused
@@ -128,6 +146,15 @@ func New(d Deps) (*Engine, error) {
 	}
 	e.backendKinds = []golane.Kind{e.kind(KindWork), e.kind(KindReview), e.kind(KindPlan)}
 	e.engineKinds = []golane.Kind{e.kind(KindVerify), e.kind(KindMerge)}
+	if d.Git != nil {
+		if e.deps.Verify == nil {
+			e.deps.Verify = verifyExecutor{e}
+		}
+		if e.deps.Merge == nil {
+			e.deps.Merge = mergeExecutor{e}
+		}
+		e.tickHooks = append(e.tickHooks, func(ctx context.Context) { _ = e.Advance(ctx) })
+	}
 	if err := e.SyncLanes(context.Background()); err != nil {
 		return nil, err
 	}

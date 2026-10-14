@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -256,11 +255,11 @@ func (e *Engine) dispatchOne(ctx context.Context, v *view, p store.Project) (boo
 }
 
 // submitWork opens the task's attempt and submits its work stage on the
-// chosen backend's lane. The worktree path is the task's planned location;
-// the attempt chain (C6) creates it.
+// chosen backend's lane. The worktree path is the task's planned location in
+// gitsvc's layout; the work stage creates the worktree when it starts (C6).
 func (e *Engine) submitWork(ctx context.Context, v *view, ef model.Effort, hash string, p store.Project, t model.Task, pk Pick) error {
 	s := e.deps.Store
-	wt := filepath.Join(e.deps.DataDir, "worktrees", p.Slug, fmt.Sprintf("task-%d", t.ID))
+	wt := e.taskWorktreePath(p.Slug, ef.ID, t)
 	att, err := s.StartAttempt(ctx, t.ID, model.AttemptNormal, wt, pk.Model)
 	if err != nil {
 		return err
