@@ -65,12 +65,17 @@ export function buildRoleEditor(o: RoleEditorOpts): HTMLElement {
 
   const save = async (): Promise<void> => {
     errors.clear();
+    if (o.rows().length === 0 && pickBackend.value && pickModel.value) {
+      // Save on an empty list adds the pair picked in the dropdowns, as Add candidate would.
+      o.setDraft([{ backend: pickBackend.value, model: pickModel.value, optIn: !isPaid(o.backends, pickBackend.value, pickModel.value) }]);
+    }
     if (o.rows().length === 0) {
       errors.show(new Error('Nothing to save yet: pick a backend and model, press Add candidate, then Save order'));
       return;
     }
     const missing = unconsented(o.backends, o.rows());
     if (missing.length > 0) {
+      draw();
       errors.show(new Error(`Tick the paid opt-in for: ${missing.map((m) => `${m.backend}/${m.model}`).join(', ')}`));
       return;
     }

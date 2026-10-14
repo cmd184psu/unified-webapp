@@ -9,7 +9,7 @@ import { confirmDialog, showToast } from '@shared';
 import { api, ApiError, type EffortView, type QueueView } from './api.js';
 import { chooseEffort, effortBar } from './current.js';
 import { chip, h, replace } from './dom.js';
-import { subscribe, type AgentflowEvent } from './events.js';
+import { isTransient, startPoll, subscribe, type AgentflowEvent } from './events.js';
 import { FormErrors, badge, button, section } from './forms.js';
 
 export type QueueDeps = Pick<typeof api, 'efforts' | 'queue' | 'compile' | 'approveQueue'> & {
@@ -37,18 +37,22 @@ export class QueueApproval {
   private loaded = false;
   private errors = new FormErrors();
   private off: (() => void) | null = null;
+  private stopPoll: (() => void) | null = null;
 
   constructor(private host: HTMLElement, private slug: string, private deps: QueueDeps) {}
 
   mount(): () => void {
     this.off = subscribe((ev: AgentflowEvent) => {
       const mine = 'project' in ev && ev.project === this.slug;
-      if (ev.type === 'state.changed' || (mine && (ev.type === 'effort.update' || ev.type === 'task.update'))) void this.refresh();
+      if (ev.type === 'state.changed' || (mine && (ev.type === 'effort.update' || ev.type === 'task.update' || ev.type === 'project.update'))) void this.refresh();
     });
+    this.stopPoll = startPoll(() => isTransient(this.current?.status), () => this.refresh());
     void this.load();
     return () => {
       this.off?.();
       this.off = null;
+      this.stopPoll?.();
+      this.stopPoll = null;
     };
   }
 

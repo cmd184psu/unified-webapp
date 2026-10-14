@@ -4,8 +4,10 @@
 // projecttab.ts.
 
 import { ThemeManager, HamburgerMenu } from '@shared';
+import { api } from './api.js';
 import { h, replace } from './dom.js';
 import { startEvents } from './events.js';
+import { HealthBanner } from './health.js';
 import { Overview, defaultDeps } from './overview.js';
 import { mountBackends } from './backends.js';
 import { mountProjectTab } from './projecttab.js';
@@ -74,4 +76,6 @@ function initHamburger(): void {
 
 initHamburger();
 startEvents();
+const banner = document.getElementById('health-banner');
+if (banner) new HealthBanner(banner, api).mount();
 showTab('overview');

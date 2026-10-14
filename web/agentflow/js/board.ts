@@ -8,12 +8,13 @@
 // or the models is placed with h(), so it is text.
 
 import { confirmDialog, copyText, showToast } from '@shared';
-import { api, ApiError, type Attempt, type EffortView, type Stage, type TaskDef, type TaskDetail, type TaskView } from './api.js';
+import { api, ApiError, type Attempt, type EffortView, type GitCommands, type Stage, type TaskDef, type TaskDetail, type TaskView } from './api.js';
 import { chooseEffort, effortBar } from './current.js';
 import { budgetBar } from './effort-settings.js';
 import { chip, h, replace, statusKey, type Child } from './dom.js';
-import { subscribe, type AgentflowEvent } from './events.js';
+import { isTransient, startPoll, subscribe, type AgentflowEvent } from './events.js';
 import { FormErrors, badge, button, checkbox, type ToggleEl, fieldRow, textArea, textInput } from './forms.js';
+import { mergeCard } from './merge-card.js';
 import { buttonsFor, progressText } from './overview.js';
 import { defaultYoloDeps, type YoloDeps } from './yolo.js';
 import { StreamPanel, defaultStreamDeps, type StreamDeps } from './stream.js';
@@ -100,7 +101,7 @@ export class Board {
   runState = 'stopped';
   /** stopReason is why the system stopped the run ("budget"), else empty. */
   stopReason = '';
-  gitLines: string[] | null = null;
+  git: GitCommands | null = null;
   private editing = false;
   private detailEl: HTMLElement | null = null;
   private reasonEl: HTMLTextAreaElement | null = null;
@@ -111,6 +112,7 @@ export class Board {
   private loaded = false;
   private stream: StreamPanel;
   private off: (() => void) | null = null;
+  private stopPoll: (() => void) | null = null;
   private errors = new FormErrors();
 
   constructor(private host: HTMLElement, private panel: HTMLElement, private slug: string, private deps: BoardDeps, streamDeps: StreamDeps, private yolo: YoloDeps = defaultYoloDeps()) {
@@ -119,10 +121,13 @@ export class Board {
 
   mount(): () => void {
     this.off = subscribe((ev: AgentflowEvent) => this.handle(ev));
+    this.stopPoll = startPoll(() => isTransient(this.current?.status), () => this.refresh());
     void this.load();
     return () => {
       this.off?.();
       this.off = null;
+      this.stopPoll?.();
+      this.stopPoll = null;
       this.stream.close();
     };
   }
@@ -152,7 +157,7 @@ export class Board {
     this.current = chooseEffort(this.slug, this.efforts);
     this.selected = '';
     this.detail = null;
-    this.gitLines = null;
+    this.git = null;
     this.fresh = true;
     this.stream.close();
     await this.refresh();
@@ -177,9 +182,9 @@ export class Board {
       const ef = this.current;
       this.tasks = ef ? await this.deps.tasks(this.slug, ef.id) : [];
       if (ef && this.selected && this.tasks.some((t) => t.key === this.selected)) this.detail = await this.deps.task(this.slug, ef.id, this.selected);
-      if (ef?.status === 'complete' && !this.gitLines && this.gitFailed !== ef.id) {
+      if (ef?.status === 'complete' && !this.git && this.gitFailed !== ef.id) {
         try {
-          this.gitLines = (await this.deps.gitCommands(this.slug, ef.id, { quiet: true })).commands;
+          this.git = await this.deps.gitCommands(this.slug, ef.id, { quiet: true });
         } catch {
           this.gitFailed = ef.id;
         }
@@ -368,15 +373,6 @@ export class Board {
         d.progress.length ? block('Progress log', bullets(d.progress)) : null));
   }
 
-  private gitBox(): HTMLElement | null {
-    if (!this.gitLines) return null;
-    const text = this.gitLines.join('\n');
-    return h('div', { class: 'detail-section', attrs: { 'data-role': 'git-commands' } },
-      h('h4', { text: 'Merge and push (run these yourself; agentflow never pushes)' }),
-      mono(text),
-      button('Copy commands', () => this.deps.copy(text), { field: 'copy-git' }));
-  }
-
   render(): void {
     if (!this.loaded) {
       replace(this.host, h('p', { class: 'field-hint', text: 'Loading board…' }));
@@ -407,11 +403,11 @@ export class Board {
       h('div', { class: 'console-header' },
         h('span', { class: 'pane-title', text: 'Progress' }), bar, h('span', { class: 'progress-pct', text }), chip(this.runState), ef.run_state !== this.runState && ef.run_state === 'running'
           ? h('span', { class: 'field-hint', text: 'was running before restart', attrs: { 'data-role': 'was-running' } }) : null, ...controls),
+      ef.status === 'complete' ? mergeCard(ef, this.git, this.deps.copy) : null,
       ef.budget ? budgetBar(ef.budget) : null,
       this.runState === 'stopped' && this.stopReason === 'budget'
         ? h('div', { class: 'warn-box', attrs: { 'data-role': 'budget-stop' } },
           h('p', { text: 'The run was stopped because the effort used up its budget. Nothing failed: raise the budget on the FRD tab and start the run again.' })) : null,
-      this.gitBox(),
       h('div', { class: 'console-body' },
         h('div', { class: 'console-left' },
           h('h3', { class: 'pane-title', text: 'Tasks' }),

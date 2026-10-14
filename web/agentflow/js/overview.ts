@@ -2,10 +2,11 @@
 // active effort, progress, current stage(s) and backend, kept live from the
 // event stream, with start / pause / stop / run-one buttons (RC2).
 
-import { confirmDialog } from '@shared';
-import { api, type ProjectView, type RunOp, type WorkItem } from './api.js';
+import { confirmDialog, copyText } from '@shared';
+import { api, type Effort, type GitCommands, type ProjectView, type RunOp, type WorkItem } from './api.js';
 import { chip, h, replace } from './dom.js';
-import { subscribe, type AgentflowEvent } from './events.js';
+import { isTransient, startPoll, subscribe, type AgentflowEvent } from './events.js';
+import { mergeCard } from './merge-card.js';
 import { yoloBadge } from './yolo.js';
 
 export interface OverviewDeps {
@@ -14,6 +15,10 @@ export interface OverviewDeps {
   confirm(message: string): Promise<boolean>;
   /** Called when a project name is clicked. */
   open(slug: string): void;
+  /** Optional: with these the row of a project whose newest effort is complete shows the Ready to merge card. */
+  efforts?: typeof api.efforts;
+  gitCommands?: typeof api.gitCommands;
+  copy?(text: string): void;
 }
 
 export const defaultDeps = (open: (slug: string) => void): OverviewDeps => ({
@@ -21,6 +26,9 @@ export const defaultDeps = (open: (slug: string) => void): OverviewDeps => ({
   run: (slug, op) => api.run(slug, op),
   confirm: (m) => confirmDialog(m, { confirmLabel: 'Stop' }),
   open,
+  efforts: api.efforts,
+  gitCommands: api.gitCommands,
+  copy: (t) => void copyText(t),
 });
 
 interface Button {
@@ -66,20 +74,27 @@ function workLine(w: WorkItem): string {
 
 export class Overview {
   rows: ProjectView[] = [];
+  /** Per project, the newest effort when it is complete (the project row's active effort is then null). */
+  private done = new Map<string, Effort>();
+  private git = new Map<number, GitCommands | null>();
   private loaded = false;
   private refreshing = false;
   private again = false;
   private off: (() => void) | null = null;
+  private stopPoll: (() => void) | null = null;
 
   constructor(private host: HTMLElement, private deps: OverviewDeps) {}
 
   /** mount fetches the rows and starts listening to the event stream; it returns the dispose. */
   mount(): () => void {
     this.off = subscribe((ev) => this.handle(ev));
+    this.stopPoll = startPoll(() => this.rows.some((r) => isTransient(r.effort?.status)), () => this.refresh());
     void this.refresh();
     return () => {
       this.off?.();
       this.off = null;
+      this.stopPoll?.();
+      this.stopPoll = null;
     };
   }
 
@@ -95,6 +110,7 @@ export class Overview {
         this.again = false;
         try {
           this.rows = await this.deps.list();
+          await this.loadCompleted();
           this.loaded = true;
         } catch {
           // apiFetch already told the user; keep what is shown.
@@ -103,6 +119,23 @@ export class Overview {
       } while (this.again);
     } finally {
       this.refreshing = false;
+    }
+  }
+
+  /** loadCompleted finds, for each project without an active effort, its newest effort when that is complete, with its git commands. */
+  private async loadCompleted(): Promise<void> {
+    const { efforts, gitCommands } = this.deps;
+    this.done.clear();
+    if (!efforts) return;
+    for (const p of this.rows.filter((r) => !r.effort)) {
+      try {
+        const newest = (await efforts(p.slug)).reduce<Effort | undefined>((m, e) => (!m || e.id > m.id ? e : m), undefined);
+        if (!newest || newest.status !== 'complete') continue;
+        this.done.set(p.slug, newest);
+        if (gitCommands && !this.git.has(newest.id)) this.git.set(newest.id, await gitCommands(p.slug, newest.id, { quiet: true }).catch(() => null));
+      } catch {
+        // keep the row without a card
+      }
     }
   }
 
@@ -198,6 +231,7 @@ export class Overview {
       bar,
       h('div', { class: 'progress-pct', text: text }),
       ...work,
-      h('div', { class: 'task-item-meta' }, ...buttons));
+      h('div', { class: 'task-item-meta' }, ...buttons),
+      this.done.has(p.slug) ? mergeCard(this.done.get(p.slug) as Effort, this.git.get((this.done.get(p.slug) as Effort).id) ?? null, (t) => this.deps.copy?.(t)) : null);
   }
 }

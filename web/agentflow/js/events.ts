@@ -1,7 +1,9 @@
 // events.ts — the live event stream (RC5, UI3). One EventSource on
 // /api/events; the server names every message "agentflow" and the JSON data
-// carries its own type. A dropped stream reconnects with backoff. There is no
-// polling: state.changed tells subscribers to refetch what they show.
+// carries its own type. A dropped stream reconnects with backoff.
+// state.changed tells subscribers to refetch what they show. The engine moves an
+// effort on (planning, compiling) without always saying so, and a proxy may block
+// SSE, so views also poll while their effort is in a transient status (startPoll).
 
 export interface RunSnapshot {
   project: string;
@@ -92,4 +94,30 @@ export function stopEvents(): void {
   source?.close();
   source = null;
   failures = 0;
+}
+
+/** Effort statuses the engine changes by itself; a view polls while its effort is in one. */
+const TRANSIENT = new Set(['planning', 'compiling', 'running']);
+
+/** isTransient is true while the engine is still working on an effort (status is about to change). */
+export function isTransient(status: string | undefined): boolean {
+  return status !== undefined && TRANSIENT.has(status);
+}
+
+/** pollSettings.ms is the poll period; tests shorten it. */
+export const pollSettings = { ms: 5000 };
+
+/**
+ * startPoll calls fn every pollSettings.ms while active() is true and the last
+ * call has finished; it returns the stop. Nothing runs once active() is false,
+ * so a settled effort costs no requests.
+ */
+export function startPoll(active: () => boolean, fn: () => void | Promise<void>): () => void {
+  let busy = false;
+  const id = setInterval(() => {
+    if (busy || !active()) return;
+    busy = true;
+    void Promise.resolve(fn()).finally(() => { busy = false; });
+  }, pollSettings.ms);
+  return () => clearInterval(id);
 }

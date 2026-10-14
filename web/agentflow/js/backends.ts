@@ -16,6 +16,17 @@ import { FormErrors, badge, button, checkbox, type ToggleEl, fieldRow, section, 
 import { ROLES, buildRoleEditor, isPaid, unconsented, type CandRow } from './candidates.js';
 import { LIMIT_FIELDS } from './settings.js';
 
+/** isPrivateHost is true when a backend's host (a URL or host:port) is a loopback or private-network address. */
+export function isPrivateHost(host: string): boolean {
+  const m = /^(?:[a-z][a-z0-9+.-]*:\/\/)?(?:[^@/]*@)?(\[[^\]]*\]|[^:/?#]*)/i.exec(host.trim());
+  const name = (m?.[1] ?? '').toLowerCase();
+  if (name === 'localhost' || name === '[::1]') return true;
+  const ip = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(name);
+  if (!ip) return false;
+  const [a, b] = [Number(ip[1]), Number(ip[2])];
+  return a === 10 || a === 127 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31);
+}
+
 export { ROLES, isPaid, unconsented };
 export type { CandRow };
 
@@ -251,6 +262,7 @@ export class BackendsView {
           h('strong', { text: b.name }),
           b.paid ? badge('paid') : null,
           b.hosted ? badge('hosted', 'muted') : null,
+          b.hosted && isPrivateHost(b.host) ? h('span', { class: 'badge badge-warn', text: '\u26A0 hosted?', attrs: { title: 'Flagged hosted, but the host is a private or local address: it may be mis-flagged. Edit the backend and untick Hosted if it runs on your own machine or network.', 'data-role': 'hosted-warning' } }) : null,
           b.retired ? badge('retired', 'warn') : null,
           b.down_until ? badge('unreachable', 'warn') : null),
         h('div', { class: 'profile-actions' },

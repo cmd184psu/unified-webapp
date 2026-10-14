@@ -288,6 +288,15 @@ export interface PlanView {
   waiting?: string;
 }
 
+/** GET .../git-commands: what to run to merge a complete effort; commits, diffstat and files are optional extras. */
+export interface GitCommands {
+  commands: string[];
+  branch?: string;
+  commits?: Array<{ sha: string; subject: string }>;
+  diffstat?: string;
+  files?: number;
+}
+
 export interface TaskDef {
   key: string;
   phase: string;
@@ -437,7 +446,7 @@ const send = <T>(method: string, path: string, body?: unknown, o?: FetchOptions)
 
 export const api = {
   // Health and opencode
-  health: (): Promise<Health> => get('/api/health'),
+  health: (o?: FetchOptions): Promise<Health> => get('/api/health', o),
   opencodeVersion: (refresh = false): Promise<OpenCodeStatus> =>
     get(`/api/opencode/version${refresh ? '?refresh=1' : ''}`),
 
@@ -513,7 +522,7 @@ export const api = {
   compile: (slug: string, id: number): Promise<EffortView> => send('POST', `${eff(slug, id)}/compile`),
   queue: (slug: string, id: number, o?: FetchOptions): Promise<QueueView> => get(`${eff(slug, id)}/queue`, o),
   /** gitCommands lists the commands to merge and push a complete effort's branch; agentflow runs none of them (GIT4). */
-  gitCommands: (slug: string, id: number, o?: FetchOptions): Promise<{ commands: string[] }> => get(`${eff(slug, id)}/git-commands`, o),
+  gitCommands: (slug: string, id: number, o?: FetchOptions): Promise<GitCommands> => get(`${eff(slug, id)}/git-commands`, o),
   approveQueue: (slug: string, id: number, hash: string, o?: FetchOptions): Promise<QueueView> =>
     send('POST', `${eff(slug, id)}/queue/approve`, { hash }, o),
   tasks: (slug: string, id: number): Promise<TaskView[]> => get(`${eff(slug, id)}/tasks`),

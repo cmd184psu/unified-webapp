@@ -69,9 +69,10 @@ test('an FRD without acceptance_criteria or requirements still renders the form'
   const { acceptance_criteria: _a, requirements: _r, ...bare } = FRD0;
   w.docs.set(1, [{ doc: bare as unknown as FRD, by: 'me' }]);
   const t = harness(w);
-  t.ed.mount();
+  const stop = t.ed.mount();
   await flush();
   ok(byAttr(t.host, 'data-role', 'frd-form').length === 1, 'form rendered');
+  stop();
 });
 
 test('helpers split lines and comma lists', () => {

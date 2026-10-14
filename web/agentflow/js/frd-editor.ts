@@ -9,7 +9,7 @@ import { api, ApiError, type DocView, type EffortView, type FRD, type FRDAC, typ
 import { chooseEffort, effortBar, isFinished, rememberEffort } from './current.js';
 import { effortSettings } from './effort-settings.js';
 import { chip, h, replace } from './dom.js';
-import { subscribe, type AgentflowEvent } from './events.js';
+import { isTransient, startPoll, subscribe, type AgentflowEvent } from './events.js';
 import { FormErrors, RowsEditor, badge, button, checkbox, fieldRow, section, selectInput, textArea, textInput } from './forms.js';
 
 export type FrdDeps = Pick<typeof api, 'efforts' | 'createEffort' | 'patchEffort' | 'frd' | 'putFRD' | 'frdRevisions' | 'frdRevision' | 'approveFRD'> & {
@@ -154,6 +154,8 @@ export class FrdEditor {
   private off: (() => void) | null = null;
   private createErrors = new FormErrors();
 
+  private stopPoll: (() => void) | null = null;
+
   constructor(private host: HTMLElement, private slug: string, private deps: FrdDeps) {}
 
   mount(): () => void {
@@ -161,10 +163,13 @@ export class FrdEditor {
       const mine = 'project' in ev && ev.project === this.slug;
       if (!this.dirty && (ev.type === 'state.changed' || mine && (ev.type === 'effort.update' || ev.type === 'project.update'))) void this.load();
     });
+    this.stopPoll = startPoll(() => !this.dirty && isTransient(this.current?.status), () => this.load());
     void this.load();
     return () => {
       this.off?.();
       this.off = null;
+      this.stopPoll?.();
+      this.stopPoll = null;
     };
   }
 

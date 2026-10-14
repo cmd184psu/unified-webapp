@@ -3,7 +3,7 @@ import { Board, counts, renderVerify, renderReviewOut, type BoardDeps } from './
 import { StreamPanel, MAX_LINES, type SourceLike, type StreamDeps } from './stream';
 import { statusKey } from './dom';
 import type { YoloDeps } from './yolo';
-import { dispatch } from './events';
+import { dispatch, pollSettings } from './events';
 import { mountProjectTab, SUB_TABS } from './projecttab';
 import { api } from './api';
 import { ApiError, type Attempt, type EffortView, type Stage, type TaskDetail, type TaskView } from './api';
@@ -13,6 +13,7 @@ declare const require: (id: string) => { readFileSync(path: string, enc: string)
 const { readFileSync } = require('fs');
 
 installFakeDom();
+pollSettings.ms = 20;
 
 const effort = (over: Partial<EffortView> = {}): EffortView => ({
   id: 1, project: 'p1', title: 'Alpha', status: 'running', run_state: 'running', integration_branch: 'af/1', base_commit: '', yolo: false,
@@ -236,16 +237,19 @@ test('a field error from an edit shows beside the field', async () => {
   stop();
 });
 
-test('GIT4: a complete effort shows the merge and push commands as copyable text', async () => {
+test('GIT4: a complete effort shows a Ready to merge card with a copy button per command', async () => {
   const w = mixed();
   w.effort = effort({ status: 'complete', run_state: 'stopped' });
   const t = harness(w);
   const stop = t.board.mount();
   await flush();
   const box = byAttr(t.host, 'data-role', 'git-commands')[0];
+  ok(box.textContent.includes('Ready to merge') && box.textContent.includes('Nothing was merged into main'), 'plain statement');
   ok(box.textContent.includes("git merge --no-ff 'af/1'") && box.textContent.includes('never pushes'), 'commands shown');
-  button(box, 'Copy commands').click();
-  eq(t.log.filter((l) => l.startsWith('copy:')), ["copy:cd '/r'\ngit merge --no-ff 'af/1'\ngit push origin 'main'"]);
+  const copies = byAttr(box, 'data-action', 'copy-command');
+  eq(copies.length, 3);
+  copies[1].click();
+  eq(t.log.filter((l) => l.startsWith('copy:')), ["copy:git merge --no-ff 'af/1'"]);
   stop();
   const running = harness(mixed());
   const stop2 = running.board.mount();
@@ -445,6 +449,53 @@ test('AT12: the board shows the budget bar, and a budget stop is explained as no
   eq(byAttr(plain.host, 'data-role', 'budget').length, 0);
   eq(byAttr(plain.host, 'data-role', 'budget-stop').length, 0);
   stop2();
+});
+
+test('F3: the Ready to merge card shows the branch, commits, file count, diffstat and one copy button per command', async () => {
+  const w = mixed();
+  w.effort = effort({ status: 'complete', run_state: 'stopped', integration_branch: 'agentflow/effort-1' });
+  const t = harness(w, { gitCommands: async () => ({
+    commands: ['git merge --no-ff agentflow/effort-1'],
+    commits: [{ sha: 'abcdef1234567', subject: 'T001: add the thing' }], diffstat: ' a.go | 3 ++-', files: 1,
+  }) });
+  const stop = t.board.mount();
+  await flush();
+  const card = byAttr(t.host, 'data-role', 'git-commands')[0].textContent;
+  ok(card.includes('agentflow/effort-1') && card.includes('Nothing was merged into main'), 'branch and plain statement');
+  ok(card.includes('abcdef1 T001: add the thing') && card.includes('1 file changed') && card.includes('a.go | 3 ++-'), 'optional fields: ' + card);
+  stop();
+});
+
+test('F3: a complete effort whose git commands cannot be fetched still shows the card with the branch', async () => {
+  const w = mixed();
+  w.effort = effort({ status: 'complete', run_state: 'stopped', integration_branch: '' });
+  const t = harness(w, { gitCommands: async () => { throw new ApiError(500, 'boom'); } });
+  const stop = t.board.mount();
+  await flush();
+  const card = byAttr(t.host, 'data-role', 'git-commands')[0].textContent;
+  ok(card.includes('agentflow/effort-1') && card.includes('could not be loaded'), card);
+  stop();
+});
+
+test('F1: the board polls while the effort is running and refetches on project.update', async () => {
+  const w = mixed();
+  let tasksCalls = 0;
+  const t = harness(w, { tasks: async () => { tasksCalls++; return w.tasks; } });
+  const stop = t.board.mount();
+  await flush();
+  const first = tasksCalls;
+  await new Promise((r) => setTimeout(r, 120));
+  ok(tasksCalls > first + 1, 'polled while running');
+  w.effort = effort({ status: 'complete', run_state: 'stopped' });
+  await new Promise((r) => setTimeout(r, 80));
+  ok(byAttr(t.host, 'data-role', 'git-commands').length === 1, 'completion shown without a reload');
+  const settled = tasksCalls;
+  await new Promise((r) => setTimeout(r, 120));
+  eq(tasksCalls, settled);
+  dispatch(JSON.stringify({ type: 'project.update', project: 'p1' }));
+  await flush();
+  ok(tasksCalls > settled, 'event refetch');
+  stop();
 });
 
 void run('agentflow-board');

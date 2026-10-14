@@ -1,8 +1,10 @@
 import { test, run, eq, ok, installFakeDom, FakeEl, asEl, byAttr, button, flush, findAll } from './testkit';
-import { PlanViewer, renderPlan, type PlanDeps } from './plan-view';
+import { PlanViewer, renderPlan, stageName, elapsedText, type PlanDeps } from './plan-view';
+import { dispatch, pollSettings } from './events';
 import type { DocView, EffortView, PlanDoc, PlanReview, PlanView } from './api';
 
 installFakeDom();
+pollSettings.ms = 20;
 
 const effort = (over: Partial<EffortView> = {}): EffortView => ({
   id: 1, project: 'p1', title: 'Alpha', status: 'plan_ready', run_state: 'stopped', integration_branch: '', base_commit: '', yolo: false,
@@ -29,6 +31,7 @@ interface Opts {
 function harness(o: Opts = {}) {
   const host = new FakeEl('DIV');
   const log: string[] = [];
+  const calls = { plan: 0 };
   const reviews = o.reviews ?? [
     review('architect', 1, 'revise', 'architect round one', 1), review('critic', 1, 'revise', 'critic round one', 1),
     review('architect', 2, 'approve', 'architect round two', 2), review('critic', 2, 'approve', '<script>alert(1)</script>', 2),
@@ -39,7 +42,7 @@ function harness(o: Opts = {}) {
   };
   const deps: PlanDeps = {
     efforts: async () => [o.effort ?? effort()],
-    plan: async () => state,
+    plan: async () => { calls.plan++; return { ...state, status: o.state?.status ?? o.effort?.status ?? 'plan_ready' }; },
     planRounds: async () => ({ rounds, revision: state.revision, not_critic_approved: state.not_critic_approved, warnings: state.warnings, waiting: state.waiting }),
     planRevisions: async () => [1, 2].map((n) => ({ revision: n, created_by: 'planner', created: 0, approved: o.approvedRevision === n })),
     planRevision: async (_s, _id, n): Promise<DocView<PlanDoc>> => ({ revision: n, created_by: 'planner', created: 0, approved: o.approvedRevision === n, json: doc(n === 1 ? 'one' : 'two') }),
@@ -49,7 +52,7 @@ function harness(o: Opts = {}) {
     notify: (m) => { log.push('notify:' + m); },
   };
   const v = new PlanViewer(asEl(host), 'p1', deps);
-  return { host, v, log };
+  return { host, v, log, calls };
 }
 
 const tab = (host: FakeEl, name: string): FakeEl => byAttr(host, 'data-plan-tab', name)[0];
@@ -59,9 +62,10 @@ test('a plan-less effort (null rounds, reviews and revisions) renders without th
   const origRounds = t.v as unknown as { deps: PlanDeps };
   origRounds.deps.planRounds = async () => ({ rounds: null, revision: 0, not_critic_approved: false, warnings: null } as never);
   origRounds.deps.planRevisions = async () => null as never;
-  t.v.mount();
+  const stop = t.v.mount();
   await flush();
   ok(t.host.textContent.includes('No plan yet'), 'empty state shown');
+  stop();
 });
 
 test('RP2: rounds with planner, architect and critic tabs and verdict chips', async () => {
@@ -158,6 +162,7 @@ test('a draft effort with an FRD offers Generate plan; without rounds the empty 
     effort: effort({ status: 'draft' }), reviews: [],
     state: { revision: 0, rounds: 0, plan: undefined },
   });
+  (t.v as unknown as { deps: PlanDeps }).deps.planRevisions = async () => [];
   const stop = t.v.mount();
   await flush();
   ok(t.host.textContent.includes('No plan yet'), 'empty state');
@@ -172,6 +177,75 @@ test('renderPlan shows hostile plan text literally', () => {
   const el = renderPlan(p) as unknown as FakeEl;
   ok(el.textContent.includes('<img src=x onerror=alert(1)>'), 'literal');
   ok(findAll(el, (e) => e.tagName === 'IMG').length === 0, 'no element');
+});
+
+test('F1: a plan view refetches on an effort.update event for its project and ignores other projects', async () => {
+  const t = harness();
+  const stop = t.v.mount();
+  await flush();
+  const before = t.calls.plan;
+  dispatch(JSON.stringify({ type: 'effort.update', project: 'other', effort: 9 }));
+  await flush();
+  eq(t.calls.plan, before);
+  dispatch(JSON.stringify({ type: 'effort.update', project: 'p1', effort: 1 }));
+  await flush();
+  ok(t.calls.plan > before, 'refetched on the event');
+  stop();
+});
+
+test('F1: while the effort is planning the view polls on its own and stops once it settles', async () => {
+  const o: Opts = { effort: effort({ status: 'planning' }) };
+  const t = harness(o);
+  const stop = t.v.mount();
+  await flush();
+  ok(byAttr(t.host, 'data-role', 'progress-strip').length === 1, 'strip while planning');
+  const first = t.calls.plan;
+  await new Promise((r) => setTimeout(r, 120));
+  ok(t.calls.plan > first + 1, 'polled without any event');
+  o.effort = effort({ status: 'queue_draft' });
+  await new Promise((r) => setTimeout(r, 80));
+  eq(byAttr(t.host, 'data-role', 'progress-strip').length, 0);
+  const settled = t.calls.plan;
+  await new Promise((r) => setTimeout(r, 120));
+  eq(t.calls.plan, settled);
+  stop();
+});
+
+test('F2: a first draft with no rounds yet shows that plan, not "No plan yet", and a progress strip with the stage and elapsed time', async () => {
+  const t = harness({
+    effort: effort({ status: 'planning', updated: Date.now() - 65000 }), reviews: [],
+    state: { revision: 0, rounds: 0, plan: undefined },
+  });
+  const stop = t.v.mount();
+  await flush();
+  ok(!t.host.textContent.includes('No plan yet'), 'no empty state');
+  ok(byAttr(t.host, 'data-role', 'plan-doc')[0].textContent.includes('Go two'), 'the revision on file is shown');
+  const strip = byAttr(t.host, 'data-role', 'progress-strip')[0].textContent;
+  ok(strip.includes('Architect: reviewing plan revision 2'), 'stage: ' + strip);
+  ok(/1m 0[5-9]s/.test(byAttr(t.host, 'data-role', 'elapsed')[0].textContent), 'elapsed: ' + strip);
+  stop();
+});
+
+test('F2: a failed refetch keeps the rounds on screen instead of resetting to the empty state', async () => {
+  const t = harness();
+  const stop = t.v.mount();
+  await flush();
+  (t.v as unknown as { deps: PlanDeps }).deps.planRounds = async () => { throw new Error('boom'); };
+  await t.v.load();
+  ok(byAttr(t.host, 'data-round', '1').length === 1 && !t.host.textContent.includes('No plan yet'), 'rounds kept');
+  stop();
+});
+
+test('F2: stageName and elapsedText', () => {
+  const rv = (role: string, rev: number) => review(role, 1, 'revise', 's', rev);
+  eq(stageName('compiling', [], 1), 'Compiler: turning the plan into tasks');
+  eq(stageName('plan_ready', [], 1), '');
+  eq(stageName('planning', [], 0), 'Planner: drafting the first plan');
+  eq(stageName('planning', [], 1), 'Architect: reviewing plan revision 1');
+  eq(stageName('planning', [{ round: 1, reviews: [rv('architect', 1)] }], 1), 'Critic: reviewing round 1');
+  eq(stageName('planning', [{ round: 1, reviews: [rv('architect', 1), rv('critic', 1)] }], 1), 'Planner: revising the plan after round 1');
+  eq(stageName('planning', [{ round: 1, reviews: [rv('architect', 1), rv('critic', 1)] }], 2), 'Architect: reviewing plan revision 2');
+  eq([0, 59000, 65000, 3725000].map(elapsedText), ['0s', '59s', '1m 05s', '62m 05s']);
 });
 
 void run('agentflow-plan');

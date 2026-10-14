@@ -8,7 +8,7 @@ import { confirmDialog, showToast } from '@shared';
 import { api, type DocView, type EffortView, type PlanDoc, type PlanReview, type PlanRound, type PlanView as PlanState } from './api.js';
 import { chooseEffort, effortBar } from './current.js';
 import { chip, h, replace, type Child } from './dom.js';
-import { subscribe, type AgentflowEvent } from './events.js';
+import { isTransient, startPoll, subscribe, type AgentflowEvent } from './events.js';
 import { badge, button, section } from './forms.js';
 
 export type PlanDeps = Pick<typeof api, 'efforts' | 'plan' | 'planRounds' | 'planRevisions' | 'planRevision' | 'generatePlan' | 'approvePlan'> & {
@@ -64,6 +64,24 @@ export function renderReview(r: PlanReview | undefined, role: string): HTMLEleme
       h('li', {}, h('strong', { text: i.severity }), ` ${i.description}`, i.file ? ` (${i.file}${i.line ? ':' + i.line : ''})` : null))) : null);
 }
 
+/** elapsedText formats a duration as "42s" or "3m 05s". */
+export function elapsedText(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
+}
+
+/** stageName says what the engine is doing now, from the effort status and the plan rounds so far. */
+export function stageName(status: string, rounds: PlanRound[], latestRevision: number): string {
+  if (status === 'compiling') return 'Compiler: turning the plan into tasks';
+  if (status !== 'planning') return '';
+  const reviewed = Math.max(0, ...rounds.flatMap((r) => r.reviews.map((x) => x.plan_revision)));
+  if (latestRevision === 0) return 'Planner: drafting the first plan';
+  if (latestRevision > reviewed) return `Architect: reviewing plan revision ${latestRevision}`;
+  const last = rounds[rounds.length - 1];
+  if (last && !last.reviews.some((x) => x.role === 'critic')) return `Critic: reviewing round ${last.round}`;
+  return `Planner: revising the plan after round ${last?.round ?? 1}`;
+}
+
 export class PlanViewer {
   efforts: EffortView[] = [];
   current: EffortView | undefined;
@@ -74,8 +92,14 @@ export class PlanViewer {
   tab: PlanTab = 'planner';
   private docs = new Map<number, PlanDoc>();
   private viewing: DocView<PlanDoc> | null = null;
+  /** The newest plan document the snapshot knows: the presented plan, else the latest revision. */
+  private latestDoc: PlanDoc | undefined;
   private loaded = false;
   private off: (() => void) | null = null;
+  private stopPoll: (() => void) | null = null;
+  private ticker: ReturnType<typeof setInterval> | null = null;
+  private elapsedEl: HTMLElement | null = null;
+  private since = 0;
 
   constructor(private host: HTMLElement, private slug: string, private deps: PlanDeps) {}
 
@@ -84,11 +108,21 @@ export class PlanViewer {
       const mine = 'project' in ev && ev.project === this.slug;
       if (ev.type === 'state.changed' || (mine && (ev.type === 'effort.update' || ev.type === 'project.update'))) void this.load();
     });
+    this.stopPoll = startPoll(() => isTransient(this.current?.status), () => this.load());
     void this.load();
     return () => {
       this.off?.();
       this.off = null;
+      this.stopPoll?.();
+      this.stopPoll = null;
+      this.stopTicker();
     };
+  }
+
+  private stopTicker(): void {
+    if (this.ticker) clearInterval(this.ticker);
+    this.ticker = null;
+    this.elapsedEl = null;
   }
 
   async load(): Promise<void> {
@@ -102,24 +136,44 @@ export class PlanViewer {
     await this.loadPlan();
   }
 
+  /**
+   * loadPlan fetches the plan, rounds and revisions as one snapshot and swaps
+   * it in whole, so the view never mixes a new status with old rounds. A failed
+   * fetch keeps what is shown.
+   */
   private async loadPlan(): Promise<void> {
     const ef = this.current;
-    this.state = null;
-    this.rounds = [];
-    this.revisions = [];
-    this.viewing = null;
-    if (ef) {
-      try {
-        const [state, rounds, revisions] = await Promise.all([
-          this.deps.plan(this.slug, ef.id), this.deps.planRounds(this.slug, ef.id), this.deps.planRevisions(this.slug, ef.id),
-        ]);
-        this.state = state;
-        this.rounds = (rounds.rounds ?? []).map((r) => ({ ...r, reviews: r.reviews ?? [] }));
-        this.revisions = revisions ?? [];
-        this.state = { ...state, warnings: rounds.warnings ?? state.warnings, waiting: rounds.waiting ?? state.waiting };
-      } catch {
-        // apiFetch already told the user.
+    if (!ef) {
+      this.state = null;
+      this.rounds = [];
+      this.revisions = [];
+      this.viewing = null;
+      this.latestDoc = undefined;
+      this.render();
+      return;
+    }
+    try {
+      const [state, rounds, revisions] = await Promise.all([
+        this.deps.plan(this.slug, ef.id), this.deps.planRounds(this.slug, ef.id), this.deps.planRevisions(this.slug, ef.id),
+      ]);
+      const revs = revisions ?? [];
+      let latestDoc = state.plan;
+      if (!latestDoc && revs.length > 0) {
+        try {
+          latestDoc = (await this.deps.planRevision(this.slug, ef.id, Math.max(...revs.map((r) => r.revision)))).json;
+        } catch {
+          // apiFetch already told the user.
+        }
       }
+      if (this.current?.id !== ef.id) return; // the reader picked another effort meanwhile
+      this.state = { ...state, warnings: rounds.warnings ?? state.warnings, waiting: rounds.waiting ?? state.waiting };
+      this.current = { ...ef, status: state.status };
+      this.rounds = (rounds.rounds ?? []).map((r) => ({ ...r, reviews: r.reviews ?? [] }));
+      this.revisions = revs;
+      this.latestDoc = latestDoc;
+      if (this.viewing && !revs.some((r) => r.revision === this.viewing?.revision)) this.viewing = null;
+    } catch {
+      // apiFetch already told the user.
     }
     const last = this.rounds[this.rounds.length - 1]?.round ?? 0;
     if (this.round === 0 || !this.rounds.some((r) => r.round === this.round)) this.round = last;
@@ -149,7 +203,7 @@ export class PlanViewer {
     const ef = this.current;
     const rev = this.roundPlanRevision();
     if (ef && rev > 0) return this.docs.get(rev * 1000 + ef.id);
-    return this.state?.plan;
+    return this.state?.plan ?? this.latestDoc;
   }
 
   async generate(): Promise<void> {
@@ -197,12 +251,33 @@ export class PlanViewer {
     return h('div', { class: 'plan-header', attrs: { 'data-role': 'plan-header' } },
       h('div', { class: 'plan-meta' },
         chip(ef.status),
-        st.revision > 0 ? h('span', { class: 'plan-frd-id', text: `revision ${st.revision} · ${st.rounds} round${st.rounds === 1 ? '' : 's'}` }) : h('span', { class: 'plan-frd-id', text: 'no plan yet' }),
+        st.revision > 0 ? h('span', { class: 'plan-frd-id', text: `revision ${st.revision} · ${st.rounds} round${st.rounds === 1 ? '' : 's'}` })
+          : h('span', { class: 'plan-frd-id', text: this.latestDoc ? 'first draft, not reviewed yet' : 'no plan yet' }),
         st.not_critic_approved ? badge('not critic-approved', 'warn') : null,
         approved ? badge(`revision ${approved} approved`, 'ok') : null),
       h('div', { class: 'plan-actions' },
         canGenerate ? button(st.revision > 0 ? 'Regenerate plan' : 'Generate plan', () => void this.generate(), { field: 'generate-plan' }) : null,
         canApprove ? button('Approve plan', () => void this.approve(), { primary: true, field: 'approve-plan' }) : null));
+  }
+
+  /** strip is the live indicator shown while the engine plans or compiles: stage, and time since the effort last changed. */
+  private strip(ef: EffortView): HTMLElement | null {
+    if (ef.status !== 'planning' && ef.status !== 'compiling') {
+      this.stopTicker();
+      return null;
+    }
+    const stage = stageName(ef.status, this.rounds, Math.max(0, ...this.revisions.map((r) => r.revision)));
+    this.since = ef.updated;
+    const elapsed = h('span', { class: 'field-hint', text: this.since > 0 ? elapsedText(Date.now() - this.since) : '', attrs: { 'data-role': 'elapsed' } });
+    this.elapsedEl = elapsed;
+    if (!this.ticker) {
+      this.ticker = setInterval(() => {
+        if (this.elapsedEl && this.since > 0) this.elapsedEl.textContent = elapsedText(Date.now() - this.since);
+      }, 1000);
+    }
+    return h('div', { class: 'progress-strip', attrs: { 'data-role': 'progress-strip', role: 'status' } },
+      h('div', { class: 'row-actions' }, h('strong', { text: stage }), elapsed),
+      h('div', { class: 'progress-bar-wrap' }, h('div', { class: 'progress-bar progress-indeterminate' })));
   }
 
   private roundTabs(): HTMLElement {
@@ -247,6 +322,7 @@ export class PlanViewer {
     const ef = this.current;
     const st = this.state;
     if (!ef || !st) {
+      this.stopTicker();
       replace(this.host, h('div', { class: 'plan-empty' }, h('h3', { text: 'No effort to plan' }), h('p', { text: 'Create an effort and save its FRD on the FRD tab first.' })));
       return;
     }
@@ -257,8 +333,8 @@ export class PlanViewer {
         this.header(ef, st),
         warnings.length ? h('div', { class: 'warn-box', attrs: { 'data-role': 'plan-warnings' } }, ...warnings.map((w) => h('p', { text: w }))) : null,
         st.waiting ? h('div', { class: 'warn-box', attrs: { 'data-role': 'plan-waiting' } }, h('p', { text: `Waiting: ${st.waiting}` })) : null,
-        ef.status === 'planning' && !st.waiting ? h('p', { class: 'field-hint', text: 'Planning is running; this page updates as rounds finish.' }) : null,
-        this.rounds.length > 0 || st.plan ? this.roundTabs() : h('div', { class: 'plan-empty' }, h('h3', { text: 'No plan yet' }), h('p', { text: 'Generate a plan once the FRD is saved.' })),
+        this.strip(ef),
+        this.rounds.length > 0 || this.plannerDoc() ? this.roundTabs() : h('div', { class: 'plan-empty' }, h('h3', { text: 'No plan yet' }), h('p', { text: 'Generate a plan once the FRD is saved.' })),
         this.revisionList()));
   }
 }

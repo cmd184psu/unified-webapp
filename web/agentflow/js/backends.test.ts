@@ -1,5 +1,5 @@
 import { test, run, eq, ok, installFakeDom, FakeEl, asEl, byField, byAttr, button, flush, findAll } from './testkit';
-import { BackendsView, isPaid, lastForRoles, unconsented, type BackendsDeps } from './backends';
+import { BackendsView, isPaid, isPrivateHost, lastForRoles, unconsented, type BackendsDeps } from './backends';
 import { dispatch } from './events';
 import { ApiError, type Backend, type BackendInput, type BackendResult, type Candidate, type ModelStat, type ProjectView } from './api';
 
@@ -189,6 +189,47 @@ test('MB5: a paid candidate shows the paid badge and cannot be saved without opt
   await flush();
   eq(t.bodies.cands, [{ backend: 'b1', model: 'm1' }, { backend: 'b1', model: 'm2-paid' }]);
   stop();
+});
+
+test('F5: Save order on an empty list adds the picked pair and saves in one step; nothing picked keeps the message', async () => {
+  const t = harness({ backends: [be('b1')] });
+  const stop = t.view.mount();
+  await flush();
+  const worker = (): FakeEl => byAttr(t.host, 'data-role-editor', 'worker')[0];
+  button(worker(), 'Save order').click();
+  await flush();
+  eq(t.bodies.cands, [{ backend: 'b1', model: 'm1' }]);
+  stop();
+  const none = harness({ backends: [be('b1', { retired: true })] });
+  const stop2 = none.view.mount();
+  await flush();
+  const w = byAttr(none.host, 'data-role-editor', 'worker')[0];
+  button(w, 'Save order').click();
+  await flush();
+  ok(w.textContent.includes('Nothing to save yet'), 'message kept when nothing is selected');
+  eq(none.log.filter((l) => l.startsWith('cands:')), []);
+  stop2();
+});
+
+test('F4: a backend flagged hosted on a private or loopback host gets a warning badge', async () => {
+  const t = harness({ backends: [
+    be('ollama-m5', { hosted: true, host: 'http://192.168.1.20:11434' }),
+    be('cloud', { hosted: true, host: 'https://api.example.com' }),
+    be('local', { hosted: false, host: 'http://127.0.0.1:11434' }),
+  ] });
+  const stop = t.view.mount();
+  await flush();
+  const warn = (name: string): number => byAttr(byAttr(t.host, 'data-backend', name)[0], 'data-role', 'hosted-warning').length;
+  eq([warn('ollama-m5'), warn('cloud'), warn('local')], [1, 0, 0]);
+  ok(byAttr(t.host, 'data-role', 'hosted-warning')[0].getAttribute('title')?.includes('mis-flagged'), 'tooltip explains');
+  stop();
+});
+
+test('F4: isPrivateHost recognises loopback and private ranges only', () => {
+  const yes = ['http://localhost:11434', 'http://127.0.0.1:1', '10.1.2.3:8080', 'http://192.168.0.5', 'http://172.16.0.1', 'http://172.31.9.9:80', 'http://[::1]:80'];
+  const no = ['https://api.openai.com', 'http://172.15.0.1', 'http://172.32.0.1', 'http://8.8.8.8', 'http://192.169.0.1', 'http://example.com:80'];
+  eq(yes.filter((h) => !isPrivateHost(h)), []);
+  eq(no.filter((h) => isPrivateHost(h)), []);
 });
 
 test('candidates reorder and remove locally before saving', async () => {

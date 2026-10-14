@@ -1,6 +1,129 @@
 // web/agentflow/js/main.ts
 import { ThemeManager, HamburgerMenu } from "/shared/dist/shared.mjs";
 
+// web/agentflow/js/api.ts
+import { alertDialog } from "/shared/dist/shared.mjs";
+var ApiError = class extends Error {
+  constructor(status, message, field) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.field = field;
+  }
+};
+function fail(err, quiet) {
+  if (!quiet) void alertDialog(err.message);
+  throw err;
+}
+async function apiFetch(path, opts = {}) {
+  if (!path.startsWith("/api/")) throw new Error(`apiFetch: ${path} is not an /api path`);
+  const init = { method: opts.method ?? "GET" };
+  if (opts.body !== void 0) {
+    init.headers = { "Content-Type": "application/json" };
+    init.body = typeof opts.body === "string" ? opts.body : JSON.stringify(opts.body);
+  }
+  let resp;
+  try {
+    resp = await fetch(path, init);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return fail(new ApiError(0, "Network error contacting the server: " + msg), opts.quiet);
+  }
+  if (resp.status === 401) {
+    window.location.reload();
+    throw new ApiError(401, "unauthorized");
+  }
+  if (!resp.ok) {
+    let message = resp.statusText || `HTTP ${resp.status}`;
+    let field;
+    try {
+      const body = await resp.json();
+      if (body.error) message = body.error;
+      field = body.field;
+    } catch {
+    }
+    return fail(new ApiError(resp.status, message, field), opts.quiet);
+  }
+  if (resp.status === 204) return void 0;
+  return await resp.json();
+}
+var enc = encodeURIComponent;
+var proj = (slug) => `/api/projects/${enc(slug)}`;
+var eff = (slug, id) => `${proj(slug)}/efforts/${id}`;
+var get = (path, o) => apiFetch(path, o);
+var send = (method, path, body, o) => apiFetch(path, { ...o, method, body });
+var api = {
+  // Health and opencode
+  health: (o) => get("/api/health", o),
+  opencodeVersion: (refresh = false) => get(`/api/opencode/version${refresh ? "?refresh=1" : ""}`),
+  // Projects
+  projects: () => get("/api/projects"),
+  project: (slug) => get(proj(slug)),
+  createProject: (p, o) => send("POST", "/api/projects", p, o),
+  gitInit: (repoPath) => send("POST", "/api/projects/git-init", { repo_path: repoPath, confirm: true }),
+  patchProject: (slug, p, o) => send("PATCH", proj(slug), p, o),
+  deleteProject: (slug) => send("DELETE", proj(slug)),
+  limits: (slug) => get(`${proj(slug)}/limits`),
+  putLimits: (slug, limits, o) => send("PUT", `${proj(slug)}/limits`, { limits }, o),
+  // Backends, candidates, settings
+  backends: () => get("/api/backends"),
+  createBackend: (b, o) => send("POST", "/api/backends", b, o),
+  probeBackend: (host, apiType) => send("POST", "/api/backends/probe", { host, api_type: apiType }, { quiet: true }),
+  patchBackend: (name, b, o) => send("PATCH", `/api/backends/${enc(name)}`, b, o),
+  retireBackend: (name, cancelRunning) => send("POST", `/api/backends/${enc(name)}/retire`, { cancel_running: cancelRunning }),
+  enableBackend: (name) => send("POST", `/api/backends/${enc(name)}/enable`),
+  candidates: () => get("/api/candidates"),
+  putCandidates: (role, candidates, o) => send("PUT", `/api/candidates/${enc(role)}`, { candidates }, o),
+  putProjectCandidates: (slug, role, candidates, o) => send("PUT", `${proj(slug)}/candidates/${enc(role)}`, { candidates }, o),
+  clearProjectCandidates: (slug, role) => send("DELETE", `${proj(slug)}/candidates/${enc(role)}`),
+  settings: () => get("/api/settings"),
+  putSettings: (s, o) => send("PUT", "/api/settings", s, o),
+  modelStats: () => get("/api/stats/models"),
+  // Efforts
+  efforts: (slug) => get(`${proj(slug)}/efforts`),
+  effort: (slug, id) => get(eff(slug, id)),
+  createEffort: (slug, title, deliberate, o, budget) => send("POST", `${proj(slug)}/efforts`, { title, deliberate, ...budget }, o),
+  patchEffort: (slug, id, patch, o) => send("PATCH", eff(slug, id), patch, o),
+  importFRD: (slug, frdJSON, o) => send("POST", `${proj(slug)}/efforts/import`, frdJSON, o),
+  abandonEffort: (slug, id) => send("POST", `${eff(slug, id)}/abandon`),
+  setYOLO: (slug, id, on, confirm) => send("POST", `${eff(slug, id)}/yolo`, { on, confirm }),
+  yoloInvariants: () => get("/api/yolo/invariants"),
+  // FRD and plan documents
+  frd: (slug, id, o) => get(`${eff(slug, id)}/frd`, o),
+  putFRD: (slug, id, frd, o) => send("PUT", `${eff(slug, id)}/frd`, frd, o),
+  frdRevisions: (slug, id) => get(`${eff(slug, id)}/frd/revisions`),
+  frdRevision: (slug, id, n) => get(`${eff(slug, id)}/frd/revisions/${n}`),
+  approveFRD: (slug, id, revision) => send("POST", `${eff(slug, id)}/frd/approve`, revision === void 0 ? {} : { revision }),
+  generatePlan: (slug, id) => send("POST", `${eff(slug, id)}/plan/generate`),
+  plan: (slug, id, o) => get(`${eff(slug, id)}/plan`, o),
+  putPlan: (slug, id, plan, o) => send("PUT", `${eff(slug, id)}/plan`, plan, o),
+  planRounds: (slug, id) => get(`${eff(slug, id)}/plan/rounds`),
+  planRevisions: (slug, id) => get(`${eff(slug, id)}/plan/revisions`),
+  planRevision: (slug, id, n) => get(`${eff(slug, id)}/plan/revisions/${n}`),
+  approvePlan: (slug, id) => send("POST", `${eff(slug, id)}/plan/approve`),
+  // Queue and tasks
+  compile: (slug, id) => send("POST", `${eff(slug, id)}/compile`),
+  queue: (slug, id, o) => get(`${eff(slug, id)}/queue`, o),
+  /** gitCommands lists the commands to merge and push a complete effort's branch; agentflow runs none of them (GIT4). */
+  gitCommands: (slug, id, o) => get(`${eff(slug, id)}/git-commands`, o),
+  approveQueue: (slug, id, hash, o) => send("POST", `${eff(slug, id)}/queue/approve`, { hash }, o),
+  tasks: (slug, id) => get(`${eff(slug, id)}/tasks`),
+  task: (slug, id, key) => get(`${eff(slug, id)}/tasks/${enc(key)}`),
+  /** editTask answers with the queue, which is back in draft until it is approved again (AT9). */
+  editTask: (slug, id, key, def, o) => send("PUT", `${eff(slug, id)}/tasks/${enc(key)}`, def, o),
+  retryTask: (slug, id, key, clean) => send("POST", `${eff(slug, id)}/tasks/${enc(key)}/retry`, { clean }),
+  overrideTask: (slug, id, key, reason) => send("POST", `${eff(slug, id)}/tasks/${enc(key)}/override`, { reason }),
+  // Run control: answers with the project's overview
+  run: (slug, op) => send("POST", `${proj(slug)}/run/${op}`)
+};
+function exportURL(effort, format, doc, revision) {
+  const base = doc ? `/api/efforts/${effort}/${doc}/export` : `/api/efforts/${effort}/export`;
+  return `${base}?format=${format}${revision ? `&revision=${revision}` : ""}`;
+}
+function stageStreamURL(stage) {
+  return `/api/stages/${stage}/stream`;
+}
+
 // web/agentflow/js/dom.ts
 function h(tag, props = {}, ...children) {
   const el = document.createElement(tag);
@@ -90,131 +213,104 @@ function startEvents() {
   wanted = true;
   connect();
 }
+var TRANSIENT = /* @__PURE__ */ new Set(["planning", "compiling", "running"]);
+function isTransient(status) {
+  return status !== void 0 && TRANSIENT.has(status);
+}
+var pollSettings = { ms: 5e3 };
+function startPoll(active2, fn) {
+  let busy = false;
+  const id = setInterval(() => {
+    if (busy || !active2()) return;
+    busy = true;
+    void Promise.resolve(fn()).finally(() => {
+      busy = false;
+    });
+  }, pollSettings.ms);
+  return () => clearInterval(id);
+}
+
+// web/agentflow/js/health.ts
+function healthMessage(hl) {
+  if (!hl || hl.status === "ok") return "";
+  const oc = hl.opencode;
+  const why = oc?.error ? `: ${oc.error}` : "";
+  return `AgentFlow is degraded. opencode is ${oc?.status ?? "unavailable"}${why}. Planning and running tasks will fail until it is fixed.`;
+}
+var HealthBanner = class {
+  constructor(host, deps) {
+    this.host = host;
+    this.deps = deps;
+    this.health = null;
+    this.stopPoll = null;
+    this.off = null;
+  }
+  mount() {
+    this.off = subscribe((ev) => {
+      if (ev.type === "settings.update" || ev.type === "state.changed") void this.load();
+    });
+    this.stopPoll = startPoll(() => healthMessage(this.health) !== "", () => this.load());
+    void this.load();
+    return () => {
+      this.off?.();
+      this.stopPoll?.();
+      this.off = this.stopPoll = null;
+    };
+  }
+  async load() {
+    try {
+      this.health = await this.deps.health({ quiet: true });
+    } catch {
+      return;
+    }
+    this.render();
+  }
+  render() {
+    const msg = healthMessage(this.health);
+    if (msg) {
+      replace(this.host, h("div", { class: "warn-box health-banner", attrs: { role: "alert", "data-role": "health-banner" } }, h("p", { text: msg })));
+      this.host.removeAttribute("hidden");
+    } else {
+      replace(this.host);
+      this.host.setAttribute("hidden", "");
+    }
+  }
+};
 
 // web/agentflow/js/overview.ts
-import { confirmDialog as confirmDialog2 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog2, copyText } from "/shared/dist/shared.mjs";
 
-// web/agentflow/js/api.ts
-import { alertDialog } from "/shared/dist/shared.mjs";
-var ApiError = class extends Error {
-  constructor(status, message, field) {
-    super(message);
-    this.name = "ApiError";
-    this.status = status;
-    this.field = field;
-  }
-};
-function fail(err, quiet) {
-  if (!quiet) void alertDialog(err.message);
-  throw err;
+// web/agentflow/js/merge-card.ts
+function mergeBranch(ef, git) {
+  return git?.branch || ef.integration_branch || `agentflow/effort-${ef.id}`;
 }
-async function apiFetch(path, opts = {}) {
-  if (!path.startsWith("/api/")) throw new Error(`apiFetch: ${path} is not an /api path`);
-  const init = { method: opts.method ?? "GET" };
-  if (opts.body !== void 0) {
-    init.headers = { "Content-Type": "application/json" };
-    init.body = typeof opts.body === "string" ? opts.body : JSON.stringify(opts.body);
-  }
-  let resp;
-  try {
-    resp = await fetch(path, init);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return fail(new ApiError(0, "Network error contacting the server: " + msg), opts.quiet);
-  }
-  if (resp.status === 401) {
-    window.location.reload();
-    throw new ApiError(401, "unauthorized");
-  }
-  if (!resp.ok) {
-    let message = resp.statusText || `HTTP ${resp.status}`;
-    let field;
-    try {
-      const body = await resp.json();
-      if (body.error) message = body.error;
-      field = body.field;
-    } catch {
-    }
-    return fail(new ApiError(resp.status, message, field), opts.quiet);
-  }
-  if (resp.status === 204) return void 0;
-  return await resp.json();
-}
-var enc = encodeURIComponent;
-var proj = (slug) => `/api/projects/${enc(slug)}`;
-var eff = (slug, id) => `${proj(slug)}/efforts/${id}`;
-var get = (path, o) => apiFetch(path, o);
-var send = (method, path, body, o) => apiFetch(path, { ...o, method, body });
-var api = {
-  // Health and opencode
-  health: () => get("/api/health"),
-  opencodeVersion: (refresh = false) => get(`/api/opencode/version${refresh ? "?refresh=1" : ""}`),
-  // Projects
-  projects: () => get("/api/projects"),
-  project: (slug) => get(proj(slug)),
-  createProject: (p, o) => send("POST", "/api/projects", p, o),
-  gitInit: (repoPath) => send("POST", "/api/projects/git-init", { repo_path: repoPath, confirm: true }),
-  patchProject: (slug, p, o) => send("PATCH", proj(slug), p, o),
-  deleteProject: (slug) => send("DELETE", proj(slug)),
-  limits: (slug) => get(`${proj(slug)}/limits`),
-  putLimits: (slug, limits, o) => send("PUT", `${proj(slug)}/limits`, { limits }, o),
-  // Backends, candidates, settings
-  backends: () => get("/api/backends"),
-  createBackend: (b, o) => send("POST", "/api/backends", b, o),
-  probeBackend: (host, apiType) => send("POST", "/api/backends/probe", { host, api_type: apiType }, { quiet: true }),
-  patchBackend: (name, b, o) => send("PATCH", `/api/backends/${enc(name)}`, b, o),
-  retireBackend: (name, cancelRunning) => send("POST", `/api/backends/${enc(name)}/retire`, { cancel_running: cancelRunning }),
-  enableBackend: (name) => send("POST", `/api/backends/${enc(name)}/enable`),
-  candidates: () => get("/api/candidates"),
-  putCandidates: (role, candidates, o) => send("PUT", `/api/candidates/${enc(role)}`, { candidates }, o),
-  putProjectCandidates: (slug, role, candidates, o) => send("PUT", `${proj(slug)}/candidates/${enc(role)}`, { candidates }, o),
-  clearProjectCandidates: (slug, role) => send("DELETE", `${proj(slug)}/candidates/${enc(role)}`),
-  settings: () => get("/api/settings"),
-  putSettings: (s, o) => send("PUT", "/api/settings", s, o),
-  modelStats: () => get("/api/stats/models"),
-  // Efforts
-  efforts: (slug) => get(`${proj(slug)}/efforts`),
-  effort: (slug, id) => get(eff(slug, id)),
-  createEffort: (slug, title, deliberate, o, budget) => send("POST", `${proj(slug)}/efforts`, { title, deliberate, ...budget }, o),
-  patchEffort: (slug, id, patch, o) => send("PATCH", eff(slug, id), patch, o),
-  importFRD: (slug, frdJSON, o) => send("POST", `${proj(slug)}/efforts/import`, frdJSON, o),
-  abandonEffort: (slug, id) => send("POST", `${eff(slug, id)}/abandon`),
-  setYOLO: (slug, id, on, confirm) => send("POST", `${eff(slug, id)}/yolo`, { on, confirm }),
-  yoloInvariants: () => get("/api/yolo/invariants"),
-  // FRD and plan documents
-  frd: (slug, id, o) => get(`${eff(slug, id)}/frd`, o),
-  putFRD: (slug, id, frd, o) => send("PUT", `${eff(slug, id)}/frd`, frd, o),
-  frdRevisions: (slug, id) => get(`${eff(slug, id)}/frd/revisions`),
-  frdRevision: (slug, id, n) => get(`${eff(slug, id)}/frd/revisions/${n}`),
-  approveFRD: (slug, id, revision) => send("POST", `${eff(slug, id)}/frd/approve`, revision === void 0 ? {} : { revision }),
-  generatePlan: (slug, id) => send("POST", `${eff(slug, id)}/plan/generate`),
-  plan: (slug, id, o) => get(`${eff(slug, id)}/plan`, o),
-  putPlan: (slug, id, plan, o) => send("PUT", `${eff(slug, id)}/plan`, plan, o),
-  planRounds: (slug, id) => get(`${eff(slug, id)}/plan/rounds`),
-  planRevisions: (slug, id) => get(`${eff(slug, id)}/plan/revisions`),
-  planRevision: (slug, id, n) => get(`${eff(slug, id)}/plan/revisions/${n}`),
-  approvePlan: (slug, id) => send("POST", `${eff(slug, id)}/plan/approve`),
-  // Queue and tasks
-  compile: (slug, id) => send("POST", `${eff(slug, id)}/compile`),
-  queue: (slug, id, o) => get(`${eff(slug, id)}/queue`, o),
-  /** gitCommands lists the commands to merge and push a complete effort's branch; agentflow runs none of them (GIT4). */
-  gitCommands: (slug, id, o) => get(`${eff(slug, id)}/git-commands`, o),
-  approveQueue: (slug, id, hash, o) => send("POST", `${eff(slug, id)}/queue/approve`, { hash }, o),
-  tasks: (slug, id) => get(`${eff(slug, id)}/tasks`),
-  task: (slug, id, key) => get(`${eff(slug, id)}/tasks/${enc(key)}`),
-  /** editTask answers with the queue, which is back in draft until it is approved again (AT9). */
-  editTask: (slug, id, key, def, o) => send("PUT", `${eff(slug, id)}/tasks/${enc(key)}`, def, o),
-  retryTask: (slug, id, key, clean) => send("POST", `${eff(slug, id)}/tasks/${enc(key)}/retry`, { clean }),
-  overrideTask: (slug, id, key, reason) => send("POST", `${eff(slug, id)}/tasks/${enc(key)}/override`, { reason }),
-  // Run control: answers with the project's overview
-  run: (slug, op) => send("POST", `${proj(slug)}/run/${op}`)
-};
-function exportURL(effort, format, doc, revision) {
-  const base = doc ? `/api/efforts/${effort}/${doc}/export` : `/api/efforts/${effort}/export`;
-  return `${base}?format=${format}${revision ? `&revision=${revision}` : ""}`;
-}
-function stageStreamURL(stage) {
-  return `/api/stages/${stage}/stream`;
+function mergeCard(ef, git, copy) {
+  const branch = mergeBranch(ef, git);
+  const files = git?.files;
+  return h(
+    "div",
+    { class: "merge-card", attrs: { "data-role": "git-commands" } },
+    h("h4", { text: `Ready to merge: ${ef.title}` }),
+    h("p", { text: `Nothing was merged into main. The finished work is on the branch ${branch}; main is unchanged until you merge it yourself. agentflow never merges into main and never pushes.` }),
+    git?.commits?.length ? h("ul", { class: "plan-review-notes", attrs: { "data-role": "merge-commits" } }, ...git.commits.map((c) => h("li", { text: `${c.sha.slice(0, 7)} ${c.subject}` }))) : null,
+    files !== void 0 || git?.diffstat ? h(
+      "div",
+      { attrs: { "data-role": "merge-diffstat" } },
+      files !== void 0 ? h("p", { class: "field-hint", text: `${files} file${files === 1 ? "" : "s"} changed` }) : null,
+      git?.diffstat ? h("pre", { class: "detail-mono", text: git.diffstat }) : null
+    ) : null,
+    git?.commands.length ? h(
+      "div",
+      {},
+      h("p", { text: "To merge it, run:" }),
+      ...git.commands.map((c) => h(
+        "div",
+        { class: "merge-command" },
+        h("pre", { class: "detail-mono", text: c }),
+        h("button", { class: "icon-btn", text: "\u29C9", attrs: { type: "button", title: "Copy this command", "aria-label": "Copy this command", "data-action": "copy-command" }, on: { click: () => copy(c) } })
+      ))
+    ) : h("p", { class: "field-hint", text: `The commands could not be loaded. To merge, run: git merge --no-ff ${branch}` })
+  );
 }
 
 // web/agentflow/js/yolo.ts
@@ -427,7 +523,10 @@ var defaultDeps = (open) => ({
   list: () => api.projects(),
   run: (slug, op) => api.run(slug, op),
   confirm: (m) => confirmDialog2(m, { confirmLabel: "Stop" }),
-  open
+  open,
+  efforts: api.efforts,
+  gitCommands: api.gitCommands,
+  copy: (t) => void copyText(t)
 });
 function buttonsFor(runState) {
   switch (runState) {
@@ -461,18 +560,25 @@ var Overview = class {
     this.host = host;
     this.deps = deps;
     this.rows = [];
+    /** Per project, the newest effort when it is complete (the project row's active effort is then null). */
+    this.done = /* @__PURE__ */ new Map();
+    this.git = /* @__PURE__ */ new Map();
     this.loaded = false;
     this.refreshing = false;
     this.again = false;
     this.off = null;
+    this.stopPoll = null;
   }
   /** mount fetches the rows and starts listening to the event stream; it returns the dispose. */
   mount() {
     this.off = subscribe((ev) => this.handle(ev));
+    this.stopPoll = startPoll(() => this.rows.some((r) => isTransient(r.effort?.status)), () => this.refresh());
     void this.refresh();
     return () => {
       this.off?.();
       this.off = null;
+      this.stopPoll?.();
+      this.stopPoll = null;
     };
   }
   /** refresh refetches the rows; overlapping calls collapse into one follow-up fetch. */
@@ -487,6 +593,7 @@ var Overview = class {
         this.again = false;
         try {
           this.rows = await this.deps.list();
+          await this.loadCompleted();
           this.loaded = true;
         } catch {
         }
@@ -494,6 +601,21 @@ var Overview = class {
       } while (this.again);
     } finally {
       this.refreshing = false;
+    }
+  }
+  /** loadCompleted finds, for each project without an active effort, its newest effort when that is complete, with its git commands. */
+  async loadCompleted() {
+    const { efforts, gitCommands } = this.deps;
+    this.done.clear();
+    if (!efforts) return;
+    for (const p of this.rows.filter((r) => !r.effort)) {
+      try {
+        const newest = (await efforts(p.slug)).reduce((m, e) => !m || e.id > m.id ? e : m, void 0);
+        if (!newest || newest.status !== "complete") continue;
+        this.done.set(p.slug, newest);
+        if (gitCommands && !this.git.has(newest.id)) this.git.set(newest.id, await gitCommands(p.slug, newest.id, { quiet: true }).catch(() => null));
+      } catch {
+      }
     }
   }
   /** handle applies one stream event: run-state changes show at once, the rest refetch. */
@@ -592,7 +714,8 @@ var Overview = class {
       bar,
       h("div", { class: "progress-pct", text }),
       ...work,
-      h("div", { class: "task-item-meta" }, ...buttons)
+      h("div", { class: "task-item-meta" }, ...buttons),
+      this.done.has(p.slug) ? mergeCard(this.done.get(p.slug), this.git.get(this.done.get(p.slug).id) ?? null, (t) => this.deps.copy?.(t)) : null
     );
   }
 };
@@ -629,12 +752,16 @@ function buildRoleEditor(o) {
   fillModels();
   const save = async () => {
     errors.clear();
+    if (o.rows().length === 0 && pickBackend.value && pickModel.value) {
+      o.setDraft([{ backend: pickBackend.value, model: pickModel.value, optIn: !isPaid(o.backends, pickBackend.value, pickModel.value) }]);
+    }
     if (o.rows().length === 0) {
       errors.show(new Error("Nothing to save yet: pick a backend and model, press Add candidate, then Save order"));
       return;
     }
     const missing = unconsented(o.backends, o.rows());
     if (missing.length > 0) {
+      draw();
       errors.show(new Error(`Tick the paid opt-in for: ${missing.map((m) => `${m.backend}/${m.model}`).join(", ")}`));
       return;
     }
@@ -836,6 +963,15 @@ function mountSettings(host) {
 }
 
 // web/agentflow/js/backends.ts
+function isPrivateHost(host) {
+  const m = /^(?:[a-z][a-z0-9+.-]*:\/\/)?(?:[^@/]*@)?(\[[^\]]*\]|[^:/?#]*)/i.exec(host.trim());
+  const name = (m?.[1] ?? "").toLowerCase();
+  if (name === "localhost" || name === "[::1]") return true;
+  const ip = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(name);
+  if (!ip) return false;
+  const [a, b] = [Number(ip[1]), Number(ip[2])];
+  return a === 10 || a === 127 || a === 192 && b === 168 || a === 172 && b >= 16 && b <= 31;
+}
 var API_TYPES = [
   ["ollama", "ollama"],
   ["openai_compatible", "openai compatible"],
@@ -1090,6 +1226,7 @@ var BackendsView = class {
           h("strong", { text: b.name }),
           b.paid ? badge("paid") : null,
           b.hosted ? badge("hosted", "muted") : null,
+          b.hosted && isPrivateHost(b.host) ? h("span", { class: "badge badge-warn", text: "\u26A0 hosted?", attrs: { title: "Flagged hosted, but the host is a private or local address: it may be mis-flagged. Edit the backend and untick Hosted if it runs on your own machine or network.", "data-role": "hosted-warning" } }) : null,
           b.retired ? badge("retired", "warn") : null,
           b.down_until ? badge("unreachable", "warn") : null
         ),
@@ -1287,7 +1424,7 @@ function mountBackends(host) {
 }
 
 // web/agentflow/js/board.ts
-import { confirmDialog as confirmDialog3, copyText, showToast as showToast4 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog3, copyText as copyText2, showToast as showToast4 } from "/shared/dist/shared.mjs";
 
 // web/agentflow/js/current.ts
 var picked = /* @__PURE__ */ new Map();
@@ -1513,7 +1650,7 @@ var defaultBoardDeps = () => ({
   abandonEffort: api.abandonEffort,
   gitCommands: api.gitCommands,
   confirm: (m, label = "Confirm") => confirmDialog3(m, { confirmLabel: label }),
-  copy: (t) => void copyText(t),
+  copy: (t) => void copyText2(t),
   notify: (m) => void showToast4(m, "success")
 });
 var rec = (v) => v && typeof v === "object" ? v : {};
@@ -1570,7 +1707,7 @@ var Board = class {
     this.runState = "stopped";
     /** stopReason is why the system stopped the run ("budget"), else empty. */
     this.stopReason = "";
-    this.gitLines = null;
+    this.git = null;
     this.editing = false;
     this.detailEl = null;
     this.reasonEl = null;
@@ -1583,15 +1720,19 @@ var Board = class {
     // effort id whose git commands failed
     this.loaded = false;
     this.off = null;
+    this.stopPoll = null;
     this.errors = new FormErrors();
     this.stream = new StreamPanel(panel, streamDeps);
   }
   mount() {
     this.off = subscribe((ev) => this.handle(ev));
+    this.stopPoll = startPoll(() => isTransient(this.current?.status), () => this.refresh());
     void this.load();
     return () => {
       this.off?.();
       this.off = null;
+      this.stopPoll?.();
+      this.stopPoll = null;
       this.stream.close();
     };
   }
@@ -1619,7 +1760,7 @@ var Board = class {
     this.current = chooseEffort(this.slug, this.efforts);
     this.selected = "";
     this.detail = null;
-    this.gitLines = null;
+    this.git = null;
     this.fresh = true;
     this.stream.close();
     await this.refresh();
@@ -1642,9 +1783,9 @@ var Board = class {
       const ef = this.current;
       this.tasks = ef ? await this.deps.tasks(this.slug, ef.id) : [];
       if (ef && this.selected && this.tasks.some((t) => t.key === this.selected)) this.detail = await this.deps.task(this.slug, ef.id, this.selected);
-      if (ef?.status === "complete" && !this.gitLines && this.gitFailed !== ef.id) {
+      if (ef?.status === "complete" && !this.git && this.gitFailed !== ef.id) {
         try {
-          this.gitLines = (await this.deps.gitCommands(this.slug, ef.id, { quiet: true })).commands;
+          this.git = await this.deps.gitCommands(this.slug, ef.id, { quiet: true });
         } catch {
           this.gitFailed = ef.id;
         }
@@ -1875,17 +2016,6 @@ var Board = class {
       )
     );
   }
-  gitBox() {
-    if (!this.gitLines) return null;
-    const text = this.gitLines.join("\n");
-    return h(
-      "div",
-      { class: "detail-section", attrs: { "data-role": "git-commands" } },
-      h("h4", { text: "Merge and push (run these yourself; agentflow never pushes)" }),
-      mono(text),
-      button("Copy commands", () => this.deps.copy(text), { field: "copy-git" })
-    );
-  }
   render() {
     if (!this.loaded) {
       replace(this.host, h("p", { class: "field-hint", text: "Loading board\u2026" }));
@@ -1928,13 +2058,13 @@ var Board = class {
         ef.run_state !== this.runState && ef.run_state === "running" ? h("span", { class: "field-hint", text: "was running before restart", attrs: { "data-role": "was-running" } }) : null,
         ...controls
       ),
+      ef.status === "complete" ? mergeCard(ef, this.git, this.deps.copy) : null,
       ef.budget ? budgetBar(ef.budget) : null,
       this.runState === "stopped" && this.stopReason === "budget" ? h(
         "div",
         { class: "warn-box", attrs: { "data-role": "budget-stop" } },
         h("p", { text: "The run was stopped because the effort used up its budget. Nothing failed: raise the budget on the FRD tab and start the run again." })
       ) : null,
-      this.gitBox(),
       h(
         "div",
         { class: "console-body" },
@@ -1987,16 +2117,20 @@ var History = class {
     this.errors = new FormErrors();
     this.fileInput = h("input", { attrs: { type: "file", accept: ".json,application/json", name: "frd_file", "data-field": "frd_file" } });
     this.off = null;
+    this.stopPoll = null;
   }
   mount() {
     this.off = subscribe((ev) => {
       const mine = "project" in ev && ev.project === this.slug;
       if (ev.type === "state.changed" || mine && (ev.type === "effort.update" || ev.type === "project.update")) void this.load();
     });
+    this.stopPoll = startPoll(() => this.efforts.some((e) => isTransient(e.status)), () => this.load());
     void this.load();
     return () => {
       this.off?.();
       this.off = null;
+      this.stopPoll?.();
+      this.stopPoll = null;
     };
   }
   async load() {
@@ -2211,16 +2345,20 @@ var FrdEditor = class {
     this.loaded = false;
     this.off = null;
     this.createErrors = new FormErrors();
+    this.stopPoll = null;
   }
   mount() {
     this.off = subscribe((ev) => {
       const mine = "project" in ev && ev.project === this.slug;
       if (!this.dirty && (ev.type === "state.changed" || mine && (ev.type === "effort.update" || ev.type === "project.update"))) void this.load();
     });
+    this.stopPoll = startPoll(() => !this.dirty && isTransient(this.current?.status), () => this.load());
     void this.load();
     return () => {
       this.off?.();
       this.off = null;
+      this.stopPoll?.();
+      this.stopPoll = null;
     };
   }
   async load() {
@@ -2490,6 +2628,20 @@ function renderReview(r, role) {
     r.issues?.length ? h("ul", { class: "plan-review-notes" }, ...r.issues.map((i) => h("li", {}, h("strong", { text: i.severity }), ` ${i.description}`, i.file ? ` (${i.file}${i.line ? ":" + i.line : ""})` : null))) : null
   );
 }
+function elapsedText(ms) {
+  const s = Math.max(0, Math.floor(ms / 1e3));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+}
+function stageName(status, rounds, latestRevision) {
+  if (status === "compiling") return "Compiler: turning the plan into tasks";
+  if (status !== "planning") return "";
+  const reviewed = Math.max(0, ...rounds.flatMap((r) => r.reviews.map((x) => x.plan_revision)));
+  if (latestRevision === 0) return "Planner: drafting the first plan";
+  if (latestRevision > reviewed) return `Architect: reviewing plan revision ${latestRevision}`;
+  const last = rounds[rounds.length - 1];
+  if (last && !last.reviews.some((x) => x.role === "critic")) return `Critic: reviewing round ${last.round}`;
+  return `Planner: revising the plan after round ${last?.round ?? 1}`;
+}
 var PlanViewer = class {
   constructor(host, slug, deps) {
     this.host = host;
@@ -2505,17 +2657,30 @@ var PlanViewer = class {
     this.viewing = null;
     this.loaded = false;
     this.off = null;
+    this.stopPoll = null;
+    this.ticker = null;
+    this.elapsedEl = null;
+    this.since = 0;
   }
   mount() {
     this.off = subscribe((ev) => {
       const mine = "project" in ev && ev.project === this.slug;
       if (ev.type === "state.changed" || mine && (ev.type === "effort.update" || ev.type === "project.update")) void this.load();
     });
+    this.stopPoll = startPoll(() => isTransient(this.current?.status), () => this.load());
     void this.load();
     return () => {
       this.off?.();
       this.off = null;
+      this.stopPoll?.();
+      this.stopPoll = null;
+      this.stopTicker();
     };
+  }
+  stopTicker() {
+    if (this.ticker) clearInterval(this.ticker);
+    this.ticker = null;
+    this.elapsedEl = null;
   }
   async load() {
     try {
@@ -2527,25 +2692,44 @@ var PlanViewer = class {
     this.current = chooseEffort(this.slug, this.efforts);
     await this.loadPlan();
   }
+  /**
+   * loadPlan fetches the plan, rounds and revisions as one snapshot and swaps
+   * it in whole, so the view never mixes a new status with old rounds. A failed
+   * fetch keeps what is shown.
+   */
   async loadPlan() {
     const ef = this.current;
-    this.state = null;
-    this.rounds = [];
-    this.revisions = [];
-    this.viewing = null;
-    if (ef) {
-      try {
-        const [state, rounds, revisions] = await Promise.all([
-          this.deps.plan(this.slug, ef.id),
-          this.deps.planRounds(this.slug, ef.id),
-          this.deps.planRevisions(this.slug, ef.id)
-        ]);
-        this.state = state;
-        this.rounds = (rounds.rounds ?? []).map((r) => ({ ...r, reviews: r.reviews ?? [] }));
-        this.revisions = revisions ?? [];
-        this.state = { ...state, warnings: rounds.warnings ?? state.warnings, waiting: rounds.waiting ?? state.waiting };
-      } catch {
+    if (!ef) {
+      this.state = null;
+      this.rounds = [];
+      this.revisions = [];
+      this.viewing = null;
+      this.latestDoc = void 0;
+      this.render();
+      return;
+    }
+    try {
+      const [state, rounds, revisions] = await Promise.all([
+        this.deps.plan(this.slug, ef.id),
+        this.deps.planRounds(this.slug, ef.id),
+        this.deps.planRevisions(this.slug, ef.id)
+      ]);
+      const revs = revisions ?? [];
+      let latestDoc = state.plan;
+      if (!latestDoc && revs.length > 0) {
+        try {
+          latestDoc = (await this.deps.planRevision(this.slug, ef.id, Math.max(...revs.map((r) => r.revision)))).json;
+        } catch {
+        }
       }
+      if (this.current?.id !== ef.id) return;
+      this.state = { ...state, warnings: rounds.warnings ?? state.warnings, waiting: rounds.waiting ?? state.waiting };
+      this.current = { ...ef, status: state.status };
+      this.rounds = (rounds.rounds ?? []).map((r) => ({ ...r, reviews: r.reviews ?? [] }));
+      this.revisions = revs;
+      this.latestDoc = latestDoc;
+      if (this.viewing && !revs.some((r) => r.revision === this.viewing?.revision)) this.viewing = null;
+    } catch {
     }
     const last = this.rounds[this.rounds.length - 1]?.round ?? 0;
     if (this.round === 0 || !this.rounds.some((r) => r.round === this.round)) this.round = last;
@@ -2571,7 +2755,7 @@ var PlanViewer = class {
     const ef = this.current;
     const rev = this.roundPlanRevision();
     if (ef && rev > 0) return this.docs.get(rev * 1e3 + ef.id);
-    return this.state?.plan;
+    return this.state?.plan ?? this.latestDoc;
   }
   async generate() {
     const ef = this.current;
@@ -2620,7 +2804,7 @@ var PlanViewer = class {
         "div",
         { class: "plan-meta" },
         chip(ef.status),
-        st.revision > 0 ? h("span", { class: "plan-frd-id", text: `revision ${st.revision} \xB7 ${st.rounds} round${st.rounds === 1 ? "" : "s"}` }) : h("span", { class: "plan-frd-id", text: "no plan yet" }),
+        st.revision > 0 ? h("span", { class: "plan-frd-id", text: `revision ${st.revision} \xB7 ${st.rounds} round${st.rounds === 1 ? "" : "s"}` }) : h("span", { class: "plan-frd-id", text: this.latestDoc ? "first draft, not reviewed yet" : "no plan yet" }),
         st.not_critic_approved ? badge("not critic-approved", "warn") : null,
         approved ? badge(`revision ${approved} approved`, "ok") : null
       ),
@@ -2630,6 +2814,28 @@ var PlanViewer = class {
         canGenerate ? button(st.revision > 0 ? "Regenerate plan" : "Generate plan", () => void this.generate(), { field: "generate-plan" }) : null,
         canApprove ? button("Approve plan", () => void this.approve(), { primary: true, field: "approve-plan" }) : null
       )
+    );
+  }
+  /** strip is the live indicator shown while the engine plans or compiles: stage, and time since the effort last changed. */
+  strip(ef) {
+    if (ef.status !== "planning" && ef.status !== "compiling") {
+      this.stopTicker();
+      return null;
+    }
+    const stage = stageName(ef.status, this.rounds, Math.max(0, ...this.revisions.map((r) => r.revision)));
+    this.since = ef.updated;
+    const elapsed = h("span", { class: "field-hint", text: this.since > 0 ? elapsedText(Date.now() - this.since) : "", attrs: { "data-role": "elapsed" } });
+    this.elapsedEl = elapsed;
+    if (!this.ticker) {
+      this.ticker = setInterval(() => {
+        if (this.elapsedEl && this.since > 0) this.elapsedEl.textContent = elapsedText(Date.now() - this.since);
+      }, 1e3);
+    }
+    return h(
+      "div",
+      { class: "progress-strip", attrs: { "data-role": "progress-strip", role: "status" } },
+      h("div", { class: "row-actions" }, h("strong", { text: stage }), elapsed),
+      h("div", { class: "progress-bar-wrap" }, h("div", { class: "progress-bar progress-indeterminate" }))
     );
   }
   roundTabs() {
@@ -2691,6 +2897,7 @@ var PlanViewer = class {
     const ef = this.current;
     const st = this.state;
     if (!ef || !st) {
+      this.stopTicker();
       replace(this.host, h("div", { class: "plan-empty" }, h("h3", { text: "No effort to plan" }), h("p", { text: "Create an effort and save its FRD on the FRD tab first." })));
       return;
     }
@@ -2708,8 +2915,8 @@ var PlanViewer = class {
         this.header(ef, st),
         warnings.length ? h("div", { class: "warn-box", attrs: { "data-role": "plan-warnings" } }, ...warnings.map((w) => h("p", { text: w }))) : null,
         st.waiting ? h("div", { class: "warn-box", attrs: { "data-role": "plan-waiting" } }, h("p", { text: `Waiting: ${st.waiting}` })) : null,
-        ef.status === "planning" && !st.waiting ? h("p", { class: "field-hint", text: "Planning is running; this page updates as rounds finish." }) : null,
-        this.rounds.length > 0 || st.plan ? this.roundTabs() : h("div", { class: "plan-empty" }, h("h3", { text: "No plan yet" }), h("p", { text: "Generate a plan once the FRD is saved." })),
+        this.strip(ef),
+        this.rounds.length > 0 || this.plannerDoc() ? this.roundTabs() : h("div", { class: "plan-empty" }, h("h3", { text: "No plan yet" }), h("p", { text: "Generate a plan once the FRD is saved." })),
         this.revisionList()
       )
     );
@@ -2745,16 +2952,20 @@ var QueueApproval = class {
     this.loaded = false;
     this.errors = new FormErrors();
     this.off = null;
+    this.stopPoll = null;
   }
   mount() {
     this.off = subscribe((ev) => {
       const mine = "project" in ev && ev.project === this.slug;
-      if (ev.type === "state.changed" || mine && (ev.type === "effort.update" || ev.type === "task.update")) void this.refresh();
+      if (ev.type === "state.changed" || mine && (ev.type === "effort.update" || ev.type === "task.update" || ev.type === "project.update")) void this.refresh();
     });
+    this.stopPoll = startPoll(() => isTransient(this.current?.status), () => this.refresh());
     void this.load();
     return () => {
       this.off?.();
       this.off = null;
+      this.stopPoll?.();
+      this.stopPoll = null;
     };
   }
   async load() {
@@ -3268,4 +3479,6 @@ function initHamburger() {
 }
 initHamburger();
 startEvents();
+var banner = document.getElementById("health-banner");
+if (banner) new HealthBanner(banner, api).mount();
 showTab("overview");

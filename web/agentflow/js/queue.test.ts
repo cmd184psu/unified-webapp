@@ -1,8 +1,10 @@
 import { test, run, eq, ok, installFakeDom, FakeEl, asEl, byAttr, button, flush, findAll } from './testkit';
 import { QueueApproval, type QueueDeps } from './queue';
+import { dispatch, pollSettings } from './events';
 import { ApiError, type EffortView, type QueueView } from './api';
 
 installFakeDom();
+pollSettings.ms = 20;
 
 const effort = (over: Partial<EffortView> = {}): EffortView => ({
   id: 1, project: 'p1', title: 'Alpha', status: 'queue_draft', run_state: 'stopped', integration_branch: '', base_commit: '', yolo: false,
@@ -21,9 +23,11 @@ function harness(o: { effort?: EffortView; queue?: QueueView | null; approve?: Q
   const host = new FakeEl('DIV');
   const log: string[] = [];
   let q: QueueView | null = o.queue === undefined ? queue('hash-1') : o.queue;
+  const calls = { queue: 0 };
   const deps: QueueDeps = {
     efforts: async () => [o.effort ?? effort()],
     queue: async () => {
+      calls.queue++;
       if (!q) throw new ApiError(404, 'no queue');
       return q;
     },
@@ -33,7 +37,7 @@ function harness(o: { effort?: EffortView; queue?: QueueView | null; approve?: Q
     notify: (m) => { log.push('notify:' + m); },
   };
   const v = new QueueApproval(asEl(host), 'p1', deps);
-  return { host, v, log, setQueue: (x: QueueView | null) => { q = x; } };
+  return { host, v, log, calls, o, setQueue: (x: QueueView | null) => { q = x; } };
 }
 
 test('QA3: the approval view lists every task with prompt, files_touched, acceptance and dependencies', async () => {
@@ -100,6 +104,28 @@ test('with an approved plan and no queue the view offers to compile', async () =
   button(t.host, 'Compile plan').click();
   await flush();
   eq(t.log.filter((l) => l === 'compile'), ['compile']);
+  stop();
+});
+
+test('F1: the queue refetches on project.update and polls while compiling, then stops once the queue is a draft', async () => {
+  const o = { effort: effort({ status: 'compiling' }), queue: null as QueueView | null };
+  const t = harness(o);
+  const stop = t.v.mount();
+  await flush();
+  const first = t.calls.queue;
+  dispatch(JSON.stringify({ type: 'project.update', project: 'p1' }));
+  await flush();
+  ok(t.calls.queue > first, 'refetched on the event');
+  const afterEvent = t.calls.queue;
+  await new Promise((r) => setTimeout(r, 120));
+  ok(t.calls.queue > afterEvent + 1, 'polled while compiling');
+  t.setQueue(queue('hash-1'));
+  o.effort = effort({ status: 'queue_draft' });
+  await new Promise((r) => setTimeout(r, 80));
+  ok(t.host.textContent.includes('Approve whole queue'), 'the finished queue is shown without a reload');
+  const settled = t.calls.queue;
+  await new Promise((r) => setTimeout(r, 120));
+  eq(t.calls.queue, settled);
   stop();
 });
 

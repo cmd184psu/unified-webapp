@@ -1,9 +1,11 @@
 import { test, run, eq, ok, installFakeDom, FakeEl, findAll, asEl } from './testkit';
 import { Overview, buttonsFor, progressText, type OverviewDeps } from './overview';
-import { dispatch, subscribe, backoffMs } from './events';
-import type { ProjectView, RunOp } from './api';
+import { dispatch, subscribe, backoffMs, pollSettings } from './events';
+import { HealthBanner, healthMessage } from './health';
+import type { Effort, Health, ProjectView, RunOp } from './api';
 
 installFakeDom();
+pollSettings.ms = 20;
 
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
@@ -23,7 +25,11 @@ function harness(initial: ProjectView[]) {
   const calls: string[] = [];
   let rows = initial;
   let listCalls = 0;
+  const efforts: Effort[] = [];
   const deps: OverviewDeps = {
+    efforts: async () => efforts as never,
+    gitCommands: async () => ({ commands: ['git merge --no-ff agentflow/effort-3'], branch: 'agentflow/effort-3', files: 2 }),
+    copy: (t: string) => { calls.push('copy:' + t); },
     list: async () => { listCalls++; return rows.map((r) => ({ ...r })); },
     run: async (slug: string, op: RunOp) => {
       calls.push(`${slug}:${op}`);
@@ -33,7 +39,7 @@ function harness(initial: ProjectView[]) {
     open: (s: string) => { calls.push('open:' + s); },
   };
   const ov = new Overview(asEl(host), deps);
-  return { host, ov, calls, setRows: (r: ProjectView[]) => { rows = r; }, listCalls: () => listCalls };
+  return { host, ov, calls, efforts, setRows: (r: ProjectView[]) => { rows = r; }, listCalls: () => listCalls };
 }
 
 test('overview shows every project with run state, effort, progress, stage and backend (PJ5)', async () => {
@@ -141,6 +147,49 @@ test('progressText and backoff', () => {
   eq([0, 1, 2, 5, 9].map(backoffMs), [1000, 2000, 4000, 30000, 30000]);
   const off = subscribe(() => {});
   off();
+});
+
+test('F1: the overview polls while a project effort is running and stops once nothing is transient', async () => {
+  const t = harness([proj('alpha')]);
+  const stop = t.ov.mount();
+  await flush();
+  const first = t.listCalls();
+  await new Promise((r) => setTimeout(r, 120));
+  ok(t.listCalls() > first + 1, 'polled without any event');
+  t.setRows([proj('alpha', { effort: { ...proj('x').effort!, status: 'queue_draft' } })]);
+  await new Promise((r) => setTimeout(r, 80));
+  const settled = t.listCalls();
+  await new Promise((r) => setTimeout(r, 120));
+  eq(t.listCalls(), settled);
+  stop();
+});
+
+test('F3: a project whose newest effort is complete shows the Ready to merge card with copyable commands', async () => {
+  const t = harness([proj('alpha', { effort: null, current: [], progress: {} })]);
+  t.efforts.push({ ...proj('x').effort!, id: 3, title: 'Done thing', status: 'complete', integration_branch: 'agentflow/effort-3' });
+  const stop = t.ov.mount();
+  await flush();
+  const card = findAll(t.host, (e) => e.getAttribute('data-role') === 'git-commands')[0];
+  ok(card.textContent.includes('Done thing') && card.textContent.includes('agentflow/effort-3') && card.textContent.includes('Nothing was merged into main'), card.textContent);
+  ok(card.textContent.includes('2 files changed'), 'optional file count');
+  findAll(card, (e) => e.getAttribute('data-action') === 'copy-command')[0].click();
+  eq(t.calls.filter((c) => c.startsWith('copy:')), ['copy:git merge --no-ff agentflow/effort-3']);
+  stop();
+});
+
+test('F4: the health banner is hidden when ok and shows the server message when degraded, then clears on recovery', async () => {
+  let hl: Health = { status: 'degraded', opencode: { status: 'unavailable', error: 'opencode not found in PATH' } };
+  const host = new FakeEl('DIV');
+  const b = new HealthBanner(asEl(host), { health: async () => hl });
+  const stop = b.mount();
+  await flush();
+  ok(host.textContent.includes('opencode not found in PATH') && !host.hasAttribute('hidden'), 'banner shown: ' + host.textContent);
+  hl = { status: 'ok', opencode: { status: 'ok', version: '1.0' } };
+  await new Promise((r) => setTimeout(r, 80));
+  eq(host.textContent, '');
+  ok(host.hasAttribute('hidden'), 'hidden when ok');
+  eq(healthMessage(hl), '');
+  stop();
 });
 
 void run('agentflow-overview');

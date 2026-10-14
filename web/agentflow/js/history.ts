@@ -8,7 +8,7 @@ import { showToast } from '@shared';
 import { api, exportURL, type EffortView } from './api.js';
 import { rememberEffort } from './current.js';
 import { chip, h, replace } from './dom.js';
-import { subscribe, type AgentflowEvent } from './events.js';
+import { isTransient, startPoll, subscribe, type AgentflowEvent } from './events.js';
 import { FormErrors, button, fieldRow, section } from './forms.js';
 import { defaultYoloDeps, yoloBadge, yoloControl, type YoloDeps } from './yolo.js';
 
@@ -38,6 +38,8 @@ export class History {
   private fileInput = h('input', { attrs: { type: 'file', accept: '.json,application/json', name: 'frd_file', 'data-field': 'frd_file' } }) as HTMLInputElement;
   private off: (() => void) | null = null;
 
+  private stopPoll: (() => void) | null = null;
+
   constructor(private host: HTMLElement, private slug: string, private deps: HistoryDeps, private yolo: YoloDeps) {}
 
   mount(): () => void {
@@ -45,10 +47,13 @@ export class History {
       const mine = 'project' in ev && ev.project === this.slug;
       if (ev.type === 'state.changed' || (mine && (ev.type === 'effort.update' || ev.type === 'project.update'))) void this.load();
     });
+    this.stopPoll = startPoll(() => this.efforts.some((e) => isTransient(e.status)), () => this.load());
     void this.load();
     return () => {
       this.off?.();
       this.off = null;
+      this.stopPoll?.();
+      this.stopPoll = null;
     };
   }
 
