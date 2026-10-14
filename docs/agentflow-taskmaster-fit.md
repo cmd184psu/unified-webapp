@@ -1,3 +1,5 @@
+> **Superseded by FRD-AF-REM-001 (docs/agentflow-remediation/frd.md).** This analysis is kept for history. The current design is in [agentflow-design.md](agentflow-design.md).
+
 # Agentflow → Taskmaster Lane Fit Investigation
 
 > **Status (2026-10-05):** point-in-time investigation, body preserved as written. The

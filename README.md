@@ -1,6 +1,6 @@
 # unified-webapp
 
-Unified Go server for todo-list, slideshow, menuserver, grocery-list, obsidianoid (Obsidian-vault viewer/editor), timetracker (customer/PS helper with time selector and report composer, routed as `timetracker.*`), and agentflow (filesystem-backed agent job queue, dashboard, and progress monitor). A single binary replaces separate services. HAProxy (or `/etc/hosts`) routes hostnames to the correct module; the Go server dispatches on the `Host` header.
+Unified Go server for todo-list, slideshow, menuserver, grocery-list, obsidianoid (Obsidian-vault viewer/editor), timetracker (customer/PS helper with time selector and report composer, routed as `timetracker.*`), and agentflow (model orchestrator: FRD to plan to reviewed, sandboxed task execution in git worktrees). A single binary replaces separate services. HAProxy (or `/etc/hosts`) routes hostnames to the correct module; the Go server dispatches on the `Host` header.
 
 ---
 
@@ -306,14 +306,17 @@ the name are separate controls on the same row.
 
 ## AgentFlow: model orchestrator (FRD → plan → reviewed task execution)
 
-AgentFlow is the module for running models in a Ralph-like loop. Five tabs walk one
-pipeline: **FRD Wizard** (author the requirements) → **Plan Gen** (generate + reviewer
-loop + human approve) → **Compile** (plan to atomic tasks) → **Queue** (progress, task
-detail, run/approve/repair/fail, live SSE output) → **Settings** (model profiles,
-prompt dir, timeouts). State lives in `<project_path>/.agentflow/` (`frd.json`,
-`plan.json`, `queue.json`, `lock`, `logs/`); a single worker runs one task at a time
-(worker → verify → reviewer). The old `/opt/agentflow/` scripts are a temporary
-migration source — nothing in this module reads them at runtime.
+AgentFlow runs coding models against a git repository you already have. You write a
+requirements document (FRD); a planner, architect and critic produce a plan; you approve the
+plan and the compiled task queue; then models implement each task in an isolated git
+worktree. The engine verifies every change, a second model reviews it, and the engine merges
+it into an integration branch. You merge that branch into your own. AgentFlow never pushes
+and never touches your checked-out branch.
+
+It is a **local, single-user tool**. Every model call runs in a bwrap sandbox with an
+allowlisted environment, so `bwrap`, `git` and the real `opencode` binary (not a shim) must
+be installed on the server. All state is in one SQLite database under `data_dir`. Every
+project starts stopped after a restart.
 
 ### Configuration
 
@@ -321,71 +324,35 @@ Section `agentflow` in the server config (`internal/platform/config.AgentflowCon
 
 ```json
 "agentflow": {
-     "static_dir":           "./web/agentflow",
-     "project_path":         "./data/agentflow",
-     "prompt_dir":           "./prompts",
-     "default_profile":      "m5",
-     "default_timeout_secs": 300,
-     "profiles": [
-         {
-             "name":          "m5",
-             "ollama_host":   "http://192.168.1.239:11434",
-             "worker_model":  "qwen3.6:35b-a3b-mxfp8",
-             "planner_model": "qwen3.6:35b-a3b-mxfp8",
-             "review_model":  "mistral-small3.2",
-             "timeout_secs":  300
-         }
-     ]
+    "static_dir": "./web/agentflow",
+    "data_dir":   "./data/agentflow"
 }
 ```
 
-| Field | Type | Meaning |
+| Field | Default | Meaning |
 |---|---|---|
-| `static_dir` | string | Directory serving the module's frontend; mounted at `/` via `platform/static`. |
-| `project_path` | string | Project root — the directory containing the `.agentflow` subdirectory. The parent is created on first boot if absent, at mode `0750`. Default when unset: `./data/agentflow`. |
-| `prompt_dir` | string | Prompt templates (`planner.md`, `worker.md`, `reviewer.md`, `plan-reviewer.md`, `task-compiler.md`). Missing files fail the build loudly. |
-| `default_profile` | string | Active model profile (the knife switch). |
-| `default_timeout_secs` | int | Task timeout fallback when a profile leaves `timeout_secs` unset. Default `300`. |
-| `profiles` | array | Named profiles: `name`, `ollama_host`, `worker_model`, `planner_model`, `review_model`, optional `timeout_secs` and per-profile `prompt_dir`. |
+| `static_dir` | `./web/agentflow` | Directory serving the module's frontend. |
+| `data_dir` | `./data/agentflow` | SQLite database (`agentflow.db`), worktrees and stage directories. |
 
-### API routes
-
-All routes live under the module's hostname (e.g. `agentflow.cmdhome.net`) and are wrapped by platform middleware like any other module.
-
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/queue` | Full task queue. 404 when missing; 503 when malformed. |
-| `GET` | `/progress` | Counts derived from the queue (zero counts, not an error, when missing/malformed). |
-| `GET` / `POST` | `/frd` | Read / write the FRD draft. |
-| `GET` / `POST` | `/plan` | Read / write the plan draft. |
-| `POST` | `/plan/review` | Run the plan reviewer loop. |
-| `POST` | `/tasks/compile` | Compile the approved plan into the queue. |
-| `POST` | `/tasks/run` | Enqueue a task (`{ task_id }`, or empty for first ready). |
-| `POST` | `/tasks/{id}/approve`, `/repair`, `/fail` | Human task gates. |
-| `POST` | `/run-next` | Advance the first `ready` task. |
-| `GET` | `/tasks/{id}/stream` | SSE live task output. |
-| `GET` / `POST` | `/settings` | Read / update profiles, prompt dir, timeouts. |
+Backends, models, role candidates, limits and projects are managed in the UI (or under
+`/api/`) and stored in the database. Hosted backends read their keys from the server
+environment as `AGENTFLOW_KEY_<NAME>`; a key change needs a restart. Old keys
+(`project_path`, `prompt_dir`, `profiles`, ...) are ignored and can be removed.
 
 ### How to set it up
 
-1. **Route a hostname** — add an entry to `host_routing`:
+1. **Route a hostname** in `host_routing`, for example `"agentflow.example.net": "agentflow"`.
+2. **Install requirements**: `bwrap`, `git`, and opencode at `~/.opencode/bin/opencode` or on `PATH`.
+   `GET /api/health` reports `degraded` if opencode is missing.
+3. **Add a backend and role candidates**, then **create a project** for a git repository.
+4. **Work the pipeline in the UI**: FRD, plan, approve, compile, approve the queue, Start.
+5. **Authentication**: list `agentflow` in `auth.modules` to require a session or API key.
+   The module has no login of its own.
+6. **TLS / proxy**: same pattern as any other module (see
+   [Production: HAProxy Configuration](#production-haproxy-configuration)).
 
-    ```json
-    "agentflow.cmdhome.net":         "agentflow",
-    "agentflow-test.cmdhome.net":    "agentflow"
-    ```
-
-2. **Configure the module section** (see config reference above).
-
-3. **Provide prompt templates** — `prompt_dir` must contain `planner.md`, `worker.md`, `reviewer.md`, `plan-reviewer.md`, and `task-compiler.md`.
-
-4. **Work the pipeline in the UI** — complete the FRD Wizard, generate and approve the plan, compile tasks, then drive execution from the Queue tab. No seeding required.
-
-5. **TLS / proxy** — follow the same HAProxy or nginx configuration pattern as any other module (see [Production: HAProxy Configuration](#production-haproxy-configuration)). AgentFlow has no special proxy requirements beyond standard HTTP/HTTPS; a reverse proxy that rewrites the `Host` header will break dispatch, just like every other module.
-
-6. **Authentication** — if you list `agentflow` in `auth.modules`, callers need a valid session or API key; otherwise any reachable operator can read and mutate pipeline state.
-
-The full operator guide is at **[docs/guides/agentflow.md](docs/guides/agentflow.md)** and the design source of truth at **[docs/agentflow-design.md](docs/agentflow-design.md)**.
+The full operator guide is at **[docs/guides/agentflow.md](docs/guides/agentflow.md)** and the
+architecture at **[docs/agentflow-design.md](docs/agentflow-design.md)**.
 
 ---
 

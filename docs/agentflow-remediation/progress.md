@@ -73,6 +73,10 @@ Logged per the owner's posture; candidates for the next phase alongside `.omc/pl
 
 - **Phase E commits:** the E2 commit (`ee4e09b`) carries the final-state `bundle.js` rather than an E2-state bundle (commit-script slip; `make web-verify` is only guaranteed from E3 on — E3-E5 each rebuilt it). Added routes: `GET /api/stats/models` (E2), `GET /api/projects/{slug}/efforts/{id}/git-commands` (E4, 409 unless complete). Feedback-command editor joins argv tokens with single spaces (server stores strings, `verify.Commands` uses strings.Fields). A paid candidate's "opt-in" is a UI checkbox (server rule: eligible only if listed). Unsaved forms are kept when SSE events arrive.
 
+- Phase F review notes (non-blocking, not fixed): a pinned plugin (F4) is arbitrary code in the model process with the stage's network/filesystem reach and the API key env vars, bypasses the agent permission model, and the pin has no integrity hash; it was never exercised against a real plugin, and whether `OPENCODE_DISABLE_PROJECT_CONFIG` also stops loading `.opencode/plugins` from the worktree is unconfirmed. Budget: the 100% check runs only for projects in `RunRunning` (a pausing project can overshoot until it settles); stop reason is in memory; `createEffort` writes the budget in a second call. Cleanup leaves the "(before cleanup)" checkpoint commit in the merged history. Migration v6 reseeds the stages AUTOINCREMENT from MAX(id) (ids could be reused only if rows had been deleted). `patchEffort` may not refuse completed/abandoned efforts (unverified). Migrations: v5 backend_models.max_concurrent; v6 rebuilds stages (role CHECK allows cleanup) + projects.cleanup_enabled; v7 stages.tokens + efforts.budget_tokens/budget_seconds; v8 project_plugins. New route: PATCH /api/projects/{slug}/efforts/{id} {deliberate?, budget_tokens?, budget_seconds?}.
+
+- G1 findings (docs vs code): the `opencode_path` setting is stored and echoed but nothing reads it — `Build` always resolves the binary via `opencodePath()` (~/.opencode/bin/opencode, then PATH, refusing any path containing /.agents/); the "needs a restart" note above is wrong, the setting is currently inert (candidate for the next phase). YOLO does not approve the FRD (a person always does). The 3-violation policy halt is a constant. The critic's blindness is by prompt construction only. Old config keys (`project_path`, `prompt_dir`, `profiles`) are silently ignored. Under systemd the working directory is the checkout, so projects can't be that checkout or contain it.
+
 ## API contract for the UI (Phase D, final)
 All under `/api`; JSON errors `{"error","field"?}` (400 validation, 404, 409 ErrConflict, 503 at SSE cap). `…` = `/projects/{slug}`.
 - Health: GET /health (`{status: ok|degraded, opencode:{status,version?,error?}}`); GET /opencode/version?refresh=1.
@@ -134,6 +138,7 @@ Known limits: `opencode_path` setting needs a restart; project create defaults m
 - 2026-10-13 — F3: token/time budgets (migration v7, stages.tokens, 90% hold / 100% stop with reason budget).
 - 2026-10-13 — F4: pinned per-project plugins (migration v8); --pure dropped only for opted-in projects.
 - 2026-10-13 — F5: deliberate planning mode (pre-mortem validation, critic checks, UI toggle + keyword suggestion).
+- 2026-10-13 — G1: documentation (design + operator guide + README), docs_test.go route check.
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`
