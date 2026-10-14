@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -204,6 +205,11 @@ func (e *Engine) buildPrompt(ctx context.Context, st model.Stage, project string
 		return "", err
 	}
 	var b strings.Builder
+	if st.Role == "reviewer" {
+		taskJSON, _ := json.Marshal(map[string]any{"key": task.Key, "title": task.Title, "prompt": task.Prompt,
+			"acceptance": task.Acceptance, "files_touched": task.FilesTouched})
+		text = strings.ReplaceAll(text, "{{TASK_JSON}}", string(taskJSON))
+	}
 	b.WriteString(text)
 	fmt.Fprintf(&b, "\n\n## Task: %s\n\n%s\n", task.Title, task.Prompt)
 	if len(task.Acceptance) > 0 {
@@ -211,6 +217,9 @@ func (e *Engine) buildPrompt(ctx context.Context, st model.Stage, project string
 		for _, a := range task.Acceptance {
 			b.WriteString("- " + a + "\n")
 		}
+	}
+	if st.Role == "reviewer" {
+		b.WriteString(e.reviewFiles(ctx, att, task))
 	}
 	if st.Role == "worker" {
 		wc, err := e.WorkerContext(ctx, project, att.ID)
@@ -373,4 +382,64 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 		return failed(res2, OutcomeInfraUnparseable, perr2)
 	}
 	return StageResult{Outcome: verdict, Raw: res2.Final, Parsed: parsed}
+}
+
+// Caps on what the reviewer's prompt carries, so one large file cannot swamp it.
+const (
+	reviewFileCap  = 24 << 10
+	reviewTotalCap = 96 << 10
+)
+
+// reviewFiles is the FILES section of the reviewer's prompt: the worker's own
+// log and the current content of every file the task or the worker touched,
+// read from the attempt's worktree. A reviewer model with unreliable tool use
+// can then judge from the prompt alone instead of guessing about files it
+// never opened.
+func (e *Engine) reviewFiles(ctx context.Context, att model.Attempt, task model.Task) string {
+	var b strings.Builder
+	names := append([]string{}, task.FilesTouched...)
+	if stages, err := e.deps.Store.ListAttemptStages(ctx, att.ID); err == nil {
+		for i := len(stages) - 1; i >= 0; i-- {
+			st := stages[i]
+			if st.Role != "worker" || len(st.Parsed) == 0 {
+				continue
+			}
+			var log struct {
+				Summary      string   `json:"summary"`
+				FilesChanged []string `json:"files_changed"`
+				Blocked      string   `json:"blocked"`
+			}
+			if json.Unmarshal(st.Parsed, &log) == nil {
+				fmt.Fprintf(&b, "\n\n## Worker log\n\nSummary: %s\n", log.Summary)
+				if log.Blocked != "" {
+					fmt.Fprintf(&b, "Blocked: %s\n", log.Blocked)
+				}
+				names = append(names, log.FilesChanged...)
+			}
+			break
+		}
+	}
+	b.WriteString("\n\n## FILES (read from the worktree after the worker finished)\n")
+	seen, total := map[string]bool{}, 0
+	for _, n := range names {
+		rel := filepath.Clean(n)
+		if rel == "." || filepath.IsAbs(rel) || strings.HasPrefix(rel, "..") || seen[rel] {
+			continue
+		}
+		seen[rel] = true
+		data, err := os.ReadFile(filepath.Join(att.Worktree, rel))
+		switch {
+		case err != nil:
+			fmt.Fprintf(&b, "\n### %s\n\nMISSING: the file does not exist in the worktree.\n", rel)
+		case total >= reviewTotalCap:
+			fmt.Fprintf(&b, "\n### %s\n\n(omitted: prompt size limit)\n", rel)
+		default:
+			if len(data) > reviewFileCap {
+				data = append(data[:reviewFileCap], []byte("\n... (truncated)")...)
+			}
+			total += len(data)
+			fmt.Fprintf(&b, "\n### %s\n\n```\n%s\n```\n", rel, strings.TrimRight(string(data), "\n"))
+		}
+	}
+	return b.String()
 }

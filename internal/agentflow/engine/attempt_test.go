@@ -341,3 +341,29 @@ func TestC6_PostMergeVerifyFailureResetsTheIntegrationBranch(t *testing.T) {
 }
 
 func (h *harness) deps() Deps { return h.eng.deps }
+
+// The reviewer must be handed the evidence: the task JSON filled in, the
+// worker's log, and the content of the touched files (FILES), so a model with
+// weak tool use does not have to open files to judge them. A missing file is
+// marked so it is not guessed at.
+func TestReviewerPromptCarriesTheFiles(t *testing.T) {
+	defs := []model.TaskDef{{Key: "T1", Phase: "P", Title: "first", Prompt: "do", Acceptance: []string{"ok"},
+		FilesTouched: []string{"T1.txt", "absent.go", "../escape"}}}
+	c := newChainRun(t, nil, defs)
+	c.script(1, reviewPass, nil)
+	c.run()
+	waitFor(t, "reviewer called", func() bool { return len(c.fake.CallsFor("reviewer")) > 0 })
+	raw, err := os.ReadFile(c.fake.CallsFor("reviewer")[0].Request.PromptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := string(raw)
+	for _, want := range []string{"## FILES", "### T1.txt", "work of T1", "MISSING", "### absent.go", `"key":"T1"`} {
+		if !strings.Contains(p, want) {
+			t.Errorf("reviewer prompt lacks %q", want)
+		}
+	}
+	if strings.Contains(p, "{{TASK_JSON}}") || strings.Contains(p, "### ../escape") {
+		t.Errorf("reviewer prompt has an unfilled placeholder or an escaped path:\n%s", p)
+	}
+}
