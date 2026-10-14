@@ -58,7 +58,10 @@ func TestImportBoundary(t *testing.T) {
 		}
 		rel, _ := filepath.Rel(root, filepath.Dir(path))
 		rel = filepath.ToSlash(rel)
-		allowed := rel == "internal/agentflow" || rel == "internal/agentflow/runner/opencode"
+		// testdata/smoke is the operator-run live smoke (scripts/agentflow-smoke.sh):
+		// never built by ./..., never part of the server.
+		allowed := rel == "internal/agentflow" || rel == "internal/agentflow/runner/opencode" ||
+			rel == "internal/agentflow/runner/opencode/testdata/smoke"
 		for _, imp := range f.Imports {
 			if strings.Trim(imp.Path.Value, `"`) == adapterImport && !allowed {
 				t.Errorf("%s imports the opencode adapter outside the composition root", path)

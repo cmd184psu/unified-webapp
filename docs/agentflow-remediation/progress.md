@@ -139,6 +139,7 @@ Known limits: `opencode_path` setting needs a restart; project create defaults m
 - 2026-10-13 — F4: pinned per-project plugins (migration v8); --pure dropped only for opted-in projects.
 - 2026-10-13 — F5: deliberate planning mode (pre-mortem validation, critic checks, UI toggle + keyword suggestion).
 - 2026-10-13 — G1: documentation (design + operator guide + README), docs_test.go route check.
+- 2026-10-13 — G2: end-to-end acceptance sweep (e2e_test.go, live smoke script, AC table: 40 proven + AC-OC1/OC2 live-only).
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`
@@ -150,3 +151,58 @@ Known limits: `opencode_path` setting needs a restart; project create defaults m
    - Keep the existing agentflow look and feel (UI6).
    - Run the planning spikes S1-S6 first; record findings here.
    - Append a dated entry to this log after every story.
+
+## Acceptance evidence (G2)
+
+Every acceptance criterion of `frd.json`, the test or command that proves it, and its status. Go test names were checked against the repo by script (every cited name exists). Test files: grep the name. Heavy checks run once at the end of G2: `go vet ./...`, `go test ./internal/agentflow/` and `make check`.
+
+| AC | Proven by | Status | Notes |
+|---|---|---|---|
+| AC-RC1 | `TestRC1_RestartComesBackStoppedWithNoJobs`, `TestE2E_FullJourneyOverHTTP` | proven | Engine test uses an injected clock; the e2e restart step rebuilds Build on the same data_dir and waits 0.3 s, not the real 60 s (the plan's slow real-time check was not added). |
+| AC-RC2 | `TestRC2_StopKillsSandboxedProcessTree`, `TestCancelKillsProcessGroup` | proven |  |
+| AC-RC3 | `TestRC3_RunOneDispatchesOneAttemptThenPauses`, `TestRC3_RunOneOverHTTPDeliversPaused` | proven |  |
+| AC-QA1 | `TestQA1_StartOnDraftQueueIsConflict`, `TestD3_FRDPlanQueueFlow` | proven |  |
+| AC-QA2 | `TestQA2_StaleHashMidRunIsDiscarded`, `TestC9_ActionsChangeStatusAndAreAudited`, `TestC11_CompileRejectsVerifyAndQueueApprovalIsPinnedToTheHash` | proven |  |
+| AC-WC1 | `TestCredentialsUnreachable`, `TestGitPushFailsWithoutCredentials`, `TestC12_YOLOEffortRunsFromTheSavedFRDToASandboxedWorker` | proven | Real bwrap. The e2e feedback command also runs inside the sandbox (it fails if the host home is visible), but that check is weak because a baseline failure would not fail the task. |
+| AC-WC2 | `TestWC2_ServerTreeRefused`, `TestProjectRejectsCwdAndDataDir`, `TestProjectRejectsRealRepoRoot` | proven |  |
+| AC-V1 | `TestC11_CompileRejectsVerifyAndQueueApprovalIsPinnedToTheHash` | proven |  |
+| AC-V2 | `TestNoShellInVerify` | proven |  |
+| AC-V3 | `TestNoChangesFails`, `TestOutOfScopeIsWarningNotFailure` | proven |  |
+| AC-V4 | `TestBaselineFailureDoesNotFailUnrelatedTask` | proven |  |
+| AC-TM1 | `TestAgentflowLanesOnTaskmaster`, `TestMB8_TM1_StageRecordsBackendModelAndJobIsListed`, `TestLanesGoHasNoGoroutineLoop`, `TestE2E_FullJourneyOverHTTP` | proven | The e2e asserts the host's GET /api/lanes lists agentflow-gpu and agentflow_verify. |
+| AC-TM2 | `TestTM2_BrakeCancelsRunningStage` | proven |  |
+| AC-TMX1 | `TestTMX1_TwoBackendsShareKinds`, `TestRegisterLaneSharedKindSameOwner`, `TestRegisterLaneFailureLeavesNoResidue` | proven | "utuber tests pass unchanged" is covered by `go test ./...` inside `make check`. |
+| AC-PX1 | `TestC6_HappyPathLeavesTheUserTreeUntouched`, `TestMainTreeUntouched`, `TestE2E_FullJourneyOverHTTP` | proven | Re-proven over HTTP with a dirty main tree (modified, staged and untracked files). |
+| AC-MB1 | `TestC8_ACMB1_UnreachableBackendIsSkippedForTheCooldown` | proven |  |
+| AC-MB2 | `TestMB2_NoPaidModelUnlessListed` | proven |  |
+| AC-MB3 | `TestMB3_ReviewerNeverEqualsWorker` | proven |  |
+| AC-BK1 | `TestBK1_AddBackendCreatesLane`, `TestBK1_AddBackendAtRuntimeRunsStage` | proven |  |
+| AC-BK2 | `TestC8_ACBK2_RetireReroutesQueuedStages` | proven |  |
+| AC-PP1 | `TestPP1_LocalScopeSkipsHosted` | proven |  |
+| AC-ST1 | `TestCleanCloneBoot` | proven |  |
+| AC-ST2 | `TestC6_HappyPathLeavesTheUserTreeUntouched`, `TestE2E_FullJourneyOverHTTP` | proven | Re-proven over HTTP: the repo shows no new entry and its file list is unchanged. |
+| AC-DBS1 | `TestNoStateFiles`, `TestE2E_FullJourneyOverHTTP` | proven |  |
+| AC-DBS2 | `TestDBS2_CrashDuringStageIsLostAfterRestart`, `TestE2E_FullJourneyOverHTTP` | proven | The kill-mid-stage case is engine-level; the e2e covers the restart-boots-stopped half only. |
+| AC-DBS3 | `TestD3_FRDPlanQueueFlow` | proven | Web side: web/agentflow/js/frd-editor.test.ts and plan-view.test.ts. |
+| AC-PJ1 | `TestPJ1_OnlyRunningProjectsAndRoundRobin` | proven |  |
+| AC-AT1 | `TestC7_ACAT1_SameVerifyFailureThriceIsStuck` | proven |  |
+| AC-AT2 | `TestC7_ACAT2_UnreachableRetriesOnAnotherBackend` | proven |  |
+| AC-AT3 | `TestC7_ACAT3_RepairPromptCarriesEvidence_ACOC1_500KB` | proven |  |
+| AC-RP1 | `TestC10_CriticNeverSeesTheArchitectAndTheLoopStopsAtMaxRounds` | proven | The e2e also drives one revise-then-approve plan round. |
+| AC-CF1 | `TestCF1_SettingsSurviveRebuild`, `TestSettingsSurviveReopen` | proven |  |
+| AC-OC1 | `TestC7_ACAT3_RepairPromptCarriesEvidence_ACOC1_500KB`, `TestPromptIsNeverArgv`, `TestNoFileAttachFlag`, `TestRealOpencodeAgainstStub` | operator-only (live) | Unit level covers the 500 KB file path with the fake and the argv shape. `scripts/agentflow-smoke.sh` (AGENTFLOW_LIVE_SMOKE=1) ran once against the local stub with the real opencode binary: a 500 KB prompt arrived intact. A run against a real model is operator-only and was not done. |
+| AC-OC2 | `TestGoldenConfig`, `TestIsolationEnv`, `TestChildEnvIsIsolated`, `TestRealOpencodeAgainstStub` | operator-only (live) | `scripts/agentflow-smoke.sh` ran once against the stub: a control run with the throwaway HOME loaded the marker plugin, the adapter run did not. Re-run it against your own backend if you want the live proof. |
+| AC-SV1 | `TestSV1_InvalidWritesNameTheField`, `TestSV3_EmptyCandidatesAndBackendsWait`, `TestSV1_PanicIsInfraAndLaneSurvives` | proven |  |
+| AC-SO1 | `TestSO1_UnparseableTwiceIsInfra`, `TestSO3_FencedReplyParsesAndStoresRawAndParsed` | proven |  |
+| AC-GIT1 | `TestC7_ACGIT1_WorkerCommitIsAViolation`, `TestDetectAndRevertCommit` | proven |  |
+| AC-YO1 | `TestC12_YOLOEffortRunsFromTheSavedFRDToASandboxedWorker`, `TestE2E_YOLOJourneyNeedsNoGateClicks` | proven | Engine test proves the sandboxed worker cannot reach credentials; the e2e proves zero gate clicks over HTTP. |
+| AC-AR1 | `TestImportBoundary` | proven | Every engine and API test runs on `runner.Fake`; the boundary test fails if code outside the adapter imports opencode. |
+| AC-UI1 | `TestE2E_FullJourneyOverHTTP` | proven | Rendered check is the web DOM tests: web/agentflow/js/dom.test.ts, board.test.ts, frd-editor.test.ts, plan-view.test.ts, history.test.ts, backends.test.ts (run by `make test-web`). The e2e asserts the API returns the payload as JSON data. No Playwright XSS check was added. |
+| AC-GT1 | `make gates`, `scripts/gates/gofmt.mjs`, `scripts/gates/innerhtml-escape.mjs` | proven | Negative cases were checked by hand once in G2: an unformatted Go file made the gofmt gate exit 1, and an unescaped `innerHTML = ...${x}...` made the innerhtml gate exit 1. There is no automated test for the gates themselves. |
+| AC-UI2 | `~/agentflow-ui-after/` | proven (visual verdict: same look and feel) | Playwright screenshots next to ~/agentflow-ui-baseline/ with side-by-side composites. Seeded state: a project, a 6-task queue (passed, repair, stuck, blocked, ready) and two backends. A task in `running` state and live SSE were not reachable without a real runner. The old Compile tab has no counterpart (compile is now on the Plan tab); the Board replaces the old queue view. |
+
+Counts: 40 proven, 2 operator-only (live) (of 42). AC-UI2 verdict (orchestrator, 2026-10-14, from the composites in ~/agentflow-ui-after/): nav bar with hamburger and logout, tab bar, teal accent, typography, cards, progress bar and status chips are unchanged; the board keeps the old left-border task items; only nit was the Overview project name rendering as a default blue link (fixed in a follow-up).
+
+Live smoke: `AGENTFLOW_LIVE_SMOKE=1 scripts/agentflow-smoke.sh` (see the header of the script for the backend variables). Without a backend it starts the local stub model server and drives the real opencode binary at it; that run passed once in G2 (AC-OC1 and AC-OC2 both ok, control loaded the plugin). Not part of `make` and not run against a paid model.
+
+Findings from the UI evidence run (not fixed in G2): the FRD tab crashes on render when an FRD has no `acceptance_criteria` (`web/agentflow/js/frd-editor.ts` passes `base.acceptance_criteria` to `RowsEditor` without `?? []`, while the API accepts such an FRD); and the Plan tab logs two `Cannot read properties of null (reading 'length')` page errors on an effort with no plan yet (it still renders).
