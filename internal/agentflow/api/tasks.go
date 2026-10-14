@@ -17,6 +17,7 @@ func (a *API) registerTasks(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+e+"/tasks/{key}/retry", a.retryTask)
 	mux.HandleFunc("POST "+e+"/tasks/{key}/override", a.overrideTask)
 	mux.HandleFunc("POST "+e+"/abandon", a.abandonEffort)
+	mux.HandleFunc("GET "+e+"/git-commands", a.gitCommands)
 	mux.HandleFunc("POST "+e+"/yolo", a.setYOLO)
 	mux.HandleFunc("GET /api/yolo/invariants", a.yoloInvariants)
 }
@@ -274,4 +275,20 @@ func (a *API) setYOLO(w http.ResponseWriter, r *http.Request) {
 // yoloInvariants lists what stays enforced under YOLO.
 func (a *API) yoloInvariants(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, engine.EnforcedInvariants())
+}
+
+// gitCommands lists the commands a human runs to merge and push a completed
+// effort's integration branch (GIT4). Agentflow runs none of them; an effort
+// that is not complete answers 409.
+func (a *API) gitCommands(w http.ResponseWriter, r *http.Request) {
+	ef, ok := a.loadEffort(w, r)
+	if !ok {
+		return
+	}
+	cmds, err := a.deps.Engine.PushInstructions(r.Context(), ef.ID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"commands": cmds})
 }

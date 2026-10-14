@@ -5,8 +5,10 @@
 
 import { api, type ProjectView } from './api.js';
 import { h, replace } from './dom.js';
+import { mountBoard } from './board.js';
 import { mountFrd } from './frd-editor.js';
 import { mountPlan } from './plan-view.js';
+import { mountQueue } from './queue.js';
 import { showProjectForm } from './projects.js';
 import { button } from './forms.js';
 
@@ -26,8 +28,8 @@ function placeholder(story: string): ProjectMount {
 export const SUB_TABS: SubTab[] = [
   { id: 'frd', label: 'FRD', mount: mountFrd },
   { id: 'plan', label: 'Plan', mount: mountPlan },
-  { id: 'queue', label: 'Queue', mount: placeholder('E4') },
-  { id: 'board', label: 'Board', mount: placeholder('E4') },
+  { id: 'queue', label: 'Queue', mount: mountQueue },
+  { id: 'board', label: 'Board', mount: mountBoard },
   { id: 'history', label: 'History', mount: placeholder('E5') },
 ];
 

@@ -469,12 +469,15 @@ export const api = {
 
   // Queue and tasks
   compile: (slug: string, id: number): Promise<EffortView> => send('POST', `${eff(slug, id)}/compile`),
-  queue: (slug: string, id: number): Promise<QueueView> => get(`${eff(slug, id)}/queue`),
-  approveQueue: (slug: string, id: number, hash: string): Promise<QueueView> =>
-    send('POST', `${eff(slug, id)}/queue/approve`, { hash }),
+  queue: (slug: string, id: number, o?: FetchOptions): Promise<QueueView> => get(`${eff(slug, id)}/queue`, o),
+  /** gitCommands lists the commands to merge and push a complete effort's branch; agentflow runs none of them (GIT4). */
+  gitCommands: (slug: string, id: number): Promise<{ commands: string[] }> => get(`${eff(slug, id)}/git-commands`),
+  approveQueue: (slug: string, id: number, hash: string, o?: FetchOptions): Promise<QueueView> =>
+    send('POST', `${eff(slug, id)}/queue/approve`, { hash }, o),
   tasks: (slug: string, id: number): Promise<TaskView[]> => get(`${eff(slug, id)}/tasks`),
   task: (slug: string, id: number, key: string): Promise<TaskDetail> => get(`${eff(slug, id)}/tasks/${enc(key)}`),
-  editTask: (slug: string, id: number, key: string, def: Partial<TaskDef>, o?: FetchOptions): Promise<TaskDetail> =>
+  /** editTask answers with the queue, which is back in draft until it is approved again (AT9). */
+  editTask: (slug: string, id: number, key: string, def: TaskDef, o?: FetchOptions): Promise<QueueView> =>
     send('PUT', `${eff(slug, id)}/tasks/${enc(key)}`, def, o),
   retryTask: (slug: string, id: number, key: string, clean: boolean): Promise<TaskDetail> =>
     send('POST', `${eff(slug, id)}/tasks/${enc(key)}/retry`, { clean }),

@@ -55,3 +55,22 @@ func TestE2_ModelStatsEmptyIsAnArray(t *testing.T) {
 		t.Fatalf("body = %q", body)
 	}
 }
+
+// GIT4: the merge and push commands exist only for a complete effort.
+func TestE4_GitCommandsNeedACompleteEffort(t *testing.T) {
+	e := newEnv(t, envOpt{engineGit: true})
+	e.addProject("p1")
+	ef := decode[EffortView](t, e.ok("POST", "/api/projects/p1/efforts", map[string]any{"title": "src"}, http.StatusCreated))
+	path := "/api/projects/p1/efforts/" + itoa(ef.ID) + "/git-commands"
+	e.ok("GET", path, nil, http.StatusConflict)
+	complete := "complete"
+	if _, err := e.st.UpdateEffort(context.Background(), "test", ef.ID, store.EffortPatch{Status: &complete, IntegrationBranch: strPtr("af/integ")}); err != nil {
+		t.Fatal(err)
+	}
+	got := decode[map[string][]string](t, e.ok("GET", path, nil, http.StatusOK))["commands"]
+	if len(got) != 5 || got[3] != "git merge --no-ff 'af/integ'" {
+		t.Fatalf("commands = %q", got)
+	}
+}
+
+func strPtr(s string) *string { return &s }

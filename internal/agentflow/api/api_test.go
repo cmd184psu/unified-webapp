@@ -39,6 +39,8 @@ type envOpt struct {
 	widthZero bool
 	// fastPoll makes taskmaster's worker poll every 20 ms instead of 5 s.
 	fastPoll bool
+	// engineGit hands the engine the git service (tests of commands that call git).
+	engineGit bool
 }
 
 func newEnv(t *testing.T, opt envOpt) *env {
@@ -64,7 +66,12 @@ func newEnv(t *testing.T, opt envOpt) *env {
 		t.Fatal(err)
 	}
 	var api *API
+	var engGit *gitsvc.Service
+	if opt.engineGit {
+		engGit = git
+	}
 	if e.eng, err = engine.New(engine.Deps{
+		Git:   engGit,
 		Store: e.st, Host: e.tm, Runner: e.fake, DataDir: e.dataDir, TestWidthZero: opt.widthZero,
 		PublishRun: func(ev engine.RunEvent) {
 			if api != nil {

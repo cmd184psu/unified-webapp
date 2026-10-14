@@ -70,8 +70,13 @@ const CHIP_ALIAS: Record<string, string> = {
   reject: 'failed',
 };
 
-/** chip builds a status chip; needs_input gets status-needs-input, running reuses status-in-progress. */
-export function chip(status: string): HTMLElement {
+/** statusKey is the suffix of the status-* class for a status: needs_input gives needs-input, running gives in-progress. */
+export function statusKey(status: string): string {
   const key = status.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-  return h('span', { class: `status-chip status-${CHIP_ALIAS[key] ?? key}`, text: status.replace(/_/g, ' ') });
+  return CHIP_ALIAS[key] ?? key;
+}
+
+/** chip builds a status chip. */
+export function chip(status: string): HTMLElement {
+  return h('span', { class: `status-chip status-${statusKey(status)}`, text: status.replace(/_/g, ' ') });
 }
