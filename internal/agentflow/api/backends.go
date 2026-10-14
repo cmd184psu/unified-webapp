@@ -23,8 +23,9 @@ func (a *API) registerBackends(mux *http.ServeMux) {
 
 // BackendModelView is one model a backend serves.
 type BackendModelView struct {
-	Model string `json:"model"`
-	Paid  bool   `json:"paid"`
+	Model         string `json:"model"`
+	Paid          bool   `json:"paid"`
+	MaxConcurrent int    `json:"max_concurrent"`
 }
 
 // BackendView is a backend as the API shows it. DownUntil (unix ms) is set
@@ -45,7 +46,7 @@ func (a *API) backendView(b store.Backend) BackendView {
 	v := BackendView{Name: b.Name, Host: b.Host, APIType: b.APIType, Hosted: b.Hosted, Paid: b.Paid,
 		Slots: b.Slots, Retired: b.Retired, Models: []BackendModelView{}}
 	for _, m := range b.Models {
-		v.Models = append(v.Models, BackendModelView{Model: m.Model, Paid: m.Paid})
+		v.Models = append(v.Models, BackendModelView{Model: m.Model, Paid: m.Paid, MaxConcurrent: m.MaxConcurrent})
 	}
 	if until, down := a.deps.Engine.DownBackends()[b.Name]; down {
 		v.DownUntil = until.UnixMilli()
@@ -122,7 +123,7 @@ func (bb backendBody) apply(b *store.Backend) {
 	if bb.Models != nil {
 		b.Models = make([]store.BackendModel, 0, len(*bb.Models))
 		for _, m := range *bb.Models {
-			b.Models = append(b.Models, store.BackendModel{Model: m.Model, Paid: m.Paid})
+			b.Models = append(b.Models, store.BackendModel{Model: m.Model, Paid: m.Paid, MaxConcurrent: m.MaxConcurrent})
 		}
 	}
 }

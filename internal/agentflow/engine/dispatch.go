@@ -120,7 +120,12 @@ type view struct {
 	free map[string]int
 	// down are the backends in their unreachable cooldown (MB7).
 	down map[string]bool
+	// modelFree is the remaining per-model concurrency (PX5) of every model
+	// that has a limit, keyed by modelKey.
+	modelFree map[string]int
 }
+
+func modelKey(backend, model string) string { return backend + "\x00" + model }
 
 func (e *Engine) newView(ctx context.Context) (*view, error) {
 	snap, err := e.deps.Store.Snapshot(ctx)
@@ -131,18 +136,26 @@ func (e *Engine) newView(ctx context.Context) (*view, error) {
 	if err != nil {
 		return nil, err
 	}
-	v := &view{snap: snap, free: map[string]int{}, down: map[string]bool{}}
+	v := &view{snap: snap, free: map[string]int{}, down: map[string]bool{}, modelFree: map[string]int{}}
 	for b := range e.health.active(e.deps.Clock()) {
 		v.down[b] = true
 	}
 	for _, b := range snap.Backends {
 		if !b.Retired {
 			v.free[b.Name] = b.Slots
+			for _, m := range b.Models {
+				if m.MaxConcurrent > 0 {
+					v.modelFree[modelKey(b.Name, m.Model)] = m.MaxConcurrent
+				}
+			}
 		}
 	}
 	for _, st := range open {
 		if _, ok := v.free[st.Backend]; ok {
 			v.free[st.Backend]--
+		}
+		if _, ok := v.modelFree[modelKey(st.Backend, st.Model)]; ok {
+			v.modelFree[modelKey(st.Backend, st.Model)]--
 		}
 	}
 	return v, nil
@@ -283,6 +296,9 @@ func (e *Engine) submitWork(ctx context.Context, v *view, ef model.Effort, hash 
 		return err
 	}
 	v.free[pk.Backend]--
+	if _, ok := v.modelFree[modelKey(pk.Backend, pk.Model)]; ok {
+		v.modelFree[modelKey(pk.Backend, pk.Model)]--
+	}
 	if t.WaitingReason != "" {
 		return s.SetWaitingReason(ctx, t.ID, "")
 	}
@@ -424,8 +440,16 @@ func skipReason(v *view, p store.Project, c store.Candidate, needSlot bool) stri
 		return "backend " + c.Backend + " is down"
 	case needSlot && v.free[c.Backend] <= 0:
 		return "no free slot on " + c.Backend
+	case needSlot && modelFull(v, c):
+		return "model " + c.Model + " is at its concurrency limit on " + c.Backend
 	}
 	return ""
+}
+
+// modelFull reports whether c's model has a concurrency limit and it is used up.
+func modelFull(v *view, c store.Candidate) bool {
+	free, limited := v.modelFree[modelKey(c.Backend, c.Model)]
+	return limited && free <= 0
 }
 
 // noEligible words the reason a role has no usable candidate; when every

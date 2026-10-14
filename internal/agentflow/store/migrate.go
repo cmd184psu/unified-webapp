@@ -18,6 +18,7 @@ type migration struct {
 //	2  B2  settings, backends, backend_models, role_candidates, projects, project_limits
 //	3  B3  efforts, documents, approvals, queues, tasks, task_deps, attempts, stages, ...
 //	4  C8  backend_cooldown setting
+//	5  F1  backend_models.max_concurrent
 //
 // Later stories append the next integer; they never edit an earlier entry.
 var migrations = []migration{
@@ -25,7 +26,14 @@ var migrations = []migration{
 	{2, migration2SQL},
 	{3, migration3SQL},
 	{4, migration4SQL},
+	{5, migration5SQL},
 }
+
+// migration5SQL (F1) adds the per-model concurrency hint (PX5): 0 means no
+// limit beyond the backend's slots.
+const migration5SQL = `
+ALTER TABLE backend_models ADD COLUMN max_concurrent INTEGER NOT NULL DEFAULT 0 CHECK (max_concurrent >= 0);
+`
 
 // migration4SQL (C8) adds the backend health cooldown setting (MB7).
 const migration4SQL = `

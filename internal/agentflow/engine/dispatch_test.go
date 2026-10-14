@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -457,4 +458,53 @@ func waitOpen(t *testing.T, h *harness, n int) {
 		}
 	}
 	t.Fatalf("open stages = %d, want %d", len(h.openStages()), n)
+}
+
+// AC-PX5: on a backend with 2 slots and model X limited to 1, two X stages
+// never run at once, while an X and a Y stage do.
+func TestPX5_ModelConcurrencyLimit(t *testing.T) {
+	setup := func(t *testing.T, workers ...string) *harness {
+		h := newDispHarness(t)
+		b := store.Backend{Name: "gpu", Host: "http://127.0.0.1:11434", APIType: "ollama", Slots: 2,
+			Models: []store.BackendModel{{Model: "X", MaxConcurrent: 1}, {Model: "Y"}, {Model: "R"}}}
+		if err := h.eng.AddBackend(context.Background(), "t", b); err != nil {
+			t.Fatal(err)
+		}
+		h.candidates("global", "", "worker", workers...)
+		h.candidates("global", "", "reviewer", "gpu/R")
+		h.dispProject("alpha", "any", indep(4))
+		h.startRun("alpha")
+		return h
+	}
+	models := func(h *harness) string {
+		var ms []string
+		for _, st := range h.openStages() {
+			ms = append(ms, st.Model)
+		}
+		sort.Strings(ms)
+		return strings.Join(ms, ",")
+	}
+
+	t.Run("only X: second X waits though a slot is free", func(t *testing.T) {
+		h := setup(t, "gpu/X")
+		h.pass()
+		h.pass()
+		if got := models(h); got != "X" {
+			t.Fatalf("open models = %q, want X only", got)
+		}
+		h.finish(h.openStages()[0])
+		h.pass()
+		if got := models(h); got != "X" {
+			t.Fatalf("after the first X finished = %q, want one X again", got)
+		}
+	})
+	t.Run("X then Y: an X and a Y run together", func(t *testing.T) {
+		h := setup(t, "gpu/X", "gpu/Y")
+		for i := 0; i < 4; i++ {
+			h.pass()
+		}
+		if got := models(h); got != "X,Y" {
+			t.Fatalf("open models = %q, want X,Y", got)
+		}
+	})
 }

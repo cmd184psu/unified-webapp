@@ -8,7 +8,7 @@ const view = (slug: string, over: Partial<ProjectView> = {}): ProjectView => ({
   slug, repo_path: '/r/' + slug, model_scope: 'local', feedback_cmds: ['go vet ./...'], limits: {}, created: 0, updated: 0,
   run_state: 'stopped', remembered_run_state: 'stopped', effort: null, progress: {}, current: [], ...over,
 });
-const backend: Backend = { name: 'b1', host: 'http://h', api_type: 'ollama', hosted: false, paid: false, slots: 1, retired: false, models: [{ model: 'm1', paid: false }] };
+const backend: Backend = { name: 'b1', host: 'http://h', api_type: 'ollama', hosted: false, paid: false, slots: 1, retired: false, models: [{ model: 'm1', paid: false, max_concurrent: 0 }] };
 const cand = (scope: string, role: string, position: number, project?: string): Candidate =>
   ({ scope, project, role, position, backend: 'b1', model: 'm1', paid: false });
 

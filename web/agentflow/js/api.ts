@@ -97,6 +97,8 @@ export interface OpenCodeStatus {
 export interface BackendModel {
   model: string;
   paid: boolean;
+  /** Most stages that may run this model at once on its backend; 0 = no limit (PX5). */
+  max_concurrent: number;
 }
 
 export interface Backend {

@@ -7,7 +7,7 @@ installFakeDom();
 
 const be = (name: string, over: Partial<Backend> = {}): Backend => ({
   name, host: 'http://127.0.0.1:11434', api_type: 'ollama', hosted: false, paid: false, slots: 2, retired: false,
-  models: [{ model: 'm1', paid: false }, { model: 'm2-paid', paid: true }], ...over,
+  models: [{ model: 'm1', paid: false, max_concurrent: 0 }, { model: 'm2-paid', paid: true, max_concurrent: 2 }], ...over,
 });
 const cand = (role: string, position: number, backend: string, model: string, paid = false): Candidate =>
   ({ scope: 'global', role, position, backend, model, paid });
@@ -87,6 +87,7 @@ test('BK1: adding a backend sends the form; a 400 shows next to the field it nam
   field(t.host, 'api_type').value = 'ollama';
   field(t.host, 'slots').value = '3';
   field(t.host, 'model').value = ' qwen ';
+  field(t.host, 'max_concurrent').value = '1';
   button(t.host, 'Add backend').click();
   await flush();
   eq(errorOf(t.host, 'host'), 'must be an http or https URL with a host');
@@ -95,7 +96,7 @@ test('BK1: adding a backend sends the form; a 400 shows next to the field it nam
   fail = false;
   button(t.host, 'Add backend').click();
   await flush();
-  eq(t.bodies.create, { name: 'local1', host: 'http://127.0.0.1:11434', api_type: 'ollama', hosted: false, paid: false, slots: 3, models: [{ model: 'qwen', paid: false }] });
+  eq(t.bodies.create, { name: 'local1', host: 'http://127.0.0.1:11434', api_type: 'ollama', hosted: false, paid: false, slots: 3, models: [{ model: 'qwen', paid: false, max_concurrent: 1 }] });
   ok(t.log.includes('notify:Added local1'), 'toast');
   stop();
 });

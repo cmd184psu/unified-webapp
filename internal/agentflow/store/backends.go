@@ -14,6 +14,9 @@ import (
 type BackendModel struct {
 	Model string
 	Paid  bool
+	// MaxConcurrent caps how many stages may run this model at once on the
+	// backend (PX5); 0 means only the backend's slots limit it.
+	MaxConcurrent int
 }
 
 // Backend is a model server in agentflow's own terms (AR3): where it is, which
@@ -51,6 +54,9 @@ func validateBackend(b Backend) error {
 		if m.Model == "" || m.Model != strings.TrimSpace(m.Model) {
 			return Invalid("models", "model name required, without leading or trailing whitespace")
 		}
+		if m.MaxConcurrent < 0 {
+			return Invalid("models", fmt.Sprintf("model %q: max_concurrent must be 0 (no limit) or more", m.Model))
+		}
 		if seen[m.Model] {
 			return Invalid("models", fmt.Sprintf("duplicate model %q", m.Model))
 		}
@@ -76,8 +82,8 @@ func b2i(b bool) int {
 
 func insertModels(ctx context.Context, tx *sql.Tx, b Backend) error {
 	for _, m := range b.Models {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO backend_models (backend, model, paid) VALUES (?, ?, ?)`,
-			b.Name, m.Model, b2i(m.Paid)); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO backend_models (backend, model, paid, max_concurrent) VALUES (?, ?, ?, ?)`,
+			b.Name, m.Model, b2i(m.Paid), m.MaxConcurrent); err != nil {
 			return err
 		}
 	}
@@ -220,14 +226,14 @@ func loadBackends(ctx context.Context, q querier, name string) ([]Backend, error
 	// The single connection serves one result set at a time, so models are
 	// read after the backend rows are closed.
 	for i := range out {
-		mrows, err := q.QueryContext(ctx, `SELECT model, paid FROM backend_models WHERE backend = ? ORDER BY model`, out[i].Name)
+		mrows, err := q.QueryContext(ctx, `SELECT model, paid, max_concurrent FROM backend_models WHERE backend = ? ORDER BY model`, out[i].Name)
 		if err != nil {
 			return nil, err
 		}
 		for mrows.Next() {
 			var m BackendModel
 			var paid int
-			if err := mrows.Scan(&m.Model, &paid); err != nil {
+			if err := mrows.Scan(&m.Model, &paid, &m.MaxConcurrent); err != nil {
 				mrows.Close()
 				return nil, err
 			}

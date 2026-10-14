@@ -723,3 +723,29 @@ func TestRepoPathMissingVersusUnreadable(t *testing.T) {
 		t.Fatalf("missing = %q, blocked = %q", m.Msg, l.Msg)
 	}
 }
+
+func TestPX5_MaxConcurrentRoundTripsAndRejectsNegative(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	b := goodBackend("local")
+	b.Models = []BackendModel{{Model: "x", MaxConcurrent: 1}, {Model: "y"}}
+	if err := s.CreateBackend(ctx, "t", b); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetBackend(ctx, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Models[0].MaxConcurrent != 1 || got.Models[1].MaxConcurrent != 0 {
+		t.Fatalf("models = %+v, want x limited to 1 and y unlimited", got.Models)
+	}
+	b.Models[1].MaxConcurrent = 3
+	if err := s.UpdateBackend(ctx, "t", b); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = s.GetBackend(ctx, "local"); got.Models[1].MaxConcurrent != 3 {
+		t.Fatalf("update lost max_concurrent: %+v", got.Models)
+	}
+	b.Models[0].MaxConcurrent = -1
+	wantField(t, s.UpdateBackend(ctx, "t", b), "models")
+}

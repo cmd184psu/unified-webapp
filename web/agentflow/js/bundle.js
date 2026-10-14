@@ -916,14 +916,19 @@ var BackendsView = class {
     const paid = checkbox("paid", initial?.paid ?? false);
     const models = [];
     const modelList = h("div", { class: "wizard-list" });
-    const addModel = (m = "", p = false) => {
-      const row = { model: textInput("model", m, { placeholder: "model name" }), paid: checkbox("model_paid", p) };
+    const addModel = (m = "", p = false, max = 0) => {
+      const row = {
+        model: textInput("model", m, { placeholder: "model name" }),
+        paid: checkbox("model_paid", p),
+        max: textInput("max_concurrent", max > 0 ? String(max) : "", { type: "number", placeholder: "no limit" })
+      };
       models.push(row);
       const el = h(
         "div",
         { class: "inline-row", attrs: { "data-role": "model-row" } },
         row.model,
         h("label", { class: "inline-check" }, row.paid, "paid"),
+        h("label", { class: "inline-check" }, "at once", row.max),
         button("Remove", () => {
           models.splice(models.indexOf(row), 1);
           el.parentNode?.removeChild(el);
@@ -931,12 +936,12 @@ var BackendsView = class {
       );
       modelList.appendChild(el);
     };
-    for (const m of initial?.models ?? []) addModel(m.model, m.paid);
+    for (const m of initial?.models ?? []) addModel(m.model, m.paid, m.max_concurrent);
     if (!initial) addModel();
     const modelsField = errors.add("models", fieldRow(
       "Models",
       modelList,
-      "The models this backend serves; mark a paid model so it is only used when listed for a role"
+      'The models this backend serves; mark a paid model so it is only used when listed for a role. "At once" caps how many stages run that model together (blank = only the slots limit it)'
     ));
     modelsField.el.appendChild(button("Add model", () => addModel(), { field: "add-model" }));
     const save = async () => {
@@ -948,7 +953,7 @@ var BackendsView = class {
         hosted: hosted.checked,
         paid: paid.checked,
         slots: Number(slots.value),
-        models: models.map((m) => ({ model: m.model.value.trim(), paid: m.paid.checked })).filter((m) => m.model !== "")
+        models: models.map((m) => ({ model: m.model.value.trim(), paid: m.paid.checked, max_concurrent: Number(m.max.value) || 0 })).filter((m) => m.model !== "")
       };
       try {
         const res = initial ? await this.deps.patchBackend(initial.name, body, { quiet: true }) : await this.deps.createBackend(body, { quiet: true });
@@ -1024,7 +1029,13 @@ var BackendsView = class {
         void this.load();
       });
     }
-    const models = b.models.map((m) => h("span", { class: "row-actions" }, m.model, m.paid ? badge("paid") : null));
+    const models = b.models.map((m) => h(
+      "span",
+      { class: "row-actions" },
+      m.model,
+      m.paid ? badge("paid") : null,
+      m.max_concurrent > 0 ? badge(`max ${m.max_concurrent} at once`, "muted") : null
+    ));
     return h(
       "div",
       { class: "profile-card", attrs: { "data-backend": b.name } },
