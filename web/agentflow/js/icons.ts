@@ -29,6 +29,9 @@ const SHAPES = {
   probe: [['circle', { cx: '11', cy: '11', r: '8' }], line(21, 21, 16.65, 16.65)],
   view: [path('M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z'), ['circle', { cx: '12', cy: '12', r: '3' }]],
   import: [path('M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'), poly('17 8 12 3 7 8'), line(12, 3, 12, 15)],
+  sparkle: [path('M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z'), path('M19 15l.7 1.8 1.8.7-1.8.7L19 20l-.7-1.8-1.8-.7 1.8-.7z')],
+  split: [['circle', { cx: '6', cy: '6', r: '3' }], ['circle', { cx: '6', cy: '18', r: '3' }], line(20, 4, 8.12, 15.88), line(14.47, 14.48, 20, 20), line(8.12, 8.12, 12, 12)],
+  gauge: [path('M3.34 19a10 10 0 1 1 17.32 0'), line(12, 14, 16, 10)],
 } satisfies Record<string, Shape[]>;
 
 export type IconName = keyof typeof SHAPES;

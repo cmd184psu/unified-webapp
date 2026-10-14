@@ -112,7 +112,15 @@ export interface ProjectInput {
   plugins?: PluginPin[];
 }
 
-export type ProjectPatch = Partial<ProjectInput>;
+/** ProjectPatch: definition_of_done replaces the detected list; null clears the override. */
+export type ProjectPatch = Partial<ProjectInput> & { definition_of_done?: string[] | null };
+
+/** DefinitionOfDone is GET .../definition-of-done: what every task must meet, detected or overridden. */
+export interface DefinitionOfDone {
+  items: string[];
+  source: 'detected' | 'project';
+  toolchains?: string[];
+}
 
 export interface LimitsView {
   limits: Record<string, string>;
@@ -135,6 +143,8 @@ export interface BackendModel {
   paid: boolean;
   /** Most stages that may run this model at once on its backend; 0 = no limit (PX5). */
   max_concurrent: number;
+  /** The model's context window in tokens; 0 or absent = unknown. */
+  context_tokens?: number;
 }
 
 export interface Backend {
@@ -201,6 +211,34 @@ export interface ModelStat {
   pass_rate: number;
   attempts_total: number;
   attempts_passed: number;
+}
+
+/** DraftState is GET .../frd/draft: the FRD drafting stage (draft or polish). */
+export interface DraftState {
+  state: 'idle' | 'running' | 'failed';
+  /** Start time in ms. */
+  started?: number;
+  error?: string;
+}
+
+/** SizeView is GET .../size: the FRD against the smallest planning context. budget_tokens 0 or over missing = contexts unknown. */
+export interface SizeView {
+  frd_tokens: number;
+  plan_tokens?: number;
+  budget_tokens: number;
+  context_tokens_min?: number;
+  over?: boolean;
+  models?: Array<{ backend: string; model: string; context_tokens: number }>;
+  advice?: string;
+}
+
+/** FrdPart is one row of GET .../frd/parts after a split; a part without status is pending. */
+export interface FrdPart {
+  n: number;
+  title: string;
+  summary?: string;
+  tokens: number;
+  status?: string;
 }
 
 export interface DocView<T = unknown> {
@@ -473,6 +511,7 @@ export const api = {
   patchProject: (slug: string, p: ProjectPatch, o?: FetchOptions): Promise<ProjectView> =>
     send('PATCH', proj(slug), p, o),
   deleteProject: (slug: string): Promise<void> => send('DELETE', proj(slug)),
+  definitionOfDone: (slug: string, o?: FetchOptions): Promise<DefinitionOfDone> => get(`${proj(slug)}/definition-of-done`, o),
   limits: (slug: string): Promise<LimitsView> => get(`${proj(slug)}/limits`),
   putLimits: (slug: string, limits: Record<string, string | number>, o?: FetchOptions): Promise<LimitsView> =>
     send('PUT', `${proj(slug)}/limits`, { limits }, o),
@@ -480,7 +519,7 @@ export const api = {
   // Backends, candidates, settings
   backends: (): Promise<Backend[]> => get('/api/backends'),
   createBackend: (b: BackendInput, o?: FetchOptions): Promise<BackendResult> => send('POST', '/api/backends', b, o),
-  probeBackend: (host: string, apiType: string): Promise<{ models: string[] }> =>
+  probeBackend: (host: string, apiType: string): Promise<{ models: string[]; contexts?: Record<string, number> }> =>
     send('POST', '/api/backends/probe', { host, api_type: apiType }, { quiet: true }),
   patchBackend: (name: string, b: Partial<BackendInput>, o?: FetchOptions): Promise<BackendResult> =>
     send('PATCH', `/api/backends/${enc(name)}`, b, o),
@@ -522,6 +561,14 @@ export const api = {
     get(`${eff(slug, id)}/frd/revisions/${n}`),
   approveFRD: (slug: string, id: number, revision?: number): Promise<EffortView> =>
     send('POST', `${eff(slug, id)}/frd/approve`, revision === undefined ? {} : { revision }),
+  draftFRD: (slug: string, id: number, description: string, polish: boolean, o?: FetchOptions): Promise<DraftState> =>
+    send('POST', `${eff(slug, id)}/frd/draft`, { description, polish }, o),
+  draftState: (slug: string, id: number, o?: FetchOptions): Promise<DraftState> => get(`${eff(slug, id)}/frd/draft`, o),
+  frdSize: (slug: string, id: number, o?: FetchOptions): Promise<SizeView> => get(`${eff(slug, id)}/size`, o),
+  splitFRD: (slug: string, id: number, o?: FetchOptions): Promise<unknown> => send('POST', `${eff(slug, id)}/frd/split`, {}, o),
+  frdParts: (slug: string, id: number, o?: FetchOptions): Promise<FrdPart[]> => get(`${eff(slug, id)}/frd/parts`, o),
+  startPart: (slug: string, id: number, n: number, o?: FetchOptions): Promise<EffortView> =>
+    send('POST', `${eff(slug, id)}/frd/parts/${n}/start`, undefined, o),
   generatePlan: (slug: string, id: number): Promise<EffortView> => send('POST', `${eff(slug, id)}/plan/generate`),
   plan: (slug: string, id: number, o?: FetchOptions): Promise<PlanView> => get(`${eff(slug, id)}/plan`, o),
   putPlan: (slug: string, id: number, plan: PlanDoc, o?: FetchOptions): Promise<DocView<PlanDoc>> =>

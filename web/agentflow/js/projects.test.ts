@@ -28,6 +28,7 @@ function harness(over: Partial<ProjectDeps> = {}, mode: { project?: ProjectView 
     candidates: async () => cands,
     putProjectCandidates: async (slug, role, list) => { log.push(`put:${slug}:${role}`); bodies.put = list; cands = [...cands.filter((c) => c.role !== role), ...list.map((c, i) => cand('project', role, i, slug))]; return cands; },
     clearProjectCandidates: async (slug, role) => { log.push(`clear:${slug}:${role}`); cands = cands.filter((c) => !(c.scope === 'project' && c.role === role)); },
+    definitionOfDone: async () => ({ items: ['go test passes'], source: 'detected' }),
     confirm: async (m) => { log.push('confirm:' + m); return true; },
     pickDir: async (start) => { log.push('pick:' + start); return chosen.path; },
     notify: (m) => { log.push('notify:' + m); },
@@ -295,6 +296,33 @@ test('H2: a start path the server refuses falls back to the first root; a later 
   byAttr(bad.el, 'data-dir', '/srv/docs')[0].click();
   await flush();
   eq(errorsOf(bad.el), []);
+});
+
+test('U2: the definition of done is overridden as a list, saved, and reset to detected with null', async () => {
+  const untouched = harness({}, { project: view('p1') });
+  await untouched.form.mount();
+  button(untouched.host, 'Save project').click();
+  await flush();
+  ok(!('definition_of_done' in (untouched.bodies.patch as object)), 'untouched detected list is not sent');
+
+  const t = harness({}, { project: view('p1') });
+  await t.form.mount();
+  ok(byAttr(t.host, 'data-role', 'dod-editor')[0].textContent.includes('go test passes'), 'detected list shown');
+  button(t.host, 'Override for this project').click();
+  allByField(t.host, 'dod_item')[0].value = 'make check passes';
+  button(t.host, 'Add item').click();
+  allByField(t.host, 'dod_item')[1].value = 'docs updated';
+  button(t.host, 'Save project').click();
+  await flush();
+  eq((t.bodies.patch as { definition_of_done?: string[] | null }).definition_of_done, ['make check passes', 'docs updated']);
+
+  const o = harness({ definitionOfDone: async () => ({ items: ['only this'], source: 'project' }) }, { project: view('p1') });
+  await o.form.mount();
+  eq(allByField(o.host, 'dod_item')[0].value, 'only this');
+  button(o.host, 'Reset to detected').click();
+  button(o.host, 'Save project').click();
+  await flush();
+  eq((o.bodies.patch as { definition_of_done?: string[] | null }).definition_of_done, null);
 });
 
 void run('agentflow-projects');

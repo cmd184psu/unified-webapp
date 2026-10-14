@@ -14,7 +14,7 @@ import { FormErrors, RowsEditor, button, checkbox, type ToggleEl, fieldRow, sect
 
 export type ProjectDeps = Pick<
   typeof api,
-  'createProject' | 'patchProject' | 'gitInit' | 'deleteProject' | 'backends' | 'candidates' | 'putProjectCandidates' | 'clearProjectCandidates'
+  'createProject' | 'patchProject' | 'gitInit' | 'deleteProject' | 'backends' | 'candidates' | 'putProjectCandidates' | 'clearProjectCandidates' | 'definitionOfDone'
 > & {
   confirm(message: string, confirmLabel?: string): Promise<boolean>;
   /** Opens the directory picker at start; the chosen path, or null when cancelled. */
@@ -31,6 +31,7 @@ export const defaultProjectDeps = (): ProjectDeps => ({
   candidates: api.candidates,
   putProjectCandidates: api.putProjectCandidates,
   clearProjectCandidates: api.clearProjectCandidates,
+  definitionOfDone: api.definitionOfDone,
   confirm: (m, label = 'Confirm') => confirmDialog(m, { confirmLabel: label }),
   pickDir: (start) => pickDirectory(start),
   notify: (m) => void showToast(m, 'success'),
@@ -78,6 +79,11 @@ export class ProjectForm {
   private cands: Candidate[] = [];
   private drafts = new Map<string, CandRow[]>();
   private rolesHost = h('div');
+  /** Definition of done: the detected list, and the override rows once the project has or starts one. */
+  private dodDetected: string[] = [];
+  private dodRows: RowsEditor<string> | null = null;
+  private dodReset = false;
+  private dodHost = h('div', { attrs: { 'data-role': 'dod-editor' } });
 
   constructor(private host: HTMLElement, private deps: ProjectDeps, private mode: ProjectMode, private done: (slug: string) => void) {
     const p = mode.project;
@@ -133,6 +139,13 @@ export class ProjectForm {
       } catch {
         // apiFetch already told the user; the role section stays empty.
       }
+      try {
+        const dod = await this.deps.definitionOfDone(this.mode.project.slug, { quiet: true });
+        if (dod.source === 'project') this.startDod(dod.items);
+        else this.dodDetected = dod.items;
+      } catch {
+        // No definition of done to show.
+      }
     }
     this.render();
   }
@@ -153,7 +166,7 @@ export class ProjectForm {
     this.errors.clear();
     const body = this.body();
     const attempt = (): Promise<ProjectView> => this.mode.project
-      ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, feedback_cmds: body.feedback_cmds, cleanup_enabled: body.cleanup_enabled, plugins: body.plugins }, { quiet: true })
+      ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, feedback_cmds: body.feedback_cmds, cleanup_enabled: body.cleanup_enabled, plugins: body.plugins, ...this.dodPatch() }, { quiet: true })
       : this.deps.createProject(body, { quiet: true });
     let saved: ProjectView;
     try {
@@ -189,6 +202,32 @@ export class ProjectForm {
     }
     this.deps.notify(`Deleted ${p.slug}`);
     this.done('');
+  }
+
+  // ─── Definition of done: detected from the toolchain, optionally overridden per project ───
+
+  private startDod(items: string[]): void {
+    this.dodRows = new RowsEditor<string>((t) => {
+      const input = textInput('dod_item', t);
+      return { el: input, read: () => input.value.trim() };
+    }, items, () => '', 'Add item');
+    this.dodReset = false;
+  }
+
+  /** dodPatch is the patch fields for the list: the override rows, null to go back to detected, nothing when untouched. */
+  private dodPatch(): { definition_of_done?: string[] | null } {
+    if (this.dodReset) return { definition_of_done: null };
+    return this.dodRows ? { definition_of_done: this.dodRows.read().filter((t) => t !== '') } : {};
+  }
+
+  private drawDod(): void {
+    if (!this.mode.project) return;
+    replace(this.dodHost,
+      this.dodRows
+        ? h('div', {}, this.dodRows.el, button('Reset to detected', () => { this.dodRows = null; this.dodReset = true; this.drawDod(); }, { field: 'reset-dod', icon: 'retry' }))
+        : h('div', {},
+          h('ul', { class: 'field-hint' }, ...this.dodDetected.map((t) => h('li', { text: t }))),
+          button('Override for this project', () => { this.startDod(this.dodDetected); this.drawDod(); }, { field: 'override-dod', icon: 'edit' })));
   }
 
   // ─── Role preferences: a per-project candidate list overriding the global one ───
@@ -243,6 +282,7 @@ export class ProjectForm {
     const p = this.mode.project;
     const e = this.errors;
     this.drawRoles();
+    this.drawDod();
     replace(this.host,
       h('div', { class: 'settings-host', attrs: { 'data-form': p ? 'project-edit' : 'project-create' } },
         section(p ? `Edit ${p.slug}` : 'New project',
@@ -254,6 +294,7 @@ export class ProjectForm {
               'After a task passes review, run a cleanup agent and verify again; if that breaks verification the cleanup is rolled back')).el),
           e.add('feedback_cmds', fieldRow('Feedback commands', this.cmds.el,
             'Run in the sandbox to verify each task, as a program and arguments, never through a shell. Blank: detected from go.mod, pyproject.toml or package.json')).el,
+          p ? e.add('definition_of_done', fieldRow('Definition of done', this.dodHost, 'Applies to every task; need not be written as acceptance criteria')).el : null,
           e.add('plugins', fieldRow('Runner plugins', this.plugins.el,
             'Opt-in only: none are loaded unless listed here. Each is pinned to an exact version such as 1.2.3 (no latest, no ranges); listed plugins are fetched by the runner when a stage starts')).el,
           e.general,

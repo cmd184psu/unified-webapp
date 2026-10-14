@@ -15,6 +15,7 @@ import { subscribe, type AgentflowEvent } from './events.js';
 import { FormErrors, badge, button, checkbox, type ToggleEl, fieldRow, section, selectInput, textInput } from './forms.js';
 import { ROLES, buildRoleEditor, isPaid, unconsented, type CandRow } from './candidates.js';
 import { LIMIT_FIELDS } from './settings.js';
+import { formatTokens } from './effort-settings.js';
 
 /** isPrivateHost is true when a backend's host (a URL or host:port) is a loopback or private-network address. */
 export function isPrivateHost(host: string): boolean {
@@ -151,47 +152,59 @@ export class BackendsView {
     (hosted.firstChild as HTMLInputElement).addEventListener('change', syncKey);
     syncKey();
     type ModelControl = HTMLInputElement | HTMLSelectElement;
-    const models: Array<{ model: ModelControl; paid: ToggleEl; max: HTMLInputElement; el: HTMLElement }> = [];
+    type ModelRow = { model: ModelControl; paid: ToggleEl; max: HTMLInputElement; ctx: HTMLInputElement; el: HTMLElement };
+    const models: ModelRow[] = [];
     // Names the host reported when probed; model rows then pick from them instead of typing.
     let probed: string[] = [];
+    // Context windows the host reported, by model name; they prefill an empty context field.
+    let contexts: Record<string, number> = {};
     const modelControl = (m: string): ModelControl => probed.length > 0
       ? selectInput('model', probed.map((n): [string, string] => [n, n]), m)
       : textInput('model', m, { placeholder: 'model name (or Probe host)' });
     const modelList = h('div', { class: 'wizard-list' });
-    const addModel = (m = '', p = false, max = 0): void => {
-      const row = {
-        model: modelControl(m),
-        paid: checkbox('model_paid', p),
-        max: textInput('max_concurrent', max > 0 ? String(max) : '', { type: 'number', placeholder: 'no limit' }),
-        el: h('div', { class: 'inline-row', attrs: { 'data-role': 'model-row' } }),
-      };
-      models.push(row);
-      const draw = (): void => replace(row.el,
+    const prefill = (row: ModelRow): void => {
+      const c = contexts[row.model.value];
+      if (c > 0 && row.ctx.value === '') row.ctx.value = String(c);
+    };
+    const draw = (row: ModelRow): void => {
+      row.model.addEventListener('change', () => prefill(row));
+      replace(row.el,
         row.model,
         h('span', { class: 'inline-check' }, row.paid, 'paid'),
+        h('span', { class: 'inline-check', attrs: { title: 'Context window in tokens; blank = unknown' } }, 'ctx', row.ctx),
         h('span', { class: 'inline-check' }, 'at once', row.max),
         button('Remove', () => {
           models.splice(models.indexOf(row), 1);
           row.el.parentNode?.removeChild(row.el);
         }, { field: 'remove-model', icon: 'remove' }));
-      draw();
+    };
+    const addModel = (m = '', p = false, max = 0, ctx = 0): void => {
+      const row: ModelRow = {
+        model: modelControl(m),
+        paid: checkbox('model_paid', p),
+        max: textInput('max_concurrent', max > 0 ? String(max) : '', { type: 'number', placeholder: 'no limit' }),
+        ctx: textInput('context_tokens', ctx > 0 ? String(ctx) : '', { type: 'number', placeholder: 'auto' }),
+        el: h('div', { class: 'inline-row', attrs: { 'data-role': 'model-row' } }),
+      };
+      models.push(row);
+      draw(row);
       modelList.appendChild(row.el);
     };
-    for (const m of initial?.models ?? []) addModel(m.model, m.paid, m.max_concurrent);
+    for (const m of initial?.models ?? []) addModel(m.model, m.paid, m.max_concurrent, m.context_tokens ?? 0);
     if (!initial) addModel();
     const probe = async (): Promise<void> => {
       errors.clear();
       try {
         const res = await this.deps.probeBackend(host.value.trim(), apiType.value);
         probed = res.models;
+        contexts = res.contexts ?? {};
         if (probed.length === 0) throw new Error('the host reported no models');
         // Swap each row's control for a picker, keeping a name the host still serves.
         for (const row of models) {
           const keep = row.model.value;
           row.model = modelControl(keep);
-          replace(row.el, row.model, h('span', { class: 'inline-check' }, row.paid, 'paid'),
-            h('span', { class: 'inline-check' }, 'at once', row.max),
-            button('Remove', () => { models.splice(models.indexOf(row), 1); row.el.parentNode?.removeChild(row.el); }, { field: 'remove-model', icon: 'remove' }));
+          draw(row);
+          prefill(row);
         }
         this.deps.notify(`${probed.length} model(s) found on ${host.value.trim()}`);
       } catch (err) {
@@ -212,7 +225,7 @@ export class BackendsView {
         hosted: hosted.checked,
         paid: paid.checked,
         slots: Number(slots.value),
-        models: models.map((m) => ({ model: m.model.value.trim(), paid: m.paid.checked, max_concurrent: Number(m.max.value) || 0 })).filter((m) => m.model !== ''),
+        models: models.map((m) => ({ model: m.model.value.trim(), paid: m.paid.checked, max_concurrent: Number(m.max.value) || 0, context_tokens: Math.max(0, Math.round(Number(m.ctx.value) || 0)) })).filter((m) => m.model !== ''),
       };
       if (hosted.checked && apiKey.value !== '') body.api_key = apiKey.value;
       else if (clearKey) body.api_key = '';
@@ -275,7 +288,8 @@ export class BackendsView {
       return this.backendForm(b, () => { this.editing.delete(b.name); void this.load(); });
     }
     const models = b.models.map((m) => h('span', { class: 'row-actions' }, m.model, m.paid ? badge('paid') : null,
-      m.max_concurrent > 0 ? badge(`max ${m.max_concurrent} at once`, 'muted') : null));
+      m.max_concurrent > 0 ? badge(`max ${m.max_concurrent} at once`, 'muted') : null,
+      m.context_tokens ? badge(formatTokens(m.context_tokens), 'muted') : null));
     return h('div', { class: 'profile-card', attrs: { 'data-backend': b.name } },
       h('div', { class: 'profile-header' },
         h('span', { class: 'row-actions' },

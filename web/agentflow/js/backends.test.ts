@@ -85,6 +85,27 @@ test('probing the host turns the model box into a picker of the names it reporte
   stop();
 });
 
+test('U4: probing prefills the context field, it is sent as context_tokens, and the card shows a compact badge', async () => {
+  const t = harness({}, { probeBackend: async () => ({ models: ['m-a', 'm-b'], contexts: { 'm-a': 32768 } }) });
+  const stop = t.view.mount();
+  await flush();
+  button(t.host, 'Add backend').click();
+  field(t.host, 'name').value = 'ctx1';
+  field(t.host, 'host').value = 'http://127.0.0.1:11434';
+  button(t.host, 'Probe host for models').click();
+  await flush();
+  eq(field(t.host, 'context_tokens').value, '32768');
+  button(t.host, 'Add backend').click();
+  await flush();
+  eq((t.bodies.create as BackendInput).models, [{ model: 'm-a', paid: false, max_concurrent: 0, context_tokens: 32768 }]);
+  stop();
+  const card = harness({ backends: [be('b1', { models: [{ model: 'm1', paid: false, max_concurrent: 0, context_tokens: 32768 }] })] });
+  const stop2 = card.view.mount();
+  await flush();
+  ok(card.host.textContent.includes('32.8k'), 'badge');
+  stop2();
+});
+
 test('BK1: adding a backend sends the form; a 400 shows next to the field it names', async () => {
   let fail = true;
   const t = harness({}, {
@@ -112,7 +133,7 @@ test('BK1: adding a backend sends the form; a 400 shows next to the field it nam
   fail = false;
   button(t.host, 'Add backend').click();
   await flush();
-  eq(t.bodies.create, { name: 'local1', host: 'http://127.0.0.1:11434', api_type: 'ollama', hosted: false, paid: false, slots: 3, models: [{ model: 'qwen', paid: false, max_concurrent: 1 }] });
+  eq(t.bodies.create, { name: 'local1', host: 'http://127.0.0.1:11434', api_type: 'ollama', hosted: false, paid: false, slots: 3, models: [{ model: 'qwen', paid: false, max_concurrent: 1, context_tokens: 0 }] });
   ok(t.log.includes('notify:Added local1'), 'toast');
   stop();
 });

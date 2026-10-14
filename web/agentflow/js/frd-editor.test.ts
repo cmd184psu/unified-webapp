@@ -2,7 +2,7 @@ import { test, run, eq, ok, installFakeDom, FakeEl, asEl, byField, byAttr, allBy
 import { FrdEditor, commaList, lines, type FrdDeps } from './frd-editor';
 import { Overview, type OverviewDeps } from './overview';
 import { budgetBar, deliberateTriggers } from './effort-settings';
-import { ApiError, type DocView, type EffortView, type FRD, type ProjectView } from './api';
+import { ApiError, type DefinitionOfDone, type DocView, type DraftState, type EffortView, type FRD, type FrdPart, type ProjectView, type SizeView } from './api';
 
 installFakeDom();
 
@@ -33,6 +33,14 @@ function harness(w: World, over: Partial<FrdDeps> = {}) {
   const host = new FakeEl('DIV');
   const log: string[] = [];
   const sent: FRD[] = [];
+  const ctl = {
+    draft: { state: 'idle' } as DraftState,
+    draftFails: '',
+    size: null as SizeView | null,
+    parts: [] as FrdPart[],
+    dod: { items: [], source: 'detected' } as DefinitionOfDone,
+    startFails: '',
+  };
   const view = (id: number, n: number, body: boolean): DocView<FRD> => {
     const d = w.docs.get(id)?.[n - 1];
     if (!d) throw new ApiError(404, 'not found');
@@ -55,12 +63,31 @@ function harness(w: World, over: Partial<FrdDeps> = {}) {
     frdRevisions: async (_s, id) => (w.docs.get(id) ?? []).map((_, i) => view(id, i + 1, false)),
     frdRevision: async (_s, id, n) => view(id, n, true),
     approveFRD: async (_s, id, rev) => { log.push(`approve:${id}:${rev}`); w.approved.set(id, rev ?? 0); return effort(id, 'x'); },
+    draftFRD: async (_s, _id, description, polish) => {
+      log.push(`draft:${description}:${polish}`);
+      if (ctl.draftFails) throw new ApiError(409, ctl.draftFails);
+      ctl.draft = { state: 'running', started: Date.now() };
+      return ctl.draft;
+    },
+    draftState: async () => ctl.draft,
+    definitionOfDone: async () => ctl.dod,
+    frdSize: async () => { if (!ctl.size) throw new ApiError(404, 'no size'); return ctl.size; },
+    splitFRD: async () => { log.push('split'); return {}; },
+    frdParts: async () => ctl.parts,
+    startPart: async (_s, _id, n) => {
+      log.push(`start-part:${n}`);
+      if (ctl.startFails) throw new ApiError(409, ctl.startFails);
+      return effort(9, 'part');
+    },
     notify: (m) => { log.push('notify:' + m); },
     ...over,
   };
   const ed = new FrdEditor(asEl(host), 'p1', deps);
-  return { host, ed, log, sent };
+  return { host, ed, log, sent, ctl };
 }
+
+/** openEditor presses Edit (or Write it by hand when there is no FRD yet). */
+const openEditor = (host: FakeEl): void => (findAll(host, (e) => e.getAttribute('aria-label') === 'Edit').length ? button(host, 'Edit') : button(host, 'Write it by hand')).click();
 
 const world = (): World => ({ efforts: [effort(1, 'Alpha')], docs: new Map([[1, [{ doc: FRD0, by: 'me' }]]]), approved: new Map() });
 
@@ -71,6 +98,7 @@ test('an FRD without acceptance_criteria or requirements still renders the form'
   const t = harness(w);
   const stop = t.ed.mount();
   await flush();
+  openEditor(t.host);
   ok(byAttr(t.host, 'data-role', 'frd-form').length === 1, 'form rendered');
   stop();
 });
@@ -87,6 +115,7 @@ test('AC-UI1 (rendered): an FRD title and effort title with <img onerror> are li
   const t = harness(w);
   const stop = t.ed.mount();
   await flush();
+  openEditor(t.host);
   const list = byAttr(t.host, 'data-role', 'frd-list')[0];
   ok(list.textContent.includes(EVIL), 'literal in the list');
   eq(byField(t.host, 'title').value, EVIL);
@@ -112,22 +141,22 @@ test('UI5: saving sends the edited fields as a new revision and keeps the verbat
   const t = harness(w);
   const stop = t.ed.mount();
   await flush();
+  openEditor(t.host);
   byField(t.host, 'title').value = 'Second';
   byField(t.host, 'constraints').value = 'c1\nc2\n';
   allByField(t.host, 'req_description')[0].value = 'one, edited';
   button(t.host, 'Add requirement').click();
-  allByField(t.host, 'req_id')[1].value = 'R2';
   allByField(t.host, 'req_description')[1].value = 'two';
   allByField(t.host, 'req_priority')[1].value = 'should';
-  allByField(t.host, 'ac_requirements')[0].value = 'R1, R2';
   button(t.host, 'Save as new revision').click();
   await flush();
   eq(t.sent.length, 1);
   const f = t.sent[0];
   eq(f.title, 'Second');
   eq(f.constraints, ['c1', 'c2']);
-  eq(f.requirements.map((r) => [r.id, r.priority, r.description]), [['R1', 'must', 'one, edited'], ['R2', 'should', 'two']]);
-  eq(f.acceptance_criteria[0].requirements, ['R1', 'R2']);
+  eq(f.requirements.map((r) => [r.id, r.priority, r.description]), [['R1', 'must', 'one, edited'], ['', 'should', 'two']]);
+  eq(f.acceptance_criteria[0].requirements, ['R1']);
+  eq(allByField(t.host, 'req_id').length + allByField(t.host, 'ac_id').length, 0);
   eq(f.state_model, { keep: ['me'] });
   eq(w.docs.get(1)?.length, 2);
   ok(t.host.textContent.includes('Revision 2'), 'new revision listed');
@@ -139,6 +168,7 @@ test('a 400 shows next to the field it names', async () => {
   const t = harness(w);
   const stop = t.ed.mount();
   await flush();
+  openEditor(t.host);
   byField(t.host, 'title').value = '';
   button(t.host, 'Save as new revision').click();
   await flush();
@@ -154,6 +184,7 @@ test('AC-DBS3 (UI): the approved revision stays viewable after an edit', async (
   const t = harness(w);
   const stop = t.ed.mount();
   await flush();
+  openEditor(t.host);
   ok(t.host.textContent.includes('revision 1 approved'), 'approved shown');
   eq(findAll(t.host, (e) => e.getAttribute('aria-label') === 'Approve revision 1').length, 0);
   byField(t.host, 'objective').value = 'Do it better';
@@ -193,7 +224,9 @@ test('an effort without an FRD starts from a template; the new-effort form creat
   button(t.host, 'Create effort').click();
   await flush();
   eq(t.log.filter((l) => l.startsWith('create:')), ['create:First effort:true']);
+  openEditor(t.host);
   eq(byField(t.host, 'id').value, 'FRD-P1-1');
+  ok(byField(t.host, 'id').hasAttribute('readonly'), 'the FRD id is read-only');
   eq(byField(t.host, 'title').value, 'First effort');
   stop();
 });
@@ -232,6 +265,7 @@ test('H3: the current effort comes before the efforts list and its next action i
   const t = harness(w);
   const stop = t.ed.mount();
   await flush();
+  openEditor(t.host);
   const order = findAll(t.host, (e) => e.getAttribute('data-role') === 'frd-form' || e.getAttribute('data-role') === 'frd-list');
   eq(order.map((e) => e.getAttribute('data-role')), ['frd-form', 'frd-list']);
   ok(button(t.host, 'Approve revision 1').className.includes('primary'), 'a saved, unapproved revision: approve is primary');
@@ -240,6 +274,7 @@ test('H3: the current effort comes before the efforts list and its next action i
   const done = harness(w);
   const stop2 = done.ed.mount();
   await flush();
+  openEditor(done.host);
   ok(button(done.host, 'Save as new revision').className.includes('primary'), 'nothing to approve: save is primary');
   stop2();
   stop();
@@ -302,6 +337,164 @@ test('AT12: the budget bar shows usage and what 90% and 100% mean', () => {
   const over = asFakeEl(budgetBar({ tokens: 10, seconds: 7300, token_limit: 0, seconds_limit: 7200, fraction: 1.01, state: 'exhausted' }));
   ok(over.textContent.includes('100%') && over.textContent.includes('time 2h/2h') && over.textContent.includes('run is stopped'), over.textContent);
   eq(findAll(over, (e) => e.className === 'progress-bar progress-over').length, 1);
+});
+
+const FRD1: FRD = { ...FRD0, out_of_scope: ['no ui'] };
+
+test('U1: an FRD opens as a read-only review card with Approve and Edit, and no id inputs', async () => {
+  const w = world();
+  w.docs.set(1, [{ doc: FRD1, by: 'me' }]);
+  const t = harness(w);
+  const stop = t.ed.mount();
+  await flush();
+  const card = byAttr(t.host, 'data-role', 'frd-review')[0];
+  ok(card.textContent.includes('First') && card.textContent.includes('Do it') && card.textContent.includes('must: one') && card.textContent.includes('works') && card.textContent.includes('no ui'), card.textContent);
+  eq(byAttr(t.host, 'data-role', 'frd-form').length, 0);
+  eq(findAll(t.host, (e) => e.tagName === 'TEXTAREA' && e.getAttribute('data-field') !== 'description' && e.getAttribute('data-field') !== null && e.getAttribute('data-field') !== 'effort_title').length, 0);
+  button(t.host, 'Approve revision 1').click();
+  await flush();
+  eq(t.log.filter((l) => l.startsWith('approve:')), ['approve:1:1']);
+  button(t.host, 'Edit').click();
+  eq(byAttr(t.host, 'data-role', 'frd-form').length, 1);
+  eq(allByField(t.host, 'req_id').length + allByField(t.host, 'ac_id').length + allByField(t.host, 'ac_requirements').length, 0);
+  button(t.host, 'Close the editor').click();
+  await flush();
+  eq(byAttr(t.host, 'data-role', 'frd-form').length, 0);
+  stop();
+});
+
+test('U1: describing sends the text to the draft endpoint, shows a progress strip, then the reviewed FRD', async () => {
+  const w = world();
+  w.docs.set(1, []);
+  const t = harness(w);
+  const stop = t.ed.mount();
+  await flush();
+  button(t.host, 'Draft the FRD').click();
+  eq(t.log.filter((l) => l.startsWith('draft:')), []);
+  byField(t.host, 'description').value = '  add a login page ';
+  byField(t.host, 'description').fire('input');
+  button(t.host, 'Draft the FRD').click();
+  await flush();
+  eq(t.log.filter((l) => l.startsWith('draft:')), ['draft:add a login page:false']);
+  eq(byAttr(t.host, 'data-role', 'progress-strip').length, 1);
+  w.docs.set(1, [{ doc: FRD1, by: 'planner' }]);
+  t.ctl.draft = { state: 'idle' };
+  await t.ed.load();
+  eq(byAttr(t.host, 'data-role', 'progress-strip').length, 0);
+  eq(byAttr(t.host, 'data-role', 'frd-review').length, 1);
+  eq(byField(t.host, 'description').value, '');
+  stop();
+});
+
+test('U1: a failed draft shows the error and keeps the typed description', async () => {
+  const t = harness(world());
+  t.ctl.draftFails = 'no planner backend';
+  const stop = t.ed.mount();
+  await flush();
+  byField(t.host, 'description').value = 'keep me';
+  byField(t.host, 'description').fire('input');
+  button(t.host, 'Draft the FRD').click();
+  await flush();
+  eq(byAttr(t.host, 'data-role', 'draft-error')[0].textContent, 'no planner backend');
+  eq(byField(t.host, 'description').value, 'keep me');
+  t.ctl.draftFails = '';
+  t.ctl.draft = { state: 'failed', error: 'model timed out' };
+  await t.ed.load();
+  eq(byAttr(t.host, 'data-role', 'draft-error')[0].textContent, 'model timed out');
+  eq(byField(t.host, 'description').value, 'keep me');
+  stop();
+});
+
+test('U1: the polish button asks the server to tidy the existing text', async () => {
+  const t = harness(world());
+  const stop = t.ed.mount();
+  await flush();
+  button(t.host, 'Tidy the text').click();
+  await flush();
+  eq(t.log.filter((l) => l.startsWith('draft:')), ['draft::true']);
+  stop();
+});
+
+test('U2: the definition of done is listed read-only under the review card, and absent when empty', async () => {
+  const t = harness(world());
+  const stop = t.ed.mount();
+  await flush();
+  eq(byAttr(t.host, 'data-role', 'definition-of-done').length, 0);
+  t.ctl.dod = { items: ['go test passes', 'no unrelated files changed'], source: 'detected', toolchains: ['go'] };
+  await t.ed.load();
+  const dod = byAttr(t.host, 'data-role', 'definition-of-done')[0];
+  ok(dod.textContent.includes('go test passes') && dod.textContent.includes('no unrelated files changed'), dod.textContent);
+  eq(findAll(dod, (e) => e.tagName === 'INPUT').length, 0);
+  stop();
+});
+
+test('U3: an oversized FRD highlights the meter and offers a split that shows progress until the parts arrive', async () => {
+  const t = harness(world());
+  t.ctl.size = { frd_tokens: 12000, budget_tokens: 8000, over: true, advice: 'split it' };
+  const stop = t.ed.mount();
+  await flush();
+  const meter = byAttr(t.host, 'data-role', 'size')[0];
+  ok(meter.textContent.includes('12k / 8k tokens'), meter.textContent);
+  eq(findAll(meter, (e) => e.className === 'progress-bar progress-over').length, 1);
+  button(t.host, 'Split into smaller parts').click();
+  await flush();
+  eq(t.log.filter((l) => l === 'split').length, 1);
+  eq(byAttr(t.host, 'data-role', 'progress-strip').length, 1);
+  eq(findAll(t.host, (e) => e.getAttribute('aria-label') === 'Split into smaller parts').length, 0);
+  t.ctl.parts = [{ n: 1, title: 'Core', tokens: 4000, status: 'started' }, { n: 2, title: 'Extras', summary: 'the rest', tokens: 3000 }];
+  await t.ed.load();
+  eq(byAttr(t.host, 'data-role', 'progress-strip').length, 0);
+  eq(byAttr(t.host, 'data-part', '2').length, 1);
+  stop();
+});
+
+test('U3: a fitting FRD shows no split; unknown contexts show only a muted hint with the Backends tooltip', async () => {
+  const t = harness(world());
+  t.ctl.size = { frd_tokens: 100, budget_tokens: 8000, over: false };
+  const stop = t.ed.mount();
+  await flush();
+  eq(byAttr(t.host, 'data-role', 'size').length, 1);
+  eq(findAll(t.host, (e) => e.getAttribute('aria-label') === 'Split into smaller parts').length, 0);
+  t.ctl.size = { frd_tokens: 100, budget_tokens: 0 };
+  await t.ed.load();
+  eq(byAttr(t.host, 'data-role', 'size').length, 0);
+  const hint = byAttr(t.host, 'data-role', 'size-unknown')[0];
+  eq(findAll(hint, (e) => e.getAttribute('title') === 'Set context sizes in Backends').length, 1);
+  eq(findAll(hint, (e) => e.tagName === 'BUTTON').length, 0);
+  stop();
+});
+
+test('U3: pending parts start only when the project has no active effort; a 409 shows inline', async () => {
+  const w = world();
+  const t = harness(w);
+  t.ctl.parts = [{ n: 1, title: 'Core', tokens: 4000 }, { n: 2, title: 'Extras', summary: 'the rest', tokens: 3000 }, { n: 3, title: 'Done', tokens: 10, status: 'started' }];
+  const stop = t.ed.mount();
+  await flush();
+  eq(findAll(byAttr(t.host, 'data-part', '3')[0], (e) => e.tagName === 'BUTTON').length, 0);
+  const busy = findAll(byAttr(t.host, 'data-part', '2')[0], (e) => e.tagName === 'BUTTON')[0];
+  eq(busy.getAttribute('aria-disabled'), 'true');
+  busy.click();
+  await flush();
+  eq(t.log.filter((l) => l.startsWith('start-part')), []);
+  stop();
+
+  w.efforts = [effort(1, 'Alpha', { status: 'complete' })];
+  const t2 = harness(w);
+  t2.ctl.parts = t.ctl.parts;
+  t2.ctl.startFails = 'project p1 already has an active effort';
+  const stop2 = t2.ed.mount();
+  await flush();
+  const go = findAll(byAttr(t2.host, 'data-part', '2')[0], (e) => e.tagName === 'BUTTON')[0];
+  eq(go.getAttribute('aria-disabled'), null);
+  go.click();
+  await flush();
+  eq(t2.log.filter((l) => l.startsWith('start-part')), ['start-part:2']);
+  ok(byAttr(t2.host, 'data-part', '2')[0].textContent.includes('already has an active effort'), 'inline 409');
+  t2.ctl.startFails = '';
+  findAll(byAttr(t2.host, 'data-part', '2')[0], (e) => e.tagName === 'BUTTON')[0].click();
+  await flush();
+  ok(t2.log.includes('notify:Started part 2'), 'started');
+  stop2();
 });
 
 void run('agentflow-frd');

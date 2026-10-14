@@ -64,6 +64,7 @@ var api = {
   gitInit: (repoPath) => send("POST", "/api/projects/git-init", { repo_path: repoPath, confirm: true }),
   patchProject: (slug, p, o) => send("PATCH", proj(slug), p, o),
   deleteProject: (slug) => send("DELETE", proj(slug)),
+  definitionOfDone: (slug, o) => get(`${proj(slug)}/definition-of-done`, o),
   limits: (slug) => get(`${proj(slug)}/limits`),
   putLimits: (slug, limits, o) => send("PUT", `${proj(slug)}/limits`, { limits }, o),
   // Backends, candidates, settings
@@ -95,6 +96,12 @@ var api = {
   frdRevisions: (slug, id) => get(`${eff(slug, id)}/frd/revisions`),
   frdRevision: (slug, id, n) => get(`${eff(slug, id)}/frd/revisions/${n}`),
   approveFRD: (slug, id, revision) => send("POST", `${eff(slug, id)}/frd/approve`, revision === void 0 ? {} : { revision }),
+  draftFRD: (slug, id, description, polish, o) => send("POST", `${eff(slug, id)}/frd/draft`, { description, polish }, o),
+  draftState: (slug, id, o) => get(`${eff(slug, id)}/frd/draft`, o),
+  frdSize: (slug, id, o) => get(`${eff(slug, id)}/size`, o),
+  splitFRD: (slug, id, o) => send("POST", `${eff(slug, id)}/frd/split`, {}, o),
+  frdParts: (slug, id, o) => get(`${eff(slug, id)}/frd/parts`, o),
+  startPart: (slug, id, n, o) => send("POST", `${eff(slug, id)}/frd/parts/${n}/start`, void 0, o),
   generatePlan: (slug, id) => send("POST", `${eff(slug, id)}/plan/generate`),
   plan: (slug, id, o) => get(`${eff(slug, id)}/plan`, o),
   putPlan: (slug, id, plan, o) => send("PUT", `${eff(slug, id)}/plan`, plan, o),
@@ -307,7 +314,10 @@ var SHAPES = {
   folder: [path("M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z")],
   probe: [["circle", { cx: "11", cy: "11", r: "8" }], line(21, 21, 16.65, 16.65)],
   view: [path("M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"), ["circle", { cx: "12", cy: "12", r: "3" }]],
-  import: [path("M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"), poly("17 8 12 3 7 8"), line(12, 3, 12, 15)]
+  import: [path("M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"), poly("17 8 12 3 7 8"), line(12, 3, 12, 15)],
+  sparkle: [path("M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"), path("M19 15l.7 1.8 1.8.7-1.8.7L19 20l-.7-1.8-1.8-.7 1.8-.7z")],
+  split: [["circle", { cx: "6", cy: "6", r: "3" }], ["circle", { cx: "6", cy: "18", r: "3" }], line(20, 4, 8.12, 15.88), line(14.47, 14.48, 20, 20), line(8.12, 8.12, 12, 12)],
+  gauge: [path("M3.34 19a10 10 0 1 1 17.32 0"), line(12, 14, 16, 10)]
 };
 function icon(name) {
   const svg = document.createElementNS(SVG_NS, "svg");
@@ -1178,6 +1188,103 @@ var SettingsView = class {
   }
 };
 
+// web/agentflow/js/effort-settings.ts
+var DELIBERATE_PATTERNS = [
+  ["auth", /\b(oauth|auth(n|z|entication|enticate\w*|orization|orize\w*|orisation)?)\b/i],
+  ["login", /\blog-?in\b/i],
+  ["password", /\bpasswords?\b/i],
+  ["credentials", /\bcredentials?\b/i],
+  ["migration", /\bmigrat\w+/i],
+  ["PII", /\bpii\b|\bpersonal(ly)?[ -](identifiable )?(data|information)\b/i],
+  ["GDPR", /\bgdpr\b/i],
+  ["encryption", /\bencrypt\w*/i],
+  ["payment", /\bpayments?\b/i]
+];
+function deliberateTriggers(text) {
+  return DELIBERATE_PATTERNS.filter(([, re]) => re.test(text)).map(([name]) => name);
+}
+function formatTokens(n) {
+  if (n >= 1e6) return `${Number((n / 1e6).toFixed(1))}M`;
+  if (n >= 1e3) return `${Number((n / 1e3).toFixed(1))}k`;
+  return String(n);
+}
+function formatSeconds(s) {
+  if (s >= 3600) return `${Number((s / 3600).toFixed(1))}h`;
+  if (s >= 60) return `${Math.round(s / 60)}m`;
+  return `${s}s`;
+}
+function budgetText(b) {
+  const parts = [];
+  if (b.token_limit > 0) parts.push(`tokens ${formatTokens(b.tokens)}/${formatTokens(b.token_limit)}`);
+  if (b.seconds_limit > 0) parts.push(`time ${formatSeconds(b.seconds)}/${formatSeconds(b.seconds_limit)}`);
+  return parts.join(" \xB7 ");
+}
+function budgetBar(b) {
+  const pct2 = Math.min(100, Math.round(b.fraction * 100));
+  const cls = b.state === "exhausted" ? " progress-over" : b.state === "no_new_tasks" ? " progress-warn" : "";
+  const note = b.state === "exhausted" ? "budget used up: the run is stopped" : b.state === "no_new_tasks" ? "over 90%: no new task starts, running ones finish" : "";
+  return h(
+    "div",
+    { class: "console-header", attrs: { "data-role": "budget" } },
+    h("span", { class: "pane-title", text: "Budget" }),
+    h("div", { class: "progress-bar-wrap" }, h("div", { class: "progress-bar" + cls, attrs: { style: `width: ${pct2}%` } })),
+    h("span", { class: "progress-pct", text: `${pct2}% \u2014 ${budgetText(b)}` }),
+    note ? badge(note, b.state === "exhausted" ? "warn" : "muted") : null
+  );
+}
+function effortSettings(ef, frdText, deps, onSaved) {
+  const errors = new FormErrors();
+  const deliberate = checkbox("effort_deliberate", ef.deliberate);
+  const tokens = textInput("budget_tokens", ef.budget_tokens ? String(ef.budget_tokens) : "", { type: "number", placeholder: "no limit" });
+  const minutes = textInput("budget_minutes", ef.budget_seconds ? String(Number((ef.budget_seconds / 60).toFixed(2))) : "", { type: "number", placeholder: "no limit" });
+  const triggers = ef.deliberate ? [] : deliberateTriggers(frdText);
+  const suggestion = triggers.length === 0 ? null : h(
+    "div",
+    { class: "warn-box", attrs: { "data-role": "deliberate-suggestion" } },
+    h("p", { text: `This FRD mentions ${triggers.join(", ")}. Deliberate planning adds a pre-mortem and a fuller test plan, which suits this kind of work.` }),
+    button("Turn on deliberate planning", () => {
+      deliberate.checked = true;
+      void save();
+    }, { field: "accept-suggestion", icon: "approve", word: true })
+  );
+  const save = async () => {
+    errors.clear();
+    try {
+      await deps.patchEffort(ef.project, ef.id, {
+        deliberate: deliberate.checked,
+        budget_tokens: Math.max(0, Math.round(Number(tokens.value) || 0)),
+        budget_seconds: Math.max(0, Math.round((Number(minutes.value) || 0) * 60))
+      }, { quiet: true });
+    } catch (err) {
+      errors.show(err);
+      return;
+    }
+    deps.notify("Saved effort settings");
+    onSaved();
+  };
+  return section(
+    `Settings for #${ef.id}`,
+    suggestion,
+    errors.add("deliberate", fieldRow(
+      "Deliberate planning",
+      deliberate,
+      "The planner adds a pre-mortem (three failure scenarios) and an expanded test plan, and the critic checks for them"
+    )).el,
+    h(
+      "div",
+      { class: "profile-fields" },
+      errors.add("budget_tokens", fieldRow("Token budget", tokens, "Runner tokens for the whole effort; blank is no limit")).el,
+      errors.add("budget_seconds", fieldRow(
+        "Time budget (minutes)",
+        minutes,
+        "Total stage run time, so stages running in parallel add up; blank is no limit. From 90% no new task starts; at 100% the run stops"
+      )).el
+    ),
+    errors.general,
+    h("div", { class: "settings-actions" }, button("Save settings", () => void save(), { primary: true, field: "save-effort-settings", icon: "save" }))
+  );
+}
+
 // web/agentflow/js/backends.ts
 function isPrivateHost(host) {
   const m = /^(?:[a-z][a-z0-9+.-]*:\/\/)?(?:[^@/]*@)?(\[[^\]]*\]|[^:/?#]*)/i.exec(host.trim());
@@ -1305,50 +1412,53 @@ var BackendsView = class {
     syncKey();
     const models = [];
     let probed = [];
+    let contexts = {};
     const modelControl = (m) => probed.length > 0 ? selectInput("model", probed.map((n) => [n, n]), m) : textInput("model", m, { placeholder: "model name (or Probe host)" });
     const modelList = h("div", { class: "wizard-list" });
-    const addModel = (m = "", p = false, max = 0) => {
-      const row = {
-        model: modelControl(m),
-        paid: checkbox("model_paid", p),
-        max: textInput("max_concurrent", max > 0 ? String(max) : "", { type: "number", placeholder: "no limit" }),
-        el: h("div", { class: "inline-row", attrs: { "data-role": "model-row" } })
-      };
-      models.push(row);
-      const draw = () => replace(
+    const prefill = (row) => {
+      const c = contexts[row.model.value];
+      if (c > 0 && row.ctx.value === "") row.ctx.value = String(c);
+    };
+    const draw = (row) => {
+      row.model.addEventListener("change", () => prefill(row));
+      replace(
         row.el,
         row.model,
         h("span", { class: "inline-check" }, row.paid, "paid"),
+        h("span", { class: "inline-check", attrs: { title: "Context window in tokens; blank = unknown" } }, "ctx", row.ctx),
         h("span", { class: "inline-check" }, "at once", row.max),
         button("Remove", () => {
           models.splice(models.indexOf(row), 1);
           row.el.parentNode?.removeChild(row.el);
         }, { field: "remove-model", icon: "remove" })
       );
-      draw();
+    };
+    const addModel = (m = "", p = false, max = 0, ctx = 0) => {
+      const row = {
+        model: modelControl(m),
+        paid: checkbox("model_paid", p),
+        max: textInput("max_concurrent", max > 0 ? String(max) : "", { type: "number", placeholder: "no limit" }),
+        ctx: textInput("context_tokens", ctx > 0 ? String(ctx) : "", { type: "number", placeholder: "auto" }),
+        el: h("div", { class: "inline-row", attrs: { "data-role": "model-row" } })
+      };
+      models.push(row);
+      draw(row);
       modelList.appendChild(row.el);
     };
-    for (const m of initial?.models ?? []) addModel(m.model, m.paid, m.max_concurrent);
+    for (const m of initial?.models ?? []) addModel(m.model, m.paid, m.max_concurrent, m.context_tokens ?? 0);
     if (!initial) addModel();
     const probe = async () => {
       errors.clear();
       try {
         const res = await this.deps.probeBackend(host.value.trim(), apiType.value);
         probed = res.models;
+        contexts = res.contexts ?? {};
         if (probed.length === 0) throw new Error("the host reported no models");
         for (const row of models) {
           const keep = row.model.value;
           row.model = modelControl(keep);
-          replace(
-            row.el,
-            row.model,
-            h("span", { class: "inline-check" }, row.paid, "paid"),
-            h("span", { class: "inline-check" }, "at once", row.max),
-            button("Remove", () => {
-              models.splice(models.indexOf(row), 1);
-              row.el.parentNode?.removeChild(row.el);
-            }, { field: "remove-model", icon: "remove" })
-          );
+          draw(row);
+          prefill(row);
         }
         this.deps.notify(`${probed.length} model(s) found on ${host.value.trim()}`);
       } catch (err) {
@@ -1371,7 +1481,7 @@ var BackendsView = class {
         hosted: hosted.checked,
         paid: paid.checked,
         slots: Number(slots.value),
-        models: models.map((m) => ({ model: m.model.value.trim(), paid: m.paid.checked, max_concurrent: Number(m.max.value) || 0 })).filter((m) => m.model !== "")
+        models: models.map((m) => ({ model: m.model.value.trim(), paid: m.paid.checked, max_concurrent: Number(m.max.value) || 0, context_tokens: Math.max(0, Math.round(Number(m.ctx.value) || 0)) })).filter((m) => m.model !== "")
       };
       if (hosted.checked && apiKey.value !== "") body.api_key = apiKey.value;
       else if (clearKey) body.api_key = "";
@@ -1455,7 +1565,8 @@ var BackendsView = class {
       { class: "row-actions" },
       m.model,
       m.paid ? badge("paid") : null,
-      m.max_concurrent > 0 ? badge(`max ${m.max_concurrent} at once`, "muted") : null
+      m.max_concurrent > 0 ? badge(`max ${m.max_concurrent} at once`, "muted") : null,
+      m.context_tokens ? badge(formatTokens(m.context_tokens), "muted") : null
     ));
     return h(
       "div",
@@ -1696,103 +1807,6 @@ function effortBar(slug, efforts, current, onPick, yolo) {
     current ? chip(current.status) : null,
     current?.yolo && !yolo ? yoloBadge() : null,
     current && yolo ? yoloControl(slug, current, yolo.deps, yolo.onChanged) : null
-  );
-}
-
-// web/agentflow/js/effort-settings.ts
-var DELIBERATE_PATTERNS = [
-  ["auth", /\b(oauth|auth(n|z|entication|enticate\w*|orization|orize\w*|orisation)?)\b/i],
-  ["login", /\blog-?in\b/i],
-  ["password", /\bpasswords?\b/i],
-  ["credentials", /\bcredentials?\b/i],
-  ["migration", /\bmigrat\w+/i],
-  ["PII", /\bpii\b|\bpersonal(ly)?[ -](identifiable )?(data|information)\b/i],
-  ["GDPR", /\bgdpr\b/i],
-  ["encryption", /\bencrypt\w*/i],
-  ["payment", /\bpayments?\b/i]
-];
-function deliberateTriggers(text) {
-  return DELIBERATE_PATTERNS.filter(([, re]) => re.test(text)).map(([name]) => name);
-}
-function formatTokens(n) {
-  if (n >= 1e6) return `${Number((n / 1e6).toFixed(1))}M`;
-  if (n >= 1e3) return `${Number((n / 1e3).toFixed(1))}k`;
-  return String(n);
-}
-function formatSeconds(s) {
-  if (s >= 3600) return `${Number((s / 3600).toFixed(1))}h`;
-  if (s >= 60) return `${Math.round(s / 60)}m`;
-  return `${s}s`;
-}
-function budgetText(b) {
-  const parts = [];
-  if (b.token_limit > 0) parts.push(`tokens ${formatTokens(b.tokens)}/${formatTokens(b.token_limit)}`);
-  if (b.seconds_limit > 0) parts.push(`time ${formatSeconds(b.seconds)}/${formatSeconds(b.seconds_limit)}`);
-  return parts.join(" \xB7 ");
-}
-function budgetBar(b) {
-  const pct2 = Math.min(100, Math.round(b.fraction * 100));
-  const cls = b.state === "exhausted" ? " progress-over" : b.state === "no_new_tasks" ? " progress-warn" : "";
-  const note = b.state === "exhausted" ? "budget used up: the run is stopped" : b.state === "no_new_tasks" ? "over 90%: no new task starts, running ones finish" : "";
-  return h(
-    "div",
-    { class: "console-header", attrs: { "data-role": "budget" } },
-    h("span", { class: "pane-title", text: "Budget" }),
-    h("div", { class: "progress-bar-wrap" }, h("div", { class: "progress-bar" + cls, attrs: { style: `width: ${pct2}%` } })),
-    h("span", { class: "progress-pct", text: `${pct2}% \u2014 ${budgetText(b)}` }),
-    note ? badge(note, b.state === "exhausted" ? "warn" : "muted") : null
-  );
-}
-function effortSettings(ef, frdText, deps, onSaved) {
-  const errors = new FormErrors();
-  const deliberate = checkbox("effort_deliberate", ef.deliberate);
-  const tokens = textInput("budget_tokens", ef.budget_tokens ? String(ef.budget_tokens) : "", { type: "number", placeholder: "no limit" });
-  const minutes = textInput("budget_minutes", ef.budget_seconds ? String(Number((ef.budget_seconds / 60).toFixed(2))) : "", { type: "number", placeholder: "no limit" });
-  const triggers = ef.deliberate ? [] : deliberateTriggers(frdText);
-  const suggestion = triggers.length === 0 ? null : h(
-    "div",
-    { class: "warn-box", attrs: { "data-role": "deliberate-suggestion" } },
-    h("p", { text: `This FRD mentions ${triggers.join(", ")}. Deliberate planning adds a pre-mortem and a fuller test plan, which suits this kind of work.` }),
-    button("Turn on deliberate planning", () => {
-      deliberate.checked = true;
-      void save();
-    }, { field: "accept-suggestion", icon: "approve", word: true })
-  );
-  const save = async () => {
-    errors.clear();
-    try {
-      await deps.patchEffort(ef.project, ef.id, {
-        deliberate: deliberate.checked,
-        budget_tokens: Math.max(0, Math.round(Number(tokens.value) || 0)),
-        budget_seconds: Math.max(0, Math.round((Number(minutes.value) || 0) * 60))
-      }, { quiet: true });
-    } catch (err) {
-      errors.show(err);
-      return;
-    }
-    deps.notify("Saved effort settings");
-    onSaved();
-  };
-  return section(
-    `Settings for #${ef.id}`,
-    suggestion,
-    errors.add("deliberate", fieldRow(
-      "Deliberate planning",
-      deliberate,
-      "The planner adds a pre-mortem (three failure scenarios) and an expanded test plan, and the critic checks for them"
-    )).el,
-    h(
-      "div",
-      { class: "profile-fields" },
-      errors.add("budget_tokens", fieldRow("Token budget", tokens, "Runner tokens for the whole effort; blank is no limit")).el,
-      errors.add("budget_seconds", fieldRow(
-        "Time budget (minutes)",
-        minutes,
-        "Total stage run time, so stages running in parallel add up; blank is no limit. From 90% no new task starts; at 100% the run stops"
-      )).el
-    ),
-    errors.general,
-    h("div", { class: "settings-actions" }, button("Save settings", () => void save(), { primary: true, field: "save-effort-settings", icon: "save" }))
   );
 }
 
@@ -2454,366 +2468,10 @@ function mountHistory(host, slug) {
 }
 
 // web/agentflow/js/frd-editor.ts
-import { alertDialog as alertDialog2, showToast as showToast6 } from "/shared/dist/shared.mjs";
-var defaultFrdDeps = () => ({
-  efforts: api.efforts,
-  createEffort: api.createEffort,
-  patchEffort: api.patchEffort,
-  frd: api.frd,
-  putFRD: api.putFRD,
-  frdRevisions: api.frdRevisions,
-  frdRevision: api.frdRevision,
-  approveFRD: api.approveFRD,
-  notify: (m) => void showToast6(m, "success")
-});
-var PRIORITIES = [["", "(none)"], ["must", "must"], ["should", "should"], ["could", "could"], ["wont", "won't"]];
-var lines = (s) => s.split("\n").map((l) => l.trim()).filter((l) => l !== "");
-var commaList = (s) => s.split(",").map((l) => l.trim()).filter((l) => l !== "");
-var when2 = (ms) => ms ? new Date(ms).toLocaleString() : "";
-function blankFRD(slug, effort) {
-  return {
-    id: `FRD-${slug}-${effort.id}`.toUpperCase(),
-    title: effort.title,
-    objective: "",
-    requirements: [{ id: "R1", priority: "must", description: "" }],
-    acceptance_criteria: []
-  };
-}
-var FrdForm = class {
-  constructor(base, onChange) {
-    this.base = base;
-    this.errors = new FormErrors();
-    this.f = {
-      id: textInput("id", base.id ?? ""),
-      title: textInput("title", base.title ?? ""),
-      status: textInput("status", base.status ?? ""),
-      objective: textArea("objective", base.objective ?? "", 3),
-      context: textArea("context", base.context ?? "", 3),
-      constraints: textArea("constraints", (base.constraints ?? []).join("\n"), 3),
-      out_of_scope: textArea("out_of_scope", (base.out_of_scope ?? []).join("\n"), 3)
-    };
-    for (const c of Object.values(this.f)) c.addEventListener("input", onChange);
-    this.groups = new RowsEditor((g) => {
-      const id = textInput("group_id", g.id, { placeholder: "id" });
-      const title = textInput("group_title", g.title, { placeholder: "title" });
-      const summary = textInput("group_summary", g.summary ?? "", { placeholder: "summary" });
-      return { el: h("div", { class: "row-actions" }, id, title, summary), read: () => ({ id: id.value.trim(), title: title.value.trim(), summary: summary.value.trim() || void 0 }) };
-    }, base.groups ?? [], () => ({ id: "", title: "" }), "Add group", onChange);
-    this.reqs = new RowsEditor((r) => {
-      const id = textInput("req_id", r.id, { placeholder: "id" });
-      const group = textInput("req_group", r.group ?? "", { placeholder: "group" });
-      const prio = selectInput("req_priority", PRIORITIES, r.priority ?? "");
-      const desc = textArea("req_description", r.description, 2);
-      return {
-        el: h("div", { class: "wizard-field" }, h("div", { class: "row-actions" }, id, group, prio), desc),
-        read: () => ({ ...r, id: id.value.trim(), group: group.value.trim() || void 0, priority: prio.value || void 0, description: desc.value.trim() })
-      };
-    }, base.requirements ?? [], () => ({ id: "", description: "" }), "Add requirement", onChange);
-    this.acs = new RowsEditor((a) => {
-      const id = textInput("ac_id", a.id, { placeholder: "id" });
-      const reqs = textInput("ac_requirements", (a.requirements ?? []).join(", "), { placeholder: "R1, R2" });
-      const crit = textArea("ac_criterion", a.criterion, 2);
-      return {
-        el: h("div", { class: "wizard-field" }, h("div", { class: "row-actions" }, id, reqs), crit),
-        read: () => ({ id: id.value.trim(), requirements: commaList(reqs.value), criterion: crit.value.trim() })
-      };
-    }, base.acceptance_criteria ?? [], () => ({ id: "", criterion: "" }), "Add acceptance criterion", onChange);
-    this.decisions = new RowsEditor((d) => {
-      const id = textInput("decision_id", d.id, { placeholder: "id" });
-      const dec = textInput("decision_text", d.decision, { placeholder: "decision" });
-      const why = textInput("decision_rationale", d.rationale ?? "", { placeholder: "rationale" });
-      return { el: h("div", { class: "row-actions" }, id, dec, why), read: () => ({ id: id.value.trim(), decision: dec.value.trim(), rationale: why.value.trim() || void 0 }) };
-    }, base.decisions ?? [], () => ({ id: "", decision: "" }), "Add decision", onChange);
-    const e = this.errors;
-    const verbatim = ["state_model", "findings", "planning_spikes"].filter((k) => base[k] !== void 0);
-    this.el = h(
-      "div",
-      { class: "detail-body", attrs: { "data-role": "frd-form" } },
-      h(
-        "div",
-        { class: "profile-fields" },
-        e.add("id", fieldRow("ID", this.f.id)).el,
-        e.add("title", fieldRow("Title", this.f.title)).el,
-        e.add("status", fieldRow("Status", this.f.status)).el
-      ),
-      e.add("objective", fieldRow("Objective", this.f.objective)).el,
-      e.add("context", fieldRow("Context", this.f.context)).el,
-      e.add("constraints", fieldRow("Constraints", this.f.constraints, "One per line")).el,
-      e.add("groups", fieldRow("Groups", this.groups.el)).el,
-      e.add("requirements", fieldRow("Requirements", this.reqs.el)).el,
-      e.add("acceptance_criteria", fieldRow("Acceptance criteria", this.acs.el, "Requirements are a comma-separated list of requirement ids")).el,
-      e.add("decisions", fieldRow("Decisions", this.decisions.el)).el,
-      e.add("out_of_scope", fieldRow("Out of scope", this.f.out_of_scope, "One per line")).el,
-      verbatim.length ? h("p", { class: "field-hint", text: `Kept as they are: ${verbatim.join(", ")}` }) : null,
-      e.general
-    );
-  }
-  /** read assembles the FRD: the loaded document with the edited fields replaced. */
-  read() {
-    const v = (k) => this.f[k].value.trim();
-    const some = (a) => a.length ? a : void 0;
-    return {
-      ...this.base,
-      id: v("id"),
-      title: v("title"),
-      status: v("status") || void 0,
-      objective: v("objective"),
-      context: v("context") || void 0,
-      constraints: some(lines(this.f.constraints.value)),
-      groups: some(this.groups.read().filter((g) => g.id || g.title)),
-      requirements: this.reqs.read().filter((r) => r.id || r.description),
-      acceptance_criteria: this.acs.read().filter((a) => a.id || a.criterion),
-      decisions: some(this.decisions.read().filter((d) => d.id || d.decision)),
-      out_of_scope: some(lines(this.f.out_of_scope.value))
-    };
-  }
-};
-var FrdEditor = class {
-  constructor(host, slug, deps) {
-    this.host = host;
-    this.slug = slug;
-    this.deps = deps;
-    this.efforts = [];
-    this.revisions = [];
-    this.latest = null;
-    this.viewing = null;
-    this.form = null;
-    this.dirty = false;
-    this.loaded = false;
-    this.off = null;
-    this.createErrors = new FormErrors();
-    this.stopPoll = null;
-  }
-  mount() {
-    this.off = subscribe((ev) => {
-      const mine = "project" in ev && ev.project === this.slug;
-      if (!this.dirty && (ev.type === "state.changed" || mine && (ev.type === "effort.update" || ev.type === "project.update"))) void this.load();
-    });
-    this.stopPoll = startPoll(() => !this.dirty && isTransient(this.current?.status), () => this.load());
-    void this.load();
-    return () => {
-      this.off?.();
-      this.off = null;
-      this.stopPoll?.();
-      this.stopPoll = null;
-    };
-  }
-  async load() {
-    try {
-      this.efforts = await this.deps.efforts(this.slug);
-    } catch {
-      if (!this.loaded) return;
-    }
-    this.loaded = true;
-    this.current = chooseEffort(this.slug, this.efforts);
-    await this.loadDoc();
-  }
-  async loadDoc() {
-    this.latest = null;
-    this.viewing = null;
-    this.revisions = [];
-    this.dirty = false;
-    const ef = this.current;
-    if (ef) {
-      try {
-        this.latest = await this.deps.frd(this.slug, ef.id, { quiet: true });
-        this.revisions = await this.deps.frdRevisions(this.slug, ef.id);
-      } catch (err) {
-        if (!(err instanceof ApiError && err.status === 404)) void alertDialog2(err instanceof Error ? err.message : String(err));
-      }
-      this.form = new FrdForm(this.latest?.json ?? blankFRD(this.slug, ef), () => {
-        this.dirty = true;
-      });
-    } else {
-      this.form = null;
-    }
-    this.render();
-  }
-  async create(title, deliberate, tokens, minutes) {
-    this.createErrors.clear();
-    try {
-      const ef = await this.deps.createEffort(this.slug, title.trim(), deliberate, { quiet: true }, {
-        budget_tokens: Math.max(0, Math.round(Number(tokens) || 0)),
-        budget_seconds: Math.max(0, Math.round((Number(minutes) || 0) * 60))
-      });
-      rememberEffort(this.slug, ef.id);
-    } catch (err) {
-      this.createErrors.show(err);
-      return;
-    }
-    this.deps.notify("Effort created");
-    await this.load();
-  }
-  async save() {
-    const ef = this.current;
-    if (!ef || !this.form) return;
-    this.form.errors.clear();
-    try {
-      await this.deps.putFRD(this.slug, ef.id, this.form.read(), { quiet: true });
-    } catch (err) {
-      this.form.errors.show(err);
-      return;
-    }
-    this.deps.notify("Saved a new FRD revision");
-    await this.load();
-  }
-  async approve() {
-    const ef = this.current;
-    if (!ef || !this.latest) return;
-    try {
-      await this.deps.approveFRD(this.slug, ef.id, this.latest.revision);
-    } catch {
-      return;
-    }
-    this.deps.notify(`Approved revision ${this.latest.revision}`);
-    await this.load();
-  }
-  async view(n) {
-    const ef = this.current;
-    if (!ef) return;
-    try {
-      this.viewing = await this.deps.frdRevision(this.slug, ef.id, n);
-    } catch {
-      return;
-    }
-    this.render();
-  }
-  loadIntoEditor(doc) {
-    this.form = new FrdForm(doc, () => {
-      this.dirty = true;
-    });
-    this.dirty = true;
-    this.viewing = null;
-    this.render();
-  }
-  newEffortForm() {
-    const title = textInput("effort_title", "", { placeholder: "What this effort delivers" });
-    const deliberate = checkbox("deliberate", false);
-    const tokens = textInput("budget_tokens", "", { type: "number", placeholder: "no limit" });
-    const minutes = textInput("budget_minutes", "", { type: "number", placeholder: "no limit" });
-    this.createErrors = new FormErrors();
-    return section(
-      "New effort",
-      this.createErrors.add("title", fieldRow("Title", title)).el,
-      fieldRow("Deliberate planning", deliberate, "Adds a pre-mortem and test plan to the planner prompt; after the FRD is written you are told when it mentions auth, migration or personal data").el,
-      this.createErrors.add("budget_tokens", fieldRow("Token budget", tokens, "Optional; blank is no limit")).el,
-      this.createErrors.add("budget_seconds", fieldRow("Time budget (minutes)", minutes, "Optional; blank is no limit")).el,
-      this.createErrors.general,
-      h("div", { class: "settings-actions" }, button("Create effort", () => void this.create(title.value, deliberate.checked, tokens.value, minutes.value), { primary: true, field: "create-effort", icon: "add", word: true }))
-    );
-  }
-  list() {
-    return h("ul", { class: "task-list", attrs: { "data-role": "frd-list" } }, ...this.efforts.map((e) => h(
-      "li",
-      { class: "task-item" + (e.id === this.current?.id ? " selected" : ""), attrs: { "data-effort": e.id }, on: {
-        click: () => {
-          rememberEffort(this.slug, e.id);
-          this.current = e;
-          void this.loadDoc();
-        }
-      } },
-      h("div", { class: "task-item-title", text: e.title }),
-      h(
-        "div",
-        { class: "task-item-meta" },
-        chip(e.status),
-        h("span", { text: e.frd.latest ? `FRD revision ${e.frd.latest}${e.frd.approved ? `, approved ${e.frd.approved}` : ", not approved"}` : "no FRD yet" })
-      )
-    )));
-  }
-  revisionList() {
-    const rows = this.revisions.map((r) => h(
-      "div",
-      { class: "inline-row", attrs: { "data-revision": r.revision } },
-      h("span", { text: `Revision ${r.revision} \xB7 ${r.created_by} \xB7 ${when2(r.created)}` }),
-      r.approved ? badge("approved", "ok") : null,
-      button("View", () => void this.view(r.revision), { field: "view-revision", icon: "view" })
-    ));
-    const viewing = this.viewing;
-    return section(
-      "Revisions",
-      rows.length ? h("div", { class: "wizard-list" }, ...rows) : h("p", { class: "field-hint", text: "No revisions yet." }),
-      viewing ? h(
-        "div",
-        { class: "detail-section", attrs: { "data-role": "revision-view" } },
-        h("h4", { text: `Revision ${viewing.revision}${viewing.approved ? " (approved)" : ""}` }),
-        h("pre", { class: "detail-mono", text: JSON.stringify(viewing.json, null, 2) }),
-        h(
-          "div",
-          { class: "row-actions" },
-          button("Load into editor", () => viewing.json && this.loadIntoEditor(viewing.json), { field: "load-revision", icon: "import", word: true }),
-          button("Close", () => {
-            this.viewing = null;
-            this.render();
-          }, { field: "close-revision", icon: "cancel" })
-        )
-      ) : null
-    );
-  }
-  render() {
-    if (!this.loaded) {
-      replace(this.host, h("p", { class: "field-hint", text: "Loading efforts\u2026" }));
-      return;
-    }
-    const ef = this.current;
-    const approvedRev = this.revisions.find((r) => r.approved)?.revision;
-    const canApprove = !!ef && !!this.latest && this.latest.revision !== approvedRev && !this.dirty && !isFinished(ef);
-    const editor = ef && this.form ? section(
-      `FRD for #${ef.id}`,
-      h(
-        "div",
-        { class: "row-actions" },
-        h("span", { class: "field-hint", text: this.latest ? `Latest revision ${this.latest.revision}${approvedRev ? `; revision ${approvedRev} approved` : "; not approved"}` : "Not saved yet" }),
-        this.dirty ? badge("unsaved", "warn") : null
-      ),
-      this.form.el,
-      h(
-        "div",
-        { class: "settings-actions" },
-        button("Save as new revision", () => void this.save(), { primary: !canApprove, field: "save-frd", icon: "save" }),
-        canApprove && this.latest ? button(`Approve revision ${this.latest.revision}`, () => void this.approve(), { primary: true, field: "approve-frd", icon: "approve" }) : null
-      )
-    ) : null;
-    const active2 = this.efforts.find((e) => !isFinished(e));
-    const bar = this.efforts.length ? effortBar(this.slug, this.efforts, ef, (id) => {
-      this.current = this.efforts.find((e) => e.id === id);
-      void this.loadDoc();
-    }) : null;
-    if (bar && active2) {
-      bar.appendChild(h("button", {
-        class: "ui-modal-btn is-disabled",
-        text: "+",
-        attrs: {
-          type: "button",
-          "data-action": "new-effort",
-          "aria-disabled": "true",
-          "aria-label": "New effort",
-          title: `New effort is unavailable: a project has one active effort at a time. Finish or abandon #${active2.id} (${active2.status.replace(/_/g, " ")}) first.`
-        }
-      }));
-    }
-    replace(
-      this.host,
-      h(
-        "div",
-        { class: "settings-host" },
-        bar,
-        active2 ? null : this.efforts.length ? null : h("div", { class: "plan-empty" }, h("h3", { text: "No efforts yet" }), h("p", { text: "An effort is one FRD, plan and queue. Create the first one below." })),
-        active2 ? null : this.newEffortForm(),
-        editor,
-        ef && !isFinished(ef) ? effortSettings(ef, this.form ? JSON.stringify(this.form.read()) : "", this.deps, () => void this.load()) : null,
-        ef ? this.revisionList() : null,
-        this.efforts.length ? section("Efforts", this.list()) : null
-      )
-    );
-  }
-};
-function mountFrd(host, slug) {
-  return new FrdEditor(host, slug, defaultFrdDeps()).mount();
-}
+import { alertDialog as alertDialog2, showToast as showToast7 } from "/shared/dist/shared.mjs";
 
 // web/agentflow/js/plan-view.ts
-import { confirmDialog as confirmDialog4, showToast as showToast7 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog4, showToast as showToast6 } from "/shared/dist/shared.mjs";
 var defaultPlanDeps = () => ({
   efforts: api.efforts,
   plan: api.plan,
@@ -2823,7 +2481,7 @@ var defaultPlanDeps = () => ({
   generatePlan: api.generatePlan,
   approvePlan: api.approvePlan,
   confirm: (m) => confirmDialog4(m, { confirmLabel: "Approve" }),
-  notify: (m) => void showToast7(m, "success")
+  notify: (m) => void showToast6(m, "success")
 });
 var PLAN_TABS = ["planner", "architect", "critic"];
 var list = (title, items) => items && items.length > 0 ? h("div", { class: "plan-section" }, h("h4", { text: title }), h("ul", {}, ...items.map((t) => h("li", { text: t })))) : null;
@@ -3194,6 +2852,608 @@ function mountPlan(host, slug) {
   return new PlanViewer(host, slug, defaultPlanDeps()).mount();
 }
 
+// web/agentflow/js/frd-editor.ts
+var defaultFrdDeps = () => ({
+  efforts: api.efforts,
+  createEffort: api.createEffort,
+  patchEffort: api.patchEffort,
+  frd: api.frd,
+  putFRD: api.putFRD,
+  frdRevisions: api.frdRevisions,
+  frdRevision: api.frdRevision,
+  approveFRD: api.approveFRD,
+  draftFRD: api.draftFRD,
+  draftState: api.draftState,
+  definitionOfDone: api.definitionOfDone,
+  frdSize: api.frdSize,
+  splitFRD: api.splitFRD,
+  frdParts: api.frdParts,
+  startPart: api.startPart,
+  notify: (m) => void showToast7(m, "success")
+});
+var PRIORITIES = [["", "(none)"], ["must", "must"], ["should", "should"], ["could", "could"], ["wont", "won't"]];
+var lines = (s) => s.split("\n").map((l) => l.trim()).filter((l) => l !== "");
+var when2 = (ms) => ms ? new Date(ms).toLocaleString() : "";
+function blankFRD(slug, effort) {
+  return {
+    id: `FRD-${slug}-${effort.id}`.toUpperCase(),
+    title: effort.title,
+    objective: "",
+    requirements: [{ id: "", priority: "must", description: "" }],
+    acceptance_criteria: []
+  };
+}
+var FrdForm = class {
+  constructor(base, onChange) {
+    this.base = base;
+    this.errors = new FormErrors();
+    this.f = {
+      id: textInput("id", base.id ?? "", { readOnly: true }),
+      title: textInput("title", base.title ?? ""),
+      status: textInput("status", base.status ?? "", { readOnly: true }),
+      objective: textArea("objective", base.objective ?? "", 3),
+      context: textArea("context", base.context ?? "", 3),
+      constraints: textArea("constraints", (base.constraints ?? []).join("\n"), 3),
+      out_of_scope: textArea("out_of_scope", (base.out_of_scope ?? []).join("\n"), 3)
+    };
+    for (const c of Object.values(this.f)) c.addEventListener("input", onChange);
+    this.groups = new RowsEditor((g) => {
+      const id = textInput("group_id", g.id, { placeholder: "id" });
+      const title = textInput("group_title", g.title, { placeholder: "title" });
+      const summary = textInput("group_summary", g.summary ?? "", { placeholder: "summary" });
+      return { el: h("div", { class: "row-actions" }, id, title, summary), read: () => ({ id: id.value.trim(), title: title.value.trim(), summary: summary.value.trim() || void 0 }) };
+    }, base.groups ?? [], () => ({ id: "", title: "" }), "Add group", onChange);
+    this.reqs = new RowsEditor((r) => {
+      const group = textInput("req_group", r.group ?? "", { placeholder: "group" });
+      const prio = selectInput("req_priority", PRIORITIES, r.priority ?? "");
+      const desc = textArea("req_description", r.description, 2);
+      return {
+        el: h("div", { class: "wizard-field" }, h("div", { class: "row-actions" }, group, prio), desc),
+        read: () => ({ ...r, group: group.value.trim() || void 0, priority: prio.value || void 0, description: desc.value.trim() })
+      };
+    }, base.requirements ?? [], () => ({ id: "", description: "" }), "Add requirement", onChange);
+    this.acs = new RowsEditor((a) => {
+      const crit = textArea("ac_criterion", a.criterion, 2);
+      return { el: h("div", { class: "wizard-field" }, crit), read: () => ({ ...a, criterion: crit.value.trim() }) };
+    }, base.acceptance_criteria ?? [], () => ({ id: "", criterion: "" }), "Add acceptance criterion", onChange);
+    this.decisions = new RowsEditor((d) => {
+      const id = textInput("decision_id", d.id, { placeholder: "id" });
+      const dec = textInput("decision_text", d.decision, { placeholder: "decision" });
+      const why = textInput("decision_rationale", d.rationale ?? "", { placeholder: "rationale" });
+      return { el: h("div", { class: "row-actions" }, id, dec, why), read: () => ({ id: id.value.trim(), decision: dec.value.trim(), rationale: why.value.trim() || void 0 }) };
+    }, base.decisions ?? [], () => ({ id: "", decision: "" }), "Add decision", onChange);
+    const e = this.errors;
+    const verbatim = ["state_model", "findings", "planning_spikes"].filter((k) => base[k] !== void 0);
+    this.el = h(
+      "div",
+      { class: "detail-body", attrs: { "data-role": "frd-form" } },
+      h(
+        "div",
+        { class: "profile-fields" },
+        e.add("id", fieldRow("ID", this.f.id)).el,
+        e.add("title", fieldRow("Title", this.f.title)).el,
+        e.add("status", fieldRow("Status", this.f.status)).el
+      ),
+      e.add("objective", fieldRow("Objective", this.f.objective)).el,
+      e.add("context", fieldRow("Context", this.f.context)).el,
+      e.add("constraints", fieldRow("Constraints", this.f.constraints, "One per line")).el,
+      e.add("groups", fieldRow("Groups", this.groups.el)).el,
+      e.add("requirements", fieldRow("Requirements", this.reqs.el)).el,
+      e.add("acceptance_criteria", fieldRow("Acceptance criteria", this.acs.el)).el,
+      e.add("decisions", fieldRow("Decisions", this.decisions.el)).el,
+      e.add("out_of_scope", fieldRow("Out of scope", this.f.out_of_scope, "One per line")).el,
+      verbatim.length ? h("p", { class: "field-hint", text: `Kept as they are: ${verbatim.join(", ")}` }) : null,
+      e.general
+    );
+  }
+  /** read assembles the FRD: the loaded document with the edited fields replaced. */
+  read() {
+    const v = (k) => this.f[k].value.trim();
+    const some = (a) => a.length ? a : void 0;
+    return {
+      ...this.base,
+      id: v("id"),
+      title: v("title"),
+      status: v("status") || void 0,
+      objective: v("objective"),
+      context: v("context") || void 0,
+      constraints: some(lines(this.f.constraints.value)),
+      groups: some(this.groups.read().filter((g) => g.id || g.title)),
+      requirements: this.reqs.read().filter((r) => r.id || r.description),
+      acceptance_criteria: this.acs.read().filter((a) => a.id || a.criterion),
+      decisions: some(this.decisions.read().filter((d) => d.id || d.decision)),
+      out_of_scope: some(lines(this.f.out_of_scope.value))
+    };
+  }
+};
+var FrdEditor = class {
+  constructor(host, slug, deps) {
+    this.host = host;
+    this.slug = slug;
+    this.deps = deps;
+    this.efforts = [];
+    this.revisions = [];
+    this.latest = null;
+    this.viewing = null;
+    this.form = null;
+    this.dirty = false;
+    this.loaded = false;
+    this.off = null;
+    this.createErrors = new FormErrors();
+    this.stopPoll = null;
+    // Review mode shows the FRD as a card; editing swaps in the structured editor.
+    this.editing = false;
+    this.desc = "";
+    /** True while the describe box holds typed text: a refresh must not rebuild it under the cursor. */
+    this.typing = false;
+    this.draft = null;
+    this.draftError = "";
+    this.dod = null;
+    this.size = null;
+    this.parts = [];
+    this.partErrors = /* @__PURE__ */ new Map();
+    this.splitError = "";
+    /** Start time of a split in flight (ms), else 0; it ends when the FRD revision or the parts change. */
+    this.splitting = 0;
+    this.splitBase = { revision: 0, parts: 0 };
+    this.disposed = false;
+    this.ticker = null;
+    this.clocks = [];
+  }
+  mount() {
+    this.off = subscribe((ev) => {
+      const mine = "project" in ev && ev.project === this.slug;
+      if (!this.dirty && !this.typing && (ev.type === "state.changed" || mine && (ev.type === "effort.update" || ev.type === "project.update"))) void this.load();
+    });
+    this.stopPoll = startPoll(() => !this.dirty && !this.typing && (isTransient(this.current?.status) || this.draft?.state === "running" || this.splitting > 0), () => this.load());
+    void this.load();
+    return () => {
+      this.disposed = true;
+      if (this.ticker) clearInterval(this.ticker);
+      this.ticker = null;
+      this.off?.();
+      this.off = null;
+      this.stopPoll?.();
+      this.stopPoll = null;
+    };
+  }
+  async load() {
+    try {
+      this.efforts = await this.deps.efforts(this.slug);
+    } catch {
+      if (!this.loaded) return;
+    }
+    this.loaded = true;
+    this.current = chooseEffort(this.slug, this.efforts);
+    await this.loadDoc();
+  }
+  async loadDoc() {
+    this.latest = null;
+    this.viewing = null;
+    this.revisions = [];
+    this.dirty = false;
+    const ef = this.current;
+    if (ef) {
+      try {
+        this.latest = await this.deps.frd(this.slug, ef.id, { quiet: true });
+        this.revisions = await this.deps.frdRevisions(this.slug, ef.id);
+      } catch (err) {
+        if (!(err instanceof ApiError && err.status === 404)) void alertDialog2(err instanceof Error ? err.message : String(err));
+      }
+      const q = { quiet: true };
+      const none = () => null;
+      const [draft, dod, size, parts] = await Promise.all([
+        this.deps.draftState(this.slug, ef.id, q).catch(none),
+        this.deps.definitionOfDone(this.slug, q).catch(none),
+        this.latest ? this.deps.frdSize(this.slug, ef.id, q).catch(none) : null,
+        this.deps.frdParts(this.slug, ef.id, q).catch(none)
+      ]);
+      if (this.disposed) return;
+      if (this.draft?.state === "running" && draft?.state === "idle") this.desc = "";
+      this.draft = draft;
+      this.draftError = "";
+      this.dod = dod;
+      this.size = size;
+      this.parts = parts ?? [];
+      if (this.splitting > 0 && (this.latest?.revision !== this.splitBase.revision || this.parts.length !== this.splitBase.parts || Date.now() - this.splitting > 9e5)) this.splitting = 0;
+      this.form = new FrdForm(this.latest?.json ?? blankFRD(this.slug, ef), () => {
+        this.dirty = true;
+      });
+    } else {
+      this.form = null;
+    }
+    if (!this.latest) this.editing = false;
+    this.render();
+  }
+  async startDraft(polish) {
+    const ef = this.current;
+    const description = polish ? "" : this.desc.trim();
+    if (!ef || !polish && description === "") return;
+    this.draftError = "";
+    try {
+      await this.deps.draftFRD(this.slug, ef.id, description, polish, { quiet: true });
+    } catch (err) {
+      this.draftError = err instanceof Error ? err.message : String(err);
+      this.render();
+      return;
+    }
+    this.typing = false;
+    this.draft = { state: "running", started: Date.now() };
+    this.render();
+  }
+  async split() {
+    const ef = this.current;
+    if (!ef) return;
+    this.splitError = "";
+    try {
+      await this.deps.splitFRD(this.slug, ef.id, { quiet: true });
+    } catch (err) {
+      this.splitError = err instanceof Error ? err.message : String(err);
+      this.render();
+      return;
+    }
+    this.splitting = Date.now();
+    this.splitBase = { revision: this.latest?.revision ?? 0, parts: this.parts.length };
+    this.render();
+  }
+  async startPart(n) {
+    const ef = this.current;
+    if (!ef || this.efforts.some((e) => !isFinished(e))) return;
+    this.partErrors.delete(n);
+    try {
+      const started = await this.deps.startPart(this.slug, ef.id, n, { quiet: true });
+      if (started?.id) rememberEffort(this.slug, started.id);
+    } catch (err) {
+      this.partErrors.set(n, err instanceof Error ? err.message : String(err));
+      this.render();
+      return;
+    }
+    this.deps.notify(`Started part ${n}`);
+    await this.load();
+  }
+  async create(title, deliberate, tokens, minutes) {
+    this.createErrors.clear();
+    try {
+      const ef = await this.deps.createEffort(this.slug, title.trim(), deliberate, { quiet: true }, {
+        budget_tokens: Math.max(0, Math.round(Number(tokens) || 0)),
+        budget_seconds: Math.max(0, Math.round((Number(minutes) || 0) * 60))
+      });
+      rememberEffort(this.slug, ef.id);
+    } catch (err) {
+      this.createErrors.show(err);
+      return;
+    }
+    this.deps.notify("Effort created");
+    await this.load();
+  }
+  async save() {
+    const ef = this.current;
+    if (!ef || !this.form) return;
+    this.form.errors.clear();
+    try {
+      await this.deps.putFRD(this.slug, ef.id, this.form.read(), { quiet: true });
+    } catch (err) {
+      this.form.errors.show(err);
+      return;
+    }
+    this.deps.notify("Saved a new FRD revision");
+    this.editing = false;
+    await this.load();
+  }
+  async approve() {
+    const ef = this.current;
+    if (!ef || !this.latest) return;
+    try {
+      await this.deps.approveFRD(this.slug, ef.id, this.latest.revision);
+    } catch {
+      return;
+    }
+    this.deps.notify(`Approved revision ${this.latest.revision}`);
+    await this.load();
+  }
+  async view(n) {
+    const ef = this.current;
+    if (!ef) return;
+    try {
+      this.viewing = await this.deps.frdRevision(this.slug, ef.id, n);
+    } catch {
+      return;
+    }
+    this.render();
+  }
+  loadIntoEditor(doc) {
+    this.form = new FrdForm(doc, () => {
+      this.dirty = true;
+    });
+    this.dirty = true;
+    this.editing = true;
+    this.viewing = null;
+    this.render();
+  }
+  newEffortForm() {
+    const title = textInput("effort_title", "", { placeholder: "What this effort delivers" });
+    const deliberate = checkbox("deliberate", false);
+    const tokens = textInput("budget_tokens", "", { type: "number", placeholder: "no limit" });
+    const minutes = textInput("budget_minutes", "", { type: "number", placeholder: "no limit" });
+    this.createErrors = new FormErrors();
+    return section(
+      "New effort",
+      this.createErrors.add("title", fieldRow("Title", title)).el,
+      fieldRow("Deliberate planning", deliberate, "Adds a pre-mortem and test plan to the planner prompt; after the FRD is written you are told when it mentions auth, migration or personal data").el,
+      this.createErrors.add("budget_tokens", fieldRow("Token budget", tokens, "Optional; blank is no limit")).el,
+      this.createErrors.add("budget_seconds", fieldRow("Time budget (minutes)", minutes, "Optional; blank is no limit")).el,
+      this.createErrors.general,
+      h("div", { class: "settings-actions" }, button("Create effort", () => void this.create(title.value, deliberate.checked, tokens.value, minutes.value), { primary: true, field: "create-effort", icon: "add", word: true }))
+    );
+  }
+  list() {
+    return h("ul", { class: "task-list", attrs: { "data-role": "frd-list" } }, ...this.efforts.map((e) => h(
+      "li",
+      { class: "task-item" + (e.id === this.current?.id ? " selected" : ""), attrs: { "data-effort": e.id }, on: {
+        click: () => {
+          rememberEffort(this.slug, e.id);
+          this.current = e;
+          void this.loadDoc();
+        }
+      } },
+      h("div", { class: "task-item-title", text: e.title }),
+      h(
+        "div",
+        { class: "task-item-meta" },
+        chip(e.status),
+        h("span", { text: e.frd.latest ? `FRD revision ${e.frd.latest}${e.frd.approved ? `, approved ${e.frd.approved}` : ", not approved"}` : "no FRD yet" })
+      )
+    )));
+  }
+  revisionList() {
+    const rows = this.revisions.map((r) => h(
+      "div",
+      { class: "inline-row", attrs: { "data-revision": r.revision } },
+      h("span", { text: `Revision ${r.revision} \xB7 ${r.created_by} \xB7 ${when2(r.created)}` }),
+      r.approved ? badge("approved", "ok") : null,
+      button("View", () => void this.view(r.revision), { field: "view-revision", icon: "view" })
+    ));
+    const viewing = this.viewing;
+    return section(
+      "Revisions",
+      rows.length ? h("div", { class: "wizard-list" }, ...rows) : h("p", { class: "field-hint", text: "No revisions yet." }),
+      viewing ? h(
+        "div",
+        { class: "detail-section", attrs: { "data-role": "revision-view" } },
+        h("h4", { text: `Revision ${viewing.revision}${viewing.approved ? " (approved)" : ""}` }),
+        h("pre", { class: "detail-mono", text: JSON.stringify(viewing.json, null, 2) }),
+        h(
+          "div",
+          { class: "row-actions" },
+          button("Load into editor", () => viewing.json && this.loadIntoEditor(viewing.json), { field: "load-revision", icon: "import", word: true }),
+          button("Close", () => {
+            this.viewing = null;
+            this.render();
+          }, { field: "close-revision", icon: "cancel" })
+        )
+      ) : null
+    );
+  }
+  /** strip is the progress strip of a running draft or split: label, elapsed time and an animated bar. */
+  strip(label, since) {
+    const elapsed = h("span", { class: "field-hint", text: since > 0 ? elapsedText(Date.now() - since) : "", attrs: { "data-role": "elapsed" } });
+    this.clocks.push({ el: elapsed, since });
+    return h(
+      "div",
+      { class: "progress-strip", attrs: { "data-role": "progress-strip", role: "status" } },
+      h("div", { class: "row-actions" }, h("strong", { text: label }), elapsed),
+      h("div", { class: "progress-bar-wrap" }, h("div", { class: "progress-bar progress-indeterminate" }))
+    );
+  }
+  /** syncTicker keeps one timer alive while any strip is on screen. */
+  syncTicker() {
+    if (this.clocks.length === 0 || this.disposed) {
+      if (this.ticker) clearInterval(this.ticker);
+      this.ticker = null;
+      return;
+    }
+    if (!this.ticker) {
+      this.ticker = setInterval(() => {
+        for (const c of this.clocks) if (c.since > 0) c.el.textContent = elapsedText(Date.now() - c.since);
+      }, 1e3);
+    }
+  }
+  describeBox(ef) {
+    const running = this.draft?.state === "running";
+    const box = textArea("description", this.desc, 4);
+    box.setAttribute("placeholder", "What do you want?");
+    const draftBtn = button("Draft the FRD", () => void this.startDraft(false), { primary: true, field: "draft-frd", icon: "sparkle" });
+    const sync = () => {
+      this.desc = box.value;
+      this.typing = box.value !== "";
+      draftBtn.className = draftBtn.className.replace(" is-disabled", "") + (box.value.trim() === "" ? " is-disabled" : "");
+    };
+    box.addEventListener("input", sync);
+    if (this.desc.trim() === "") draftBtn.className += " is-disabled";
+    const error = this.draftError || (this.draft?.state === "failed" ? this.draft.error ?? "The draft failed" : "");
+    return section(
+      `FRD for #${ef.id}`,
+      box,
+      running ? this.strip("Drafting the FRD", this.draft?.started ?? 0) : null,
+      error ? h("div", { class: "field-error", attrs: { role: "alert", "data-role": "draft-error" }, text: error }) : null,
+      running ? null : h(
+        "div",
+        { class: "settings-actions" },
+        this.latest ? null : button("Write it by hand", () => {
+          this.editing = true;
+          this.render();
+        }, { field: "edit-frd", icon: "edit" }),
+        draftBtn
+      )
+    );
+  }
+  bullets(title, items) {
+    return items.length ? h("div", { class: "plan-section" }, h("h4", { text: title }), h("ul", {}, ...items.map((t) => h("li", { text: t })))) : null;
+  }
+  /** reviewCard shows the latest FRD as a document: title, objective, requirements and criteria as plain lists. */
+  reviewCard(doc, approvedRev, canApprove) {
+    const rev = this.latest?.revision ?? 0;
+    const running = this.draft?.state === "running";
+    return h(
+      "div",
+      { class: "settings-section", attrs: { "data-role": "frd-review" } },
+      h(
+        "div",
+        { class: "row-actions" },
+        h("h3", { text: doc.title }),
+        h("span", { class: "field-hint", text: `rev ${rev}` }),
+        approvedRev === rev ? badge("approved", "ok") : badge(approvedRev ? `rev ${approvedRev} approved` : "not approved", "warn")
+      ),
+      doc.objective ? h("p", { text: doc.objective }) : null,
+      this.bullets("Requirements", (doc.requirements ?? []).map((r) => (r.priority ? `${r.priority}: ` : "") + r.description)),
+      this.bullets("Acceptance criteria", (doc.acceptance_criteria ?? []).map((a) => a.criterion)),
+      this.bullets("Out of scope", doc.out_of_scope ?? []),
+      running ? null : h(
+        "div",
+        { class: "settings-actions" },
+        button("Tidy the text", () => void this.startDraft(true), { field: "polish-frd", icon: "sparkle" }),
+        button("Edit", () => {
+          this.editing = true;
+          this.render();
+        }, { field: "edit-frd", icon: "edit" }),
+        canApprove ? button(`Approve revision ${rev}`, () => void this.approve(), { primary: true, field: "approve-frd", icon: "approve" }) : null
+      )
+    );
+  }
+  dodSection() {
+    const items = this.dod?.items ?? [];
+    if (items.length === 0) return null;
+    return h(
+      "div",
+      { class: "detail-section", attrs: { "data-role": "definition-of-done" } },
+      h("h4", { text: "Definition of done", attrs: { title: "Applies to every task, so it need not be written as acceptance criteria" } }),
+      h("ul", { class: "field-hint" }, ...items.map((t) => h("li", { text: t })))
+    );
+  }
+  /** sizeRow is the FRD's token count against the smallest planning context, with the split offer when it is over. */
+  sizeRow() {
+    const z = this.size;
+    if (!z || !(z.budget_tokens > 0) || typeof z.over !== "boolean") {
+      return h(
+        "div",
+        { class: "console-header", attrs: { "data-role": "size-unknown" } },
+        h("span", { class: "field-hint", attrs: { title: "Set context sizes in Backends" } }, icon("gauge"))
+      );
+    }
+    const pct2 = Math.min(100, Math.round(z.frd_tokens / z.budget_tokens * 100));
+    return h(
+      "div",
+      { class: "console-header", attrs: { "data-role": "size" } },
+      h("span", { class: "field-hint", attrs: { title: "Size of the FRD against what the smallest planning model can read" } }, icon("gauge")),
+      h("div", { class: "progress-bar-wrap" }, h("div", { class: "progress-bar" + (z.over ? " progress-over" : ""), attrs: { style: `width: ${pct2}%` } })),
+      h("span", { class: z.over ? "progress-pct field-error" : "progress-pct", text: `${formatTokens(z.frd_tokens)} / ${formatTokens(z.budget_tokens)} tokens`, attrs: { title: z.advice } }),
+      z.over && this.splitting === 0 ? button("Split into smaller parts", () => void this.split(), { field: "split-frd", icon: "split" }) : null
+    );
+  }
+  partsList() {
+    if (this.parts.length === 0) return null;
+    const busy = this.efforts.find((e) => !isFinished(e));
+    return h("div", { class: "wizard-list", attrs: { "data-role": "frd-parts" } }, ...this.parts.map((p) => {
+      const pending = (p.status ?? "pending") === "pending" && p.n > 1;
+      const start = pending ? button("Start this part", () => void this.startPart(p.n), { field: "start-part", icon: "start" }) : null;
+      if (start && busy) {
+        start.className += " is-disabled";
+        start.setAttribute("aria-disabled", "true");
+        start.setAttribute("title", `Finish or abandon #${busy.id} first`);
+      }
+      return h(
+        "div",
+        { class: "wizard-field", attrs: { "data-part": p.n } },
+        h(
+          "div",
+          { class: "inline-row" },
+          h("strong", { text: `${p.n}. ${p.title}` }),
+          badge(`${formatTokens(p.tokens)} tokens`, "muted"),
+          start
+        ),
+        p.summary ? h("p", { class: "field-hint", text: p.summary }) : null,
+        this.partErrors.get(p.n) ? h("div", { class: "field-error", attrs: { role: "alert" }, text: this.partErrors.get(p.n) }) : null
+      );
+    }));
+  }
+  render() {
+    if (this.disposed) return;
+    if (!this.loaded) {
+      replace(this.host, h("p", { class: "field-hint", text: "Loading efforts\u2026" }));
+      return;
+    }
+    this.clocks = [];
+    const ef = this.current;
+    const approvedRev = this.revisions.find((r) => r.approved)?.revision;
+    const canApprove = !!ef && !!this.latest && this.latest.revision !== approvedRev && !this.dirty && !isFinished(ef);
+    const editor = ef && this.form ? section(
+      `FRD for #${ef.id}`,
+      h(
+        "div",
+        { class: "row-actions" },
+        h("span", { class: "field-hint", text: this.latest ? `Latest revision ${this.latest.revision}${approvedRev ? `; revision ${approvedRev} approved` : "; not approved"}` : "Not saved yet" }),
+        this.dirty ? badge("unsaved", "warn") : null
+      ),
+      this.form.el,
+      h(
+        "div",
+        { class: "settings-actions" },
+        button("Close the editor", () => {
+          this.editing = false;
+          void this.loadDoc();
+        }, { field: "close-editor", icon: "cancel" }),
+        button("Save as new revision", () => void this.save(), { primary: !canApprove, field: "save-frd", icon: "save" }),
+        canApprove && this.latest ? button(`Approve revision ${this.latest.revision}`, () => void this.approve(), { primary: true, field: "approve-frd", icon: "approve" }) : null
+      )
+    ) : null;
+    const review = ef && !this.editing && this.latest?.json ? [
+      this.reviewCard(this.latest.json, approvedRev, canApprove),
+      this.dodSection(),
+      this.splitting > 0 ? this.strip("Splitting the FRD", this.splitting) : this.sizeRow(),
+      this.splitError ? h("div", { class: "field-error", attrs: { role: "alert", "data-role": "split-error" }, text: this.splitError }) : null,
+      this.partsList()
+    ] : [];
+    const active2 = this.efforts.find((e) => !isFinished(e));
+    const bar = this.efforts.length ? effortBar(this.slug, this.efforts, ef, (id) => {
+      this.current = this.efforts.find((e) => e.id === id);
+      void this.loadDoc();
+    }) : null;
+    if (bar && active2) {
+      bar.appendChild(h("button", {
+        class: "ui-modal-btn is-disabled",
+        text: "+",
+        attrs: {
+          type: "button",
+          "data-action": "new-effort",
+          "aria-disabled": "true",
+          "aria-label": "New effort",
+          title: `New effort is unavailable: a project has one active effort at a time. Finish or abandon #${active2.id} (${active2.status.replace(/_/g, " ")}) first.`
+        }
+      }));
+    }
+    replace(
+      this.host,
+      h(
+        "div",
+        { class: "settings-host" },
+        bar,
+        active2 ? null : this.efforts.length ? null : h("div", { class: "plan-empty" }, h("h3", { text: "No efforts yet" }), h("p", { text: "An effort is one FRD, plan and queue. Create the first one below." })),
+        active2 ? null : this.newEffortForm(),
+        ef && !this.editing && !isFinished(ef) ? this.describeBox(ef) : null,
+        ...review,
+        this.editing ? editor : null,
+        ef && !isFinished(ef) ? effortSettings(ef, this.form ? JSON.stringify(this.form.read()) : "", this.deps, () => void this.load()) : null,
+        ef ? this.revisionList() : null,
+        this.efforts.length ? section("Efforts", this.list()) : null
+      )
+    );
+    this.syncTicker();
+  }
+};
+function mountFrd(host, slug) {
+  return new FrdEditor(host, slug, defaultFrdDeps()).mount();
+}
+
 // web/agentflow/js/queue.ts
 import { confirmDialog as confirmDialog5, showToast as showToast8 } from "/shared/dist/shared.mjs";
 var defaultQueueDeps = () => ({
@@ -3381,6 +3641,7 @@ var defaultProjectDeps = () => ({
   candidates: api.candidates,
   putProjectCandidates: api.putProjectCandidates,
   clearProjectCandidates: api.clearProjectCandidates,
+  definitionOfDone: api.definitionOfDone,
   confirm: (m, label = "Confirm") => confirmDialog6(m, { confirmLabel: label }),
   pickDir: (start) => pickDirectory(start),
   notify: (m) => void showToast9(m, "success")
@@ -3410,6 +3671,11 @@ var ProjectForm = class {
     this.cands = [];
     this.drafts = /* @__PURE__ */ new Map();
     this.rolesHost = h("div");
+    /** Definition of done: the detected list, and the override rows once the project has or starts one. */
+    this.dodDetected = [];
+    this.dodRows = null;
+    this.dodReset = false;
+    this.dodHost = h("div", { attrs: { "data-role": "dod-editor" } });
     const p = mode.project;
     this.slug = textInput("slug", p?.slug ?? "", { readOnly: !!p, placeholder: "my-project" });
     this.repoPath = p?.repo_path ?? "";
@@ -3459,6 +3725,12 @@ var ProjectForm = class {
         [this.backends, this.cands] = await Promise.all([this.deps.backends(), this.deps.candidates()]);
       } catch {
       }
+      try {
+        const dod = await this.deps.definitionOfDone(this.mode.project.slug, { quiet: true });
+        if (dod.source === "project") this.startDod(dod.items);
+        else this.dodDetected = dod.items;
+      } catch {
+      }
     }
     this.render();
   }
@@ -3476,7 +3748,7 @@ var ProjectForm = class {
   async save() {
     this.errors.clear();
     const body = this.body();
-    const attempt = () => this.mode.project ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, feedback_cmds: body.feedback_cmds, cleanup_enabled: body.cleanup_enabled, plugins: body.plugins }, { quiet: true }) : this.deps.createProject(body, { quiet: true });
+    const attempt = () => this.mode.project ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, feedback_cmds: body.feedback_cmds, cleanup_enabled: body.cleanup_enabled, plugins: body.plugins, ...this.dodPatch() }, { quiet: true }) : this.deps.createProject(body, { quiet: true });
     let saved;
     try {
       saved = await attempt();
@@ -3510,6 +3782,38 @@ var ProjectForm = class {
     }
     this.deps.notify(`Deleted ${p.slug}`);
     this.done("");
+  }
+  // ─── Definition of done: detected from the toolchain, optionally overridden per project ───
+  startDod(items) {
+    this.dodRows = new RowsEditor((t) => {
+      const input = textInput("dod_item", t);
+      return { el: input, read: () => input.value.trim() };
+    }, items, () => "", "Add item");
+    this.dodReset = false;
+  }
+  /** dodPatch is the patch fields for the list: the override rows, null to go back to detected, nothing when untouched. */
+  dodPatch() {
+    if (this.dodReset) return { definition_of_done: null };
+    return this.dodRows ? { definition_of_done: this.dodRows.read().filter((t) => t !== "") } : {};
+  }
+  drawDod() {
+    if (!this.mode.project) return;
+    replace(
+      this.dodHost,
+      this.dodRows ? h("div", {}, this.dodRows.el, button("Reset to detected", () => {
+        this.dodRows = null;
+        this.dodReset = true;
+        this.drawDod();
+      }, { field: "reset-dod", icon: "retry" })) : h(
+        "div",
+        {},
+        h("ul", { class: "field-hint" }, ...this.dodDetected.map((t) => h("li", { text: t }))),
+        button("Override for this project", () => {
+          this.startDod(this.dodDetected);
+          this.drawDod();
+        }, { field: "override-dod", icon: "edit" })
+      )
+    );
   }
   // ─── Role preferences: a per-project candidate list overriding the global one ───
   projectRows(role) {
@@ -3560,6 +3864,7 @@ var ProjectForm = class {
     const p = this.mode.project;
     const e = this.errors;
     this.drawRoles();
+    this.drawDod();
     replace(
       this.host,
       h(
@@ -3584,6 +3889,7 @@ var ProjectForm = class {
             this.cmds.el,
             "Run in the sandbox to verify each task, as a program and arguments, never through a shell. Blank: detected from go.mod, pyproject.toml or package.json"
           )).el,
+          p ? e.add("definition_of_done", fieldRow("Definition of done", this.dodHost, "Applies to every task; need not be written as acceptance criteria")).el : null,
           e.add("plugins", fieldRow(
             "Runner plugins",
             this.plugins.el,

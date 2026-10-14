@@ -1,18 +1,24 @@
-// frd-editor.ts — the FRD sub-tab: the project's efforts (the FRD list), an
-// editor for the effort's FRD with fields matching model.FRD, the revision
-// viewer and the human approval (PJ1, DBS4, UI5). Saving always makes a new
-// revision; the approved revision stays viewable after later edits. Every
-// title, requirement and server message is placed with h(), so it is text.
+// frd-editor.ts — the FRD sub-tab: the project's efforts (the FRD list), the
+// describe-it box that drafts an FRD, a read-only review card with the human
+// approval, the definition of done, the size meter with split and its parts,
+// and the structured editor behind "edit" with fields matching model.FRD, plus
+// the revision viewer (PJ1, DBS4, UI5). Saving always makes a new revision; the
+// approved revision stays viewable after later edits. Ids are filled by the
+// server and never typed. Every title, requirement and server message is
+// placed with h(), so it is text.
 
 import { alertDialog, showToast } from '@shared';
-import { api, ApiError, type DocView, type EffortView, type FRD, type FRDAC, type FRDDecision, type FRDGroup, type FRDRequirement } from './api.js';
+import { api, ApiError, type DefinitionOfDone, type DocView, type DraftState, type EffortView, type FRD, type FRDAC, type FRDDecision, type FRDGroup, type FrdPart, type FRDRequirement, type SizeView } from './api.js';
 import { chooseEffort, effortBar, isFinished, rememberEffort } from './current.js';
-import { effortSettings } from './effort-settings.js';
+import { effortSettings, formatTokens } from './effort-settings.js';
 import { chip, h, replace } from './dom.js';
+import { icon } from './icons.js';
 import { isTransient, startPoll, subscribe, type AgentflowEvent } from './events.js';
+import { elapsedText } from './plan-view.js';
 import { FormErrors, RowsEditor, badge, button, checkbox, fieldRow, section, selectInput, textArea, textInput } from './forms.js';
 
-export type FrdDeps = Pick<typeof api, 'efforts' | 'createEffort' | 'patchEffort' | 'frd' | 'putFRD' | 'frdRevisions' | 'frdRevision' | 'approveFRD'> & {
+export type FrdDeps = Pick<typeof api, 'efforts' | 'createEffort' | 'patchEffort' | 'frd' | 'putFRD' | 'frdRevisions' | 'frdRevision' | 'approveFRD' |
+  'draftFRD' | 'draftState' | 'definitionOfDone' | 'frdSize' | 'splitFRD' | 'frdParts' | 'startPart'> & {
   notify(message: string): void;
 };
 
@@ -25,6 +31,13 @@ export const defaultFrdDeps = (): FrdDeps => ({
   frdRevisions: api.frdRevisions,
   frdRevision: api.frdRevision,
   approveFRD: api.approveFRD,
+  draftFRD: api.draftFRD,
+  draftState: api.draftState,
+  definitionOfDone: api.definitionOfDone,
+  frdSize: api.frdSize,
+  splitFRD: api.splitFRD,
+  frdParts: api.frdParts,
+  startPart: api.startPart,
   notify: (m) => void showToast(m, 'success'),
 });
 
@@ -44,7 +57,7 @@ export function blankFRD(slug: string, effort: EffortView): FRD {
     id: `FRD-${slug}-${effort.id}`.toUpperCase(),
     title: effort.title,
     objective: '',
-    requirements: [{ id: 'R1', priority: 'must', description: '' }],
+    requirements: [{ id: '', priority: 'must', description: '' }],
     acceptance_criteria: [],
   };
 }
@@ -61,9 +74,9 @@ export class FrdForm {
 
   constructor(private base: FRD, onChange: () => void) {
     this.f = {
-      id: textInput('id', base.id ?? ''),
+      id: textInput('id', base.id ?? '', { readOnly: true }),
       title: textInput('title', base.title ?? ''),
-      status: textInput('status', base.status ?? ''),
+      status: textInput('status', base.status ?? '', { readOnly: true }),
       objective: textArea('objective', base.objective ?? '', 3),
       context: textArea('context', base.context ?? '', 3),
       constraints: textArea('constraints', (base.constraints ?? []).join('\n'), 3),
@@ -77,23 +90,18 @@ export class FrdForm {
       return { el: h('div', { class: 'row-actions' }, id, title, summary), read: () => ({ id: id.value.trim(), title: title.value.trim(), summary: summary.value.trim() || undefined }) };
     }, base.groups ?? [], () => ({ id: '', title: '' }), 'Add group', onChange);
     this.reqs = new RowsEditor<FRDRequirement>((r) => {
-      const id = textInput('req_id', r.id, { placeholder: 'id' });
       const group = textInput('req_group', r.group ?? '', { placeholder: 'group' });
       const prio = selectInput('req_priority', PRIORITIES, r.priority ?? '');
       const desc = textArea('req_description', r.description, 2);
       return {
-        el: h('div', { class: 'wizard-field' }, h('div', { class: 'row-actions' }, id, group, prio), desc),
-        read: () => ({ ...r, id: id.value.trim(), group: group.value.trim() || undefined, priority: prio.value || undefined, description: desc.value.trim() }),
+        el: h('div', { class: 'wizard-field' }, h('div', { class: 'row-actions' }, group, prio), desc),
+        read: () => ({ ...r, group: group.value.trim() || undefined, priority: prio.value || undefined, description: desc.value.trim() }),
       };
     }, base.requirements ?? [], () => ({ id: '', description: '' }), 'Add requirement', onChange);
     this.acs = new RowsEditor<FRDAC>((a) => {
-      const id = textInput('ac_id', a.id, { placeholder: 'id' });
-      const reqs = textInput('ac_requirements', (a.requirements ?? []).join(', '), { placeholder: 'R1, R2' });
       const crit = textArea('ac_criterion', a.criterion, 2);
-      return {
-        el: h('div', { class: 'wizard-field' }, h('div', { class: 'row-actions' }, id, reqs), crit),
-        read: () => ({ id: id.value.trim(), requirements: commaList(reqs.value), criterion: crit.value.trim() }),
-      };
+      // Ids and the links to requirements stay as loaded; the server fills them for new rows.
+      return { el: h('div', { class: 'wizard-field' }, crit), read: () => ({ ...a, criterion: crit.value.trim() }) };
     }, base.acceptance_criteria ?? [], () => ({ id: '', criterion: '' }), 'Add acceptance criterion', onChange);
     this.decisions = new RowsEditor<FRDDecision>((d) => {
       const id = textInput('decision_id', d.id, { placeholder: 'id' });
@@ -114,7 +122,7 @@ export class FrdForm {
       e.add('constraints', fieldRow('Constraints', this.f.constraints, 'One per line')).el,
       e.add('groups', fieldRow('Groups', this.groups.el)).el,
       e.add('requirements', fieldRow('Requirements', this.reqs.el)).el,
-      e.add('acceptance_criteria', fieldRow('Acceptance criteria', this.acs.el, 'Requirements are a comma-separated list of requirement ids')).el,
+      e.add('acceptance_criteria', fieldRow('Acceptance criteria', this.acs.el)).el,
       e.add('decisions', fieldRow('Decisions', this.decisions.el)).el,
       e.add('out_of_scope', fieldRow('Out of scope', this.f.out_of_scope, 'One per line')).el,
       verbatim.length ? h('p', { class: 'field-hint', text: `Kept as they are: ${verbatim.join(', ')}` }) : null,
@@ -153,19 +161,39 @@ export class FrdEditor {
   private loaded = false;
   private off: (() => void) | null = null;
   private createErrors = new FormErrors();
-
   private stopPoll: (() => void) | null = null;
+  // Review mode shows the FRD as a card; editing swaps in the structured editor.
+  private editing = false;
+  private desc = '';
+  /** True while the describe box holds typed text: a refresh must not rebuild it under the cursor. */
+  private typing = false;
+  private draft: DraftState | null = null;
+  private draftError = '';
+  private dod: DefinitionOfDone | null = null;
+  private size: SizeView | null = null;
+  private parts: FrdPart[] = [];
+  private partErrors = new Map<number, string>();
+  private splitError = '';
+  /** Start time of a split in flight (ms), else 0; it ends when the FRD revision or the parts change. */
+  private splitting = 0;
+  private splitBase = { revision: 0, parts: 0 };
+  private disposed = false;
+  private ticker: ReturnType<typeof setInterval> | null = null;
+  private clocks: Array<{ el: HTMLElement; since: number }> = [];
 
   constructor(private host: HTMLElement, private slug: string, private deps: FrdDeps) {}
 
   mount(): () => void {
     this.off = subscribe((ev: AgentflowEvent) => {
       const mine = 'project' in ev && ev.project === this.slug;
-      if (!this.dirty && (ev.type === 'state.changed' || mine && (ev.type === 'effort.update' || ev.type === 'project.update'))) void this.load();
+      if (!this.dirty && !this.typing && (ev.type === 'state.changed' || mine && (ev.type === 'effort.update' || ev.type === 'project.update'))) void this.load();
     });
-    this.stopPoll = startPoll(() => !this.dirty && isTransient(this.current?.status), () => this.load());
+    this.stopPoll = startPoll(() => !this.dirty && !this.typing && (isTransient(this.current?.status) || this.draft?.state === 'running' || this.splitting > 0), () => this.load());
     void this.load();
     return () => {
+      this.disposed = true;
+      if (this.ticker) clearInterval(this.ticker);
+      this.ticker = null;
       this.off?.();
       this.off = null;
       this.stopPoll?.();
@@ -197,11 +225,78 @@ export class FrdEditor {
       } catch (err) {
         if (!(err instanceof ApiError && err.status === 404)) void alertDialog(err instanceof Error ? err.message : String(err));
       }
+      // The side panels are best effort: a failed read shows nothing rather than blocking the FRD.
+      const q = { quiet: true };
+      const none = (): null => null;
+      const [draft, dod, size, parts] = await Promise.all([
+        this.deps.draftState(this.slug, ef.id, q).catch(none),
+        this.deps.definitionOfDone(this.slug, q).catch(none),
+        this.latest ? this.deps.frdSize(this.slug, ef.id, q).catch(none) : null,
+        this.deps.frdParts(this.slug, ef.id, q).catch(none),
+      ]);
+      if (this.disposed) return;
+      if (this.draft?.state === 'running' && draft?.state === 'idle') this.desc = '';
+      this.draft = draft;
+      this.draftError = '';
+      this.dod = dod;
+      this.size = size;
+      this.parts = parts ?? [];
+      if (this.splitting > 0 && (this.latest?.revision !== this.splitBase.revision || this.parts.length !== this.splitBase.parts || Date.now() - this.splitting > 900_000)) this.splitting = 0;
       this.form = new FrdForm(this.latest?.json ?? blankFRD(this.slug, ef), () => { this.dirty = true; });
     } else {
       this.form = null;
     }
+    if (!this.latest) this.editing = false;
     this.render();
+  }
+
+  async startDraft(polish: boolean): Promise<void> {
+    const ef = this.current;
+    const description = polish ? '' : this.desc.trim();
+    if (!ef || (!polish && description === '')) return;
+    this.draftError = '';
+    try {
+      await this.deps.draftFRD(this.slug, ef.id, description, polish, { quiet: true });
+    } catch (err) {
+      this.draftError = err instanceof Error ? err.message : String(err);
+      this.render();
+      return;
+    }
+    this.typing = false;
+    this.draft = { state: 'running', started: Date.now() };
+    this.render();
+  }
+
+  async split(): Promise<void> {
+    const ef = this.current;
+    if (!ef) return;
+    this.splitError = '';
+    try {
+      await this.deps.splitFRD(this.slug, ef.id, { quiet: true });
+    } catch (err) {
+      this.splitError = err instanceof Error ? err.message : String(err);
+      this.render();
+      return;
+    }
+    this.splitting = Date.now();
+    this.splitBase = { revision: this.latest?.revision ?? 0, parts: this.parts.length };
+    this.render();
+  }
+
+  async startPart(n: number): Promise<void> {
+    const ef = this.current;
+    if (!ef || this.efforts.some((e) => !isFinished(e))) return;
+    this.partErrors.delete(n);
+    try {
+      const started = await this.deps.startPart(this.slug, ef.id, n, { quiet: true });
+      if (started?.id) rememberEffort(this.slug, started.id);
+    } catch (err) {
+      this.partErrors.set(n, err instanceof Error ? err.message : String(err));
+      this.render();
+      return;
+    }
+    this.deps.notify(`Started part ${n}`);
+    await this.load();
   }
 
   private async create(title: string, deliberate: boolean, tokens: string, minutes: string): Promise<void> {
@@ -231,6 +326,7 @@ export class FrdEditor {
       return;
     }
     this.deps.notify('Saved a new FRD revision');
+    this.editing = false;
     await this.load();
   }
 
@@ -260,6 +356,7 @@ export class FrdEditor {
   private loadIntoEditor(doc: FRD): void {
     this.form = new FrdForm(doc, () => { this.dirty = true; });
     this.dirty = true;
+    this.editing = true;
     this.viewing = null;
     this.render();
   }
@@ -306,11 +403,125 @@ export class FrdEditor {
           button('Close', () => { this.viewing = null; this.render(); }, { field: 'close-revision', icon: 'cancel' }))) : null);
   }
 
+  /** strip is the progress strip of a running draft or split: label, elapsed time and an animated bar. */
+  private strip(label: string, since: number): HTMLElement {
+    const elapsed = h('span', { class: 'field-hint', text: since > 0 ? elapsedText(Date.now() - since) : '', attrs: { 'data-role': 'elapsed' } });
+    this.clocks.push({ el: elapsed, since });
+    return h('div', { class: 'progress-strip', attrs: { 'data-role': 'progress-strip', role: 'status' } },
+      h('div', { class: 'row-actions' }, h('strong', { text: label }), elapsed),
+      h('div', { class: 'progress-bar-wrap' }, h('div', { class: 'progress-bar progress-indeterminate' })));
+  }
+
+  /** syncTicker keeps one timer alive while any strip is on screen. */
+  private syncTicker(): void {
+    if (this.clocks.length === 0 || this.disposed) {
+      if (this.ticker) clearInterval(this.ticker);
+      this.ticker = null;
+      return;
+    }
+    if (!this.ticker) {
+      this.ticker = setInterval(() => {
+        for (const c of this.clocks) if (c.since > 0) c.el.textContent = elapsedText(Date.now() - c.since);
+      }, 1000);
+    }
+  }
+
+  private describeBox(ef: EffortView): HTMLElement {
+    const running = this.draft?.state === 'running';
+    const box = textArea('description', this.desc, 4);
+    box.setAttribute('placeholder', 'What do you want?');
+    const draftBtn = button('Draft the FRD', () => void this.startDraft(false), { primary: true, field: 'draft-frd', icon: 'sparkle' });
+    const sync = (): void => {
+      this.desc = box.value;
+      this.typing = box.value !== '';
+      draftBtn.className = draftBtn.className.replace(' is-disabled', '') + (box.value.trim() === '' ? ' is-disabled' : '');
+    };
+    box.addEventListener('input', sync);
+    if (this.desc.trim() === '') draftBtn.className += ' is-disabled';
+    const error = this.draftError || (this.draft?.state === 'failed' ? this.draft.error ?? 'The draft failed' : '');
+    return section(`FRD for #${ef.id}`,
+      box,
+      running ? this.strip('Drafting the FRD', this.draft?.started ?? 0) : null,
+      error ? h('div', { class: 'field-error', attrs: { role: 'alert', 'data-role': 'draft-error' }, text: error }) : null,
+      running ? null : h('div', { class: 'settings-actions' },
+        this.latest ? null : button('Write it by hand', () => { this.editing = true; this.render(); }, { field: 'edit-frd', icon: 'edit' }),
+        draftBtn));
+  }
+
+  private bullets(title: string, items: string[]): HTMLElement | null {
+    return items.length ? h('div', { class: 'plan-section' }, h('h4', { text: title }), h('ul', {}, ...items.map((t) => h('li', { text: t })))) : null;
+  }
+
+  /** reviewCard shows the latest FRD as a document: title, objective, requirements and criteria as plain lists. */
+  private reviewCard(doc: FRD, approvedRev: number | undefined, canApprove: boolean): HTMLElement {
+    const rev = this.latest?.revision ?? 0;
+    const running = this.draft?.state === 'running';
+    return h('div', { class: 'settings-section', attrs: { 'data-role': 'frd-review' } },
+      h('div', { class: 'row-actions' },
+        h('h3', { text: doc.title }),
+        h('span', { class: 'field-hint', text: `rev ${rev}` }),
+        approvedRev === rev ? badge('approved', 'ok') : badge(approvedRev ? `rev ${approvedRev} approved` : 'not approved', 'warn')),
+      doc.objective ? h('p', { text: doc.objective }) : null,
+      this.bullets('Requirements', (doc.requirements ?? []).map((r) => (r.priority ? `${r.priority}: ` : '') + r.description)),
+      this.bullets('Acceptance criteria', (doc.acceptance_criteria ?? []).map((a) => a.criterion)),
+      this.bullets('Out of scope', doc.out_of_scope ?? []),
+      running ? null : h('div', { class: 'settings-actions' },
+        button('Tidy the text', () => void this.startDraft(true), { field: 'polish-frd', icon: 'sparkle' }),
+        button('Edit', () => { this.editing = true; this.render(); }, { field: 'edit-frd', icon: 'edit' }),
+        canApprove ? button(`Approve revision ${rev}`, () => void this.approve(), { primary: true, field: 'approve-frd', icon: 'approve' }) : null));
+  }
+
+  private dodSection(): HTMLElement | null {
+    const items = this.dod?.items ?? [];
+    if (items.length === 0) return null;
+    return h('div', { class: 'detail-section', attrs: { 'data-role': 'definition-of-done' } },
+      h('h4', { text: 'Definition of done', attrs: { title: 'Applies to every task, so it need not be written as acceptance criteria' } }),
+      h('ul', { class: 'field-hint' }, ...items.map((t) => h('li', { text: t }))));
+  }
+
+  /** sizeRow is the FRD's token count against the smallest planning context, with the split offer when it is over. */
+  private sizeRow(): HTMLElement {
+    const z = this.size;
+    if (!z || !(z.budget_tokens > 0) || typeof z.over !== 'boolean') {
+      return h('div', { class: 'console-header', attrs: { 'data-role': 'size-unknown' } },
+        h('span', { class: 'field-hint', attrs: { title: 'Set context sizes in Backends' } }, icon('gauge')));
+    }
+    const pct = Math.min(100, Math.round((z.frd_tokens / z.budget_tokens) * 100));
+    return h('div', { class: 'console-header', attrs: { 'data-role': 'size' } },
+      h('span', { class: 'field-hint', attrs: { title: 'Size of the FRD against what the smallest planning model can read' } }, icon('gauge')),
+      h('div', { class: 'progress-bar-wrap' }, h('div', { class: 'progress-bar' + (z.over ? ' progress-over' : ''), attrs: { style: `width: ${pct}%` } })),
+      h('span', { class: z.over ? 'progress-pct field-error' : 'progress-pct', text: `${formatTokens(z.frd_tokens)} / ${formatTokens(z.budget_tokens)} tokens`, attrs: { title: z.advice } }),
+      z.over && this.splitting === 0 ? button('Split into smaller parts', () => void this.split(), { field: 'split-frd', icon: 'split' }) : null);
+  }
+
+  private partsList(): HTMLElement | null {
+    if (this.parts.length === 0) return null;
+    const busy = this.efforts.find((e) => !isFinished(e));
+    return h('div', { class: 'wizard-list', attrs: { 'data-role': 'frd-parts' } }, ...this.parts.map((p) => {
+      const pending = (p.status ?? 'pending') === 'pending' && p.n > 1;
+      const start = pending ? button('Start this part', () => void this.startPart(p.n), { field: 'start-part', icon: 'start' }) : null;
+      if (start && busy) {
+        start.className += ' is-disabled';
+        start.setAttribute('aria-disabled', 'true');
+        start.setAttribute('title', `Finish or abandon #${busy.id} first`);
+      }
+      return h('div', { class: 'wizard-field', attrs: { 'data-part': p.n } },
+        h('div', { class: 'inline-row' },
+          h('strong', { text: `${p.n}. ${p.title}` }),
+          badge(`${formatTokens(p.tokens)} tokens`, 'muted'),
+          start),
+        p.summary ? h('p', { class: 'field-hint', text: p.summary }) : null,
+        this.partErrors.get(p.n) ? h('div', { class: 'field-error', attrs: { role: 'alert' }, text: this.partErrors.get(p.n) }) : null);
+    }));
+  }
+
   render(): void {
+    if (this.disposed) return;
     if (!this.loaded) {
       replace(this.host, h('p', { class: 'field-hint', text: 'Loading efforts…' }));
       return;
     }
+    this.clocks = [];
     const ef = this.current;
     const approvedRev = this.revisions.find((r) => r.approved)?.revision;
     // The one obvious next step: approving a saved, unedited revision; otherwise saving.
@@ -321,8 +532,16 @@ export class FrdEditor {
         this.dirty ? badge('unsaved', 'warn') : null),
       this.form.el,
       h('div', { class: 'settings-actions' },
+        button('Close the editor', () => { this.editing = false; void this.loadDoc(); }, { field: 'close-editor', icon: 'cancel' }),
         button('Save as new revision', () => void this.save(), { primary: !canApprove, field: 'save-frd', icon: 'save' }),
         canApprove && this.latest ? button(`Approve revision ${this.latest.revision}`, () => void this.approve(), { primary: true, field: 'approve-frd', icon: 'approve' }) : null)) : null;
+    const review = ef && !this.editing && this.latest?.json ? [
+      this.reviewCard(this.latest.json, approvedRev, canApprove),
+      this.dodSection(),
+      this.splitting > 0 ? this.strip('Splitting the FRD', this.splitting) : this.sizeRow(),
+      this.splitError ? h('div', { class: 'field-error', attrs: { role: 'alert', 'data-role': 'split-error' }, text: this.splitError }) : null,
+      this.partsList(),
+    ] : [];
     // A project has one active effort at a time: show the form only when none is active, else a disabled "+" says why.
     const active = this.efforts.find((e) => !isFinished(e));
     const bar = this.efforts.length ? effortBar(this.slug, this.efforts, ef, (id) => { this.current = this.efforts.find((e) => e.id === id); void this.loadDoc(); }) : null;
@@ -341,10 +560,13 @@ export class FrdEditor {
         bar,
         active ? null : this.efforts.length ? null : h('div', { class: 'plan-empty' }, h('h3', { text: 'No efforts yet' }), h('p', { text: 'An effort is one FRD, plan and queue. Create the first one below.' })),
         active ? null : this.newEffortForm(),
-        editor,
+        ef && !this.editing && !isFinished(ef) ? this.describeBox(ef) : null,
+        ...review,
+        this.editing ? editor : null,
         ef && !isFinished(ef) ? effortSettings(ef, this.form ? JSON.stringify(this.form.read()) : '', this.deps, () => void this.load()) : null,
         ef ? this.revisionList() : null,
         this.efforts.length ? section('Efforts', this.list()) : null));
+    this.syncTicker();
   }
 }
 
