@@ -92,9 +92,23 @@ func (e *Engine) Retry(ctx context.Context, actor string, task int64, clean bool
 
 // EditTask saves a new definition of one task. The queue's hash is recomputed
 // and the queue returns to draft, so stages carrying the old hash are
-// discarded without counting (QA2).
+// discarded without counting (QA2). An effort that had an approved queue goes
+// back to queue_draft until the new hash is approved.
 func (e *Engine) EditTask(ctx context.Context, actor string, effort int64, def model.TaskDef) (model.Queue, error) {
-	return e.deps.Store.EditTask(ctx, actor, effort, def)
+	q, err := e.deps.Store.EditTask(ctx, actor, effort, def)
+	if err != nil {
+		return q, err
+	}
+	ef, err := e.deps.Store.GetEffort(ctx, effort)
+	if err != nil {
+		return q, err
+	}
+	switch ef.Status {
+	case model.EffortQueueAppr, model.EffortRunning, model.EffortPaused:
+		draft := model.EffortQueueDraft
+		_, err = e.deps.Store.UpdateEffort(ctx, actor, effort, store.EffortPatch{Status: &draft})
+	}
+	return q, err
 }
 
 // Override marks a halted task passed by a human decision (AT9). Its

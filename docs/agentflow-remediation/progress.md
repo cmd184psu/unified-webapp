@@ -96,6 +96,7 @@ Logged per the owner's posture; candidates for the next phase alongside `.omc/pl
 - 2026-10-13 — C9: halted-task actions (Retry/EditTask/Override/AbandonEffort), audited.
 - 2026-10-13 — C8: backend health cooldown + retire reroute (infra:rerouted, no strike); migration v4 backend_cooldown.
 - 2026-10-13 — C10: ralplan planning loop (planner->architect->critic, critic blind to architect, max rounds, revisions as documents, plan_ready until human approval).
+- 2026-10-13 — C11: compile + queue approval (hash-pinned), QueueView; EditTask returns effort to queue_draft.
 
 ## Handoff to the fresh session
 1. `/oh-my-claudecode:ralplan --deliberate docs/agentflow-remediation/frd.md`

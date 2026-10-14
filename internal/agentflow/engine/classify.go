@@ -109,7 +109,13 @@ func parseFinal(role, final string) (json.RawMessage, string, error) {
 	case "architect", "critic":
 		_, err = schema.Parse[schema.PlanReviewOut](raw)
 	case "compiler":
-		_, err = schema.Parse[schema.CompileOut](raw)
+		// A reply the queue would reject (a verify field, a cycle, a
+		// dangling dependency, an absolute path) gets the corrective
+		// follow-up like any malformed reply (SO2, V1).
+		var out schema.CompileOut
+		if out, err = schema.Parse[schema.CompileOut](raw); err == nil {
+			_, err = compiledTasks(out)
+		}
 	default:
 		err = fmt.Errorf("role %q produces no structured output", role)
 	}

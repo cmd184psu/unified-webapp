@@ -422,6 +422,10 @@ func (e *Engine) AdvancePlans(ctx context.Context) error {
 		switch ef.Status {
 		case model.EffortPlanning:
 			err = e.advancePlan(ctx, p, ef)
+		case model.EffortCompiling:
+			err = e.advanceCompile(ctx, p, ef)
+		case model.EffortQueueDraft:
+			err = e.healQueueStatus(ctx, ef)
 		}
 		if err != nil {
 			errs = append(errs, fmt.Errorf("effort %d: %w", ef.ID, err))
