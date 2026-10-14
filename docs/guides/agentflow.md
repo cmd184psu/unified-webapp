@@ -156,6 +156,8 @@ Rules the dispatcher applies:
   candidate for the role. The Backends tab shows this as an opt-in checkbox.
 - **Model scope.** A project is `local` (default) or `any`. Under `local`, no stage is sent
   to a hosted backend.
+- **Minor findings never block.** A review that asks for repair but lists only minor issues
+  counts as a pass; the notes stay in the stored review.
 - **Reviewer differs from worker.** A task is not started unless a reviewer on a different
   model is available. Planner, architect and critic also prefer different models; where that
   is impossible the plan shows a warning.

@@ -77,6 +77,20 @@ func classifyRun(parent context.Context, role string, err error) string {
 	return OutcomeInfraCrash
 }
 
+// onlyMinorIssues reports whether the review lists issues and every one is
+// minor. A repair with no issues listed is not minor: it keeps its repair.
+func onlyMinorIssues(issues []schema.Issue) bool {
+	if len(issues) == 0 {
+		return false
+	}
+	for _, i := range issues {
+		if i.Severity != "minor" {
+			return false
+		}
+	}
+	return true
+}
+
 // parseFinal extracts and validates the role's final message; deliberate
 // (RP5) makes a planner's plan need its pre-mortem. It returns the
 // parsed JSON and the outcome the verdict implies.
@@ -102,9 +116,13 @@ func parseFinal(role, final string, deliberate bool) (json.RawMessage, string, e
 		switch {
 		case r.Blocked != "":
 			return raw, OutcomeBlocked, nil
-		case r.Verdict == "repair":
+		case r.Verdict == "repair" && !onlyMinorIssues(r.Issues):
 			return raw, OutcomeRepair, nil
 		}
+		// A repair whose issues are all minor passes: the reviewer prompt
+		// already says style and wording are never a reason to repair alone,
+		// and a model that inflates a nit into a repair costs a full worker
+		// cycle. The notes stay in the stored review.
 	case "planner":
 		_, err = schema.ParsePlan(raw, deliberate)
 	case "architect", "critic":

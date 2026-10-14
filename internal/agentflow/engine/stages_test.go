@@ -598,3 +598,21 @@ func TestOA3_OnlyTheProjectsPinnedPluginsReachTheRunner(t *testing.T) {
 		t.Fatalf("frozen backends = %+v", frozen)
 	}
 }
+
+// A reviewer that asks for repair but lists only minor issues passes the task:
+// style and wording are never a reason to repair alone.
+func TestParseFinal_RepairWithOnlyMinorIssuesPasses(t *testing.T) {
+	review := func(sev string) string {
+		return `{"verdict":"repair","summary":"s","issues":[{"description":"d","severity":"` + sev + `"}],"repair_prompt":"do x"}`
+	}
+	for sev, want := range map[string]string{"minor": OutcomePass, "major": OutcomeRepair, "blocker": OutcomeRepair} {
+		_, got, err := parseFinal("reviewer", review(sev), false)
+		if err != nil || got != want {
+			t.Errorf("severity %s: outcome %q (%v), want %q", sev, got, err, want)
+		}
+	}
+	noIssues := `{"verdict":"repair","summary":"s","issues":[],"repair_prompt":"do x"}`
+	if _, got, err := parseFinal("reviewer", noIssues, false); err != nil || got != OutcomeRepair {
+		t.Errorf("a repair with no issues listed: outcome %q (%v), want repair", got, err)
+	}
+}
