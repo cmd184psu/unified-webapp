@@ -5,6 +5,7 @@
 
 import { ThemeManager, HamburgerMenu } from '@shared';
 import { api } from './api.js';
+import { mountSaveMark } from './autosave.js';
 import { h, replace } from './dom.js';
 import { startEvents } from './events.js';
 import { HealthBanner } from './health.js';
@@ -77,7 +78,18 @@ function initHamburger(): void {
   trigger.appendChild(hamburger.trigger);
 }
 
+function initSaveMark(): void {
+  const right = document.querySelector('#nav .nav-right');
+  const trigger = document.getElementById('hamburger-trigger');
+  if (!right) return;
+  // First in the corner, before the menu: always there, always the same place.
+  const holder = h('span', { class: 'autosave-holder' });
+  right.insertBefore(holder, trigger);
+  mountSaveMark(holder);
+}
+
 initHamburger();
+initSaveMark();
 startEvents();
 const banner = document.getElementById('health-banner');
 if (banner) new HealthBanner(banner, api).mount();

@@ -1287,3 +1287,8 @@ body {
 /* The small mark an auto-saving card shows: pending, saving, saved or not saved. */
 .autosave-state { color: var(--color-text-muted); font-size: 1.1rem; min-width: 1.2em; text-align: center; align-self: center; }
 .autosave-state[data-state="failed"] { color: var(--color-danger); }
+
+.autosave-holder { display: inline-flex; align-items: center; margin-right: 0.5rem; }
+.autosave-mark { color: var(--color-text-muted); font-size: 1.1rem; min-width: 2rem; }
+.autosave-mark[data-state="pending"] { color: var(--color-text); }
+.autosave-mark[data-state="failed"] { color: var(--color-danger); }

@@ -173,20 +173,145 @@ function chip(status) {
   return h("span", { class: `status-chip status-${statusKey(status)}`, text: status.replace(/_/g, " ") });
 }
 
+// web/agentflow/js/autosave.ts
+var AUTOSAVE_DELAY_MS = 5e3;
+var timing = { delay: AUTOSAVE_DELAY_MS };
+var registry = /* @__PURE__ */ new Set();
+var listeners = /* @__PURE__ */ new Set();
+var changed = () => listeners.forEach((fn) => fn());
+var onScreen = (e) => e.status.isConnected !== false;
+var MARKS = {
+  idle: { text: "", title: "" },
+  pending: { text: "\u2026", title: "Unsaved changes: saves after a few seconds without typing" },
+  saving: { text: "\u21BB", title: "Saving" },
+  saved: { text: "\u2713", title: "Saved" },
+  failed: { text: "\u26A0", title: "Not saved: fix the field marked above, then change something to try again" }
+};
+function autosave(o) {
+  const status = h("span", { class: "autosave-state", attrs: { "data-role": "autosave-state", "aria-live": "polite" } });
+  let saved = o.startDirty ? null : o.snapshot();
+  let timer2;
+  let busy = false;
+  let current = "idle";
+  const mark = (k) => {
+    current = k;
+    status.textContent = MARKS[k].text;
+    status.setAttribute("title", MARKS[k].title);
+    status.setAttribute("data-state", k);
+    changed();
+  };
+  mark("idle");
+  const run = async () => {
+    timer2 = void 0;
+    if (busy) {
+      timer2 = setTimeout(() => void run(), o.delay ?? timing.delay);
+      return;
+    }
+    const now = o.snapshot();
+    if (now === saved) {
+      mark("idle");
+      return;
+    }
+    busy = true;
+    mark("saving");
+    let ok = false;
+    try {
+      ok = await o.save();
+    } catch {
+      ok = false;
+    }
+    busy = false;
+    if (ok) saved = now;
+    if (timer2 === void 0) mark(ok ? "saved" : "failed");
+  };
+  const touch = () => {
+    if (timer2 !== void 0) clearTimeout(timer2);
+    mark(o.snapshot() === saved ? "idle" : "pending");
+    timer2 = setTimeout(() => void run(), o.delay ?? timing.delay);
+  };
+  const entry = { status, state: () => current, flush: () => api2.flush() };
+  registry.add(entry);
+  const api2 = {
+    status,
+    watch(el) {
+      el.addEventListener("input", touch);
+      el.addEventListener("change", touch);
+    },
+    touch,
+    async flush() {
+      if (timer2 !== void 0) clearTimeout(timer2);
+      await run();
+    },
+    stop() {
+      if (timer2 !== void 0) clearTimeout(timer2);
+      timer2 = void 0;
+      registry.delete(entry);
+      changed();
+    }
+  };
+  return api2;
+}
+var ROLLUP = {
+  idle: { text: "\u2713", title: "All changes are saved" },
+  pending: { text: "\u2026", title: "Changes are saving by themselves: click to save now" },
+  failed: { text: "\u26A0", title: "Something was not saved: click to go to it" }
+};
+function rollup() {
+  let out = "idle";
+  for (const e of registry) {
+    if (!onScreen(e)) {
+      if (e.state() !== "pending" && e.state() !== "saving") registry.delete(e);
+      continue;
+    }
+    const s = e.state();
+    if (s === "failed") return "failed";
+    if (s === "pending" || s === "saving") out = "pending";
+  }
+  return out;
+}
+async function saveAll() {
+  await Promise.all([...registry].filter((e) => e.state() === "pending").map((e) => e.flush()));
+}
+function mountSaveMark(host) {
+  const el = h("button", { class: "icon-btn autosave-mark", attrs: { type: "button", "data-role": "save-mark", "aria-live": "polite" } });
+  const draw = () => {
+    const r = rollup();
+    el.textContent = ROLLUP[r].text;
+    el.setAttribute("title", ROLLUP[r].title);
+    el.setAttribute("aria-label", ROLLUP[r].title);
+    el.setAttribute("data-state", r);
+  };
+  el.addEventListener("click", () => {
+    const failed = [...registry].find((e) => onScreen(e) && e.state() === "failed");
+    if (failed) {
+      failed.status.scrollIntoView?.({ block: "center", behavior: "smooth" });
+      return;
+    }
+    void saveAll();
+  });
+  listeners.add(draw);
+  draw();
+  host.appendChild(el);
+  return () => {
+    listeners.delete(draw);
+    el.parentNode?.removeChild(el);
+  };
+}
+
 // web/agentflow/js/events.ts
 function backoffMs(failures2) {
   return Math.min(3e4, 1e3 * 2 ** Math.max(0, failures2));
 }
 var EVENT_NAME = "agentflow";
 var URL = "/api/events";
-var listeners = /* @__PURE__ */ new Set();
+var listeners2 = /* @__PURE__ */ new Set();
 var source = null;
 var failures = 0;
 var timer = null;
 var wanted = false;
 function subscribe(fn) {
-  listeners.add(fn);
-  return () => listeners.delete(fn);
+  listeners2.add(fn);
+  return () => listeners2.delete(fn);
 }
 function dispatch(data) {
   let ev;
@@ -196,7 +321,7 @@ function dispatch(data) {
     return;
   }
   if (!ev || typeof ev.type !== "string") return;
-  for (const fn of [...listeners]) fn(ev);
+  for (const fn of [...listeners2]) fn(ev);
 }
 function connect() {
   if (!wanted || source) return;
@@ -825,73 +950,6 @@ var Overview = class {
     );
   }
 };
-
-// web/agentflow/js/autosave.ts
-var AUTOSAVE_DELAY_MS = 5e3;
-var timing = { delay: AUTOSAVE_DELAY_MS };
-var MARKS = {
-  idle: { text: "", title: "" },
-  pending: { text: "\u2026", title: "Unsaved changes: saves after a few seconds without typing" },
-  saving: { text: "\u21BB", title: "Saving" },
-  saved: { text: "\u2713", title: "Saved" },
-  failed: { text: "\u26A0", title: "Not saved: fix the field marked above, then change something to try again" }
-};
-function autosave(o) {
-  const status = h("span", { class: "autosave-state", attrs: { "data-role": "autosave-state", "aria-live": "polite" } });
-  let saved = o.startDirty ? null : o.snapshot();
-  let timer2;
-  let busy = false;
-  const mark = (k) => {
-    status.textContent = MARKS[k].text;
-    status.setAttribute("title", MARKS[k].title);
-    status.setAttribute("data-state", k);
-  };
-  mark("idle");
-  const run = async () => {
-    timer2 = void 0;
-    if (busy) {
-      timer2 = setTimeout(() => void run(), o.delay ?? timing.delay);
-      return;
-    }
-    const now = o.snapshot();
-    if (now === saved) {
-      mark("idle");
-      return;
-    }
-    busy = true;
-    mark("saving");
-    let ok = false;
-    try {
-      ok = await o.save();
-    } catch {
-      ok = false;
-    }
-    busy = false;
-    if (ok) saved = now;
-    if (timer2 === void 0) mark(ok ? "saved" : "failed");
-  };
-  const touch = () => {
-    if (timer2 !== void 0) clearTimeout(timer2);
-    mark(o.snapshot() === saved ? "idle" : "pending");
-    timer2 = setTimeout(() => void run(), o.delay ?? timing.delay);
-  };
-  return {
-    status,
-    watch(el) {
-      el.addEventListener("input", touch);
-      el.addEventListener("change", touch);
-    },
-    touch,
-    async flush() {
-      if (timer2 !== void 0) clearTimeout(timer2);
-      await run();
-    },
-    stop() {
-      if (timer2 !== void 0) clearTimeout(timer2);
-      timer2 = void 0;
-    }
-  };
-}
 
 // web/agentflow/js/backends.ts
 import { showToast as showToast4 } from "/shared/dist/shared.mjs";
@@ -4334,7 +4392,16 @@ function initHamburger() {
   });
   trigger.appendChild(hamburger.trigger);
 }
+function initSaveMark() {
+  const right = document.querySelector("#nav .nav-right");
+  const trigger = document.getElementById("hamburger-trigger");
+  if (!right) return;
+  const holder = h("span", { class: "autosave-holder" });
+  right.insertBefore(holder, trigger);
+  mountSaveMark(holder);
+}
 initHamburger();
+initSaveMark();
 startEvents();
 var banner = document.getElementById("health-banner");
 if (banner) new HealthBanner(banner, api).mount();

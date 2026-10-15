@@ -10,6 +10,21 @@ export const AUTOSAVE_DELAY_MS = 5000;
 /** timing lets a test shorten the pause. */
 export const timing = { delay: AUTOSAVE_DELAY_MS };
 
+type Mark = 'idle' | 'pending' | 'saving' | 'saved' | 'failed';
+
+interface Entry {
+  status: HTMLElement;
+  state: () => Mark;
+  flush: () => Promise<void>;
+}
+
+/** Every live card, so one mark in the header can say whether everything on screen is stored. */
+const registry = new Set<Entry>();
+const listeners = new Set<() => void>();
+const changed = (): void => listeners.forEach((fn) => fn());
+/** A card that has left the page is not on screen: its leftover state is not the user's business. */
+const onScreen = (e: Entry): boolean => (e.status as { isConnected?: boolean }).isConnected !== false;
+
 export interface Autosave {
   /** The small state mark to place in the card: pending, saving, saved or failed. */
   status: HTMLElement;
@@ -47,10 +62,13 @@ export function autosave(o: AutosaveOptions): Autosave {
   let saved: string | null = o.startDirty ? null : o.snapshot();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let busy = false;
-  const mark = (k: keyof typeof MARKS): void => {
+  let current: Mark = 'idle';
+  const mark = (k: Mark): void => {
+    current = k;
     status.textContent = MARKS[k].text;
     status.setAttribute('title', MARKS[k].title);
     status.setAttribute('data-state', k);
+    changed();
   };
   mark('idle');
 
@@ -85,7 +103,9 @@ export function autosave(o: AutosaveOptions): Autosave {
     timer = setTimeout(() => void run(), o.delay ?? timing.delay);
   };
 
-  return {
+  const entry: Entry = { status, state: () => current, flush: () => api.flush() };
+  registry.add(entry);
+  const api: Autosave = {
     status,
     watch(el) {
       el.addEventListener('input', touch);
@@ -99,6 +119,67 @@ export function autosave(o: AutosaveOptions): Autosave {
     stop() {
       if (timer !== undefined) clearTimeout(timer);
       timer = undefined;
+      registry.delete(entry);
+      changed();
     },
   };
+  return api;
+}
+
+const ROLLUP: Record<'idle' | 'pending' | 'failed', { text: string; title: string }> = {
+  idle: { text: '\u2713', title: 'All changes are saved' },
+  pending: { text: '\u2026', title: 'Changes are saving by themselves: click to save now' },
+  failed: { text: '\u26A0', title: 'Something was not saved: click to go to it' },
+};
+
+/** rollup is the state of everything on screen: failed beats pending beats saved. */
+export function rollup(): 'idle' | 'pending' | 'failed' {
+  let out: 'idle' | 'pending' | 'failed' = 'idle';
+  for (const e of registry) {
+    if (!onScreen(e)) {
+      if (e.state() !== 'pending' && e.state() !== 'saving') registry.delete(e);
+      continue;
+    }
+    const s = e.state();
+    if (s === 'failed') return 'failed';
+    if (s === 'pending' || s === 'saving') out = 'pending';
+  }
+  return out;
+}
+
+/** saveAll saves every pending card now. */
+export async function saveAll(): Promise<void> {
+  await Promise.all([...registry].filter((e) => e.state() === 'pending').map((e) => e.flush()));
+}
+
+/** mountSaveMark puts the one always-there mark in host; it needs no click, but a click saves now or shows what failed. */
+export function mountSaveMark(host: HTMLElement): () => void {
+  const el = h('button', { class: 'icon-btn autosave-mark', attrs: { type: 'button', 'data-role': 'save-mark', 'aria-live': 'polite' } });
+  const draw = (): void => {
+    const r = rollup();
+    el.textContent = ROLLUP[r].text;
+    el.setAttribute('title', ROLLUP[r].title);
+    el.setAttribute('aria-label', ROLLUP[r].title);
+    el.setAttribute('data-state', r);
+  };
+  el.addEventListener('click', () => {
+    const failed = [...registry].find((e) => onScreen(e) && e.state() === 'failed');
+    if (failed) {
+      (failed.status as { scrollIntoView?: (o: unknown) => void }).scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+      return;
+    }
+    void saveAll();
+  });
+  listeners.add(draw);
+  draw();
+  host.appendChild(el);
+  return () => {
+    listeners.delete(draw);
+    el.parentNode?.removeChild(el);
+  };
+}
+
+/** forgetAll empties the registry (tests start from nothing). */
+export function forgetAll(): void {
+  registry.clear();
 }

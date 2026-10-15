@@ -1,5 +1,5 @@
 import { test, run, eq, ok, installFakeDom, FakeEl } from './testkit';
-import { autosave, timing } from './autosave';
+import { autosave, forgetAll, timing, rollup, saveAll, mountSaveMark } from './autosave';
 
 installFakeDom();
 timing.delay = 10;
@@ -86,6 +86,40 @@ test('AS6: a card rebuilt around unsaved edits saves them after the pause', asyn
   a.touch();
   await wait(40);
   eq(saves, 1);
+});
+
+test('AS7: the corner mark rolls the cards up: pending, failed, saved; a click saves now', async () => {
+  forgetAll();
+  let a = 'a';
+  let b = 'b';
+  let bOk = false;
+  const one = autosave({ snapshot: () => a, save: async () => true });
+  const two = autosave({ snapshot: () => b, save: async () => bOk });
+  const corner = new FakeEl('DIV');
+  const stop = mountSaveMark(corner as unknown as HTMLElement);
+  const mark = corner.childNodes[0] as FakeEl;
+  eq(mark.getAttribute('data-state'), 'idle');
+  a = 'a2';
+  one.touch();
+  eq(rollup(), 'pending');
+  eq(mark.getAttribute('data-state'), 'pending');
+  mark.click();
+  await wait(5);
+  eq(mark.getAttribute('data-state'), 'idle');
+  b = 'b2';
+  two.touch();
+  await saveAll();
+  eq(rollup(), 'failed');
+  eq(mark.getAttribute('data-state'), 'failed');
+  bOk = true;
+  b = 'b3';
+  two.touch();
+  await wait(40);
+  eq(rollup(), 'idle');
+  one.stop();
+  two.stop();
+  stop();
+  eq(corner.childNodes.length, 0);
 });
 
 void run('agentflow-autosave');
