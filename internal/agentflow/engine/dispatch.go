@@ -389,17 +389,38 @@ func (e *Engine) pickBackend(ctx context.Context, role string, t model.Task, p s
 // reviewerFor walks the reviewer candidates. needSlot false only asks whether
 // some reviewer could ever be picked, ignoring free slots (the work stage has
 // not used its slot yet, and a slot is a transient condition).
+//
+// The check is only as good as the reviewer is independent of the worker (H2):
+// a reviewer from another model family is preferred, a different model of the
+// worker's family is the fallback, and the worker's own model is never used.
+// When a different-family reviewer exists but has no free slot, the stage
+// waits for it rather than settling for the weaker check.
 func reviewerFor(v *view, p store.Project, sticky, workerModel string, needSlot bool) (Pick, string) {
 	cands := v.snap.CandidatesFor("reviewer", p.Slug)
+	level := func(c store.Candidate) int {
+		if model.ModelFamily(c.Model) != model.ModelFamily(workerModel) {
+			return 0
+		}
+		return 1
+	}
+	best := 2
+	for _, c := range cands {
+		if skipReviewer(v, p, c, workerModel, false) == "" && level(c) < best {
+			best = level(c)
+		}
+	}
 	if sticky != "" {
 		for _, c := range cands {
-			if c.Model == sticky && skipReviewer(v, p, c, workerModel, needSlot) == "" {
+			if c.Model == sticky && level(c) == best && skipReviewer(v, p, c, workerModel, needSlot) == "" {
 				return Pick{Backend: c.Backend, Model: c.Model}, ""
 			}
 		}
 	}
 	var reasons []string
 	for _, c := range cands {
+		if best < 2 && level(c) != best && c.Model != workerModel {
+			continue
+		}
 		if why := skipReviewer(v, p, c, workerModel, needSlot); why != "" {
 			reasons = append(reasons, why)
 			continue

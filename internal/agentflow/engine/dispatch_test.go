@@ -508,3 +508,32 @@ func TestPX5_ModelConcurrencyLimit(t *testing.T) {
 		}
 	})
 }
+
+// H2: a reviewer from another model family is preferred over a first-listed one
+// of the worker's family; with only same-family reviewers the other model of the
+// family is used, and the worker's own model never is.
+func TestH2_ReviewerPrefersAnotherFamily(t *testing.T) {
+	ctx := context.Background()
+	pick := func(reviewers ...string) (string, string) {
+		h := newDispHarness(t)
+		h.addBackend("gpu", 5, false, false, "qwen3", "qwen3-coder", "mistral-small")
+		h.candidates("global", "", "worker", "gpu/qwen3")
+		h.candidates("global", "", "reviewer", reviewers...)
+		f := h.dispProject("alpha", "any", indep(1))
+		tk, _ := h.st.GetTask(ctx, f.tasks[0].ID)
+		pk, why, err := h.eng.pickBackend(ctx, "reviewer", tk, store.Project{Slug: "alpha", ModelScope: "any"}, "qwen3")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pk.Model, why
+	}
+	if m, why := pick("gpu/qwen3-coder", "gpu/mistral-small"); m != "mistral-small" || why != "" {
+		t.Fatalf("with a mistral reviewer listed second, picked %q (%q)", m, why)
+	}
+	if m, why := pick("gpu/qwen3", "gpu/qwen3-coder"); m != "qwen3-coder" || why != "" {
+		t.Fatalf("with only qwens, picked %q (%q)", m, why)
+	}
+	if m, why := pick("gpu/qwen3"); m != "" || why == "" {
+		t.Fatalf("the worker's own model was picked: %q (%q)", m, why)
+	}
+}

@@ -341,7 +341,9 @@ export class Board {
       h('div', { class: 'row-actions' },
         h('strong', { text: `Attempt ${a.n}` }), a.kind === 'repair' ? badge('repair', 'warn') : null,
         chip(a.outcome || 'running'),
-        h('span', { class: 'field-hint', text: `worker ${a.worker_model || '-'} · reviewer ${a.reviewer_model || '-'}` })),
+        h('span', { class: 'field-hint', text: `worker ${a.worker_model || '-'} · reviewer ${a.reviewer_model || '-'}` }),
+        a.review_independence === 'same_family' ? badge('reviewer is the worker\'s model family', 'warn') : null,
+        a.review_independence === 'same_model' ? badge('reviewer is the worker\'s model', 'warn') : null),
       h('div', { class: 'wizard-list' }, ...a.stages.map((s) =>
         h('div', { class: 'inline-row', attrs: { 'data-stage': s.id } },
           h('span', { text: `${s.role} · ${s.backend ? `${s.backend}/${s.model}` : 'engine'} · ${s.outcome || s.state}` }),

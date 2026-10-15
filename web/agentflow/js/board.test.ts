@@ -125,6 +125,7 @@ test('selecting a task shows its detail: prompt, acceptance, attempts with Verif
   const text = pane.textContent;
   ok(text.includes('prompt of T004') && text.includes('it works') && text.includes('a.go'), 'definition');
   ok(text.includes('worker m1 · reviewer m2'), 'models');
+  ok(!text.includes('model family'), 'an independent reviewer gets no warning');
   ok(byAttr(pane, 'data-role', 'verify-report')[0].textContent.includes('go vet failed — bad'), 'verify report');
   ok(text.includes('New failures') && text.includes('TestX'), 'new failures');
   const rev = byAttr(pane, 'data-role', 'reviewer-report')[0].textContent;
@@ -508,3 +509,16 @@ test('F1: the board polls while the effort is running and refetches on project.u
 });
 
 void run('agentflow-board');
+
+test('H2: a reviewer from the worker\'s model family is flagged on the attempt', async () => {
+  const w = mixed();
+  const t4 = w.tasks[3];
+  w.detail.T004 = detailOf(t4, [{ ...attempt([stage(10, 'worker', { summary: 's' })]), review_independence: 'same_family' }]);
+  const t = harness(w);
+  const stop = t.board.mount();
+  await flush();
+  byAttr(t.host, 'data-task', 'T004')[0].click();
+  await flush();
+  ok(byAttr(t.host, 'data-role', 'detail-pane')[0].textContent.includes("reviewer is the worker's model family"), 'badge');
+  stop();
+});

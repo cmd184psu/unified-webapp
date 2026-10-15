@@ -15,6 +15,7 @@ const attemptCols = `id, task, n, kind, worktree, outcome, fingerprint, worker_m
 func scanAttempt(r interface{ Scan(...any) error }) (model.Attempt, error) {
 	var a model.Attempt
 	err := r.Scan(&a.ID, &a.Task, &a.N, &a.Kind, &a.Worktree, &a.Outcome, &a.Fingerprint, &a.WorkerModel, &a.ReviewerModel, &a.Started, &a.Finished)
+	a.ReviewIndependence = model.ReviewIndependence(a.WorkerModel, a.ReviewerModel)
 	return a, err
 }
 

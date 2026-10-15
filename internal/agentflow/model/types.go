@@ -165,8 +165,10 @@ type Attempt struct {
 	Fingerprint   string `json:"fingerprint"`
 	WorkerModel   string `json:"worker_model"`
 	ReviewerModel string `json:"reviewer_model"`
-	Started       int64  `json:"started"`
-	Finished      int64  `json:"finished"`
+	// ReviewIndependence is how independent the reviewer was of the worker: different_family, same_family or same_model; empty when no reviewer ran.
+	ReviewIndependence string `json:"review_independence,omitempty"`
+	Started            int64  `json:"started"`
+	Finished           int64  `json:"finished"`
 }
 
 // Stage is one runner or engine step. It belongs to an attempt, or to an

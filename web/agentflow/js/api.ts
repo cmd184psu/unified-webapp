@@ -408,6 +408,7 @@ export interface Attempt {
   fingerprint: string;
   worker_model: string;
   reviewer_model: string;
+  review_independence?: string;
   started: number;
   finished: number;
   stages: Stage[];
