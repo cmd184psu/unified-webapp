@@ -63,3 +63,9 @@ H1 first (it is the actual defect), then H2, H3, H3b (Stats), H4 (adds hardware 
 ## Not in this phase
 
 A behavioral smoke stage that starts the built program (the sandbox forbids network and the engine runs no model-authored commands); noted as the next step if H1 is not enough. Backend delete (see the notes in progress.md).
+
+## Status (updated 2026-10-15)
+
+- **H1, H2, H3, H3b done and committed.** H1: `model/literals.go`, checks in `engine/draft.go` and `engine/compile.go`, `engine/frdlink.go`. H2: `model/family.go`, `reviewerFor`. H3: migration 12, floors in `skipReason`, reviewer-not-weaker in `skipReviewer`. H3b: `web/agentflow/js/stats.ts`, `GET /api/stats/models?project=`.
+- **H4 done on the live service.** `ollama-m4` (3 models) and `ollama-win` (5 models) added, one slot each; every local model rated (qwen3.6 tier 1; mistral-small3.2, gpt-oss:20b, qwen3-coder:30b tier 2; the 14B coder, qwen3:8b, llama3.2:3b tier 3). They are appended to the end of the global role lists (tier 3 only to worker and reviewer), so they take work when the earlier candidates are busy or down.
+- Next: H4a (backend keys in the UI), H4b (Kimi), H5 (trial harness and re-run).
