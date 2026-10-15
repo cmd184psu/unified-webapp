@@ -8,9 +8,13 @@ compile, approves the queue and starts the run. Then it exits; watch the rest in
 
   scripts/agentflow-webcalc-kickoff.py [--url http://127.0.0.1:8787]
         [--host agentflow.builder.cmdhome.net] [--pin-file ~/.unified_common.pin]
-        [--repo ~/af-webcalc] [--slug webcalc] [--wait]
+        [--repo ~/af-webcalc] [--slug webcalc] [--scope local|any] [--lineup global|local] [--wait]
 
 --host is sent as the Host header: the service routes modules by host name.
+--lineup local sets this project's own candidate lists from the registered backends' tiers instead
+of using the global lists: planner, architect, critic and compiler take tier 1 then 2 (a model
+not yet rated counts as 2); workers take tier 2, then 1; reviewers take tier 1, then 2. Only
+non-hosted backends are used, and light (tier 3) models only with --include-light.
 --wait stays until the effort completes or a task halts, printing status changes.
 """
 import argparse
@@ -42,6 +46,14 @@ ap.add_argument("--repo", default=os.path.expanduser("~/af-webcalc"))
 ap.add_argument("--slug", default="webcalc")
 ap.add_argument("--scope", default="any", choices=("local", "any"),
                 help="model scope: any lets hosted backends (the free opencode models) be used")
+ap.add_argument("--lineup", default="global", choices=("global", "local"),
+                help="local: build this project's candidate lists from the non-hosted backends by tier")
+ap.add_argument("--include-light", action="store_true", help="with --lineup local: let tier 3 models work as workers")
+ap.add_argument("--exclude-backend", action="append", default=["kimi-waste"],
+                help="with --lineup local: backend to leave out (repeatable; default kimi-waste, too slow for a worker)")
+ap.add_argument("--backend-order", default="ollama-m5,ollama-win,ollama-m4",
+                help="with --lineup local: within a tier, try these backends first, in this order (fastest first)")
+ap.add_argument("--dry-run", action="store_true", help="with --lineup local: print the candidate lists and stop")
 ap.add_argument("--wait", action="store_true")
 args = ap.parse_args()
 
@@ -95,6 +107,26 @@ missing = [r for r in ("planner", "architect", "critic", "compiler", "worker", "
 if missing:
     sys.exit("no candidate configured for: " + ", ".join(missing) + " (add them in the UI first)")
 
+if args.lineup == "local":
+    pool = []  # (tier, backend, model); tier 0 (not rated) counts as 2
+    for b in api("GET", "/api/backends", None, 200):
+        if b.get("hosted") or b.get("paid") or b["name"] in args.exclude_backend:
+            continue
+        pool += [(m.get("tier") or 2, b["name"], m["model"]) for m in b["models"]]
+    order = [x for x in args.backend_order.split(",") if x]
+    rank = lambda be: order.index(be) if be in order else len(order)
+    pick = lambda tiers: [{"backend": be, "model": m} for t in tiers
+                          for (tt, be, m) in sorted(pool, key=lambda x: (rank(x[1]), x[1], x[2])) if tt == t]
+    workers = (2, 3, 1) if args.include_light else (2, 1)
+    lineup = {"planner": pick((1, 2)), "architect": pick((1, 2)), "critic": pick((1, 2)), "compiler": pick((1, 2)),
+              "worker": pick(workers), "reviewer": pick((1, 2))}
+    for role, lst in lineup.items():
+        if not lst:
+            sys.exit(f"--lineup local: no non-hosted model fits the {role} role")
+        say(f"{role}: " + ", ".join(f"{c['backend'].replace('ollama-', '')}/{c['model']}" for c in lst))
+    if args.dry_run:
+        sys.exit(0)
+
 # a fresh repo with one commit
 if not os.path.isdir(os.path.join(args.repo, ".git")):
     os.makedirs(args.repo, exist_ok=True)
@@ -108,6 +140,10 @@ if not os.path.isdir(os.path.join(args.repo, ".git")):
 
 slug = args.slug
 api("POST", "/api/projects", {"slug": slug, "repo_path": args.repo, "model_scope": args.scope}, 201)
+if args.lineup == "local":
+    for role, lst in lineup.items():
+        api("PUT", f"/api/projects/{slug}/candidates/{role}", {"candidates": lst}, 200)
+
 eid = api("POST", f"/api/projects/{slug}/efforts", {"title": "web calculator"}, 201)["id"]
 base = f"/api/projects/{slug}/efforts/{eid}"
 say(f"project {slug}, effort {eid}: open the agentflow UI to watch")
