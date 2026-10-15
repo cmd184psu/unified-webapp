@@ -264,3 +264,9 @@ Counts: 42 proven (of 42); AC-OC1/OC2 were proven live on 2026-10-14 (AC-OC1 at 
 Live smoke: `AGENTFLOW_LIVE_SMOKE=1 scripts/agentflow-smoke.sh` (see the header of the script for the backend variables). Without a backend it starts the local stub model server and drives the real opencode binary at it; that run passed once in G2 (AC-OC1 and AC-OC2 both ok, control loaded the plugin). Not part of `make` and not run against a paid model.
 
 Findings from the UI evidence run (not fixed in G2): the FRD tab crashes on render when an FRD has no `acceptance_criteria` (`web/agentflow/js/frd-editor.ts` passes `base.acceptance_criteria` to `RowsEditor` without `?? []`, while the API accepts such an FRD); and the Plan tab logs two `Cannot read properties of null (reading 'length')` page errors on an effort with no plan yet (it still renders).
+
+## Notes for later (owner, 2026-10-14)
+
+- Backends: replace "Retire" with a trash icon that opens an "Are you sure?" modal (lightbox) and deletes the backend. Needs a delete path in the store/API (today a backend is only retired, because stages and candidates refer to it) and a decision on what happens to its candidates and history.
+- Folder picker dialog scrolls horizontally (agentflow's own `.dir-picker`/`.dir-row` CSS; do not touch the shared modal).
+- Toggles confirmed good again after the shared-CSS fix.
