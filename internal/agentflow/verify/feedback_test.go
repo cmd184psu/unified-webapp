@@ -319,13 +319,13 @@ func TestParseArgvAndDetect(t *testing.T) {
 		want  []Argv
 	}{
 		{"go", map[string]string{"go.mod": "module x\n"},
-			[]Argv{{"go", "build", "./..."}, {"go", "vet", "./..."}, {"go", "test", "./..."}}},
+			[]Argv{{"go", "build", "-o", "/dev/null", "./..."}, {"go", "vet", "./..."}, {"go", "test", "./..."}}},
 		{"python", map[string]string{"pyproject.toml": "[project]\n"}, []Argv{{"python", "-m", "pytest", "-q"}}},
 		{"npm with test script", map[string]string{"package.json": `{"scripts":{"test":"jest"}}`}, []Argv{{"npm", "test", "--silent"}}},
 		{"npm without test script", map[string]string{"package.json": `{"scripts":{"build":"tsc"}}`}, nil},
 		{"npm invalid json", map[string]string{"package.json": `{`}, nil},
 		{"go and npm", map[string]string{"go.mod": "module x\n", "package.json": `{"scripts":{"test":"t"}}`},
-			[]Argv{{"go", "build", "./..."}, {"go", "vet", "./..."}, {"go", "test", "./..."}, {"npm", "test", "--silent"}}},
+			[]Argv{{"go", "build", "-o", "/dev/null", "./..."}, {"go", "vet", "./..."}, {"go", "test", "./..."}, {"npm", "test", "--silent"}}},
 		{"nothing", map[string]string{"README.md": "x"}, nil},
 	}
 	for _, c := range cases {

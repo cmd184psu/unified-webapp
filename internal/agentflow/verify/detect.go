@@ -17,7 +17,7 @@ func Detect(worktree string) []Argv {
 		return err == nil && fi.Mode().IsRegular()
 	}
 	if has("go.mod") {
-		cmds = append(cmds, Argv{"go", "build", "./..."}, Argv{"go", "vet", "./..."}, Argv{"go", "test", "./..."})
+		cmds = append(cmds, Argv{"go", "build", "-o", "/dev/null", "./..."}, Argv{"go", "vet", "./..."}, Argv{"go", "test", "./..."})
 	}
 	if has("pyproject.toml") {
 		cmds = append(cmds, Argv{"python", "-m", "pytest", "-q"})

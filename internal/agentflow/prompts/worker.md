@@ -21,6 +21,7 @@ Acceptance criteria:
 4. You cannot run the project's checks for the runner. The runner verifies your work itself after you finish, so do not claim that anything passed.
 5. If a tool call fails with a connection, API, or timeout error, do not invent results. Put the reason in `blocked`.
 6. Do not suggest next steps or advice for a human.
+7. Never leave compiled binaries or other build output in the repository. To check that code compiles, write the output to /dev/null.
 
 ## Nothing to change
 

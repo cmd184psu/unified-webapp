@@ -3,6 +3,7 @@ package verify
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // DoD is a project's definition of done: the standard every task is held to,
@@ -35,7 +36,8 @@ func DefinitionOfDone(dir string, stored, override []string) DoD {
 	cmds := stored
 	if len(cmds) == 0 {
 		for _, a := range Detect(dir) {
-			cmds = append(cmds, a.String())
+			// The discard flag is plumbing, not part of what a person reads.
+			cmds = append(cmds, strings.Replace(a.String(), " -o /dev/null", "", 1))
 		}
 	}
 	for _, c := range cmds {
