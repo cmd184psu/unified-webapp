@@ -267,6 +267,6 @@ Findings from the UI evidence run (not fixed in G2): the FRD tab crashes on rend
 
 ## Notes for later (owner, 2026-10-14)
 
-- Backends: replace "Retire" with a trash icon that opens an "Are you sure?" modal (lightbox) and deletes the backend. Needs a delete path in the store/API (today a backend is only retired, because stages and candidates refer to it) and a decision on what happens to its candidates and history.
+- Backends: keep disable/enable (today's retire). Add a trash icon beside it that is greyed out, with the reason as its tooltip, until no candidate list (global or project) refers to the backend; then it opens an "Are you sure?" lightbox and deletes the backend and its models. History stays: stage rows keep the backend name as plain text, so nothing there blocks a delete. Needs `DELETE /api/backends/{name}` (409 while candidates refer to it) and an API-walk entry.
 - Folder picker dialog scrolls horizontally (agentflow's own `.dir-picker`/`.dir-row` CSS; do not touch the shared modal).
 - Toggles confirmed good again after the shared-CSS fix.
