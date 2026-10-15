@@ -718,6 +718,16 @@ func (e *Engine) EffortPrompt(ctx context.Context, st model.Stage) (string, erro
 	for k, v := range rep {
 		text = strings.ReplaceAll(text, k, v)
 	}
+	if (st.Role == "planner" || st.Role == "compiler") && frd != "null" {
+		var f model.FRD
+		if json.Unmarshal([]byte(frd), &f) == nil {
+			where := "the plan"
+			if st.Role == "compiler" {
+				where = "the task prompts and acceptance criteria"
+			}
+			text += model.LiteralsNote(model.ExtractLiterals(model.FRDText(f)), where)
+		}
+	}
 	return text, nil
 }
 

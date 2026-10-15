@@ -229,6 +229,7 @@ func (e *Engine) buildPrompt(ctx context.Context, st model.Stage, project string
 		}
 	}
 	if st.Role == "worker" || st.Role == "reviewer" {
+		b.WriteString(e.frdSection(ctx, task))
 		dod, err := e.dodSection(ctx, st.Role, project, att)
 		if err != nil {
 			return "", err

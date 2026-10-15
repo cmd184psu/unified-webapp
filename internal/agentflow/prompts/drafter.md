@@ -26,6 +26,7 @@ Every task is already held to this standard and the engine checks it automatical
 4. Each acceptance criterion states one behavior someone can check, and covers one or more requirements. Never write a criterion that only restates the definition of done above (tests pass, the build succeeds, vet is clean, new code has tests, no unrelated files changed): the engine already enforces it.
 5. Never invent scope. If the person did not ask for something, leave it out; if something they asked for is unclear, say so in `context` instead of guessing.
 6. Do not write ids or links: they are filled in for you. Do not plan the implementation.
+7. Keep every exact detail the person gave: ports, URL paths, status codes, field names, file names and quoted messages. Copy each one character for character into the requirement or criterion that needs it; never round, generalize or leave one out.
 
 ## Output
 

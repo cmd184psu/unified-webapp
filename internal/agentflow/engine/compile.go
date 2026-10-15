@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -131,6 +132,14 @@ func (e *Engine) advanceCompile(ctx context.Context, p store.Project, ef model.E
 	if err != nil {
 		return e.haltCompile(ctx, ef, last, err.Error())
 	}
+	if miss, err := e.queueMissingLiterals(ctx, ef.ID, defs); err != nil {
+		return err
+	} else if len(miss) > 0 {
+		if len(stages) < 2 { // one more try; the prompt names the strings that must appear
+			return e.startEffortStage(ctx, p, ef.ID, "compiler", nil, last.Model)
+		}
+		return e.haltCompile(ctx, ef, last, (&literalsError{missing: miss, from: "the task queue"}).Error())
+	}
 	q, err := e.deps.Store.SaveQueue(ctx, "compiler:"+last.Model, ef.ID, defs)
 	if err != nil {
 		if errors.Is(err, store.ErrConflict) {
@@ -149,6 +158,22 @@ func (e *Engine) advanceCompile(ctx context.Context, p store.Project, ef model.E
 		return err
 	}
 	return nil
+}
+
+// queueMissingLiterals lists the exact strings of the effort's FRD that no
+// task of a compiled queue carries (H1).
+func (e *Engine) queueMissingLiterals(ctx context.Context, effort int64, defs []model.TaskDef) ([]string, error) {
+	d, err := e.deps.Store.GetDoc(ctx, effort, model.DocFRD, 0)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	var f model.FRD
+	if json.Unmarshal(d.JSON, &f) != nil {
+		return nil, nil
+	}
+	return model.MissingLiterals(model.ExtractLiterals(model.FRDText(f)), model.TasksText(defs)), nil
 }
 
 // haltCompile gives up compilation: the effort goes back to where it came from

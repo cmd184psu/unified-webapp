@@ -66,6 +66,32 @@ type draftDetail struct {
 	After       int64  `json:"after_stage"`
 }
 
+// literalsError says a result left out exact strings the input carried (H1).
+type literalsError struct {
+	missing []string
+	from    string
+}
+
+func (l *literalsError) Error() string {
+	return fmt.Sprintf("%s left out exact strings from the request: %s", l.from, strings.Join(l.missing, ", "))
+}
+
+// draftRequestFor is the request of the drafter run a stage belongs to.
+func (e *Engine) draftRequestFor(ctx context.Context, effort, stage int64) (draftDetail, error) {
+	var req draftDetail
+	evs, err := e.effortEvents(ctx, effort, eventDraftStart)
+	if err != nil {
+		return req, err
+	}
+	for _, ev := range evs {
+		var d draftDetail
+		if json.Unmarshal([]byte(ev.DetailJSON), &d) == nil && d.After < stage {
+			req = d
+		}
+	}
+	return req, nil
+}
+
 // draftPurpose is the purpose of a drafter stage, "" for any other stage.
 func draftPurpose(st model.Stage) string {
 	if st.Role != "planner" {
@@ -283,6 +309,10 @@ func (e *Engine) advanceDraft(ctx context.Context, p store.Project, ef model.Eff
 		err = e.applyDraft(ctx, p, ef, run.start.Purpose, last, run.start.After)
 	}
 	defer e.changed()
+	var lit *literalsError
+	if errors.As(err, &lit) && len(run.stages) < 2 {
+		return retry(last.Model) // one more try, the prompt names the strings that must appear
+	}
 	if err != nil {
 		return e.failDraft(ctx, ef.ID, run.start.After, last.ID, err.Error())
 	}
@@ -341,6 +371,15 @@ func (e *Engine) applyDraft(ctx context.Context, p store.Project, ef model.Effor
 	}
 	if len(drafted.OutOfScope) > 0 {
 		f.OutOfScope = drafted.OutOfScope
+	}
+	if purpose == PurposeDraft {
+		req, err := e.draftRequestFor(ctx, ef.ID, st.ID)
+		if err != nil {
+			return err
+		}
+		if miss := model.MissingLiterals(model.ExtractLiterals(req.Description), model.FRDText(f)); len(miss) > 0 {
+			return &literalsError{missing: miss, from: "the draft"}
+		}
 	}
 	raw, err := json.Marshal(f)
 	if err != nil {
@@ -530,16 +569,9 @@ func (e *Engine) draftPrompt(ctx context.Context, st model.Stage, purpose string
 	if err != nil {
 		return "", err
 	}
-	var req draftDetail
-	evs, err := e.effortEvents(ctx, st.Effort, eventDraftStart)
+	req, err := e.draftRequestFor(ctx, st.Effort, st.ID)
 	if err != nil {
 		return "", err
-	}
-	for _, ev := range evs {
-		var d draftDetail
-		if json.Unmarshal([]byte(ev.DetailJSON), &d) == nil && d.After < st.ID {
-			req = d
-		}
 	}
 	frd := ""
 	if d, err := s.GetDoc(ctx, st.Effort, model.DocFRD, 0); err == nil {
@@ -551,7 +583,8 @@ func (e *Engine) draftPrompt(ctx context.Context, st model.Stage, purpose string
 	switch purpose {
 	case PurposeDraft:
 		task = "Draft an FRD from the description below."
-		input = "Description from the person:\n\n" + req.Description
+		input = "Description from the person:\n\n" + req.Description +
+			model.LiteralsNote(model.ExtractLiterals(req.Description), "the requirements and acceptance criteria")
 		sizeRule = "For a short description write at most 6 requirements and no more than two criteria for each; write more only when the description clearly lists more separate things."
 	case PurposePolish:
 		task = "Tidy the existing FRD below: shorter plain wording, duplicates merged, boilerplate and anything that restates the definition of done removed. Keep its meaning and its scope."

@@ -1,0 +1,185 @@
+package engine
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"cmd184psu/unified-webapp/internal/agentflow/model"
+	"cmd184psu/unified-webapp/internal/agentflow/runner"
+)
+
+const (
+	portAsk       = "A greeter that listens on port 7070 and serves GET /api/hello"
+	draftWithPort = `{"title":"Greeter","objective":"Serve a greeting on port 7070.","requirements":[{"description":"GET /api/hello returns hello"}],"acceptance_criteria":[{"criterion":"GET /api/hello returns hello"}]}`
+)
+
+// H1: a draft that drops an exact string of the request (the port) gets one
+// more try whose prompt names the string; a draft that still drops it fails
+// with the string named, and the FRD stays as it was.
+func TestH1_DraftThatDropsTheRequestsPortIsRetriedThenAccepted(t *testing.T) {
+	f := newPlanFix(t, false)
+	f.standardPool()
+	f.fake.Script("planner", runner.Step{Reply: draftReply}, runner.Step{Reply: draftWithPort})
+	f.startEngine()
+	ctx := context.Background()
+	if err := f.eng.StartDraft(ctx, "alice", f.effort, DraftRequest{Purpose: PurposeDraft, Description: portAsk}); err != nil {
+		t.Fatal(err)
+	}
+	if v := f.waitDraft("idle"); v.Error != "" {
+		t.Fatalf("state = %+v", v)
+	}
+	calls := f.fake.CallsFor("planner")
+	if len(calls) != 2 {
+		t.Fatalf("planner calls = %d, want the draft and one retry", len(calls))
+	}
+	for i, c := range calls {
+		if !strings.Contains(c.Prompt, "Exact strings that must appear") || !strings.Contains(c.Prompt, "`7070`") || !strings.Contains(c.Prompt, "`/api/hello`") {
+			t.Fatalf("call %d does not name the exact strings:\n%s", i, c.Prompt)
+		}
+	}
+	frd, rev := f.latestFRD()
+	if rev != 2 || !strings.Contains(model.FRDText(frd), "7070") {
+		t.Fatalf("revision %d, FRD text %q", rev, model.FRDText(frd))
+	}
+}
+
+func TestH1_DraftThatKeepsDroppingAStringFailsNamingIt(t *testing.T) {
+	f := newPlanFix(t, false)
+	f.standardPool()
+	f.fake.Script("planner", runner.Step{Reply: draftReply}, runner.Step{Reply: draftReply}, runner.Step{Reply: draftReply})
+	f.startEngine()
+	ctx := context.Background()
+	if err := f.eng.StartDraft(ctx, "alice", f.effort, DraftRequest{Purpose: PurposeDraft, Description: portAsk}); err != nil {
+		t.Fatal(err)
+	}
+	v := f.waitDraft("failed")
+	if !strings.Contains(v.Error, "7070") || !strings.Contains(v.Error, "/api/hello") {
+		t.Fatalf("error = %q, want the missing strings named", v.Error)
+	}
+	if n := len(f.fake.CallsFor("planner")); n != 2 {
+		t.Fatalf("planner calls = %d, want exactly one retry", n)
+	}
+	if _, rev := f.latestFRD(); rev != 1 {
+		t.Fatalf("a failed draft changed the FRD: revision %d", rev)
+	}
+}
+
+// A request without exact strings is never retried or failed on their account.
+func TestH1_DescriptionWithoutExactStringsIsNotChecked(t *testing.T) {
+	f := newPlanFix(t, false)
+	f.standardPool()
+	f.fake.Script("planner", runner.Step{Reply: draftReply})
+	f.startEngine()
+	if err := f.eng.StartDraft(context.Background(), "alice", f.effort, DraftRequest{Purpose: PurposeDraft, Description: "make a friendly greeter"}); err != nil {
+		t.Fatal(err)
+	}
+	f.waitDraft("idle")
+	if n := len(f.fake.CallsFor("planner")); n != 1 {
+		t.Fatalf("planner calls = %d", n)
+	}
+}
+
+const (
+	compileNoPath   = `{"tasks":[{"id":"T001","phase":"P1","title":"api","prompt":"create the endpoints in api.go","acceptance":["R1: the endpoints answer"],"files_touched":["api.go"]}]}`
+	compileWithPath = `{"tasks":[{"id":"T001","phase":"P1","title":"api","prompt":"create GET /api/hello in api.go","acceptance":["R1: GET /api/hello returns hello"],"files_touched":["api.go"]}]}`
+)
+
+func (f *planFix) frdNaming(path string) {
+	f.t.Helper()
+	raw := `{"title":"Greeter","objective":"Greet.","requirements":[{"id":"R1","description":"GET ` + path + ` returns hello","priority":"must"}],"acceptance_criteria":[{"id":"AC1","requirements":["R1"],"criterion":"it answers"}]}`
+	if _, err := f.st.SaveDoc(context.Background(), "t", f.effort, model.DocFRD, []byte(raw)); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+// H1: a compiled queue must carry every exact string of the FRD; one that does
+// not gets one more try, whose prompt names the strings.
+func TestH1_CompiledQueueThatDropsAPathIsRetried(t *testing.T) {
+	f := newPlanFix(t, false)
+	f.standardPool()
+	f.frdNaming("/api/hello")
+	f.approvedPlan()
+	f.fake.Script("compiler", runner.Step{Reply: compileNoPath}, runner.Step{Reply: compileWithPath})
+	f.startEngine()
+	if err := f.eng.Compile(context.Background(), "alice", f.effort); err != nil {
+		t.Fatal(err)
+	}
+	f.waitStatus(model.EffortQueueDraft)
+	calls := f.fake.CallsFor("compiler")
+	if len(calls) != 2 {
+		t.Fatalf("compiler calls = %d, want the compile and one retry", len(calls))
+	}
+	for i, c := range calls {
+		if !strings.Contains(c.Prompt, "`/api/hello`") {
+			t.Fatalf("call %d does not name the path:\n%s", i, c.Prompt)
+		}
+	}
+}
+
+func TestH1_CompiledQueueThatKeepsDroppingAPathHaltsNamingIt(t *testing.T) {
+	f := newPlanFix(t, false)
+	f.standardPool()
+	f.frdNaming("/api/hello")
+	f.approvedPlan()
+	f.fake.Script("compiler", runner.Step{Reply: compileNoPath}, runner.Step{Reply: compileNoPath})
+	f.startEngine()
+	if err := f.eng.Compile(context.Background(), "alice", f.effort); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "compile halted", func() bool {
+		st := f.effortStages("compiler")
+		return len(st) == 2 && st[1].State == model.StageDone && f.status() == model.EffortPlanApproved
+	})
+	evs, err := f.eng.effortEvents(context.Background(), f.effort, eventCompileHalted)
+	if err != nil || len(evs) != 1 || !strings.Contains(evs[0].DetailJSON, "/api/hello") {
+		t.Fatalf("halt events = %+v, %v", evs, err)
+	}
+}
+
+// H1: the worker and the reviewer see the approved requirement behind a
+// criterion word for word, so a paraphrase cannot hide a path or a port.
+func TestH1_WorkerAndReviewerPromptsCarryTheApprovedRequirementText(t *testing.T) {
+	h := newHarness(t)
+	h.start()
+	ctx := context.Background()
+	for _, role := range []string{"worker", "reviewer"} {
+		fx := h.attemptStage("b-"+role, role)
+		frd := `{"title":"T","objective":"o","requirements":[{"id":"R1","description":"Listen on port 7070"},{"id":"R2","description":"POST /api/add adds"}],` +
+			`"acceptance_criteria":[{"id":"AC1","requirements":["R2"],"criterion":"POST /api/add returns {result}"}]}`
+		if _, err := h.st.SaveDoc(ctx, "t", fx.payload.Effort, model.DocFRD, []byte(frd)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.st.EditTask(ctx, "t", fx.payload.Effort, model.TaskDef{Key: "T1", Phase: "P1", Title: "first", Prompt: "do it",
+			Acceptance: []string{"R1: the server starts", "AC1: adds work"}}); err != nil {
+			t.Fatal(err)
+		}
+		st, err := h.st.GetStage(ctx, fx.stage.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := h.eng.buildPrompt(ctx, st, fx.payload.Project)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"approved requirements behind these criteria", "R1: Listen on port 7070", "R2: POST /api/add adds", "AC1: POST /api/add returns {result}"} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("%s prompt lacks %q:\n%s", role, want, got)
+			}
+		}
+	}
+}
+
+func TestH1_TaskWithoutRequirementReferencesGetsNoSection(t *testing.T) {
+	h := newHarness(t)
+	h.start()
+	fx := h.attemptStage("b-none", "worker")
+	st, err := h.st.GetStage(context.Background(), fx.stage.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.eng.buildPrompt(context.Background(), st, fx.payload.Project)
+	if err != nil || strings.Contains(got, "approved requirements") {
+		t.Fatalf("err %v, prompt:\n%s", err, got)
+	}
+}

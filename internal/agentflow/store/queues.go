@@ -270,3 +270,13 @@ func (s *Store) ApprovedQueueHash(ctx context.Context, effort int64) (string, er
 	}
 	return q.Hash, nil
 }
+
+// QueueEffort is the effort a queue belongs to.
+func (s *Store) QueueEffort(ctx context.Context, queue int64) (int64, error) {
+	var effort int64
+	err := s.db.QueryRowContext(ctx, `SELECT effort FROM queues WHERE id = ?`, queue).Scan(&effort)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	return effort, err
+}
