@@ -6,6 +6,7 @@ import { ApiError, type FsDirs, type Backend, type Candidate, type ProjectInput,
 
 installFakeDom();
 timing.delay = 10;
+const settle = async (): Promise<void> => { await new Promise((r) => setTimeout(r, 60)); await flush(); };
 
 const view = (slug: string, over: Partial<ProjectView> = {}): ProjectView => ({
   slug, repo_path: '/r/' + slug, model_scope: 'local', feedback_cmds: ['go vet ./...'], limits: {}, created: 0, updated: 0,
@@ -160,9 +161,11 @@ test('edit: the slug is fixed, the save patches, and the role editor shows the g
   const worker = byAttr(t.host, 'data-role-editor', 'worker')[0];
   ok(worker.textContent.includes('Uses the global list: b1/m1'), 'fallback note: ' + worker.textContent);
   await pick(t, '/r/moved');
-  button(t.host, 'Save project').click();
-  await flush();
+  await settle();
   eq(t.bodies.patch, { repo_path: '/r/moved', model_scope: 'local', feedback_cmds: ['go vet ./...'], cleanup_enabled: false, plugins: [] });
+  eq(t.done, []);
+  button(t.host, 'Done').click();
+  await flush();
   eq(t.done, ['p1']);
 });
 
@@ -234,8 +237,9 @@ test('OA3: plugins are sent as pinned name and version rows; a rejected version 
   }, { project: view('p1', { plugins: [{ name: 'notify', version: 'latest' }] }) });
   await t.form.mount();
   eq(allByField(t.host, 'plugin_name')[0].value, 'notify');
-  button(t.host, 'Save project').click();
-  await flush();
+  allByField(t.host, 'plugin_version')[0].value = 'latest-x';
+  allByField(t.host, 'plugin_version')[0].fire('input');
+  await settle();
   ok(errorsOf(t.host).some((m) => m.includes('exact version')), 'the version error is shown');
   eq(t.done, []);
   allByField(t.host, 'plugin_version')[0].value = ' 1.2.3 ';
@@ -244,10 +248,10 @@ test('OA3: plugins are sent as pinned name and version rows; a rejected version 
   allByField(t.host, 'plugin_version')[1].value = '0.4.0';
   button(t.host, 'Add plugin').click(); // a blank row is dropped
   reject = false;
-  button(t.host, 'Save project').click();
-  await flush();
+  allByField(t.host, 'plugin_version')[0].fire('input');
+  await settle();
   eq((t.bodies.patch as ProjectInput).plugins, [{ name: 'notify', version: '1.2.3' }, { name: '@acme/other', version: '0.4.0' }]);
-  eq(t.done, ['p1']);
+  eq(t.done, []);
 });
 
 test('OA3: a project starts with no plugins', async () => {
@@ -330,8 +334,12 @@ test('H2: a start path the server refuses falls back to the first root; a later 
 test('U2: the definition of done is overridden as a list, saved, and reset to detected with null', async () => {
   const untouched = harness({}, { project: view('p1') });
   await untouched.form.mount();
-  button(untouched.host, 'Save project').click();
-  await flush();
+  untouched.host.fire('input');
+  await settle();
+  eq(untouched.bodies.patch, undefined);
+  allByField(untouched.host, 'feedback_cmd')[0].value = 'go test ./...';
+  allByField(untouched.host, 'feedback_cmd')[0].fire('input');
+  await settle();
   ok(!('definition_of_done' in (untouched.bodies.patch as object)), 'untouched detected list is not sent');
 
   const t = harness({}, { project: view('p1') });
@@ -341,16 +349,15 @@ test('U2: the definition of done is overridden as a list, saved, and reset to de
   allByField(t.host, 'dod_item')[0].value = 'make check passes';
   button(t.host, 'Add item').click();
   allByField(t.host, 'dod_item')[1].value = 'docs updated';
-  button(t.host, 'Save project').click();
-  await flush();
+  allByField(t.host, 'dod_item')[1].fire('input');
+  await settle();
   eq((t.bodies.patch as { definition_of_done?: string[] | null }).definition_of_done, ['make check passes', 'docs updated']);
 
   const o = harness({ definitionOfDone: async () => ({ items: ['only this'], source: 'project' }) }, { project: view('p1') });
   await o.form.mount();
   eq(allByField(o.host, 'dod_item')[0].value, 'only this');
   button(o.host, 'Reset to detected').click();
-  button(o.host, 'Save project').click();
-  await flush();
+  await settle();
   eq((o.bodies.patch as { definition_of_done?: string[] | null }).definition_of_done, null);
 });
 

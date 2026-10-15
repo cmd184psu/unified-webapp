@@ -2283,21 +2283,19 @@ var Board = class {
     this.deps.notify("Effort abandoned");
     await this.refresh();
   }
+  /** saveEdit stores an edited task; the queue returns to draft, which the form says up front. The form stays as it is. */
   async saveEdit(def) {
     const ef = this.current;
-    if (!ef) return;
+    if (!ef) return false;
     this.errors.clear();
-    if (!await this.deps.confirm(`Save ${def.key}? The queue returns to draft and must be approved again before anything runs.`, "Save task")) return;
     try {
       await this.deps.editTask(this.slug, ef.id, def.key, def, { quiet: true });
     } catch (err) {
       this.errors.show(err);
-      return;
+      return false;
     }
-    this.editing = false;
-    this.fresh = true;
     this.deps.notify(`Saved ${def.key}; approve the queue again`);
-    await this.refresh();
+    return true;
   }
   editForm(d) {
     this.errors = new FormErrors();
@@ -2309,9 +2307,20 @@ var Board = class {
     const deps = textInput("depends_on", (d.depends_on ?? []).join(", "));
     const split = (s) => s.split("\n").map((l) => l.trim()).filter((l) => l !== "");
     const e = this.errors;
-    return h(
+    const read = () => ({
+      key: d.key,
+      title: title.value.trim(),
+      phase: phase.value.trim(),
+      prompt: prompt.value,
+      acceptance: split(acceptance.value),
+      files_touched: split(files.value),
+      depends_on: deps.value.split(",").map((s) => s.trim()).filter((s) => s !== "")
+    });
+    const auto = autosave({ snapshot: () => JSON.stringify(read()), save: () => this.saveEdit(read()) });
+    const form = h(
       "div",
       { attrs: { "data-role": "edit-task" } },
+      h("p", { class: "field-hint", text: "A saved change returns the queue to draft: approve it again before anything runs." }),
       e.add("title", fieldRow("Title", title)).el,
       e.add("phase", fieldRow("Phase", phase)).el,
       e.add("prompt", fieldRow("Prompt", prompt)).el,
@@ -2322,22 +2331,16 @@ var Board = class {
       h(
         "div",
         { class: "row-actions" },
-        button("Save task", () => void this.saveEdit({
-          key: d.key,
-          title: title.value.trim(),
-          phase: phase.value.trim(),
-          prompt: prompt.value,
-          acceptance: split(acceptance.value),
-          files_touched: split(files.value),
-          depends_on: deps.value.split(",").map((s) => s.trim()).filter((s) => s !== "")
-        }), { primary: true, field: "save-task", icon: "save" }),
-        button("Cancel", () => {
+        auto.status,
+        button("Done", () => void auto.flush().then(() => {
           this.editing = false;
           this.fresh = true;
-          this.render();
-        }, { field: "cancel-edit", icon: "cancel" })
+          return this.refresh();
+        }), { primary: true, field: "close-edit", icon: "approve" })
       )
     );
+    auto.watch(form);
+    return form;
   }
   actions(d) {
     const clean = checkbox("clean_worktree", false);
@@ -3175,6 +3178,9 @@ var FrdEditor = class {
     this.disposed = false;
     this.ticker = null;
     this.clocks = [];
+    this.auto = null;
+    this.revHost = h("div");
+    this.hintEl = null;
   }
   mount() {
     this.off = subscribe((ev) => {
@@ -3233,9 +3239,12 @@ var FrdEditor = class {
       this.parts = parts ?? [];
       this.form = new FrdForm(this.latest?.json ?? blankFRD(this.slug, ef), () => {
         this.dirty = true;
+        this.auto?.touch();
       });
+      this.armAuto();
     } else {
       this.form = null;
+      this.auto?.stop();
     }
     if (!this.latest) this.editing = false;
     this.render();
@@ -3300,19 +3309,36 @@ var FrdEditor = class {
     this.deps.notify("Effort created");
     await this.load();
   }
+  /** armAuto starts watching the form that was just built; a pause after a change stores a new revision. */
+  armAuto(startDirty = false) {
+    this.auto?.stop();
+    this.auto = autosave({ snapshot: () => JSON.stringify(this.form?.read() ?? null), save: () => this.save(), startDirty });
+    if (this.form) this.auto.watch(this.form.el);
+    if (startDirty) this.auto.touch();
+  }
+  /** save stores the form as a new revision and stays in the editor, so typing is not interrupted. */
   async save() {
     const ef = this.current;
-    if (!ef || !this.form) return;
+    if (!ef || !this.form) return false;
     this.form.errors.clear();
     try {
-      await this.deps.putFRD(this.slug, ef.id, this.form.read(), { quiet: true });
+      const saved = await this.deps.putFRD(this.slug, ef.id, this.form.read(), { quiet: true });
+      this.latest = { ...this.latest ?? { created_by: "", created: 0, approved: false }, ...saved };
+      this.revisions = await this.deps.frdRevisions(this.slug, ef.id);
     } catch (err) {
       this.form.errors.show(err);
-      return;
+      return false;
     }
-    this.deps.notify("Saved a new FRD revision");
+    this.dirty = false;
+    replace(this.revHost, this.revisionList());
+    if (this.hintEl) this.hintEl.textContent = `Latest revision ${this.latest?.revision ?? ""}; not approved`;
+    return true;
+  }
+  /** closeEditor saves a pending change, then shows the saved revision for review and approval. */
+  async closeEditor() {
+    await this.auto?.flush();
     this.editing = false;
-    await this.load();
+    await this.loadDoc();
   }
   async approve() {
     const ef = this.current;
@@ -3338,7 +3364,9 @@ var FrdEditor = class {
   loadIntoEditor(doc) {
     this.form = new FrdForm(doc, () => {
       this.dirty = true;
+      this.auto?.touch();
     });
+    this.armAuto(true);
     this.dirty = true;
     this.editing = true;
     this.viewing = null;
@@ -3593,19 +3621,14 @@ var FrdEditor = class {
       h(
         "div",
         { class: "row-actions" },
-        h("span", { class: "field-hint", text: this.latest ? `Latest revision ${this.latest.revision}${approvedRev ? `; revision ${approvedRev} approved` : "; not approved"}` : "Not saved yet" }),
-        this.dirty ? badge("unsaved", "warn") : null
+        this.hintEl = h("span", { class: "field-hint", text: this.latest ? `Latest revision ${this.latest.revision}${approvedRev ? `; revision ${approvedRev} approved` : "; not approved"}` : "Not saved yet" })
       ),
       this.form.el,
       h(
         "div",
         { class: "settings-actions" },
-        button("Close the editor", () => {
-          this.editing = false;
-          void this.loadDoc();
-        }, { field: "close-editor", icon: "cancel" }),
-        button("Save as new revision", () => void this.save(), { primary: !canApprove, field: "save-frd", icon: "save" }),
-        canApprove && this.latest ? button(`Approve revision ${this.latest.revision}`, () => void this.approve(), { primary: true, field: "approve-frd", icon: "approve" }) : null
+        this.auto?.status ?? null,
+        button("Done", () => void this.closeEditor(), { primary: true, field: "close-editor", icon: "approve" })
       )
     ) : null;
     const splitError = this.splitError || (this.draft?.state === "failed" && this.draft.purpose === "split" ? this.draft.error ?? "The split failed" : "");
@@ -3647,7 +3670,7 @@ var FrdEditor = class {
       ...review,
       this.editing ? editor : null,
       ef && !isFinished(ef) ? effortSettings(ef, this.form ? JSON.stringify(this.form.read()) : "", this.deps, () => void this.load()) : null,
-      ef ? this.revisionList() : null,
+      ef ? (replace(this.revHost, this.revisionList()), this.revHost) : null,
       this.efforts.length ? section("Efforts", this.list()) : null
     );
     if (!this.root || this.host.firstChild !== this.root) {
@@ -3884,6 +3907,9 @@ var ProjectForm = class {
     this.dodRows = null;
     this.dodReset = false;
     this.dodHost = h("div", { attrs: { "data-role": "dod-editor" } });
+    /** An existing project saves its edits by itself; creating one is one explicit step. */
+    this.auto = null;
+    this.bump = () => this.auto?.touch();
     const p = mode.project;
     this.slug = textInput("slug", p?.slug ?? "", { readOnly: !!p, placeholder: "my-project" });
     this.repoPath = p?.repo_path ?? "";
@@ -3910,12 +3936,12 @@ var ProjectForm = class {
       input.addEventListener("input", sync);
       sync();
       return { el: h("div", { class: "wizard-field" }, input, preview, warn), read: () => joinArgv(splitArgv(input.value)) };
-    }, p?.feedback_cmds ?? [], () => "", "Add command");
+    }, p?.feedback_cmds ?? [], () => "", "Add command", () => this.bump());
     this.plugins = new RowsEditor((pl) => {
       const name = textInput("plugin_name", pl.name, { placeholder: "package-name" });
       const version = textInput("plugin_version", pl.version, { placeholder: "1.2.3" });
       return { el: h("div", { class: "row-actions" }, name, version), read: () => ({ name: name.value.trim(), version: version.value.trim() }) };
-    }, p?.plugins ?? [], () => ({ name: "", version: "" }), "Add plugin");
+    }, p?.plugins ?? [], () => ({ name: "", version: "" }), "Add plugin", () => this.bump());
   }
   drawRepo() {
     this.repoBtn.textContent = this.repoPath || "Choose a folder...";
@@ -3926,6 +3952,7 @@ var ProjectForm = class {
     if (chosen === null) return;
     this.repoPath = chosen;
     this.drawRepo();
+    this.bump();
   }
   async mount() {
     if (this.mode.project) {
@@ -3980,6 +4007,21 @@ var ProjectForm = class {
     this.deps.notify(this.mode.project ? `Saved ${saved.slug}` : `Created ${saved.slug}`);
     this.done(saved.slug);
   }
+  /** autoSave stores an edit of an existing project: no prompt, no navigation, and the form stays as it is. */
+  async autoSave() {
+    const p = this.mode.project;
+    if (!p) return false;
+    this.errors.clear();
+    const b = this.body();
+    try {
+      await this.deps.patchProject(p.slug, { repo_path: b.repo_path, model_scope: b.model_scope, feedback_cmds: b.feedback_cmds, cleanup_enabled: b.cleanup_enabled, plugins: b.plugins, ...this.dodPatch() }, { quiet: true });
+    } catch (err) {
+      this.errors.show(err);
+      return false;
+    }
+    this.dodReset = false;
+    return true;
+  }
   async remove() {
     const p = this.mode.project;
     if (!p || unregisterBlock(p)) return;
@@ -3992,7 +4034,7 @@ var ProjectForm = class {
     this.dodRows = new RowsEditor((t) => {
       const input = textInput("dod_item", t);
       return { el: input, read: () => input.value.trim() };
-    }, items, () => "", "Add item");
+    }, items, () => "", "Add item", () => this.bump());
     this.dodReset = false;
   }
   /** dodPatch is the patch fields for the list: the override rows, null to go back to detected, nothing when untouched. */
@@ -4008,6 +4050,7 @@ var ProjectForm = class {
         this.dodRows = null;
         this.dodReset = true;
         this.drawDod();
+        this.bump();
       }, { field: "reset-dod", icon: "retry" })) : h(
         "div",
         {},
@@ -4079,52 +4122,54 @@ var ProjectForm = class {
     const e = this.errors;
     this.drawRoles();
     this.drawDod();
-    replace(
-      this.host,
-      h(
-        "div",
-        { class: "settings-host", attrs: { "data-form": p ? "project-edit" : "project-create" } },
-        section(
-          p ? `Edit ${p.slug}` : "New project",
-          h(
-            "div",
-            { class: "profile-fields" },
-            e.add("slug", fieldRow("Slug", this.slug, "Lowercase letters, digits and dashes; fixed once created")).el,
-            e.add("repo_path", fieldRow("Repository", this.repoBtn, "A git repository on this machine; if the folder is not one you are offered git init")).el,
-            e.add("model_scope", fieldRow("Model scope", this.scope, "local keeps this project off hosted backends")).el,
-            e.add("cleanup_enabled", fieldRow(
-              "Cleanup pass",
-              this.cleanup,
-              "After a task passes review, run a cleanup agent and verify again; if that breaks verification the cleanup is rolled back"
-            )).el
-          ),
-          e.add("feedback_cmds", fieldRow(
-            "Feedback commands",
-            this.cmds.el,
-            "Run in the sandbox to verify each task, as a program and arguments, never through a shell. Blank: detected from go.mod, pyproject.toml or package.json"
-          )).el,
-          p ? e.add("definition_of_done", fieldRow("Definition of done", this.dodHost, "Applies to every task; need not be written as acceptance criteria")).el : null,
-          e.add("plugins", fieldRow(
-            "Runner plugins",
-            this.plugins.el,
-            "Opt-in only: none are loaded unless listed here. Each is pinned to an exact version such as 1.2.3 (no latest, no ranges); listed plugins are fetched by the runner when a stage starts"
-          )).el,
-          e.general,
-          h(
-            "div",
-            { class: "settings-actions" },
-            p ? this.unregisterButton(p) : null,
-            button("Cancel", () => this.done(p?.slug ?? ""), { field: "cancel", icon: "cancel" }),
-            button(p ? "Save project" : "Create project", () => void this.save(), { primary: true, field: "save-project", icon: p ? "save" : "add" })
-          )
+    this.auto?.stop();
+    this.auto = p ? autosave({ snapshot: () => JSON.stringify([this.body(), this.dodPatch()]), save: () => this.autoSave() }) : null;
+    const root = h(
+      "div",
+      { class: "settings-host", attrs: { "data-form": p ? "project-edit" : "project-create" } },
+      section(
+        p ? `Edit ${p.slug}` : "New project",
+        h(
+          "div",
+          { class: "profile-fields" },
+          e.add("slug", fieldRow("Slug", this.slug, "Lowercase letters, digits and dashes; fixed once created")).el,
+          e.add("repo_path", fieldRow("Repository", this.repoBtn, "A git repository on this machine; if the folder is not one you are offered git init")).el,
+          e.add("model_scope", fieldRow("Model scope", this.scope, "local keeps this project off hosted backends")).el,
+          e.add("cleanup_enabled", fieldRow(
+            "Cleanup pass",
+            this.cleanup,
+            "After a task passes review, run a cleanup agent and verify again; if that breaks verification the cleanup is rolled back"
+          )).el
         ),
-        p ? section(
-          "Role preferences",
-          h("p", { class: "field-hint", text: "Override the global candidate list for one role in this project; a role without an override uses the global list." }),
-          this.rolesHost
-        ) : h("p", { class: "field-hint", text: "Role preferences can be set once the project exists." })
-      )
+        e.add("feedback_cmds", fieldRow(
+          "Feedback commands",
+          this.cmds.el,
+          "Run in the sandbox to verify each task, as a program and arguments, never through a shell. Blank: detected from go.mod, pyproject.toml or package.json"
+        )).el,
+        p ? e.add("definition_of_done", fieldRow("Definition of done", this.dodHost, "Applies to every task; need not be written as acceptance criteria")).el : null,
+        e.add("plugins", fieldRow(
+          "Runner plugins",
+          this.plugins.el,
+          "Opt-in only: none are loaded unless listed here. Each is pinned to an exact version such as 1.2.3 (no latest, no ranges); listed plugins are fetched by the runner when a stage starts"
+        )).el,
+        e.general,
+        h(
+          "div",
+          { class: "settings-actions" },
+          p ? this.unregisterButton(p) : null,
+          this.auto?.status ?? null,
+          p ? null : button("Cancel", () => this.done(""), { field: "cancel", icon: "cancel" }),
+          p ? button("Done", () => void (this.auto?.flush() ?? Promise.resolve()).then(() => this.done(p.slug)), { primary: true, field: "close", icon: "approve" }) : button("Create project", () => void this.save(), { primary: true, field: "save-project", icon: "approve" })
+        )
+      ),
+      p ? section(
+        "Role preferences",
+        h("p", { class: "field-hint", text: "Override the global candidate list for one role in this project; a role without an override uses the global list." }),
+        this.rolesHost
+      ) : h("p", { class: "field-hint", text: "Role preferences can be set once the project exists." })
     );
+    replace(this.host, root);
+    this.auto?.watch(root);
   }
 };
 function showProjectForm(host, mode, done) {

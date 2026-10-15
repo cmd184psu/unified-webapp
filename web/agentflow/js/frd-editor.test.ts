@@ -150,8 +150,7 @@ test('UI5: saving sends the edited fields as a new revision and keeps the verbat
   button(t.host, 'Add requirement').click();
   allByField(t.host, 'req_description')[1].value = 'two';
   allByField(t.host, 'req_priority')[1].value = 'should';
-  button(t.host, 'Save as new revision').click();
-  await flush();
+  await settle();
   eq(t.sent.length, 1);
   const f = t.sent[0];
   eq(f.title, 'Second');
@@ -172,8 +171,8 @@ test('a 400 shows next to the field it names', async () => {
   await flush();
   openEditor(t.host);
   byField(t.host, 'title').value = '';
-  button(t.host, 'Save as new revision').click();
-  await flush();
+  byField(t.host, 'title').fire('input');
+  await settle();
   const row = byField(t.host, 'title').parentNode as FakeEl;
   eq(findAll(row, (e) => e.className === 'field-error')[0].textContent, 'title is required');
   eq(w.docs.get(1)?.length, 1);
@@ -190,8 +189,8 @@ test('AC-DBS3 (UI): the approved revision stays viewable after an edit', async (
   ok(t.host.textContent.includes('revision 1 approved'), 'approved shown');
   eq(findAll(t.host, (e) => e.getAttribute('aria-label') === 'Approve revision 1').length, 0);
   byField(t.host, 'objective').value = 'Do it better';
-  button(t.host, 'Save as new revision').click();
-  await flush();
+  byField(t.host, 'objective').fire('input');
+  await settle();
   const rev1 = byAttr(t.host, 'data-revision', '1')[0];
   ok(rev1.textContent.includes('approved'), 'revision 1 still marked approved');
   const rev2 = byAttr(t.host, 'data-revision', '2')[0];
@@ -270,14 +269,13 @@ test('H3: the current effort comes before the efforts list and its next action i
   openEditor(t.host);
   const order = findAll(t.host, (e) => e.getAttribute('data-role') === 'frd-form' || e.getAttribute('data-role') === 'frd-list');
   eq(order.map((e) => e.getAttribute('data-role')), ['frd-form', 'frd-list']);
-  ok(button(t.host, 'Approve revision 1').className.includes('primary'), 'a saved, unapproved revision: approve is primary');
-  ok(!button(t.host, 'Save as new revision').className.includes('primary'), 'save is secondary then');
+  ok(button(t.host, 'Done').className.includes('primary'), 'the editor offers one button: Done');
   w.approved.set(1, 1);
   const done = harness(w);
   const stop2 = done.ed.mount();
   await flush();
   openEditor(done.host);
-  ok(button(done.host, 'Save as new revision').className.includes('primary'), 'nothing to approve: save is primary');
+  ok(button(done.host, 'Done').className.includes('primary'), 'Done is primary');
   stop2();
   stop();
 });
@@ -321,6 +319,7 @@ test('RP5: an FRD without such topics shows no suggestion; the keyword match is 
 });
 
 timing.delay = 10;
+const settle = async (): Promise<void> => { await new Promise((r) => setTimeout(r, 60)); await flush(); };
 
 test('AT12: the effort settings send the token budget and the time budget in seconds', async () => {
   const t = harness(world());
@@ -362,7 +361,7 @@ test('U1: an FRD opens as a read-only review card with Approve and Edit, and no 
   button(t.host, 'Edit').click();
   eq(byAttr(t.host, 'data-role', 'frd-form').length, 1);
   eq(allByField(t.host, 'req_id').length + allByField(t.host, 'ac_id').length + allByField(t.host, 'ac_requirements').length, 0);
-  button(t.host, 'Close the editor').click();
+  button(t.host, 'Done').click();
   await flush();
   eq(byAttr(t.host, 'data-role', 'frd-form').length, 0);
   stop();
@@ -560,8 +559,7 @@ test('U3 (review): deleting a requirement prunes the links to it so the save car
   await flush();
   openEditor(t.host);
   button((allByField(t.host, 'req_description')[1].parentNode as FakeEl).parentNode as FakeEl, 'Remove').click();
-  button(t.host, 'Save as new revision').click();
-  await flush();
+  await settle();
   eq(t.sent[0].requirements.map((r) => r.id), ['R1']);
   eq(t.sent[0].acceptance_criteria.map((a) => a.requirements), [['R1'], undefined]);
   stop();

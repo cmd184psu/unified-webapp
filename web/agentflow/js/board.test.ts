@@ -1,3 +1,4 @@
+import { timing } from './autosave';
 import { test, run, eq, ok, installFakeDom, FakeEl, asEl, byField, byAttr, button, flush, findAll } from './testkit';
 import { Board, counts, renderVerify, renderReviewOut, type BoardDeps } from './board';
 import { StreamPanel, MAX_LINES, type SourceLike, type StreamDeps } from './stream';
@@ -13,6 +14,7 @@ declare const require: (id: string) => { readFileSync(path: string, enc: string)
 const { readFileSync } = require('fs');
 
 installFakeDom();
+timing.delay = 10;
 pollSettings.ms = 20;
 
 const effort = (over: Partial<EffortView> = {}): EffortView => ({
@@ -206,7 +208,7 @@ test('AT9: a halted task offers retry, edit, override and abandon, each behind a
   stop();
 });
 
-test('AT9: edit task saves the full definition after a confirmation and says the queue is back in draft', async () => {
+test('AT9: edit task saves the full definition by itself and says the queue goes back to draft', async () => {
   const t = harness(mixed());
   const stop = t.board.mount();
   await flush();
@@ -216,9 +218,11 @@ test('AT9: edit task saves the full definition after a confirmation and says the
   byField(t.host, 'prompt').value = 'new prompt';
   byField(t.host, 'acceptance').value = 'a\n\nb';
   byField(t.host, 'depends_on').value = 'T001, T002';
-  button(t.host, 'Save task').click();
+  byField(t.host, 'depends_on').fire('input');
+  await new Promise((r) => setTimeout(r, 60));
   await flush();
-  ok(t.log.some((l) => l.startsWith('confirm:Save T004') && l.includes('returns to draft')), 'confirm text');
+  ok(t.host.textContent.includes('returns the queue to draft'), 'said up front');
+  ok(t.log.some((l) => l.startsWith('notify:Saved T004') && l.includes('approve the queue again')), 'toast');
   eq(t.log.filter((l) => l.startsWith('edit:')), ['edit:T004:new prompt']);
   stop();
 });
@@ -230,7 +234,9 @@ test('a field error from an edit shows beside the field', async () => {
   byAttr(t.host, 'data-task', 'T004')[0].click();
   await flush();
   button(byAttr(t.host, 'data-role', 'detail-pane')[0], 'Edit task').click();
-  button(t.host, 'Save task').click();
+  byField(t.host, 'prompt').value = '';
+  byField(t.host, 'prompt').fire('input');
+  await new Promise((r) => setTimeout(r, 60));
   await flush();
   const row = byField(t.host, 'prompt').parentNode as FakeEl;
   eq(findAll(row, (e) => e.className === 'field-error')[0].textContent, 'prompt must not be empty');

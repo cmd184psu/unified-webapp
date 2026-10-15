@@ -7,6 +7,7 @@
 // server and never typed. Every title, requirement and server message is
 // placed with h(), so it is text.
 
+import { autosave, type Autosave } from './autosave.js';
 import { alertDialog, showToast } from '@shared';
 import { api, ApiError, type DefinitionOfDone, type DocView, type DraftState, type EffortView, type FRD, type FRDAC, type FRDDecision, type FRDGroup, type FrdPart, type FRDRequirement, type SizeView } from './api.js';
 import { chooseEffort, effortBar, isFinished, rememberEffort } from './current.js';
@@ -252,9 +253,11 @@ export class FrdEditor {
       this.dod = dod;
       this.size = size;
       this.parts = parts ?? [];
-      this.form = new FrdForm(this.latest?.json ?? blankFRD(this.slug, ef), () => { this.dirty = true; });
+      this.form = new FrdForm(this.latest?.json ?? blankFRD(this.slug, ef), () => { this.dirty = true; this.auto?.touch(); });
+      this.armAuto();
     } else {
       this.form = null;
+      this.auto?.stop();
     }
     if (!this.latest) this.editing = false;
     this.render();
@@ -324,19 +327,42 @@ export class FrdEditor {
     await this.load();
   }
 
-  async save(): Promise<void> {
+  private auto: Autosave | null = null;
+  private revHost = h('div');
+  private hintEl: HTMLElement | null = null;
+
+  /** armAuto starts watching the form that was just built; a pause after a change stores a new revision. */
+  private armAuto(startDirty = false): void {
+    this.auto?.stop();
+    this.auto = autosave({ snapshot: () => JSON.stringify(this.form?.read() ?? null), save: () => this.save(), startDirty });
+    if (this.form) this.auto.watch(this.form.el);
+    if (startDirty) this.auto.touch();
+  }
+
+  /** save stores the form as a new revision and stays in the editor, so typing is not interrupted. */
+  async save(): Promise<boolean> {
     const ef = this.current;
-    if (!ef || !this.form) return;
+    if (!ef || !this.form) return false;
     this.form.errors.clear();
     try {
-      await this.deps.putFRD(this.slug, ef.id, this.form.read(), { quiet: true });
+      const saved = await this.deps.putFRD(this.slug, ef.id, this.form.read(), { quiet: true });
+      this.latest = { ...(this.latest ?? { created_by: '', created: 0, approved: false }), ...saved };
+      this.revisions = await this.deps.frdRevisions(this.slug, ef.id);
     } catch (err) {
       this.form.errors.show(err);
-      return;
+      return false;
     }
-    this.deps.notify('Saved a new FRD revision');
+    this.dirty = false;
+    replace(this.revHost, this.revisionList());
+    if (this.hintEl) this.hintEl.textContent = `Latest revision ${this.latest?.revision ?? ''}; not approved`;
+    return true;
+  }
+
+  /** closeEditor saves a pending change, then shows the saved revision for review and approval. */
+  private async closeEditor(): Promise<void> {
+    await this.auto?.flush();
     this.editing = false;
-    await this.load();
+    await this.loadDoc();
   }
 
   async approve(): Promise<void> {
@@ -363,7 +389,8 @@ export class FrdEditor {
   }
 
   private loadIntoEditor(doc: FRD): void {
-    this.form = new FrdForm(doc, () => { this.dirty = true; });
+    this.form = new FrdForm(doc, () => { this.dirty = true; this.auto?.touch(); });
+    this.armAuto(true);
     this.dirty = true;
     this.editing = true;
     this.viewing = null;
@@ -570,13 +597,11 @@ export class FrdEditor {
     const canApprove = !!ef && !!this.latest && this.latest.revision !== approvedRev && !this.dirty && !isFinished(ef);
     const editor = ef && this.form ? section(`FRD for #${ef.id}`,
       h('div', { class: 'row-actions' },
-        h('span', { class: 'field-hint', text: this.latest ? `Latest revision ${this.latest.revision}${approvedRev ? `; revision ${approvedRev} approved` : '; not approved'}` : 'Not saved yet' }),
-        this.dirty ? badge('unsaved', 'warn') : null),
+        this.hintEl = h('span', { class: 'field-hint', text: this.latest ? `Latest revision ${this.latest.revision}${approvedRev ? `; revision ${approvedRev} approved` : '; not approved'}` : 'Not saved yet' })),
       this.form.el,
       h('div', { class: 'settings-actions' },
-        button('Close the editor', () => { this.editing = false; void this.loadDoc(); }, { field: 'close-editor', icon: 'cancel' }),
-        button('Save as new revision', () => void this.save(), { primary: !canApprove, field: 'save-frd', icon: 'save' }),
-        canApprove && this.latest ? button(`Approve revision ${this.latest.revision}`, () => void this.approve(), { primary: true, field: 'approve-frd', icon: 'approve' }) : null)) : null;
+        this.auto?.status ?? null,
+        button('Done', () => void this.closeEditor(), { primary: true, field: 'close-editor', icon: 'approve' }))) : null;
     const splitError = this.splitError || (this.draft?.state === 'failed' && this.draft.purpose === 'split' ? this.draft.error ?? 'The split failed' : '');
     const review = ef && !this.editing && this.latest?.json ? [
       this.reviewCard(this.latest.json, approvedRev, canApprove),
@@ -608,7 +633,7 @@ export class FrdEditor {
       ...review,
       this.editing ? editor : null,
       ef && !isFinished(ef) ? effortSettings(ef, this.form ? JSON.stringify(this.form.read()) : '', this.deps, () => void this.load()) : null,
-      ef ? this.revisionList() : null,
+      ef ? (replace(this.revHost, this.revisionList()), this.revHost) : null,
       this.efforts.length ? section('Efforts', this.list()) : null);
     if (!this.root || this.host.firstChild !== this.root) {
       this.root = h('div', { class: 'settings-host' }, this.top, this.slot, this.bottom);

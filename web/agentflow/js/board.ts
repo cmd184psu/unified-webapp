@@ -7,6 +7,7 @@
 // complete, the git commands for the human to run. Everything from the server
 // or the models is placed with h(), so it is text.
 
+import { autosave } from './autosave.js';
 import { confirmDialog, copyText, showToast } from '@shared';
 import { api, ApiError, type Attempt, type EffortView, type GitCommands, type Stage, type TaskDef, type TaskDetail, type TaskView } from './api.js';
 import { chooseEffort, effortBar } from './current.js';
@@ -265,21 +266,19 @@ export class Board {
     await this.refresh();
   }
 
-  private async saveEdit(def: TaskDef): Promise<void> {
+  /** saveEdit stores an edited task; the queue returns to draft, which the form says up front. The form stays as it is. */
+  private async saveEdit(def: TaskDef): Promise<boolean> {
     const ef = this.current;
-    if (!ef) return;
+    if (!ef) return false;
     this.errors.clear();
-    if (!(await this.deps.confirm(`Save ${def.key}? The queue returns to draft and must be approved again before anything runs.`, 'Save task'))) return;
     try {
       await this.deps.editTask(this.slug, ef.id, def.key, def, { quiet: true });
     } catch (err) {
       this.errors.show(err);
-      return;
+      return false;
     }
-    this.editing = false;
-    this.fresh = true;
     this.deps.notify(`Saved ${def.key}; approve the queue again`);
-    await this.refresh();
+    return true;
   }
 
   private editForm(d: TaskDetail): HTMLElement {
@@ -292,7 +291,14 @@ export class Board {
     const deps = textInput('depends_on', (d.depends_on ?? []).join(', '));
     const split = (s: string): string[] => s.split('\n').map((l) => l.trim()).filter((l) => l !== '');
     const e = this.errors;
-    return h('div', { attrs: { 'data-role': 'edit-task' } },
+    const read = (): TaskDef => ({
+      key: d.key, title: title.value.trim(), phase: phase.value.trim(), prompt: prompt.value,
+      acceptance: split(acceptance.value), files_touched: split(files.value),
+      depends_on: deps.value.split(',').map((s) => s.trim()).filter((s) => s !== ''),
+    });
+    const auto = autosave({ snapshot: () => JSON.stringify(read()), save: () => this.saveEdit(read()) });
+    const form = h('div', { attrs: { 'data-role': 'edit-task' } },
+      h('p', { class: 'field-hint', text: 'A saved change returns the queue to draft: approve it again before anything runs.' }),
       e.add('title', fieldRow('Title', title)).el,
       e.add('phase', fieldRow('Phase', phase)).el,
       e.add('prompt', fieldRow('Prompt', prompt)).el,
@@ -301,12 +307,10 @@ export class Board {
       e.add('depends_on', fieldRow('Depends on', deps, 'Task keys, comma separated')).el,
       e.general,
       h('div', { class: 'row-actions' },
-        button('Save task', () => void this.saveEdit({
-          key: d.key, title: title.value.trim(), phase: phase.value.trim(), prompt: prompt.value,
-          acceptance: split(acceptance.value), files_touched: split(files.value),
-          depends_on: deps.value.split(',').map((s) => s.trim()).filter((s) => s !== ''),
-        }), { primary: true, field: 'save-task', icon: 'save' }),
-        button('Cancel', () => { this.editing = false; this.fresh = true; this.render(); }, { field: 'cancel-edit', icon: 'cancel' })));
+        auto.status,
+        button('Done', () => void auto.flush().then(() => { this.editing = false; this.fresh = true; return this.refresh(); }), { primary: true, field: 'close-edit', icon: 'approve' })));
+    auto.watch(form);
+    return form;
   }
 
   private actions(d: TaskDetail): HTMLElement {

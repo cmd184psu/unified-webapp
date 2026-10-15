@@ -5,6 +5,7 @@
 // shell, so the editor shows the argv and warns when a shell operator would
 // only be passed as a plain argument.
 
+import { autosave, type Autosave } from './autosave.js';
 import { confirmDialog, showToast } from '@shared';
 import { defaultUnregisterDeps, unregister, unregisterBlock, type UnregisterDeps } from './unregister.js';
 import { api, ApiError, type Backend, type Candidate, type PluginPin, type ProjectInput, type ProjectView } from './api.js';
@@ -86,6 +87,9 @@ export class ProjectForm {
   private dodRows: RowsEditor<string> | null = null;
   private dodReset = false;
   private dodHost = h('div', { attrs: { 'data-role': 'dod-editor' } });
+  /** An existing project saves its edits by itself; creating one is one explicit step. */
+  private auto: Autosave | null = null;
+  private bump = (): void => this.auto?.touch();
 
   constructor(private host: HTMLElement, private deps: ProjectDeps, private mode: ProjectMode, private done: (slug: string) => void) {
     const p = mode.project;
@@ -114,12 +118,12 @@ export class ProjectForm {
       input.addEventListener('input', sync);
       sync();
       return { el: h('div', { class: 'wizard-field' }, input, preview, warn), read: () => joinArgv(splitArgv(input.value)) };
-    }, p?.feedback_cmds ?? [], () => '', 'Add command');
+    }, p?.feedback_cmds ?? [], () => '', 'Add command', () => this.bump());
     this.plugins = new RowsEditor<PluginPin>((pl) => {
       const name = textInput('plugin_name', pl.name, { placeholder: 'package-name' });
       const version = textInput('plugin_version', pl.version, { placeholder: '1.2.3' });
       return { el: h('div', { class: 'row-actions' }, name, version), read: () => ({ name: name.value.trim(), version: version.value.trim() }) };
-    }, p?.plugins ?? [], () => ({ name: '', version: '' }), 'Add plugin');
+    }, p?.plugins ?? [], () => ({ name: '', version: '' }), 'Add plugin', () => this.bump());
   }
 
   private drawRepo(): void {
@@ -132,6 +136,7 @@ export class ProjectForm {
     if (chosen === null) return;
     this.repoPath = chosen;
     this.drawRepo();
+    this.bump();
   }
 
   async mount(): Promise<void> {
@@ -194,6 +199,22 @@ export class ProjectForm {
     this.done(saved.slug);
   }
 
+  /** autoSave stores an edit of an existing project: no prompt, no navigation, and the form stays as it is. */
+  private async autoSave(): Promise<boolean> {
+    const p = this.mode.project;
+    if (!p) return false;
+    this.errors.clear();
+    const b = this.body();
+    try {
+      await this.deps.patchProject(p.slug, { repo_path: b.repo_path, model_scope: b.model_scope, feedback_cmds: b.feedback_cmds, cleanup_enabled: b.cleanup_enabled, plugins: b.plugins, ...this.dodPatch() }, { quiet: true });
+    } catch (err) {
+      this.errors.show(err);
+      return false;
+    }
+    this.dodReset = false;
+    return true;
+  }
+
   private async remove(): Promise<void> {
     const p = this.mode.project;
     if (!p || unregisterBlock(p)) return;
@@ -207,7 +228,7 @@ export class ProjectForm {
     this.dodRows = new RowsEditor<string>((t) => {
       const input = textInput('dod_item', t);
       return { el: input, read: () => input.value.trim() };
-    }, items, () => '', 'Add item');
+    }, items, () => '', 'Add item', () => this.bump());
     this.dodReset = false;
   }
 
@@ -221,7 +242,7 @@ export class ProjectForm {
     if (!this.mode.project) return;
     replace(this.dodHost,
       this.dodRows
-        ? h('div', {}, this.dodRows.el, button('Reset to detected', () => { this.dodRows = null; this.dodReset = true; this.drawDod(); }, { field: 'reset-dod', icon: 'retry' }))
+        ? h('div', {}, this.dodRows.el, button('Reset to detected', () => { this.dodRows = null; this.dodReset = true; this.drawDod(); this.bump(); }, { field: 'reset-dod', icon: 'retry' }))
         : h('div', {},
           h('ul', { class: 'field-hint' }, ...this.dodDetected.map((t) => h('li', { text: t }))),
           button('Override for this project', () => { this.startDod(this.dodDetected); this.drawDod(); }, { field: 'override-dod', icon: 'edit' })));
@@ -291,8 +312,9 @@ export class ProjectForm {
     const e = this.errors;
     this.drawRoles();
     this.drawDod();
-    replace(this.host,
-      h('div', { class: 'settings-host', attrs: { 'data-form': p ? 'project-edit' : 'project-create' } },
+    this.auto?.stop();
+    this.auto = p ? autosave({ snapshot: () => JSON.stringify([this.body(), this.dodPatch()]), save: () => this.autoSave() }) : null;
+    const root = h('div', { class: 'settings-host', attrs: { 'data-form': p ? 'project-edit' : 'project-create' } },
         section(p ? `Edit ${p.slug}` : 'New project',
           h('div', { class: 'profile-fields' },
             e.add('slug', fieldRow('Slug', this.slug, 'Lowercase letters, digits and dashes; fixed once created')).el,
@@ -308,11 +330,16 @@ export class ProjectForm {
           e.general,
           h('div', { class: 'settings-actions' },
             p ? this.unregisterButton(p) : null,
-            button('Cancel', () => this.done(p?.slug ?? ''), { field: 'cancel', icon: 'cancel' }),
-            button(p ? 'Save project' : 'Create project', () => void this.save(), { primary: true, field: 'save-project', icon: p ? 'save' : 'add' }))),
+            this.auto?.status ?? null,
+            p ? null : button('Cancel', () => this.done(''), { field: 'cancel', icon: 'cancel' }),
+            p
+              ? button('Done', () => void (this.auto?.flush() ?? Promise.resolve()).then(() => this.done(p.slug)), { primary: true, field: 'close', icon: 'approve' })
+              : button('Create project', () => void this.save(), { primary: true, field: 'save-project', icon: 'approve' }))),
         p ? section('Role preferences',
           h('p', { class: 'field-hint', text: 'Override the global candidate list for one role in this project; a role without an override uses the global list.' }),
-          this.rolesHost) : h('p', { class: 'field-hint', text: 'Role preferences can be set once the project exists.' })));
+          this.rolesHost) : h('p', { class: 'field-hint', text: 'Role preferences can be set once the project exists.' }));
+    replace(this.host, root);
+    this.auto?.watch(root);
   }
 }
 

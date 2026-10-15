@@ -501,4 +501,8 @@ when the FRD text mentions things like auth, migration or PII.
 
 ## Auto-save
 
-Cards that edit something that already exists save themselves: an edited backend, a role's candidate order, the settings drawer, an effort's settings and a project's limits. There is no Save button. After five seconds without a change the card compares its fields with what was last saved and saves only if they differ; a refused save (the field it names is marked) is not retried until something changes again. A small mark shows the state: `…` pending, `↻` saving, `✓` saved, `⚠` not saved. Closing a card (Done) or leaving a project's limits saves a pending change first. Creating things (Add backend, Create project, Create effort) and anything that makes a new version (the FRD, a queue task) stay explicit, one ✓ button each.
+Editing something that already exists never needs a Save button: a backend, a role's candidate order, the settings drawer, an effort's settings, a project (including its definition of done and plugins), a project's limits, the FRD and a halted task. After five seconds without a change the card compares its fields with what was last saved and saves only if they differ. A refused save marks the field it names and is not retried until something changes again. A small mark shows the state: `…` pending, `↻` saving, `✓` saved, `⚠` not saved. **Done** (✓) saves anything pending and closes the card.
+
+Two things behave differently because of what a save means. Each FRD save stores a new revision (so a long editing session leaves several), and Done then shows the saved revision for approval. Editing a halted task returns the queue to draft; the form says so, and the queue must be approved again. A repository that is not a git repository is reported as an error on a project edit instead of offering git init.
+
+Creating something (Add backend, Create project, Create effort) stays one explicit ✓, because saving on a pause would create half-typed entities.
