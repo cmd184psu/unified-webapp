@@ -47,7 +47,9 @@ The engine's gates (build, vet, tests, reviewer) all passed on the broken build.
 - windows, `http://windows.cmdhome.net:11434` (192.168.1.90), large system RAM plus an AMD eGPU: qwen3-coder:30b, gpt-oss:20b, mistral-small3.2, qwen3:8b, llama3.2:3b. Width 1 until throughput is measured; a model that spills out of the eGPU's memory into system RAM will be slow, so rate it by measurement, not size.
 - Suggested starting tiers (owner to confirm): tier 1 qwen3.6 on the m5 and the other 24B+ instruct models; tier 2 qwen3-coder:30b, gpt-oss:20b, mistral-small3.2; tier 3 qwen2.5-coder:14b, qwen3:8b, llama3.2:3b.
 
-**H4b Kimi k3 through WASTE (experiment).** On builder, `~/wastegate.py` (running, port 8011, `--model-id kimi-k3`) is a keepalive proxy in front of WASTE's OpenAI-compatible server on 8010. WASTE streams a 2.78T-parameter MoE off NVMe at a fraction of a token per second, and the proxy serialises requests, so there is exactly one job at a time. The proxy requires a bearer key (I did not look for it); add the backend as `openai_compatible`, `http://127.0.0.1:8011`, with the key in an `AGENTFLOW_KEY_*` variable, width 1, hosted off (it is local), tier 1.
+**H4a Backend keys in the UI.** (owner, 2026-10-15) Today a key exists only as an `AGENTFLOW_KEY_<BACKEND>` environment variable read once at boot, which means a service restart and a hand-edited unit file. Add a key field to the backend form. The key is write-only: stored in a `0600` file under `data_dir` (not in the repositories, not in the database dumps), never returned by any API (the backend shows only "key set"), never logged, and forwarded to the sandbox per stage from the store, so a new key works on the next stage with no restart. The env variable keeps working and wins if both exist. Tests: write, replace, clear, never echoed, reaches the runner env, file mode. Owner OK'd that I read `GATE_API_KEY` from `/etc/waste/serve.env` (group-readable by the service user) and enter it through this mechanism, without printing it.
+
+**H4b Kimi k3 through WASTE (experiment).** On builder, `~/wastegate.py` (running, port 8011, `--model-id kimi-k3`) is a keepalive proxy in front of WASTE's OpenAI-compatible server on 8010. WASTE streams a 2.78T-parameter MoE off NVMe at a fraction of a token per second, and the proxy serialises requests, so there is exactly one job at a time. The proxy requires a bearer key (I did not look for it); add the backend as `openai_compatible`, `http://127.0.0.1:8011`, with the key set through H4a, width 1, hosted off (it is local), tier 1.
 - Honest expectation: at under one token per second a worker or compiler stage that writes a few thousand tokens would take hours, so it cannot be in the worker lane. The useful experiment is a single short, high-value stage: reviewer (a verdict is a few hundred tokens) or critic, on a small effort, with a long per-stage timeout set for that candidate only.
 - Needs: a per-candidate stage timeout (today one project-wide limit) so a slow model is not killed or cause a retry storm; the job API of wastegate (asks longer than a socket survives) is a possible later adapter if SSE keepalive alone is not enough.
 - The experiment: run the webcalc plan with Kimi as the only reviewer over the free-model workers, then compare in the Stats tab.
@@ -56,7 +58,7 @@ The engine's gates (build, vet, tests, reviewer) all passed on the broken build.
 
 ## Order
 
-H1 first (it is the actual defect), then H2, H3, H3b (Stats), H4 (adds hardware once tiers exist), H4b (Kimi), H5 last. Each story: tests first, `make gates`, one commit.
+H1 first (it is the actual defect), then H2, H3, H3b (Stats), H4 (adds hardware once tiers exist), H4a (keys), H4b (Kimi), H5 last. Each story: tests first, `make gates`, one commit.
 
 ## Not in this phase
 
