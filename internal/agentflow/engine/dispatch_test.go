@@ -537,3 +537,62 @@ func TestH2_ReviewerPrefersAnotherFamily(t *testing.T) {
 		t.Fatalf("the worker's own model was picked: %q (%q)", m, why)
 	}
 }
+
+// tiered adds a backend whose models carry the given tiers (model -> tier).
+func (h *harness) tiered(name string, slots int, tiers map[string]int) {
+	h.t.Helper()
+	b := store.Backend{Name: name, Host: "http://127.0.0.1:11434", APIType: "ollama", Slots: slots}
+	for m, tier := range tiers {
+		b.Models = append(b.Models, store.BackendModel{Model: m, Tier: tier})
+	}
+	if err := h.eng.AddBackend(context.Background(), "t", b); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+// H3: a model rated light (tier 3) is skipped for planning roles with the
+// reason stated, but still serves as a worker; unrated models are unaffected.
+func TestH3_LightModelsAreSkippedForPlanningRoles(t *testing.T) {
+	ctx := context.Background()
+	h := newDispHarness(t)
+	h.tiered("gpu", 5, map[string]int{"big": 1, "small": 3, "plain": 0})
+	for _, role := range []string{"planner", "architect", "critic", "compiler"} {
+		h.candidates("global", "", role, "gpu/small")
+		_, _, why, err := h.eng.pickEffortStage(ctx, store.Project{Slug: "x", ModelScope: "any"}, role, nil, "")
+		if err != nil || !strings.Contains(why, "tier 3") {
+			t.Fatalf("%s: err %v, reason %q, want the light model skipped", role, err, why)
+		}
+		h.candidates("global", "", role, "gpu/small", "gpu/plain")
+		pk, _, why, err := h.eng.pickEffortStage(ctx, store.Project{Slug: "x", ModelScope: "any"}, role, nil, "")
+		if err != nil || why != "" || pk.Model != "plain" {
+			t.Fatalf("%s: picked %+v (%q, %v), want the unrated model", role, pk, why, err)
+		}
+	}
+	h.candidates("global", "", "worker", "gpu/small")
+	h.candidates("global", "", "reviewer", "gpu/big")
+	f := h.dispProject("alpha", "any", indep(1))
+	h.startRun("alpha")
+	h.pass()
+	if open := h.openStages(); len(open) != 1 || open[0].Model != "small" {
+		t.Fatalf("a light model must still work as a worker: %+v (%v)", open, f)
+	}
+}
+
+// H3: a reviewer may not be weaker than the worker whose work it judges.
+func TestH3_ReviewerIsNotWeakerThanTheWorker(t *testing.T) {
+	ctx := context.Background()
+	h := newDispHarness(t)
+	h.tiered("gpu", 5, map[string]int{"strong": 1, "mid": 2, "weak": 3, "unrated": 0})
+	h.candidates("global", "", "worker", "gpu/strong")
+	h.candidates("global", "", "reviewer", "gpu/weak", "gpu/unrated", "gpu/mid")
+	f := h.dispProject("alpha", "any", indep(1))
+	tk, _ := h.st.GetTask(ctx, f.tasks[0].ID)
+	pk, why, err := h.eng.pickBackend(ctx, "reviewer", tk, store.Project{Slug: "alpha", ModelScope: "any"}, "strong")
+	if err != nil || pk.Model != "" || !strings.Contains(why, "weaker than the worker") {
+		t.Fatalf("a strong worker got reviewer %+v (%q, %v)", pk, why, err)
+	}
+	pk, why, err = h.eng.pickBackend(ctx, "reviewer", tk, store.Project{Slug: "alpha", ModelScope: "any"}, "weak")
+	if err != nil || why != "" || pk.Model != "unrated" {
+		t.Fatalf("a weak worker got reviewer %+v (%q, %v), want the first reviewer that is not weaker", pk, why, err)
+	}
+}

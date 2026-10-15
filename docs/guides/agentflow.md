@@ -136,7 +136,7 @@ at once (`slots`) and which models it offers.
 | `hosted` | `true` for a remote service. Hosted backends are never used under model scope `local`. |
 | `paid` | `true` if the backend bills per use. |
 | `slots` | Concurrent stages, at least 1. |
-| `models` | List of `{model, paid, max_concurrent, context_tokens}`. `max_concurrent` is a per-model cap below the slots (0 = no extra cap). `context_tokens` is the model's context window (0 = unknown); it feeds the [size check](#size-and-splitting-a-large-frd). |
+| `models` | List of `{model, paid, max_concurrent, context_tokens, tier}`. `tier` rates the model: 1 strong, 2 capable, 3 light, 0 not rated (counts as 2). A light model is never picked for the planner, architect, critic or compiler role (the skip reason says so), and a reviewer is never weaker than the worker whose work it checks. A reviewer from another model family than the worker is preferred, then another model of the same family; an attempt reviewed within the worker's family is flagged in the task view. `max_concurrent` is a per-model cap below the slots (0 = no extra cap). `context_tokens` is the model's context window (0 = unknown); it feeds the [size check](#size-and-splitting-a-large-frd). |
 
 Create and manage them in the **Backends** tab or with `POST /api/backends`,
 `POST /api/backends/probe` (lists the models a host serves, so the form can offer them; for an

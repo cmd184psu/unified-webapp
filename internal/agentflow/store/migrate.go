@@ -39,7 +39,14 @@ var migrations = []migration{
 	{9, migration9SQL},
 	{10, migration10SQL},
 	{11, migration11SQL},
+	{12, migration12SQL},
 }
+
+// migration12SQL (H3) rates a model: 1 strong, 2 capable, 3 light, 0 not rated
+// yet (treated as 2 where a tier matters).
+const migration12SQL = `
+ALTER TABLE backend_models ADD COLUMN tier INTEGER NOT NULL DEFAULT 0 CHECK (tier BETWEEN 0 AND 3);
+`
 
 // migration11SQL lets a backend be opencode's built-in provider (no host, no
 // key). backends is rebuilt with the wider api_type CHECK; the rows copy as

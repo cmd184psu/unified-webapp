@@ -98,7 +98,7 @@ test('U4: probing prefills the context field, it is sent as context_tokens, and 
   eq(field(t.host, 'context_tokens').value, '32768');
   button(t.host, 'Add backend').click();
   await flush();
-  eq((t.bodies.create as BackendInput).models, [{ model: 'm-a', paid: false, max_concurrent: 0, context_tokens: 32768 }]);
+  eq((t.bodies.create as BackendInput).models, [{ model: 'm-a', paid: false, max_concurrent: 0, context_tokens: 32768, tier: 0 }]);
   stop();
   const card = harness({ backends: [be('b1', { models: [{ model: 'm1', paid: false, max_concurrent: 0, context_tokens: 32768 }] })] });
   const stop2 = card.view.mount();
@@ -134,7 +134,7 @@ test('BK1: adding a backend sends the form; a 400 shows next to the field it nam
   fail = false;
   button(t.host, 'Add backend').click();
   await flush();
-  eq(t.bodies.create, { name: 'local1', host: 'http://127.0.0.1:11434', api_type: 'ollama', hosted: false, paid: false, slots: 3, models: [{ model: 'qwen', paid: false, max_concurrent: 1, context_tokens: 0 }] });
+  eq(t.bodies.create, { name: 'local1', host: 'http://127.0.0.1:11434', api_type: 'ollama', hosted: false, paid: false, slots: 3, models: [{ model: 'qwen', paid: false, max_concurrent: 1, context_tokens: 0, tier: 0 }] });
   ok(t.log.includes('notify:Added local1'), 'toast');
   stop();
 });
@@ -480,4 +480,25 @@ test('OB1: the opencode built-in type hides host and key, probes without a host,
   const body = t.bodies.create as BackendInput;
   eq([body.host, body.api_type, body.api_key], ['', 'opencode', undefined]);
   stop();
+});
+
+test('H3: a model row has a tier control; the choice is sent and the card shows the tier', async () => {
+  const t = harness({});
+  const stop = t.view.mount();
+  await flush();
+  button(t.host, 'Add backend').click();
+  field(t.host, 'name').value = 'tier1';
+  field(t.host, 'host').value = 'http://127.0.0.1:11434';
+  field(t.host, 'model').value = 'qwen';
+  eq(field(t.host, 'tier').value, '0');
+  field(t.host, 'tier').value = '3';
+  button(t.host, 'Add backend').click();
+  await flush();
+  eq((t.bodies.create as BackendInput).models, [{ model: 'qwen', paid: false, max_concurrent: 0, context_tokens: 0, tier: 3 }]);
+  stop();
+  const card = harness({ backends: [be('b1', { models: [{ model: 'm1', paid: false, max_concurrent: 0, tier: 1 }, { model: 'm2', paid: false, max_concurrent: 0, tier: 3 }] })] });
+  const stop2 = card.view.mount();
+  await flush();
+  ok(card.host.textContent.includes('tier 1') && card.host.textContent.includes('tier 3'), 'badges');
+  stop2();
 });

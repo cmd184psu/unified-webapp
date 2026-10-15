@@ -152,6 +152,8 @@ export interface BackendModel {
   max_concurrent: number;
   /** The model's context window in tokens; 0 or absent = unknown. */
   context_tokens?: number;
+  /** 1 strong, 2 capable, 3 light, 0 or absent = not rated (H3). */
+  tier?: number;
 }
 
 export interface Backend {

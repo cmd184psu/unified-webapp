@@ -32,7 +32,10 @@ export function isPrivateHost(host: string): boolean {
 export { ROLES, isPaid, unconsented };
 export type { CandRow };
 
-export const API_TYPES: Array<[string, string]> = [
+export /** TIERS are the ratings a model can have; unrated models count as tier 2 where it matters. */
+const TIERS: Array<[string, string]> = [['0', 'not rated'], ['1', '1 strong'], ['2', '2 capable'], ['3', '3 light']];
+
+const API_TYPES: Array<[string, string]> = [
   ['ollama', 'ollama'],
   ['openai_compatible', 'openai compatible'],
   ['anthropic', 'anthropic'],
@@ -163,7 +166,7 @@ export class BackendsView {
     apiType.addEventListener('change', syncKey);
     syncKey();
     type ModelControl = HTMLInputElement | HTMLSelectElement;
-    type ModelRow = { model: ModelControl; paid: ToggleEl; max: HTMLInputElement; ctx: HTMLInputElement; auto: string; el: HTMLElement };
+    type ModelRow = { model: ModelControl; paid: ToggleEl; max: HTMLInputElement; ctx: HTMLInputElement; tier: HTMLSelectElement; auto: string; el: HTMLElement };
     const models: ModelRow[] = [];
     // Names the host reported when probed; model rows then pick from them instead of typing.
     let probed: string[] = [];
@@ -188,6 +191,7 @@ export class BackendsView {
         row.model,
         h('span', { class: 'inline-check' }, row.paid, 'paid'),
         h('span', { class: 'inline-check', attrs: { title: 'Context window in tokens; blank = unknown' } }, 'ctx', row.ctx),
+        h('span', { class: 'inline-check', attrs: { title: 'How capable the model is. Light models are kept off planning roles; a reviewer is never weaker than the worker it checks.' } }, 'tier', row.tier),
         h('span', { class: 'inline-check' }, 'at once', row.max),
         button('Remove', () => {
           models.splice(models.indexOf(row), 1);
@@ -195,12 +199,13 @@ export class BackendsView {
           bump();
         }, { field: 'remove-model', icon: 'remove' }));
     };
-    const addModel = (m = '', p = false, max = 0, ctx = 0): void => {
+    const addModel = (m = '', p = false, max = 0, ctx = 0, tier = 0): void => {
       const row: ModelRow = {
         model: modelControl(m),
         paid: checkbox('model_paid', p),
         max: textInput('max_concurrent', max > 0 ? String(max) : '', { type: 'number', placeholder: 'no limit' }),
         ctx: textInput('context_tokens', ctx > 0 ? String(ctx) : '', { type: 'number', placeholder: '?' }),
+        tier: selectInput('tier', TIERS, String(tier)),
         auto: '',
         el: h('div', { class: 'inline-row', attrs: { 'data-role': 'model-row' } }),
       };
@@ -208,7 +213,7 @@ export class BackendsView {
       draw(row);
       modelList.appendChild(row.el);
     };
-    for (const m of initial?.models ?? []) addModel(m.model, m.paid, m.max_concurrent, m.context_tokens ?? 0);
+    for (const m of initial?.models ?? []) addModel(m.model, m.paid, m.max_concurrent, m.context_tokens ?? 0, m.tier ?? 0);
     if (!initial) addModel();
     const probe = async (): Promise<void> => {
       errors.clear();
@@ -243,7 +248,7 @@ export class BackendsView {
         hosted: hosted.checked,
         paid: paid.checked,
         slots: Number(slots.value),
-        models: models.map((m) => ({ model: m.model.value.trim(), paid: m.paid.checked, max_concurrent: Number(m.max.value) || 0, context_tokens: Math.max(0, Math.round(Number(m.ctx.value) || 0)) })).filter((m) => m.model !== ''),
+        models: models.map((m) => ({ model: m.model.value.trim(), paid: m.paid.checked, max_concurrent: Number(m.max.value) || 0, context_tokens: Math.max(0, Math.round(Number(m.ctx.value) || 0)), tier: Number(m.tier.value) || 0 })).filter((m) => m.model !== ''),
       };
       if (hosted.checked && !builtin() && apiKey.value !== '') body.api_key = apiKey.value;
       else if (clearKey) body.api_key = '';
@@ -320,7 +325,8 @@ export class BackendsView {
     }
     const models = b.models.map((m) => h('span', { class: 'row-actions' }, m.model, m.paid ? badge('paid') : null,
       m.max_concurrent > 0 ? badge(`max ${m.max_concurrent} at once`, 'muted') : null,
-      m.context_tokens ? badge(formatTokens(m.context_tokens), 'muted') : null));
+      m.context_tokens ? badge(formatTokens(m.context_tokens), 'muted') : null,
+      m.tier ? badge(`tier ${m.tier}`, m.tier === 3 ? 'warn' : 'muted') : null));
     return h('div', { class: 'profile-card', attrs: { 'data-backend': b.name } },
       h('div', { class: 'profile-header' },
         h('span', { class: 'row-actions' },

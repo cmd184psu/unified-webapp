@@ -434,6 +434,9 @@ func skipReviewer(v *view, p store.Project, c store.Candidate, workerModel strin
 	if c.Model == workerModel {
 		return "reviewer model equals worker model"
 	}
+	if wt := effectiveTier(v.snap, "", workerModel); effectiveTier(v.snap, c.Backend, c.Model) > wt {
+		return fmt.Sprintf("reviewer model %s (tier %d) is weaker than the worker %s (tier %d)", c.Model, effectiveTier(v.snap, c.Backend, c.Model), workerModel, wt)
+	}
 	return skipReason(v, p, c, needSlot)
 }
 
@@ -470,6 +473,8 @@ func skipReason(v *view, p store.Project, c store.Candidate, needSlot bool) stri
 		return "backend " + c.Backend + " is unavailable"
 	case b.Hosted && p.ModelScope == "local":
 		return "hosted under local scope"
+	case lightForRole(v, c):
+		return fmt.Sprintf("model %s is rated light (tier 3), too weak for role %s", c.Model, c.Role)
 	case needSlot && v.down[c.Backend]:
 		return "backend " + c.Backend + " is down"
 	case needSlot && v.free[c.Backend] <= 0:
@@ -478,6 +483,43 @@ func skipReason(v *view, p store.Project, c store.Candidate, needSlot bool) stri
 		return "model " + c.Model + " is at its concurrency limit on " + c.Backend
 	}
 	return ""
+}
+
+// Model tiers (H3): 1 strong, 2 capable, 3 light; a model the owner has not
+// rated counts as 2, so nothing changes until models are rated.
+const defaultTier = 2
+
+// planningRole is a role whose output every later stage builds on.
+func planningRole(role string) bool {
+	switch role {
+	case "planner", "architect", "critic", "compiler":
+		return true
+	}
+	return false
+}
+
+// effectiveTier is the tier of a model: of that backend's entry when backend
+// is given, else of the first backend that lists it.
+func effectiveTier(snap store.Snapshot, backend, mdl string) int {
+	for _, b := range snap.Backends {
+		if backend != "" && b.Name != backend {
+			continue
+		}
+		for _, m := range b.Models {
+			if m.Model == mdl && m.Tier != 0 {
+				return m.Tier
+			}
+			if m.Model == mdl {
+				return defaultTier
+			}
+		}
+	}
+	return defaultTier
+}
+
+// lightForRole reports whether c is rated light and its role is a planning one.
+func lightForRole(v *view, c store.Candidate) bool {
+	return planningRole(c.Role) && effectiveTier(v.snap, c.Backend, c.Model) == 3
 }
 
 // modelFull reports whether c's model has a concurrency limit and it is used up.
