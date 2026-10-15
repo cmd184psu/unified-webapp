@@ -164,7 +164,7 @@ Rules the dispatcher applies:
 - **Unreachable backends are skipped** for `backend_cooldown` (default 2 minutes).
 - If nothing is eligible, the task shows a *waiting* reason instead of failing.
 
-Model statistics are at `GET /api/stats/models`.
+Model statistics have their own **Stats** tab and are at `GET /api/stats/models` (add `?project=<slug>` to limit them to one project). Each row is a backend, model and role: stages, passes, failures, infra failures (left out of the pass rate), average and total time, tokens, the model's tier and family, and for workers the attempts that passed. Use it to decide a model's tier.
 
 ---
 

@@ -3,7 +3,7 @@ import { test, run, eq, ok, installFakeDom, FakeEl, asEl, byField, byAttr, butto
 import { BackendsView, isPaid, isPrivateHost, lastForRoles, unconsented, type BackendsDeps } from './backends';
 import { moveItem, dropIndex } from './candidates';
 import { dispatch } from './events';
-import { ApiError, type Backend, type BackendInput, type BackendResult, type Candidate, type ModelStat, type ProjectView } from './api';
+import { ApiError, type Backend, type BackendInput, type BackendResult, type Candidate, type ProjectView } from './api';
 
 installFakeDom();
 
@@ -23,11 +23,10 @@ interface State {
   backends: Backend[];
   candidates: Candidate[];
   projects: ProjectView[];
-  stats: ModelStat[];
 }
 
 function harness(init: Partial<State> = {}, over: Partial<BackendsDeps> = {}) {
-  const st: State = { backends: [], candidates: [], projects: [], stats: [], ...init };
+  const st: State = { backends: [], candidates: [], projects: [], ...init };
   const host = new FakeEl('DIV');
   const log: string[] = [];
   const bodies: Record<string, unknown> = {};
@@ -35,7 +34,6 @@ function harness(init: Partial<State> = {}, over: Partial<BackendsDeps> = {}) {
     backends: async () => st.backends.map((b) => ({ ...b })),
     candidates: async () => st.candidates.map((c) => ({ ...c })),
     projects: async () => st.projects,
-    modelStats: async () => st.stats,
     settings: async () => ({ worker_timeout: '30m0s', max_attempts: 5 }),
     limits: async () => ({ limits: { max_attempts: '9' }, effective: {} }),
     putLimits: async (slug, limits) => { log.push('limits:' + slug); bodies.limits = limits; return { limits: {}, effective: {} } as never; },
@@ -336,21 +334,6 @@ test('a limits 400 names the limit field', async () => {
   field(lim, 'worker_timeout').value = '1m';
   await settle(field(lim, 'worker_timeout'));
   eq(errorOf(t.host, 'worker_timeout'), 'must be a duration such as 30m');
-  stop();
-});
-
-test('MB8 + AC-UI1: the pass-rate table shows hostile model names as text', async () => {
-  const evil = '<img src=x onerror=alert(1)>';
-  const t = harness({
-    backends: [be('b1')],
-    stats: [{ model: evil, backend: 'b1', role: 'worker', stages: 4, passed: 2, failed: 1, infra: 1, pass_rate: 2 / 3, attempts_total: 3, attempts_passed: 2 }],
-  });
-  const stop = t.view.mount();
-  await flush();
-  const table = byAttr(t.host, 'data-role', 'pass-rates')[0];
-  ok(table.textContent.includes(evil), 'literal name');
-  ok(table.textContent.includes('67%') && table.textContent.includes('2/3'), 'rates: ' + table.textContent);
-  ok(findAll(t.host, (e) => e.tagName === 'IMG').length === 0, 'no element injected');
   stop();
 });
 

@@ -220,6 +220,13 @@ export interface ModelStat {
   pass_rate: number;
   attempts_total: number;
   attempts_passed: number;
+  /** Time the model's stages ran: total and mean per stage, in ms. */
+  total_ms: number;
+  avg_ms: number;
+  tokens: number;
+  /** The owner's rating (0 = not rated) and the family derived from the name. */
+  tier: number;
+  family: string;
 }
 
 /** DraftState is GET .../frd/draft: the FRD drafting stage (draft or polish). */
@@ -550,7 +557,7 @@ export const api = {
   settings: (): Promise<Settings> => get('/api/settings'),
   putSettings: (s: Settings, o?: FetchOptions): Promise<Settings> => send('PUT', '/api/settings', s, o),
 
-  modelStats: (): Promise<ModelStat[]> => get('/api/stats/models'),
+  modelStats: (project = ''): Promise<ModelStat[]> => get(`/api/stats/models${project ? `?project=${enc(project)}` : ''}`),
 
   // Efforts
   efforts: (slug: string): Promise<EffortView[]> => get(`${proj(slug)}/efforts`),

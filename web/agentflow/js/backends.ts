@@ -9,7 +9,7 @@
 import { autosave, type Autosave } from './autosave.js';
 import { showToast } from '@shared';
 import {
-  api, type Backend, type BackendInput, type BackendResult, type Candidate, type ModelStat, type ProjectView,
+  api, type Backend, type BackendInput, type BackendResult, type Candidate, type ProjectView,
 } from './api.js';
 import { h, replace } from './dom.js';
 import { subscribe, type AgentflowEvent } from './events.js';
@@ -45,7 +45,7 @@ const API_TYPES: Array<[string, string]> = [
 export type BackendsDeps = Pick<
   typeof api,
   'backends' | 'createBackend' | 'probeBackend' | 'patchBackend' | 'retireBackend' | 'enableBackend' | 'candidates' | 'putCandidates' |
-  'projects' | 'limits' | 'putLimits' | 'settings' | 'modelStats'
+  'projects' | 'limits' | 'putLimits' | 'settings'
 > & { notify(message: string): void };
 
 export const defaultBackendsDeps = (): BackendsDeps => ({
@@ -61,7 +61,6 @@ export const defaultBackendsDeps = (): BackendsDeps => ({
   limits: api.limits,
   putLimits: api.putLimits,
   settings: api.settings,
-  modelStats: api.modelStats,
   notify: (m) => void showToast(m, 'success'),
 });
 
@@ -73,13 +72,10 @@ export function lastForRoles(cands: Candidate[], name: string): string[] {
   });
 }
 
-const pct = (r: number): string => `${Math.round(r * 100)}%`;
-
 export class BackendsView {
   backends: Backend[] = [];
   candidates: Candidate[] = [];
   projects: ProjectView[] = [];
-  stats: ModelStat[] = [];
   globals: Record<string, string | number> = {};
   warnings: string[] = [];
   private loaded = false;
@@ -111,10 +107,10 @@ export class BackendsView {
 
   async load(): Promise<void> {
     try {
-      const [backends, candidates, projects, stats, globals] = await Promise.all([
-        this.deps.backends(), this.deps.candidates(), this.deps.projects(), this.deps.modelStats(), this.deps.settings(),
+      const [backends, candidates, projects, globals] = await Promise.all([
+        this.deps.backends(), this.deps.candidates(), this.deps.projects(), this.deps.settings(),
       ]);
-      Object.assign(this, { backends, candidates, projects, stats, globals, loaded: true });
+      Object.assign(this, { backends, candidates, projects, globals, loaded: true });
     } catch {
       // apiFetch already told the user; keep what is shown.
       if (!this.loaded) return;
@@ -457,23 +453,6 @@ export class BackendsView {
     return section('Project limits', fieldRow('Project', pick).el, this.limitsHost);
   }
 
-  // ─── Pass rates ──────────────────────────────────────────────────────────
-
-  private statsSection(): HTMLElement {
-    if (this.stats.length === 0) {
-      return section('Model pass rates', h('p', { class: 'field-hint', text: 'No finished stages yet.' }));
-    }
-    const head = ['Model', 'Backend', 'Role', 'Stages', 'Passed', 'Failed', 'Infra', 'Pass rate', 'Worker attempts passed'];
-    return section('Model pass rates',
-      h('table', { class: 'stats-table', attrs: { 'data-role': 'pass-rates' } },
-        h('thead', {}, h('tr', {}, ...head.map((t) => h('th', { text: t })))),
-        h('tbody', {}, ...this.stats.map((s) => h('tr', {},
-          h('td', { text: s.model }), h('td', { text: s.backend }), h('td', { text: s.role }),
-          h('td', { text: String(s.stages) }), h('td', { text: String(s.passed) }), h('td', { text: String(s.failed) }),
-          h('td', { text: String(s.infra) }), h('td', { text: s.passed + s.failed > 0 ? pct(s.pass_rate) : '-' }),
-          h('td', { text: s.role === 'worker' ? `${s.attempts_passed}/${s.attempts_total}` : '-' }))))));
-  }
-
   // ─── Whole view ──────────────────────────────────────────────────────────
 
   render(): void {
@@ -489,8 +468,7 @@ export class BackendsView {
         warn,
         this.backendsSection(),
         this.backends.length > 0 ? this.candidatesSection() : null,
-        this.projects.length > 0 || this.backends.length > 0 ? this.limitsSection() : null,
-        this.statsSection()));
+        this.projects.length > 0 || this.backends.length > 0 ? this.limitsSection() : null));
   }
 }
 

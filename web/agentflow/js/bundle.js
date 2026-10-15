@@ -80,7 +80,7 @@ var api = {
   clearProjectCandidates: (slug, role) => send("DELETE", `${proj(slug)}/candidates/${enc(role)}`),
   settings: () => get("/api/settings"),
   putSettings: (s, o) => send("PUT", "/api/settings", s, o),
-  modelStats: () => get("/api/stats/models"),
+  modelStats: (project = "") => get(`/api/stats/models${project ? `?project=${enc(project)}` : ""}`),
   // Efforts
   efforts: (slug) => get(`${proj(slug)}/efforts`),
   effort: (slug, id) => get(eff(slug, id)),
@@ -1513,7 +1513,6 @@ var defaultBackendsDeps = () => ({
   limits: api.limits,
   putLimits: api.putLimits,
   settings: api.settings,
-  modelStats: api.modelStats,
   notify: (m) => void showToast4(m, "success")
 });
 function lastForRoles(cands, name) {
@@ -1522,7 +1521,6 @@ function lastForRoles(cands, name) {
     return mine.length > 0 && mine.every((c) => c.backend === name);
   });
 }
-var pct = (r) => `${Math.round(r * 100)}%`;
 var BackendsView = class {
   constructor(host, deps) {
     this.host = host;
@@ -1530,7 +1528,6 @@ var BackendsView = class {
     this.backends = [];
     this.candidates = [];
     this.projects = [];
-    this.stats = [];
     this.globals = {};
     this.warnings = [];
     this.loaded = false;
@@ -1560,14 +1557,13 @@ var BackendsView = class {
   }
   async load() {
     try {
-      const [backends, candidates, projects, stats, globals] = await Promise.all([
+      const [backends, candidates, projects, globals] = await Promise.all([
         this.deps.backends(),
         this.deps.candidates(),
         this.deps.projects(),
-        this.deps.modelStats(),
         this.deps.settings()
       ]);
-      Object.assign(this, { backends, candidates, projects, stats, globals, loaded: true });
+      Object.assign(this, { backends, candidates, projects, globals, loaded: true });
     } catch {
       if (!this.loaded) return;
     }
@@ -1948,34 +1944,6 @@ var BackendsView = class {
     });
     return section("Project limits", fieldRow("Project", pick).el, this.limitsHost);
   }
-  // ─── Pass rates ──────────────────────────────────────────────────────────
-  statsSection() {
-    if (this.stats.length === 0) {
-      return section("Model pass rates", h("p", { class: "field-hint", text: "No finished stages yet." }));
-    }
-    const head = ["Model", "Backend", "Role", "Stages", "Passed", "Failed", "Infra", "Pass rate", "Worker attempts passed"];
-    return section(
-      "Model pass rates",
-      h(
-        "table",
-        { class: "stats-table", attrs: { "data-role": "pass-rates" } },
-        h("thead", {}, h("tr", {}, ...head.map((t) => h("th", { text: t })))),
-        h("tbody", {}, ...this.stats.map((s) => h(
-          "tr",
-          {},
-          h("td", { text: s.model }),
-          h("td", { text: s.backend }),
-          h("td", { text: s.role }),
-          h("td", { text: String(s.stages) }),
-          h("td", { text: String(s.passed) }),
-          h("td", { text: String(s.failed) }),
-          h("td", { text: String(s.infra) }),
-          h("td", { text: s.passed + s.failed > 0 ? pct(s.pass_rate) : "-" }),
-          h("td", { text: s.role === "worker" ? `${s.attempts_passed}/${s.attempts_total}` : "-" })
-        )))
-      )
-    );
-  }
   // ─── Whole view ──────────────────────────────────────────────────────────
   render() {
     if (!this.loaded) {
@@ -1999,8 +1967,7 @@ var BackendsView = class {
         warn,
         this.backendsSection(),
         this.backends.length > 0 ? this.candidatesSection() : null,
-        this.projects.length > 0 || this.backends.length > 0 ? this.limitsSection() : null,
-        this.statsSection()
+        this.projects.length > 0 || this.backends.length > 0 ? this.limitsSection() : null
       )
     );
   }
@@ -4498,6 +4465,123 @@ function mountProjectTab(host, wanted2) {
   };
 }
 
+// web/agentflow/js/stats.ts
+var defaultStatsDeps = () => ({
+  stats: (project) => api.modelStats(project),
+  projects: () => api.projects()
+});
+var pct = (r) => `${Math.round(r * 100)}%`;
+function duration(ms) {
+  if (ms <= 0) return "-";
+  const s = ms / 1e3;
+  if (s < 90) return `${Math.round(s)}s`;
+  if (s < 5400) return `${(s / 60).toFixed(1)}m`;
+  return `${(s / 3600).toFixed(1)}h`;
+}
+function tokensShort(n) {
+  if (n <= 0) return "-";
+  if (n < 1e3) return String(n);
+  if (n < 1e6) return `${(n / 1e3).toFixed(1)}k`;
+  return `${(n / 1e6).toFixed(1)}M`;
+}
+var ROLES2 = ["", "planner", "architect", "critic", "compiler", "worker", "reviewer"];
+var StatsView = class {
+  constructor(host, deps) {
+    this.host = host;
+    this.deps = deps;
+    this.rows = [];
+    this.projects = [];
+    this.role = "";
+    this.project = "";
+    this.loaded = false;
+    this.disposed = false;
+    this.busy = false;
+  }
+  mount() {
+    void this.load();
+    const off = subscribe((ev) => {
+      if (ev.type === "state.changed" || ev.type === "effort.update" || ev.type === "backend.update") void this.load();
+    });
+    return () => {
+      this.disposed = true;
+      off();
+    };
+  }
+  async load() {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      const [rows, projects] = await Promise.all([this.deps.stats(this.project), this.deps.projects()]);
+      if (this.disposed) return;
+      Object.assign(this, { rows, projects, loaded: true });
+      this.render();
+    } catch {
+    } finally {
+      this.busy = false;
+    }
+  }
+  table() {
+    const shown = this.rows.filter((r) => this.role === "" || r.role === this.role);
+    if (shown.length === 0) return h("p", { class: "field-hint", text: "No finished stages yet." });
+    const head = ["Model", "Backend", "Tier", "Family", "Role", "Stages", "Passed", "Failed", "Infra", "Pass rate", "Avg time", "Total time", "Tokens", "Worker attempts passed"];
+    return h(
+      "table",
+      { class: "stats-table", attrs: { "data-role": "pass-rates" } },
+      h("thead", {}, h("tr", {}, ...head.map((t) => h("th", { text: t })))),
+      h("tbody", {}, ...shown.map((s) => h(
+        "tr",
+        {},
+        h("td", { text: s.model }),
+        h("td", { text: s.backend }),
+        h("td", {}, s.tier ? badge(`tier ${s.tier}`, s.tier === 3 ? "warn" : "muted") : h("span", { class: "field-hint", text: "not rated" })),
+        h("td", { text: s.family }),
+        h("td", { text: s.role }),
+        h("td", { text: String(s.stages) }),
+        h("td", { text: String(s.passed) }),
+        h("td", { text: String(s.failed) }),
+        h("td", { text: String(s.infra) }),
+        h("td", { text: s.passed + s.failed > 0 ? pct(s.pass_rate) : "-" }),
+        h("td", { text: duration(s.avg_ms) }),
+        h("td", { text: duration(s.total_ms) }),
+        h("td", { text: tokensShort(s.tokens) }),
+        h("td", { text: s.role === "worker" ? `${s.attempts_passed}/${s.attempts_total}` : "-" })
+      )))
+    );
+  }
+  render() {
+    if (!this.loaded) {
+      replace(this.host, h("p", { class: "field-hint", text: "Loading stats\u2026" }));
+      return;
+    }
+    const role = selectInput("role", ROLES2.map((r) => [r, r === "" ? "All roles" : r]), this.role);
+    role.addEventListener("change", () => {
+      this.role = role.value;
+      this.render();
+    });
+    const project = selectInput("project", [["", "All projects"], ...this.projects.map((p) => [p.slug, p.slug])], this.project);
+    project.addEventListener("change", () => {
+      this.project = project.value;
+      void this.load();
+    });
+    replace(
+      this.host,
+      h(
+        "div",
+        { class: "settings-host" },
+        section(
+          "Model results",
+          h("div", { class: "inline-row" }, fieldRow("Role", role).el, fieldRow("Project", project).el),
+          h("p", { class: "field-hint", text: "Infra failures (a crash, a timeout) say nothing about the model and are left out of the pass rate. Rate a model on the Backends tab once these numbers say how it does." }),
+          this.table()
+        )
+      )
+    );
+  }
+};
+function mountStats(host) {
+  return new StatsView(host, defaultStatsDeps()).mount();
+}
+
 // web/agentflow/js/main.ts
 var themes = new ThemeManager({ module: "agentflow", default: "dark" });
 themes.apply();
@@ -4508,7 +4592,8 @@ var TABS = [
     mount: (host) => new Overview(host, defaultDeps((slug) => showTab("project", slug))).mount()
   },
   { id: "project", label: "Project", mount: mountProjectTab },
-  { id: "backends", label: "Backends", mount: mountBackends }
+  { id: "backends", label: "Backends", mount: mountBackends },
+  { id: "stats", label: "Stats", mount: mountStats }
 ];
 var active = "overview";
 var dispose;

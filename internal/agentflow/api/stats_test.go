@@ -82,3 +82,49 @@ func TestE4_GitCommandsNeedACompleteEffort(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// H3b: stats carry time, tokens, tier and family, and can be limited to one project.
+func TestH3b_ModelStatsCarryTimeTokensTierAndFilterByProject(t *testing.T) {
+	e := newEnv(t, envOpt{})
+	e.addProject("p1")
+	e.addProject("p2")
+	ctx := context.Background()
+	mk := func(slug string) int64 {
+		ef := decode[EffortView](t, e.ok("POST", "/api/projects/"+slug+"/efforts", map[string]any{"title": "src"}, http.StatusCreated))
+		return ef.ID
+	}
+	e1, e2 := mk("p1"), mk("p2")
+	if err := e.st.CreateBackend(ctx, "t", store.Backend{Name: "b1", Host: "http://127.0.0.1:11434", APIType: "ollama", Slots: 1,
+		Models: []store.BackendModel{{Model: "qwen3-coder:30b", Tier: 2}}}); err != nil {
+		t.Fatal(err)
+	}
+	finish := func(effort int64, outcome string) {
+		t.Helper()
+		st, err := e.st.CreateStage(ctx, store.StageSpec{Effort: effort, Role: "planner", Backend: "b1", Model: "qwen3-coder:30b"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.st.StartStage(ctx, st.ID, "job"); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.st.FinishStage(ctx, st.ID, outcome, "", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	finish(e1, "pass")
+	finish(e1, "pass")
+	finish(e2, "repair")
+
+	all := decode[[]ModelStat](t, e.ok("GET", "/api/stats/models", nil, http.StatusOK))
+	if len(all) != 1 || all[0].Stages != 3 || all[0].Tier != 2 || all[0].Family != "qwen" {
+		t.Fatalf("all = %+v", all)
+	}
+	one := decode[[]ModelStat](t, e.ok("GET", "/api/stats/models?project=p1", nil, http.StatusOK))
+	if len(one) != 1 || one[0].Stages != 2 || one[0].Passed != 2 {
+		t.Fatalf("p1 = %+v", one)
+	}
+	none := decode[[]ModelStat](t, e.ok("GET", "/api/stats/models?project=nope", nil, http.StatusOK))
+	if len(none) != 0 {
+		t.Fatalf("unknown project = %+v", none)
+	}
+}

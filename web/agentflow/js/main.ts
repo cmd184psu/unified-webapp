@@ -12,12 +12,13 @@ import { HealthBanner } from './health.js';
 import { Overview, defaultDeps } from './overview.js';
 import { mountBackends } from './backends.js';
 import { mountProjectTab } from './projecttab.js';
+import { mountStats } from './stats.js';
 import { SettingsView, defaultSettingsDeps } from './settings.js';
 
 const themes = new ThemeManager({ module: 'agentflow', default: 'dark' });
 themes.apply();
 
-type TabId = 'overview' | 'project' | 'backends';
+type TabId = 'overview' | 'project' | 'backends' | 'stats';
 
 interface Tab {
   id: TabId;
@@ -33,6 +34,7 @@ const TABS: Tab[] = [
   },
   { id: 'project', label: 'Project', mount: mountProjectTab },
   { id: 'backends', label: 'Backends', mount: mountBackends },
+  { id: 'stats', label: 'Stats', mount: mountStats },
 ];
 
 let active: TabId = 'overview';

@@ -3,7 +3,17 @@ package api
 import (
 	"net/http"
 	"sort"
+
+	"cmd184psu/unified-webapp/internal/agentflow/model"
 )
+
+// statsScope joins a stage to its effort (directly, or through its attempt's
+// task and queue) so the stats can be limited to one project.
+const statsScope = ` FROM stages s
+	LEFT JOIN attempts a ON a.id = s.attempt
+	LEFT JOIN tasks t ON t.id = a.task
+	LEFT JOIN queues q ON q.id = t.queue
+	LEFT JOIN efforts e ON e.id = COALESCE(s.effort, q.effort) `
 
 // ModelStat is how a model has done: its finished stages by outcome class
 // (MB8) and, as a worker, how its attempts ended. Infrastructure outcomes
@@ -20,6 +30,13 @@ type ModelStat struct {
 	PassRate       float64 `json:"pass_rate"`
 	AttemptsTotal  int     `json:"attempts_total"`
 	AttemptsPassed int     `json:"attempts_passed"`
+	// TotalMS is the time the model's stages ran, AvgMS the mean per stage; Tokens what they used.
+	TotalMS int64 `json:"total_ms"`
+	AvgMS   int64 `json:"avg_ms"`
+	Tokens  int64 `json:"tokens"`
+	// Tier is how the owner rated the model (0 = not rated); Family is derived from its name.
+	Tier   int    `json:"tier"`
+	Family string `json:"family"`
 }
 
 func (a *API) registerStats(mux muxer) {
@@ -29,13 +46,15 @@ func (a *API) registerStats(mux muxer) {
 // modelStats answers GET /api/stats/models: one row per backend, model and
 // role that has a finished stage.
 func (a *API) modelStats(w http.ResponseWriter, r *http.Request) {
+	project := r.URL.Query().Get("project")
 	rows, err := a.deps.Store.DB().QueryContext(r.Context(), `
-		SELECT model, backend, role,
-			SUM(CASE WHEN outcome = 'pass' THEN 1 ELSE 0 END),
-			SUM(CASE WHEN outcome LIKE 'infra:%' OR outcome = 'discarded' THEN 1 ELSE 0 END),
-			SUM(CASE WHEN outcome NOT LIKE 'infra:%' AND outcome NOT IN ('discarded', 'pass') THEN 1 ELSE 0 END)
-		FROM stages WHERE state = 'done' AND model <> ''
-		GROUP BY model, backend, role`)
+		SELECT s.model, s.backend, s.role,
+			SUM(CASE WHEN s.outcome = 'pass' THEN 1 ELSE 0 END),
+			SUM(CASE WHEN s.outcome LIKE 'infra:%' OR s.outcome = 'discarded' THEN 1 ELSE 0 END),
+			SUM(CASE WHEN s.outcome NOT LIKE 'infra:%' AND s.outcome NOT IN ('discarded', 'pass') THEN 1 ELSE 0 END),
+			SUM(CASE WHEN s.finished > s.started THEN s.finished - s.started ELSE 0 END), SUM(s.tokens)`+statsScope+`
+		WHERE s.state = 'done' AND s.model <> '' AND (? = '' OR e.project = ?)
+		GROUP BY s.model, s.backend, s.role`, project, project)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -44,11 +63,15 @@ func (a *API) modelStats(w http.ResponseWriter, r *http.Request) {
 	out := []ModelStat{}
 	for rows.Next() {
 		var s ModelStat
-		if err := rows.Scan(&s.Model, &s.Backend, &s.Role, &s.Passed, &s.Infra, &s.Failed); err != nil {
+		if err := rows.Scan(&s.Model, &s.Backend, &s.Role, &s.Passed, &s.Infra, &s.Failed, &s.TotalMS, &s.Tokens); err != nil {
 			writeErr(w, err)
 			return
 		}
 		s.Stages = s.Passed + s.Failed + s.Infra
+		if s.Stages > 0 {
+			s.AvgMS = s.TotalMS / int64(s.Stages)
+		}
+		s.Family = model.ModelFamily(s.Model)
 		if judged := s.Passed + s.Failed; judged > 0 {
 			s.PassRate = float64(s.Passed) / float64(judged)
 		}
@@ -59,8 +82,10 @@ func (a *API) modelStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	att, err := a.deps.Store.DB().QueryContext(r.Context(), `
-		SELECT worker_model, COUNT(*), SUM(CASE WHEN outcome = 'passed' THEN 1 ELSE 0 END)
-		FROM attempts WHERE outcome NOT IN ('', 'abandoned') AND worker_model <> '' GROUP BY worker_model`)
+		SELECT at.worker_model, COUNT(*), SUM(CASE WHEN at.outcome = 'passed' THEN 1 ELSE 0 END)
+		FROM attempts at JOIN tasks t ON t.id = at.task JOIN queues q ON q.id = t.queue JOIN efforts e ON e.id = q.effort
+		WHERE at.outcome NOT IN ('', 'abandoned') AND at.worker_model <> '' AND (? = '' OR e.project = ?)
+		GROUP BY at.worker_model`, project, project)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -81,7 +106,16 @@ func (a *API) modelStats(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	tiers := map[string]int{}
+	if bs, err := a.deps.Store.ListBackends(r.Context()); err == nil {
+		for _, b := range bs {
+			for _, m := range b.Models {
+				tiers[b.Name+"/"+m.Model] = m.Tier
+			}
+		}
+	}
 	for i := range out {
+		out[i].Tier = tiers[out[i].Backend+"/"+out[i].Model]
 		if out[i].Role == "worker" {
 			t := byModel[out[i].Model]
 			out[i].AttemptsTotal, out[i].AttemptsPassed = t.total, t.passed

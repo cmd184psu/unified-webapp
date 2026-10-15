@@ -71,6 +71,7 @@ const suites = [
   { name: "agentflow-autosave", entry: "web/agentflow/js/autosave.test.ts", runner: "esbuild-cjs" },
   { name: "agentflow-settings", entry: "web/agentflow/js/settings.test.ts", runner: "esbuild-cjs" },
   { name: "agentflow-backends", entry: "web/agentflow/js/backends.test.ts", runner: "esbuild-cjs" },
+  { name: "agentflow-stats", entry: "web/agentflow/js/stats.test.ts", runner: "esbuild-cjs" },
   { name: "agentflow-projects", entry: "web/agentflow/js/projects.test.ts", runner: "esbuild-cjs" },
   { name: "agentflow-frd", entry: "web/agentflow/js/frd-editor.test.ts", runner: "esbuild-cjs" },
   { name: "agentflow-plan", entry: "web/agentflow/js/plan-view.test.ts", runner: "esbuild-cjs" },
