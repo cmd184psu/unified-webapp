@@ -478,3 +478,23 @@ func TestPureIsDroppedOnlyForOptedInProjects(t *testing.T) {
 		}
 	}
 }
+
+// A backend of api type opencode is opencode's own provider: no entry in the
+// generated config, and its models are addressed as opencode/<model>.
+func TestBuiltinProviderIsNotRenderedAndUsesItsOwnPrefix(t *testing.T) {
+	free := BackendSpec{Backend: runner.Backend{Name: "free", APIType: "opencode"}, Models: []string{"big-pickle"}}
+	local := BackendSpec{Backend: runner.Backend{Name: "live", Host: "http://h:1", APIType: "ollama"}, Models: []string{"m"}}
+	out, err := RenderConfig([]BackendSpec{free, local})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "free") || !strings.Contains(string(out), `"live"`) {
+		t.Fatalf("config = %s", out)
+	}
+	if got := RefFor(free.Backend, "big-pickle"); got != "opencode/big-pickle" {
+		t.Fatalf("builtin ref = %q", got)
+	}
+	if got := RefFor(local.Backend, "m"); got != "live/m" {
+		t.Fatalf("custom ref = %q", got)
+	}
+}

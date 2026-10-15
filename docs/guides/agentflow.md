@@ -132,7 +132,7 @@ at once (`slots`) and which models it offers.
 |---|---|
 | `name` | Lower-case id (`[a-z0-9][a-z0-9_-]*`). Not `verify` or `merge`. |
 | `host` | Base URL of the model server. |
-| `api_type` | `ollama`, `openai_compatible` or `anthropic`. |
+| `api_type` | `ollama`, `openai_compatible`, `anthropic` or `opencode`. `opencode` is opencode's own built-in provider: no host, no key, models addressed as `opencode/<model>` (Probe lists them, the free ones among them). Hosted: prompts leave the machine. |
 | `hosted` | `true` for a remote service. Hosted backends are never used under model scope `local`. |
 | `paid` | `true` if the backend bills per use. |
 | `slots` | Concurrent stages, at least 1. |

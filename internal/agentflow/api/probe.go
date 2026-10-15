@@ -30,6 +30,10 @@ func (a *API) probeBackend(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &body, false) {
 		return
 	}
+	if body.APIType == "opencode" {
+		a.probeBuiltin(w, r)
+		return
+	}
 	models, err := probeModels(r.Context(), http.DefaultClient, body.Host, body.APIType)
 	if err != nil {
 		var fe *store.FieldError
@@ -155,4 +159,20 @@ func probeModels(ctx context.Context, c *http.Client, host, apiType string) ([]s
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+// probeBuiltin lists opencode's own models; there is no host to ask.
+func (a *API) probeBuiltin(w http.ResponseWriter, r *http.Request) {
+	if a.deps.BuiltinModels == nil {
+		writeJSON(w, http.StatusBadGateway, errorBody{Error: "opencode is not available", Field: "api_type"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	models, err := a.deps.BuiltinModels(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, errorBody{Error: err.Error(), Field: "api_type"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"models": models, "contexts": map[string]int{}})
 }

@@ -91,7 +91,7 @@ func Argv(path string, req runner.Request) []string {
 	}
 	argv = append(argv, "--format", "json", "--auto",
 		"--agent", AgentName(req.Role),
-		"--model", ModelRef(req.Backend.Name, req.Model))
+		"--model", RefFor(req.Backend, req.Model))
 	if req.SessionID != "" {
 		argv = append(argv, "--session", req.SessionID)
 	}

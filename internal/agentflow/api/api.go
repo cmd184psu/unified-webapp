@@ -25,6 +25,8 @@ type Deps struct {
 	// Version reports the agent program's version (OC1). An error is not fatal:
 	// it is surfaced by /api/health so the operator sees why runs cannot start.
 	Version func(ctx context.Context) (string, error)
+	// BuiltinModels lists opencode's own models, for backends of api type "opencode".
+	BuiltinModels func(ctx context.Context) ([]string, error)
 	// SSEMaxSubscribers caps the event stream's subscribers (D3).
 	SSEMaxSubscribers int
 }

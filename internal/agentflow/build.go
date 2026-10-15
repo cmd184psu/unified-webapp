@@ -131,6 +131,7 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 		Engine:            eng,
 		Git:               git,
 		Version:           rn.Version,
+		BuiltinModels:     builtinModels(rn),
 		SSEMaxSubscribers: cfg.SSEMaxSubscribers,
 	})
 	a.Register(mux)
@@ -267,4 +268,14 @@ func goModCache() string {
 		return ""
 	}
 	return dir
+}
+
+// builtinModels is the runner's list of opencode's own models, when it has one.
+func builtinModels(rn runner.Runner) func(context.Context) ([]string, error) {
+	if b, ok := rn.(interface {
+		BuiltinModels(context.Context) ([]string, error)
+	}); ok {
+		return b.BuiltinModels
+	}
+	return nil
 }

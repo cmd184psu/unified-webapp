@@ -460,3 +460,28 @@ test('U5 (review): the context field says unknown, and picking another probed mo
 });
 
 void run('agentflow-backends');
+
+test('OB1: the opencode built-in type hides host and key, probes without a host, and saves an empty host', async () => {
+  let probed: string[] = [];
+  const t = harness({}, { probeBackend: async (host, type) => { probed = [host, type]; return { models: ['big-pickle', 'cat-jam-free'] }; } });
+  const stop = t.view.mount();
+  await flush();
+  button(t.host, 'Add backend').click();
+  const hostRow = (): FakeEl => field(t.host, 'host').parentNode as FakeEl;
+  ok(!hostRow().hasAttribute('hidden'), 'host shown for ollama');
+  field(t.host, 'name').value = 'free';
+  field(t.host, 'host').value = 'http://stale:1';
+  field(t.host, 'api_type').value = 'opencode';
+  field(t.host, 'api_type').fire('change');
+  ok(hostRow().hasAttribute('hidden'), 'host hidden');
+  setHosted(t.host, true);
+  ok(keyRow(t.host).hasAttribute('hidden'), 'no key field for the built-in provider');
+  button(t.host, 'Probe host for models').click();
+  await flush();
+  eq(probed, ['', 'opencode']);
+  button(t.host, 'Add backend').click();
+  await flush();
+  const body = t.bodies.create as BackendInput;
+  eq([body.host, body.api_type, body.api_key], ['', 'opencode', undefined]);
+  stop();
+});

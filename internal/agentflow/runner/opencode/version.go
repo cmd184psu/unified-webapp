@@ -42,3 +42,26 @@ func (a *Adapter) Version(ctx context.Context) (string, error) {
 	}
 	return parseVersion(string(out))
 }
+
+// BuiltinModels runs `opencode models opencode` and returns the model names of
+// opencode's own provider (the free ones among them), without the provider
+// prefix. Like Version it is a plain host call that touches no stage.
+func (a *Adapter) BuiltinModels(ctx context.Context) ([]string, error) {
+	path, err := a.path()
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, path, "models", BuiltinProvider)
+	cmd.Env = a.versionEnv()
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("opencode: %s models: %w", path, err)
+	}
+	var names []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if n := strings.TrimPrefix(strings.TrimSpace(line), BuiltinProvider+"/"); n != "" && !strings.ContainsAny(n, " \t") {
+			names = append(names, n)
+		}
+	}
+	return names, nil
+}

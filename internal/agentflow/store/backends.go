@@ -45,11 +45,14 @@ func validateBackend(b Backend) error {
 	if err := validateBackendName("name", b.Name); err != nil {
 		return err
 	}
-	if err := validateHostURL("host", b.Host); err != nil {
-		return err
-	}
 	if !apiTypes[b.APIType] {
-		return Invalid("api_type", "must be ollama, openai_compatible or anthropic")
+		return Invalid("api_type", "must be ollama, openai_compatible, anthropic or opencode")
+	}
+	// opencode's own provider has no host of its own.
+	if b.APIType != "opencode" {
+		if err := validateHostURL("host", b.Host); err != nil {
+			return err
+		}
 	}
 	if b.Slots < 1 {
 		return Invalid("slots", "must be at least 1")

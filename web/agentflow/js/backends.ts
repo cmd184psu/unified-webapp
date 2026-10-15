@@ -35,6 +35,7 @@ export const API_TYPES: Array<[string, string]> = [
   ['ollama', 'ollama'],
   ['openai_compatible', 'openai compatible'],
   ['anthropic', 'anthropic'],
+  ['opencode', 'opencode built-in'],
 ];
 
 export type BackendsDeps = Pick<
@@ -145,11 +146,17 @@ export class BackendsView {
     drawKey();
     const keyField = errors.add('api_key', fieldRow('API key', h('div', { class: 'row-actions' }, apiKey, keyState),
       'Sent to the hosted service as the credential. Leave blank to keep the stored key'));
+    const hostField = errors.add('host', fieldRow('Host', host, 'An http or https URL'));
+    // opencode's own provider has no host and no key: its free models are reached through opencode itself.
+    const builtin = (): boolean => apiType.value === 'opencode';
     const syncKey = (): void => {
-      if (hosted.checked) keyField.el.removeAttribute('hidden');
+      if (hosted.checked && !builtin()) keyField.el.removeAttribute('hidden');
       else keyField.el.setAttribute('hidden', '');
+      if (builtin()) hostField.el.setAttribute('hidden', '');
+      else hostField.el.removeAttribute('hidden');
     };
     (hosted.firstChild as HTMLInputElement).addEventListener('change', syncKey);
+    apiType.addEventListener('change', syncKey);
     syncKey();
     type ModelControl = HTMLInputElement | HTMLSelectElement;
     type ModelRow = { model: ModelControl; paid: ToggleEl; max: HTMLInputElement; ctx: HTMLInputElement; auto: string; el: HTMLElement };
@@ -201,7 +208,7 @@ export class BackendsView {
     const probe = async (): Promise<void> => {
       errors.clear();
       try {
-        const res = await this.deps.probeBackend(host.value.trim(), apiType.value);
+        const res = await this.deps.probeBackend(builtin() ? '' : host.value.trim(), apiType.value);
         probed = res.models;
         contexts = res.contexts ?? {};
         if (probed.length === 0) throw new Error('the host reported no models');
@@ -212,7 +219,7 @@ export class BackendsView {
           draw(row);
           prefill(row);
         }
-        this.deps.notify(`${probed.length} model(s) found on ${host.value.trim()}`);
+        this.deps.notify(`${probed.length} model(s) found${builtin() ? '' : ` on ${host.value.trim()}`}`);
       } catch (err) {
         errors.show(err);
       }
@@ -226,14 +233,14 @@ export class BackendsView {
       errors.clear();
       const body: BackendInput = {
         name: name.value.trim(),
-        host: host.value.trim(),
+        host: builtin() ? '' : host.value.trim(),
         api_type: apiType.value,
         hosted: hosted.checked,
         paid: paid.checked,
         slots: Number(slots.value),
         models: models.map((m) => ({ model: m.model.value.trim(), paid: m.paid.checked, max_concurrent: Number(m.max.value) || 0, context_tokens: Math.max(0, Math.round(Number(m.ctx.value) || 0)) })).filter((m) => m.model !== ''),
       };
-      if (hosted.checked && apiKey.value !== '') body.api_key = apiKey.value;
+      if (hosted.checked && !builtin() && apiKey.value !== '') body.api_key = apiKey.value;
       else if (clearKey) body.api_key = '';
       try {
         const res = initial
@@ -249,7 +256,7 @@ export class BackendsView {
     return h('div', { class: 'profile-card', attrs: { 'data-form': initial ? 'edit' : 'add' } },
       h('div', { class: 'profile-fields' },
         errors.add('name', fieldRow('Name', name, 'Letters, digits and dashes; fixed once added')).el,
-        errors.add('host', fieldRow('Host', host, 'An http or https URL')).el,
+        hostField.el,
         errors.add('api_type', fieldRow('API type', apiType)).el,
         errors.add('slots', fieldRow('Slots', slots, 'Stages this backend runs at once')).el,
         errors.add('hosted', fieldRow('Hosted', hosted, 'A remote service rather than your own machine')).el,
@@ -303,7 +310,7 @@ export class BackendsView {
           b.paid ? badge('paid') : null,
           b.hosted ? badge('hosted', 'muted') : null,
           b.has_key ? badge('key set', 'ok') : null,
-          b.hosted && isPrivateHost(b.host) ? h('span', { class: 'badge badge-warn', text: '\u26A0 hosted?', attrs: { title: 'Flagged hosted, but the host is a private or local address: it may be mis-flagged. Edit the backend and untick Hosted if it runs on your own machine or network.', 'data-role': 'hosted-warning' } }) : null,
+          b.hosted && b.api_type !== 'opencode' && isPrivateHost(b.host) ? h('span', { class: 'badge badge-warn', text: '\u26A0 hosted?', attrs: { title: 'Flagged hosted, but the host is a private or local address: it may be mis-flagged. Edit the backend and untick Hosted if it runs on your own machine or network.', 'data-role': 'hosted-warning' } }) : null,
           b.retired ? badge('retired', 'warn') : null,
           b.down_until ? badge('unreachable', 'warn') : null),
         h('div', { class: 'profile-actions' },
@@ -312,7 +319,7 @@ export class BackendsView {
             ? button('Enable', () => void this.enable(b.name), { field: 'enable', icon: 'approve', word: true })
             : button('Retire', () => { this.retiring.add(b.name); this.render(); }, { field: 'retire', icon: 'trash', word: true }))),
       h('div', { class: 'profile-fields' },
-        h('div', {}, h('label', { text: 'Host' }), h('span', { text: b.host })),
+        b.api_type === 'opencode' ? null : h('div', {}, h('label', { text: 'Host' }), h('span', { text: b.host })),
         h('div', {}, h('label', { text: 'API type' }), h('span', { text: b.api_type })),
         h('div', {}, h('label', { text: 'Slots' }), h('span', { text: String(b.slots) })),
         h('div', {}, h('label', { text: 'Models' }), ...models)),

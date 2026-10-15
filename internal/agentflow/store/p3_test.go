@@ -35,8 +35,8 @@ func TestMigration10UpgradesAnExistingDatabase(t *testing.T) {
 		t.Fatalf("upgrade: %v", err)
 	}
 	defer s2.Close()
-	if v := schemaVersion(t, s2.db); v != 10 {
-		t.Fatalf("version = %d, want 10", v)
+	if v := schemaVersion(t, s2.db); v != len(migrations) {
+		t.Fatalf("version = %d, want %d", v, len(migrations))
 	}
 	b, err := s2.GetBackend(ctx, "b")
 	if err != nil || len(b.Models) != 1 || b.Models[0].ContextTokens != 0 {

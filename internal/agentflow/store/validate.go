@@ -24,7 +24,7 @@ var (
 	slugRE        = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,39}$`)
 
 	reservedBackendNames = map[string]bool{"verify": true, "merge": true}
-	apiTypes             = map[string]bool{"ollama": true, "openai_compatible": true, "anthropic": true}
+	apiTypes             = map[string]bool{"ollama": true, "openai_compatible": true, "anthropic": true, "opencode": true}
 )
 
 const (

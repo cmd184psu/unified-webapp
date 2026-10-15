@@ -47,6 +47,20 @@ func KeyEnv(backend string) string {
 // ModelRef is the --model value for a backend's model.
 func ModelRef(backend, model string) string { return backend + "/" + model }
 
+// BuiltinProvider is the provider id of opencode's own models; a backend of
+// api type "opencode" is not rendered into the config, so its models are
+// addressed as opencode/<model>.
+const BuiltinProvider = "opencode"
+
+// RefFor is ModelRef for a backend spec: the built-in provider is addressed by
+// its own id, whatever the backend is called.
+func RefFor(b runner.Backend, model string) string {
+	if b.APIType == "opencode" {
+		return BuiltinProvider + "/" + model
+	}
+	return ModelRef(b.Name, model)
+}
+
 type providerDef struct {
 	NPM     string                `json:"npm"`
 	Name    string                `json:"name"`
@@ -112,6 +126,9 @@ func RenderConfig(backends []BackendSpec, plugins ...runner.Plugin) ([]byte, err
 	}
 	keys := map[string]string{}
 	for _, b := range backends {
+		if b.APIType == "opencode" {
+			continue // opencode's own provider needs no entry and no key
+		}
 		if other, clash := keys[KeyEnv(b.Name)]; clash {
 			return nil, fmt.Errorf("opencode: backends %q and %q map to the same key variable %s", other, b.Name, KeyEnv(b.Name))
 		}
