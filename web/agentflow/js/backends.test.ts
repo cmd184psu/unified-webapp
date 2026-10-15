@@ -363,17 +363,18 @@ const setHosted = (host: FakeEl, on: boolean): void => {
 };
 const SECRET = 'sk-secret-123';
 
-test('H5: the API key input is masked and shown only while Hosted is on', async () => {
+test('H5: the API key input is masked and shown for every backend except opencode\'s built-in provider', async () => {
   const t = harness();
   const stop = t.view.mount();
   await flush();
   button(t.host, 'Add backend').click();
   eq(field(t.host, 'api_key').getAttribute('type'), 'password');
-  ok(keyRow(t.host).hasAttribute('hidden'), 'hidden while not hosted');
+  ok(!keyRow(t.host).hasAttribute('hidden'), 'a local server may ask for a key too');
   setHosted(t.host, true);
   ok(!keyRow(t.host).hasAttribute('hidden'), 'shown when hosted');
-  setHosted(t.host, false);
-  ok(keyRow(t.host).hasAttribute('hidden'), 'hidden again');
+  field(t.host, 'api_type').value = 'opencode';
+  field(t.host, 'api_type').fire('change');
+  ok(keyRow(t.host).hasAttribute('hidden'), 'hidden for the built-in provider');
   stop();
 });
 
@@ -438,6 +439,23 @@ test('U5 (review): the context field says unknown, and picking another probed mo
   stop();
 });
 
+test('H4a: Probe sends the typed key and the saved backend name so a host that wants a key can be probed', async () => {
+  const seen: unknown[][] = [];
+  const t = harness({ backends: [be('kimi', { api_type: 'openai_compatible', has_key: true })] },
+    { probeBackend: async (...a: unknown[]) => { seen.push(a); return { models: ['kimi-k3'] }; } });
+  const stop = t.view.mount();
+  await flush();
+  button(t.host, 'Edit').click();
+  button(t.host, 'Probe host for models').click();
+  await flush();
+  eq(seen[0].slice(2), ['', 'kimi']);
+  field(t.host, 'api_key').value = 'typed-key';
+  button(t.host, 'Probe host for models').click();
+  await flush();
+  eq(seen[1].slice(2), ['typed-key', 'kimi']);
+  stop();
+});
+
 void run('agentflow-backends');
 
 test('OB1: the opencode built-in type hides host and key, probes without a host, and saves an empty host', async () => {
@@ -485,3 +503,4 @@ test('H3: a model row has a tier control; the choice is sent and the card shows 
   ok(card.host.textContent.includes('tier 1') && card.host.textContent.includes('tier 3'), 'badges');
   stop2();
 });
+

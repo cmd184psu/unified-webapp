@@ -540,8 +540,8 @@ export const api = {
   // Backends, candidates, settings
   backends: (): Promise<Backend[]> => get('/api/backends'),
   createBackend: (b: BackendInput, o?: FetchOptions): Promise<BackendResult> => send('POST', '/api/backends', b, o),
-  probeBackend: (host: string, apiType: string): Promise<{ models: string[]; contexts?: Record<string, number> }> =>
-    send('POST', '/api/backends/probe', { host, api_type: apiType }, { quiet: true }),
+  probeBackend: (host: string, apiType: string, key = '', backend = ''): Promise<{ models: string[]; contexts?: Record<string, number> }> =>
+    send('POST', '/api/backends/probe', { host, api_type: apiType, api_key: key, backend }, { quiet: true }),
   patchBackend: (name: string, b: Partial<BackendInput>, o?: FetchOptions): Promise<BackendResult> =>
     send('PATCH', `/api/backends/${enc(name)}`, b, o),
   retireBackend: (name: string, cancelRunning: boolean): Promise<BackendResult> =>

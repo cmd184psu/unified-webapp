@@ -148,12 +148,12 @@ export class BackendsView {
       initial?.has_key ? button(clearKey ? 'Keep key' : 'Clear key', () => { clearKey = !clearKey; drawKey(); bump(); }, { field: 'clear-key', icon: clearKey ? 'cancel' : 'remove', word: true }) : null);
     drawKey();
     const keyField = errors.add('api_key', fieldRow('API key', h('div', { class: 'row-actions' }, apiKey, keyState),
-      'Sent to the hosted service as the credential. Leave blank to keep the stored key'));
+      'Sent to the server as its bearer credential, for a hosted service or a local one that asks for a key. Stored write-only; leave blank to keep the stored key'));
     const hostField = errors.add('host', fieldRow('Host', host, 'An http or https URL'));
     // opencode's own provider has no host and no key: its free models are reached through opencode itself.
     const builtin = (): boolean => apiType.value === 'opencode';
     const syncKey = (): void => {
-      if (hosted.checked && !builtin()) keyField.el.removeAttribute('hidden');
+      if (!builtin()) keyField.el.removeAttribute('hidden');
       else keyField.el.setAttribute('hidden', '');
       if (builtin()) hostField.el.setAttribute('hidden', '');
       else hostField.el.removeAttribute('hidden');
@@ -214,7 +214,7 @@ export class BackendsView {
     const probe = async (): Promise<void> => {
       errors.clear();
       try {
-        const res = await this.deps.probeBackend(builtin() ? '' : host.value.trim(), apiType.value);
+        const res = await this.deps.probeBackend(builtin() ? '' : host.value.trim(), apiType.value, apiKey.value, initial?.name ?? '');
         probed = res.models;
         contexts = res.contexts ?? {};
         if (probed.length === 0) throw new Error('the host reported no models');
@@ -246,7 +246,7 @@ export class BackendsView {
         slots: Number(slots.value),
         models: models.map((m) => ({ model: m.model.value.trim(), paid: m.paid.checked, max_concurrent: Number(m.max.value) || 0, context_tokens: Math.max(0, Math.round(Number(m.ctx.value) || 0)), tier: Number(m.tier.value) || 0 })).filter((m) => m.model !== ''),
       };
-      if (hosted.checked && !builtin() && apiKey.value !== '') body.api_key = apiKey.value;
+      if (!builtin() && apiKey.value !== '') body.api_key = apiKey.value;
       else if (clearKey) body.api_key = '';
       return body;
     };

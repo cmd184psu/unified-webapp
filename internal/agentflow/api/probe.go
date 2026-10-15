@@ -21,6 +21,11 @@ import (
 type probeBody struct {
 	Host    string `json:"host"`
 	APIType string `json:"api_type"`
+	// APIKey is a key typed into the form; Backend names a saved backend whose
+	// stored key is used when none was typed. Hosts that need a bearer key
+	// answer 401 without one.
+	APIKey  string `json:"api_key"`
+	Backend string `json:"backend"`
 }
 
 // probeBackend asks a host which models it serves, so the form can offer an
@@ -34,7 +39,11 @@ func (a *API) probeBackend(w http.ResponseWriter, r *http.Request) {
 		a.probeBuiltin(w, r)
 		return
 	}
-	models, err := probeModels(r.Context(), http.DefaultClient, body.Host, body.APIType)
+	key := body.APIKey
+	if key == "" && body.Backend != "" {
+		key, _ = a.deps.Store.BackendKey(r.Context(), body.Backend)
+	}
+	models, err := probeModels(r.Context(), http.DefaultClient, body.Host, body.APIType, key)
 	if err != nil {
 		var fe *store.FieldError
 		if errors.As(err, &fe) {
@@ -102,7 +111,7 @@ func showContext(ctx context.Context, c *http.Client, base, model string) int {
 
 // probeModels lists the model names a backend host serves: Ollama's
 // /api/tags, or an OpenAI-compatible /v1/models.
-func probeModels(ctx context.Context, c *http.Client, host, apiType string) ([]string, error) {
+func probeModels(ctx context.Context, c *http.Client, host, apiType, key string) ([]string, error) {
 	u, err := url.Parse(strings.TrimSpace(host))
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, store.Invalid("host", "an http or https URL is required")
@@ -122,6 +131,9 @@ func probeModels(ctx context.Context, c *http.Client, host, apiType string) ([]s
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
 	if err != nil {
 		return nil, err
+	}
+	if key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
 	}
 	resp, err := c.Do(req)
 	if err != nil {
