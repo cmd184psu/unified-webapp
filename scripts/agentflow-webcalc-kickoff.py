@@ -88,10 +88,10 @@ except OSError:
 
 health = api("GET", "/api/health", None, 200)
 say(f"service ok; opencode {health.get('opencode', {}).get('status')}")
-for role in ("planner", "architect", "critic", "compiler", "worker", "reviewer"):
-    cands = (api("GET", f"/api/candidates/{role}", None, 200) or {}).get("candidates") or []
-    if not cands:
-        sys.exit(f"no {role} candidate configured: add one in the UI first")
+have = {c.get("role") for c in (api("GET", "/api/candidates", None, 200) or []) if c.get("scope") == "global"}
+missing = [r for r in ("planner", "architect", "critic", "compiler", "worker", "reviewer") if r not in have]
+if missing:
+    sys.exit("no candidate configured for: " + ", ".join(missing) + " (add them in the UI first)")
 
 # a fresh repo with one commit
 if not os.path.isdir(os.path.join(args.repo, ".git")):
