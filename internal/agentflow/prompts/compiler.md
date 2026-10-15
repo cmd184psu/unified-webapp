@@ -44,5 +44,6 @@ Emit only these fields. Any other field makes the queue invalid.
 10. Put code and the tests that cover it in the SAME task: the worker writes both, and a task that only adds tests for code another task wrote finds nothing to do. Make a tests-only task only for tests that span several tasks' code (end-to-end or cross-package); it depends on those tasks and names the test files.
 11. Never invent infrastructure outside the approved plan. The runner owns project-state files.
 12. Never emit a task whose only purpose is running, checking or confirming tests, the build or lint (titles such as "Run tests" or "Make sure all tests pass"). Every task must change files; the engine builds, vets and tests after every task automatically, with no task needed. Such a task is rejected.
+13. Never emit a task whose only purpose is creating directories, empty files or placeholders. Git does not track empty directories, so such a task changes nothing and can never pass. A directory comes into being as part of the task that writes the first real file in it.
 
 Produce the full queue now.

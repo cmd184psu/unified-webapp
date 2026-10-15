@@ -40,6 +40,8 @@ ap.add_argument("--host", default="agentflow.builder.cmdhome.net")
 ap.add_argument("--pin-file", default=os.path.expanduser("~/.unified_common.pin"))
 ap.add_argument("--repo", default=os.path.expanduser("~/af-webcalc"))
 ap.add_argument("--slug", default="webcalc")
+ap.add_argument("--scope", default="any", choices=("local", "any"),
+                help="model scope: any lets hosted backends (the free opencode models) be used")
 ap.add_argument("--wait", action="store_true")
 args = ap.parse_args()
 
@@ -105,7 +107,7 @@ if not os.path.isdir(os.path.join(args.repo, ".git")):
     g("commit", "-q", "-m", "initial")
 
 slug = args.slug
-api("POST", "/api/projects", {"slug": slug, "repo_path": args.repo, "model_scope": "local"}, 201)
+api("POST", "/api/projects", {"slug": slug, "repo_path": args.repo, "model_scope": args.scope}, 201)
 eid = api("POST", f"/api/projects/{slug}/efforts", {"title": "web calculator"}, 201)["id"]
 base = f"/api/projects/{slug}/efforts/{eid}"
 say(f"project {slug}, effort {eid}: open the agentflow UI to watch")
