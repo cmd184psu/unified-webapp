@@ -56,6 +56,8 @@ The engine's gates (build, vet, tests, reviewer) all passed on the broken build.
 
 **H5 Trial harness and re-run.** Turn the webcalc trial into a scored check: a probe script that starts the built branch on the port from the spec (first confirming the port is free, which would have caught my stale-server mistake) and tests every route in the spec, the page, the history cap and the 400 cases. Re-run webcalc with local-only models and with the mixed set, and record the results in progress.md. Success: the local-only run passes the probe, or fails at a gate with a named reason instead of completing.
 
+**H6 Install a model from the UI.** (owner, 2026-10-15) On the Backends page: pick an Ollama backend, name a model, press Install. The service calls the host's `POST /api/pull` (no ssh needed; it is the same API I used by hand on 2026-10-15 for devstral-small-2 and gemma3:27b), streams the progress (layer, bytes done of total) to a progress bar through a job record in SQLite so a page reload or service restart still shows it, and on success adds the model to the backend with a tier chosen at install time. Errors are shown as the host reports them (an unknown tag answers `pull model manifest: file does not exist`). Also: a host-side delete (`DELETE /api/delete`) behind the same "Are you sure?" box as the planned backend delete, and the host's loaded/installed lists (`/api/ps`, `/api/tags`) to warn when a model will not fit. Tests: progress parsing, the job surviving a restart, unknown tag, a cancelled pull. Not for non-Ollama backends.
+
 ## Order
 
 H1 first (it is the actual defect), then H2, H3, H3b (Stats), H4 (adds hardware once tiers exist), H4a (keys), H4b (Kimi), H5 last. Each story: tests first, `make gates`, one commit.
