@@ -1292,3 +1292,13 @@ body {
 .autosave-mark { color: var(--color-text-muted); font-size: 1.1rem; min-width: 2rem; }
 .autosave-mark[data-state="pending"] { color: var(--color-text); }
 .autosave-mark[data-state="failed"] { color: var(--color-danger); }
+
+/* What the project is doing right now, above the tabs. */
+.activity-strip { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); margin-bottom: var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-1); }
+.activity-strip[hidden] { display: none; }
+.activity-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.activity-dot { flex: 0 0 auto; width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--color-text-muted); }
+.activity-strip[data-kind="busy"] .activity-dot { background: var(--color-primary); animation: activity-pulse 1.2s ease-in-out infinite; }
+.activity-strip[data-kind="wait"] .activity-dot { background: var(--color-warning); }
+@keyframes activity-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.7); } }
+@media (prefers-reduced-motion: reduce) { .activity-strip[data-kind="busy"] .activity-dot { animation: none; } }

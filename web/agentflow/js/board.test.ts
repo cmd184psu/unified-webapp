@@ -351,6 +351,8 @@ test('a project tab disposed before the project list arrives mounts no sub-view'
   const saved = SUB_TABS[0].mount;
   SUB_TABS[0].mount = (_h, slug) => { mounted.push(slug); };
   const origProjects = api.projects;
+  const origEfforts = api.efforts;
+  api.efforts = async () => [];
   let release: (v: never[]) => void = () => {};
   api.projects = () => new Promise((r) => { release = r as (v: never[]) => void; });
   const host = new FakeEl('DIV');
@@ -360,6 +362,7 @@ test('a project tab disposed before the project list arrives mounts no sub-view'
   await flush();
   eq(mounted, []);
   api.projects = origProjects;
+  api.efforts = origEfforts;
   SUB_TABS[0].mount = saved;
 });
 

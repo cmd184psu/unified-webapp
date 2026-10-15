@@ -506,3 +506,7 @@ Editing something that already exists never needs a Save button: a backend, a ro
 Two things behave differently because of what a save means. Each FRD save stores a new revision (so a long editing session leaves several), and Done then shows the saved revision for approval. Editing a halted task returns the queue to draft; the form says so, and the queue must be approved again. A repository that is not a git repository is reported as an error on a project edit instead of offering git init.
 
 Creating something (Add backend, Create project, Create effort) stays one explicit ✓, because saving on a pause would create half-typed entities.
+
+## What is happening now
+
+A strip above a project's tabs says what the project is doing, whichever tab is open: a pulsing dot with a clock while the engine or a model is working (drafting the FRD, planning, turning the plan into tasks, or running a task with its stage and model), a yellow dot when it is your turn (review the FRD, plan or queue; a halted task), and a grey dot when nothing is going on. The arrow opens the tab that shows it. The Overview row shows the run state ("stopped", Start) only once a queue is approved; before that it is not a decision you have, so it is left out.

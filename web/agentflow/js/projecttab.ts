@@ -3,6 +3,7 @@
 // mounted from SUB_TABS; the form for creating and editing a project replaces
 // the sub-tabs while it is open.
 
+import { Activity } from './activity.js';
 import { api, type ProjectView } from './api.js';
 import { h, replace } from './dom.js';
 import { mountBoard } from './board.js';
@@ -58,6 +59,9 @@ export function mountProjectTab(host: HTMLElement, wanted: string): () => void {
   const picker = h('select', { class: 'settings-input', attrs: { 'aria-label': 'Project' } }) as HTMLSelectElement;
   const bar = h('div', { class: 'tab-bar', attrs: { role: 'tablist' } });
   const body = h('div', { class: 'project-body' });
+  const activityEl = h('div', { class: 'activity-strip', attrs: { role: 'status', hidden: true, 'data-role': 'activity' } });
+  const activity = new Activity(activityEl, (id) => { sub = id; showSub(); });
+  const stopActivity = activity.mount(slug);
 
   const closeSub = (): void => {
     if (typeof dispose === 'function') dispose();
@@ -92,6 +96,7 @@ export function mountProjectTab(host: HTMLElement, wanted: string): () => void {
     if (!projects.some((p) => p.slug === slug)) slug = projects[0]?.slug ?? '';
     replace(picker, ...projects.map((p) => h('option', { text: p.slug, attrs: { value: p.slug, selected: p.slug === slug } })));
     picker.value = slug;
+    activity.setProject(slug);
     showSub();
   };
 
@@ -110,6 +115,7 @@ export function mountProjectTab(host: HTMLElement, wanted: string): () => void {
   picker.addEventListener('change', () => {
     slug = picker.value;
     remember(slug);
+    activity.setProject(slug);
     showSub();
   });
   replace(host,
@@ -117,13 +123,14 @@ export function mountProjectTab(host: HTMLElement, wanted: string): () => void {
       h('span', { class: 'pane-title', text: 'Project' }), picker,
       button('New project', () => showForm(), { field: 'new-project', icon: 'add' }),
       button('Edit project', () => { const cur = projects.find((p) => p.slug === slug); if (cur) showForm(cur); }, { field: 'edit-project', icon: 'edit' })),
-    bar, body);
+    activityEl, bar, body);
 
   if (wanted === '+new') showForm();
   else void reload();
 
   return () => {
     disposed = true;
+    stopActivity();
     closeSub();
   };
 }

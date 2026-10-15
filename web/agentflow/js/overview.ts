@@ -226,7 +226,9 @@ export class Overview {
     const work = (p.current ?? []).length > 0
       ? (p.current ?? []).map((w) => h('div', { class: 'task-item-meta', text: workLine(w) }))
       : [h('div', { class: 'task-item-meta', text: ef ? 'no stage running' : 'no active effort' })];
-    const buttons = buttonsFor(p.run_state).map((b) =>
+    // "stopped" and Start mean nothing while the effort is still being drafted, planned or compiled.
+    const runnable = p.run_state !== 'stopped' || (!!ef && ['queue_approved', 'running', 'paused'].includes(ef.status));
+    const buttons = (runnable ? buttonsFor(p.run_state) : []).map((b) =>
       button(b.label, () => void this.control(p.slug, b.op), { primary: b.primary, op: b.op, icon: b.icon, word: b.word }));
     const why = unregisterBlock(p);
     const trash = this.deps.unregister
@@ -238,7 +240,7 @@ export class Overview {
         h('a', { class: 'task-item-title', text: p.slug, attrs: { href: '#', 'data-open': p.slug }, on: {
           click: (e) => { e.preventDefault(); this.deps.open(p.slug); },
         } }),
-        chip(p.run_state),
+        runnable ? chip(p.run_state) : null,
         ef?.yolo ? yoloBadge() : null),
       h('div', { class: 'task-item-meta', text: ef ? `${ef.title} · ${ef.status.replace(/_/g, ' ')}` : 'no active effort' }),
       bar,

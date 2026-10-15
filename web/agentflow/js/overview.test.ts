@@ -1,4 +1,4 @@
-import { test, run, eq, ok, installFakeDom, FakeEl, findAll, asEl } from './testkit';
+import { test, run, eq, ok, installFakeDom, FakeEl, findAll, asEl, byAttr } from './testkit';
 import { Overview, buttonsFor, progressText, type OverviewDeps } from './overview';
 import { dispatch, subscribe, backoffMs, pollSettings } from './events';
 import { HealthBanner, healthMessage } from './health';
@@ -54,6 +54,20 @@ test('overview shows every project with run state, effort, progress, stage and b
   ok(text.includes('worker · t1 (attempt 2) · bk/m1 · running'), 'current stage and backend');
   ok(text.includes('no queue yet'), 'project with no queue');
   eq(findAll(t.host, (e) => e.className.startsWith('status-chip')).map((e) => e.textContent), ['stopped', 'paused']);
+  stop();
+});
+
+test('OV1: while an effort is only being drafted or planned, the row shows no "stopped" chip and no Start', async () => {
+  const planning = proj('alpha', { effort: { ...proj('x').effort as NonNullable<ProjectView['effort']>, status: 'planning' }, current: [], progress: {} });
+  const ready = proj('beta', { effort: { ...proj('x').effort as NonNullable<ProjectView['effort']>, status: 'queue_approved' }, current: [], progress: {} });
+  const t = harness([planning, ready]);
+  const stop = t.ov.mount();
+  await flush();
+  const chips = (slug: string): string[] => findAll(byAttr(t.host, 'data-project', slug)[0], (e) => e.className.startsWith('status-chip')).map((e) => e.textContent);
+  eq(chips('alpha'), []);
+  eq(chips('beta'), ['stopped']);
+  eq(findAll(byAttr(t.host, 'data-project', 'alpha')[0], (e) => e.getAttribute('data-op') === 'start').length, 0);
+  eq(findAll(byAttr(t.host, 'data-project', 'beta')[0], (e) => e.getAttribute('data-op') === 'start').length, 1);
   stop();
 });
 

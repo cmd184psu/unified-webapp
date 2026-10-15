@@ -443,6 +443,7 @@ var SHAPES = {
   sparkle: [path("M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"), path("M19 15l.7 1.8 1.8.7-1.8.7L19 20l-.7-1.8-1.8-.7 1.8-.7z")],
   split: [["circle", { cx: "6", cy: "6", r: "3" }], ["circle", { cx: "6", cy: "18", r: "3" }], line(20, 4, 8.12, 15.88), line(14.47, 14.48, 20, 20), line(8.12, 8.12, 12, 12)],
   warn: [path("M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"), line(12, 9, 12, 13), line(12, 17, 12.01, 17)],
+  next: [line(5, 12, 19, 12), poly("12 5 19 12 12 19")],
   gauge: [path("M3.34 19a10 10 0 1 1 17.32 0"), line(12, 14, 16, 10)]
 };
 function icon(name) {
@@ -922,7 +923,8 @@ var Overview = class {
     const ef = p.effort;
     const bar = h("div", { class: "progress-bar-wrap" }, h("div", { class: "progress-bar", attrs: { style: `width: ${pct2}%` } }));
     const work = (p.current ?? []).length > 0 ? (p.current ?? []).map((w) => h("div", { class: "task-item-meta", text: workLine(w) })) : [h("div", { class: "task-item-meta", text: ef ? "no stage running" : "no active effort" })];
-    const buttons = buttonsFor(p.run_state).map((b) => button(b.label, () => void this.control(p.slug, b.op), { primary: b.primary, op: b.op, icon: b.icon, word: b.word }));
+    const runnable = p.run_state !== "stopped" || !!ef && ["queue_approved", "running", "paused"].includes(ef.status);
+    const buttons = (runnable ? buttonsFor(p.run_state) : []).map((b) => button(b.label, () => void this.control(p.slug, b.op), { primary: b.primary, op: b.op, icon: b.icon, word: b.word }));
     const why = unregisterBlock(p);
     const trash = this.deps.unregister ? button(why ? `Unregister: ${why}` : "Unregister", () => void this.unregisterRow(p.slug), { field: "unregister-project", icon: "trash" }) : null;
     if (trash && why) trash.disabled = true;
@@ -938,7 +940,7 @@ var Overview = class {
             this.deps.open(p.slug);
           }
         } }),
-        chip(p.run_state),
+        runnable ? chip(p.run_state) : null,
         ef?.yolo ? yoloBadge() : null
       ),
       h("div", { class: "task-item-meta", text: ef ? `${ef.title} \xB7 ${ef.status.replace(/_/g, " ")}` : "no active effort" }),
@@ -2003,9 +2005,6 @@ function mountBackends(host) {
   return new BackendsView(host, defaultBackendsDeps()).mount();
 }
 
-// web/agentflow/js/board.ts
-import { confirmDialog as confirmDialog4, copyText as copyText3, showToast as showToast5 } from "/shared/dist/shared.mjs";
-
 // web/agentflow/js/current.ts
 var picked = /* @__PURE__ */ new Map();
 function isFinished(e) {
@@ -2034,6 +2033,149 @@ function effortBar(slug, efforts, current, onPick, yolo) {
     current && yolo ? yoloControl(slug, current, yolo.deps, yolo.onChanged) : null
   );
 }
+
+// web/agentflow/js/activity.ts
+function describe(ef, draft, tasks) {
+  const n = `#${ef.id}`;
+  switch (ef.status) {
+    case "draft":
+      if (draft?.state === "running") {
+        const what = draft.purpose === "split" ? "Splitting the FRD into parts" : draft.purpose === "polish" ? "Tidying the FRD" : "Drafting the FRD";
+        return { kind: "busy", text: `${what}\u2026`, tab: "frd", since: draft.started ?? 0 };
+      }
+      if (ef.frd?.latest) return { kind: "wait", text: `${n}: review the FRD and approve it`, tab: "frd", since: 0 };
+      return { kind: "wait", text: `${n}: describe what to build`, tab: "frd", since: 0 };
+    case "planning":
+      return { kind: "busy", text: `${n}: planning\u2026`, tab: "plan", since: ef.updated };
+    case "plan_ready":
+      return { kind: "wait", text: `${n}: review the plan and approve it`, tab: "plan", since: 0 };
+    case "plan_approved":
+    case "compiling":
+      return { kind: "busy", text: `${n}: turning the plan into tasks\u2026`, tab: "queue", since: ef.updated };
+    case "queue_draft":
+      return { kind: "wait", text: `${n}: review the queue and approve it`, tab: "queue", since: 0 };
+    case "queue_approved":
+      return { kind: "wait", text: `${n}: queue approved; start the run`, tab: "board", since: 0 };
+    case "running": {
+      const halted = tasks.find((t) => t.halted);
+      if (halted) return { kind: "wait", text: `${n}: ${halted.key} needs attention`, tab: "board", since: 0 };
+      const cur = tasks.map((t) => t.current).find((c) => c);
+      const done = tasks.filter((t) => t.status === "passed").length;
+      const progress = tasks.length ? ` (${done}/${tasks.length} done)` : "";
+      return {
+        kind: "busy",
+        text: cur ? `${n}: ${cur.task} ${cur.role} on ${cur.model || cur.backend}${progress}` : `${n}: running${progress}`,
+        tab: "board",
+        since: 0
+      };
+    }
+    case "paused":
+      return { kind: "rest", text: `${n}: paused`, tab: "board", since: 0 };
+    case "complete":
+      return { kind: "rest", text: `${n}: complete; ready to merge`, tab: "board", since: 0 };
+    case "abandoned":
+      return { kind: "rest", text: `${n}: abandoned`, tab: "history", since: 0 };
+    default:
+      return { kind: "rest", text: `${n}: ${ef.status.replace(/_/g, " ")}`, tab: "frd", since: 0 };
+  }
+}
+function clock(ms) {
+  const s = Math.max(0, Math.floor(ms / 1e3));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+}
+var Activity = class {
+  constructor(el, open, deps = { efforts: api.efforts, draftState: (s, i) => api.draftState(s, i, { quiet: true }), tasks: api.tasks }) {
+    this.el = el;
+    this.open = open;
+    this.deps = deps;
+    this.slug = "";
+    this.line = null;
+    this.ticker = null;
+    this.clockEl = null;
+    this.off = null;
+    this.stopPoll = null;
+    this.disposed = false;
+    this.seq = 0;
+  }
+  mount(slug) {
+    this.slug = slug;
+    this.off = subscribe((ev) => {
+      if (["state.changed", "effort.update", "project.update", "draft.update"].includes(ev.type)) void this.refresh();
+    });
+    this.stopPoll = startPoll(() => this.line?.kind === "busy", () => this.refresh());
+    void this.refresh();
+    return () => {
+      this.disposed = true;
+      this.stopTicker();
+      this.off?.();
+      this.stopPoll?.();
+    };
+  }
+  /** setProject points the strip at another project. */
+  setProject(slug) {
+    this.slug = slug;
+    this.line = null;
+    this.render();
+    void this.refresh();
+  }
+  async refresh() {
+    if (this.disposed) return;
+    const slug = this.slug;
+    const seq = ++this.seq;
+    let line2 = null;
+    try {
+      const ef = slug ? chooseEffort(slug, await this.deps.efforts(slug)) : void 0;
+      if (ef) {
+        const draft = ef.status === "draft" ? await this.deps.draftState(slug, ef.id).catch(() => null) : null;
+        const tasks = ef.status === "running" ? await this.deps.tasks(slug, ef.id).catch(() => []) : [];
+        line2 = describe(ef, draft, tasks);
+      }
+    } catch {
+      return;
+    }
+    if (this.disposed || seq !== this.seq || slug !== this.slug) return;
+    this.line = line2;
+    this.render();
+  }
+  stopTicker() {
+    if (this.ticker) clearInterval(this.ticker);
+    this.ticker = null;
+    this.clockEl = null;
+  }
+  render() {
+    this.stopTicker();
+    const l = this.line;
+    if (!l) {
+      replace(this.el);
+      this.el.setAttribute("hidden", "");
+      return;
+    }
+    this.el.removeAttribute("hidden");
+    this.el.setAttribute("data-kind", l.kind);
+    const clockEl = l.since > 0 ? h("span", { class: "field-hint", attrs: { "data-role": "elapsed" }, text: clock(Date.now() - l.since) }) : null;
+    this.clockEl = clockEl;
+    if (clockEl && l.since > 0) {
+      const since = l.since;
+      this.ticker = setInterval(() => {
+        if (this.clockEl) this.clockEl.textContent = clock(Date.now() - since);
+      }, 1e3);
+    }
+    replace(
+      this.el,
+      h("span", { class: "activity-dot", attrs: { "aria-hidden": "true" } }),
+      h("span", { class: "activity-text", text: l.text, attrs: { "data-role": "activity-text" } }),
+      clockEl,
+      h("button", {
+        class: "ui-modal-btn af-has-icon af-icon-only",
+        attrs: { type: "button", title: "Open it", "aria-label": "Open it", "data-action": "open-activity" },
+        on: { click: () => this.open(l.tab) }
+      }, icon("next"))
+    );
+  }
+};
+
+// web/agentflow/js/board.ts
+import { confirmDialog as confirmDialog4, copyText as copyText3, showToast as showToast5 } from "/shared/dist/shared.mjs";
 
 // web/agentflow/js/stream.ts
 var defaultStreamDeps = () => ({ open: (url) => new EventSource(url) });
@@ -4265,6 +4407,12 @@ function mountProjectTab(host, wanted2) {
   const picker = h("select", { class: "settings-input", attrs: { "aria-label": "Project" } });
   const bar = h("div", { class: "tab-bar", attrs: { role: "tablist" } });
   const body = h("div", { class: "project-body" });
+  const activityEl = h("div", { class: "activity-strip", attrs: { role: "status", hidden: true, "data-role": "activity" } });
+  const activity = new Activity(activityEl, (id) => {
+    sub = id;
+    showSub();
+  });
+  const stopActivity = activity.mount(slug);
   const closeSub = () => {
     if (typeof dispose2 === "function") dispose2();
     dispose2 = void 0;
@@ -4298,6 +4446,7 @@ function mountProjectTab(host, wanted2) {
     if (!projects.some((p) => p.slug === slug)) slug = projects[0]?.slug ?? "";
     replace(picker, ...projects.map((p) => h("option", { text: p.slug, attrs: { value: p.slug, selected: p.slug === slug } })));
     picker.value = slug;
+    activity.setProject(slug);
     showSub();
   };
   const showForm = (project) => {
@@ -4314,6 +4463,7 @@ function mountProjectTab(host, wanted2) {
   picker.addEventListener("change", () => {
     slug = picker.value;
     remember(slug);
+    activity.setProject(slug);
     showSub();
   });
   replace(
@@ -4329,6 +4479,7 @@ function mountProjectTab(host, wanted2) {
         if (cur) showForm(cur);
       }, { field: "edit-project", icon: "edit" })
     ),
+    activityEl,
     bar,
     body
   );
@@ -4336,6 +4487,7 @@ function mountProjectTab(host, wanted2) {
   else void reload();
   return () => {
     disposed = true;
+    stopActivity();
     closeSub();
   };
 }
