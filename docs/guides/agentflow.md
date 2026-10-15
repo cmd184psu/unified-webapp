@@ -498,3 +498,7 @@ when the FRD text mentions things like auth, migration or PII.
 | `409` on git commands | The effort is not complete yet. |
 | After a restart, a project shows "was running" | That is a memory aid. Press Start. |
 | Verification fails on a clean checkout | The baseline is recorded before the first task. Failures that already existed there are not blamed on a task; fix or remove the failing feedback command. |
+
+## Auto-save
+
+Cards that edit something that already exists save themselves: an edited backend, a role's candidate order, the settings drawer, an effort's settings and a project's limits. There is no Save button. After five seconds without a change the card compares its fields with what was last saved and saves only if they differ; a refused save (the field it names is marked) is not retried until something changes again. A small mark shows the state: `…` pending, `↻` saving, `✓` saved, `⚠` not saved. Closing a card (Done) or leaving a project's limits saves a pending change first. Creating things (Add backend, Create project, Create effort) and anything that makes a new version (the FRD, a queue task) stay explicit, one ✓ button each.

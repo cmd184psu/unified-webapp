@@ -1,3 +1,4 @@
+import { timing } from './autosave';
 import { test, run, eq, ok, installFakeDom, FakeEl, asEl, byField, byAttr, button, flush, findAll } from './testkit';
 import { BackendsView, isPaid, isPrivateHost, lastForRoles, unconsented, type BackendsDeps } from './backends';
 import { moveItem, dropIndex } from './candidates';
@@ -149,6 +150,11 @@ test('a models error from the server shows beside the models list', async () => 
   stop();
 });
 
+const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+/** settle lets the pause after an edit pass (the tests shorten it) so the card has saved. */
+const settle = async (el: FakeEl): Promise<void> => { el.fire('input'); await wait(60); await flush(); };
+timing.delay = 10;
+
 test('edit patches the backend without renaming it', async () => {
   const t = harness({ backends: [be('b1')] });
   const stop = t.view.mount();
@@ -156,8 +162,7 @@ test('edit patches the backend without renaming it', async () => {
   button(t.host, 'Edit').click();
   eq(field(t.host, 'name').getAttribute('readonly'), '');
   field(t.host, 'slots').value = '4';
-  button(t.host, 'Save backend').click();
-  await flush();
+  await settle(field(t.host, 'slots'));
   eq(t.log.filter((l) => l.startsWith('patch:')), ['patch:b1']);
   eq((t.bodies.patch as BackendInput).slots, 4);
   stop();
@@ -200,37 +205,31 @@ test('MB5: a paid candidate shows the paid badge and cannot be saved without opt
   button(worker, 'Add candidate').click();
   const w = byAttr(t.host, 'data-role-editor', 'worker')[0];
   ok(findAll(w, (e) => e.className.startsWith('badge badge-paid')).length === 1, 'paid badge on the new row');
-  button(w, 'Save order').click();
+  await wait(60);
   await flush();
   eq(t.log.filter((l) => l.startsWith('cands:')), []);
-  ok(w.textContent.includes('Tick the paid opt-in for: b1/m2-paid'), 'blocked with a reason');
-  const optIn = field(w, 'opt_in');
+  ok(byAttr(t.host, 'data-role-editor', 'worker')[0].textContent.includes('Tick the paid opt-in for: b1/m2-paid'), 'blocked with a reason');
+  const optIn = field(byAttr(t.host, 'data-role-editor', 'worker')[0], 'opt_in');
   optIn.checked = true;
   optIn.fire('change');
-  button(byAttr(t.host, 'data-role-editor', 'worker')[0], 'Save order').click();
+  await wait(60);
   await flush();
   eq(t.bodies.cands, [{ backend: 'b1', model: 'm1' }, { backend: 'b1', model: 'm2-paid' }]);
   stop();
 });
 
-test('F5: Save order on an empty list adds the picked pair and saves in one step; nothing picked keeps the message', async () => {
+test('F5: an empty list saves nothing by itself; Add candidate adds the picked pair and it saves after the pause', async () => {
   const t = harness({ backends: [be('b1')] });
   const stop = t.view.mount();
   await flush();
   const worker = (): FakeEl => byAttr(t.host, 'data-role-editor', 'worker')[0];
-  button(worker(), 'Save order').click();
+  await wait(60);
+  eq(t.log.filter((l) => l.startsWith('cands:')), []);
+  button(worker(), 'Add candidate').click();
+  await wait(60);
   await flush();
   eq(t.bodies.cands, [{ backend: 'b1', model: 'm1' }]);
   stop();
-  const none = harness({ backends: [be('b1', { retired: true })] });
-  const stop2 = none.view.mount();
-  await flush();
-  const w = byAttr(none.host, 'data-role-editor', 'worker')[0];
-  button(w, 'Save order').click();
-  await flush();
-  ok(w.textContent.includes('Nothing to save yet'), 'message kept when nothing is selected');
-  eq(none.log.filter((l) => l.startsWith('cands:')), []);
-  stop2();
 });
 
 test('F4: a backend flagged hosted on a private or loopback host gets a warning badge', async () => {
@@ -264,7 +263,7 @@ test('candidates reorder and remove locally before saving', async () => {
   handle(1).fire('keydown', { key: 'ArrowUp' });
   ok(row(0).textContent.includes('b2 / m1'), 'moved up');
   button(row(1), 'Remove').click();
-  button(ed(), 'Save order').click();
+  await wait(60);
   await flush();
   eq(t.bodies.cands, [{ backend: 'b2', model: 'm1' }]);
   stop();
@@ -286,7 +285,7 @@ test('H4: the reorder handle is a focusable labelled control; arrow keys move a 
   handle(1).fire('keydown', { key: 'ArrowDown' });
   handle(2).fire('keydown', { key: 'a' });
   eq([0, 1, 2].map((i) => /b\d/.exec(row(i).textContent)?.[0]), ['b2', 'b3', 'b1']);
-  button(ed(), 'Save order').click();
+  await wait(60);
   await flush();
   eq(t.bodies.cands, [{ backend: 'b2', model: 'm1' }, { backend: 'b3', model: 'm1' }, { backend: 'b1', model: 'm1' }]);
   stop();
@@ -320,8 +319,7 @@ test('CF2: project limits show blank as inherit and send blanks for the unset on
   eq(field(limits, 'worker_timeout').getAttribute('placeholder'), 'inherit (30m0s)');
   field(limits, 'worker_timeout').value = '45m';
   field(limits, 'max_attempts').value = '';
-  button(t.host, 'Save project limits').click();
-  await flush();
+  await settle(field(limits, 'max_attempts'));
   const sent = t.bodies.limits as Record<string, string>;
   eq([sent.worker_timeout, sent.max_attempts, sent.review_timeout], ['45m', '', '']);
   eq(t.log.filter((l) => l.startsWith('limits:')), ['limits:p1']);
@@ -334,8 +332,9 @@ test('a limits 400 names the limit field', async () => {
   });
   const stop = t.view.mount();
   await flush();
-  button(t.host, 'Save project limits').click();
-  await flush();
+  const lim = byAttr(t.host, 'data-role', 'project-limits')[0];
+  field(lim, 'worker_timeout').value = '1m';
+  await settle(field(lim, 'worker_timeout'));
   eq(errorOf(t.host, 'worker_timeout'), 'must be a duration such as 30m');
   stop();
 });
@@ -400,13 +399,11 @@ test('H5: a typed key is sent as api_key; an untouched field sends none', async 
   const stop = t.view.mount();
   await flush();
   button(t.host, 'Edit').click();
-  button(t.host, 'Save backend').click();
-  await flush();
+  field(t.host, 'slots').value = '3';
+  await settle(field(t.host, 'slots'));
   ok(!('api_key' in (t.bodies.patch as object)), 'absent keeps the stored key');
-  button(t.host, 'Edit').click();
   field(t.host, 'api_key').value = SECRET;
-  button(t.host, 'Save backend').click();
-  await flush();
+  await settle(field(t.host, 'api_key'));
   eq((t.bodies.patch as BackendInput).api_key, SECRET);
   ok(!t.log.some((l) => l.includes(SECRET)), 'the key is not in any toast');
   ok(!t.host.textContent.includes(SECRET), 'the key is not in the page text');
@@ -424,12 +421,11 @@ test('H5: has_key shows a key set badge in the list and the form; Clear key send
   button(t.host, 'Clear key').click();
   ok(t.host.textContent.includes('key cleared on save'), 'pending clear shown');
   button(t.host, 'Keep key').click();
-  button(t.host, 'Save backend').click();
-  await flush();
+  field(t.host, 'slots').value = '3';
+  await settle(field(t.host, 'slots'));
   ok(!('api_key' in (t.bodies.patch as object)), 'kept');
-  button(t.host, 'Edit').click();
   button(t.host, 'Clear key').click();
-  button(t.host, 'Save backend').click();
+  await wait(60);
   await flush();
   eq((t.bodies.patch as BackendInput).api_key, '');
   stop();

@@ -1,9 +1,11 @@
+import { timing } from './autosave';
 import { test, run, eq, ok, installFakeDom, FakeEl, asEl, byField, byAttr, allByField, button, flush, findAll } from './testkit';
 import { DirPicker } from './dirpicker';
 import { ProjectForm, splitArgv, joinArgv, shellOperators, isNotARepo, type ProjectDeps } from './projects';
 import { ApiError, type FsDirs, type Backend, type Candidate, type ProjectInput, type ProjectView } from './api';
 
 installFakeDom();
+timing.delay = 10;
 
 const view = (slug: string, over: Partial<ProjectView> = {}): ProjectView => ({
   slug, repo_path: '/r/' + slug, model_scope: 'local', feedback_cmds: ['go vet ./...'], limits: {}, created: 0, updated: 0,
@@ -169,7 +171,7 @@ test('role preferences: a project override is saved per role and can be cleared 
   await t.form.mount();
   const reviewer = (): FakeEl => byAttr(t.host, 'data-role-editor', 'reviewer')[0];
   button(reviewer(), 'Add candidate').click();
-  button(reviewer(), 'Save order').click();
+  await new Promise((r) => setTimeout(r, 60));
   await flush();
   eq(t.log.filter((l) => l.startsWith('put:')), ['put:p1:reviewer']);
   eq(t.bodies.put, [{ backend: 'b1', model: 'm1' }]);

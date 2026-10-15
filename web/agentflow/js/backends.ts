@@ -6,6 +6,7 @@
 // warnings a retire returns are shown in full (SV3). Every server- or
 // user-supplied string reaches the page through h(), so it is text.
 
+import { autosave, type Autosave } from './autosave.js';
 import { showToast } from '@shared';
 import {
   api, type Backend, type BackendInput, type BackendResult, type Candidate, type ModelStat, type ProjectView,
@@ -129,6 +130,9 @@ export class BackendsView {
 
   private backendForm(initial: Backend | null, done: () => void): HTMLElement {
     const errors = new FormErrors();
+    // Edits the page makes itself (no input event) still count as a change.
+    let auto: Autosave | null = null;
+    const bump = (): void => auto?.touch();
     const name = textInput('name', initial?.name ?? '', { readOnly: !!initial });
     const host = textInput('host', initial?.host ?? '', { placeholder: 'http://host:port' });
     const apiType = selectInput('api_type', API_TYPES, initial?.api_type ?? 'ollama');
@@ -142,7 +146,7 @@ export class BackendsView {
     const keyState = h('span', { class: 'row-actions', attrs: { 'data-role': 'key-state' } });
     const drawKey = (): void => replace(keyState,
       initial?.has_key ? (clearKey ? badge('key cleared on save', 'warn') : badge('key set', 'ok')) : null,
-      initial?.has_key ? button(clearKey ? 'Keep key' : 'Clear key', () => { clearKey = !clearKey; drawKey(); }, { field: 'clear-key', icon: clearKey ? 'cancel' : 'remove', word: true }) : null);
+      initial?.has_key ? button(clearKey ? 'Keep key' : 'Clear key', () => { clearKey = !clearKey; drawKey(); bump(); }, { field: 'clear-key', icon: clearKey ? 'cancel' : 'remove', word: true }) : null);
     drawKey();
     const keyField = errors.add('api_key', fieldRow('API key', h('div', { class: 'row-actions' }, apiKey, keyState),
       'Sent to the hosted service as the credential. Leave blank to keep the stored key'));
@@ -188,6 +192,7 @@ export class BackendsView {
         button('Remove', () => {
           models.splice(models.indexOf(row), 1);
           row.el.parentNode?.removeChild(row.el);
+          bump();
         }, { field: 'remove-model', icon: 'remove' }));
     };
     const addModel = (m = '', p = false, max = 0, ctx = 0): void => {
@@ -219,6 +224,7 @@ export class BackendsView {
           draw(row);
           prefill(row);
         }
+        bump();
         this.deps.notify(`${probed.length} model(s) found${builtin() ? '' : ` on ${host.value.trim()}`}`);
       } catch (err) {
         errors.show(err);
@@ -229,8 +235,7 @@ export class BackendsView {
     modelsField.el.appendChild(button('Probe host for models', () => void probe(), { field: 'probe-host', icon: 'probe' }));
     modelsField.el.appendChild(button('Add model', () => addModel(), { field: 'add-model', icon: 'add' }));
 
-    const save = async (): Promise<void> => {
-      errors.clear();
+    const readBody = (): BackendInput => {
       const body: BackendInput = {
         name: name.value.trim(),
         host: builtin() ? '' : host.value.trim(),
@@ -242,6 +247,12 @@ export class BackendsView {
       };
       if (hosted.checked && !builtin() && apiKey.value !== '') body.api_key = apiKey.value;
       else if (clearKey) body.api_key = '';
+      return body;
+    };
+    // Adding is one deliberate step; editing a card saves itself after a pause.
+    const save = async (): Promise<boolean> => {
+      errors.clear();
+      const body = readBody();
       try {
         const res = initial
           ? await this.deps.patchBackend(initial.name, body, { quiet: true })
@@ -249,11 +260,13 @@ export class BackendsView {
         this.showResult(res, initial ? `Saved ${body.name}` : `Added ${body.name}`);
       } catch (err) {
         errors.show(err);
-        return;
+        return false;
       }
-      done();
+      if (!initial) done();
+      return true;
     };
-    return h('div', { class: 'profile-card', attrs: { 'data-form': initial ? 'edit' : 'add' } },
+    auto = initial ? autosave({ snapshot: () => JSON.stringify(readBody()), save }) : null;
+    const card = h('div', { class: 'profile-card', attrs: { 'data-form': initial ? 'edit' : 'add' } },
       h('div', { class: 'profile-fields' },
         errors.add('name', fieldRow('Name', name, 'Letters, digits and dashes; fixed once added')).el,
         hostField.el,
@@ -265,8 +278,13 @@ export class BackendsView {
       modelsField.el,
       errors.general,
       h('div', { class: 'settings-actions' },
-        button('Cancel', done, { field: 'cancel', icon: 'cancel' }),
-        button(initial ? 'Save backend' : 'Add backend', () => void save(), { primary: true, field: 'save', icon: initial ? 'save' : 'add' })));
+        auto?.status ?? null,
+        initial ? null : button('Cancel', done, { field: 'cancel', icon: 'cancel' }),
+        initial
+          ? button('Done', () => void auto?.flush().then(done), { primary: true, field: 'close', icon: 'approve' })
+          : button('Add backend', () => void save(), { primary: true, field: 'save', icon: 'approve' })));
+    if (auto) auto.watch(card);
+    return card;
   }
 
   private retirePanel(b: Backend): HTMLElement {
@@ -382,7 +400,11 @@ export class BackendsView {
 
   // ─── Per-project limits ──────────────────────────────────────────────────
 
+  private limitsAuto: Autosave | null = null;
+
   private async drawLimits(): Promise<void> {
+    // Leaving a project with a change pending saves it first (to that project).
+    void this.limitsAuto?.flush();
     const slug = this.limitsSlug;
     if (!slug) {
       replace(this.limitsHost, h('p', { class: 'field-hint', text: 'No projects yet.' }));
@@ -401,22 +423,26 @@ export class BackendsView {
       inputs.set(f.key, input);
       return errors.add(f.key, fieldRow(f.label, input, 'Blank uses the global value')).el;
     });
-    const save = async (): Promise<void> => {
-      errors.clear();
+    const read = (): Record<string, string> => {
       const body: Record<string, string> = {};
       for (const [k, input] of inputs) body[k] = input.value.trim();
+      return body;
+    };
+    const save = async (): Promise<boolean> => {
+      errors.clear();
       try {
-        await this.deps.putLimits(slug, body, { quiet: true });
+        await this.deps.putLimits(slug, read(), { quiet: true });
       } catch (err) {
         errors.show(err);
-        return;
+        return false;
       }
-      this.deps.notify(`Saved limits for ${slug}`);
+      return true;
     };
-    replace(this.limitsHost,
-      h('div', { class: 'profile-fields', attrs: { 'data-role': 'project-limits' } }, ...rows),
-      errors.general,
-      h('div', { class: 'settings-actions' }, button('Save project limits', () => void save(), { primary: true, field: 'save-limits', icon: 'save' })));
+    const auto = autosave({ snapshot: () => JSON.stringify(read()), save });
+    this.limitsAuto = auto;
+    const box = h('div', { class: 'profile-fields', attrs: { 'data-role': 'project-limits' } }, ...rows);
+    replace(this.limitsHost, box, errors.general, h('div', { class: 'settings-actions' }, auto.status));
+    auto.watch(box);
   }
 
   private limitsSection(): HTMLElement {

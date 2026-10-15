@@ -67,6 +67,7 @@ const suites = [
   { name: "haproxy-sourceguard", entry: "web/haproxy/src/sourceguard.test.ts", runner: "esbuild-cjs" },
   { name: "agentflow-dom", entry: "web/agentflow/js/dom.test.ts", runner: "esbuild-cjs" },
   { name: "agentflow-overview", entry: "web/agentflow/js/overview.test.ts", runner: "esbuild-cjs" },
+  { name: "agentflow-autosave", entry: "web/agentflow/js/autosave.test.ts", runner: "esbuild-cjs" },
   { name: "agentflow-settings", entry: "web/agentflow/js/settings.test.ts", runner: "esbuild-cjs" },
   { name: "agentflow-backends", entry: "web/agentflow/js/backends.test.ts", runner: "esbuild-cjs" },
   { name: "agentflow-projects", entry: "web/agentflow/js/projects.test.ts", runner: "esbuild-cjs" },

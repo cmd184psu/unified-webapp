@@ -1,3 +1,4 @@
+import { timing } from './autosave';
 import { test, run, eq, ok, installFakeDom, FakeEl, asEl, byField, byAttr, allByField, button, flush, findAll } from './testkit';
 import { FrdEditor, commaList, lines, type FrdDeps } from './frd-editor';
 import { Overview, type OverviewDeps } from './overview';
@@ -319,13 +320,16 @@ test('RP5: an FRD without such topics shows no suggestion; the keyword match is 
   stop();
 });
 
+timing.delay = 10;
+
 test('AT12: the effort settings send the token budget and the time budget in seconds', async () => {
   const t = harness(world());
   const stop = t.ed.mount();
   await flush();
   allByField(t.host, 'budget_tokens')[0].value = '250000';
   allByField(t.host, 'budget_minutes')[0].value = '90';
-  button(t.host, 'Save settings').click();
+  allByField(t.host, 'budget_minutes')[0].fire('input');
+  await new Promise((r) => setTimeout(r, timing.delay * 3));
   await flush();
   eq(t.log.filter((l) => l.startsWith('patch:')), ['patch:1:{"deliberate":false,"budget_tokens":250000,"budget_seconds":5400}']);
   stop();

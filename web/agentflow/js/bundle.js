@@ -826,6 +826,73 @@ var Overview = class {
   }
 };
 
+// web/agentflow/js/autosave.ts
+var AUTOSAVE_DELAY_MS = 5e3;
+var timing = { delay: AUTOSAVE_DELAY_MS };
+var MARKS = {
+  idle: { text: "", title: "" },
+  pending: { text: "\u2026", title: "Unsaved changes: saves after a few seconds without typing" },
+  saving: { text: "\u21BB", title: "Saving" },
+  saved: { text: "\u2713", title: "Saved" },
+  failed: { text: "\u26A0", title: "Not saved: fix the field marked above, then change something to try again" }
+};
+function autosave(o) {
+  const status = h("span", { class: "autosave-state", attrs: { "data-role": "autosave-state", "aria-live": "polite" } });
+  let saved = o.startDirty ? null : o.snapshot();
+  let timer2;
+  let busy = false;
+  const mark = (k) => {
+    status.textContent = MARKS[k].text;
+    status.setAttribute("title", MARKS[k].title);
+    status.setAttribute("data-state", k);
+  };
+  mark("idle");
+  const run = async () => {
+    timer2 = void 0;
+    if (busy) {
+      timer2 = setTimeout(() => void run(), o.delay ?? timing.delay);
+      return;
+    }
+    const now = o.snapshot();
+    if (now === saved) {
+      mark("idle");
+      return;
+    }
+    busy = true;
+    mark("saving");
+    let ok = false;
+    try {
+      ok = await o.save();
+    } catch {
+      ok = false;
+    }
+    busy = false;
+    if (ok) saved = now;
+    if (timer2 === void 0) mark(ok ? "saved" : "failed");
+  };
+  const touch = () => {
+    if (timer2 !== void 0) clearTimeout(timer2);
+    mark(o.snapshot() === saved ? "idle" : "pending");
+    timer2 = setTimeout(() => void run(), o.delay ?? timing.delay);
+  };
+  return {
+    status,
+    watch(el) {
+      el.addEventListener("input", touch);
+      el.addEventListener("change", touch);
+    },
+    touch,
+    async flush() {
+      if (timer2 !== void 0) clearTimeout(timer2);
+      await run();
+    },
+    stop() {
+      if (timer2 !== void 0) clearTimeout(timer2);
+      timer2 = void 0;
+    }
+  };
+}
+
 // web/agentflow/js/backends.ts
 import { showToast as showToast4 } from "/shared/dist/shared.mjs";
 
@@ -892,6 +959,7 @@ function buildRoleEditor(o) {
   const edit = (fn) => {
     o.setDraft(fn(o.rows().map((r) => ({ ...r }))));
     draw();
+    auto.touch();
   };
   const active2 = o.backends.filter((b) => !b.retired);
   const pickBackend = selectInput("backend", active2.map((b) => [b.name, b.name]), active2[0]?.name ?? "");
@@ -905,28 +973,28 @@ function buildRoleEditor(o) {
   fillModels();
   const save = async () => {
     errors.clear();
-    if (o.rows().length === 0 && pickBackend.value && pickModel.value) {
-      o.setDraft([{ backend: pickBackend.value, model: pickModel.value, optIn: !isPaid(o.backends, pickBackend.value, pickModel.value) }]);
-    }
     if (o.rows().length === 0) {
-      errors.show(new Error("Nothing to save yet: pick a backend and model, press Add candidate, then Save order"));
-      return;
+      errors.show(new Error("A role needs at least one candidate: pick a backend and model and press Add candidate"));
+      return false;
     }
     const missing = unconsented(o.backends, o.rows());
     if (missing.length > 0) {
       draw();
       errors.show(new Error(`Tick the paid opt-in for: ${missing.map((m) => `${m.backend}/${m.model}`).join(", ")}`));
-      return;
+      return false;
     }
     try {
       await o.save(o.rows().map((r) => ({ backend: r.backend, model: r.model })));
     } catch (err) {
       errors.show(err);
-      return;
+      return false;
     }
     o.setDraft(null);
     draw();
+    return true;
   };
+  const auto = autosave({ snapshot: () => JSON.stringify(o.rows()), save, startDirty: o.hasDraft() });
+  if (o.hasDraft()) auto.touch();
   const handles = [];
   const draw = () => {
     const list3 = o.rows();
@@ -986,11 +1054,12 @@ function buildRoleEditor(o) {
         "div",
         { class: "settings-actions" },
         ...o.extra ?? [],
-        button("Discard", () => {
+        auto.status,
+        o.hasDraft() ? button("Discard", () => {
+          auto.stop();
           o.setDraft(null);
           draw();
-        }, { field: "discard", icon: "cancel" }),
-        button("Save order", () => void save(), { primary: true, field: "save-candidates", icon: "save" })
+        }, { field: "discard", icon: "cancel" }) : null
       )
     );
     if (focusIdx >= 0) handles[focusIdx]?.focus();
@@ -1120,6 +1189,7 @@ var SettingsView = class {
     this.roots = [];
     this.rootsHost = h("div", { class: "wizard-list", attrs: { "data-role": "browse-roots" } });
     this.dirty = false;
+    this.auto = null;
     this.off = null;
   }
   /** mount loads the settings and returns the dispose. */
@@ -1131,13 +1201,16 @@ var SettingsView = class {
     return () => {
       this.off?.();
       this.off = null;
+      void this.auto?.flush();
     };
   }
   async load() {
     try {
       const [settings, oc] = await Promise.all([this.deps.settings(), this.deps.opencodeVersion(false)]);
+      const same = this.auto !== null && JSON.stringify(settings) === JSON.stringify(this.values);
       this.values = settings;
       this.oc = oc;
+      if (same) return;
       this.roots = Array.isArray(settings.browse_roots) ? [...settings.browse_roots] : [];
     } catch {
       if (Object.keys(this.values).length === 0) return;
@@ -1175,6 +1248,7 @@ var SettingsView = class {
       this.roots = next;
       this.dirty = true;
       this.renderRoots();
+      this.auto?.touch();
     };
     replace(
       this.rootsHost,
@@ -1200,21 +1274,27 @@ var SettingsView = class {
     }
     this.renderOpenCode();
   }
-  /** save sends every field; the server validates and names a bad field. */
-  async save() {
-    this.errors.clear();
+  /** saveNow saves a pending change now (what the pause would do). */
+  saveNow() {
+    return this.auto?.flush() ?? Promise.resolve();
+  }
+  body() {
     const body = {};
     for (const [key, input] of this.inputs) body[key] = input.value.trim();
     if ("browse_roots" in this.values || this.roots.length > 0) body.browse_roots = this.roots;
+    return body;
+  }
+  /** save sends every field; the server validates and names a bad field. It does not redraw: the form is being edited. */
+  async save() {
+    this.errors.clear();
     try {
-      this.values = await this.deps.putSettings(body, { quiet: true });
+      this.values = await this.deps.putSettings(this.body(), { quiet: true });
     } catch (err) {
       this.errors.show(err);
-      return;
+      return false;
     }
     this.dirty = false;
-    this.deps.notify("Settings saved");
-    this.render();
+    return true;
   }
   render() {
     this.inputs.clear();
@@ -1224,19 +1304,20 @@ var SettingsView = class {
     const path2 = this.row({ key: "opencode_path", label: "opencode path", hint: "Program to run" });
     this.renderOpenCode();
     this.renderRoots();
-    replace(
-      this.host,
-      h(
-        "div",
-        { class: "settings-host settings-host-drawer" },
-        section("Limits", limits),
-        section("Execution", exec),
-        section("opencode", path2, this.ocHost),
-        section("Browse limit", this.rootsHost),
-        this.errors.general,
-        h("div", { class: "settings-actions" }, button("Save settings", () => void this.save(), { primary: true, field: "save", icon: "save" }))
-      )
+    this.auto?.stop();
+    this.auto = autosave({ snapshot: () => JSON.stringify(this.body()), save: () => this.save() });
+    const root = h(
+      "div",
+      { class: "settings-host settings-host-drawer" },
+      section("Limits", limits),
+      section("Execution", exec),
+      section("opencode", path2, this.ocHost),
+      section("Browse limit", this.rootsHost),
+      this.errors.general,
+      h("div", { class: "settings-actions" }, this.auto.status)
     );
+    replace(this.host, root);
+    this.auto.watch(root);
   }
 };
 
@@ -1296,25 +1377,28 @@ function effortSettings(ef, frdText, deps, onSaved) {
     h("p", { text: `This FRD mentions ${triggers.join(", ")}. Deliberate planning adds a pre-mortem and a fuller test plan, which suits this kind of work.` }),
     button("Turn on deliberate planning", () => {
       deliberate.checked = true;
-      void save();
+      void save().then((ok) => {
+        if (ok) onSaved();
+      });
     }, { field: "accept-suggestion", icon: "approve", word: true })
   );
+  const body = () => ({
+    deliberate: deliberate.checked,
+    budget_tokens: Math.max(0, Math.round(Number(tokens.value) || 0)),
+    budget_seconds: Math.max(0, Math.round((Number(minutes.value) || 0) * 60))
+  });
   const save = async () => {
     errors.clear();
     try {
-      await deps.patchEffort(ef.project, ef.id, {
-        deliberate: deliberate.checked,
-        budget_tokens: Math.max(0, Math.round(Number(tokens.value) || 0)),
-        budget_seconds: Math.max(0, Math.round((Number(minutes.value) || 0) * 60))
-      }, { quiet: true });
+      await deps.patchEffort(ef.project, ef.id, body(), { quiet: true });
     } catch (err) {
       errors.show(err);
-      return;
+      return false;
     }
-    deps.notify("Saved effort settings");
-    onSaved();
+    return true;
   };
-  return section(
+  const auto = autosave({ snapshot: () => JSON.stringify(body()), save });
+  const el = section(
     `Settings for #${ef.id}`,
     suggestion,
     errors.add("deliberate", fieldRow(
@@ -1333,8 +1417,10 @@ function effortSettings(ef, frdText, deps, onSaved) {
       )).el
     ),
     errors.general,
-    h("div", { class: "settings-actions" }, button("Save settings", () => void save(), { primary: true, field: "save-effort-settings", icon: "save" }))
+    h("div", { class: "settings-actions" }, auto.status)
   );
+  auto.watch(el);
+  return el;
 }
 
 // web/agentflow/js/backends.ts
@@ -1395,6 +1481,8 @@ var BackendsView = class {
     this.limitsSlug = "";
     this.limitsHost = h("div");
     this.off = null;
+    // ─── Per-project limits ──────────────────────────────────────────────────
+    this.limitsAuto = null;
   }
   mount() {
     this.off = subscribe((ev) => {
@@ -1433,6 +1521,8 @@ var BackendsView = class {
   }
   backendForm(initial, done) {
     const errors = new FormErrors();
+    let auto = null;
+    const bump = () => auto?.touch();
     const name = textInput("name", initial?.name ?? "", { readOnly: !!initial });
     const host = textInput("host", initial?.host ?? "", { placeholder: "http://host:port" });
     const apiType = selectInput("api_type", API_TYPES, initial?.api_type ?? "ollama");
@@ -1449,6 +1539,7 @@ var BackendsView = class {
       initial?.has_key ? button(clearKey ? "Keep key" : "Clear key", () => {
         clearKey = !clearKey;
         drawKey();
+        bump();
       }, { field: "clear-key", icon: clearKey ? "cancel" : "remove", word: true }) : null
     );
     drawKey();
@@ -1492,6 +1583,7 @@ var BackendsView = class {
         button("Remove", () => {
           models.splice(models.indexOf(row), 1);
           row.el.parentNode?.removeChild(row.el);
+          bump();
         }, { field: "remove-model", icon: "remove" })
       );
     };
@@ -1523,6 +1615,7 @@ var BackendsView = class {
           draw(row);
           prefill(row);
         }
+        bump();
         this.deps.notify(`${probed.length} model(s) found${builtin() ? "" : ` on ${host.value.trim()}`}`);
       } catch (err) {
         errors.show(err);
@@ -1535,8 +1628,7 @@ var BackendsView = class {
     ));
     modelsField.el.appendChild(button("Probe host for models", () => void probe(), { field: "probe-host", icon: "probe" }));
     modelsField.el.appendChild(button("Add model", () => addModel(), { field: "add-model", icon: "add" }));
-    const save = async () => {
-      errors.clear();
+    const readBody = () => {
       const body = {
         name: name.value.trim(),
         host: builtin() ? "" : host.value.trim(),
@@ -1548,16 +1640,23 @@ var BackendsView = class {
       };
       if (hosted.checked && !builtin() && apiKey.value !== "") body.api_key = apiKey.value;
       else if (clearKey) body.api_key = "";
+      return body;
+    };
+    const save = async () => {
+      errors.clear();
+      const body = readBody();
       try {
         const res = initial ? await this.deps.patchBackend(initial.name, body, { quiet: true }) : await this.deps.createBackend(body, { quiet: true });
         this.showResult(res, initial ? `Saved ${body.name}` : `Added ${body.name}`);
       } catch (err) {
         errors.show(err);
-        return;
+        return false;
       }
-      done();
+      if (!initial) done();
+      return true;
     };
-    return h(
+    auto = initial ? autosave({ snapshot: () => JSON.stringify(readBody()), save }) : null;
+    const card = h(
       "div",
       { class: "profile-card", attrs: { "data-form": initial ? "edit" : "add" } },
       h(
@@ -1576,10 +1675,13 @@ var BackendsView = class {
       h(
         "div",
         { class: "settings-actions" },
-        button("Cancel", done, { field: "cancel", icon: "cancel" }),
-        button(initial ? "Save backend" : "Add backend", () => void save(), { primary: true, field: "save", icon: initial ? "save" : "add" })
+        auto?.status ?? null,
+        initial ? null : button("Cancel", done, { field: "cancel", icon: "cancel" }),
+        initial ? button("Done", () => void auto?.flush().then(done), { primary: true, field: "close", icon: "approve" }) : button("Add backend", () => void save(), { primary: true, field: "save", icon: "approve" })
       )
     );
+    if (auto) auto.watch(card);
+    return card;
   }
   retirePanel(b) {
     const cancel = checkbox("cancel_running", false);
@@ -1733,8 +1835,8 @@ var BackendsView = class {
       h("div", { class: "profile-list" }, ...ROLES.map((r) => this.roleEditor(r)))
     );
   }
-  // ─── Per-project limits ──────────────────────────────────────────────────
   async drawLimits() {
+    void this.limitsAuto?.flush();
     const slug = this.limitsSlug;
     if (!slug) {
       replace(this.limitsHost, h("p", { class: "field-hint", text: "No projects yet." }));
@@ -1753,24 +1855,26 @@ var BackendsView = class {
       inputs.set(f.key, input);
       return errors.add(f.key, fieldRow(f.label, input, "Blank uses the global value")).el;
     });
-    const save = async () => {
-      errors.clear();
+    const read = () => {
       const body = {};
       for (const [k, input] of inputs) body[k] = input.value.trim();
+      return body;
+    };
+    const save = async () => {
+      errors.clear();
       try {
-        await this.deps.putLimits(slug, body, { quiet: true });
+        await this.deps.putLimits(slug, read(), { quiet: true });
       } catch (err) {
         errors.show(err);
-        return;
+        return false;
       }
-      this.deps.notify(`Saved limits for ${slug}`);
+      return true;
     };
-    replace(
-      this.limitsHost,
-      h("div", { class: "profile-fields", attrs: { "data-role": "project-limits" } }, ...rows),
-      errors.general,
-      h("div", { class: "settings-actions" }, button("Save project limits", () => void save(), { primary: true, field: "save-limits", icon: "save" }))
-    );
+    const auto = autosave({ snapshot: () => JSON.stringify(read()), save });
+    this.limitsAuto = auto;
+    const box = h("div", { class: "profile-fields", attrs: { "data-role": "project-limits" } }, ...rows);
+    replace(this.limitsHost, box, errors.general, h("div", { class: "settings-actions" }, auto.status));
+    auto.watch(box);
   }
   limitsSection() {
     const pick = selectInput("project", this.projects.map((p) => [p.slug, p.slug]), this.limitsSlug);

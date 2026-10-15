@@ -4,6 +4,7 @@
 // FRD and the server reaches the page through h(), so it is text.
 
 import type { BudgetView, EffortView } from './api.js';
+import { autosave } from './autosave.js';
 import { api } from './api.js';
 import { h } from './dom.js';
 import { FormErrors, badge, button, checkbox, fieldRow, section, textInput } from './forms.js';
@@ -72,23 +73,24 @@ export function effortSettings(ef: EffortView, frdText: string, deps: EffortSett
   const triggers = ef.deliberate ? [] : deliberateTriggers(frdText);
   const suggestion = triggers.length === 0 ? null : h('div', { class: 'warn-box', attrs: { 'data-role': 'deliberate-suggestion' } },
     h('p', { text: `This FRD mentions ${triggers.join(', ')}. Deliberate planning adds a pre-mortem and a fuller test plan, which suits this kind of work.` }),
-    button('Turn on deliberate planning', () => { deliberate.checked = true; void save(); }, { field: 'accept-suggestion', icon: 'approve', word: true }));
-  const save = async (): Promise<void> => {
+    button('Turn on deliberate planning', () => { deliberate.checked = true; void save().then((ok) => { if (ok) onSaved(); }); }, { field: 'accept-suggestion', icon: 'approve', word: true }));
+  const body = (): { deliberate: boolean; budget_tokens: number; budget_seconds: number } => ({
+    deliberate: deliberate.checked,
+    budget_tokens: Math.max(0, Math.round(Number(tokens.value) || 0)),
+    budget_seconds: Math.max(0, Math.round((Number(minutes.value) || 0) * 60)),
+  });
+  const save = async (): Promise<boolean> => {
     errors.clear();
     try {
-      await deps.patchEffort(ef.project, ef.id, {
-        deliberate: deliberate.checked,
-        budget_tokens: Math.max(0, Math.round(Number(tokens.value) || 0)),
-        budget_seconds: Math.max(0, Math.round((Number(minutes.value) || 0) * 60)),
-      }, { quiet: true });
+      await deps.patchEffort(ef.project, ef.id, body(), { quiet: true });
     } catch (err) {
       errors.show(err);
-      return;
+      return false;
     }
-    deps.notify('Saved effort settings');
-    onSaved();
+    return true;
   };
-  return section(`Settings for #${ef.id}`,
+  const auto = autosave({ snapshot: () => JSON.stringify(body()), save });
+  const el = section(`Settings for #${ef.id}`,
     suggestion,
     errors.add('deliberate', fieldRow('Deliberate planning', deliberate,
       'The planner adds a pre-mortem (three failure scenarios) and an expanded test plan, and the critic checks for them')).el,
@@ -97,5 +99,7 @@ export function effortSettings(ef: EffortView, frdText: string, deps: EffortSett
       errors.add('budget_seconds', fieldRow('Time budget (minutes)', minutes,
         'Total stage run time, so stages running in parallel add up; blank is no limit. From 90% no new task starts; at 100% the run stops')).el),
     errors.general,
-    h('div', { class: 'settings-actions' }, button('Save settings', () => void save(), { primary: true, field: 'save-effort-settings', icon: 'save' })));
+    h('div', { class: 'settings-actions' }, auto.status));
+  auto.watch(el);
+  return el;
 }

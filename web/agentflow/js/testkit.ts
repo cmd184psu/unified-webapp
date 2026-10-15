@@ -106,6 +106,8 @@ export class FakeEl {
   /** fire dispatches an event of any type to the listeners. */
   fire(type: string, ev: Record<string, unknown> = {}): void {
     for (const fn of this.listeners.get(type) ?? []) fn({ preventDefault() {}, target: this, ...ev });
+    // Edits bubble to the card that watches them, as in a browser.
+    if ((type === 'input' || type === 'change') && this.parentNode instanceof FakeEl) this.parentNode.fire(type, { target: this, ...ev });
   }
 }
 

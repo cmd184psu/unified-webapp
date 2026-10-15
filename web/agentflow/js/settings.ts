@@ -6,6 +6,7 @@
 // that field (UI5). The shared limit field list is also used by the
 // per-project limits form in backends.ts (CF2).
 
+import { autosave, type Autosave } from './autosave.js';
 import { showToast } from '@shared';
 import { api, type OpenCodeStatus, type Settings } from './api.js';
 import { h, replace } from './dom.js';
@@ -61,6 +62,7 @@ export class SettingsView {
   private roots: string[] = [];
   private rootsHost = h('div', { class: 'wizard-list', attrs: { 'data-role': 'browse-roots' } });
   private dirty = false;
+  private auto: Autosave | null = null;
   private off: (() => void) | null = null;
 
   constructor(private host: HTMLElement, private deps: SettingsDeps) {}
@@ -74,14 +76,18 @@ export class SettingsView {
     return () => {
       this.off?.();
       this.off = null;
+      void this.auto?.flush();
     };
   }
 
   async load(): Promise<void> {
     try {
       const [settings, oc] = await Promise.all([this.deps.settings(), this.deps.opencodeVersion(false)]);
+      // Our own save echoes back as an update: nothing to redraw, and redrawing would drop what is being typed.
+      const same = this.auto !== null && JSON.stringify(settings) === JSON.stringify(this.values);
       this.values = settings;
       this.oc = oc;
+      if (same) return;
       this.roots = Array.isArray(settings.browse_roots) ? [...settings.browse_roots] : [];
     } catch {
       // apiFetch already told the user; keep what is shown.
@@ -109,7 +115,7 @@ export class SettingsView {
   }
 
   private renderRoots(): void {
-    const edit = (next: string[]): void => { this.roots = next; this.dirty = true; this.renderRoots(); };
+    const edit = (next: string[]): void => { this.roots = next; this.dirty = true; this.renderRoots(); this.auto?.touch(); };
     replace(this.rootsHost,
       ...this.roots.map((r, i) => h('div', { class: 'inline-row', attrs: { 'data-root': i } },
         h('code', { text: r }),
@@ -132,21 +138,29 @@ export class SettingsView {
     this.renderOpenCode();
   }
 
-  /** save sends every field; the server validates and names a bad field. */
-  async save(): Promise<void> {
-    this.errors.clear();
+  /** saveNow saves a pending change now (what the pause would do). */
+  saveNow(): Promise<void> {
+    return this.auto?.flush() ?? Promise.resolve();
+  }
+
+  private body(): Settings {
     const body: Settings = {};
     for (const [key, input] of this.inputs) body[key] = input.value.trim();
     if ('browse_roots' in this.values || this.roots.length > 0) body.browse_roots = this.roots;
+    return body;
+  }
+
+  /** save sends every field; the server validates and names a bad field. It does not redraw: the form is being edited. */
+  async save(): Promise<boolean> {
+    this.errors.clear();
     try {
-      this.values = await this.deps.putSettings(body, { quiet: true });
+      this.values = await this.deps.putSettings(this.body(), { quiet: true });
     } catch (err) {
       this.errors.show(err);
-      return;
+      return false;
     }
     this.dirty = false;
-    this.deps.notify('Settings saved');
-    this.render();
+    return true;
   }
 
   render(): void {
@@ -157,13 +171,16 @@ export class SettingsView {
     const path = this.row({ key: 'opencode_path', label: 'opencode path', hint: 'Program to run' });
     this.renderOpenCode();
     this.renderRoots();
-    replace(this.host,
-      h('div', { class: 'settings-host settings-host-drawer' },
+    this.auto?.stop();
+    this.auto = autosave({ snapshot: () => JSON.stringify(this.body()), save: () => this.save() });
+    const root = h('div', { class: 'settings-host settings-host-drawer' },
         section('Limits', limits),
         section('Execution', exec),
         section('opencode', path, this.ocHost),
         section('Browse limit', this.rootsHost),
         this.errors.general,
-        h('div', { class: 'settings-actions' }, button('Save settings', () => void this.save(), { primary: true, field: 'save', icon: 'save' }))));
+        h('div', { class: 'settings-actions' }, this.auto.status));
+    replace(this.host, root);
+    this.auto.watch(root);
   }
 }

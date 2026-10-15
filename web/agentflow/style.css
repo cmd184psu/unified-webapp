@@ -1283,3 +1283,7 @@ body {
 .settings-host-drawer .profile-fields > div,
 .settings-host-drawer .inline-row { min-width: 0; }
 .settings-host-drawer .settings-input { max-width: 100%; min-width: 0; }
+
+/* The small mark an auto-saving card shows: pending, saving, saved or not saved. */
+.autosave-state { color: var(--color-text-muted); font-size: 1.1rem; min-width: 1.2em; text-align: center; align-self: center; }
+.autosave-state[data-state="failed"] { color: var(--color-danger); }

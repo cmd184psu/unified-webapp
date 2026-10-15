@@ -68,12 +68,11 @@ test('save sends every field and confirms', async () => {
   const stop = t.view.mount();
   await flush();
   byField(t.host, 'max_attempts').value = ' 7 ';
-  button(t.host, 'Save settings').click();
+  await t.view.saveNow();
   await flush();
   eq(t.sent.length, 1);
   eq(t.sent[0].max_attempts, '7');
   eq(Object.keys(t.sent[0]).length, LIMIT_FIELDS.length + 3);
-  ok(t.calls.includes('notify:Settings saved'), 'toast');
   stop();
 });
 
@@ -83,7 +82,8 @@ test('AC-SV1 (UI): a 400 naming a field shows its message next to that field onl
   });
   const stop = t.view.mount();
   await flush();
-  button(t.host, 'Save settings').click();
+  byField(t.host, 'max_attempts').value = '9';
+  await t.view.saveNow();
   await flush();
   const row = byField(t.host, 'stuck_threshold').parentNode as FakeEl;
   const msgs = findAll(row, (e) => e.className === 'field-error' && e.textContent !== '');
@@ -98,7 +98,8 @@ test('an error that names no field lands in the form-level line', async () => {
   const t = harness({ putSettings: async () => { throw new ApiError(500, 'disk full'); } });
   const stop = t.view.mount();
   await flush();
-  button(t.host, 'Save settings').click();
+  byField(t.host, 'max_attempts').value = '9';
+  await t.view.saveNow();
   await flush();
   eq(findAll(t.host, (e) => e.className === 'field-error' && e.textContent !== '').map((e) => e.textContent), ['disk full']);
   stop();
@@ -126,12 +127,12 @@ test('H1: browse roots are listed, added through the picker (no typing), removed
   button(t.host, 'Add folder').click();
   await flush();
   eq(findAll(t.host, (e) => e.getAttribute('data-root') !== null).length, 2);
-  button(t.host, 'Save settings').click();
+  await t.view.saveNow();
   await flush();
   eq(t.sent[0].browse_roots, ['/srv', '/home/me']);
   button(t.host, 'Remove').click();
   await flush();
-  button(t.host, 'Save settings').click();
+  await t.view.saveNow();
   await flush();
   eq(t.sent[1].browse_roots, ['/home/me']);
   stop();

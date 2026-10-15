@@ -5,6 +5,7 @@
 // explicitly listed, and listing one here is that act.
 
 import type { Backend, CandidateInput } from './api.js';
+import { autosave } from './autosave.js';
 import { h, replace } from './dom.js';
 import { FormErrors, badge, button, checkbox, selectInput } from './forms.js';
 
@@ -102,6 +103,7 @@ export function buildRoleEditor(o: RoleEditorOpts): HTMLElement {
   const edit = (fn: (r: CandRow[]) => CandRow[]): void => {
     o.setDraft(fn(o.rows().map((r) => ({ ...r }))));
     draw();
+    auto.touch();
   };
   const active = o.backends.filter((b) => !b.retired);
   const pickBackend = selectInput('backend', active.map((b) => [b.name, b.name] as [string, string]), active[0]?.name ?? '');
@@ -114,31 +116,31 @@ export function buildRoleEditor(o: RoleEditorOpts): HTMLElement {
   pickBackend.addEventListener('change', fillModels);
   fillModels();
 
-  const save = async (): Promise<void> => {
+  const save = async (): Promise<boolean> => {
     errors.clear();
-    if (o.rows().length === 0 && pickBackend.value && pickModel.value) {
-      // Save on an empty list adds the pair picked in the dropdowns, as Add candidate would.
-      o.setDraft([{ backend: pickBackend.value, model: pickModel.value, optIn: !isPaid(o.backends, pickBackend.value, pickModel.value) }]);
-    }
     if (o.rows().length === 0) {
-      errors.show(new Error('Nothing to save yet: pick a backend and model, press Add candidate, then Save order'));
-      return;
+      errors.show(new Error('A role needs at least one candidate: pick a backend and model and press Add candidate'));
+      return false;
     }
     const missing = unconsented(o.backends, o.rows());
     if (missing.length > 0) {
       draw();
       errors.show(new Error(`Tick the paid opt-in for: ${missing.map((m) => `${m.backend}/${m.model}`).join(', ')}`));
-      return;
+      return false;
     }
     try {
       await o.save(o.rows().map((r) => ({ backend: r.backend, model: r.model })));
     } catch (err) {
       errors.show(err);
-      return;
+      return false;
     }
     o.setDraft(null);
     draw();
+    return true;
   };
+  // The order saves itself after a pause; Discard drops a pending change.
+  const auto = autosave({ snapshot: () => JSON.stringify(o.rows()), save, startDirty: o.hasDraft() });
+  if (o.hasDraft()) auto.touch();
 
   const handles: HTMLElement[] = [];
 
@@ -189,8 +191,8 @@ export function buildRoleEditor(o: RoleEditorOpts): HTMLElement {
       errors.general,
       h('div', { class: 'settings-actions' },
         ...(o.extra ?? []),
-        button('Discard', () => { o.setDraft(null); draw(); }, { field: 'discard', icon: 'cancel' }),
-        button('Save order', () => void save(), { primary: true, field: 'save-candidates', icon: 'save' })));
+        auto.status,
+        o.hasDraft() ? button('Discard', () => { auto.stop(); o.setDraft(null); draw(); }, { field: 'discard', icon: 'cancel' }) : null));
     // A keyboard move redraws the list; keep the focus on the handle that moved.
     if (focusIdx >= 0) handles[focusIdx]?.focus();
     focusIdx = -1;
