@@ -304,3 +304,4 @@ Changes proposed (not built, except the first):
 - Show each project's active effort in the dropdown (`webcalc-local3  #6 running`) so a project is recognised by what it is doing.
 - When a project has no active effort say so, and say that its Board shows its last effort (a finished one), not current work.
 - Trial scripts: put the trial number in the effort title ("web calculator, local trial 3") so efforts differ.
+- Clean slate for a full test run (owner, 2026-10-16): `scripts/agentflow-reset.py` (dry run by default; archives statistics, strikes and a database copy first; keeps configuration). Plan: finish and evaluate effort 6, archive, reset, then run the full trial (local-only, then the mixed set) as several projects and efforts that accumulate on screen, so the project/effort UX can be judged against realistic clutter.
