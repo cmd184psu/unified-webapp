@@ -164,7 +164,9 @@ Rules the dispatcher applies:
 - **Unreachable backends are skipped** for `backend_cooldown` (default 2 minutes).
 - If nothing is eligible, the task shows a *waiting* reason instead of failing.
 
-Model statistics have their own **Stats** tab and are at `GET /api/stats/models` (add `?project=<slug>` to limit them to one project). Each row is a backend, model and role: stages, passes, failures, infra failures (left out of the pass rate), average and total time, tokens, the model's tier and family, and for workers the attempts that passed. Use it to decide a model's tier.
+Model statistics have their own **Stats** tab and are at `GET /api/stats/models` (add `?project=<slug>` to limit them to one project). Each row is a backend, model and role: stages, passes, failures, infra failures (left out of the pass rate), average and total time, tokens, the model's tier and family, and for workers the attempts that passed, and its strikes. Use it to decide a model's tier.
+
+**Strikes and the bench.** A model gets a strike for output the engine could not read (`infra:unparseable`), for breaking the git policy, and for failing one task the same way twice in a row (the same fingerprint, same worker). Strikes count against a model in one role, and it makes no difference whether the backend is local, free or paid. Separately, a model that has failed a task the same way twice in a row is passed over for that task's next attempt, so another model gets a turn before the task can be declared stuck; if no other model could ever serve, the repeat is allowed so the task still reaches stuck. At three uncleared strikes (`store.StrikeLimit`) the model is benched in that role: the dispatcher skips it with the reason "benched", and the Stats tab shows a benched badge and a **Clear** button (`POST /api/strikes/clear` with `{backend, model, role}`), which forgives everything up to now.
 
 ---
 

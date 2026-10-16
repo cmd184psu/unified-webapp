@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"cmd184psu/unified-webapp/internal/agentflow/model"
+	"cmd184psu/unified-webapp/internal/agentflow/store"
 )
 
 // statsScope joins a stage to its effort (directly, or through its attempt's
@@ -37,10 +38,37 @@ type ModelStat struct {
 	// Tier is how the owner rated the model (0 = not rated); Family is derived from its name.
 	Tier   int    `json:"tier"`
 	Family string `json:"family"`
+	// Strikes are the uncleared strikes against this model in this role, across every project (H7);
+	// Benched is set at store.StrikeLimit, and the dispatcher then skips the model.
+	Strikes int  `json:"strikes"`
+	Benched bool `json:"benched"`
 }
 
 func (a *API) registerStats(mux muxer) {
 	mux.HandleFunc("GET /api/stats/models", a.modelStats)
+	mux.HandleFunc("POST /api/strikes/clear", a.clearStrikes)
+}
+
+type strikeKeyBody struct {
+	Backend string `json:"backend"`
+	Model   string `json:"model"`
+	Role    string `json:"role"`
+}
+
+// clearStrikes answers POST /api/strikes/clear: the owner forgives a model in a
+// role, so it can be dispatched again.
+func (a *API) clearStrikes(w http.ResponseWriter, r *http.Request) {
+	var body strikeKeyBody
+	if !decodeBody(w, r, &body, false) {
+		return
+	}
+	k := store.StrikeKey{Backend: body.Backend, Model: body.Model, Role: body.Role}
+	if err := a.deps.Store.ClearStrikes(r.Context(), actorOf(r), k); err != nil {
+		writeErr(w, err)
+		return
+	}
+	a.emit("strikes.update", map[string]any{"backend": k.Backend, "model": k.Model, "role": k.Role})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // modelStats answers GET /api/stats/models: one row per backend, model and
@@ -114,7 +142,14 @@ func (a *API) modelStats(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	strikes, err := a.deps.Store.StrikeCounts(r.Context())
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
 	for i := range out {
+		out[i].Strikes = strikes[store.StrikeKey{Backend: out[i].Backend, Model: out[i].Model, Role: out[i].Role}]
+		out[i].Benched = out[i].Strikes >= store.StrikeLimit
 		out[i].Tier = tiers[out[i].Backend+"/"+out[i].Model]
 		if out[i].Role == "worker" {
 			t := byModel[out[i].Model]

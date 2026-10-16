@@ -40,7 +40,21 @@ var migrations = []migration{
 	{10, migration10SQL},
 	{11, migration11SQL},
 	{12, migration12SQL},
+	{13, migration13SQL},
 }
+
+// migration13SQL (H7) records when the owner cleared a model's strikes. The
+// strikes themselves are derived from the stages and attempts tables; only
+// those after the reset count.
+const migration13SQL = `
+CREATE TABLE strike_resets (
+  backend TEXT NOT NULL,
+  model TEXT NOT NULL,
+  role TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (backend, model, role)
+);
+`
 
 // migration12SQL (H3) rates a model: 1 strong, 2 capable, 3 light, 0 not rated
 // yet (treated as 2 where a tier matters).

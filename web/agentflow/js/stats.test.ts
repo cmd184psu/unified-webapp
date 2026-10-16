@@ -7,7 +7,7 @@ installFakeDom();
 
 const row = (over: Partial<ModelStat> = {}): ModelStat => ({
   model: 'qwen3-coder:30b', backend: 'ollama-m5', role: 'worker', stages: 4, passed: 2, failed: 1, infra: 1, pass_rate: 2 / 3,
-  attempts_total: 3, attempts_passed: 2, total_ms: 600000, avg_ms: 150000, tokens: 1_500_000, tier: 2, family: 'qwen', ...over,
+  attempts_total: 3, attempts_passed: 2, total_ms: 600000, avg_ms: 150000, tokens: 1_500_000, tier: 2, family: 'qwen', strikes: 0, benched: false, ...over,
 });
 const project = (slug: string): ProjectView => ({
   slug, repo_path: '/r', model_scope: 'local', feedback_cmds: [], limits: {}, created: 0, updated: 0,
@@ -19,6 +19,7 @@ function harness(rows: ModelStat[]) {
   const deps: StatsDeps = {
     stats: async (p) => { calls.push(p); return p === 'only' ? rows.slice(0, 1) : rows; },
     projects: async () => [project('only'), project('other')],
+    clear: async (b, m, r) => { calls.push(`clear ${b}/${m}/${r}`); },
   };
   const host = new FakeEl('DIV');
   const view = new StatsView(asEl(host), deps);
@@ -65,6 +66,20 @@ test('a state change refetches; an empty result says so', async () => {
   dispatch(JSON.stringify({ type: 'state.changed' }));
   await flush();
   ok(t.calls.length > before, 'refetched');
+  stop();
+});
+
+test('strikes show out of three, a benched model says so, and Clear forgives it', async () => {
+  const t = harness([row({ strikes: 2 }), row({ model: 'gpt-oss:20b', family: 'gpt-oss', strikes: 3, benched: true }), row({ model: 'clean' })]);
+  const stop = t.view.mount();
+  await flush();
+  const text = byAttr(t.host, 'data-role', 'pass-rates')[0].textContent;
+  ok(text.includes('2/3') && text.includes('benched'), 'strikes shown: ' + text);
+  const clears = byAttr(t.host, 'data-action', 'clear-strikes');
+  eq(clears.length, 2, 'only struck models get a Clear button');
+  clears[1].fire('click');
+  await flush();
+  ok(t.calls.includes('clear ollama-m5/gpt-oss:20b/worker'), 'cleared: ' + t.calls.join('|'));
   stop();
 });
 

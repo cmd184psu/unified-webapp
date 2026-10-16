@@ -227,6 +227,9 @@ export interface ModelStat {
   /** The owner's rating (0 = not rated) and the family derived from the name. */
   tier: number;
   family: string;
+  /** Uncleared strikes against the model in this role (H7); benched at 3, and the dispatcher then skips it. */
+  strikes: number;
+  benched: boolean;
 }
 
 /** DraftState is GET .../frd/draft: the FRD drafting stage (draft or polish). */
@@ -558,6 +561,7 @@ export const api = {
   putSettings: (s: Settings, o?: FetchOptions): Promise<Settings> => send('PUT', '/api/settings', s, o),
 
   modelStats: (project = ''): Promise<ModelStat[]> => get(`/api/stats/models${project ? `?project=${enc(project)}` : ''}`),
+  clearStrikes: (backend: string, model: string, role: string): Promise<void> => send('POST', '/api/strikes/clear', { backend, model, role }),
 
   // Efforts
   efforts: (slug: string): Promise<EffortView[]> => get(`${proj(slug)}/efforts`),

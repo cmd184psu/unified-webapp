@@ -81,6 +81,7 @@ var api = {
   settings: () => get("/api/settings"),
   putSettings: (s, o) => send("PUT", "/api/settings", s, o),
   modelStats: (project = "") => get(`/api/stats/models${project ? `?project=${enc(project)}` : ""}`),
+  clearStrikes: (backend, model, role) => send("POST", "/api/strikes/clear", { backend, model, role }),
   // Efforts
   efforts: (slug) => get(`${proj(slug)}/efforts`),
   effort: (slug, id) => get(eff(slug, id)),
@@ -4468,7 +4469,8 @@ function mountProjectTab(host, wanted2) {
 // web/agentflow/js/stats.ts
 var defaultStatsDeps = () => ({
   stats: (project) => api.modelStats(project),
-  projects: () => api.projects()
+  projects: () => api.projects(),
+  clear: (backend, model, role) => api.clearStrikes(backend, model, role)
 });
 var pct = (r) => `${Math.round(r * 100)}%`;
 function duration(ms) {
@@ -4500,7 +4502,7 @@ var StatsView = class {
   mount() {
     void this.load();
     const off = subscribe((ev) => {
-      if (ev.type === "state.changed" || ev.type === "effort.update" || ev.type === "backend.update") void this.load();
+      if (ev.type === "state.changed" || ev.type === "effort.update" || ev.type === "backend.update" || ev.type === "strikes.update") void this.load();
     });
     return () => {
       this.disposed = true;
@@ -4520,10 +4522,22 @@ var StatsView = class {
       this.busy = false;
     }
   }
+  /** strikeCell shows a model's strikes out of three, a benched badge at three, and a Clear button. */
+  strikeCell(s) {
+    if (!s.strikes) return h("td", { text: "0" });
+    return h(
+      "td",
+      {},
+      s.benched ? badge("benched", "warn") : h("span", { text: `${s.strikes}/3 ` }),
+      button("Clear", () => {
+        void this.deps.clear(s.backend, s.model, s.role).then(() => this.load());
+      }, { field: "clear-strikes" })
+    );
+  }
   table() {
     const shown = this.rows.filter((r) => this.role === "" || r.role === this.role);
     if (shown.length === 0) return h("p", { class: "field-hint", text: "No finished stages yet." });
-    const head = ["Model", "Backend", "Tier", "Family", "Role", "Stages", "Passed", "Failed", "Infra", "Pass rate", "Avg time", "Total time", "Tokens", "Worker attempts passed"];
+    const head = ["Model", "Backend", "Tier", "Family", "Role", "Stages", "Passed", "Failed", "Infra", "Pass rate", "Avg time", "Total time", "Tokens", "Worker attempts passed", "Strikes"];
     return h(
       "table",
       { class: "stats-table", attrs: { "data-role": "pass-rates" } },
@@ -4544,7 +4558,8 @@ var StatsView = class {
         h("td", { text: duration(s.avg_ms) }),
         h("td", { text: duration(s.total_ms) }),
         h("td", { text: tokensShort(s.tokens) }),
-        h("td", { text: s.role === "worker" ? `${s.attempts_passed}/${s.attempts_total}` : "-" })
+        h("td", { text: s.role === "worker" ? `${s.attempts_passed}/${s.attempts_total}` : "-" }),
+        this.strikeCell(s)
       )))
     );
   }
@@ -4571,7 +4586,7 @@ var StatsView = class {
         section(
           "Model results",
           h("div", { class: "inline-row" }, fieldRow("Role", role).el, fieldRow("Project", project).el),
-          h("p", { class: "field-hint", text: "Infra failures (a crash, a timeout) say nothing about the model and are left out of the pass rate. Rate a model on the Backends tab once these numbers say how it does." }),
+          h("p", { class: "field-hint", text: "Infra failures (a crash, a timeout) say nothing about the model and are left out of the pass rate. Rate a model on the Backends tab once these numbers say how it does. A strike is output the engine could not read, a git policy break, or the same failure twice in a row on one task; three strikes bench a model in that role (local, free or paid alike) until you clear them here." }),
           this.table()
         )
       )

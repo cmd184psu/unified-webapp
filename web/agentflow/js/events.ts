@@ -21,6 +21,7 @@ export type AgentflowEvent =
   | { type: 'task.update'; project: string; effort: number; task: string }
   | { type: 'backend.update'; backend: string }
   | { type: 'candidates.update'; role: string; project?: string }
+  | { type: 'strikes.update'; backend: string; model: string; role: string }
   | { type: 'settings.update' }
   | { type: 'state.changed' };
 

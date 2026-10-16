@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"testing"
+	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/store"
 )
@@ -126,5 +127,50 @@ func TestH3b_ModelStatsCarryTimeTokensTierAndFilterByProject(t *testing.T) {
 	none := decode[[]ModelStat](t, e.ok("GET", "/api/stats/models?project=nope", nil, http.StatusOK))
 	if len(none) != 0 {
 		t.Fatalf("unknown project = %+v", none)
+	}
+}
+
+// H7: unparseable output is a strike, three bench the model, and clearing
+// forgives them.
+func TestH7_StatsShowStrikesAndClearForgives(t *testing.T) {
+	e := newEnv(t, envOpt{})
+	e.addProject("p1")
+	ef := decode[EffortView](t, e.ok("POST", "/api/projects/p1/efforts", map[string]any{"title": "src"}, http.StatusCreated))
+	ctx := context.Background()
+	bad := func() {
+		t.Helper()
+		st, err := e.st.CreateStage(ctx, store.StageSpec{Effort: ef.ID, Role: "planner", Backend: "b1", Model: "m1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.st.StartStage(ctx, st.ID, "job"); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.st.FinishStage(ctx, st.ID, "infra:unparseable", "", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	row := func() ModelStat {
+		t.Helper()
+		got := decode[[]ModelStat](t, e.ok("GET", "/api/stats/models", nil, http.StatusOK))
+		if len(got) != 1 {
+			t.Fatalf("stats = %+v", got)
+		}
+		return got[0]
+	}
+	bad()
+	bad()
+	if r := row(); r.Strikes != 2 || r.Benched {
+		t.Fatalf("after two: %+v", r)
+	}
+	bad()
+	if r := row(); r.Strikes != 3 || !r.Benched {
+		t.Fatalf("after three: %+v", r)
+	}
+	e.field("POST", "/api/strikes/clear", map[string]any{"backend": "b1"}, "strikes")
+	time.Sleep(3 * time.Millisecond)
+	e.ok("POST", "/api/strikes/clear", map[string]any{"backend": "b1", "model": "m1", "role": "planner"}, http.StatusNoContent)
+	if r := row(); r.Strikes != 0 || r.Benched {
+		t.Fatalf("after clear: %+v", r)
 	}
 }

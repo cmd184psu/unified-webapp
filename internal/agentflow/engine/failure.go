@@ -220,7 +220,7 @@ func (e *Engine) resubmit(ctx context.Context, c *chain, last model.Stage) error
 			pk, why := reviewerFor(v, c.proj, sticky, c.workerModel(), true)
 			return pk, why, nil
 		}
-		pk, why := pickWorker(v, c.proj, sticky)
+		pk, why := pickWorker(v, c.proj, sticky, nil)
 		return pk, why, nil
 	}
 	pk, why, err := pick(last.Backend)

@@ -596,3 +596,126 @@ func TestH3_ReviewerIsNotWeakerThanTheWorker(t *testing.T) {
 		t.Fatalf("a weak worker got reviewer %+v (%q, %v), want the first reviewer that is not weaker", pk, why, err)
 	}
 }
+
+// failedAttempt records one finished, failed attempt of task by model with the
+// given fingerprint, and a worker stage with stageOutcome on backend gpu.
+func (h *harness) failedAttempt(task int64, mdl, fp, stageOutcome string) {
+	h.t.Helper()
+	ctx := context.Background()
+	a, err := h.st.StartAttempt(ctx, task, model.AttemptNormal, "wt", mdl)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	st, err := h.st.CreateStage(ctx, store.StageSpec{Attempt: a.ID, Role: "worker", Backend: "gpu", Model: mdl})
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	if err := h.st.FinishStage(ctx, st.ID, stageOutcome, "", nil); err != nil {
+		h.t.Fatal(err)
+	}
+	if err := h.st.FinishAttempt(ctx, a.ID, model.OutcomeFailed, fp, ""); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+func (h *harness) workerModelDispatched() string {
+	h.t.Helper()
+	h.pass()
+	for _, st := range h.openStages() {
+		if st.Role == "worker" {
+			return st.Model
+		}
+	}
+	return ""
+}
+
+// H7: a model that fails a task the same way twice in a row is passed over
+// for the next attempt; with nobody else to try, the repeat is allowed so the
+// task can reach stuck.
+func TestH7_RepeatFailureMovesToAnotherModel(t *testing.T) {
+	setup := func(workers ...string) (*harness, runFix) {
+		h := newDispHarness(t)
+		h.addBackend("gpu", 5, false, false, "m1", "m2", "m3")
+		h.candidates("global", "", "worker", workers...)
+		h.candidates("global", "", "reviewer", "gpu/m3")
+		f := h.dispProject("alpha", "any", indep(1))
+		h.startRun("alpha")
+		return h, f
+	}
+	h, f := setup("gpu/m1", "gpu/m2")
+	h.failedAttempt(f.tasks[0].ID, "m1", "v:x", "pass")
+	if got := h.workerModelDispatched(); got != "m1" {
+		t.Fatalf("after one failure the worker was %q, want m1 again", got)
+	}
+	h, f = setup("gpu/m1", "gpu/m2")
+	h.failedAttempt(f.tasks[0].ID, "m1", "v:x", "pass")
+	h.failedAttempt(f.tasks[0].ID, "m1", "v:x", "pass")
+	if got := h.workerModelDispatched(); got != "m2" {
+		t.Fatalf("after the same failure twice the worker was %q, want m2", got)
+	}
+	h, f = setup("gpu/m1", "gpu/m2")
+	h.failedAttempt(f.tasks[0].ID, "m1", "v:x", "pass")
+	h.failedAttempt(f.tasks[0].ID, "m1", "v:y", "pass")
+	if got := h.workerModelDispatched(); got != "m1" {
+		t.Fatalf("two different failures moved the worker to %q", got)
+	}
+	h, f = setup("gpu/m1")
+	h.failedAttempt(f.tasks[0].ID, "m1", "v:x", "pass")
+	h.failedAttempt(f.tasks[0].ID, "m1", "v:x", "pass")
+	if got := h.workerModelDispatched(); got != "m1" {
+		t.Fatalf("with only m1 listed the worker was %q, want the repeat", got)
+	}
+}
+
+// H7: three strikes bench a model in that role, wherever it runs, until the
+// owner clears them; the task waits with the reason when nobody else is listed.
+func TestH7_ThreeStrikesBenchAModel(t *testing.T) {
+	h := newDispHarness(t)
+	h.addBackend("gpu", 5, false, false, "m1", "m2", "m3")
+	h.candidates("global", "", "worker", "gpu/m1", "gpu/m2")
+	h.candidates("global", "", "reviewer", "gpu/m3")
+	f := h.dispProject("alpha", "any", indep(1))
+	h.startRun("alpha")
+	for i := 1; i <= 2; i++ {
+		h.failedAttempt(f.tasks[0].ID, "m1", fmt.Sprintf("u%d", i), "infra:unparseable")
+	}
+	if got := h.workerModelDispatched(); got != "m1" {
+		t.Fatalf("two strikes already benched m1: got %q", got)
+	}
+	h2 := newDispHarness(t)
+	h2.addBackend("gpu", 5, false, false, "m1", "m2", "m3")
+	h2.candidates("global", "", "worker", "gpu/m1", "gpu/m2")
+	h2.candidates("global", "", "reviewer", "gpu/m3")
+	f2 := h2.dispProject("alpha", "any", indep(1))
+	h2.startRun("alpha")
+	for i := 1; i <= 3; i++ {
+		h2.failedAttempt(f2.tasks[0].ID, "m1", fmt.Sprintf("u%d", i), "infra:unparseable")
+	}
+	if got := h2.workerModelDispatched(); got != "m2" {
+		t.Fatalf("three strikes: worker %q, want m2", got)
+	}
+	// With nobody else listed, the task waits and says why; clearing frees m1.
+	h3 := newDispHarness(t)
+	h3.addBackend("gpu", 5, false, false, "m1", "m3")
+	h3.candidates("global", "", "worker", "gpu/m1")
+	h3.candidates("global", "", "reviewer", "gpu/m3")
+	f3 := h3.dispProject("alpha", "any", indep(1))
+	h3.startRun("alpha")
+	for i := 1; i <= 3; i++ {
+		h3.failedAttempt(f3.tasks[0].ID, "m1", fmt.Sprintf("u%d", i), "infra:unparseable")
+	}
+	if got := h3.workerModelDispatched(); got != "" {
+		t.Fatalf("a benched model was dispatched: %q", got)
+	}
+	tk, _ := h3.st.GetTask(context.Background(), f3.tasks[0].ID)
+	if !strings.Contains(tk.WaitingReason, "benched") {
+		t.Fatalf("waiting reason %q does not say the model is benched", tk.WaitingReason)
+	}
+	time.Sleep(3 * time.Millisecond)
+	if err := h3.st.ClearStrikes(context.Background(), "owner", store.StrikeKey{Backend: "gpu", Model: "m1", Role: "worker"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := h3.workerModelDispatched(); got != "m1" {
+		t.Fatalf("after clearing the worker was %q, want m1", got)
+	}
+}

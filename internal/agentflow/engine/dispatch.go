@@ -123,6 +123,8 @@ type view struct {
 	// modelFree is the remaining per-model concurrency (PX5) of every model
 	// that has a limit, keyed by modelKey.
 	modelFree map[string]int
+	// strikes are the uncleared strikes per model and role (H7); StrikeLimit of them benches the model.
+	strikes map[store.StrikeKey]int
 }
 
 func modelKey(backend, model string) string { return backend + "\x00" + model }
@@ -136,7 +138,11 @@ func (e *Engine) newView(ctx context.Context) (*view, error) {
 	if err != nil {
 		return nil, err
 	}
-	v := &view{snap: snap, free: map[string]int{}, down: map[string]bool{}, modelFree: map[string]int{}}
+	strikes, err := e.deps.Store.StrikeCounts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	v := &view{snap: snap, free: map[string]int{}, down: map[string]bool{}, modelFree: map[string]int{}, strikes: strikes}
 	for b := range e.health.active(e.deps.Clock()) {
 		v.down[b] = true
 	}
@@ -258,7 +264,12 @@ func (e *Engine) dispatchOne(ctx context.Context, v *view, p store.Project) (boo
 			errs = append(errs, err)
 			continue
 		}
-		pk, reason := pickWorker(v, p, sticky)
+		avoid, err := e.repeatFailers(ctx, t, eff.StuckThreshold)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		pk, reason := pickWorker(v, p, sticky, avoid)
 		if reason != "" {
 			errs = append(errs, e.setWaiting(ctx, t, reason))
 			continue
@@ -328,12 +339,20 @@ func (e *Engine) setWaiting(ctx context.Context, t model.Task, reason string) er
 // pickWorker chooses the worker backend. A worker is only taken when a
 // reviewer other than it could still be picked (MB6), so a one-model pool
 // waits instead of dispatching; the reviewer itself is picked when its stage
-// is submitted.
-func pickWorker(v *view, p store.Project, sticky string) (Pick, string) {
+// is submitted. avoid holds the models that already failed this task the same
+// way repeatedly (H7): they are passed over for another model, unless no other
+// model could ever serve, in which case the repeat is allowed so the task
+// reaches stuck instead of waiting for ever.
+func pickWorker(v *view, p store.Project, sticky string, avoid map[string]int) (Pick, string) {
 	var reasons []string
-	for _, c := range v.snap.CandidatesFor("worker", p.Slug) {
+	cands := v.snap.CandidatesFor("worker", p.Slug)
+	for _, c := range cands {
 		if why := skipReason(v, p, c, true); why != "" {
 			reasons = append(reasons, why)
+			continue
+		}
+		if n := avoid[c.Model]; n > 0 {
+			reasons = append(reasons, fmt.Sprintf("model %s failed the same way %d times on this task", c.Model, n))
 			continue
 		}
 		if _, why := reviewerFor(v, p, sticky, c.Model, false); why != "" {
@@ -341,7 +360,42 @@ func pickWorker(v *view, p store.Project, sticky string) (Pick, string) {
 		}
 		return Pick{Backend: c.Backend, Model: c.Model}, ""
 	}
+	if len(avoid) > 0 {
+		other := false
+		for _, c := range cands {
+			if avoid[c.Model] == 0 && skipReason(v, p, c, false) == "" {
+				other = true
+			}
+		}
+		if !other {
+			return pickWorker(v, p, sticky, nil)
+		}
+	}
 	return Pick{}, noEligible("worker", reasons)
+}
+
+// repeatFailers names the worker model, if any, that has failed the task's
+// latest attempts the same way: the trailing run of failed attempts with one
+// fingerprint and one worker. From stuckThreshold-1 of them (at least 1) the
+// model is passed over for the next attempt, so a different model gets a turn
+// before the task is declared stuck. The value is the length of the run.
+func (e *Engine) repeatFailers(ctx context.Context, t model.Task, stuckThreshold int) (map[string]int, error) {
+	atts, err := e.deps.Store.ListAttempts(ctx, t.ID)
+	if err != nil {
+		return nil, err
+	}
+	run := 0
+	for i := len(atts) - 1; i >= 0; i-- {
+		a, last := atts[i], atts[len(atts)-1]
+		if a.Outcome != model.OutcomeFailed || a.Fingerprint == "" || a.Fingerprint != last.Fingerprint || a.WorkerModel != last.WorkerModel {
+			break
+		}
+		run++
+	}
+	if run == 0 || run < max(1, stuckThreshold-1) {
+		return nil, nil
+	}
+	return map[string]int{atts[len(atts)-1].WorkerModel: run}, nil
 }
 
 // pickBackend chooses the backend and model for a stage of role for task t of
@@ -473,6 +527,8 @@ func skipReason(v *view, p store.Project, c store.Candidate, needSlot bool) stri
 		return "backend " + c.Backend + " is unavailable"
 	case b.Hosted && p.ModelScope == "local":
 		return "hosted under local scope"
+	case v.strikes[store.StrikeKey{Backend: c.Backend, Model: c.Model, Role: c.Role}] >= store.StrikeLimit:
+		return fmt.Sprintf("model %s is benched for %s: %d strikes (clear them on the Stats tab)", c.Model, c.Role, store.StrikeLimit)
 	case lightForRole(v, c):
 		return fmt.Sprintf("model %s is rated light (tier 3), too weak for role %s", c.Model, c.Role)
 	case needSlot && v.down[c.Backend]:
