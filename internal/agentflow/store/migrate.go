@@ -42,7 +42,14 @@ var migrations = []migration{
 	{12, migration12SQL},
 	{13, migration13SQL},
 	{14, migration14SQL},
+	{15, migration15SQL},
 }
+
+// migration15SQL (H10) records whether the host says a model supports tool
+// calls, which every runner role needs: yes, no, or empty when not known.
+const migration15SQL = `
+ALTER TABLE backend_models ADD COLUMN tools TEXT NOT NULL DEFAULT '' CHECK (tools IN ('', 'yes', 'no'));
+`
 
 // migration14SQL (H6) tracks the installs of a model on an Ollama host: one row
 // per pull, with its progress, so a page reload or a restart still shows it.

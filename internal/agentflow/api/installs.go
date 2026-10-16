@@ -192,6 +192,44 @@ func (a *API) pull(ctx context.Context, in store.Install, host string) error {
 	return nil
 }
 
+// RefreshCapabilities asks each Ollama backend's host whether its models whose
+// tool support is not known support tool calls, and records the answers (H10).
+// It is best effort and meant to run once in the background at start-up, so
+// models added before the check existed get a badge (and a refusal when they
+// are made candidates) without anyone re-saving the backend.
+func (a *API) RefreshCapabilities(ctx context.Context) {
+	bs, err := a.deps.Store.ListBackends(ctx)
+	if err != nil {
+		return
+	}
+	for _, b := range bs {
+		if b.APIType != "ollama" || b.Retired {
+			continue
+		}
+		var ask []string
+		for _, m := range b.Models {
+			if m.Tools == "" {
+				ask = append(ask, m.Model)
+			}
+		}
+		if len(ask) == 0 {
+			continue
+		}
+		info := probeInfo(ctx, http.DefaultClient, b.Host, b.APIType, ask)
+		changed := false
+		for i := range b.Models {
+			if got := info[b.Models[i].Model].Tools; got != "" && b.Models[i].Tools == "" {
+				b.Models[i].Tools, changed = got, true
+			}
+		}
+		if changed {
+			if err := a.deps.Engine.UpdateBackend(ctx, "capabilities", b); err == nil {
+				a.emit("backend.update", map[string]any{"backend": b.Name})
+			}
+		}
+	}
+}
+
 // addInstalled lists the new model on its backend with the chosen tier and
 // its context window, unless it is already listed.
 func (a *API) addInstalled(ctx context.Context, in store.Install, host string) error {
@@ -214,8 +252,11 @@ func (a *API) addInstalled(ctx context.Context, in store.Install, host string) e
 	}
 	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	size := probeContexts(cctx, http.DefaultClient, host, b.APIType, []string{in.Model})[in.Model]
-	b.Models = append(b.Models, store.BackendModel{Model: in.Model, Tier: in.Tier, ContextTokens: size})
+	info := probeInfo(cctx, http.DefaultClient, host, b.APIType, []string{in.Model})[in.Model]
+	if info.Tools == "no" {
+		return fmt.Errorf("it does not support tool calls, which every agentflow role needs, so it was not added (it is still on the host: remove it there with ollama rm %s)", in.Model)
+	}
+	b.Models = append(b.Models, store.BackendModel{Model: in.Model, Tier: in.Tier, ContextTokens: info.Context, Tools: info.Tools})
 	if err := a.deps.Engine.UpdateBackend(ctx, "install", b); err != nil {
 		return err
 	}

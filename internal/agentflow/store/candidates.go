@@ -53,9 +53,10 @@ func (s *Store) SetRoleCandidates(ctx context.Context, actor, scope, projectID, 
 			}
 			seen[r] = true
 			var retired int
+			var tools string
 			err := tx.QueryRowContext(ctx, `
-				SELECT b.retired FROM backend_models m JOIN backends b ON b.name = m.backend
-				WHERE m.backend = ? AND m.model = ?`, r.Backend, r.Model).Scan(&retired)
+				SELECT b.retired, m.tools FROM backend_models m JOIN backends b ON b.name = m.backend
+				WHERE m.backend = ? AND m.model = ?`, r.Backend, r.Model).Scan(&retired, &tools)
 			if errors.Is(err, sql.ErrNoRows) {
 				return Invalid(fmt.Sprintf("candidates[%d]", i), fmt.Sprintf("unknown backend model %s/%s", r.Backend, r.Model))
 			}
@@ -64,6 +65,9 @@ func (s *Store) SetRoleCandidates(ctx context.Context, actor, scope, projectID, 
 			}
 			if retired != 0 {
 				return Invalid(fmt.Sprintf("candidates[%d]", i), fmt.Sprintf("backend %q is retired", r.Backend))
+			}
+			if tools == "no" {
+				return Invalid(fmt.Sprintf("candidates[%d]", i), fmt.Sprintf("%s/%s does not support tool calls, which every role needs", r.Backend, r.Model))
 			}
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM role_candidates WHERE scope = ? AND project_id = ? AND role = ?`,

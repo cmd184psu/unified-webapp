@@ -178,14 +178,16 @@ export class BackendsView {
     apiType.addEventListener('change', syncKey);
     syncKey();
     type ModelControl = HTMLInputElement | HTMLSelectElement;
-    type ModelRow = { model: ModelControl; paid: ToggleEl; max: HTMLInputElement; ctx: HTMLInputElement; tier: HTMLSelectElement; auto: string; el: HTMLElement };
+    type ModelRow = { model: ModelControl; paid: ToggleEl; max: HTMLInputElement; ctx: HTMLInputElement; tier: HTMLSelectElement; auto: string; warn: HTMLElement; el: HTMLElement };
     const models: ModelRow[] = [];
     // Names the host reported when probed; model rows then pick from them instead of typing.
     let probed: string[] = [];
     // Context windows the host reported, by model name; they prefill an empty context field.
     let contexts: Record<string, number> = {};
+    // What the host said about tool calls, by model name (H10); a model it says lacks them cannot be saved.
+    let tools: Record<string, string> = {};
     const modelControl = (m: string): ModelControl => probed.length > 0
-      ? selectInput('model', probed.map((n): [string, string] => [n, n]), m)
+      ? selectInput('model', probed.map((n): [string, string] => [n, tools[n] === 'no' ? `${n} (no tool support)` : n]), m)
       : textInput('model', m, { placeholder: 'model name (or Probe host)' });
     const modelList = h('div', { class: 'wizard-list' });
     const prefill = (row: ModelRow): void => {
@@ -197,10 +199,11 @@ export class BackendsView {
         row.auto = next;
       }
     };
+    const flag = (row: ModelRow): void => { row.warn.hidden = tools[row.model.value] !== 'no'; };
     const draw = (row: ModelRow): void => {
-      row.model.addEventListener('change', () => prefill(row));
+      row.model.addEventListener('change', () => { prefill(row); flag(row); });
       replace(row.el,
-        row.model,
+        row.model, row.warn,
         h('span', { class: 'inline-check' }, row.paid, 'paid'),
         h('span', { class: 'inline-check', attrs: { title: 'Context window in tokens; blank = unknown' } }, 'ctx', row.ctx),
         h('span', { class: 'inline-check', attrs: { title: 'How capable the model is. Light models are kept off planning roles; a reviewer is never weaker than the worker it checks.' } }, 'tier', row.tier),
@@ -219,6 +222,7 @@ export class BackendsView {
         ctx: textInput('context_tokens', ctx > 0 ? String(ctx) : '', { type: 'number', placeholder: '?' }),
         tier: selectInput('tier', TIERS, String(tier)),
         auto: '',
+        warn: h('span', { class: 'badge badge-warn', text: 'no tool support: remove it', attrs: { 'data-role': 'no-tools', hidden: true, title: 'The host says this model cannot make tool calls, which every agentflow role needs. It cannot be saved.' } }),
         el: h('div', { class: 'inline-row', attrs: { 'data-role': 'model-row' } }),
       };
       models.push(row);
@@ -233,6 +237,7 @@ export class BackendsView {
         const res = await this.deps.probeBackend(builtin() ? '' : host.value.trim(), apiType.value, apiKey.value, initial?.name ?? '');
         probed = res.models;
         contexts = res.contexts ?? {};
+        tools = res.tools ?? {};
         if (probed.length === 0) throw new Error('the host reported no models');
         // Swap each row's control for a picker, keeping a name the host still serves.
         for (const row of models) {
@@ -240,6 +245,7 @@ export class BackendsView {
           row.model = modelControl(keep);
           draw(row);
           prefill(row);
+          flag(row);
         }
         bump();
         this.deps.notify(`${probed.length} model(s) found${builtin() ? '' : ` on ${host.value.trim()}`}`);
@@ -338,7 +344,8 @@ export class BackendsView {
     const models = b.models.map((m) => h('span', { class: 'row-actions' }, m.model, m.paid ? badge('paid') : null,
       m.max_concurrent > 0 ? badge(`max ${m.max_concurrent} at once`, 'muted') : null,
       m.context_tokens ? badge(formatTokens(m.context_tokens), 'muted') : null,
-      m.tier ? badge(`tier ${m.tier}`, m.tier === 3 ? 'warn' : 'muted') : null));
+      m.tier ? badge(`tier ${m.tier}`, m.tier === 3 ? 'warn' : 'muted') : null,
+      m.tools === 'no' ? badge('no tools', 'warn') : null));
     return h('div', { class: 'profile-card', attrs: { 'data-backend': b.name } },
       h('div', { class: 'profile-header' },
         h('span', { class: 'row-actions' },

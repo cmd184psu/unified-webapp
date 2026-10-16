@@ -529,6 +529,8 @@ func skipReason(v *view, p store.Project, c store.Candidate, needSlot bool) stri
 		return "hosted under local scope"
 	case v.strikes[store.StrikeKey{Backend: c.Backend, Model: c.Model, Role: c.Role}] >= store.StrikeLimit:
 		return fmt.Sprintf("model %s is benched for %s: %d strikes (clear them on the Stats tab)", c.Model, c.Role, store.StrikeLimit)
+	case lacksTools(v, c):
+		return fmt.Sprintf("model %s does not support tool calls, which every role needs", c.Model)
 	case lightForRole(v, c):
 		return fmt.Sprintf("model %s is rated light (tier 3), too weak for role %s", c.Model, c.Role)
 	case needSlot && v.down[c.Backend]:
@@ -539,6 +541,22 @@ func skipReason(v *view, p store.Project, c store.Candidate, needSlot bool) stri
 		return "model " + c.Model + " is at its concurrency limit on " + c.Backend
 	}
 	return ""
+}
+
+// lacksTools says the host reported that the candidate's model does not support
+// tool calls (H10). A model whose support is not known is not blocked.
+func lacksTools(v *view, c store.Candidate) bool {
+	for _, b := range v.snap.Backends {
+		if b.Name != c.Backend {
+			continue
+		}
+		for _, m := range b.Models {
+			if m.Model == c.Model {
+				return m.Tools == "no"
+			}
+		}
+	}
+	return false
 }
 
 // Model tiers (H3): 1 strong, 2 capable, 3 light; a model the owner has not

@@ -53,15 +53,33 @@ func (a *API) probeBackend(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadGateway, errorBody{Error: err.Error(), Field: "host"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"models": models, "contexts": probeContexts(r.Context(), http.DefaultClient, body.Host, body.APIType, models)})
+	info := probeInfo(r.Context(), http.DefaultClient, body.Host, body.APIType, models)
+	contexts, tools := map[string]int{}, map[string]string{}
+	for name, i := range info {
+		if i.Context > 0 {
+			contexts[name] = i.Context
+		}
+		if i.Tools != "" {
+			tools[name] = i.Tools
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"models": models, "contexts": contexts, "tools": tools})
 }
 
-// probeContexts asks an Ollama host for each model's context window
-// (/api/show, a model_info key ending in .context_length). It is best effort:
-// a model whose answer is missing or unreadable is left out, and hosts of
-// other API types have no such call.
-func probeContexts(ctx context.Context, c *http.Client, host, apiType string, models []string) map[string]int {
-	out := map[string]int{}
+// modelInfo is what an Ollama host reports about a model: its context window
+// and whether it supports tool calls, which every agentflow role needs. Tools
+// is "yes" or "no", or empty when the host did not say (an old Ollama has no
+// capabilities list, and an unreachable host says nothing).
+type modelInfo struct {
+	Context int
+	Tools   string
+}
+
+// probeInfo asks an Ollama host about each model (/api/show). It is best
+// effort: a model whose answer is missing or unreadable is left out, and hosts
+// of other API types have no such call.
+func probeInfo(ctx context.Context, c *http.Client, host, apiType string, models []string) map[string]modelInfo {
+	out := map[string]modelInfo{}
 	if apiType != "ollama" {
 		return out
 	}
@@ -69,44 +87,66 @@ func probeContexts(ctx context.Context, c *http.Client, host, apiType string, mo
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	for _, name := range models {
-		if n := showContext(ctx, c, base, name); n > 0 {
-			out[name] = n
+		if info, ok := showInfo(ctx, c, base, name); ok {
+			out[name] = info
 		}
 	}
 	return out
 }
 
-func showContext(ctx context.Context, c *http.Client, base, model string) int {
+// probeContexts is the context windows from probeInfo, for the models that report one.
+func probeContexts(ctx context.Context, c *http.Client, host, apiType string, models []string) map[string]int {
+	out := map[string]int{}
+	for name, info := range probeInfo(ctx, c, host, apiType, models) {
+		if info.Context > 0 {
+			out[name] = info.Context
+		}
+	}
+	return out
+}
+
+func showInfo(ctx context.Context, c *http.Client, base, model string) (modelInfo, bool) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	body, _ := json.Marshal(map[string]string{"model": model})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/api/show", bytes.NewReader(body))
 	if err != nil {
-		return 0
+		return modelInfo{}, false
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.Do(req)
 	if err != nil {
-		return 0
+		return modelInfo{}, false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return 0
+		return modelInfo{}, false
 	}
 	var out struct {
-		ModelInfo map[string]json.RawMessage `json:"model_info"`
+		ModelInfo    map[string]json.RawMessage `json:"model_info"`
+		Capabilities []string                   `json:"capabilities"`
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil || json.Unmarshal(raw, &out) != nil {
-		return 0
+		return modelInfo{}, false
 	}
+	var info modelInfo
 	for k, v := range out.ModelInfo {
 		var n int
 		if strings.HasSuffix(k, ".context_length") && json.Unmarshal(v, &n) == nil && n > 0 {
-			return n
+			info.Context = n
+			break
 		}
 	}
-	return 0
+	if out.Capabilities != nil { // an old host sends none: then nothing is known
+		info.Tools = "no"
+		for _, c := range out.Capabilities {
+			if c == "tools" {
+				info.Tools = "yes"
+			}
+		}
+	}
+	return info, true
 }
 
 // probeModels lists the model names a backend host serves: Ollama's

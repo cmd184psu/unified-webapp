@@ -1741,7 +1741,8 @@ var BackendsView = class {
     const models = [];
     let probed = [];
     let contexts = {};
-    const modelControl = (m) => probed.length > 0 ? selectInput("model", probed.map((n) => [n, n]), m) : textInput("model", m, { placeholder: "model name (or Probe host)" });
+    let tools = {};
+    const modelControl = (m) => probed.length > 0 ? selectInput("model", probed.map((n) => [n, tools[n] === "no" ? `${n} (no tool support)` : n]), m) : textInput("model", m, { placeholder: "model name (or Probe host)" });
     const modelList = h("div", { class: "wizard-list" });
     const prefill = (row) => {
       const c = contexts[row.model.value];
@@ -1751,11 +1752,18 @@ var BackendsView = class {
         row.auto = next;
       }
     };
+    const flag = (row) => {
+      row.warn.hidden = tools[row.model.value] !== "no";
+    };
     const draw = (row) => {
-      row.model.addEventListener("change", () => prefill(row));
+      row.model.addEventListener("change", () => {
+        prefill(row);
+        flag(row);
+      });
       replace(
         row.el,
         row.model,
+        row.warn,
         h("span", { class: "inline-check" }, row.paid, "paid"),
         h("span", { class: "inline-check", attrs: { title: "Context window in tokens; blank = unknown" } }, "ctx", row.ctx),
         h("span", { class: "inline-check", attrs: { title: "How capable the model is. Light models are kept off planning roles; a reviewer is never weaker than the worker it checks." } }, "tier", row.tier),
@@ -1775,6 +1783,7 @@ var BackendsView = class {
         ctx: textInput("context_tokens", ctx > 0 ? String(ctx) : "", { type: "number", placeholder: "?" }),
         tier: selectInput("tier", TIERS2, String(tier)),
         auto: "",
+        warn: h("span", { class: "badge badge-warn", text: "no tool support: remove it", attrs: { "data-role": "no-tools", hidden: true, title: "The host says this model cannot make tool calls, which every agentflow role needs. It cannot be saved." } }),
         el: h("div", { class: "inline-row", attrs: { "data-role": "model-row" } })
       };
       models.push(row);
@@ -1789,12 +1798,14 @@ var BackendsView = class {
         const res = await this.deps.probeBackend(builtin() ? "" : host.value.trim(), apiType.value, apiKey.value, initial?.name ?? "");
         probed = res.models;
         contexts = res.contexts ?? {};
+        tools = res.tools ?? {};
         if (probed.length === 0) throw new Error("the host reported no models");
         for (const row of models) {
           const keep = row.model.value;
           row.model = modelControl(keep);
           draw(row);
           prefill(row);
+          flag(row);
         }
         bump();
         this.deps.notify(`${probed.length} model(s) found${builtin() ? "" : ` on ${host.value.trim()}`}`);
@@ -1913,7 +1924,8 @@ var BackendsView = class {
       m.paid ? badge("paid") : null,
       m.max_concurrent > 0 ? badge(`max ${m.max_concurrent} at once`, "muted") : null,
       m.context_tokens ? badge(formatTokens(m.context_tokens), "muted") : null,
-      m.tier ? badge(`tier ${m.tier}`, m.tier === 3 ? "warn" : "muted") : null
+      m.tier ? badge(`tier ${m.tier}`, m.tier === 3 ? "warn" : "muted") : null,
+      m.tools === "no" ? badge("no tools", "warn") : null
     ));
     return h(
       "div",

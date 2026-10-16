@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 
 	"cmd184psu/unified-webapp/internal/agentflow/engine"
@@ -31,6 +32,9 @@ type BackendModelView struct {
 	ContextTokens int `json:"context_tokens"`
 	// Tier rates the model: 1 strong, 2 capable, 3 light, 0 not rated.
 	Tier int `json:"tier"`
+	// Tools is whether the host says the model supports tool calls, which every role needs (H10): yes,
+	// no, or empty when not known. The server sets it from the host; a value sent in is ignored.
+	Tools string `json:"tools"`
 }
 
 // BackendView is a backend as the API shows it. DownUntil (unix ms) is set
@@ -56,7 +60,7 @@ func (a *API) backendView(b store.Backend) BackendView {
 	v := BackendView{Name: b.Name, Host: b.Host, APIType: b.APIType, Hosted: b.Hosted, Paid: b.Paid,
 		Slots: b.Slots, Retired: b.Retired, HasKey: b.HasKey, Models: []BackendModelView{}}
 	for _, m := range b.Models {
-		v.Models = append(v.Models, BackendModelView{Model: m.Model, Paid: m.Paid, MaxConcurrent: m.MaxConcurrent, ContextTokens: m.ContextTokens, Tier: m.Tier})
+		v.Models = append(v.Models, BackendModelView{Model: m.Model, Paid: m.Paid, MaxConcurrent: m.MaxConcurrent, ContextTokens: m.ContextTokens, Tier: m.Tier, Tools: m.Tools})
 	}
 	if since, ok := a.deps.Engine.SuspendedBackends()[b.Name]; ok {
 		v.SuspendedSince = since.UnixMilli()
@@ -142,6 +146,43 @@ func (bb backendBody) apply(b *store.Backend) {
 	}
 }
 
+// checkTools sets each model's tool support from its host and refuses a model
+// that lacks it (H10): every agentflow role calls tools, so a model that
+// cannot would only crash its stages. A client's value is ignored; what was
+// stored before is kept until the host answers. An Ollama host that cannot be
+// reached leaves a model's support unknown rather than blocking the save.
+func (a *API) checkTools(ctx context.Context, b *store.Backend, prev []store.BackendModel) error {
+	known := map[string]string{}
+	for _, m := range prev {
+		known[m.Model] = m.Tools
+	}
+	var ask []string
+	for i := range b.Models {
+		b.Models[i].Tools = known[b.Models[i].Model]
+		if b.Models[i].Tools != "yes" {
+			ask = append(ask, b.Models[i].Model)
+		}
+	}
+	if len(ask) > 0 {
+		info := probeInfo(ctx, http.DefaultClient, b.Host, b.APIType, ask)
+		for i := range b.Models {
+			if got := info[b.Models[i].Model].Tools; got != "" {
+				b.Models[i].Tools = got
+			}
+		}
+	}
+	var bad []string
+	for _, m := range b.Models {
+		if m.Tools == "no" {
+			bad = append(bad, m.Model)
+		}
+	}
+	if len(bad) > 0 {
+		return store.Invalid("models", strings.Join(bad, ", ")+" does not support tool calls, which every agentflow role needs; remove it from the backend")
+	}
+	return nil
+}
+
 // needModels rejects a backend that serves no model: nothing could ever be
 // dispatched to it (SV1).
 func needModels(b store.Backend) error {
@@ -159,6 +200,10 @@ func (a *API) createBackend(w http.ResponseWriter, r *http.Request) {
 	b := store.Backend{Slots: 1}
 	body.apply(&b)
 	if err := needModels(b); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := a.checkTools(r.Context(), &b, nil); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -194,8 +239,13 @@ func (a *API) patchBackend(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	prev := slices.Clone(b.Models)
 	body.apply(&b)
 	if err := needModels(b); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := a.checkTools(r.Context(), &b, prev); err != nil {
 		writeErr(w, err)
 		return
 	}

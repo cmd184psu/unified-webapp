@@ -2,6 +2,7 @@ package store
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -48,5 +49,37 @@ func TestMigration12AddsModelTiers(t *testing.T) {
 		if err := s2.UpdateBackend(ctx, "t", b); err == nil {
 			t.Fatalf("tier %d accepted", bad)
 		}
+	}
+}
+
+// H10: whether a model supports tool calls is stored per model ("" when not
+// known); a model known to lack them cannot be made a candidate for any role.
+func TestH10ToolsAreStoredAndAModelWithoutThemCannotBeACandidate(t *testing.T) {
+	s, _ := openTemp(t)
+	b := Backend{Name: "b", Host: "http://127.0.0.1:11434", APIType: "ollama", Slots: 1, Models: []BackendModel{
+		{Model: "good", Tools: "yes"}, {Model: "bad", Tools: "no"}, {Model: "unknown"}}}
+	if err := s.CreateBackend(ctx, "t", b); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.GetBackend(ctx, "b")
+	tools := map[string]string{}
+	for _, m := range got.Models {
+		tools[m.Model] = m.Tools
+	}
+	if tools["good"] != "yes" || tools["bad"] != "no" || tools["unknown"] != "" {
+		t.Fatalf("tools = %v", tools)
+	}
+	b.Models[0].Tools = "maybe"
+	if err := s.UpdateBackend(ctx, "t", b); err == nil {
+		t.Fatal("tools = maybe accepted")
+	}
+	for _, ok := range []string{"good", "unknown"} {
+		if err := s.SetRoleCandidates(ctx, "t", "global", "", "worker", []CandidateRef{{Backend: "b", Model: ok}}); err != nil {
+			t.Fatalf("%s as a candidate: %v", ok, err)
+		}
+	}
+	err := s.SetRoleCandidates(ctx, "t", "global", "", "worker", []CandidateRef{{Backend: "b", Model: "bad"}})
+	if err == nil || !strings.Contains(err.Error(), "tool calls") {
+		t.Fatalf("a model without tool support became a candidate: %v", err)
 	}
 }

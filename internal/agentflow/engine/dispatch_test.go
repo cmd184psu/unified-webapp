@@ -757,3 +757,47 @@ func TestH8_ASuspendedBackendReturnsWhenItAnswers(t *testing.T) {
 		t.Fatalf("after it answered the worker was %q, want m1", got)
 	}
 }
+
+// H10: a model its host says has no tool support is never dispatched, whatever
+// the lists say, and the task shows why when it was the only choice.
+func TestH10_ModelWithoutToolsIsSkipped(t *testing.T) {
+	ctx := context.Background()
+	mark := func(h *harness, mdl string) {
+		b, err := h.st.GetBackend(ctx, "gpu")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range b.Models {
+			if b.Models[i].Model == mdl {
+				b.Models[i].Tools = "no"
+			}
+		}
+		if err := h.eng.UpdateBackend(ctx, "t", b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := newDispHarness(t)
+	h.addBackend("gpu", 5, false, false, "m1", "m2", "m3")
+	h.candidates("global", "", "worker", "gpu/m1", "gpu/m2")
+	h.candidates("global", "", "reviewer", "gpu/m3")
+	h.dispProject("alpha", "any", indep(1))
+	h.startRun("alpha")
+	mark(h, "m1")
+	if got := h.workerModelDispatched(); got != "m2" {
+		t.Fatalf("worker = %q, want m2 (m1 has no tool support)", got)
+	}
+	h2 := newDispHarness(t)
+	h2.addBackend("gpu", 5, false, false, "m1", "m3")
+	h2.candidates("global", "", "worker", "gpu/m1")
+	h2.candidates("global", "", "reviewer", "gpu/m3")
+	f := h2.dispProject("alpha", "any", indep(1))
+	h2.startRun("alpha")
+	mark(h2, "m1")
+	if got := h2.workerModelDispatched(); got != "" {
+		t.Fatalf("a model without tool support was dispatched: %q", got)
+	}
+	tk, _ := h2.st.GetTask(ctx, f.tasks[0].ID)
+	if !strings.Contains(tk.WaitingReason, "tool calls") {
+		t.Fatalf("waiting reason %q does not say why", tk.WaitingReason)
+	}
+}

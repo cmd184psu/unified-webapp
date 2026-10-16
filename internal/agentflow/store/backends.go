@@ -21,6 +21,10 @@ type BackendModel struct {
 	ContextTokens int
 	// Tier rates the model: 1 strong, 2 capable, 3 light, 0 not rated yet (H3).
 	Tier int
+	// Tools is whether the host says the model supports tool calls, which
+	// every runner role needs (H10): "yes", "no", or "" when not known. The
+	// server fills it from the host; a client's value is not trusted.
+	Tools string
 }
 
 // Backend is a model server in agentflow's own terms (AR3): where it is, which
@@ -67,6 +71,9 @@ func validateBackend(b Backend) error {
 		if m.MaxConcurrent < 0 {
 			return Invalid("models", fmt.Sprintf("model %q: max_concurrent must be 0 (no limit) or more", m.Model))
 		}
+		if m.Tools != "" && m.Tools != "yes" && m.Tools != "no" {
+			return Invalid("models", fmt.Sprintf("model %q: tools must be yes, no or empty", m.Model))
+		}
 		if m.Tier < 0 || m.Tier > 3 {
 			return Invalid("models", fmt.Sprintf("model %q: tier must be 0 (not rated), 1, 2 or 3", m.Model))
 		}
@@ -98,8 +105,8 @@ func b2i(b bool) int {
 
 func insertModels(ctx context.Context, tx *sql.Tx, b Backend) error {
 	for _, m := range b.Models {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO backend_models (backend, model, paid, max_concurrent, context_tokens, tier) VALUES (?, ?, ?, ?, ?, ?)`,
-			b.Name, m.Model, b2i(m.Paid), m.MaxConcurrent, m.ContextTokens, m.Tier); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO backend_models (backend, model, paid, max_concurrent, context_tokens, tier, tools) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			b.Name, m.Model, b2i(m.Paid), m.MaxConcurrent, m.ContextTokens, m.Tier, m.Tools); err != nil {
 			return err
 		}
 	}
@@ -242,14 +249,14 @@ func loadBackends(ctx context.Context, q querier, name string) ([]Backend, error
 	// The single connection serves one result set at a time, so models are
 	// read after the backend rows are closed.
 	for i := range out {
-		mrows, err := q.QueryContext(ctx, `SELECT model, paid, max_concurrent, context_tokens, tier FROM backend_models WHERE backend = ? ORDER BY model`, out[i].Name)
+		mrows, err := q.QueryContext(ctx, `SELECT model, paid, max_concurrent, context_tokens, tier, tools FROM backend_models WHERE backend = ? ORDER BY model`, out[i].Name)
 		if err != nil {
 			return nil, err
 		}
 		for mrows.Next() {
 			var m BackendModel
 			var paid int
-			if err := mrows.Scan(&m.Model, &paid, &m.MaxConcurrent, &m.ContextTokens, &m.Tier); err != nil {
+			if err := mrows.Scan(&m.Model, &paid, &m.MaxConcurrent, &m.ContextTokens, &m.Tier, &m.Tools); err != nil {
 				mrows.Close()
 				return nil, err
 			}

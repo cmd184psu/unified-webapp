@@ -76,6 +76,28 @@ test('CI1: with no backends the tab prompts to add one', async () => {
   stop();
 });
 
+test('H10: a probe marks a model without tool support, the form warns when it is picked, and the card badges a stored one', async () => {
+  const t = harness({ backends: [be('o1', { models: [{ model: 'gemma', paid: false, max_concurrent: 0, tools: 'no' }, { model: 'ok', paid: false, max_concurrent: 0, tools: 'yes' }] })] }, {
+    probeBackend: async () => ({ models: ['m-a', 'm-b'], tools: { 'm-a': 'yes', 'm-b': 'no' } }),
+  });
+  const stop = t.view.mount();
+  await flush();
+  const card = byAttr(t.host, 'data-backend', 'o1')[0].textContent;
+  ok(card.includes('no tools'), 'card badge: ' + card);
+  eq((card.match(/no tools/g) ?? []).length, 1, 'only the model without tools is badged');
+  button(t.host, 'Add backend').click();
+  field(t.host, 'host').value = 'http://127.0.0.1:11434';
+  button(t.host, 'Probe host for models').click();
+  await flush();
+  const pick = field(t.host, 'model');
+  ok(pick.childNodes.some((o) => o.textContent.includes('m-b (no tool support)')), 'the picker says which model has no tools');
+  eq((byAttr(t.host, 'data-role', 'no-tools')[0] as unknown as { hidden: boolean }).hidden, true, 'no warning while a good model is picked');
+  pick.value = 'm-b';
+  pick.fire('change');
+  eq((byAttr(t.host, 'data-role', 'no-tools')[0] as unknown as { hidden: boolean }).hidden, false, 'warning once the bad model is picked');
+  stop();
+});
+
 test('probing the host turns the model box into a picker of the names it reported', async () => {
   const t = harness({});
   const stop = t.view.mount();

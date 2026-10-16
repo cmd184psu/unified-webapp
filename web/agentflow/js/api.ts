@@ -154,6 +154,8 @@ export interface BackendModel {
   context_tokens?: number;
   /** 1 strong, 2 capable, 3 light, 0 or absent = not rated (H3). */
   tier?: number;
+  /** Whether the host says the model supports tool calls, which every role needs (H10); empty or absent = not known. Set by the server. */
+  tools?: 'yes' | 'no' | '';
 }
 
 export interface Backend {
@@ -592,7 +594,7 @@ export const api = {
   // Backends, candidates, settings
   backends: (): Promise<Backend[]> => get('/api/backends'),
   createBackend: (b: BackendInput, o?: FetchOptions): Promise<BackendResult> => send('POST', '/api/backends', b, o),
-  probeBackend: (host: string, apiType: string, key = '', backend = ''): Promise<{ models: string[]; contexts?: Record<string, number> }> =>
+  probeBackend: (host: string, apiType: string, key = '', backend = ''): Promise<{ models: string[]; contexts?: Record<string, number>; tools?: Record<string, string> }> =>
     send('POST', '/api/backends/probe', { host, api_type: apiType, api_key: key, backend }, { quiet: true }),
   patchBackend: (name: string, b: Partial<BackendInput>, o?: FetchOptions): Promise<BackendResult> =>
     send('PATCH', `/api/backends/${enc(name)}`, b, o),

@@ -138,8 +138,14 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 	events.Store(a)
 	mux.Handle("/", static.NewHandler(cfg.StaticDir))
 
+	// Models listed before the tool-support check existed learn whether their host
+	// says they support tool calls (H10); best effort, in the background.
+	capCtx, stopCaps := context.WithCancel(context.Background())
+	go a.RefreshCapabilities(capCtx)
+
 	log.Printf("agentflow: data %s, static %s", dataDir, cfg.StaticDir)
 	return &handler{Handler: mux, stop: func() error {
+		stopCaps()
 		eng.Close()
 		return st.Close()
 	}}, nil
