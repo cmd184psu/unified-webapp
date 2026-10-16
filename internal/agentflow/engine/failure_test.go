@@ -224,6 +224,8 @@ func TestC7_ACAT2_UnreachableRetriesOnAnotherBackend(t *testing.T) {
 	}
 	if as := c.attempts(0); len(as) != 1 || as[0].N != 1 || as[0].Outcome != model.OutcomePassed {
 		t.Fatalf("attempts = %+v", as)
+	} else if as[0].WorkerModel != "m3" {
+		t.Fatalf("the attempt names worker %q, but m3 did the work", as[0].WorkerModel)
 	}
 	ins, err := c.st.TaskInputs(ctx, c.effort)
 	if err != nil || len(ins[0].InfraIDs) != 0 {

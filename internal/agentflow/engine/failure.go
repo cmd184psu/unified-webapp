@@ -246,6 +246,11 @@ func (e *Engine) resubmit(ctx context.Context, c *chain, last model.Stage) error
 	if err := e.submit(ctx, c, BackendLane(pk.Backend), last.Role, pk.Backend, pk.Model, last.QueueHash); err != nil {
 		return err
 	}
+	if last.Role == "worker" && pk.Model != c.att.WorkerModel {
+		if err := e.deps.Store.SetAttemptWorker(ctx, c.att.ID, pk.Model); err != nil {
+			return err
+		}
+	}
 	if c.task.WaitingReason != "" {
 		return e.deps.Store.SetWaitingReason(ctx, c.task.ID, "")
 	}

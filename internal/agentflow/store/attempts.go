@@ -75,6 +75,20 @@ func (s *Store) FinishAttempt(ctx context.Context, id int64, outcome, fingerprin
 	})
 }
 
+// SetAttemptWorker records the model that is now doing the attempt's work, when
+// a retry moved it to another one, so the attempt, its review independence and
+// the per-model attempt counts name the model that produced the result.
+func (s *Store) SetAttemptWorker(ctx context.Context, id int64, workerModel string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE attempts SET worker_model = ? WHERE id = ? AND outcome = ''`, workerModel, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("attempt %d is not open: %w", id, ErrConflict)
+	}
+	return nil
+}
+
 // GetAttempt returns one attempt or ErrNotFound.
 func (s *Store) GetAttempt(ctx context.Context, id int64) (model.Attempt, error) {
 	a, err := scanAttempt(s.db.QueryRowContext(ctx, `SELECT `+attemptCols+` FROM attempts WHERE id = ?`, id))
