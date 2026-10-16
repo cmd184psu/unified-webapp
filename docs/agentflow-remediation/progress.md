@@ -271,3 +271,24 @@ Findings from the UI evidence run (not fixed in G2): the FRD tab crashes on rend
 - Folder picker dialog scrolls horizontally (agentflow's own `.dir-picker`/`.dir-row` CSS; do not touch the shared modal).
 - Toggles confirmed good again after the shared-CSS fix.
 - FRD tab console noise (2026-10-15): while a draft is still being written, the tab polls `GET .../frd`, which correctly returns 404, and Chrome logs a red line each time. Harmless (`frd-editor.ts` loadDoc treats 404 as "no FRD yet"), but skip the request until the effort reports an FRD revision (`e.frd.latest`), taking care that the poll refreshes the effort so the FRD still appears when the draft lands.
+
+## Webcalc trials (2026-10-14 and 2026-10-15)
+
+Same one-sentence spec every time (`scripts/agentflow-webcalc-kickoff.py`), scored by `scripts/agentflow-webcalc-probe.py` (17 checks against the spec on port 7070).
+
+| | Effort 3: free models | Effort 4: local models | Effort 5: hardened, local only |
+|---|---|---|---|
+| Engine | before phase H | before phase H | H1 to H3b, H4 |
+| Result | works, 17/17 | marked complete, 2/17 (listens on 8080) | **halted at T003**, tasks T004 to T006 never ran |
+| Port, routes | 7070, `/api/*` | 8080, `/arithmetic/*` | task prompts and criteria carry `/api/add`..`/api/divide` and port 7070 verbatim |
+| Stopped by | n/a | n/a | the same verify failure three times in a row on T003 |
+
+**What effort 5 showed**
+- **H1 worked.** The compiled task prompts quote the routes, the status codes, the error text and the port; effort 4's paraphrases are gone. The literal guard was the fix for the defect that let effort 4 pass wrongly.
+- **The halt was a model fault, not a spec fault.** T001 and T002 passed. On T003 the m4's qwen3.6:27b gave unparseable output after 32 minutes; the m5's qwen3.6:35b then passed its own checks and the review, hit a merge conflict in `main_test.go` (T003 had edited T002's file, outside its `files_touched`), failed a repair with `declared and not used: ct`, and then wrote its result file with one stray backtick after the JSON three attempts running. The strict parse rejected it each time and the task was stuck, with other models idle.
+- **Cost.** One T003 worker stage used 3.4M tokens in 25 minutes. The whole effort was about an hour and a half of model time before the halt.
+- **Independence label.** The task view said `same_model` for T003 attempt 1 although the retry had moved the work to another model; the label reads the worker model at attempt start. Not fixed.
+
+**Changes it led to (all live, `878aa60`)**: H7 a task passes over a model that failed it the same way twice; strikes are a streak (a success resets it, three in a row bench the model), with a permanent history and per-day counts (`GET /api/strikes`, Stats tab). H8 an unreachable backend is suspended until it answers and blames nobody. H9, a merge-conflict plan (prevention, a deterministic ladder, then a resolver agent), is written but not built.
+
+Effort 6 onward: `scripts/agentflow-webcalc-local.py` builds the lineup from tiers and probes the result.

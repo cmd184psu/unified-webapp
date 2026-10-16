@@ -61,7 +61,15 @@ jar = http.cookiejar.CookieJar()
 opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
 
 
-def api(method, path, body=None, want=None):
+def login():
+    try:
+        pin = open(args.pin_file).read().strip()
+    except OSError:
+        return
+    api("POST", "/api/auth/login", {"method": "pin", "pin": pin}, _retry=False)
+
+
+def api(method, path, body=None, want=None, _retry=True):
     req = urllib.request.Request(args.url + path, method=method,
                                  data=None if body is None else json.dumps(body).encode())
     req.add_header("Host", args.host)
@@ -71,6 +79,9 @@ def api(method, path, body=None, want=None):
             code, raw = r.status, r.read()
     except urllib.error.HTTPError as e:
         code, raw = e.code, e.read()
+    if code == 401 and _retry and path != "/api/auth/login":  # the session expired during a long wait: log in again
+        login()
+        return api(method, path, body, want, _retry=False)
     if want is not None and code != want:
         sys.exit(f"{method} {path} -> {code} (want {want}): {raw[:300]!r}")
     try:
@@ -94,11 +105,7 @@ def say(m):
 
 
 # login (a PIN session is "anonymous", which is fine)
-try:
-    pin = open(args.pin_file).read().strip()
-    api("POST", "/api/auth/login", {"method": "pin", "pin": pin})
-except OSError:
-    pass
+login()
 
 health = api("GET", "/api/health", None, 200)
 say(f"service ok; opencode {health.get('opencode', {}).get('status')}")
