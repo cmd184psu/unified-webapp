@@ -253,6 +253,16 @@ export interface Install {
   finished?: number;
 }
 
+/** ImportReport is what POST /api/config/import says it did (or, without apply, would do) (H13). */
+export interface ImportReport {
+  applied: boolean;
+  created_backends: string[];
+  updated_backends: string[];
+  candidate_roles: string[];
+  settings: string[];
+  warnings: string[];
+}
+
 /** Strike is one entry of the strike history (GET /api/strikes); counted is whether it is in the current streak. */
 export interface Strike {
   backend: string;
@@ -618,6 +628,7 @@ export const api = {
   startInstall: (backend: string, model: string, tier: number): Promise<Install> =>
     send('POST', `/api/backends/${enc(backend)}/install`, { model, tier }),
   cancelInstall: (id: number): Promise<void> => send('POST', `/api/installs/${id}/cancel`),
+  importConfig: (config: unknown, apply: boolean): Promise<ImportReport> => send('POST', '/api/config/import', { config, apply }),
   clearStrikes: (backend: string, model: string, role: string): Promise<void> => send('POST', '/api/strikes/clear', { backend, model, role }),
 
   // Efforts
