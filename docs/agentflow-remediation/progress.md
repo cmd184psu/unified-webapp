@@ -292,3 +292,15 @@ Same one-sentence spec every time (`scripts/agentflow-webcalc-kickoff.py`), scor
 **Changes it led to (all live, `878aa60`)**: H7 a task passes over a model that failed it the same way twice; strikes are a streak (a success resets it, three in a row bench the model), with a permanent history and per-day counts (`GET /api/strikes`, Stats tab). H8 an unreachable backend is suspended until it answers and blames nobody. H9, a merge-conflict plan (prevention, a deterministic ladder, then a resolver agent), is written but not built.
 
 Effort 6 onward: `scripts/agentflow-webcalc-local.py` builds the lineup from tiers and probes the result.
+
+## UX: projects and efforts are easy to confuse (owner, 2026-10-16)
+
+The owner looked at the Board of an old effort and read it as the running work, because the screen shows a *project* picker and an *effort* bar next to each other and the trial projects were named after their runs (`webcalc-local`, `-local2`, `-local3`), each holding one effort called "web calculator". Seen on the way there: the Overview card says "running" twice (the project's run state, then the effort's status); the Project tab opens on the project used last, with nothing to say another project is working; every effort in the list has the same title.
+
+Changes proposed (not built, except the first):
+- Done 2026-10-16: the Project dropdown marks a project that has a run going.
+- One line at the top of every project screen that spells out the hierarchy: `Project webcalc-local3  >  Effort #6 "web calculator" (running, 4 of 6 tasks)`.
+- Overview cards: the project name as the heading, the effort and its state on its own labelled line ("Effort #6 · running"), and only one "running" chip.
+- Show each project's active effort in the dropdown (`webcalc-local3  #6 running`) so a project is recognised by what it is doing.
+- When a project has no active effort say so, and say that its Board shows its last effort (a finished one), not current work.
+- Trial scripts: put the trial number in the effort title ("web calculator, local trial 3") so efforts differ.
