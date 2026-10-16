@@ -34,10 +34,10 @@ func (c *chainRun) infraStrikes(task int) int {
 	return len(ins[task].InfraIDs)
 }
 
-// AC-MB1 (MB7): alpha reports itself unreachable, so it is marked down for the
-// cooldown and the retried worker stage runs on beta, which the dispatcher and
-// the infra retry both honor. No attempt is counted for the outage; after the
-// cooldown alpha is usable again.
+// AC-MB1 (MB7, H8): alpha reports itself unreachable, so it is suspended and
+// the retried worker stage runs on beta, which the dispatcher and the infra
+// retry both honor. No attempt is counted for the outage; alpha is usable again
+// only once it answers, however long that takes.
 func TestC8_ACMB1_UnreachableBackendIsSkippedForTheCooldown(t *testing.T) {
 	c := newChainRun(t, nil, chainDefs()[:1])
 	c.addBackend("alpha", 1, false, false, "m1")
@@ -70,9 +70,18 @@ func TestC8_ACMB1_UnreachableBackendIsSkippedForTheCooldown(t *testing.T) {
 	if err != nil || set.BackendCooldown != 2*time.Minute {
 		t.Fatalf("cooldown = %v (%v)", set.BackendCooldown, err)
 	}
+	// H8: time alone does not bring a backend back; it has to answer.
+	answers := false
+	c.eng.deps.Reachable = func(context.Context, string) bool { return answers }
 	skew.Store(int64(3 * time.Minute))
+	c.eng.probeSuspended(ctx)
+	if _, down := c.eng.DownBackends()["alpha"]; !down {
+		t.Fatal("alpha came back although it does not answer")
+	}
+	answers = true
+	c.eng.probeSuspended(ctx)
 	if down := c.eng.DownBackends(); len(down) != 0 {
-		t.Fatalf("still down after the cooldown: %v", down)
+		t.Fatalf("still down after it answered: %v", down)
 	}
 }
 

@@ -324,6 +324,7 @@ func (e *Engine) Start(ctx context.Context) error {
 				return
 			case <-ticks:
 				_, _ = e.Reconcile(bg)
+				e.probeSuspended(bg)
 				for _, h := range e.tickHooks {
 					h(bg)
 				}

@@ -332,7 +332,7 @@ export class BackendsView {
           b.has_key ? badge('key set', 'ok') : null,
           b.hosted && b.api_type !== 'opencode' && isPrivateHost(b.host) ? h('span', { class: 'badge badge-warn', text: '\u26A0 hosted?', attrs: { title: 'Flagged hosted, but the host is a private or local address: it may be mis-flagged. Edit the backend and untick Hosted if it runs on your own machine or network.', 'data-role': 'hosted-warning' } }) : null,
           b.retired ? badge('retired', 'warn') : null,
-          b.down_until ? badge('unreachable', 'warn') : null),
+          b.suspended_since ? badge('suspended: not answering', 'warn') : b.down_until ? badge('unreachable', 'warn') : null),
         h('div', { class: 'profile-actions' },
           button('Edit', () => { this.editing.add(b.name); this.render(); }, { field: 'edit', icon: 'edit' }),
           b.retired

@@ -68,6 +68,9 @@ type Deps struct {
 	// Tick, when set, replaces the reconcile ticker (tests); ReconcileEvery is
 	// the period otherwise (default 60 s). The engine's one background
 	// goroutine, started by Start and stopped by Close, waits on it (DBS5).
+	// Reachable reports whether the host of a suspended backend answers (H8);
+	// nil does an HTTP GET with a short timeout, tests replace it.
+	Reachable      func(ctx context.Context, host string) bool
 	Tick           <-chan time.Time
 	ReconcileEvery time.Duration
 	// DispatchTick, when set, replaces the dispatcher's safety ticker (tests);

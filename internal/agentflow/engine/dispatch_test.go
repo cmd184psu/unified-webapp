@@ -719,3 +719,41 @@ func TestH7_ThreeStrikesBenchAModel(t *testing.T) {
 		t.Fatalf("after clearing the worker was %q, want m1", got)
 	}
 }
+
+// H8: a backend that stopped answering is suspended, not retried on a timer:
+// nothing is dispatched to it, it is probed, and it comes back as soon as it
+// answers.
+func TestH8_ASuspendedBackendReturnsWhenItAnswers(t *testing.T) {
+	ctx := context.Background()
+	h := newDispHarness(t)
+	h.addBackend("gpu", 5, false, false, "m1", "m3")
+	h.candidates("global", "", "worker", "gpu/m1")
+	h.candidates("global", "", "reviewer", "gpu/m3")
+	f := h.dispProject("alpha", "any", indep(1))
+	h.startRun("alpha")
+	h.eng.health.suspend("gpu", time.Now())
+	if _, ok := h.eng.SuspendedBackends()["gpu"]; !ok {
+		t.Fatal("not suspended")
+	}
+	if got := h.workerModelDispatched(); got != "" {
+		t.Fatalf("a suspended backend was given work: %q", got)
+	}
+	tk, _ := h.st.GetTask(ctx, f.tasks[0].ID)
+	if !strings.Contains(tk.WaitingReason, "down") {
+		t.Fatalf("waiting reason %q does not say the backend is down", tk.WaitingReason)
+	}
+	answers := false
+	h.eng.deps.Reachable = func(context.Context, string) bool { return answers }
+	h.eng.probeSuspended(ctx)
+	if _, ok := h.eng.SuspendedBackends()["gpu"]; !ok {
+		t.Fatal("a silent backend came back")
+	}
+	answers = true
+	h.eng.probeSuspended(ctx)
+	if len(h.eng.SuspendedBackends()) != 0 {
+		t.Fatal("an answering backend stayed suspended")
+	}
+	if got := h.workerModelDispatched(); got != "m1" {
+		t.Fatalf("after it answered the worker was %q, want m1", got)
+	}
+}

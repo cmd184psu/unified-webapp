@@ -7,8 +7,9 @@ import (
 	"slices"
 )
 
-// StrikeLimit is the number of uncleared strikes that benches a model in a
-// role (H7): three strikes and it is out until the owner clears them.
+// StrikeLimit is the number of strikes in a row that benches a model in a role
+// (H7), like failed password attempts: a success in between resets the count,
+// and a benched model stays out until the owner clears it.
 const StrikeLimit = 3
 
 // Strike kinds.
@@ -22,28 +23,43 @@ const (
 // runs and whatever it costs.
 type StrikeKey struct{ Backend, Model, Role string }
 
-// Strike is one objectively bad act by a model.
+// Strike is one objectively bad act by a model, kept for ever. Counted says
+// whether it is part of the model's current streak: a success by the model in
+// that role (an attempt that passed, or a planning or review stage that
+// passed) or the owner's Clear ends the streak, and strikes before that stay
+// in the history with Ended saying why they no longer count.
 type Strike struct {
 	StrikeKey
-	Kind string `json:"kind"`
-	Task int64  `json:"task,omitempty"`
-	At   int64  `json:"at"`
+	Kind    string `json:"kind"`
+	Task    int64  `json:"task,omitempty"`
+	Effort  int64  `json:"effort,omitempty"`
+	Project string `json:"project,omitempty"`
+	At      int64  `json:"at"`
+	Counted bool   `json:"counted"`
+	Ended   string `json:"ended,omitempty"` // "success" or "cleared"; empty while counted
 }
 
-// Strikes lists every strike since the owner last cleared that model and role.
-// It is derived, not stored: unparseable stage output, a git policy violation,
-// and an attempt that failed with the same fingerprint as the task's previous
-// attempt under the same worker.
+// Strikes lists every strike, oldest first. They are derived, not stored:
+// unparseable stage output, a git policy violation, and an attempt that failed
+// with the same verify or review fingerprint as the task's previous attempt
+// under the same worker. A timeout, a merge conflict or a refused commit is
+// not the model's doing and never makes a strike, nor does an unreachable host.
 func (s *Store) Strikes(ctx context.Context) ([]Strike, error) {
 	var out []Strike
-	rows, err := s.db.QueryContext(ctx, `SELECT backend, model, role, finished FROM stages
-		WHERE state = 'done' AND outcome = 'infra:unparseable' AND model <> ''`)
+	// The effort and project of a stage or an attempt's task.
+	const stageEffort = ` LEFT JOIN attempts at ON at.id = s.attempt LEFT JOIN tasks t ON t.id = at.task
+		LEFT JOIN queues q ON q.id = t.queue LEFT JOIN efforts e ON e.id = COALESCE(s.effort, q.effort) `
+	const attEffort = ` JOIN tasks t ON t.id = a.task JOIN queues q ON q.id = t.queue JOIN efforts e ON e.id = q.effort `
+	const lastWorker = ` JOIN stages s ON s.id = (SELECT MAX(id) FROM stages WHERE attempt = a.id AND role = 'worker') `
+
+	rows, err := s.db.QueryContext(ctx, `SELECT s.backend, s.model, s.role, COALESCE(t.id, 0), COALESCE(e.id, 0), COALESCE(e.project, ''), s.finished
+		FROM stages s`+stageEffort+`WHERE s.state = 'done' AND s.outcome = 'infra:unparseable' AND s.model <> ''`)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var k Strike
-		if err := rows.Scan(&k.Backend, &k.Model, &k.Role, &k.At); err != nil {
+		if err := rows.Scan(&k.Backend, &k.Model, &k.Role, &k.Task, &k.Effort, &k.Project, &k.At); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -53,15 +69,14 @@ func (s *Store) Strikes(ctx context.Context) ([]Strike, error) {
 	if err := closeRows(rows); err != nil {
 		return nil, err
 	}
-	const lastWorker = `JOIN stages s ON s.id = (SELECT MAX(id) FROM stages WHERE attempt = a.id AND role = 'worker')`
-	rows, err = s.db.QueryContext(ctx, `SELECT s.backend, s.model, a.task, a.finished FROM attempts a `+lastWorker+`
+	rows, err = s.db.QueryContext(ctx, `SELECT s.backend, s.model, a.task, e.id, e.project, a.finished FROM attempts a`+attEffort+lastWorker+`
 		WHERE a.outcome = 'policy_violation' AND s.model <> ''`)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var k Strike
-		if err := rows.Scan(&k.Backend, &k.Model, &k.Task, &k.At); err != nil {
+		if err := rows.Scan(&k.Backend, &k.Model, &k.Task, &k.Effort, &k.Project, &k.At); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -71,8 +86,8 @@ func (s *Store) Strikes(ctx context.Context) ([]Strike, error) {
 	if err := closeRows(rows); err != nil {
 		return nil, err
 	}
-	rows, err = s.db.QueryContext(ctx, `SELECT a.task, a.n, a.fingerprint, s.backend, s.model, a.finished FROM attempts a `+lastWorker+`
-		WHERE a.outcome = 'failed' AND a.fingerprint <> '' AND s.model <> '' ORDER BY a.task, a.n`)
+	rows, err = s.db.QueryContext(ctx, `SELECT a.task, a.n, a.fingerprint, s.backend, s.model, e.id, e.project, a.finished FROM attempts a`+attEffort+lastWorker+`
+		WHERE a.outcome = 'failed' AND (a.fingerprint LIKE 'v:%' OR a.fingerprint LIKE 'r:%') AND s.model <> '' ORDER BY a.task, a.n`)
 	if err != nil {
 		return nil, err
 	}
@@ -84,18 +99,60 @@ func (s *Store) Strikes(ctx context.Context) ([]Strike, error) {
 		model   string
 	}
 	for rows.Next() {
-		var task int64
+		var task, effort, at int64
 		var n int
-		var fp, backend, mdl string
-		var at int64
-		if err := rows.Scan(&task, &n, &fp, &backend, &mdl, &at); err != nil {
+		var fp, backend, mdl, project string
+		if err := rows.Scan(&task, &n, &fp, &backend, &mdl, &effort, &project, &at); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		if prev.task == task && prev.n == n-1 && prev.fp == fp && prev.backend == backend && prev.model == mdl {
-			out = append(out, Strike{StrikeKey: StrikeKey{backend, mdl, "worker"}, Kind: StrikeRepeat, Task: task, At: at})
+			out = append(out, Strike{StrikeKey: StrikeKey{backend, mdl, "worker"}, Kind: StrikeRepeat, Task: task, Effort: effort, Project: project, At: at})
 		}
 		prev.task, prev.n, prev.fp, prev.backend, prev.model = task, n, fp, backend, mdl
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, err
+	}
+
+	// A success ends a streak: a worker's attempt that passed, or a stage of
+	// any other model role that passed.
+	last := map[StrikeKey]int64{}
+	note := func(k StrikeKey, at int64) {
+		if at > last[k] {
+			last[k] = at
+		}
+	}
+	rows, err = s.db.QueryContext(ctx, `SELECT backend, model, role, finished FROM stages
+		WHERE state = 'done' AND outcome = 'pass' AND model <> '' AND role NOT IN ('worker', 'verify', 'merge', 'cleanup')`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var k StrikeKey
+		var at int64
+		if err := rows.Scan(&k.Backend, &k.Model, &k.Role, &at); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		note(k, at)
+	}
+	if err := closeRows(rows); err != nil {
+		return nil, err
+	}
+	rows, err = s.db.QueryContext(ctx, `SELECT s.backend, s.model, a.finished FROM attempts a`+lastWorker+`WHERE a.outcome = 'passed' AND s.model <> ''`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var k StrikeKey
+		var at int64
+		k.Role = "worker"
+		if err := rows.Scan(&k.Backend, &k.Model, &at); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		note(k, at)
 	}
 	if err := closeRows(rows); err != nil {
 		return nil, err
@@ -104,7 +161,17 @@ func (s *Store) Strikes(ctx context.Context) ([]Strike, error) {
 	if err != nil {
 		return nil, err
 	}
-	out = slices.DeleteFunc(out, func(k Strike) bool { return k.At <= resets[k.StrikeKey] })
+	for i := range out {
+		k := out[i]
+		switch {
+		case k.At <= resets[k.StrikeKey]:
+			out[i].Ended = "cleared"
+		case k.At < last[k.StrikeKey]:
+			out[i].Ended = "success"
+		default:
+			out[i].Counted = true
+		}
+	}
 	slices.SortStableFunc(out, func(a, b Strike) int { return int(a.At - b.At) })
 	return out, nil
 }
@@ -135,7 +202,8 @@ func (s *Store) strikeResets(ctx context.Context) (map[StrikeKey]int64, error) {
 	return out, closeRows(rows)
 }
 
-// StrikeCounts is the number of uncleared strikes per model and role.
+// StrikeCounts is each model's current streak per role: the strikes since its
+// last success or clear. StrikeLimit of them benches it.
 func (s *Store) StrikeCounts(ctx context.Context) (map[StrikeKey]int, error) {
 	list, err := s.Strikes(ctx)
 	if err != nil {
@@ -143,12 +211,15 @@ func (s *Store) StrikeCounts(ctx context.Context) (map[StrikeKey]int, error) {
 	}
 	out := map[StrikeKey]int{}
 	for _, k := range list {
-		out[k.StrikeKey]++
+		if k.Counted {
+			out[k.StrikeKey]++
+		}
 	}
 	return out, nil
 }
 
-// ClearStrikes forgives a model in a role: strikes up to now stop counting.
+// ClearStrikes forgives a model in a role: its streak goes back to zero. The
+// strikes stay in the history, marked cleared.
 func (s *Store) ClearStrikes(ctx context.Context, actor string, k StrikeKey) error {
 	if k.Backend == "" || k.Model == "" || k.Role == "" {
 		return Invalid("strikes", "backend, model and role are required")

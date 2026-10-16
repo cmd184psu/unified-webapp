@@ -168,6 +168,8 @@ export interface Backend {
   has_key?: boolean;
   models: BackendModel[];
   down_until?: number;
+  /** Set (unix ms) while the backend is suspended because it stopped answering; it returns when it answers (H8). */
+  suspended_since?: number;
 }
 
 export interface BackendInput {
@@ -227,9 +229,41 @@ export interface ModelStat {
   /** The owner's rating (0 = not rated) and the family derived from the name. */
   tier: number;
   family: string;
-  /** Uncleared strikes against the model in this role (H7); benched at 3, and the dispatcher then skips it. */
+  /** The model's current streak of strikes in this role (H7): since its last success or clear. Benched at 3. */
   strikes: number;
+  /** Every strike it has ever had. */
+  strikes_total: number;
   benched: boolean;
+}
+
+/** Strike is one entry of the strike history (GET /api/strikes); counted is whether it is in the current streak. */
+export interface Strike {
+  backend: string;
+  model: string;
+  role: string;
+  kind: 'unparseable' | 'violation' | 'repeat';
+  task?: number;
+  effort?: number;
+  project?: string;
+  at: number;
+  counted: boolean;
+  /** Why it stopped counting: a later success, or the owner's Clear. */
+  ended?: 'success' | 'cleared';
+}
+
+export interface StrikeDay {
+  day: string;
+  backend: string;
+  model: string;
+  role: string;
+  kind: string;
+  count: number;
+}
+
+export interface StrikeHistory {
+  events: Strike[];
+  daily: StrikeDay[];
+  total: number;
 }
 
 /** DraftState is GET .../frd/draft: the FRD drafting stage (draft or polish). */
@@ -561,6 +595,8 @@ export const api = {
   putSettings: (s: Settings, o?: FetchOptions): Promise<Settings> => send('PUT', '/api/settings', s, o),
 
   modelStats: (project = ''): Promise<ModelStat[]> => get(`/api/stats/models${project ? `?project=${enc(project)}` : ''}`),
+  strikeHistory: (project = '', limit = 50): Promise<StrikeHistory> =>
+    get(`/api/strikes?limit=${limit}${project ? `&project=${enc(project)}` : ''}`),
   clearStrikes: (backend: string, model: string, role: string): Promise<void> => send('POST', '/api/strikes/clear', { backend, model, role }),
 
   // Efforts

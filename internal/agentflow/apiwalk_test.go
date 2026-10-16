@@ -128,6 +128,7 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	ok("GET", "/api/candidates", "", 200)
 	ok("GET", "/api/stats/models", "", 200)
 	ok("POST", "/api/strikes/clear", `{"backend":"gpu","model":"m1","role":"worker"}`, 204)
+	ok("GET", "/api/strikes", "", 200)
 	ok("GET", "/api/yolo/invariants", "", 200)
 
 	// Projects: git-init, create, list, get, patch, limits, project candidates.

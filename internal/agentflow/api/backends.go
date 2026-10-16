@@ -47,6 +47,9 @@ type BackendView struct {
 	HasKey    bool               `json:"has_key"`
 	Models    []BackendModelView `json:"models"`
 	DownUntil int64              `json:"down_until,omitempty"`
+	// SuspendedSince (unix ms) is set while the backend is out of use because it stopped
+	// answering (H8); it comes back by itself when it answers again.
+	SuspendedSince int64 `json:"suspended_since,omitempty"`
 }
 
 func (a *API) backendView(b store.Backend) BackendView {
@@ -55,7 +58,9 @@ func (a *API) backendView(b store.Backend) BackendView {
 	for _, m := range b.Models {
 		v.Models = append(v.Models, BackendModelView{Model: m.Model, Paid: m.Paid, MaxConcurrent: m.MaxConcurrent, ContextTokens: m.ContextTokens, Tier: m.Tier})
 	}
-	if until, down := a.deps.Engine.DownBackends()[b.Name]; down {
+	if since, ok := a.deps.Engine.SuspendedBackends()[b.Name]; ok {
+		v.SuspendedSince = since.UnixMilli()
+	} else if until, down := a.deps.Engine.DownBackends()[b.Name]; down {
 		v.DownUntil = until.UnixMilli()
 	}
 	return v

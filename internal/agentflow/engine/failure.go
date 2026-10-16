@@ -129,6 +129,16 @@ func (e *Engine) handleInfra(ctx context.Context, c *chain, last model.Stage) (b
 		// Its backend was retired: not a failure, so no strike and no backoff.
 		return true, e.resubmit(ctx, c, last)
 	}
+	if last.Outcome == OutcomeInfraUnreachable {
+		// A host that does not answer is nobody's fault and not the task's:
+		// no strike, no backoff and no halt (H8). The backend is suspended
+		// until it answers, and the stage goes to another backend, or waits.
+		if err := e.resubmit(ctx, c, last); err != nil {
+			return false, err
+		}
+		stages, err := e.deps.Store.ListAttemptStages(ctx, c.att.ID)
+		return err == nil && len(stages) > 0 && stages[len(stages)-1].ID != last.ID, err
+	}
 	s := e.deps.Store
 	set, err := s.EffectiveSettings(ctx, c.proj.Slug)
 	if err != nil {

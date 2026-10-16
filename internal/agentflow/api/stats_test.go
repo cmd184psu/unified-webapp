@@ -170,7 +170,50 @@ func TestH7_StatsShowStrikesAndClearForgives(t *testing.T) {
 	e.field("POST", "/api/strikes/clear", map[string]any{"backend": "b1"}, "strikes")
 	time.Sleep(3 * time.Millisecond)
 	e.ok("POST", "/api/strikes/clear", map[string]any{"backend": "b1", "model": "m1", "role": "planner"}, http.StatusNoContent)
-	if r := row(); r.Strikes != 0 || r.Benched {
-		t.Fatalf("after clear: %+v", r)
+	if r := row(); r.Strikes != 0 || r.Benched || r.StrikesTotal != 3 {
+		t.Fatalf("after clear: %+v (the lifetime total must stay 3)", r)
+	}
+	h := decode[StrikeHistory](t, e.ok("GET", "/api/strikes", nil, http.StatusOK))
+	if h.Total != 3 || len(h.Events) != 3 || len(h.Daily) != 1 || h.Daily[0].Count != 3 || h.Daily[0].Kind != "unparseable" || h.Daily[0].Model != "m1" {
+		t.Fatalf("history = %+v", h)
+	}
+	if h.Events[0].Counted || h.Events[0].Ended != "cleared" || h.Events[0].Project != "p1" || h.Events[0].Effort != ef.ID {
+		t.Fatalf("event = %+v", h.Events[0])
+	}
+	if n := decode[StrikeHistory](t, e.ok("GET", "/api/strikes?project=other", nil, http.StatusOK)).Total; n != 0 {
+		t.Fatalf("project filter let %d through", n)
+	}
+	if n := len(decode[StrikeHistory](t, e.ok("GET", "/api/strikes?limit=2", nil, http.StatusOK)).Events); n != 2 {
+		t.Fatalf("limit gave %d events", n)
+	}
+}
+
+// H7: a success by the model ends its streak, so two strikes then a pass is
+// back to zero and the model is not benched by a later third strike.
+func TestH7_ASuccessResetsTheStreak(t *testing.T) {
+	e := newEnv(t, envOpt{})
+	e.addProject("p1")
+	ef := decode[EffortView](t, e.ok("POST", "/api/projects/p1/efforts", map[string]any{"title": "src"}, http.StatusCreated))
+	ctx := context.Background()
+	run := func(outcome string) {
+		t.Helper()
+		time.Sleep(2 * time.Millisecond)
+		st, err := e.st.CreateStage(ctx, store.StageSpec{Effort: ef.ID, Role: "planner", Backend: "b1", Model: "m1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.st.StartStage(ctx, st.ID, "job"); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.st.FinishStage(ctx, st.ID, outcome, "", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, o := range []string{"infra:unparseable", "infra:unparseable", "pass", "infra:unparseable"} {
+		run(o)
+	}
+	got := decode[[]ModelStat](t, e.ok("GET", "/api/stats/models", nil, http.StatusOK))
+	if len(got) != 1 || got[0].Strikes != 1 || got[0].StrikesTotal != 3 || got[0].Benched {
+		t.Fatalf("stats = %+v, want streak 1, total 3, not benched", got)
 	}
 }

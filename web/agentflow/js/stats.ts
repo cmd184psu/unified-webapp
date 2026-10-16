@@ -3,7 +3,7 @@
 // away, not low on the Backends page. Filter by role and by project; the table
 // refetches when stages finish.
 
-import { api, type ModelStat, type ProjectView } from './api.js';
+import { api, type ModelStat, type ProjectView, type Strike, type StrikeDay, type StrikeHistory } from './api.js';
 import { h, replace } from './dom.js';
 import { subscribe } from './events.js';
 import { badge, button, fieldRow, section, selectInput } from './forms.js';
@@ -12,12 +12,14 @@ export interface StatsDeps {
   stats(project: string): Promise<ModelStat[]>;
   projects(): Promise<ProjectView[]>;
   clear(backend: string, model: string, role: string): Promise<void>;
+  strikes(project: string): Promise<StrikeHistory>;
 }
 
 export const defaultStatsDeps = (): StatsDeps => ({
   stats: (project) => api.modelStats(project),
   projects: () => api.projects(),
   clear: (backend, model, role) => api.clearStrikes(backend, model, role),
+  strikes: (project) => api.strikeHistory(project),
 });
 
 const pct = (r: number): string => `${Math.round(r * 100)}%`;
@@ -43,6 +45,7 @@ const ROLES = ['', 'planner', 'architect', 'critic', 'compiler', 'worker', 'revi
 
 export class StatsView {
   rows: ModelStat[] = [];
+  history: StrikeHistory = { events: [], daily: [], total: 0 };
   projects: ProjectView[] = [];
   role = '';
   project = '';
@@ -64,9 +67,9 @@ export class StatsView {
     if (this.busy) return;
     this.busy = true;
     try {
-      const [rows, projects] = await Promise.all([this.deps.stats(this.project), this.deps.projects()]);
+      const [rows, projects, history] = await Promise.all([this.deps.stats(this.project), this.deps.projects(), this.deps.strikes(this.project)]);
       if (this.disposed) return;
-      Object.assign(this, { rows, projects, loaded: true });
+      Object.assign(this, { rows, projects, history, loaded: true });
       this.render();
     } catch {
       // The tab shows what it last had; the global health banner reports a lost service.
@@ -77,9 +80,10 @@ export class StatsView {
 
   /** strikeCell shows a model's strikes out of three, a benched badge at three, and a Clear button. */
   private strikeCell(s: ModelStat): HTMLElement {
-    if (!s.strikes) return h('td', { text: '0' });
+    const total = s.strikes_total > s.strikes ? ` (${s.strikes_total} ever)` : '';
+    if (!s.strikes) return h('td', { text: s.strikes_total ? `0${total}` : '0' });
     return h('td', {},
-      s.benched ? badge('benched', 'warn') : h('span', { text: `${s.strikes}/3 ` }),
+      s.benched ? badge('benched', 'warn') : h('span', { text: `${s.strikes}/3` }), h('span', { class: 'field-hint', text: `${total} ` }),
       button('Clear', () => { void this.deps.clear(s.backend, s.model, s.role).then(() => this.load()); }, { field: 'clear-strikes' }));
   }
 
@@ -100,6 +104,23 @@ export class StatsView {
         this.strikeCell(s)))));
   }
 
+  /** historySection lists the recent strikes and the days they fell on; nothing in it is ever deleted. */
+  private historySection(): HTMLElement {
+    const hist = this.history;
+    if (hist.total === 0) return section('Strike history', h('p', { class: 'field-hint', text: 'No strikes yet.' }));
+    const status = (e: Strike): string => (e.counted ? 'counting' : `ended: ${e.ended ?? ''}`);
+    const where = (e: Strike): string => [e.project, e.effort ? `effort ${e.effort}` : '', e.task ? `task ${e.task}` : ''].filter(Boolean).join(' ');
+    const day = (d: StrikeDay): string => `${d.day} ${d.model} ${d.role} ${d.kind} ×${d.count}`;
+    return section('Strike history',
+      h('p', { class: 'field-hint', text: `${hist.total} strike(s) in all. Only an unbroken run of three benches a model: a success in that role, or Clear, starts the count again. The strikes stay here.` }),
+      h('table', { class: 'stats-table', attrs: { 'data-role': 'strike-history' } },
+        h('thead', {}, h('tr', {}, ...['When', 'Model', 'Backend', 'Role', 'Kind', 'Where', 'Status'].map((t) => h('th', { text: t })))),
+        h('tbody', {}, ...hist.events.map((e) => h('tr', {},
+          h('td', { text: new Date(e.at).toLocaleString() }), h('td', { text: e.model }), h('td', { text: e.backend }),
+          h('td', { text: e.role }), h('td', { text: e.kind }), h('td', { text: where(e) }), h('td', { text: status(e) }))))),
+      h('p', { class: 'field-hint', attrs: { 'data-role': 'strike-days' }, text: 'By day: ' + hist.daily.slice(0, 20).map(day).join('; ') }));
+  }
+
   render(): void {
     if (!this.loaded) {
       replace(this.host, h('p', { class: 'field-hint', text: 'Loading stats…' }));
@@ -114,7 +135,8 @@ export class StatsView {
         section('Model results',
           h('div', { class: 'inline-row' }, fieldRow('Role', role).el, fieldRow('Project', project).el),
           h('p', { class: 'field-hint', text: 'Infra failures (a crash, a timeout) say nothing about the model and are left out of the pass rate. Rate a model on the Backends tab once these numbers say how it does. A strike is output the engine could not read, a git policy break, or the same failure twice in a row on one task; three strikes bench a model in that role (local, free or paid alike) until you clear them here.' }),
-          this.table())));
+          this.table()),
+        this.historySection()));
   }
 }
 

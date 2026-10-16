@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/http"
 	"slices"
 	"strings"
 	"sync"
@@ -26,6 +27,26 @@ const OutcomeInfraRerouted = "infra:rerouted"
 type healthState struct {
 	mu    sync.Mutex
 	until map[string]time.Time
+	// suspended are the backends that stay out of use until they answer again
+	// (H8), with when they were suspended. They have no end time.
+	suspended map[string]time.Time
+}
+
+func (h *healthState) suspend(backend string, since time.Time) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.suspended == nil {
+		h.suspended = map[string]time.Time{}
+	}
+	if _, ok := h.suspended[backend]; !ok {
+		h.suspended[backend] = since
+	}
+}
+
+func (h *healthState) suspendedSince() map[string]time.Time {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return maps.Clone(h.suspended)
 }
 
 func (h *healthState) mark(backend string, until time.Time) {
@@ -41,6 +62,7 @@ func (h *healthState) clear(backend string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.until, backend)
+	delete(h.suspended, backend)
 }
 
 // active returns the backends whose cooldown has not ended at now.
@@ -48,6 +70,9 @@ func (h *healthState) active(now time.Time) map[string]time.Time {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	out := map[string]time.Time{}
+	for b, since := range h.suspended {
+		out[b] = since
+	}
 	for b, u := range h.until {
 		if now.Before(u) {
 			out[b] = u
@@ -64,8 +89,18 @@ func (e *Engine) DownBackends() map[string]time.Time {
 	return e.health.active(e.deps.Clock())
 }
 
-// markUnreachable puts the backend of a stage that just ended infra:unreachable
-// into its cooldown (MB7), so the dispatcher and the infra retry both skip it.
+// SuspendedBackends lists the backends suspended because they stopped
+// answering (H8), with when each was suspended. They come back by themselves
+// when a check of their address succeeds.
+func (e *Engine) SuspendedBackends() map[string]time.Time {
+	return e.health.suspendedSince()
+}
+
+// markUnreachable takes the backend of a stage that just ended
+// infra:unreachable out of use (MB7, H8). A backend with an address is
+// suspended until probeSuspended finds it answering again, so no more stages
+// are wasted on it; one without (opencode's built-in provider) cannot be
+// checked and sits in the timed cooldown.
 func (e *Engine) markUnreachable(ctx context.Context, stage int64) error {
 	st, err := e.deps.Store.GetStage(ctx, stage)
 	if err != nil {
@@ -74,12 +109,63 @@ func (e *Engine) markUnreachable(ctx context.Context, stage int64) error {
 	if st.Backend == "" || st.Backend == verifyBackend || st.Backend == mergeBackend {
 		return nil
 	}
+	b, err := e.deps.Store.GetBackend(ctx, st.Backend)
+	if err != nil {
+		return err
+	}
+	if b.Host != "" {
+		e.health.suspend(st.Backend, e.deps.Clock())
+		return nil
+	}
 	set, err := e.deps.Store.GetSettings(ctx)
 	if err != nil {
 		return err
 	}
 	e.health.mark(st.Backend, e.deps.Clock().Add(set.BackendCooldown))
 	return nil
+}
+
+// reachable says whether anything answers at host: any HTTP reply counts, even
+// an error status, because it only matters that the machine and the server are
+// up. Deps.Reachable replaces it in tests.
+func (e *Engine) reachable(ctx context.Context, host string) bool {
+	if e.deps.Reachable != nil {
+		return e.deps.Reachable(ctx, host)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, host, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return true
+}
+
+// probeSuspended checks each suspended backend and brings back the ones that
+// answer, then wakes the dispatcher and the stages that were waiting for it.
+// The engine's periodic tick calls it.
+func (e *Engine) probeSuspended(ctx context.Context) {
+	back := false
+	for name := range e.health.suspendedSince() {
+		b, err := e.deps.Store.GetBackend(ctx, name)
+		if err != nil || b.Retired || e.reachable(ctx, b.Host) {
+			e.health.clear(name)
+			back = true
+		}
+	}
+	if !back {
+		return
+	}
+	if e.deps.Kick != nil {
+		e.deps.Kick()
+	}
+	_ = e.Advance(ctx)
+	_ = e.AdvancePlans(ctx)
 }
 
 // RetireOptions are the operator's choices when retiring a backend.

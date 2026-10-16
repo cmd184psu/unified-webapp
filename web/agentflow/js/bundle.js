@@ -81,6 +81,7 @@ var api = {
   settings: () => get("/api/settings"),
   putSettings: (s, o) => send("PUT", "/api/settings", s, o),
   modelStats: (project = "") => get(`/api/stats/models${project ? `?project=${enc(project)}` : ""}`),
+  strikeHistory: (project = "", limit = 50) => get(`/api/strikes?limit=${limit}${project ? `&project=${enc(project)}` : ""}`),
   clearStrikes: (backend, model, role) => send("POST", "/api/strikes/clear", { backend, model, role }),
   // Efforts
   efforts: (slug) => get(`${proj(slug)}/efforts`),
@@ -1809,7 +1810,7 @@ var BackendsView = class {
           b.has_key ? badge("key set", "ok") : null,
           b.hosted && b.api_type !== "opencode" && isPrivateHost(b.host) ? h("span", { class: "badge badge-warn", text: "\u26A0 hosted?", attrs: { title: "Flagged hosted, but the host is a private or local address: it may be mis-flagged. Edit the backend and untick Hosted if it runs on your own machine or network.", "data-role": "hosted-warning" } }) : null,
           b.retired ? badge("retired", "warn") : null,
-          b.down_until ? badge("unreachable", "warn") : null
+          b.suspended_since ? badge("suspended: not answering", "warn") : b.down_until ? badge("unreachable", "warn") : null
         ),
         h(
           "div",
@@ -4470,7 +4471,8 @@ function mountProjectTab(host, wanted2) {
 var defaultStatsDeps = () => ({
   stats: (project) => api.modelStats(project),
   projects: () => api.projects(),
-  clear: (backend, model, role) => api.clearStrikes(backend, model, role)
+  clear: (backend, model, role) => api.clearStrikes(backend, model, role),
+  strikes: (project) => api.strikeHistory(project)
 });
 var pct = (r) => `${Math.round(r * 100)}%`;
 function duration(ms) {
@@ -4492,6 +4494,7 @@ var StatsView = class {
     this.host = host;
     this.deps = deps;
     this.rows = [];
+    this.history = { events: [], daily: [], total: 0 };
     this.projects = [];
     this.role = "";
     this.project = "";
@@ -4513,9 +4516,9 @@ var StatsView = class {
     if (this.busy) return;
     this.busy = true;
     try {
-      const [rows, projects] = await Promise.all([this.deps.stats(this.project), this.deps.projects()]);
+      const [rows, projects, history] = await Promise.all([this.deps.stats(this.project), this.deps.projects(), this.deps.strikes(this.project)]);
       if (this.disposed) return;
-      Object.assign(this, { rows, projects, loaded: true });
+      Object.assign(this, { rows, projects, history, loaded: true });
       this.render();
     } catch {
     } finally {
@@ -4524,11 +4527,13 @@ var StatsView = class {
   }
   /** strikeCell shows a model's strikes out of three, a benched badge at three, and a Clear button. */
   strikeCell(s) {
-    if (!s.strikes) return h("td", { text: "0" });
+    const total = s.strikes_total > s.strikes ? ` (${s.strikes_total} ever)` : "";
+    if (!s.strikes) return h("td", { text: s.strikes_total ? `0${total}` : "0" });
     return h(
       "td",
       {},
-      s.benched ? badge("benched", "warn") : h("span", { text: `${s.strikes}/3 ` }),
+      s.benched ? badge("benched", "warn") : h("span", { text: `${s.strikes}/3` }),
+      h("span", { class: "field-hint", text: `${total} ` }),
       button("Clear", () => {
         void this.deps.clear(s.backend, s.model, s.role).then(() => this.load());
       }, { field: "clear-strikes" })
@@ -4563,6 +4568,35 @@ var StatsView = class {
       )))
     );
   }
+  /** historySection lists the recent strikes and the days they fell on; nothing in it is ever deleted. */
+  historySection() {
+    const hist = this.history;
+    if (hist.total === 0) return section("Strike history", h("p", { class: "field-hint", text: "No strikes yet." }));
+    const status = (e) => e.counted ? "counting" : `ended: ${e.ended ?? ""}`;
+    const where = (e) => [e.project, e.effort ? `effort ${e.effort}` : "", e.task ? `task ${e.task}` : ""].filter(Boolean).join(" ");
+    const day = (d) => `${d.day} ${d.model} ${d.role} ${d.kind} \xD7${d.count}`;
+    return section(
+      "Strike history",
+      h("p", { class: "field-hint", text: `${hist.total} strike(s) in all. Only an unbroken run of three benches a model: a success in that role, or Clear, starts the count again. The strikes stay here.` }),
+      h(
+        "table",
+        { class: "stats-table", attrs: { "data-role": "strike-history" } },
+        h("thead", {}, h("tr", {}, ...["When", "Model", "Backend", "Role", "Kind", "Where", "Status"].map((t) => h("th", { text: t })))),
+        h("tbody", {}, ...hist.events.map((e) => h(
+          "tr",
+          {},
+          h("td", { text: new Date(e.at).toLocaleString() }),
+          h("td", { text: e.model }),
+          h("td", { text: e.backend }),
+          h("td", { text: e.role }),
+          h("td", { text: e.kind }),
+          h("td", { text: where(e) }),
+          h("td", { text: status(e) })
+        )))
+      ),
+      h("p", { class: "field-hint", attrs: { "data-role": "strike-days" }, text: "By day: " + hist.daily.slice(0, 20).map(day).join("; ") })
+    );
+  }
   render() {
     if (!this.loaded) {
       replace(this.host, h("p", { class: "field-hint", text: "Loading stats\u2026" }));
@@ -4588,7 +4622,8 @@ var StatsView = class {
           h("div", { class: "inline-row" }, fieldRow("Role", role).el, fieldRow("Project", project).el),
           h("p", { class: "field-hint", text: "Infra failures (a crash, a timeout) say nothing about the model and are left out of the pass rate. Rate a model on the Backends tab once these numbers say how it does. A strike is output the engine could not read, a git policy break, or the same failure twice in a row on one task; three strikes bench a model in that role (local, free or paid alike) until you clear them here." }),
           this.table()
-        )
+        ),
+        this.historySection()
       )
     );
   }

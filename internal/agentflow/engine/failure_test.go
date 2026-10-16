@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -200,54 +199,35 @@ func TestC7_ACAT3_RepairPromptCarriesEvidence_ACOC1_500KB(t *testing.T) {
 	}
 }
 
-// AC-AT2 (AT7): the runner reports the backend unreachable mid-stage. The
-// attempt count is unchanged, the stage waits out its backoff (injected
-// clock), is retried on the other backend and one infra retry is counted.
+// AC-AT2 (AT7, H8): the runner reports the backend unreachable mid-stage. The
+// attempt count is unchanged and the stage is retried at once on the other
+// backend; an unreachable host is nobody's fault, so no infra retry is counted.
 func TestC7_ACAT2_UnreachableRetriesOnAnotherBackend(t *testing.T) {
 	c := newChainRun(t, nil, chainDefs()[:1])
 	c.addBackend("gpu2", 1, false, false, "m3", "m4")
 	c.candidates("global", "", "worker", "gpu/m1", "gpu2/m3")
-	c.candidates("global", "", "reviewer", "gpu/m2", "gpu2/m4") // gpu is in its cooldown by then (MB7)
-	var skew atomic.Int64
-	c.eng.deps.Clock = func() time.Time { return time.Now().Add(time.Duration(skew.Load())) }
+	c.candidates("global", "", "reviewer", "gpu/m2", "gpu2/m4") // gpu is suspended by then (H8)
 	c.fake.Script("worker",
 		runner.Step{ErrClass: runner.ErrUnreachable, Err: os.ErrDeadlineExceeded},
 		runner.Step{Reply: workerOK, Edit: writeWork})
 	c.fake.Script("reviewer", runner.Step{Reply: reviewPass})
 	c.run()
 	ctx := context.Background()
-	stages := func() []model.Stage {
-		ss, err := c.st.ListAttemptStages(ctx, c.attempts(0)[0].ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return ss
-	}
-	waitFor(t, "first worker stage infra:unreachable", func() bool {
-		return len(c.attempts(0)) > 0 && func() bool { ss := stages(); return len(ss) == 1 && ss[0].State == model.StageDone }()
-	})
-	if err := c.eng.Advance(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if ss := stages(); len(ss) != 1 || ss[0].Outcome != OutcomeInfraUnreachable {
-		t.Fatalf("retried before the backoff ended: %+v", ss)
-	}
-	skew.Store(int64(11 * time.Second))
-	if err := c.eng.Advance(ctx); err != nil {
-		t.Fatal(err)
-	}
 	waitFor(t, "task passed", func() bool { return c.taskStatus() == model.StatusPassed })
 
-	ss := stages()
-	if ss[0].Backend != "gpu" || ss[1].Role != "worker" || ss[1].Backend != "gpu2" || ss[1].Model != "m3" {
+	ss, err := c.st.ListAttemptStages(ctx, c.attempts(0)[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ss[0].Backend != "gpu" || ss[0].Outcome != OutcomeInfraUnreachable || ss[1].Role != "worker" || ss[1].Backend != "gpu2" || ss[1].Model != "m3" {
 		t.Fatalf("stages = %+v", ss)
 	}
 	if as := c.attempts(0); len(as) != 1 || as[0].N != 1 || as[0].Outcome != model.OutcomePassed {
 		t.Fatalf("attempts = %+v", as)
 	}
 	ins, err := c.st.TaskInputs(ctx, c.effort)
-	if err != nil || len(ins[0].InfraIDs) != 1 {
-		t.Fatalf("infra retries = %v (%v)", ins[0].InfraIDs, err)
+	if err != nil || len(ins[0].InfraIDs) != 0 {
+		t.Fatalf("an unreachable host was counted as %v infra retries (%v)", ins[0].InfraIDs, err)
 	}
 }
 

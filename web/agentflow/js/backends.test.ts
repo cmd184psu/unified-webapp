@@ -183,6 +183,18 @@ test('SV3: retiring the last backend shows the warning up front and the server w
   stop();
 });
 
+test('H8: a backend that stopped answering shows as suspended, not just unreachable', async () => {
+  const t = harness({ backends: [be('b1', { suspended_since: 1700000000000 }), be('b2', { down_until: 1700000000000 }), be('b3')] });
+  const stop = t.view.mount();
+  await flush();
+  const cards = byAttr(t.host, 'data-backend', 'b1')[0].textContent + '|' + byAttr(t.host, 'data-backend', 'b2')[0].textContent + '|' + byAttr(t.host, 'data-backend', 'b3')[0].textContent;
+  const [one, two, three] = cards.split('|');
+  ok(one.includes('suspended') && !one.includes('unreachable'), 'b1: ' + one);
+  ok(two.includes('unreachable') && !two.includes('suspended'), 'b2: ' + two);
+  ok(!three.includes('suspended') && !three.includes('unreachable'), 'b3: ' + three);
+  stop();
+});
+
 test('a retired backend can be enabled again', async () => {
   const t = harness({ backends: [be('b1', { retired: true })] });
   const stop = t.view.mount();

@@ -3,6 +3,8 @@ package api
 import (
 	"net/http"
 	"sort"
+	"strconv"
+	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/model"
 	"cmd184psu/unified-webapp/internal/agentflow/store"
@@ -38,15 +40,78 @@ type ModelStat struct {
 	// Tier is how the owner rated the model (0 = not rated); Family is derived from its name.
 	Tier   int    `json:"tier"`
 	Family string `json:"family"`
-	// Strikes are the uncleared strikes against this model in this role, across every project (H7);
-	// Benched is set at store.StrikeLimit, and the dispatcher then skips the model.
-	Strikes int  `json:"strikes"`
-	Benched bool `json:"benched"`
+	// Strikes is the model's current streak in this role, across every project (H7): strikes since its
+	// last success or clear. Benched is set at store.StrikeLimit, and the dispatcher then skips the
+	// model. StrikesTotal is every strike it has ever had; GET /api/strikes has the history.
+	Strikes      int  `json:"strikes"`
+	StrikesTotal int  `json:"strikes_total"`
+	Benched      bool `json:"benched"`
 }
 
 func (a *API) registerStats(mux muxer) {
 	mux.HandleFunc("GET /api/stats/models", a.modelStats)
+	mux.HandleFunc("GET /api/strikes", a.strikeHistory)
 	mux.HandleFunc("POST /api/strikes/clear", a.clearStrikes)
+}
+
+// StrikeDay is one day's strikes for a model, role and kind: the series a chart
+// of failures over time is drawn from.
+type StrikeDay struct {
+	Day     string `json:"day"`
+	Backend string `json:"backend"`
+	Model   string `json:"model"`
+	Role    string `json:"role"`
+	Kind    string `json:"kind"`
+	Count   int    `json:"count"`
+}
+
+// StrikeHistory is GET /api/strikes: the strikes newest first (limit, default
+// 100, at most 1000) and per-day counts over all of them.
+type StrikeHistory struct {
+	Events []store.Strike `json:"events"`
+	Daily  []StrikeDay    `json:"daily"`
+	Total  int            `json:"total"`
+}
+
+// strikeHistory answers GET /api/strikes?project=&model=&limit=. Nothing is
+// ever deleted from the history; Clear and later successes only change whether
+// a strike still counts toward the bench.
+func (a *API) strikeHistory(w http.ResponseWriter, r *http.Request) {
+	all, err := a.deps.Store.Strikes(r.Context())
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	project, mdl := r.URL.Query().Get("project"), r.URL.Query().Get("model")
+	limit := 100
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 {
+		limit = min(n, 1000)
+	}
+	out := StrikeHistory{Events: []store.Strike{}, Daily: []StrikeDay{}}
+	days := map[StrikeDay]int{}
+	for i := len(all) - 1; i >= 0; i-- { // newest first
+		s := all[i]
+		if (project != "" && s.Project != project) || (mdl != "" && s.Model != mdl) {
+			continue
+		}
+		out.Total++
+		if len(out.Events) < limit {
+			out.Events = append(out.Events, s)
+		}
+		days[StrikeDay{Day: time.UnixMilli(s.At).Format("2006-01-02"), Backend: s.Backend, Model: s.Model, Role: s.Role, Kind: s.Kind}]++
+	}
+	for d, n := range days {
+		d.Count = n
+		out.Daily = append(out.Daily, d)
+	}
+	sort.Slice(out.Daily, func(i, j int) bool {
+		a, b := out.Daily[i], out.Daily[j]
+		if a.Day != b.Day {
+			return a.Day > b.Day
+		}
+		return a.Model+a.Role+a.Kind < b.Model+b.Role+b.Kind
+	})
+	writeJSON(w, http.StatusOK, out)
 }
 
 type strikeKeyBody struct {
@@ -142,13 +207,21 @@ func (a *API) modelStats(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	strikes, err := a.deps.Store.StrikeCounts(r.Context())
+	history, err := a.deps.Store.Strikes(r.Context())
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
+	streak, total := map[store.StrikeKey]int{}, map[store.StrikeKey]int{}
+	for _, k := range history {
+		total[k.StrikeKey]++
+		if k.Counted {
+			streak[k.StrikeKey]++
+		}
+	}
 	for i := range out {
-		out[i].Strikes = strikes[store.StrikeKey{Backend: out[i].Backend, Model: out[i].Model, Role: out[i].Role}]
+		key := store.StrikeKey{Backend: out[i].Backend, Model: out[i].Model, Role: out[i].Role}
+		out[i].Strikes, out[i].StrikesTotal = streak[key], total[key]
 		out[i].Benched = out[i].Strikes >= store.StrikeLimit
 		out[i].Tier = tiers[out[i].Backend+"/"+out[i].Model]
 		if out[i].Role == "worker" {
