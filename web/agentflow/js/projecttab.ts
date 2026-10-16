@@ -94,7 +94,9 @@ export function mountProjectTab(host: HTMLElement, wanted: string): () => void {
     }
     if (disposed) return;
     if (!projects.some((p) => p.slug === slug)) slug = projects[0]?.slug ?? '';
-    replace(picker, ...projects.map((p) => h('option', { text: p.slug, attrs: { value: p.slug, selected: p.slug === slug } })));
+    // A project with an active run says so, so the one that is working is never mistaken for an idle one.
+    const active = (p: ProjectView): boolean => p.run_state === 'running' || p.run_state === 'pausing';
+    replace(picker, ...projects.map((p) => h('option', { text: active(p) ? `${p.slug}  ● running` : p.slug, attrs: { value: p.slug, selected: p.slug === slug } })));
     picker.value = slug;
     activity.setProject(slug);
     showSub();
