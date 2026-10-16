@@ -54,8 +54,11 @@ ap.add_argument("--exclude-backend", action="append", default=["kimi-waste"],
 ap.add_argument("--backend-order", default="ollama-m5,ollama-win,ollama-m4",
                 help="with --lineup local: within a tier, try these backends first, in this order (fastest first)")
 ap.add_argument("--dry-run", action="store_true", help="with --lineup local: print the candidate lists and stop")
+ap.add_argument("--resume", type=int, metavar="EFFORT",
+                help="carry on an effort this script already started (same --slug and --repo): approve the gates it has reached and wait")
 ap.add_argument("--wait", action="store_true")
 args = ap.parse_args()
+LONG = 6 * 3600  # planning and compiling on local models take hours, not minutes
 
 jar = http.cookiejar.CookieJar()
 opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
@@ -146,27 +149,34 @@ if not os.path.isdir(os.path.join(args.repo, ".git")):
     g("commit", "-q", "-m", "initial")
 
 slug = args.slug
-api("POST", "/api/projects", {"slug": slug, "repo_path": args.repo, "model_scope": args.scope}, 201)
-if args.lineup == "local":
+if not args.resume:
+    api("POST", "/api/projects", {"slug": slug, "repo_path": args.repo, "model_scope": args.scope}, 201)
+if args.lineup == "local" and not args.resume:
     for role, lst in lineup.items():
         api("PUT", f"/api/projects/{slug}/candidates/{role}", {"candidates": lst}, 200)
 
-eid = api("POST", f"/api/projects/{slug}/efforts", {"title": "web calculator"}, 201)["id"]
+eid = args.resume or api("POST", f"/api/projects/{slug}/efforts", {"title": "web calculator"}, 201)["id"]
 base = f"/api/projects/{slug}/efforts/{eid}"
 say(f"project {slug}, effort {eid}: open the agentflow UI to watch")
-
-api("POST", base + "/frd/draft", {"description": SENTENCE, "polish": False}, 202)
-wait_for("draft", lambda: (api("GET", base + "/frd/draft") or {}).get("state") in ("idle", "failed"), 900)
-api("POST", base + "/frd/approve", None, 200)
 status = lambda: api("GET", base, None, 200)["status"]
-api("POST", base + "/plan/generate", None, 202)
-wait_for("plan_ready", lambda: status() == "plan_ready", 1800)
-api("POST", base + "/plan/approve", None, 200)
-wait_for("queue_draft", lambda: status() == "queue_draft", 1800)
-queue = api("GET", base + "/queue", None, 200)
-say("queue: " + "; ".join(f"{t['key']} {t['title']}" for t in queue["tasks"]))
-api("POST", base + "/queue/approve", {"hash": queue["hash"]}, 200)
-api("POST", f"/api/projects/{slug}/run/start", None, 200)
+
+if not args.resume:
+    api("POST", base + "/frd/draft", {"description": SENTENCE, "polish": False}, 202)
+    wait_for("draft", lambda: (api("GET", base + "/frd/draft") or {}).get("state") in ("idle", "failed"), LONG)
+    api("POST", base + "/frd/approve", None, 200)
+    api("POST", base + "/plan/generate", None, 202)
+# From here on the same steps serve a new effort and a resumed one: each gate is
+# approved only if the effort is waiting at it.
+AFTER_PLAN = ("plan_ready", "queue_draft", "queue_approved", "running", "complete")
+wait_for("plan_ready", lambda: status() in AFTER_PLAN, LONG)
+if status() == "plan_ready":
+    api("POST", base + "/plan/approve", None, 200)
+wait_for("queue_draft", lambda: status() in AFTER_PLAN[1:], LONG)
+if status() == "queue_draft":
+    queue = api("GET", base + "/queue", None, 200)
+    say("queue: " + "; ".join(f"{t['key']} {t['title']}" for t in queue["tasks"]))
+    api("POST", base + "/queue/approve", {"hash": queue["hash"]}, 200)
+api("POST", f"/api/projects/{slug}/run/start", None)  # already running is fine
 say("run started")
 
 if args.wait:
