@@ -41,7 +41,27 @@ var migrations = []migration{
 	{11, migration11SQL},
 	{12, migration12SQL},
 	{13, migration13SQL},
+	{14, migration14SQL},
 }
+
+// migration14SQL (H6) tracks the installs of a model on an Ollama host: one row
+// per pull, with its progress, so a page reload or a restart still shows it.
+const migration14SQL = `
+CREATE TABLE model_installs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  backend TEXT NOT NULL,
+  model TEXT NOT NULL,
+  tier INTEGER NOT NULL DEFAULT 0 CHECK (tier BETWEEN 0 AND 3),
+  state TEXT NOT NULL CHECK (state IN ('running', 'done', 'failed', 'cancelled')),
+  status TEXT NOT NULL DEFAULT '',
+  completed INTEGER NOT NULL DEFAULT 0,
+  total INTEGER NOT NULL DEFAULT 0,
+  error TEXT NOT NULL DEFAULT '',
+  started INTEGER NOT NULL,
+  finished INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_model_installs_backend ON model_installs(backend);
+`
 
 // migration13SQL (H7) records when the owner cleared a model's strikes. The
 // strikes themselves are derived from the stages and attempts tables; only

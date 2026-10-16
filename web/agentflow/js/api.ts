@@ -236,6 +236,21 @@ export interface ModelStat {
   benched: boolean;
 }
 
+/** Install is one pull of a model onto an Ollama backend's host (H6); completed and total are bytes of the layer in flight. */
+export interface Install {
+  id: number;
+  backend: string;
+  model: string;
+  tier: number;
+  state: 'running' | 'done' | 'failed' | 'cancelled';
+  status: string;
+  completed: number;
+  total: number;
+  error?: string;
+  started: number;
+  finished?: number;
+}
+
 /** Strike is one entry of the strike history (GET /api/strikes); counted is whether it is in the current streak. */
 export interface Strike {
   backend: string;
@@ -597,6 +612,10 @@ export const api = {
   modelStats: (project = ''): Promise<ModelStat[]> => get(`/api/stats/models${project ? `?project=${enc(project)}` : ''}`),
   strikeHistory: (project = '', limit = 50): Promise<StrikeHistory> =>
     get(`/api/strikes?limit=${limit}${project ? `&project=${enc(project)}` : ''}`),
+  installs: (backend: string): Promise<Install[]> => get(`/api/backends/${enc(backend)}/installs`),
+  startInstall: (backend: string, model: string, tier: number): Promise<Install> =>
+    send('POST', `/api/backends/${enc(backend)}/install`, { model, tier }),
+  cancelInstall: (id: number): Promise<void> => send('POST', `/api/installs/${id}/cancel`),
   clearStrikes: (backend: string, model: string, role: string): Promise<void> => send('POST', '/api/strikes/clear', { backend, model, role }),
 
   // Efforts

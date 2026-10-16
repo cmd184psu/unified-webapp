@@ -82,6 +82,9 @@ var api = {
   putSettings: (s, o) => send("PUT", "/api/settings", s, o),
   modelStats: (project = "") => get(`/api/stats/models${project ? `?project=${enc(project)}` : ""}`),
   strikeHistory: (project = "", limit = 50) => get(`/api/strikes?limit=${limit}${project ? `&project=${enc(project)}` : ""}`),
+  installs: (backend) => get(`/api/backends/${enc(backend)}/installs`),
+  startInstall: (backend, model, tier) => send("POST", `/api/backends/${enc(backend)}/install`, { model, tier }),
+  cancelInstall: (id) => send("POST", `/api/installs/${id}/cancel`),
   clearStrikes: (backend, model, role) => send("POST", "/api/strikes/clear", { backend, model, role }),
   // Efforts
   efforts: (slug) => get(`${proj(slug)}/efforts`),
@@ -958,6 +961,109 @@ var Overview = class {
 // web/agentflow/js/backends.ts
 import { showToast as showToast4 } from "/shared/dist/shared.mjs";
 
+// web/agentflow/js/installs.ts
+var defaultInstallDeps = () => ({
+  installs: (b) => api.installs(b),
+  start: (b, m, t) => api.startInstall(b, m, t),
+  cancel: (id) => api.cancelInstall(id)
+});
+var TIERS = [["0", "not rated"], ["1", "tier 1 (strong)"], ["2", "tier 2 (capable)"], ["3", "tier 3 (light)"]];
+function size(n) {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)} GB`;
+  if (n >= 1e6) return `${Math.round(n / 1e6)} MB`;
+  return `${n} B`;
+}
+function progressText2(i) {
+  if (i.state === "running" && i.total > 0) return `${Math.round(100 * i.completed / i.total)}% of ${size(i.total)}`;
+  return i.status;
+}
+var InstallPanel = class {
+  constructor(backend, deps) {
+    this.backend = backend;
+    this.deps = deps;
+    /** el is the panel's own root: it is re-rendered in place, so a card can move it. */
+    this.el = h("div", { class: "install-panel", attrs: { "data-role": "install-panel" } });
+    this.items = [];
+    this.error = "";
+    this.model = "";
+    this.tier = "0";
+    this.off = null;
+  }
+  mount() {
+    this.off = subscribe((ev) => {
+      if (ev.type !== "install.update" || ev.backend !== this.backend) return;
+      const known = this.items.find((i) => i.id === ev.id);
+      if (known) Object.assign(known, { state: ev.state, status: ev.status, completed: ev.completed, total: ev.total });
+      else void this.load();
+      this.render();
+      if (known && ev.state !== "running") void this.load();
+    });
+    void this.load();
+  }
+  unmount() {
+    this.off?.();
+    this.off = null;
+  }
+  async load() {
+    try {
+      this.items = await this.deps.installs(this.backend);
+    } catch {
+    }
+    this.render();
+  }
+  async start() {
+    const model = this.model.trim();
+    this.error = "";
+    try {
+      await this.deps.start(this.backend, model, Number(this.tier));
+      this.model = "";
+    } catch (e) {
+      this.error = e instanceof Error ? e.message : String(e);
+    }
+    await this.load();
+  }
+  row(i) {
+    const kind = i.state === "done" ? "ok" : i.state === "running" ? "muted" : "warn";
+    return h(
+      "div",
+      { class: "install-row", attrs: { "data-install": String(i.id) } },
+      h("strong", { text: i.model }),
+      badge(i.state, kind),
+      i.state === "running" && i.total > 0 ? h("progress", { attrs: { value: String(i.completed), max: String(i.total) } }) : null,
+      h("span", { class: "field-hint", text: i.error ? i.error : progressText2(i) }),
+      i.state === "running" ? button("Cancel", () => {
+        void this.deps.cancel(i.id).then(() => this.load());
+      }, { field: "cancel-install" }) : null
+    );
+  }
+  render() {
+    const model = textInput("install-model", this.model, { placeholder: "model to install, e.g. devstral-small-2" });
+    model.addEventListener("input", () => {
+      this.model = model.value;
+    });
+    const tier = selectInput("install-tier", TIERS, this.tier);
+    tier.addEventListener("change", () => {
+      this.tier = tier.value;
+    });
+    replace(
+      this.el,
+      h(
+        "div",
+        { class: "install-form inline-row" },
+        model,
+        tier,
+        button("Install", () => {
+          this.model = model.value;
+          this.tier = tier.value;
+          void this.start();
+        }, { field: "install", primary: true, word: true, icon: "add" })
+      ),
+      this.error ? h("div", { class: "field-error", text: this.error, attrs: { "data-role": "install-error" } }) : null,
+      ...this.items.slice(0, 5).map((i) => this.row(i))
+    );
+  }
+};
+
 // web/agentflow/js/candidates.ts
 var ROLES = ["worker", "reviewer", "planner", "architect", "critic", "compiler"];
 function isPaid(backends, backend, model) {
@@ -1495,7 +1601,7 @@ function isPrivateHost(host) {
   const [a, b] = [Number(ip[1]), Number(ip[2])];
   return a === 10 || a === 127 || a === 192 && b === 168 || a === 172 && b >= 16 && b <= 31;
 }
-var TIERS = [["0", "not rated"], ["1", "1 strong"], ["2", "2 capable"], ["3", "3 light"]];
+var TIERS2 = [["0", "not rated"], ["1", "1 strong"], ["2", "2 capable"], ["3", "3 light"]];
 var API_TYPES = [
   ["ollama", "ollama"],
   ["openai_compatible", "openai compatible"],
@@ -1524,9 +1630,10 @@ function lastForRoles(cands, name) {
   });
 }
 var BackendsView = class {
-  constructor(host, deps) {
+  constructor(host, deps, installDeps = defaultInstallDeps()) {
     this.host = host;
     this.deps = deps;
+    this.installDeps = installDeps;
     this.backends = [];
     this.candidates = [];
     this.projects = [];
@@ -1541,8 +1648,19 @@ var BackendsView = class {
     this.limitsSlug = "";
     this.limitsHost = h("div");
     this.off = null;
+    /** One install panel per Ollama backend; each keeps its own list and event subscription. */
+    this.panels = /* @__PURE__ */ new Map();
     // ─── Per-project limits ──────────────────────────────────────────────────
     this.limitsAuto = null;
+  }
+  panelFor(name) {
+    let p = this.panels.get(name);
+    if (!p) {
+      p = new InstallPanel(name, this.installDeps);
+      this.panels.set(name, p);
+      p.mount();
+    }
+    return p;
   }
   mount() {
     this.off = subscribe((ev) => {
@@ -1552,6 +1670,8 @@ var BackendsView = class {
     return () => {
       this.off?.();
       this.off = null;
+      this.panels.forEach((p) => p.unmount());
+      this.panels.clear();
     };
   }
   idle() {
@@ -1653,7 +1773,7 @@ var BackendsView = class {
         paid: checkbox("model_paid", p),
         max: textInput("max_concurrent", max > 0 ? String(max) : "", { type: "number", placeholder: "no limit" }),
         ctx: textInput("context_tokens", ctx > 0 ? String(ctx) : "", { type: "number", placeholder: "?" }),
-        tier: selectInput("tier", TIERS, String(tier)),
+        tier: selectInput("tier", TIERS2, String(tier)),
         auto: "",
         el: h("div", { class: "inline-row", attrs: { "data-role": "model-row" } })
       };
@@ -1833,6 +1953,7 @@ var BackendsView = class {
         h("div", {}, h("label", { text: "Slots" }), h("span", { text: String(b.slots) })),
         h("div", {}, h("label", { text: "Models" }), ...models)
       ),
+      b.api_type === "ollama" && !b.retired ? this.panelFor(b.name).el : null,
       this.retiring.has(b.name) ? this.retirePanel(b) : null
     );
   }
@@ -3399,7 +3520,7 @@ var FrdEditor = class {
       }
       const q = { quiet: true };
       const none = () => null;
-      const [draft, dod, size, parts] = await Promise.all([
+      const [draft, dod, size2, parts] = await Promise.all([
         this.deps.draftState(this.slug, ef.id, q).catch(none),
         this.deps.definitionOfDone(this.slug, q).catch(none),
         this.latest ? this.deps.frdSize(this.slug, ef.id, q).catch(none) : null,
@@ -3410,7 +3531,7 @@ var FrdEditor = class {
       this.draft = draft;
       this.draftError = "";
       this.dod = dod;
-      this.size = size;
+      this.size = size2;
       this.parts = parts ?? [];
       this.form = new FrdForm(this.latest?.json ?? blankFRD(this.slug, ef), () => {
         this.dirty = true;

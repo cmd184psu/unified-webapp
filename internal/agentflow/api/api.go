@@ -39,6 +39,8 @@ type API struct {
 
 	mu sync.Mutex
 	oc OpenCodeStatus
+	// pulls cancels the running model installs by id (H6).
+	pulls map[int64]context.CancelFunc
 }
 
 // OpenCodeStatus is the result of the last opencode version probe.
@@ -55,6 +57,10 @@ func New(d Deps) *API {
 	a := &API{deps: d, bus: broker.NewBroker(0)}
 	a.bus.SetMaxSubscribers(d.SSEMaxSubscribers)
 	a.probe(context.Background())
+	if d.Store != nil {
+		// A pull that was running died with the old process; pulling again resumes it.
+		_, _ = d.Store.FailRunningInstalls(context.Background(), "interrupted by a restart of the service; install it again to resume")
+	}
 	return a
 }
 
@@ -115,6 +121,7 @@ func (a *API) Register(mux muxer) {
 	mux.HandleFunc("GET /api/health", a.health)
 	a.registerProjects(mux)
 	a.registerBackends(mux)
+	a.registerInstalls(mux)
 	a.registerSettings(mux)
 	a.registerFS(mux)
 	a.registerStats(mux)

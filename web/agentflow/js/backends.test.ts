@@ -1,5 +1,6 @@
 import { timing } from './autosave';
 import { test, run, eq, ok, installFakeDom, FakeEl, asEl, byField, byAttr, button, flush, findAll } from './testkit';
+import type { InstallDeps } from './installs';
 import { BackendsView, isPaid, isPrivateHost, lastForRoles, unconsented, type BackendsDeps } from './backends';
 import { moveItem, dropIndex } from './candidates';
 import { dispatch } from './events';
@@ -51,7 +52,12 @@ function harness(init: Partial<State> = {}, over: Partial<BackendsDeps> = {}) {
     notify: (m) => { log.push('notify:' + m); },
     ...over,
   };
-  const view = new BackendsView(asEl(host), deps);
+  const installDeps: InstallDeps = {
+    installs: async () => [],
+    start: async (b, m, tier) => { log.push(`install:${b}:${m}:${tier}`); return { id: 1, backend: b, model: m, tier, state: 'running', status: '', completed: 0, total: 0, started: 1 }; },
+    cancel: async () => {},
+  };
+  const view = new BackendsView(asEl(host), deps, installDeps);
   return { host, view, log, bodies, st };
 }
 
@@ -192,6 +198,21 @@ test('H8: a backend that stopped answering shows as suspended, not just unreacha
   ok(one.includes('suspended') && !one.includes('unreachable'), 'b1: ' + one);
   ok(two.includes('unreachable') && !two.includes('suspended'), 'b2: ' + two);
   ok(!three.includes('suspended') && !three.includes('unreachable'), 'b3: ' + three);
+  stop();
+});
+
+test('H6: an Ollama card has an install row that sends the model and tier; other backends have none', async () => {
+  const t = harness({ backends: [be('o1'), be('cloud', { api_type: 'openai_compatible' })] });
+  const stop = t.view.mount();
+  await flush();
+  eq(byAttr(t.host, 'data-role', 'install-panel').length, 1, 'one panel, on the ollama backend');
+  field(t.host, 'install-model').value = ' devstral-small-2 ';
+  field(t.host, 'install-model').fire('input');
+  field(t.host, 'install-tier').value = '1';
+  field(t.host, 'install-tier').fire('change');
+  button(t.host, 'Install').click();
+  await flush();
+  eq(t.log.filter((l) => l.startsWith('install:')), ['install:o1:devstral-small-2:1']);
   stop();
 });
 

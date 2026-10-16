@@ -13,6 +13,7 @@ import {
 } from './api.js';
 import { h, replace } from './dom.js';
 import { subscribe, type AgentflowEvent } from './events.js';
+import { defaultInstallDeps, InstallPanel, type InstallDeps } from './installs.js';
 import { FormErrors, badge, button, checkbox, type ToggleEl, fieldRow, section, selectInput, textInput } from './forms.js';
 import { ROLES, buildRoleEditor, isPaid, unconsented, type CandRow } from './candidates.js';
 import { LIMIT_FIELDS } from './settings.js';
@@ -88,7 +89,20 @@ export class BackendsView {
   private limitsHost = h('div');
   private off: (() => void) | null = null;
 
-  constructor(private host: HTMLElement, private deps: BackendsDeps) {}
+  /** One install panel per Ollama backend; each keeps its own list and event subscription. */
+  private panels = new Map<string, InstallPanel>();
+
+  constructor(private host: HTMLElement, private deps: BackendsDeps, private installDeps: InstallDeps = defaultInstallDeps()) {}
+
+  private panelFor(name: string): InstallPanel {
+    let p = this.panels.get(name);
+    if (!p) {
+      p = new InstallPanel(name, this.installDeps);
+      this.panels.set(name, p);
+      p.mount();
+    }
+    return p;
+  }
 
   mount(): () => void {
     this.off = subscribe((ev: AgentflowEvent) => {
@@ -98,6 +112,8 @@ export class BackendsView {
     return () => {
       this.off?.();
       this.off = null;
+      this.panels.forEach((p) => p.unmount());
+      this.panels.clear();
     };
   }
 
@@ -343,6 +359,7 @@ export class BackendsView {
         h('div', {}, h('label', { text: 'API type' }), h('span', { text: b.api_type })),
         h('div', {}, h('label', { text: 'Slots' }), h('span', { text: String(b.slots) })),
         h('div', {}, h('label', { text: 'Models' }), ...models)),
+      b.api_type === 'ollama' && !b.retired ? this.panelFor(b.name).el : null,
       this.retiring.has(b.name) ? this.retirePanel(b) : null);
   }
 

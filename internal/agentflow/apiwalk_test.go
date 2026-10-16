@@ -113,6 +113,9 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	ok("GET", "/api/backends", "", 200)
 	ok("PATCH", "/api/backends/spare", `{"slots":2}`, 200)
 	ok("POST", "/api/backends/spare/retire", `{"cancel_running":false}`, 200)
+	ok("POST", "/api/backends/spare/install", `{"model":"walk"}`, 400) // retired: refused before any pull
+	ok("GET", "/api/backends/spare/installs", "", 200)
+	ok("POST", "/api/installs/999/cancel", "", 404)
 	ok("POST", "/api/backends/spare/enable", ``, 200)
 
 	// Settings, candidates, statistics.
