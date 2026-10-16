@@ -127,18 +127,45 @@ func TestC7_AT5_MaxAttemptsExhausts(t *testing.T) {
 	}
 }
 
-// AT6: a blocked worker halts the task as needs_input with the worker's reason.
+// AT6 (H12): a worker that is blocked twice in a row halts the task as
+// needs_input with the worker's reason; the first claim goes to another model.
 func TestC7_AT6_BlockedWorkerNeedsInput(t *testing.T) {
 	c := newChainRun(t, nil, chainDefs()[:1])
-	c.fake.Script("worker", runner.Step{Reply: `{"summary":"stopped","files_changed":[],"learnings":[],"blocked":"need the staging API key"}`})
-	if got := c.runAttempts(1); got[0] != model.StatusNeedsInput {
-		t.Fatalf("status = %s", got[0])
+	blocked := runner.Step{Reply: `{"summary":"stopped","files_changed":[],"learnings":[],"blocked":"need the staging API key"}`}
+	c.fake.Script("worker", blocked, blocked)
+	got := c.runAttempts(2)
+	if got[0] != model.StatusRepair || got[1] != model.StatusNeedsInput {
+		t.Fatalf("statuses = %v, want repair then needs_input", got)
 	}
 	if r := c.task0().WaitingReason; r != "need the staging API key" {
 		t.Fatalf("waiting reason = %q", r)
 	}
-	if as := c.attempts(0); as[0].Outcome != model.OutcomeBlocked {
-		t.Fatalf("attempt = %+v", as[0])
+	as := c.attempts(0)
+	if as[0].Outcome != model.OutcomeFailed || as[0].Fingerprint != "blocked" || as[1].Outcome != model.OutcomeBlocked {
+		t.Fatalf("attempts = %+v", as)
+	}
+}
+
+// H12: the first claim of being blocked is checked by another model, which is
+// told the claim may be a mistake; if it does the work the owner is never asked.
+func TestH12_FirstBlockGoesToAnotherModel(t *testing.T) {
+	c := newChainRun(t, nil, chainDefs()[:1])
+	c.addBackend("gpu2", 1, false, false, "m3", "m4")
+	c.candidates("global", "", "worker", "gpu/m1", "gpu/m2")
+	c.candidates("global", "", "reviewer", "gpu2/m4")
+	c.fake.Script("worker",
+		runner.Step{Reply: `{"summary":"stopped","files_changed":[],"learnings":[],"blocked":"The file internal/api/main.go does not exist."}`},
+		runner.Step{Reply: workerOK, Edit: writeWork})
+	c.fake.Script("reviewer", runner.Step{Reply: reviewPass})
+	c.run()
+	waitFor(t, "task passed", func() bool { return c.taskStatus() == model.StatusPassed })
+	as := c.attempts(0)
+	if len(as) != 2 || as[0].WorkerModel != "m1" || as[1].WorkerModel != "m2" {
+		t.Fatalf("attempts = %+v: the second should have gone to m2", as)
+	}
+	calls := c.fake.CallsFor("worker")
+	if len(calls) != 2 || !strings.Contains(calls[1].Prompt, "said it was blocked") || !strings.Contains(calls[1].Prompt, "internal/api/main.go") {
+		t.Fatalf("the second prompt does not carry the doubtful claim: %d calls", len(calls))
 	}
 }
 

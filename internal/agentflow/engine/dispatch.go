@@ -362,7 +362,7 @@ func pickWorker(v *view, p store.Project, sticky string, avoid map[string]int, m
 			continue
 		}
 		if n := avoid[c.Model]; n > 0 {
-			reasons = append(reasons, fmt.Sprintf("model %s failed the same way %d times on this task", c.Model, n))
+			reasons = append(reasons, fmt.Sprintf("model %s just failed this task the same way (%d in a row)", c.Model, n))
 			continue
 		}
 		if !tierOK(c) {
@@ -422,6 +422,9 @@ func (e *Engine) repeatFailers(ctx context.Context, t model.Task, stuckThreshold
 	atts, err := e.deps.Store.ListAttempts(ctx, t.ID)
 	if err != nil {
 		return nil, err
+	}
+	if n := len(atts); n > 0 && atts[n-1].Outcome == model.OutcomeFailed && atts[n-1].Fingerprint == string(FailBlocked) {
+		return map[string]int{atts[n-1].WorkerModel: 1}, nil // it said it was blocked: let another model look
 	}
 	run := 0
 	for i := len(atts) - 1; i >= 0; i-- {

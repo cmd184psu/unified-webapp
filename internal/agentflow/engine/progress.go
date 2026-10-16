@@ -121,6 +121,9 @@ func (e *Engine) WorkerContext(ctx context.Context, project string, attemptID in
 			if r, err := schema.Parse[schema.ReviewOut](st.Parsed); err == nil {
 				writeReview(&b, r)
 			}
+		case st.Role == "worker" && st.Outcome == OutcomeBlocked && prev.Fingerprint == string(FailBlocked):
+			b.WriteString("\n### The previous worker said it was blocked\n\n" + clip(st.RawOutput, maxEntryDetail) +
+				"\n\nThat may be a mistake: a model can name a file that does not exist or misread the task. Check the files the task names yourself and do the work. Report blocked only if you truly cannot go on.\n")
 		case st.Role == "worker" && (st.Outcome == OutcomePolicyViolation || st.Outcome == OutcomeTimeout):
 			b.WriteString("\n### Previous worker run\n\n" + clip(st.RawOutput, maxEntryDetail) + "\n")
 		}

@@ -56,7 +56,14 @@ func (e *Engine) failAttempt(ctx context.Context, c *chain, f Failure) error {
 	outcome, fp, result := model.OutcomeFailed, "", "failed ("+string(f.Kind)+")"
 	switch f.Kind {
 	case FailBlocked:
-		outcome, result = model.OutcomeBlocked, "blocked"
+		if f.Stage.Role == "worker" && !e.blockedBefore(ctx, c) {
+			// A first claim of being blocked is often a weak model's mistake (an invented
+			// path, a missing file that exists): another model gets the task before the
+			// owner is asked (H12). It is a failed attempt with its own fingerprint.
+			fp, result = "blocked", "claimed to be blocked; another model will check"
+		} else {
+			outcome, result = model.OutcomeBlocked, "blocked"
+		}
 	case FailViolation:
 		outcome, result = model.OutcomePolicyViolation, "broke the git policy (reverted)"
 	default:
@@ -65,7 +72,7 @@ func (e *Engine) failAttempt(ctx context.Context, c *chain, f Failure) error {
 	if err := e.appendProgress(ctx, c, result); err != nil {
 		return err
 	}
-	if f.Kind == FailBlocked {
+	if outcome == model.OutcomeBlocked {
 		if err := e.deps.Store.SetWaitingReason(ctx, c.task.ID, blockedReason(f.Stage)); err != nil {
 			return err
 		}
@@ -77,6 +84,21 @@ func (e *Engine) failAttempt(ctx context.Context, c *chain, f Failure) error {
 		return err
 	}
 	return e.explainHalt(ctx, c)
+}
+
+// blockedBefore says the attempt before this one already ended with a worker's
+// claim of being blocked, so a second claim goes to the owner.
+func (e *Engine) blockedBefore(ctx context.Context, c *chain) bool {
+	atts, err := e.deps.Store.ListAttempts(ctx, c.task.ID)
+	if err != nil {
+		return true // cannot tell: do not hide a block from the owner
+	}
+	for _, a := range atts {
+		if a.N == c.att.N-1 {
+			return a.Fingerprint == string(FailBlocked)
+		}
+	}
+	return false
 }
 
 // explainHalt puts the reason on a task that this attempt just halted, so the
