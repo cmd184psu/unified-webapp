@@ -101,7 +101,11 @@ try:
     code, raw = call("GET", "/api/history")
     h = js(raw)
     check("GET /api/history keeps the last ten", code == 200 and isinstance(h, list) and len(h) == 10, f"{code} {raw[:80]!r}")
-    check("history is newest first", isinstance(h, list) and h and json.dumps(h[0]).find("13") >= 0, f"{raw[:80]!r}")
+    # The spec does not say what a history entry looks like, so judge the order by the numbers in it: the
+    # calls were add(i, 1) for i = 1..12, so the newest entry mentions 12 (or its result 13) and the oldest
+    # one kept (the third call) mentions 3 (or 4).
+    has = lambda e, *ns: any(re.search(rf"(?<![0-9.]){n}(?![0-9.])", json.dumps(e)) for n in ns)
+    check("history is newest first", isinstance(h, list) and len(h) == 10 and has(h[0], 12, 13) and has(h[-1], 3, 4), f"{raw[:80]!r}")
     code, raw = call("DELETE", "/api/history")
     code2, raw2 = call("GET", "/api/history")
     check("history is empty after DELETE", code2 == 200 and js(raw2) == [], f"{code2} {raw2[:80]!r}")
