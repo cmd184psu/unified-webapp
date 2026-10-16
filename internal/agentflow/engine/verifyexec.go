@@ -66,9 +66,13 @@ func (x verifyExecutor) Execute(ctx context.Context, rc golane.RunContext, st mo
 	if err != nil {
 		return StageResult{}, fmt.Errorf("task base commit: %w", err)
 	}
+	others, err := e.ownedByOthers(ctx, c)
+	if err != nil {
+		return StageResult{}, err
+	}
 	rep, err := verify.Structural(ctx, verify.Input{
 		Worktree: c.att.Worktree, GitDir: admin, BaseCommit: strings.TrimSpace(string(base)), FilesTouched: c.task.FilesTouched,
-		NoChangesReason: c.noChangesReason(),
+		OwnedByOthers: others, NoChangesReason: c.noChangesReason(),
 	})
 	if err != nil {
 		return StageResult{}, err
@@ -245,4 +249,38 @@ func (e *Engine) reviewEvidence(ctx context.Context, attempt int64) (string, err
 		}
 	}
 	return "", nil
+}
+
+// ownedByOthers are the files that the effort's other tasks are to write and
+// that this task is not built on: every task that is neither this one nor one
+// of its dependencies, direct or indirect. A dependency's files are already in
+// this task's tree, so changing them cannot conflict at merge; a file of an
+// unrelated task can (H11).
+func (e *Engine) ownedByOthers(ctx context.Context, c *chain) ([]string, error) {
+	tasks, err := e.deps.Store.ListTasks(ctx, c.eff.ID)
+	if err != nil {
+		return nil, err
+	}
+	byKey := map[string]model.Task{}
+	for _, t := range tasks {
+		byKey[t.Key] = t
+	}
+	upstream := map[string]bool{c.task.Key: true}
+	var walk func(key string)
+	walk = func(key string) {
+		for _, d := range byKey[key].DependsOn {
+			if !upstream[d] {
+				upstream[d] = true
+				walk(d)
+			}
+		}
+	}
+	walk(c.task.Key)
+	var out []string
+	for _, t := range tasks {
+		if !upstream[t.Key] {
+			out = append(out, t.FilesTouched...)
+		}
+	}
+	return out, nil
 }

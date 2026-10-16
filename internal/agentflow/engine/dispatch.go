@@ -125,6 +125,8 @@ type view struct {
 	modelFree map[string]int
 	// strikes are the uncleared strikes per model and role (H7); StrikeLimit of them benches the model.
 	strikes map[store.StrikeKey]int
+	// avoid are models to pass over for this pick, for one retry: the model whose last reply was unreadable (H11).
+	avoid map[string]bool
 }
 
 func modelKey(backend, model string) string { return backend + "\x00" + model }
@@ -269,7 +271,12 @@ func (e *Engine) dispatchOne(ctx context.Context, v *view, p store.Project) (boo
 			errs = append(errs, err)
 			continue
 		}
-		pk, reason := pickWorker(v, p, sticky, avoid)
+		maxTier, err := e.escalationTier(ctx, v, t)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		pk, reason := pickWorker(v, p, sticky, avoid, maxTier)
 		if reason != "" {
 			errs = append(errs, e.setWaiting(ctx, t, reason))
 			continue
@@ -343,9 +350,12 @@ func (e *Engine) setWaiting(ctx context.Context, t model.Task, reason string) er
 // way repeatedly (H7): they are passed over for another model, unless no other
 // model could ever serve, in which case the repeat is allowed so the task
 // reaches stuck instead of waiting for ever.
-func pickWorker(v *view, p store.Project, sticky string, avoid map[string]int) (Pick, string) {
+func pickWorker(v *view, p store.Project, sticky string, avoid map[string]int, maxTier int) (Pick, string) {
 	var reasons []string
 	cands := v.snap.CandidatesFor("worker", p.Slug)
+	tierOK := func(c store.Candidate) bool {
+		return maxTier == 0 || effectiveTier(v.snap, c.Backend, c.Model) <= maxTier
+	}
 	for _, c := range cands {
 		if why := skipReason(v, p, c, true); why != "" {
 			reasons = append(reasons, why)
@@ -355,23 +365,52 @@ func pickWorker(v *view, p store.Project, sticky string, avoid map[string]int) (
 			reasons = append(reasons, fmt.Sprintf("model %s failed the same way %d times on this task", c.Model, n))
 			continue
 		}
+		if !tierOK(c) {
+			reasons = append(reasons, fmt.Sprintf("model %s (tier %d) is not stronger than the tier-%d model that failed this task twice", c.Model, effectiveTier(v.snap, c.Backend, c.Model), maxTier+1))
+			continue
+		}
 		if _, why := reviewerFor(v, p, sticky, c.Model, false); why != "" {
 			return Pick{}, why
 		}
 		return Pick{Backend: c.Backend, Model: c.Model}, ""
 	}
-	if len(avoid) > 0 {
-		other := false
+	if len(avoid) > 0 || maxTier > 0 {
+		ever := false
 		for _, c := range cands {
-			if avoid[c.Model] == 0 && skipReason(v, p, c, false) == "" {
-				other = true
+			if avoid[c.Model] == 0 && tierOK(c) && skipReason(v, p, c, false) == "" {
+				ever = true
 			}
 		}
-		if !other {
-			return pickWorker(v, p, sticky, nil)
+		if !ever { // nothing better could ever serve: relax the escalation first, then the avoidance
+			if maxTier > 0 {
+				return pickWorker(v, p, sticky, avoid, 0)
+			}
+			return pickWorker(v, p, sticky, nil, 0)
 		}
 	}
 	return Pick{}, noEligible("worker", reasons)
+}
+
+// escalateAfter is how many failed attempts in a row a task may have before
+// its next attempt must go to a stronger model (H11).
+const escalateAfter = 2
+
+// escalationTier is the weakest tier the task's next worker may have: after
+// escalateAfter failed attempts in a row it is one better than the tier of the
+// worker that failed last (tier 1 stays tier 1), otherwise 0, meaning no limit.
+func (e *Engine) escalationTier(ctx context.Context, v *view, t model.Task) (int, error) {
+	atts, err := e.deps.Store.ListAttempts(ctx, t.ID)
+	if err != nil {
+		return 0, err
+	}
+	run := 0
+	for i := len(atts) - 1; i >= 0 && atts[i].Outcome == model.OutcomeFailed; i-- {
+		run++
+	}
+	if run < escalateAfter {
+		return 0, nil
+	}
+	return max(1, effectiveTier(v.snap, "", atts[len(atts)-1].WorkerModel)-1), nil
 }
 
 // repeatFailers names the worker model, if any, that has failed the task's
@@ -527,6 +566,8 @@ func skipReason(v *view, p store.Project, c store.Candidate, needSlot bool) stri
 		return "backend " + c.Backend + " is unavailable"
 	case b.Hosted && p.ModelScope == "local":
 		return "hosted under local scope"
+	case v.avoid[c.Model]:
+		return fmt.Sprintf("model %s's last reply could not be read", c.Model)
 	case v.strikes[store.StrikeKey{Backend: c.Backend, Model: c.Model, Role: c.Role}] >= store.StrikeLimit:
 		return fmt.Sprintf("model %s is benched for %s: %d strikes (clear them on the Stats tab)", c.Model, c.Role, store.StrikeLimit)
 	case lacksTools(v, c):

@@ -21,15 +21,24 @@ type Check struct {
 	Details []string `json:"details,omitempty"`
 }
 
+// Evidence is what a failing test printed, kept apart from the failure's
+// signature so it never changes a fingerprint.
+type Evidence struct {
+	Sig  string `json:"sig"`
+	Text string `json:"text"`
+}
+
 // VerifyReport is what the reviewer reads. Warnings never fail the report.
 // NewFailures and BaselineFailures are filled by the feedback-command half of
 // verify (B12); the structural half leaves them empty.
 type VerifyReport struct {
-	Checks           []Check  `json:"checks"`
-	Warnings         []string `json:"warnings"`
-	NewFailures      []string `json:"new_failures"`
-	BaselineFailures []string `json:"baseline_failures"`
-	Pass             bool     `json:"pass"`
+	Checks      []Check  `json:"checks"`
+	Warnings    []string `json:"warnings"`
+	NewFailures []string `json:"new_failures"`
+	// Evidence is what each new failing test printed (its assertion message or panic), so a repair can see why it failed.
+	Evidence         []Evidence `json:"evidence,omitempty"`
+	BaselineFailures []string   `json:"baseline_failures"`
+	Pass             bool       `json:"pass"`
 }
 
 // Failed returns the failing check with the given name, if any.

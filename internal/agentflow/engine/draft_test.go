@@ -200,7 +200,8 @@ func TestN2_FailedDraftLeavesTheFRDAndCanBeRetried(t *testing.T) {
 	if err := f.st.UpdateSettings(ctx, "t", map[string]string{"max_infra_retries": "1"}); err != nil {
 		t.Fatal(err)
 	}
-	f.fake.Script("planner", runner.Step{Reply: "no json here"}, runner.Step{Reply: "still none"}, runner.Step{Reply: draftReply})
+	// Gibberish is given up on at once (H11): one reply fails the draft, the next serves the retry.
+	f.fake.Script("planner", runner.Step{Reply: "no json here"}, runner.Step{Reply: draftReply})
 	f.startEngine()
 	if err := f.eng.StartDraft(ctx, "alice", f.effort, DraftRequest{Purpose: PurposeDraft, Description: "x"}); err != nil {
 		t.Fatal(err)

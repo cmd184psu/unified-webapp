@@ -390,3 +390,38 @@ func TestNoChangesReasonIgnoredWhenFilesChanged(t *testing.T) {
 		t.Fatalf("got %+v %v", rep, err)
 	}
 }
+
+// H11: a change to a file another task owns fails the scope check, because the
+// two would conflict at merge; a new file nobody owns is only a warning, and a
+// file the task lists itself is its own.
+func TestScopeFailsOnAnotherTasksFile(t *testing.T) {
+	run := func(touched, others []string, files ...string) VerifyReport {
+		t.Helper()
+		dir, base := newRepo(t)
+		for _, f := range files {
+			write(t, dir, f, "package x\n")
+		}
+		rep, err := Structural(context.Background(), Input{Worktree: dir, GitDir: filepath.Join(dir, ".git"), BaseCommit: base, FilesTouched: touched, OwnedByOthers: others})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rep
+	}
+	rep := run([]string{"main.go"}, []string{"internal/state.go"}, "main.go", "internal/state.go")
+	if rep.Pass || !strings.Contains(details(rep, CheckScope), "internal/state.go") || !strings.Contains(details(rep, CheckScope), "belongs to another task") {
+		t.Fatalf("another task's file was allowed: %+v", rep)
+	}
+	for _, w := range rep.Warnings {
+		if strings.Contains(w, "internal/state.go") {
+			t.Fatalf("a failed file should not also be a warning: %v", rep.Warnings)
+		}
+	}
+	rep = run([]string{"main.go"}, []string{"internal/state.go"}, "main.go", "helper.go")
+	if !rep.Pass || len(rep.Warnings) != 1 || !strings.Contains(rep.Warnings[0], "helper.go") {
+		t.Fatalf("a new unowned file should only warn: %+v", rep)
+	}
+	rep = run([]string{"main.go", "internal/state.go"}, []string{"internal/state.go"}, "main.go", "internal/state.go")
+	if !rep.Pass || len(rep.Warnings) != 0 {
+		t.Fatalf("a file the task lists itself must be allowed: %+v", rep)
+	}
+}

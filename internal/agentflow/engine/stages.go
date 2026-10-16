@@ -428,6 +428,12 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 	if perr == nil {
 		return StageResult{Outcome: verdict, Raw: res.Final, Parsed: parsed}
 	}
+	// A reply with no JSON object in it at all is gibberish, not a slip: the
+	// model is not doing the job, and a second run of it would only cost
+	// minutes. Give up on the first try; the retry goes to another model (H11).
+	if errors.Is(perr, schema.ErrNoObject) {
+		return failed(res, OutcomeInfraUnparseable, perr)
+	}
 
 	// One corrective follow-up with the same model (SO2): continue the session
 	// when the runner gave one, otherwise re-run with the previous reply.

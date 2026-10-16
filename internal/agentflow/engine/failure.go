@@ -214,13 +214,16 @@ func (e *Engine) resubmit(ctx context.Context, c *chain, last model.Stage) error
 	case "merge":
 		return e.submit(ctx, c, MergeLane, "merge", mergeBackend, "", last.QueueHash)
 	}
-	pick := func(avoid string) (Pick, string, error) {
+	pick := func(avoid string, skipModel bool) (Pick, string, error) {
 		v, err := e.newView(ctx)
 		if err != nil {
 			return Pick{}, "", err
 		}
 		if avoid != "" {
 			v.down[avoid] = true // like a backend in cooldown: try the others first
+		}
+		if skipModel && last.Outcome == OutcomeInfraUnparseable && last.Model != "" {
+			v.avoid = map[string]bool{last.Model: true} // an unreadable reply: another model, not another try of the same one
 		}
 		sticky, err := e.stickyReviewer(ctx, c.task)
 		if err != nil {
@@ -230,12 +233,15 @@ func (e *Engine) resubmit(ctx context.Context, c *chain, last model.Stage) error
 			pk, why := reviewerFor(v, c.proj, sticky, c.workerModel(), true)
 			return pk, why, nil
 		}
-		pk, why := pickWorker(v, c.proj, sticky, nil)
+		pk, why := pickWorker(v, c.proj, sticky, nil, 0)
 		return pk, why, nil
 	}
-	pk, why, err := pick(last.Backend)
+	pk, why, err := pick(last.Backend, true)
 	if err == nil && why != "" {
-		pk, why, err = pick("") // nowhere else to go: try the same backend again
+		pk, why, err = pick("", true) // nowhere else to go: try the same backend again
+	}
+	if err == nil && why != "" {
+		pk, why, err = pick("", false) // no other model could serve: let the same one try again
 	}
 	if err != nil {
 		return err

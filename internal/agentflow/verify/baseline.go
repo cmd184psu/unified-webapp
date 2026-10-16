@@ -74,25 +74,47 @@ func fingerprint(r CommandResult, module string) []Failure {
 func parseGo(kind, output, module string) []Failure {
 	var fs []Failure
 	var tests []string
+	// What each failing test printed (its assertion message, a panic), so the
+	// worker that has to fix it can read why it failed, not only its name.
+	said := map[string][]string{}
+	cur := ""
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimRight(line, "\r")
 		if m := reTestFail.FindStringSubmatch(line); m != nil {
 			tests = append(tests, m[1])
+			cur = m[1]
+		} else if cur != "" && (strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") || strings.HasPrefix(line, "panic:")) && strings.TrimSpace(line) != "" {
+			said[cur] = append(said[cur], strings.TrimSpace(line))
 		} else if m := rePkgFail.FindStringSubmatch(line); m != nil {
 			dir := pkgDir(m[1], module)
 			if len(tests) == 0 {
 				fs = append(fs, Failure{Sig: kind + "|" + m[1] + "|FAIL", Dir: dir})
 			}
 			for _, t := range tests {
-				fs = append(fs, Failure{Sig: kind + "|" + m[1] + "|" + t, Dir: dir})
+				fs = append(fs, Failure{Sig: kind + "|" + m[1] + "|" + t, Dir: dir, Text: evidenceText(said[t])})
 			}
-			tests = nil
+			tests, cur = nil, ""
+			said = map[string][]string{}
 		} else if m := reFileLine.FindStringSubmatch(line); m != nil {
 			file := path.Clean(m[1])
 			fs = append(fs, Failure{Sig: fmt.Sprintf("%s|%s:%s: %s", kind, file, m[2], normalise(m[3])), File: file})
 		}
 	}
 	return fs
+}
+
+// evidenceText joins the lines a failing test printed, capped so one noisy test
+// cannot swamp the repair prompt.
+func evidenceText(lines []string) string {
+	const maxLines, maxBytes = 8, 800
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
+	}
+	out := strings.Join(lines, "\n")
+	if len(out) > maxBytes {
+		out = out[:maxBytes] + " ..."
+	}
+	return out
 }
 
 // pkgDir maps an import path to its directory relative to the module root.
@@ -196,6 +218,9 @@ func Compare(rep *VerifyReport, results []CommandResult, base Baseline, touched 
 				rep.NewFailures = append(rep.NewFailures, f.Sig)
 				check.Pass = false
 				check.Details = append(check.Details, f.Sig)
+				if f.Text != "" {
+					rep.Evidence = append(rep.Evidence, Evidence{Sig: f.Sig, Text: f.Text})
+				}
 			case f.touches(touched):
 				rep.NewFailures = append(rep.NewFailures, f.Sig)
 				rep.BaselineFailures = append(rep.BaselineFailures, f.Sig)

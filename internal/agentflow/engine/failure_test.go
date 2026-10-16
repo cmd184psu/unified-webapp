@@ -377,3 +377,28 @@ func TestC7_FingerprintsAndBackoff(t *testing.T) {
 		}
 	}
 }
+
+// H11: after an unreadable reply the stage is retried on another model, not on
+// the one that just produced it, even when that model is listed first.
+func TestH11_RetryAfterGibberishUsesAnotherModel(t *testing.T) {
+	c := newChainRun(t, nil, chainDefs()[:1])
+	c.addBackend("gpu2", 1, false, false, "m3", "m4")
+	c.candidates("global", "", "worker", "gpu/m1", "gpu/m2")
+	c.candidates("global", "", "reviewer", "gpu2/m4")
+	c.fake.Script("worker",
+		runner.Step{Reply: "Sorry, I can't do that."},
+		runner.Step{Reply: workerOK, Edit: writeWork})
+	c.fake.Script("reviewer", runner.Step{Reply: reviewPass})
+	c.run()
+	waitFor(t, "task passed", func() bool { return c.taskStatus() == model.StatusPassed })
+	ss, err := c.st.ListAttemptStages(context.Background(), c.attempts(0)[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ss[0].Outcome != OutcomeInfraUnparseable || ss[0].Model != "m1" || ss[1].Role != "worker" || ss[1].Model != "m2" {
+		t.Fatalf("stages = %+v: the retry should have gone to m2", ss)
+	}
+	if as := c.attempts(0); as[0].WorkerModel != "m2" {
+		t.Fatalf("the attempt names worker %q, want m2", as[0].WorkerModel)
+	}
+}

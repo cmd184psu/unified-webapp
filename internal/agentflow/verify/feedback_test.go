@@ -418,3 +418,42 @@ func TestFailureOnlyInOutputTailIsKept(t *testing.T) {
 		t.Fatal("new tail failure must fail verify")
 	}
 }
+
+// H11: a failing test's own output (the assertion message) travels with the
+// failure as evidence, and never changes its signature, so fingerprints stay
+// stable and the worker that repairs it can read why it failed.
+func TestEvidenceCarriesWhatAFailingTestSaid(t *testing.T) {
+	out := "--- FAIL: TestHistory (0.00s)\n    server_test.go:80: expected 2 history entries got 3\n    server_test.go:81: and a second line\n" +
+		"--- FAIL: TestOther (0.00s)\npanic: runtime error: index out of range [0]\nFAIL\nFAIL\texample.com/m\t0.005s\n"
+	r := CommandResult{Argv: Argv{"go", "test", "./..."}, ExitCode: 1, Output: out}
+	fs := fingerprint(r, "example.com/m")
+	if len(fs) != 2 || fs[0].Sig != "go test|example.com/m|TestHistory" || fs[1].Sig != "go test|example.com/m|TestOther" {
+		t.Fatalf("failures = %+v", fs)
+	}
+	if !strings.Contains(fs[0].Text, "expected 2 history entries got 3") || !strings.Contains(fs[0].Text, "and a second line") {
+		t.Fatalf("test text = %q", fs[0].Text)
+	}
+	if !strings.Contains(fs[1].Text, "index out of range") {
+		t.Fatalf("panic text = %q", fs[1].Text)
+	}
+	r.Failures = fs
+	var rep VerifyReport
+	Compare(&rep, []CommandResult{r}, Baseline{}, nil)
+	if len(rep.Evidence) != 2 || rep.Evidence[0].Sig != fs[0].Sig || !strings.Contains(rep.Evidence[0].Text, "got 3") {
+		t.Fatalf("evidence = %+v", rep.Evidence)
+	}
+	for _, c := range rep.Checks {
+		for _, d := range c.Details {
+			if strings.Contains(d, "got 3") {
+				t.Fatalf("the message leaked into a check detail, which feeds the fingerprint: %q", d)
+			}
+		}
+	}
+	long := make([]string, 30)
+	for i := range long {
+		long[i] = strings.Repeat("x", 200)
+	}
+	if got := evidenceText(long); len(got) > 810 || strings.Count(got, "\n") > 7 {
+		t.Fatalf("evidence not capped: %d bytes", len(got))
+	}
+}

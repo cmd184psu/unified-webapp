@@ -616,3 +616,19 @@ func TestParseFinal_RepairWithOnlyMinorIssuesPasses(t *testing.T) {
 		t.Errorf("a repair with no issues listed: outcome %q (%v), want repair", got, err)
 	}
 }
+
+// H11: a reply with no JSON object in it is gibberish: one runner call, no
+// corrective follow-up, and the stage ends infra:unparseable at once. A reply
+// that is an object with a wrong value still gets its follow-up (SO2).
+func TestH11_GibberishGetsNoSecondTry(t *testing.T) {
+	h := newStageHarness(t)
+	h.fake.Script("reviewer", runner.Step{Reply: "I am sorry, I could not look at the files because the tool failed."})
+	f := h.attemptStage("alpha", "reviewer")
+	st := h.run(f)
+	if st.Outcome != OutcomeInfraUnparseable {
+		t.Fatalf("outcome = %q, want %s", st.Outcome, OutcomeInfraUnparseable)
+	}
+	if calls := h.fake.CallsFor("reviewer"); len(calls) != 1 {
+		t.Fatalf("runner calls = %d, want exactly 1 for gibberish", len(calls))
+	}
+}

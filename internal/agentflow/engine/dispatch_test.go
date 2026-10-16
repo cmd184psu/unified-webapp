@@ -801,3 +801,58 @@ func TestH10_ModelWithoutToolsIsSkipped(t *testing.T) {
 		t.Fatalf("waiting reason %q does not say why", tk.WaitingReason)
 	}
 }
+
+// H11: after two failed attempts in a row the next worker must be a stronger
+// tier than the one that failed; with no stronger model listed, the same tier
+// goes on trying.
+func TestH11_RepeatedFailureEscalatesTheTier(t *testing.T) {
+	setup := func(workers ...string) (*harness, runFix) {
+		h := newDispHarness(t)
+		h.tiered("gpu", 5, map[string]int{"lo": 2, "hi": 1, "rev": 1})
+		h.candidates("global", "", "worker", workers...)
+		h.candidates("global", "", "reviewer", "gpu/rev")
+		f := h.dispProject("alpha", "any", indep(1))
+		h.startRun("alpha")
+		return h, f
+	}
+	h, f := setup("gpu/lo", "gpu/hi")
+	h.failedAttempt(f.tasks[0].ID, "lo", "v:a", "pass")
+	if got := h.workerModelDispatched(); got != "lo" {
+		t.Fatalf("after one failure the worker was %q, want lo", got)
+	}
+	h, f = setup("gpu/lo", "gpu/hi")
+	h.failedAttempt(f.tasks[0].ID, "lo", "v:a", "pass")
+	h.failedAttempt(f.tasks[0].ID, "lo", "v:b", "pass")
+	if got := h.workerModelDispatched(); got != "hi" {
+		t.Fatalf("after two failures the worker was %q, want the tier-1 hi", got)
+	}
+	h, f = setup("gpu/lo")
+	h.failedAttempt(f.tasks[0].ID, "lo", "v:a", "pass")
+	h.failedAttempt(f.tasks[0].ID, "lo", "v:b", "pass")
+	if got := h.workerModelDispatched(); got != "lo" {
+		t.Fatalf("with no stronger model listed the worker was %q, want lo", got)
+	}
+}
+
+// H11: the files a task must not touch are those of the tasks it is not built
+// on: its own dependencies (direct and indirect) are already in its tree.
+func TestH11_OwnedByOthersLeavesOutTheTasksItBuildsOn(t *testing.T) {
+	h := newDispHarness(t)
+	def := func(key string, files []string, deps ...string) model.TaskDef {
+		return model.TaskDef{Key: key, Phase: "P1", Title: "t", Prompt: "do " + strings.Join(files, " "), Acceptance: []string{"ok"}, FilesTouched: files, DependsOn: deps}
+	}
+	f := h.dispProject("alpha", "any", []model.TaskDef{
+		def("T1", []string{"a.go"}), def("T2", []string{"b.go"}, "T1"), def("T3", []string{"c.go"}, "T2"), def("T4", []string{"d.go"}),
+	})
+	byKey := map[string]model.Task{}
+	for _, tk := range f.tasks {
+		byKey[tk.Key] = tk
+	}
+	got, err := h.eng.ownedByOthers(context.Background(), &chain{eff: model.Effort{ID: f.effort}, task: byKey["T3"]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "d.go" {
+		t.Fatalf("T3 is built on T2 and T1, so only d.go is another task's: %v", got)
+	}
+}

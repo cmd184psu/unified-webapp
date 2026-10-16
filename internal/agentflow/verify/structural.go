@@ -42,6 +42,9 @@ type Input struct {
 	GitDir       string
 	BaseCommit   string
 	FilesTouched []string
+	// OwnedByOthers are the files other tasks, which this one does not depend on, are to write. A change to
+	// one of them that this task does not list itself fails the scope check: it would conflict at merge.
+	OwnedByOthers []string
 	// NoChangesReason is the worker's declaration that the files already
 	// satisfy the task; it lets an unchanged tree pass no_changes.
 	NoChangesReason string
@@ -84,10 +87,21 @@ func Structural(ctx context.Context, in Input) (VerifyReport, error) {
 	nest := Check{Name: CheckNestedRepo, Pass: len(nested) == 0, Details: nested}
 	rep.Checks = append(rep.Checks, nest)
 
-	for _, f := range outOfScope(files, in.FilesTouched) {
-		rep.Warnings = append(rep.Warnings, "changed file outside files_touched: "+f)
+	scope := Check{Name: CheckScope, Pass: true}
+	taken := map[string]bool{}
+	for _, f := range outOfScope(files, in.OwnedByOthers, true) {
+		if len(outOfScope([]string{f}, in.FilesTouched, false)) > 0 || len(in.FilesTouched) == 0 {
+			taken[f] = true
+			scope.Pass = false
+			scope.Details = append(scope.Details, "belongs to another task, which has not been merged into this one: "+f)
+		}
 	}
-	rep.Checks = append(rep.Checks, Check{Name: CheckScope, Pass: true})
+	for _, f := range outOfScope(files, in.FilesTouched, false) {
+		if !taken[f] {
+			rep.Warnings = append(rep.Warnings, "changed file outside files_touched: "+f)
+		}
+	}
+	rep.Checks = append(rep.Checks, scope)
 
 	contain := Check{Name: CheckContainment, Pass: true}
 	var present []string
@@ -208,10 +222,10 @@ func changedFiles(ctx context.Context, gitDir, root, base string) (files, nested
 	return files, nested, nil
 }
 
-// outOfScope returns changed files not covered by a files_touched entry. An
-// entry covers itself and, as a directory, everything beneath it. With no
-// declared entries nothing is out of scope.
-func outOfScope(changed, touched []string) []string {
+// outOfScope returns the changed files not covered by a files_touched entry, or
+// with inside set the ones it does cover. An entry covers itself and, as a
+// directory, everything beneath it. With no declared entries the answer is empty.
+func outOfScope(changed, touched []string, inside bool) []string {
 	if len(touched) == 0 {
 		return nil
 	}
@@ -225,7 +239,7 @@ func outOfScope(changed, touched []string) []string {
 				break
 			}
 		}
-		if !covered {
+		if covered == inside {
 			out = append(out, f)
 		}
 	}
