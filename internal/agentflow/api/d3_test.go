@@ -22,7 +22,7 @@ const (
 	approveReply = `{"verdict":"approve","issues":[]}`
 	compileReply = `{"tasks":[` +
 		`{"id":"T001","phase":"P1","title":"first","prompt":"create a.txt","acceptance":["R1: a.txt exists"],"files_touched":["a.txt"]},` +
-		`{"id":"T002","phase":"P1","title":"second","prompt":"create b.txt","acceptance":["R1: b.txt exists"],"files_touched":["b.txt"],"depends_on":["T001"]}]}`
+		`{"id":"T002","phase":"P1","title":"second","prompt":"create b.txt","acceptance":["R1: b.txt exists","AC1: it exists"],"files_touched":["b.txt"],"depends_on":["T001"]}]}`
 	workerReply = `{"summary":"did it","files_changed":["a.go"],"learnings":[]}`
 )
 
