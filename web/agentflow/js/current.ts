@@ -25,6 +25,11 @@ export function rememberEffort(slug: string, id: number): void {
   picked.set(slug, id);
 }
 
+/** forgetEfforts drops every remembered pick, for when all projects are gone. */
+export function forgetEfforts(): void {
+  picked.clear();
+}
+
 /** effortBar is the picker row: a select of the project's efforts and the chosen one's status. */
 export function effortBar(
   slug: string,

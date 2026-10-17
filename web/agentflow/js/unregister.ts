@@ -70,13 +70,19 @@ export const defaultDropAllDeps = (): DropAllDeps => ({
   notify: (m) => void showToast(m, 'success'),
 });
 
-/** dropAll asks, then removes every project and effort; true when it did. A copy of the database is kept first. */
-export async function dropAll(deps: DropAllDeps): Promise<boolean> {
+/**
+ * dropAll asks, then removes every project and effort; true when it did. A copy
+ * of the database is kept first. beforeDrop runs after the person confirms and
+ * before the request, so the screen can let go of what is about to disappear
+ * instead of fetching it while it vanishes.
+ */
+export async function dropAll(deps: DropAllDeps, beforeDrop: () => void = () => {}): Promise<boolean> {
   const warning = 'Drop every project and effort? All their history, statistics and strikes are removed from AgentFlow, and any run in progress is stopped. ' +
     'Your backends, models, tiers, keys, candidate lists and settings stay, and so do your repositories and their branches. ' +
     'A copy of the database is saved first. This cannot be undone from here.';
   if (!(await deps.confirm(warning, 'Drop all'))) return false;
   let res: Dropped;
+  beforeDrop();
   try {
     res = await deps.dropAll();
   } catch {

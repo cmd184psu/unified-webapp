@@ -39,7 +39,7 @@ function harness(initial: ProjectView[]) {
     confirm: async (m: string) => { calls.push('confirm:' + m); return true; },
     open: (s: string) => { calls.push('open:' + s); },
     unregister: async (slug: string) => { calls.push('unregister:' + slug); return true; },
-    dropAll: async () => { calls.push('dropAll'); return true; },
+    dropAll: async (before: () => void) => { calls.push('dropAll'); before(); calls.push('text:' + host.textContent); return true; },
   };
   const ov = new Overview(asEl(host), deps);
   return { host, ov, calls, efforts, setRows: (r: ProjectView[]) => { rows = r; }, listCalls: () => listCalls };
@@ -258,6 +258,46 @@ test('dropAll: nothing is sent unless the person confirms; the warning says what
   answer = true;
   eq(await dropAll(deps), true);
   ok(log.includes('drop') && log.some((l) => l.startsWith('notify:Dropped 2 project')), 'dropped and told: ' + log.join('|'));
+});
+
+test('while everything is being dropped the screen lets go first: rows gone, no fetch, stream ignored; then the list is read again', async () => {
+  const t = harness([proj('alpha'), proj('beta')]);
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => { release = r; });
+  const inner = t.ov['deps'].dropAll as (b: () => void) => Promise<boolean>;
+  t.ov['deps'].dropAll = async (before) => { const ok = await inner(before); await gate; return ok; };
+  const stop = t.ov.mount();
+  await flush();
+  const btn = findAll(t.host, (e) => e.getAttribute('data-op') === 'drop-all') as unknown as Array<{ click(): void }>;
+  btn[0].click();
+  await flush();
+  ok(t.calls.includes('text:Dropping every project…'), 'shows the dropping state: ' + t.calls.join('|'));
+  const during = t.listCalls();
+  dispatch(JSON.stringify({ type: 'project.delete', project: 'alpha' }));
+  dispatch(JSON.stringify({ type: 'state.changed' }));
+  await flush();
+  eq(t.listCalls(), during);
+  t.setRows([]);
+  release();
+  await flush();
+  await flush();
+  ok(t.listCalls() > during, 'read again afterwards');
+  ok(t.host.textContent.includes('No projects yet'), 'empty state: ' + t.host.textContent);
+  stop();
+});
+
+test('a declined or failed drop re-reads the list and keeps the projects', async () => {
+  const t = harness([proj('alpha')]);
+  t.ov['deps'].dropAll = async () => false;
+  const stop = t.ov.mount();
+  await flush();
+  const before = t.listCalls();
+  (findAll(t.host, (e) => e.getAttribute('data-op') === 'drop-all') as unknown as Array<{ click(): void }>)[0].click();
+  await flush();
+  await flush();
+  ok(t.listCalls() > before, 'refetched');
+  ok(t.host.textContent.includes('alpha'), 'still listed');
+  stop();
 });
 
 void run('agentflow-overview');

@@ -609,39 +609,6 @@ var RowsEditor = class {
   }
 };
 
-// web/agentflow/js/merge-card.ts
-function mergeBranch(ef, git) {
-  return git?.branch || ef.integration_branch || `agentflow/effort-${ef.id}`;
-}
-function mergeCard(ef, git, copy) {
-  const branch = mergeBranch(ef, git);
-  const files = git?.files;
-  return h(
-    "div",
-    { class: "merge-card", attrs: { "data-role": "git-commands" } },
-    h("h4", { text: `Ready to merge: ${ef.title}` }),
-    h("p", { text: `Nothing was merged into main. The finished work is on the branch ${branch}; main is unchanged until you merge it yourself. agentflow never merges into main and never pushes.` }),
-    git?.commits?.length ? h("ul", { class: "plan-review-notes", attrs: { "data-role": "merge-commits" } }, ...git.commits.map((c) => h("li", { text: `${c.sha.slice(0, 7)} ${c.subject}` }))) : null,
-    files !== void 0 || git?.diffstat ? h(
-      "div",
-      { attrs: { "data-role": "merge-diffstat" } },
-      files !== void 0 ? h("p", { class: "field-hint", text: `${files} file${files === 1 ? "" : "s"} changed` }) : null,
-      git?.diffstat ? h("pre", { class: "detail-mono", text: git.diffstat }) : null
-    ) : null,
-    git?.commands.length ? h(
-      "div",
-      {},
-      h("p", { text: "To merge it, run:" }),
-      ...git.commands.map((c) => h(
-        "div",
-        { class: "merge-command" },
-        h("pre", { class: "detail-mono", text: c }),
-        h("button", { class: "icon-btn", attrs: { type: "button", title: "Copy this command", "aria-label": "Copy this command", "data-action": "copy-command" }, on: { click: () => copy(c) } }, icon("copy"))
-      ))
-    ) : h("p", { class: "field-hint", text: `The commands could not be loaded. To merge, run: git merge --no-ff ${branch}` })
-  );
-}
-
 // web/agentflow/js/yolo.ts
 import { confirmDialog, showToast } from "/shared/dist/shared.mjs";
 var defaultYoloDeps = () => ({
@@ -713,6 +680,71 @@ function yoloControl(slug, effort, deps, onChanged) {
   );
 }
 
+// web/agentflow/js/current.ts
+var picked = /* @__PURE__ */ new Map();
+function isFinished(e) {
+  return e.status === "complete" || e.status === "abandoned";
+}
+function chooseEffort(slug, efforts) {
+  const want = picked.get(slug);
+  return efforts.find((e) => e.id === want) ?? efforts.find((e) => !isFinished(e)) ?? efforts[efforts.length - 1];
+}
+function rememberEffort(slug, id) {
+  picked.set(slug, id);
+}
+function forgetEfforts() {
+  picked.clear();
+}
+function effortBar(slug, efforts, current, onPick, yolo) {
+  const sel = selectInput("effort", efforts.map((e) => [String(e.id), `#${e.id} ${e.title}`]), String(current?.id ?? ""));
+  sel.addEventListener("change", () => {
+    rememberEffort(slug, Number(sel.value));
+    onPick(Number(sel.value));
+  });
+  return h(
+    "div",
+    { class: "console-header" },
+    h("span", { class: "pane-title", text: "Effort" }),
+    sel,
+    current ? chip(current.status) : null,
+    current?.yolo && !yolo ? yoloBadge() : null,
+    current && yolo ? yoloControl(slug, current, yolo.deps, yolo.onChanged) : null
+  );
+}
+
+// web/agentflow/js/merge-card.ts
+function mergeBranch(ef, git) {
+  return git?.branch || ef.integration_branch || `agentflow/effort-${ef.id}`;
+}
+function mergeCard(ef, git, copy) {
+  const branch = mergeBranch(ef, git);
+  const files = git?.files;
+  return h(
+    "div",
+    { class: "merge-card", attrs: { "data-role": "git-commands" } },
+    h("h4", { text: `Ready to merge: ${ef.title}` }),
+    h("p", { text: `Nothing was merged into main. The finished work is on the branch ${branch}; main is unchanged until you merge it yourself. agentflow never merges into main and never pushes.` }),
+    git?.commits?.length ? h("ul", { class: "plan-review-notes", attrs: { "data-role": "merge-commits" } }, ...git.commits.map((c) => h("li", { text: `${c.sha.slice(0, 7)} ${c.subject}` }))) : null,
+    files !== void 0 || git?.diffstat ? h(
+      "div",
+      { attrs: { "data-role": "merge-diffstat" } },
+      files !== void 0 ? h("p", { class: "field-hint", text: `${files} file${files === 1 ? "" : "s"} changed` }) : null,
+      git?.diffstat ? h("pre", { class: "detail-mono", text: git.diffstat }) : null
+    ) : null,
+    git?.commands.length ? h(
+      "div",
+      {},
+      h("p", { text: "To merge it, run:" }),
+      ...git.commands.map((c) => h(
+        "div",
+        { class: "merge-command" },
+        h("pre", { class: "detail-mono", text: c }),
+        h("button", { class: "icon-btn", attrs: { type: "button", title: "Copy this command", "aria-label": "Copy this command", "data-action": "copy-command" }, on: { click: () => copy(c) } }, icon("copy"))
+      ))
+    ) : h("p", { class: "field-hint", text: `The commands could not be loaded. To merge, run: git merge --no-ff ${branch}` })
+  );
+}
+
 // web/agentflow/js/unregister.ts
 import { confirmDialog as confirmDialog2, copyText, openModal, showToast as showToast2 } from "/shared/dist/shared.mjs";
 var defaultUnregisterDeps = () => ({
@@ -759,10 +791,12 @@ var defaultDropAllDeps = () => ({
   confirm: (m, label = "Confirm") => confirmDialog2(m, { confirmLabel: label }),
   notify: (m) => void showToast2(m, "success")
 });
-async function dropAll(deps) {
+async function dropAll(deps, beforeDrop = () => {
+}) {
   const warning = "Drop every project and effort? All their history, statistics and strikes are removed from AgentFlow, and any run in progress is stopped. Your backends, models, tiers, keys, candidate lists and settings stay, and so do your repositories and their branches. A copy of the database is saved first. This cannot be undone from here.";
   if (!await deps.confirm(warning, "Drop all")) return false;
   let res;
+  beforeDrop();
   try {
     res = await deps.dropAll();
   } catch {
@@ -782,7 +816,7 @@ var defaultDeps = (open) => ({
   gitCommands: api.gitCommands,
   copy: (t) => void copyText2(t),
   unregister: (slug) => unregister(defaultUnregisterDeps(), slug),
-  dropAll: () => dropAll(defaultDropAllDeps())
+  dropAll: (before) => dropAll(defaultDropAllDeps(), before)
 });
 function buttonsFor(runState) {
   switch (runState) {
@@ -821,6 +855,8 @@ var Overview = class {
     this.git = /* @__PURE__ */ new Map();
     this.loaded = false;
     this.refreshing = false;
+    /** true while Drop all projects runs: nothing is fetched and the stream is ignored. */
+    this.dropping = false;
     this.again = false;
     this.off = null;
     this.stopPoll = null;
@@ -839,6 +875,7 @@ var Overview = class {
   }
   /** refresh refetches the rows; overlapping calls collapse into one follow-up fetch. */
   async refresh() {
+    if (this.dropping) return;
     if (this.refreshing) {
       this.again = true;
       return;
@@ -848,7 +885,9 @@ var Overview = class {
       do {
         this.again = false;
         try {
-          this.rows = await this.deps.list();
+          const rows = await this.deps.list();
+          if (this.dropping) return;
+          this.rows = rows;
           await this.loadCompleted();
           this.loaded = true;
         } catch {
@@ -876,6 +915,7 @@ var Overview = class {
   }
   /** handle applies one stream event: run-state changes show at once, the rest refetch. */
   handle(ev) {
+    if (this.dropping) return;
     switch (ev.type) {
       case "snapshot": {
         let stale = ev.projects.length !== this.rows.length;
@@ -923,6 +963,10 @@ var Overview = class {
       replace(this.host, h("p", { class: "field-hint", text: "Loading projects\u2026" }));
       return;
     }
+    if (this.dropping) {
+      replace(this.host, h("p", { class: "field-hint", text: "Dropping every project\u2026" }));
+      return;
+    }
     if (this.rows.length === 0) {
       replace(
         this.host,
@@ -947,9 +991,26 @@ var Overview = class {
       h("ul", { class: "task-list" }, ...this.rows.map((r) => this.row(r)))
     );
   }
+  /**
+   * dropEverything lets go of the screen first: the rows go, nothing is fetched
+   * and the stream is ignored while the request runs, so no request names a
+   * project that is vanishing. Afterwards (or if it failed or was declined) the
+   * list is read again.
+   */
   async dropEverything() {
-    if (!await this.deps.dropAll?.()) return;
-    await this.refresh();
+    try {
+      await this.deps.dropAll?.(() => {
+        this.dropping = true;
+        this.rows = [];
+        this.done.clear();
+        this.git.clear();
+        forgetEfforts();
+        this.render();
+      });
+    } finally {
+      this.dropping = false;
+      await this.refresh();
+    }
   }
   async unregisterRow(slug) {
     const row = this.rows.find((r) => r.slug === slug);
@@ -2251,35 +2312,6 @@ var BackendsView = class {
 };
 function mountBackends(host) {
   return new BackendsView(host, defaultBackendsDeps()).mount();
-}
-
-// web/agentflow/js/current.ts
-var picked = /* @__PURE__ */ new Map();
-function isFinished(e) {
-  return e.status === "complete" || e.status === "abandoned";
-}
-function chooseEffort(slug, efforts) {
-  const want = picked.get(slug);
-  return efforts.find((e) => e.id === want) ?? efforts.find((e) => !isFinished(e)) ?? efforts[efforts.length - 1];
-}
-function rememberEffort(slug, id) {
-  picked.set(slug, id);
-}
-function effortBar(slug, efforts, current, onPick, yolo) {
-  const sel = selectInput("effort", efforts.map((e) => [String(e.id), `#${e.id} ${e.title}`]), String(current?.id ?? ""));
-  sel.addEventListener("change", () => {
-    rememberEffort(slug, Number(sel.value));
-    onPick(Number(sel.value));
-  });
-  return h(
-    "div",
-    { class: "console-header" },
-    h("span", { class: "pane-title", text: "Effort" }),
-    sel,
-    current ? chip(current.status) : null,
-    current?.yolo && !yolo ? yoloBadge() : null,
-    current && yolo ? yoloControl(slug, current, yolo.deps, yolo.onChanged) : null
-  );
 }
 
 // web/agentflow/js/activity.ts

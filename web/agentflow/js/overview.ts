@@ -4,6 +4,7 @@
 
 import { confirmDialog, copyText } from '@shared';
 import { api, type Effort, type GitCommands, type ProjectView, type RunOp, type WorkItem } from './api.js';
+import { forgetEfforts } from './current.js';
 import { chip, h, replace } from './dom.js';
 import { button } from './forms.js';
 import type { IconName } from './icons.js';
@@ -24,8 +25,8 @@ export interface OverviewDeps {
   copy?(text: string): void;
   /** Optional: unregisters a project after asking; true when it is gone. */
   unregister?(slug: string): Promise<boolean>;
-  /** Optional: drops every project and effort after asking; true when it did. */
-  dropAll?(): Promise<boolean>;
+  /** Optional: drops every project and effort after asking; beforeDrop runs after the answer and before the request; true when it did. */
+  dropAll?(beforeDrop: () => void): Promise<boolean>;
 }
 
 export const defaultDeps = (open: (slug: string) => void): OverviewDeps => ({
@@ -37,7 +38,7 @@ export const defaultDeps = (open: (slug: string) => void): OverviewDeps => ({
   gitCommands: api.gitCommands,
   copy: (t) => void copyText(t),
   unregister: (slug) => unregister(defaultUnregisterDeps(), slug),
-  dropAll: () => dropAll(defaultDropAllDeps()),
+  dropAll: (before) => dropAll(defaultDropAllDeps(), before),
 });
 
 interface Button {
@@ -91,6 +92,8 @@ export class Overview {
   private git = new Map<number, GitCommands | null>();
   private loaded = false;
   private refreshing = false;
+  /** true while Drop all projects runs: nothing is fetched and the stream is ignored. */
+  private dropping = false;
   private again = false;
   private off: (() => void) | null = null;
   private stopPoll: (() => void) | null = null;
@@ -112,6 +115,7 @@ export class Overview {
 
   /** refresh refetches the rows; overlapping calls collapse into one follow-up fetch. */
   async refresh(): Promise<void> {
+    if (this.dropping) return;
     if (this.refreshing) {
       this.again = true;
       return;
@@ -121,7 +125,9 @@ export class Overview {
       do {
         this.again = false;
         try {
-          this.rows = await this.deps.list();
+          const rows = await this.deps.list();
+          if (this.dropping) return; // the drop began while this was in flight: its answer is stale
+          this.rows = rows;
           await this.loadCompleted();
           this.loaded = true;
         } catch {
@@ -153,6 +159,7 @@ export class Overview {
 
   /** handle applies one stream event: run-state changes show at once, the rest refetch. */
   handle(ev: AgentflowEvent): void {
+    if (this.dropping) return;
     switch (ev.type) {
       case 'snapshot': {
         let stale = ev.projects.length !== this.rows.length;
@@ -203,6 +210,10 @@ export class Overview {
       replace(this.host, h('p', { class: 'field-hint', text: 'Loading projects…' }));
       return;
     }
+    if (this.dropping) {
+      replace(this.host, h('p', { class: 'field-hint', text: 'Dropping every project…' }));
+      return;
+    }
     if (this.rows.length === 0) {
       replace(
         this.host,
@@ -220,9 +231,26 @@ export class Overview {
       h('ul', { class: 'task-list' }, ...this.rows.map((r) => this.row(r))));
   }
 
+  /**
+   * dropEverything lets go of the screen first: the rows go, nothing is fetched
+   * and the stream is ignored while the request runs, so no request names a
+   * project that is vanishing. Afterwards (or if it failed or was declined) the
+   * list is read again.
+   */
   private async dropEverything(): Promise<void> {
-    if (!(await this.deps.dropAll?.())) return;
-    await this.refresh();
+    try {
+      await this.deps.dropAll?.(() => {
+        this.dropping = true;
+        this.rows = [];
+        this.done.clear();
+        this.git.clear();
+        forgetEfforts();
+        this.render();
+      });
+    } finally {
+      this.dropping = false;
+      await this.refresh();
+    }
   }
 
   private async unregisterRow(slug: string): Promise<void> {
