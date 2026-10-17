@@ -45,5 +45,6 @@ Emit only these fields. Any other field makes the queue invalid.
 11. Never invent infrastructure outside the approved plan. The runner owns project-state files.
 12. Never emit a task whose only purpose is running, checking or confirming tests, the build or lint (titles such as "Run tests" or "Make sure all tests pass"). Every task must change files; the engine builds, vets and tests after every task automatically, with no task needed. Such a task is rejected.
 13. Never emit a task whose only purpose is creating directories, empty files or placeholders. Git does not track empty directories, so such a task changes nothing and can never pass. A directory comes into being as part of the task that writes the first real file in it.
+14. A Go program builds after every task, so the first task that writes Go code in the module root also writes `main.go` with a minimal `main` function; later tasks extend it and list it again. Never leave `main.go` to a later task while an earlier one writes `package main`.
 
 Produce the full queue now.

@@ -44,6 +44,10 @@ func TestQueueCoverageProblems(t *testing.T) {
 			{Key: "T001", Acceptance: []string{"R1: a", "AC1: a"}, FilesTouched: []string{"tests/math_test.go"}},
 			{Key: "T002", Acceptance: []string{"R2: p", "AC2: p"}},
 		}, "tests/math_test.go"},
+		{"main.go comes after the first root Go task", []TaskDef{
+			{Key: "T001", Acceptance: []string{"R1: a", "AC1: a"}, FilesTouched: []string{"go.mod", "calc.go", "calc_test.go"}},
+			{Key: "T002", Acceptance: []string{"R2: p", "AC2: p"}, FilesTouched: []string{"main.go"}},
+		}, "main.go comes later"},
 	}
 	for _, c := range cases {
 		p := QueueCoverageProblems(coverageFRD(), c.defs)
