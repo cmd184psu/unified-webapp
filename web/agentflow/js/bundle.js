@@ -4711,7 +4711,7 @@ function mountProjectTab(host, wanted2) {
       showSub();
     }
   });
-  const stopActivity = activity.mount(slug);
+  const stopActivity = activity.mount("");
   const closeSub = () => {
     if (typeof dispose2 === "function") dispose2();
     dispose2 = void 0;
@@ -4765,7 +4765,10 @@ function mountProjectTab(host, wanted2) {
       projects = [];
     }
     if (disposed) return;
-    if (!projects.some((p) => p.slug === slug)) slug = projects[0]?.slug ?? "";
+    if (!projects.some((p) => p.slug === slug)) {
+      slug = projects[0]?.slug ?? "";
+      remember(slug);
+    }
     const active2 = (p) => p.run_state === "running" || p.run_state === "pausing";
     replace(picker, ...projects.map((p) => h("option", { text: active2(p) ? `${p.slug}  \u25CF running` : p.slug, attrs: { value: p.slug, selected: p.slug === slug } })));
     picker.value = slug;

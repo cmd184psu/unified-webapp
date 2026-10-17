@@ -65,7 +65,8 @@ export function mountProjectTab(host: HTMLElement, wanted: string): () => void {
   const body = h('div', { class: 'project-body' });
   const activityEl = h('div', { class: 'activity-strip', attrs: { role: 'status', hidden: true, 'data-role': 'activity' } });
   const activity = new Activity(activityEl, (id) => { if (!blocked.has(id)) { sub = id; showSub(); } });
-  const stopActivity = activity.mount(slug);
+  // The remembered project may be gone: the strip points at nothing until reload has checked it exists.
+  const stopActivity = activity.mount('');
 
   const closeSub = (): void => {
     if (typeof dispose === 'function') dispose();
@@ -121,7 +122,10 @@ export function mountProjectTab(host: HTMLElement, wanted: string): () => void {
       projects = [];
     }
     if (disposed) return;
-    if (!projects.some((p) => p.slug === slug)) slug = projects[0]?.slug ?? '';
+    if (!projects.some((p) => p.slug === slug)) {
+      slug = projects[0]?.slug ?? '';
+      remember(slug); // a project that no longer exists is forgotten, not asked for again
+    }
     // A project with an active run says so, so the one that is working is never mistaken for an idle one.
     const active = (p: ProjectView): boolean => p.run_state === 'running' || p.run_state === 'pausing';
     replace(picker, ...projects.map((p) => h('option', { text: active(p) ? `${p.slug}  ● running` : p.slug, attrs: { value: p.slug, selected: p.slug === slug } })));
