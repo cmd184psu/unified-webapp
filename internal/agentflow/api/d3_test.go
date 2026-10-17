@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -373,4 +374,33 @@ func TestSSECapReturns503AtCapPlusOne(t *testing.T) {
 		return code == http.StatusOK
 	})
 	b.cancel()
+}
+
+// POST /api/projects/_all_ drops every project and effort in one call: it needs
+// confirmation, abandons active efforts, stops runs, keeps an archive of the
+// database, and leaves backends and settings alone.
+func TestDropAllProjects(t *testing.T) {
+	f := newFlow(t, envOpt{})
+	f.ok("POST", "/api/projects/_all_", map[string]any{}, http.StatusBadRequest)
+	if list := decode[[]ProjectView](t, f.ok("GET", "/api/projects", nil, http.StatusOK)); len(list) == 0 {
+		t.Fatal("a refused drop removed projects")
+	}
+	backends := len(decode[[]map[string]any](t, f.ok("GET", "/api/backends", nil, http.StatusOK)))
+	res := decode[struct {
+		Dropped []string `json:"dropped"`
+		Archive string   `json:"archive"`
+	}](t, f.ok("POST", "/api/projects/_all_", map[string]any{"confirm": true}, http.StatusOK))
+	if len(res.Dropped) == 0 || res.Archive == "" {
+		t.Fatalf("result = %+v", res)
+	}
+	if _, err := os.Stat(res.Archive); err != nil {
+		t.Fatalf("archive missing: %v", err)
+	}
+	if list := decode[[]ProjectView](t, f.ok("GET", "/api/projects", nil, http.StatusOK)); len(list) != 0 {
+		t.Fatalf("projects left: %+v", list)
+	}
+	if n := len(decode[[]map[string]any](t, f.ok("GET", "/api/backends", nil, http.StatusOK))); n != backends {
+		t.Fatalf("backends = %d, want %d kept", n, backends)
+	}
+	f.ok("POST", "/api/projects/_all_", map[string]any{"confirm": true}, http.StatusOK) // nothing left is not an error
 }

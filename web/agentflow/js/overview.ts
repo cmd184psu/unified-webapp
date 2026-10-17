@@ -10,7 +10,7 @@ import type { IconName } from './icons.js';
 import { isTransient, startPoll, subscribe, type AgentflowEvent } from './events.js';
 import { mergeCard } from './merge-card.js';
 import { yoloBadge } from './yolo.js';
-import { defaultUnregisterDeps, unregister, unregisterBlock } from './unregister.js';
+import { defaultDropAllDeps, defaultUnregisterDeps, dropAll, unregister, unregisterBlock } from './unregister.js';
 
 export interface OverviewDeps {
   list(): Promise<ProjectView[]>;
@@ -24,6 +24,8 @@ export interface OverviewDeps {
   copy?(text: string): void;
   /** Optional: unregisters a project after asking; true when it is gone. */
   unregister?(slug: string): Promise<boolean>;
+  /** Optional: drops every project and effort after asking; true when it did. */
+  dropAll?(): Promise<boolean>;
 }
 
 export const defaultDeps = (open: (slug: string) => void): OverviewDeps => ({
@@ -35,6 +37,7 @@ export const defaultDeps = (open: (slug: string) => void): OverviewDeps => ({
   gitCommands: api.gitCommands,
   copy: (t) => void copyText(t),
   unregister: (slug) => unregister(defaultUnregisterDeps(), slug),
+  dropAll: () => dropAll(defaultDropAllDeps()),
 });
 
 interface Button {
@@ -210,7 +213,16 @@ export class Overview {
       );
       return;
     }
-    replace(this.host, h('ul', { class: 'task-list' }, ...this.rows.map((r) => this.row(r))));
+    const drop = this.deps.dropAll;
+    replace(this.host,
+      drop ? h('div', { class: 'settings-actions' },
+        button('Drop all projects', () => void this.dropEverything(), { op: 'drop-all', icon: 'trash', word: true })) : null,
+      h('ul', { class: 'task-list' }, ...this.rows.map((r) => this.row(r))));
+  }
+
+  private async dropEverything(): Promise<void> {
+    if (!(await this.deps.dropAll?.())) return;
+    await this.refresh();
   }
 
   private async unregisterRow(slug: string): Promise<void> {

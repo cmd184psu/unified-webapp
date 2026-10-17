@@ -5,7 +5,7 @@
 // copy buttons for the person to run. All text is placed with h().
 
 import { confirmDialog, copyText, openModal, showToast } from '@shared';
-import { api, type ProjectView, type Unregistered } from './api.js';
+import { api, type Dropped, type ProjectView, type Unregistered } from './api.js';
 import { h } from './dom.js';
 import { icon } from './icons.js';
 
@@ -56,4 +56,32 @@ export function branchCommands(slug: string, commands: string[], copy: (text: st
 
 function showBranchCommands(slug: string, commands: string[], copy: (text: string) => void): void {
   openModal(branchCommands(slug, commands, copy), { title: 'Branches left behind' });
+}
+
+export interface DropAllDeps {
+  dropAll(): Promise<Dropped>;
+  confirm(message: string, confirmLabel?: string): Promise<boolean>;
+  notify(message: string): void;
+}
+
+export const defaultDropAllDeps = (): DropAllDeps => ({
+  dropAll: api.dropAllProjects,
+  confirm: (m, label = 'Confirm') => confirmDialog(m, { confirmLabel: label }),
+  notify: (m) => void showToast(m, 'success'),
+});
+
+/** dropAll asks, then removes every project and effort; true when it did. A copy of the database is kept first. */
+export async function dropAll(deps: DropAllDeps): Promise<boolean> {
+  const warning = 'Drop every project and effort? All their history, statistics and strikes are removed from AgentFlow, and any run in progress is stopped. ' +
+    'Your backends, models, tiers, keys, candidate lists and settings stay, and so do your repositories and their branches. ' +
+    'A copy of the database is saved first. This cannot be undone from here.';
+  if (!(await deps.confirm(warning, 'Drop all'))) return false;
+  let res: Dropped;
+  try {
+    res = await deps.dropAll();
+  } catch {
+    return false;
+  }
+  deps.notify(`Dropped ${res.dropped.length} project${res.dropped.length === 1 ? '' : 's'}; database copy saved at ${res.archive}`);
+  return true;
 }

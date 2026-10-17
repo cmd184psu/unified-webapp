@@ -1,6 +1,7 @@
 import { test, run, eq, ok, installFakeDom, FakeEl, findAll, asEl, byAttr } from './testkit';
 import { Overview, buttonsFor, progressText, type OverviewDeps } from './overview';
 import { dispatch, subscribe, backoffMs, pollSettings } from './events';
+import { dropAll, type DropAllDeps } from './unregister';
 import { HealthBanner, healthMessage } from './health';
 import type { Effort, Health, ProjectView, RunOp } from './api';
 
@@ -38,6 +39,7 @@ function harness(initial: ProjectView[]) {
     confirm: async (m: string) => { calls.push('confirm:' + m); return true; },
     open: (s: string) => { calls.push('open:' + s); },
     unregister: async (slug: string) => { calls.push('unregister:' + slug); return true; },
+    dropAll: async () => { calls.push('dropAll'); return true; },
   };
   const ov = new Overview(asEl(host), deps);
   return { host, ov, calls, efforts, setRows: (r: ProjectView[]) => { rows = r; }, listCalls: () => listCalls };
@@ -224,6 +226,38 @@ test('a row offers Unregister only when its run is stopped with no active effort
   eq(t.calls.filter((c) => c.startsWith('unregister:')), ['unregister:idle']);
   ok(!t.host.textContent.includes('idle'), 'row gone after a refresh');
   stop();
+});
+
+test('Drop all projects asks first, then the list is refetched; the button is absent with no projects', async () => {
+  const t = harness([proj('alpha'), proj('beta')]);
+  const stop = t.ov.mount();
+  await flush();
+  const btn = findAll(t.host, (e) => e.getAttribute('data-op') === 'drop-all') as unknown as Array<{ click(): void }>;
+  eq(btn.length, 1);
+  const before = t.listCalls();
+  t.setRows([]);
+  btn[0].click();
+  await flush();
+  eq(t.calls.filter((c) => c === 'dropAll'), ['dropAll']);
+  ok(t.listCalls() > before, 'refetched after the drop');
+  eq(findAll(t.host, (e) => e.getAttribute('data-op') === 'drop-all').length, 0);
+  stop();
+});
+
+test('dropAll: nothing is sent unless the person confirms; the warning says what goes and what stays', async () => {
+  const log: string[] = [];
+  let answer = false;
+  const deps: DropAllDeps = {
+    dropAll: async () => { log.push('drop'); return { dropped: ['a', 'b'], archive: '/d/archive/x.db', branches: [], commands: [] }; },
+    confirm: async (m) => { log.push('confirm:' + m); return answer; },
+    notify: (m) => { log.push('notify:' + m); },
+  };
+  eq(await dropAll(deps), false);
+  ok(!log.includes('drop'), 'declined: no call');
+  ok(log[0].includes('every project') && log[0].includes('backends') && log[0].includes('repositories'), 'warning text: ' + log[0]);
+  answer = true;
+  eq(await dropAll(deps), true);
+  ok(log.includes('drop') && log.some((l) => l.startsWith('notify:Dropped 2 project')), 'dropped and told: ' + log.join('|'));
 });
 
 void run('agentflow-overview');

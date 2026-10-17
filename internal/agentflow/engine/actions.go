@@ -381,3 +381,65 @@ func (e *Engine) UnregisterProject(ctx context.Context, actor, slug string) (Unr
 	}
 	return out, nil
 }
+
+// Dropped is what DropAllProjects removed: the slugs, the repository branches
+// and delete commands left behind (nothing in a repository is touched), and
+// the database copy taken first.
+type Dropped struct {
+	Projects []string
+	Branches []string
+	Commands []string
+	Archive  string
+}
+
+// DropAllProjects removes every project and effort in one call, for a clean
+// slate between trials. It first saves a copy of the whole database under the
+// data directory's archive/ (history, statistics and strikes stay readable
+// there), then for each project abandons its active effort, stops its run and
+// unregisters it. Backends, models, tiers, keys, candidate lists and settings
+// are kept. It stops at the first project it cannot remove and returns what it
+// had dropped so far with the error.
+func (e *Engine) DropAllProjects(ctx context.Context, actor string) (Dropped, error) {
+	s := e.deps.Store
+	out := Dropped{Projects: []string{}, Branches: []string{}, Commands: []string{}}
+	projects, err := s.ListProjects(ctx)
+	if err != nil {
+		return out, err
+	}
+	if len(projects) == 0 {
+		return out, nil
+	}
+	dir := filepath.Join(e.deps.DataDir, "archive")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return out, err
+	}
+	path := filepath.Join(dir, "agentflow-"+e.deps.Clock().Format("20060102-150405")+"-drop-all.db")
+	if _, err := s.DB().ExecContext(ctx, "VACUUM INTO ?", path); err != nil {
+		return out, fmt.Errorf("archive the database before dropping: %w", err)
+	}
+	out.Archive = path
+	for _, p := range projects {
+		efforts, err := s.ListEfforts(ctx, p.Slug)
+		if err != nil {
+			return out, err
+		}
+		for _, ef := range efforts {
+			if model.IsActiveEffortStatus(ef.Status) {
+				if err := e.AbandonEffort(ctx, actor, ef.ID); err != nil {
+					return out, err
+				}
+			}
+		}
+		if err := e.runs.Stop(ctx, actor, p.Slug); err != nil {
+			return out, err
+		}
+		left, err := e.UnregisterProject(ctx, actor, p.Slug)
+		if err != nil {
+			return out, err
+		}
+		out.Projects = append(out.Projects, p.Slug)
+		out.Branches = append(out.Branches, left.Branches...)
+		out.Commands = append(out.Commands, left.Commands...)
+	}
+	return out, nil
+}

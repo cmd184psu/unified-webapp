@@ -97,6 +97,14 @@ export interface ProjectView {
   current: WorkItem[];
 }
 
+/** Dropped is POST /api/projects/_all_: every project removed, the database copy taken first, and the branches left in the repositories. */
+export interface Dropped {
+  dropped: string[];
+  archive: string;
+  branches: string[];
+  commands: string[];
+}
+
 /** Unregistered is DELETE /api/projects/{slug}: the repository's leftover branches and the commands that delete them. */
 export interface Unregistered {
   deleted: string;
@@ -596,6 +604,7 @@ export const api = {
   patchProject: (slug: string, p: ProjectPatch, o?: FetchOptions): Promise<ProjectView> =>
     send('PATCH', proj(slug), p, o),
   deleteProject: (slug: string): Promise<Unregistered> => send('DELETE', proj(slug)),
+  dropAllProjects: (): Promise<Dropped> => send('POST', '/api/projects/_all_', { confirm: true }),
   definitionOfDone: (slug: string, o?: FetchOptions): Promise<DefinitionOfDone> => get(`${proj(slug)}/definition-of-done`, o),
   limits: (slug: string): Promise<LimitsView> => get(`${proj(slug)}/limits`),
   putLimits: (slug: string, limits: Record<string, string | number>, o?: FetchOptions): Promise<LimitsView> =>

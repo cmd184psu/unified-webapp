@@ -294,6 +294,9 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 		t.Errorf("DELETE project body = %+v (%v), want deleted=other and empty (non-null) branches and commands", gone, err)
 	}
 	ok("GET", "/api/projects/other", "", 404)
+	ok("POST", "/api/projects/_all_", `{}`, 400)
+	ok("POST", "/api/projects/_all_", `{"confirm":true}`, 200)
+	ok("GET", "/api/projects/demo", "", 404)
 
 	var missing []string
 	for _, p := range api.Patterns() {

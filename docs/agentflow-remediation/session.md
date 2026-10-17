@@ -13,7 +13,7 @@ Project `webcalc-local3`, effort 6, repo `~/af-webcalc-local3`, branch `agentflo
 When it finishes (status `complete`) or a task halts:
 1. `python3 scripts/agentflow-webcalc-probe.py --repo ~/af-webcalc-local3 --branch agentflow/effort-6` (17 checks; port 7070 must be free). At 19:03 the API checks passed (13/17); the four page checks waited on T006.
 2. Compare with efforts 3 (free models, 17/17), 4 (old local, 2/17, listens on 8080) and 5 (hardened, halted at T003); record stages, repairs, infra failures, tokens by model, strikes (Stats tab, `GET /api/stats/models`, `GET /api/strikes`) in `progress.md` (section "Webcalc trials").
-3. Then: `python3 scripts/agentflow-reset.py` (dry run), then with `--yes` for a clean slate (it archives stats and a DB copy to `~/agentflow-archive/` and keeps configuration), then the full fresh trial (local-only, then the mixed set) as several projects/efforts so the project/effort UX can be judged.
+3. Then: the Overview tab's **Drop all projects** button (`POST /api/projects/_all_`, archives a DB copy under `data/agentflow/archive/`, keeps configuration), then the full fresh trial (local-only, then the mixed set) as several projects/efforts so the project/effort UX can be judged.
 
 The old watcher processes die with the Claude session; start a new one if wanted (`~/agentflow-session-tools/watch6.py`, background).
 
@@ -36,7 +36,7 @@ Planned, not built: H9 merge-conflict plan (prevention, deterministic ladder, th
 - Kimi (WASTE) is **tabled**; `waste-serve.service` stays off; do not start it.
 - Do not change auth settings; the PIN file is `~/.unified_common.pin`. (An OMC rate-limit daemon, PID 3560197, uses ~80% of a core; the owner may want it killed; I never touched it.)
 - Prefer live changes; **a service restart interrupts a running stage**, so use the drain procedure: `POST /api/projects/<slug>/run/pause`, wait for no open stages (`select count(*) from stages where state<>'done'` on `data/agentflow/agentflow.db`), `make build`, `sudo systemctl restart unified.service`, then `POST .../run/start` (restart sets run state to stopped). `~/agentflow-session-tools/deploy.sh` does this for webcalc-local3.
-- For a full test run: clean slate via `agentflow-reset.py`, not deleting the DB file (that would lose backends, tiers, keys, candidate lists).
+- For a full test run: clean slate via Drop all projects, not deleting the DB file (that would lose backends, tiers, keys, candidate lists).
 - Projects and efforts were conflated by the owner (they looked at the old project `webcalc-local`, effort 4, which is complete at 100%); the UX note covers it.
 - Merge conflicts: avoid first, but plan for them (H9); the owner asked to keep the idea of a deterministic ladder before any agent.
 

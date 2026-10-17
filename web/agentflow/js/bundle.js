@@ -64,6 +64,7 @@ var api = {
   gitInit: (repoPath) => send("POST", "/api/projects/git-init", { repo_path: repoPath, confirm: true }),
   patchProject: (slug, p, o) => send("PATCH", proj(slug), p, o),
   deleteProject: (slug) => send("DELETE", proj(slug)),
+  dropAllProjects: () => send("POST", "/api/projects/_all_", { confirm: true }),
   definitionOfDone: (slug, o) => get(`${proj(slug)}/definition-of-done`, o),
   limits: (slug) => get(`${proj(slug)}/limits`),
   putLimits: (slug, limits, o) => send("PUT", `${proj(slug)}/limits`, { limits }, o),
@@ -753,6 +754,23 @@ function branchCommands(slug, commands, copy) {
 function showBranchCommands(slug, commands, copy) {
   openModal(branchCommands(slug, commands, copy), { title: "Branches left behind" });
 }
+var defaultDropAllDeps = () => ({
+  dropAll: api.dropAllProjects,
+  confirm: (m, label = "Confirm") => confirmDialog2(m, { confirmLabel: label }),
+  notify: (m) => void showToast2(m, "success")
+});
+async function dropAll(deps) {
+  const warning = "Drop every project and effort? All their history, statistics and strikes are removed from AgentFlow, and any run in progress is stopped. Your backends, models, tiers, keys, candidate lists and settings stay, and so do your repositories and their branches. A copy of the database is saved first. This cannot be undone from here.";
+  if (!await deps.confirm(warning, "Drop all")) return false;
+  let res;
+  try {
+    res = await deps.dropAll();
+  } catch {
+    return false;
+  }
+  deps.notify(`Dropped ${res.dropped.length} project${res.dropped.length === 1 ? "" : "s"}; database copy saved at ${res.archive}`);
+  return true;
+}
 
 // web/agentflow/js/overview.ts
 var defaultDeps = (open) => ({
@@ -763,7 +781,8 @@ var defaultDeps = (open) => ({
   efforts: api.efforts,
   gitCommands: api.gitCommands,
   copy: (t) => void copyText2(t),
-  unregister: (slug) => unregister(defaultUnregisterDeps(), slug)
+  unregister: (slug) => unregister(defaultUnregisterDeps(), slug),
+  dropAll: () => dropAll(defaultDropAllDeps())
 });
 function buttonsFor(runState) {
   switch (runState) {
@@ -917,7 +936,20 @@ var Overview = class {
       );
       return;
     }
-    replace(this.host, h("ul", { class: "task-list" }, ...this.rows.map((r) => this.row(r))));
+    const drop = this.deps.dropAll;
+    replace(
+      this.host,
+      drop ? h(
+        "div",
+        { class: "settings-actions" },
+        button("Drop all projects", () => void this.dropEverything(), { op: "drop-all", icon: "trash", word: true })
+      ) : null,
+      h("ul", { class: "task-list" }, ...this.rows.map((r) => this.row(r)))
+    );
+  }
+  async dropEverything() {
+    if (!await this.deps.dropAll?.()) return;
+    await this.refresh();
   }
   async unregisterRow(slug) {
     const row = this.rows.find((r) => r.slug === slug);

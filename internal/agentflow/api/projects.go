@@ -18,6 +18,7 @@ func (a *API) registerProjects(mux muxer) {
 	mux.HandleFunc("GET /api/projects", a.listProjects)
 	mux.HandleFunc("POST /api/projects", a.createProject)
 	mux.HandleFunc("POST /api/projects/git-init", a.gitInit)
+	mux.HandleFunc("POST /api/projects/_all_", a.dropAllProjects)
 	mux.HandleFunc("GET /api/projects/{slug}", a.getProject)
 	mux.HandleFunc("PATCH /api/projects/{slug}", a.patchProject)
 	mux.HandleFunc("DELETE /api/projects/{slug}", a.deleteProject)
@@ -300,6 +301,31 @@ func (a *API) deleteProject(w http.ResponseWriter, r *http.Request) {
 	}
 	a.emit("project.delete", map[string]any{"project": slug})
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": slug, "branches": left.Branches, "commands": left.Commands})
+}
+
+// dropAllProjects removes every project and effort after explicit confirmation
+// (the UI's "Drop all projects"). A slug cannot start with an underscore, so
+// _all_ never names a project.
+func (a *API) dropAllProjects(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Confirm bool `json:"confirm"`
+	}
+	if !decodeBody(w, r, &body, false) {
+		return
+	}
+	if !body.Confirm {
+		badRequest(w, "confirm", "dropping every project needs explicit confirmation")
+		return
+	}
+	d, err := a.deps.Engine.DropAllProjects(r.Context(), actorOf(r))
+	for _, slug := range d.Projects {
+		a.emit("project.delete", map[string]any{"project": slug})
+	}
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"dropped": d.Projects, "archive": d.Archive, "branches": d.Branches, "commands": d.Commands})
 }
 
 // gitInit runs git init on a directory that is not a repository yet, after
