@@ -2,7 +2,11 @@
 
 Read this first in a new session. Branch `agentflow` (never pushed). Live service: `unified.service` (port 8787, host `agentflow.builder.cmdhome.net`, PIN in `~/.unified_common.pin`). Work is committed; `git log --oneline | head -30` shows it. Phase H is described in `docs/agentflow-remediation/phase-hardening.md`, results in `progress.md`, user-facing behaviour in `docs/guides/agentflow.md`.
 
-## 1. A trial is running right now (it survives the restart)
+## 1. The trial ended at 20:26: T006 needs_attention, probe 13/17 (see H14 in phase-hardening.md)
+
+Update 20:26: effort 6 stopped with T001 to T005 passed and T006 (a test task that could not work) `needs_attention`. The probe on `agentflow/effort-6` scores 13 of 17: every API check passes, `GET /` is still the placeholder. Root causes are written up as H14 in `phase-hardening.md` (criterion labels collide with FRD ids; no requirement coverage check; tests placed in a `tests/` directory; the gibberish short-circuit discards real work; unparseable spends the infra budget). Next: build H14, then finish H13's panel, then the clean-slate full trial. The text below was written while the trial was still running; its commands still apply.
+
+## 1a. (earlier) A trial is running right now (it survives the restart)
 
 Project `webcalc-local3`, effort 6, repo `~/af-webcalc-local3`, branch `agentflow/effort-6`. It runs inside the systemd service, not in Claude, so restarting Claude does not stop it. At 19:03: T001 to T005 passed, **T006 (serve the page at GET /) running** on ollama-win gpt-oss:20b. Check: `python3 ~/agentflow-session-tools/afapi.py`-style calls (see section 5), or the UI.
 
