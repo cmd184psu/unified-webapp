@@ -77,11 +77,23 @@ def api(method, path, body=None, want=None, _retry=True):
                                  data=None if body is None else json.dumps(body).encode())
     req.add_header("Host", args.host)
     req.add_header("Content-Type", "application/json")
-    try:
-        with opener.open(req, timeout=60) as r:
-            code, raw = r.status, r.read()
-    except urllib.error.HTTPError as e:
-        code, raw = e.code, e.read()
+    # The proxy in front of the service can blink (503 "no server", a DNS miss): a
+    # trial runs for hours, so wait those out for up to five minutes instead of dying.
+    for attempt in range(30):
+        try:
+            with opener.open(req, timeout=60) as r:
+                code, raw = r.status, r.read()
+        except urllib.error.HTTPError as e:
+            code, raw = e.code, e.read()
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            if attempt == 29:
+                raise
+            time.sleep(10)
+            continue
+        if code in (502, 503, 504) and attempt < 29:
+            time.sleep(10)
+            continue
+        break
     if code == 401 and _retry and path != "/api/auth/login":  # the session expired during a long wait: log in again
         login()
         return api(method, path, body, want, _retry=False)
