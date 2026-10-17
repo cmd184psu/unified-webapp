@@ -85,6 +85,7 @@ var api = {
   installs: (backend) => get(`/api/backends/${enc(backend)}/installs`),
   startInstall: (backend, model, tier) => send("POST", `/api/backends/${enc(backend)}/install`, { model, tier }),
   cancelInstall: (id) => send("POST", `/api/installs/${id}/cancel`),
+  importConfig: (config, apply) => send("POST", "/api/config/import", { config, apply }),
   clearStrikes: (backend, model, role) => send("POST", "/api/strikes/clear", { backend, model, role }),
   // Efforts
   efforts: (slug) => get(`${proj(slug)}/efforts`),
@@ -1237,6 +1238,105 @@ function buildRoleEditor(o) {
   return host;
 }
 
+// web/agentflow/js/configfile.ts
+var defaultConfigDeps = () => ({ importConfig: (c, apply) => api.importConfig(c, apply) });
+function describe(r) {
+  const out = [];
+  if (r.created_backends.length) out.push(`create backend(s): ${r.created_backends.join(", ")}`);
+  if (r.updated_backends.length) out.push(`update backend(s), replacing their model lists: ${r.updated_backends.join(", ")}`);
+  if (r.candidate_roles.length) out.push(`replace the candidate list of: ${r.candidate_roles.join(", ")}`);
+  if (r.settings.length) out.push(`set: ${r.settings.join(", ")}`);
+  if (out.length === 0) out.push("nothing to change");
+  return out;
+}
+var ConfigPanel = class {
+  constructor(deps, onApplied = () => {
+  }) {
+    this.deps = deps;
+    this.onApplied = onApplied;
+    this.el = h("div", { class: "config-panel", attrs: { "data-role": "config-panel" } });
+    this.pending = null;
+    this.report = null;
+    this.error = "";
+    this.done = "";
+  }
+  /** loadText reads the chosen file's text and asks the server what importing it would do. */
+  async loadText(text) {
+    this.error = "";
+    this.done = "";
+    this.report = null;
+    this.pending = null;
+    try {
+      this.pending = JSON.parse(text);
+    } catch {
+      this.error = "That file is not JSON.";
+      this.render();
+      return;
+    }
+    try {
+      this.report = await this.deps.importConfig(this.pending, false);
+    } catch (e) {
+      this.error = e instanceof Error ? e.message : String(e);
+      this.pending = null;
+    }
+    this.render();
+  }
+  async apply() {
+    if (this.pending === null) return;
+    try {
+      const r = await this.deps.importConfig(this.pending, true);
+      this.done = `Imported: ${describe(r).join("; ")}.`;
+      this.pending = null;
+      this.report = null;
+      this.error = "";
+      this.onApplied();
+    } catch (e) {
+      this.error = e instanceof Error ? e.message : String(e);
+    }
+    this.render();
+  }
+  cancel() {
+    this.pending = null;
+    this.report = null;
+    this.error = "";
+    this.render();
+  }
+  render() {
+    const file = h("input", { attrs: { type: "file", accept: ".json,application/json", "data-field": "config-file" } });
+    file.addEventListener("change", () => {
+      const f = file.files?.[0];
+      if (f) void f.text().then((t) => this.loadText(t));
+    });
+    const r = this.report;
+    replace(
+      this.el,
+      h(
+        "div",
+        { class: "inline-row" },
+        h("a", { class: "ui-modal-btn", text: "Export configuration", attrs: { href: "/api/config/export", download: "", "data-role": "export-config" } }),
+        h("span", { class: "field-hint", text: "Import a configuration file:" }),
+        file
+      ),
+      h("p", { class: "field-hint", text: "The file holds backends, models, tiers, tool flags, candidate lists and limits. It holds no projects and no API keys." }),
+      this.error ? h("div", { class: "field-error", text: this.error, attrs: { "data-role": "config-error" } }) : null,
+      this.done ? h("div", { class: "field-hint", text: this.done, attrs: { "data-role": "config-done" } }) : null,
+      r ? h(
+        "div",
+        { class: "warn-box", attrs: { "data-role": "config-preview" } },
+        h("strong", { text: "Importing this file would:" }),
+        h("ul", {}, ...describe(r).map((t) => h("li", { text: t }))),
+        ...r.warnings.map((w) => h("p", { class: "field-hint", text: w })),
+        h(
+          "div",
+          { class: "inline-row" },
+          button("Apply import", () => void this.apply(), { primary: true, field: "apply-import" }),
+          button("Cancel", () => this.cancel(), { field: "cancel-import" })
+        )
+      ) : null
+    );
+  }
+};
+
 // web/agentflow/js/settings.ts
 import { showToast as showToast3 } from "/shared/dist/shared.mjs";
 
@@ -1648,6 +1748,7 @@ var BackendsView = class {
     this.limitsSlug = "";
     this.limitsHost = h("div");
     this.off = null;
+    this.configPanel = null;
     /** One install panel per Ollama backend; each keeps its own list and event subscription. */
     this.panels = /* @__PURE__ */ new Map();
     // ─── Per-project limits ──────────────────────────────────────────────────
@@ -2080,6 +2181,14 @@ var BackendsView = class {
     return section("Project limits", fieldRow("Project", pick).el, this.limitsHost);
   }
   // ─── Whole view ──────────────────────────────────────────────────────────
+  /** The configuration file section: export, and a previewed import (H13). The panel keeps its state across renders. */
+  configSection() {
+    if (!this.configPanel) {
+      this.configPanel = new ConfigPanel(defaultConfigDeps(), () => void this.load());
+      this.configPanel.render();
+    }
+    return section("Configuration file", this.configPanel.el);
+  }
   render() {
     if (!this.loaded) {
       replace(this.host, h("p", { class: "field-hint", text: "Loading backends\u2026" }));
@@ -2102,7 +2211,8 @@ var BackendsView = class {
         warn,
         this.backendsSection(),
         this.backends.length > 0 ? this.candidatesSection() : null,
-        this.projects.length > 0 || this.backends.length > 0 ? this.limitsSection() : null
+        this.projects.length > 0 || this.backends.length > 0 ? this.limitsSection() : null,
+        this.configSection()
       )
     );
   }
@@ -2141,7 +2251,7 @@ function effortBar(slug, efforts, current, onPick, yolo) {
 }
 
 // web/agentflow/js/activity.ts
-function describe(ef, draft, tasks) {
+function describe2(ef, draft, tasks) {
   const n = `#${ef.id}`;
   switch (ef.status) {
     case "draft":
@@ -2234,7 +2344,7 @@ var Activity = class {
       if (ef) {
         const draft = ef.status === "draft" ? await this.deps.draftState(slug, ef.id).catch(() => null) : null;
         const tasks = ef.status === "running" ? await this.deps.tasks(slug, ef.id).catch(() => []) : [];
-        line2 = describe(ef, draft, tasks);
+        line2 = describe2(ef, draft, tasks);
       }
     } catch {
       return;

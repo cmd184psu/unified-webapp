@@ -16,6 +16,7 @@ import { subscribe, type AgentflowEvent } from './events.js';
 import { defaultInstallDeps, InstallPanel, type InstallDeps } from './installs.js';
 import { FormErrors, badge, button, checkbox, type ToggleEl, fieldRow, section, selectInput, textInput } from './forms.js';
 import { ROLES, buildRoleEditor, isPaid, unconsented, type CandRow } from './candidates.js';
+import { ConfigPanel, defaultConfigDeps } from './configfile.js';
 import { LIMIT_FIELDS } from './settings.js';
 import { formatTokens } from './effort-settings.js';
 
@@ -88,6 +89,7 @@ export class BackendsView {
   private limitsSlug = '';
   private limitsHost = h('div');
   private off: (() => void) | null = null;
+  private configPanel: ConfigPanel | null = null;
 
   /** One install panel per Ollama backend; each keeps its own list and event subscription. */
   private panels = new Map<string, InstallPanel>();
@@ -479,6 +481,15 @@ export class BackendsView {
 
   // ─── Whole view ──────────────────────────────────────────────────────────
 
+  /** The configuration file section: export, and a previewed import (H13). The panel keeps its state across renders. */
+  private configSection(): HTMLElement {
+    if (!this.configPanel) {
+      this.configPanel = new ConfigPanel(defaultConfigDeps(), () => void this.load());
+      this.configPanel.render();
+    }
+    return section('Configuration file', this.configPanel.el);
+  }
+
   render(): void {
     if (!this.loaded) {
       replace(this.host, h('p', { class: 'field-hint', text: 'Loading backends…' }));
@@ -492,7 +503,8 @@ export class BackendsView {
         warn,
         this.backendsSection(),
         this.backends.length > 0 ? this.candidatesSection() : null,
-        this.projects.length > 0 || this.backends.length > 0 ? this.limitsSection() : null));
+        this.projects.length > 0 || this.backends.length > 0 ? this.limitsSection() : null,
+        this.configSection()));
   }
 }
 

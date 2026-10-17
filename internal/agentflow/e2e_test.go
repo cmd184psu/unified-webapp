@@ -32,7 +32,7 @@ const (
 	e2eCompile = `{"tasks":[` +
 		`{"id":"T001","phase":"P1","title":"first","prompt":"create T001.txt","acceptance":["R1: T001.txt exists"],"files_touched":["T001.txt"]},` +
 		`{"id":"T002","phase":"P1","title":"second","prompt":"create T002.txt","acceptance":["R1: T002.txt exists"],"files_touched":["T002.txt"],"depends_on":["T001"]},` +
-		`{"id":"T003","phase":"P1","title":"third","prompt":"create T003.txt","acceptance":["R1: T003.txt exists"],"files_touched":["T003.txt"]}]}`
+		`{"id":"T003","phase":"P1","title":"third","prompt":"create T003.txt","acceptance":["R1: T003.txt exists","AC1: it exists"],"files_touched":["T003.txt"]}]}`
 	e2eWorker = `{"summary":"did it","files_changed":[],"learnings":[]}`
 	e2eReview = `{"verdict":"pass","summary":"fine","issues":[],"repair_prompt":""}`
 	// e2eXSS is an FRD title that must stay literal text everywhere.
