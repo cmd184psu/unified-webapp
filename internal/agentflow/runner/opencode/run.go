@@ -184,6 +184,10 @@ func (a *Adapter) Run(ctx context.Context, req runner.Request) (runner.Result, e
 		return fail(out.errorClass(), out.errMessage, waitErr)
 	case waitErr != nil:
 		return fail(runner.ErrCrash, exitMsg(waitErr, tail.String()), waitErr)
+	case out.lastReason == "length":
+		// The last step stopped because the context window was full: the model
+		// was cut off mid-task, so whatever it said last is not an answer.
+		return fail(runner.ErrContext, fmt.Sprintf("the context window filled up at %d tokens (finish reason length): raise the host's context length", out.lastTotal), nil)
 	case len(out.events) == 0:
 		// Exit 0 with no event at all: the model never answered (S5).
 		return fail(runner.ErrTimeout, "no events received", nil)

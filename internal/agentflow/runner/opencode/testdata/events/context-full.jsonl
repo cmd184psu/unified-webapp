@@ -1,0 +1,3 @@
+{"type":"step_start","timestamp":1792246504717,"sessionID":"ses_ctx","part":{"id":"prt_1","messageID":"msg_1","sessionID":"ses_ctx","type":"step-start"}}
+{"type":"text","timestamp":1792246566978,"sessionID":"ses_ctx","part":{"id":"prt_2","messageID":"msg_1","sessionID":"ses_ctx","type":"text","text":"Let me fix the import issue:"}}
+{"type":"step_finish","timestamp":1792246566996,"sessionID":"ses_ctx","part":{"id":"prt_3","reason":"length","messageID":"msg_1","sessionID":"ses_ctx","type":"step-finish","tokens":{"total":16384,"input":45,"output":1044,"reasoning":0,"cache":{"write":0,"read":15295}},"cost":0}}

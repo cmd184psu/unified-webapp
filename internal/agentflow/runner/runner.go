@@ -18,12 +18,15 @@ const (
 	ErrUnreachable ErrClass = "unreachable"
 	ErrCrash       ErrClass = "crash"
 	ErrTimeout     ErrClass = "timeout"
+	// ErrContext: the model ran out of context window mid-task (finish reason
+	// "length"). The host's setting is at fault, not the model.
+	ErrContext ErrClass = "context_full"
 )
 
 // Valid reports whether c is one of the defined classes.
 func (c ErrClass) Valid() bool {
 	switch c {
-	case ErrNone, ErrRateLimit, ErrUnreachable, ErrCrash, ErrTimeout:
+	case ErrNone, ErrRateLimit, ErrUnreachable, ErrCrash, ErrTimeout, ErrContext:
 		return true
 	}
 	return false

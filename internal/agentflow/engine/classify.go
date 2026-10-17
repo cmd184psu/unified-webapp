@@ -30,8 +30,11 @@ const (
 	OutcomeInfraCancel      = "infra:cancel"
 	OutcomeInfraTimeout     = "infra:timeout"
 	OutcomeInfraUnparseable = "infra:unparseable"
-	OutcomeInfraPanic       = "infra:panic"
-	OutcomeInfraLost        = "infra:lost"
+	// OutcomeInfraContext: the host's context window filled up and cut the
+	// model off mid-task. Not the model's fault, so no strike.
+	OutcomeInfraContext = "infra:context_full"
+	OutcomeInfraPanic   = "infra:panic"
+	OutcomeInfraLost    = "infra:lost"
 )
 
 // IsInfra reports whether a stage outcome is an infrastructure failure.
@@ -64,6 +67,8 @@ func classifyRun(parent context.Context, role string, err error) string {
 		return OutcomeInfraRateLimit
 	case runner.ErrUnreachable:
 		return OutcomeInfraUnreachable
+	case runner.ErrContext:
+		return OutcomeInfraContext
 	case runner.ErrTimeout:
 		if role == "worker" || role == "cleanup" {
 			return OutcomeTimeout

@@ -435,3 +435,34 @@ func TestH11_RetryAfterGibberishUsesAnotherModel(t *testing.T) {
 		t.Fatalf("stages = %+v", ss)
 	}
 }
+
+// A worker cut off by a full context window is not at fault: the same attempt
+// goes to another model, no infra retry is counted and no strike is recorded.
+func TestContextFullGoesToAnotherModelWithoutAStrike(t *testing.T) {
+	c := newChainRun(t, nil, chainDefs()[:1])
+	c.addBackend("gpu2", 1, false, false, "m3", "m4")
+	c.candidates("global", "", "worker", "gpu/m1", "gpu2/m3")
+	c.candidates("global", "", "reviewer", "gpu/m2", "gpu2/m4")
+	c.fake.Script("worker",
+		runner.Step{ErrClass: runner.ErrContext, Err: os.ErrDeadlineExceeded},
+		runner.Step{Reply: workerOK, Edit: writeWork})
+	c.fake.Script("reviewer", runner.Step{Reply: reviewPass})
+	c.run()
+	ctx := context.Background()
+	waitFor(t, "task passed", func() bool { return c.taskStatus() == model.StatusPassed })
+
+	ss, err := c.st.ListAttemptStages(ctx, c.attempts(0)[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ss[0].Model != "m1" || ss[0].Outcome != OutcomeInfraContext || ss[1].Role != "worker" || ss[1].Model == "m1" {
+		t.Fatalf("stages = %+v: the retry should leave m1", ss)
+	}
+	if as := c.attempts(0); len(as) != 1 || as[0].Outcome != model.OutcomePassed {
+		t.Fatalf("attempts = %+v", as)
+	}
+	ins, err := c.st.TaskInputs(ctx, c.effort)
+	if err != nil || len(ins[0].InfraIDs) != 0 {
+		t.Fatalf("a full context window spent %v infra retries (%v)", ins[0].InfraIDs, err)
+	}
+}

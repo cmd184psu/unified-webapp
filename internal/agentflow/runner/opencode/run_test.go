@@ -434,3 +434,15 @@ func TestPathFuncIsReadAtUseTime(t *testing.T) {
 		t.Fatal("Version used a stale path")
 	}
 }
+
+func TestFullContextWindowIsItsOwnClass(t *testing.T) {
+	h := newHarness(t, "context-full", 0, "")
+	res, err := h.adapter().Run(runCtx(t), h.request([]byte("p")))
+	var re *runner.Error
+	if !errors.As(err, &re) || re.Class != runner.ErrContext || res.ErrClass != runner.ErrContext {
+		t.Fatalf("err = %v, class %q, want context_full", err, res.ErrClass)
+	}
+	if !strings.Contains(re.Msg, "16384") {
+		t.Errorf("message %q should name the window size", re.Msg)
+	}
+}

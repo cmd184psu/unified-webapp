@@ -180,6 +180,24 @@ func (e *Engine) handleInfra(ctx context.Context, c *chain, last model.Stage) (b
 			return err == nil && len(stages) > 0 && stages[len(stages)-1].ID != last.ID, err
 		}
 	}
+	if last.Outcome == OutcomeInfraContext {
+		// A model cut off by a full context window is not at fault and a retry
+		// on the same model would fill it again: another model takes it at
+		// once and the infrastructure budget is not spent, but not forever.
+		n := 0
+		for _, st := range c.stages {
+			if st.Outcome == OutcomeInfraContext {
+				n++
+			}
+		}
+		if n <= 2 {
+			if err := e.resubmit(ctx, c, last); err != nil {
+				return false, err
+			}
+			stages, err := s.ListAttemptStages(ctx, c.att.ID)
+			return err == nil && len(stages) > 0 && stages[len(stages)-1].ID != last.ID, err
+		}
+	}
 	set, err := s.EffectiveSettings(ctx, c.proj.Slug)
 	if err != nil {
 		return false, err
@@ -262,7 +280,7 @@ func (e *Engine) resubmit(ctx context.Context, c *chain, last model.Stage) error
 		if avoid != "" {
 			v.down[avoid] = true // like a backend in cooldown: try the others first
 		}
-		if skipModel && last.Outcome == OutcomeInfraUnparseable && last.Model != "" {
+		if skipModel && (last.Outcome == OutcomeInfraUnparseable || last.Outcome == OutcomeInfraContext) && last.Model != "" {
 			v.avoid = map[string]bool{last.Model: true} // an unreadable reply: another model, not another try of the same one
 		}
 		sticky, err := e.stickyReviewer(ctx, c.task)

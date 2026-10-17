@@ -42,6 +42,7 @@ type outcome struct {
 	sawUsage   bool
 	sessionID  string
 	lastReason string
+	lastTotal  int64 // tokens in the context at the last step
 	hasError   bool
 	errMessage string
 	errStatus  int
@@ -93,6 +94,7 @@ func (o *outcome) add(line []byte) runner.Event {
 		o.final = re.Part.Text
 	case "step_finish":
 		o.lastReason = re.Part.Reason
+		o.lastTotal = re.Part.Tokens.Total
 		o.sawUsage = true
 		o.usage.InputTokens += re.Part.Tokens.Input
 		o.usage.OutputTokens += re.Part.Tokens.Output
