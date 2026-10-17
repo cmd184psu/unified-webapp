@@ -392,6 +392,13 @@ body {
   border-bottom-color: var(--color-primary);
 }
 
+.tab-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  border-bottom-color: transparent;
+  color: var(--color-text-muted, var(--color-text));
+}
+
 .tab-btn.active {
   color: var(--color-primary);
   border-bottom-color: var(--color-primary);

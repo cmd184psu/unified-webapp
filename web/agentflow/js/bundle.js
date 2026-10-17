@@ -692,6 +692,20 @@ function chooseEffort(slug, efforts) {
 function rememberEffort(slug, id) {
   picked.set(slug, id);
 }
+function subTabBlock(id, ef) {
+  if (id === "frd") return "";
+  if (!ef) return "Create an effort on the FRD tab first";
+  switch (id) {
+    case "plan":
+      return ef.frd.latest > 0 ? "" : "Available once the FRD is saved";
+    case "queue":
+      return ef.queue || ef.status === "plan_approved" || ef.status === "compiling" ? "" : "Available once the plan is approved";
+    case "board":
+      return ef.queue?.status === "approved" ? "" : "Available once the queue is approved";
+    default:
+      return "";
+  }
+}
 function forgetEfforts() {
   picked.clear();
 }
@@ -4686,33 +4700,59 @@ function mountProjectTab(host, wanted2) {
   let sub = SUB_TABS[0].id;
   let slug = wanted2 === "+new" ? remembered() : wanted2 || remembered();
   let projects = [];
+  let blocked = /* @__PURE__ */ new Map();
   const picker = h("select", { class: "settings-input", attrs: { "aria-label": "Project" } });
   const bar = h("div", { class: "tab-bar", attrs: { role: "tablist" } });
   const body = h("div", { class: "project-body" });
   const activityEl = h("div", { class: "activity-strip", attrs: { role: "status", hidden: true, "data-role": "activity" } });
   const activity = new Activity(activityEl, (id) => {
-    sub = id;
-    showSub();
+    if (!blocked.has(id)) {
+      sub = id;
+      showSub();
+    }
   });
   const stopActivity = activity.mount(slug);
   const closeSub = () => {
     if (typeof dispose2 === "function") dispose2();
     dispose2 = void 0;
   };
+  const drawBar = () => {
+    replace(bar, ...SUB_TABS.map((t) => {
+      const why = blocked.get(t.id) ?? "";
+      return h("button", {
+        class: "tab-btn" + (t.id === sub ? " active" : ""),
+        text: t.label,
+        attrs: { type: "button", "data-sub": t.id, disabled: why !== "", title: why || void 0, "aria-disabled": why !== "" ? "true" : void 0 },
+        on: { click: () => {
+          if (blocked.has(t.id)) return;
+          sub = t.id;
+          showSub();
+        } }
+      });
+    }));
+  };
+  const readBlocks = async () => {
+    let efforts = [];
+    if (slug) {
+      try {
+        efforts = await api.efforts(slug);
+      } catch {
+        efforts = [];
+      }
+    }
+    const ef = chooseEffort(slug, efforts);
+    blocked = new Map(SUB_TABS.map((t) => [t.id, subTabBlock(t.id, ef)]).filter(([, why]) => why !== ""));
+  };
   const showSub = () => {
     closeSub();
-    replace(bar, ...SUB_TABS.map((t) => h("button", {
-      class: "tab-btn" + (t.id === sub ? " active" : ""),
-      text: t.label,
-      attrs: { type: "button", "data-sub": t.id },
-      on: { click: () => {
-        sub = t.id;
-        showSub();
-      } }
-    })));
+    drawBar();
     if (!slug) {
       replace(body, h("p", { class: "field-hint", text: "Pick a project, or create one with New project." }));
       return;
+    }
+    if (blocked.has(sub)) {
+      sub = SUB_TABS[0].id;
+      drawBar();
     }
     const tab = SUB_TABS.find((t) => t.id === sub) ?? SUB_TABS[0];
     replace(body);
@@ -4730,6 +4770,8 @@ function mountProjectTab(host, wanted2) {
     replace(picker, ...projects.map((p) => h("option", { text: active2(p) ? `${p.slug}  \u25CF running` : p.slug, attrs: { value: p.slug, selected: p.slug === slug } })));
     picker.value = slug;
     activity.setProject(slug);
+    await readBlocks();
+    if (disposed) return;
     showSub();
   };
   const showForm = (project) => {
@@ -4747,7 +4789,9 @@ function mountProjectTab(host, wanted2) {
     slug = picker.value;
     remember(slug);
     activity.setProject(slug);
-    showSub();
+    void readBlocks().then(() => {
+      if (!disposed) showSub();
+    });
   });
   replace(
     host,
@@ -4766,10 +4810,20 @@ function mountProjectTab(host, wanted2) {
     bar,
     body
   );
+  const off = subscribe((ev) => {
+    if (!slug || !["effort.update", "project.update", "state.changed", "task.update"].includes(ev.type)) return;
+    if ("project" in ev && ev.project !== slug) return;
+    void readBlocks().then(() => {
+      if (disposed || !bar.firstChild) return;
+      if (blocked.has(sub)) showSub();
+      else drawBar();
+    });
+  });
   if (wanted2 === "+new") showForm();
   else void reload();
   return () => {
     disposed = true;
+    off();
     stopActivity();
     closeSub();
   };

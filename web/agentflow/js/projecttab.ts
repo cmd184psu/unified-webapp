@@ -4,7 +4,9 @@
 // the sub-tabs while it is open.
 
 import { Activity } from './activity.js';
-import { api, type ProjectView } from './api.js';
+import { api, type EffortView, type ProjectView } from './api.js';
+import { chooseEffort, subTabBlock } from './current.js';
+import { subscribe } from './events.js';
 import { h, replace } from './dom.js';
 import { mountBoard } from './board.js';
 import { mountHistory } from './history.js';
@@ -56,11 +58,13 @@ export function mountProjectTab(host: HTMLElement, wanted: string): () => void {
   let sub = SUB_TABS[0].id;
   let slug = wanted === '+new' ? remembered() : wanted || remembered();
   let projects: ProjectView[] = [];
+  /** sub-tab id -> why it is closed; absent when open. Read from the effort being looked at. */
+  let blocked = new Map<string, string>();
   const picker = h('select', { class: 'settings-input', attrs: { 'aria-label': 'Project' } }) as HTMLSelectElement;
   const bar = h('div', { class: 'tab-bar', attrs: { role: 'tablist' } });
   const body = h('div', { class: 'project-body' });
   const activityEl = h('div', { class: 'activity-strip', attrs: { role: 'status', hidden: true, 'data-role': 'activity' } });
-  const activity = new Activity(activityEl, (id) => { sub = id; showSub(); });
+  const activity = new Activity(activityEl, (id) => { if (!blocked.has(id)) { sub = id; showSub(); } });
   const stopActivity = activity.mount(slug);
 
   const closeSub = (): void => {
@@ -68,18 +72,42 @@ export function mountProjectTab(host: HTMLElement, wanted: string): () => void {
     dispose = undefined;
   };
 
-  const showSub = (): void => {
-    closeSub();
-    replace(bar, ...SUB_TABS.map((t) =>
-      h('button', {
+  const drawBar = (): void => {
+    replace(bar, ...SUB_TABS.map((t) => {
+      const why = blocked.get(t.id) ?? '';
+      return h('button', {
         class: 'tab-btn' + (t.id === sub ? ' active' : ''),
         text: t.label,
-        attrs: { type: 'button', 'data-sub': t.id },
-        on: { click: () => { sub = t.id; showSub(); } },
-      })));
+        attrs: { type: 'button', 'data-sub': t.id, disabled: why !== '', title: why || undefined, 'aria-disabled': why !== '' ? 'true' : undefined },
+        on: { click: () => { if (blocked.has(t.id)) return; sub = t.id; showSub(); } },
+      });
+    }));
+  };
+
+  /** readBlocks reads which sub-tabs the project's current effort has something to show in. */
+  const readBlocks = async (): Promise<void> => {
+    let efforts: EffortView[] = [];
+    if (slug) {
+      try {
+        efforts = await api.efforts(slug);
+      } catch {
+        efforts = [];
+      }
+    }
+    const ef = chooseEffort(slug, efforts);
+    blocked = new Map(SUB_TABS.map((t) => [t.id, subTabBlock(t.id, ef)] as [string, string]).filter(([, why]) => why !== ''));
+  };
+
+  const showSub = (): void => {
+    closeSub();
+    drawBar();
     if (!slug) {
       replace(body, h('p', { class: 'field-hint', text: 'Pick a project, or create one with New project.' }));
       return;
+    }
+    if (blocked.has(sub)) {
+      sub = SUB_TABS[0].id;
+      drawBar();
     }
     const tab = SUB_TABS.find((t) => t.id === sub) ?? SUB_TABS[0];
     replace(body);
@@ -99,6 +127,8 @@ export function mountProjectTab(host: HTMLElement, wanted: string): () => void {
     replace(picker, ...projects.map((p) => h('option', { text: active(p) ? `${p.slug}  ● running` : p.slug, attrs: { value: p.slug, selected: p.slug === slug } })));
     picker.value = slug;
     activity.setProject(slug);
+    await readBlocks();
+    if (disposed) return;
     showSub();
   };
 
@@ -118,7 +148,7 @@ export function mountProjectTab(host: HTMLElement, wanted: string): () => void {
     slug = picker.value;
     remember(slug);
     activity.setProject(slug);
-    showSub();
+    void readBlocks().then(() => { if (!disposed) showSub(); });
   });
   replace(host,
     h('div', { class: 'console-header' },
@@ -127,11 +157,23 @@ export function mountProjectTab(host: HTMLElement, wanted: string): () => void {
       button('Edit project', () => { const cur = projects.find((p) => p.slug === slug); if (cur) showForm(cur); }, { field: 'edit-project', icon: 'edit' })),
     activityEl, bar, body);
 
+  // The efforts move on by themselves (planning, compiling, approving): reopen tabs as they get something to show.
+  const off = subscribe((ev) => {
+    if (!slug || !['effort.update', 'project.update', 'state.changed', 'task.update'].includes(ev.type)) return;
+    if ('project' in ev && ev.project !== slug) return;
+    void readBlocks().then(() => {
+      if (disposed || !bar.firstChild) return; // the project form is open
+      if (blocked.has(sub)) showSub();
+      else drawBar();
+    });
+  });
+
   if (wanted === '+new') showForm();
   else void reload();
 
   return () => {
     disposed = true;
+    off();
     stopActivity();
     closeSub();
   };

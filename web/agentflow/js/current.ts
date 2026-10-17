@@ -25,6 +25,26 @@ export function rememberEffort(slug: string, id: number): void {
   picked.set(slug, id);
 }
 
+/**
+ * subTabBlock is why a Project sub-tab cannot be opened for the effort being
+ * looked at, or '' when it can. A tab with nothing to show yet stays closed,
+ * with the reason as its tooltip, instead of opening onto an error.
+ */
+export function subTabBlock(id: string, ef: EffortView | undefined): string {
+  if (id === 'frd') return '';
+  if (!ef) return 'Create an effort on the FRD tab first';
+  switch (id) {
+    case 'plan':
+      return ef.frd.latest > 0 ? '' : 'Available once the FRD is saved';
+    case 'queue':
+      return ef.queue || ef.status === 'plan_approved' || ef.status === 'compiling' ? '' : 'Available once the plan is approved';
+    case 'board':
+      return ef.queue?.status === 'approved' ? '' : 'Available once the queue is approved';
+    default:
+      return '';
+  }
+}
+
 /** forgetEfforts drops every remembered pick, for when all projects are gone. */
 export function forgetEfforts(): void {
   picked.clear();

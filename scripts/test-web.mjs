@@ -72,6 +72,7 @@ const suites = [
   { name: "agentflow-settings", entry: "web/agentflow/js/settings.test.ts", runner: "esbuild-cjs" },
   { name: "agentflow-backends", entry: "web/agentflow/js/backends.test.ts", runner: "esbuild-cjs" },
   { name: "agentflow-configfile", entry: "web/agentflow/js/configfile.test.ts", runner: "esbuild-cjs" },
+  { name: "agentflow-current", entry: "web/agentflow/js/current.test.ts", runner: "esbuild-cjs" },
   { name: "agentflow-installs", entry: "web/agentflow/js/installs.test.ts", runner: "esbuild-cjs" },
   { name: "agentflow-stats", entry: "web/agentflow/js/stats.test.ts", runner: "esbuild-cjs" },
   { name: "agentflow-projects", entry: "web/agentflow/js/projects.test.ts", runner: "esbuild-cjs" },
