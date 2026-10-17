@@ -162,6 +162,24 @@ func (e *Engine) handleInfra(ctx context.Context, c *chain, last model.Stage) (b
 		return err == nil && len(stages) > 0 && stages[len(stages)-1].ID != last.ID, err
 	}
 	s := e.deps.Store
+	if last.Outcome == OutcomeInfraUnparseable && last.Role == "reviewer" {
+		// An unreadable review is the reviewer model's fault: another reviewer
+		// takes it at once and the infrastructure budget is not spent, but
+		// not forever (H14).
+		n := 0
+		for _, st := range c.stages {
+			if st.Role == "reviewer" && st.Outcome == OutcomeInfraUnparseable {
+				n++
+			}
+		}
+		if n <= 2 {
+			if err := e.resubmit(ctx, c, last); err != nil {
+				return false, err
+			}
+			stages, err := s.ListAttemptStages(ctx, c.att.ID)
+			return err == nil && len(stages) > 0 && stages[len(stages)-1].ID != last.ID, err
+		}
+	}
 	set, err := s.EffectiveSettings(ctx, c.proj.Slug)
 	if err != nil {
 		return false, err

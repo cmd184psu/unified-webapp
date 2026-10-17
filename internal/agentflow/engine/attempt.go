@@ -127,6 +127,10 @@ const (
 	FailViolation FailureKind = "policy_violation" // a model stage broke the git policy
 	FailMerge     FailureKind = "merge"            // merge conflict or post-merge verify failed (PX3)
 	FailCommit    FailureKind = "commit"           // the worktree could not be committed
+	// FailUnparseable: a worker's replies could not be read. It is the model's
+	// fault, so the attempt fails (and the model is passed over), and the
+	// infrastructure budget is left for real infrastructure failures (H14).
+	FailUnparseable FailureKind = "unparseable"
 )
 
 // Failure is a non-passing end of an attempt's chain.
@@ -227,6 +231,9 @@ func (e *Engine) advanceAttempt(ctx context.Context, c *chain) (bool, error) {
 			return e.afterCleanupVerify(ctx, c, last)
 		}
 		return e.afterCleanup(ctx, c, last)
+	}
+	if last.Outcome == OutcomeInfraUnparseable && (last.Role == "worker" || last.Role == "cleanup") {
+		return true, e.fail(ctx, c, Failure{Kind: FailUnparseable, Stage: last})
 	}
 	if IsInfra(last.Outcome) {
 		handled, err := e.handleInfra(ctx, c, last)

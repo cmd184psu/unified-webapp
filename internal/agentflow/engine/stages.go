@@ -428,10 +428,12 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 	if perr == nil {
 		return StageResult{Outcome: verdict, Raw: res.Final, Parsed: parsed}
 	}
-	// A reply with no JSON object in it at all is gibberish, not a slip: the
-	// model is not doing the job, and a second run of it would only cost
-	// minutes. Give up on the first try; the retry goes to another model (H11).
-	if errors.Is(perr, schema.ErrNoObject) {
+	// A reply with no JSON object that is also not coherent text is gibberish,
+	// not a slip: the model is not doing the job, and a second run of it would
+	// only cost minutes. Give up on the first try; the retry goes to another
+	// model (H11). A coherent prose summary lacks only the object: that gets
+	// the corrective follow-up below (H14).
+	if errors.Is(perr, schema.ErrNoObject) && schema.Incoherent(res.Final) {
 		return failed(res, OutcomeInfraUnparseable, perr)
 	}
 

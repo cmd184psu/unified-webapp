@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
+	"unicode"
 )
 
 // ErrNoObject means the text holds no balanced JSON object.
@@ -116,4 +118,32 @@ func CorrectiveMessage(err error) string {
 	return "Your previous reply could not be accepted: " + err.Error() + "\n\n" +
 		"Reply again with exactly one JSON object that matches the schema in your instructions. " +
 		"Output only the JSON object: no markdown fence, no commentary before or after it."
+}
+
+// Incoherent reports reply text that is not language at all: empty, a handful
+// of words, mostly symbols, or a loop over a few words. A model that ends a
+// finished job with a prose summary instead of the JSON object is not
+// incoherent; that reply is worth a corrective follow-up (H14).
+func Incoherent(text string) bool {
+	words := strings.Fields(text)
+	if len(words) < 8 {
+		return true
+	}
+	letters, others := 0, 0
+	for _, r := range text {
+		switch {
+		case unicode.IsLetter(r):
+			letters++
+		case !unicode.IsSpace(r) && !unicode.IsDigit(r):
+			others++
+		}
+	}
+	if letters < others {
+		return true
+	}
+	distinct := map[string]bool{}
+	for _, w := range words {
+		distinct[strings.ToLower(w)] = true
+	}
+	return len(words) >= 20 && len(distinct)*5 < len(words)
 }

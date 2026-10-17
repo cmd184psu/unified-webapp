@@ -68,6 +68,18 @@ func Structural(ctx context.Context, in Input) (VerifyReport, error) {
 
 	rep := VerifyReport{Warnings: []string{}, NewFailures: []string{}, BaselineFailures: []string{}}
 	if len(files) == 0 && len(nested) == 0 && in.NoChangesReason != "" {
+		// A declaration of "nothing to change" is believed only when the files
+		// the task names exist; a model that never wrote them says it too (H14).
+		var missing []string
+		for _, f := range in.FilesTouched {
+			if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(f))); err != nil || strings.HasPrefix(filepath.Clean(f), "..") {
+				missing = append(missing, f)
+			}
+		}
+		if len(missing) > 0 {
+			rep.Checks = []Check{{Name: CheckNoChanges, Pass: false, Details: []string{"the worker declares nothing to change, but these files of the task do not exist: " + strings.Join(missing, ", ")}}}
+			return rep, nil
+		}
 		rep.Checks = []Check{{Name: CheckNoChanges, Pass: true}}
 		rep.Warnings = append(rep.Warnings, "worker declares nothing to change: "+in.NoChangesReason)
 		rep.Finalize()

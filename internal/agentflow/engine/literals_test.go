@@ -81,8 +81,8 @@ func TestH1_DescriptionWithoutExactStringsIsNotChecked(t *testing.T) {
 }
 
 const (
-	compileNoPath   = `{"tasks":[{"id":"T001","phase":"P1","title":"api","prompt":"create the endpoints in api.go","acceptance":["R1: the endpoints answer"],"files_touched":["api.go"]}]}`
-	compileWithPath = `{"tasks":[{"id":"T001","phase":"P1","title":"api","prompt":"create GET /api/hello in api.go","acceptance":["R1: GET /api/hello returns hello"],"files_touched":["api.go"]}]}`
+	compileNoPath   = `{"tasks":[{"id":"T001","phase":"P1","title":"api","prompt":"create the endpoints in api.go","acceptance":["R1: the endpoints answer","AC1: it answers"],"files_touched":["api.go"]}]}`
+	compileWithPath = `{"tasks":[{"id":"T001","phase":"P1","title":"api","prompt":"create GET /api/hello in api.go","acceptance":["R1: GET /api/hello returns hello","AC1: it answers"],"files_touched":["api.go"]}]}`
 )
 
 func (f *planFix) frdNaming(path string) {
@@ -181,5 +181,49 @@ func TestH1_TaskWithoutRequirementReferencesGetsNoSection(t *testing.T) {
 	got, err := h.eng.buildPrompt(context.Background(), st, fx.payload.Project)
 	if err != nil || strings.Contains(got, "approved requirements") {
 		t.Fatalf("err %v, prompt:\n%s", err, got)
+	}
+}
+
+// H14: a queue that leaves an FRD requirement or acceptance criterion uncited,
+// or cites an id the FRD does not have, gets one more try whose prompt lists the
+// ids and says what was wrong; a second such queue halts the compile.
+func TestH14_QueueThatCitesNoAcceptanceCriterionIsRetried(t *testing.T) {
+	f := newPlanFix(t, false)
+	f.standardPool()
+	f.frdNaming("/api/hello")
+	f.approvedPlan()
+	uncited := strings.Replace(compileWithPath, `,"AC1: it answers"`, "", 1)
+	f.fake.Script("compiler", runner.Step{Reply: uncited}, runner.Step{Reply: compileWithPath})
+	f.startEngine()
+	if err := f.eng.Compile(context.Background(), "alice", f.effort); err != nil {
+		t.Fatal(err)
+	}
+	f.waitStatus(model.EffortQueueDraft)
+	calls := f.fake.CallsFor("compiler")
+	if len(calls) != 2 {
+		t.Fatalf("compiler calls = %d, want the compile and one retry", len(calls))
+	}
+	if !strings.Contains(calls[0].Prompt, "## FRD ids") || strings.Contains(calls[0].Prompt, "Fix these") {
+		t.Fatalf("first prompt should list the ids and no problems:\n%s", calls[0].Prompt)
+	}
+	if !strings.Contains(calls[1].Prompt, "Fix these") || !strings.Contains(calls[1].Prompt, "no task cites AC1") {
+		t.Fatalf("retry prompt does not say what was wrong:\n%s", calls[1].Prompt)
+	}
+}
+
+func TestH14_QueueThatKeepsLeavingARequirementUncitedHalts(t *testing.T) {
+	f := newPlanFix(t, false)
+	f.standardPool()
+	f.frdNaming("/api/hello")
+	f.approvedPlan()
+	foreign := strings.Replace(compileWithPath, `"AC1: it answers"`, `"R18: my own step"`, 1)
+	f.fake.Script("compiler", runner.Step{Reply: foreign}, runner.Step{Reply: foreign})
+	f.startEngine()
+	if err := f.eng.Compile(context.Background(), "alice", f.effort); err != nil {
+		t.Fatal(err)
+	}
+	f.waitStatus(model.EffortPlanApproved)
+	if n := len(f.fake.CallsFor("compiler")); n != 2 {
+		t.Fatalf("compiler calls = %d, want 2", n)
 	}
 }

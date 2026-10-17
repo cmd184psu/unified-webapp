@@ -617,12 +617,12 @@ func TestParseFinal_RepairWithOnlyMinorIssuesPasses(t *testing.T) {
 	}
 }
 
-// H11: a reply with no JSON object in it is gibberish: one runner call, no
+// H11: a reply with no JSON object in it that is also not coherent text is gibberish: one runner call, no
 // corrective follow-up, and the stage ends infra:unparseable at once. A reply
 // that is an object with a wrong value still gets its follow-up (SO2).
 func TestH11_GibberishGetsNoSecondTry(t *testing.T) {
 	h := newStageHarness(t)
-	h.fake.Script("reviewer", runner.Step{Reply: "I am sorry, I could not look at the files because the tool failed."})
+	h.fake.Script("reviewer", runner.Step{Reply: "I am sorry, no."})
 	f := h.attemptStage("alpha", "reviewer")
 	st := h.run(f)
 	if st.Outcome != OutcomeInfraUnparseable {
@@ -630,5 +630,22 @@ func TestH11_GibberishGetsNoSecondTry(t *testing.T) {
 	}
 	if calls := h.fake.CallsFor("reviewer"); len(calls) != 1 {
 		t.Fatalf("runner calls = %d, want exactly 1 for gibberish", len(calls))
+	}
+}
+
+// H14: a coherent prose summary that lacks the JSON object is a slip, not
+// gibberish: it gets the corrective follow-up in the same stage.
+func TestH14_CoherentProseGetsTheFollowUp(t *testing.T) {
+	h := newStageHarness(t)
+	h.fake.Script("reviewer",
+		runner.Step{Reply: "I looked at the files and everything the task asks for is present: the handler returns the right status code and the tests cover it."},
+		runner.Step{Reply: reviewPass})
+	f := h.attemptStage("alpha", "reviewer")
+	st := h.run(f)
+	if st.Outcome != OutcomePass {
+		t.Fatalf("outcome = %q, want pass after the follow-up", st.Outcome)
+	}
+	if calls := h.fake.CallsFor("reviewer"); len(calls) != 2 {
+		t.Fatalf("runner calls = %d, want 2 (the reply and the corrective follow-up)", len(calls))
 	}
 }

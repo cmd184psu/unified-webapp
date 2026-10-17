@@ -418,14 +418,20 @@ func TestH11_RetryAfterGibberishUsesAnotherModel(t *testing.T) {
 	c.fake.Script("reviewer", runner.Step{Reply: reviewPass})
 	c.run()
 	waitFor(t, "task passed", func() bool { return c.taskStatus() == model.StatusPassed })
-	ss, err := c.st.ListAttemptStages(context.Background(), c.attempts(0)[0].ID)
+	// H14: the unreadable reply fails the attempt (a strike on the model, no
+	// infrastructure retry) and the next attempt goes to another model.
+	as := c.attempts(0)
+	if len(as) < 2 || as[0].Outcome != model.OutcomeFailed || as[0].Fingerprint != string(FailUnparseable) || as[0].WorkerModel != "m1" {
+		t.Fatalf("attempts = %+v: the first should have failed as unparseable on m1", as)
+	}
+	if as[1].WorkerModel != "m2" {
+		t.Fatalf("the second attempt names worker %q, want m2", as[1].WorkerModel)
+	}
+	ss, err := c.st.ListAttemptStages(context.Background(), as[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ss[0].Outcome != OutcomeInfraUnparseable || ss[0].Model != "m1" || ss[1].Role != "worker" || ss[1].Model != "m2" {
-		t.Fatalf("stages = %+v: the retry should have gone to m2", ss)
-	}
-	if as := c.attempts(0); as[0].WorkerModel != "m2" {
-		t.Fatalf("the attempt names worker %q, want m2", as[0].WorkerModel)
+	if len(ss) != 1 || ss[0].Outcome != OutcomeInfraUnparseable || ss[0].Model != "m1" {
+		t.Fatalf("stages = %+v", ss)
 	}
 }

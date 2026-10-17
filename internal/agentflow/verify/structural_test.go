@@ -382,6 +382,19 @@ func TestNoChangesDeclaredPassesWithWarning(t *testing.T) {
 	}
 }
 
+// H14: "nothing to change" is believed only when the files the task names exist.
+func TestNoChangesDeclaredFailsWhenNamedFilesAreMissing(t *testing.T) {
+	dir, base := newRepo(t)
+	rep, err := Structural(context.Background(), Input{Worktree: dir, GitDir: filepath.Join(dir, ".git"), BaseCommit: base,
+		FilesTouched: []string{"a.go", "tests/math_test.go"}, NoChangesReason: "all done"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Pass || !rep.Failed(CheckNoChanges) || !strings.Contains(strings.Join(rep.Checks[0].Details, "|"), "tests/math_test.go") {
+		t.Fatalf("got %+v", rep)
+	}
+}
+
 func TestNoChangesReasonIgnoredWhenFilesChanged(t *testing.T) {
 	dir, base := newRepo(t)
 	write(t, dir, "a.go", "package a\n\nfunc F() {}\n")

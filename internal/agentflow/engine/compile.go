@@ -140,6 +140,14 @@ func (e *Engine) advanceCompile(ctx context.Context, p store.Project, ef model.E
 		}
 		return e.haltCompile(ctx, ef, last, (&literalsError{missing: miss, from: "the task queue"}).Error())
 	}
+	if probs, err := e.queueProblems(ctx, ef.ID, defs); err != nil {
+		return err
+	} else if len(probs) > 0 {
+		if len(stages) < 2 { // one more try; the prompt names the problems
+			return e.startEffortStage(ctx, p, ef.ID, "compiler", nil, last.Model)
+		}
+		return e.haltCompile(ctx, ef, last, "the task queue does not match the FRD: "+strings.Join(probs, "; "))
+	}
 	q, err := e.deps.Store.SaveQueue(ctx, "compiler:"+last.Model, ef.ID, defs)
 	if err != nil {
 		if errors.Is(err, store.ErrConflict) {
@@ -174,6 +182,27 @@ func (e *Engine) queueMissingLiterals(ctx context.Context, effort int64, defs []
 		return nil, nil
 	}
 	return model.MissingLiterals(model.ExtractLiterals(model.FRDText(f)), model.TasksText(defs)), nil
+}
+
+// queueProblems checks a compiled queue against the effort's FRD (H14): foreign
+// criterion labels, requirements no task cites, tests in a tests/ directory.
+func (e *Engine) queueProblems(ctx context.Context, effort int64, defs []model.TaskDef) ([]string, error) {
+	f, ok, err := e.effortFRD(ctx, effort)
+	if err != nil || !ok {
+		return nil, err
+	}
+	return model.QueueCoverageProblems(f, defs), nil
+}
+
+func (e *Engine) effortFRD(ctx context.Context, effort int64) (model.FRD, bool, error) {
+	var f model.FRD
+	d, err := e.deps.Store.GetDoc(ctx, effort, model.DocFRD, 0)
+	if errors.Is(err, store.ErrNotFound) {
+		return f, false, nil
+	} else if err != nil {
+		return f, false, err
+	}
+	return f, json.Unmarshal(d.JSON, &f) == nil, nil
 }
 
 // haltCompile gives up compilation: the effort goes back to where it came from

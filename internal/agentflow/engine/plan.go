@@ -726,6 +726,9 @@ func (e *Engine) EffortPrompt(ctx context.Context, st model.Stage) (string, erro
 				where = "the task prompts and acceptance criteria"
 			}
 			text += model.LiteralsNote(model.ExtractLiterals(model.FRDText(f)), where)
+			if st.Role == "compiler" {
+				text += e.compilerFRDNote(ctx, st, f)
+			}
 		}
 	}
 	return text, nil
@@ -889,4 +892,36 @@ func (e *Engine) effortInfra(ctx context.Context, p store.Project, stages []mode
 		return nil
 	}
 	return retry(last.Backend)
+}
+
+// compilerFRDNote lists the FRD ids the compiler must cite and, on a retry,
+// what was wrong with its last queue (H14).
+func (e *Engine) compilerFRDNote(ctx context.Context, st model.Stage, f model.FRD) string {
+	var b strings.Builder
+	b.WriteString("\n\n## FRD ids\n\nCite these ids, and only these, as the label of an acceptance criterion; every one must be cited by at least one task:\n\n")
+	for _, r := range f.Requirements {
+		b.WriteString("- " + r.ID + ": " + r.Description + "\n")
+	}
+	for _, ac := range f.AcceptanceCriteria {
+		b.WriteString("- " + ac.ID + ": " + ac.Criterion + "\n")
+	}
+	if all, err := e.deps.Store.ListEffortStages(ctx, st.Effort); err == nil {
+		var prev model.Stage
+		for _, o := range all {
+			if o.Role == "compiler" && o.ID < st.ID && o.Outcome == OutcomePass {
+				prev = o
+			}
+		}
+		if out, err := schema.Parse[schema.CompileOut](prev.Parsed); prev.ID != 0 && err == nil {
+			if defs, err := compiledTasks(out); err == nil {
+				if probs := model.QueueCoverageProblems(f, defs); len(probs) > 0 {
+					b.WriteString("\n## Fix these in the queue you wrote before\n\n")
+					for _, p := range probs {
+						b.WriteString("- " + p + "\n")
+					}
+				}
+			}
+		}
+	}
+	return b.String()
 }
