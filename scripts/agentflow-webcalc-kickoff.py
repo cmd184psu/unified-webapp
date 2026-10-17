@@ -6,7 +6,7 @@ up in the UI first. Creates a git repo, registers the project `webcalc`, drafts 
 one sentence, approves the FRD, generates and approves the plan, waits for the automatic
 compile, approves the queue and starts the run. Then it exits; watch the rest in the UI.
 
-  scripts/agentflow-webcalc-kickoff.py [--url http://127.0.0.1:8686]
+  scripts/agentflow-webcalc-kickoff.py [--url https://agentflow.builder.cmdhome.net]
         [--host agentflow.builder.cmdhome.net] [--pin-file ~/.unified_common.pin]
         [--repo ~/af-webcalc] [--slug webcalc] [--scope local|any] [--lineup global|local] [--wait]
 
@@ -39,7 +39,7 @@ SENTENCE = (
     "for the four operations, the error cases and the history.")
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--url", default="http://127.0.0.1:8686")
+ap.add_argument("--url", default="https://agentflow.builder.cmdhome.net")
 ap.add_argument("--host", default="agentflow.builder.cmdhome.net")
 ap.add_argument("--pin-file", default=os.path.expanduser("~/.unified_common.pin"))
 ap.add_argument("--repo", default=os.path.expanduser("~/af-webcalc"))
