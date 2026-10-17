@@ -914,7 +914,7 @@ func (e *Engine) compilerFRDNote(ctx context.Context, st model.Stage, f model.FR
 		}
 		if out, err := schema.Parse[schema.CompileOut](prev.Parsed); prev.ID != 0 && err == nil {
 			if defs, err := compiledTasks(out); err == nil {
-				if probs := model.QueueCoverageProblems(f, defs); len(probs) > 0 {
+				if probs, err := e.queueProblems(ctx, st.Effort, defs); err == nil && len(probs) > 0 {
 					b.WriteString("\n## Fix these in the queue you wrote before\n\n")
 					for _, p := range probs {
 						b.WriteString("- " + p + "\n")

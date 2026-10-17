@@ -37,18 +37,19 @@ func limitMap(s store.Settings) map[string]string {
 // roots.
 func settingsView(s store.Settings) map[string]any {
 	return map[string]any{
-		"max_attempts":      s.MaxAttempts,
-		"stuck_threshold":   s.StuckThreshold,
-		"max_infra_retries": s.MaxInfraRetries,
-		"plan_max_rounds":   s.PlanMaxRounds,
-		"worker_timeout":    s.WorkerTimeout.String(),
-		"review_timeout":    s.ReviewTimeout.String(),
-		"plan_timeout":      s.PlanTimeout.String(),
-		"verify_timeout":    s.VerifyTimeout.String(),
-		"opencode_path":     s.OpencodePath,
-		"verify_slots":      s.VerifySlots,
-		"backend_cooldown":  s.BackendCooldown.String(),
-		"browse_roots":      s.BrowseRoots,
+		"max_attempts":         s.MaxAttempts,
+		"stuck_threshold":      s.StuckThreshold,
+		"max_infra_retries":    s.MaxInfraRetries,
+		"plan_max_rounds":      s.PlanMaxRounds,
+		"worker_timeout":       s.WorkerTimeout.String(),
+		"review_timeout":       s.ReviewTimeout.String(),
+		"plan_timeout":         s.PlanTimeout.String(),
+		"verify_timeout":       s.VerifyTimeout.String(),
+		"opencode_path":        s.OpencodePath,
+		"verify_slots":         s.VerifySlots,
+		"context_floor_tokens": s.ContextFloor,
+		"backend_cooldown":     s.BackendCooldown.String(),
+		"browse_roots":         s.BrowseRoots,
 	}
 }
 

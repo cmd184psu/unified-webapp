@@ -409,7 +409,11 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 		}
 		res, err := d.Runner.Run(cctx, r)
 		*tokens += usageTokens(res.Usage)
-		return res, classifyRun(ctx, st.Role, err), err
+		out := classifyRun(ctx, st.Role, err)
+		if out == OutcomeInfraContext {
+			e.learnWindow(ctx, st, err)
+		}
+		return res, out, err
 	}
 	failed := func(res runner.Result, outcome string, err error) StageResult {
 		raw := res.Final

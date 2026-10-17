@@ -61,7 +61,7 @@ type ConfigDoc struct {
 // picker's roots and the verify slots belong to the machine and stay as they
 // are on the machine that imports.
 var portableSettings = []string{"max_attempts", "stuck_threshold", "max_infra_retries", "plan_max_rounds",
-	"worker_timeout", "review_timeout", "plan_timeout", "verify_timeout", "backend_cooldown"}
+	"worker_timeout", "review_timeout", "plan_timeout", "verify_timeout", "backend_cooldown", "context_floor_tokens"}
 
 // configRoles are the roles that have a global candidate list.
 var configRoles = []string{"planner", "architect", "critic", "compiler", "worker", "reviewer"}
@@ -84,7 +84,7 @@ func (a *API) exportConfig(w http.ResponseWriter, r *http.Request) {
 			Retired: b.Retired, HasKey: b.HasKey, Models: []BackendModelView{}}
 		for _, m := range b.Models {
 			cb.Models = append(cb.Models, BackendModelView{Model: m.Model, Paid: m.Paid, MaxConcurrent: m.MaxConcurrent,
-				ContextTokens: m.ContextTokens, Tier: m.Tier, Tools: m.Tools})
+				ContextTokens: m.ContextTokens, WindowTokens: m.WindowTokens, WindowSource: m.WindowSource, Tier: m.Tier, Tools: m.Tools})
 		}
 		doc.Backends = append(doc.Backends, cb)
 	}
@@ -156,7 +156,11 @@ func (a *API) importConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		b := store.Backend{Name: cb.Name, Host: cb.Host, APIType: cb.APIType, Hosted: cb.Hosted, Paid: cb.Paid, Slots: cb.Slots}
 		for _, m := range cb.Models {
-			b.Models = append(b.Models, store.BackendModel{Model: m.Model, Paid: m.Paid, MaxConcurrent: m.MaxConcurrent, ContextTokens: m.ContextTokens, Tier: m.Tier})
+			bm := store.BackendModel{Model: m.Model, Paid: m.Paid, MaxConcurrent: m.MaxConcurrent, ContextTokens: m.ContextTokens, WindowTokens: m.WindowTokens, Tier: m.Tier}
+			if bm.WindowTokens > 0 {
+				bm.WindowSource = "set"
+			}
+			b.Models = append(b.Models, bm)
 		}
 		if err := needModels(b); err != nil {
 			writeErr(w, store.Invalid("config", "backend "+cb.Name+": "+err.Error()))

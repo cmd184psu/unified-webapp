@@ -158,8 +158,12 @@ export interface BackendModel {
   paid: boolean;
   /** Most stages that may run this model at once on its backend; 0 = no limit (PX5). */
   max_concurrent: number;
-  /** The model's context window in tokens; 0 or absent = unknown. */
+  /** The largest context window the model supports, as the host reports it; 0 or absent = unknown. */
   context_tokens?: number;
+  /** The context window the model is served with; 0 or absent = unknown (the floor setting is assumed). A value sent in is the owner's setting; 0 keeps what the server learned. */
+  window_tokens?: number;
+  /** Where window_tokens came from: set (the owner), observed (a run was cut off at this size), host. Set by the server. */
+  window_source?: string;
   /** 1 strong, 2 capable, 3 light, 0 or absent = not rated (H3). */
   tier?: number;
   /** Whether the host says the model supports tool calls, which every role needs (H10); empty or absent = not known. Set by the server. */

@@ -127,6 +127,9 @@ type view struct {
 	strikes map[store.StrikeKey]int
 	// avoid are models to pass over for this pick, for one retry: the model whose last reply was unreadable (H11).
 	avoid map[string]bool
+	// need is the context a worker task needs; a worker candidate with a
+	// smaller window is passed over (H15). 0 means no requirement.
+	need int
 }
 
 func modelKey(backend, model string) string { return backend + "\x00" + model }
@@ -276,7 +279,9 @@ func (e *Engine) dispatchOne(ctx context.Context, v *view, p store.Project) (boo
 			errs = append(errs, err)
 			continue
 		}
+		e.needFor(v, p, t)
 		pk, reason := pickWorker(v, p, sticky, avoid, maxTier)
+		v.need = 0
 		if reason != "" {
 			errs = append(errs, e.setWaiting(ctx, t, reason))
 			continue
@@ -573,6 +578,8 @@ func skipReason(v *view, p store.Project, c store.Candidate, needSlot bool) stri
 		return fmt.Sprintf("model %s's last reply could not be read", c.Model)
 	case v.strikes[store.StrikeKey{Backend: c.Backend, Model: c.Model, Role: c.Role}] >= store.StrikeLimit:
 		return fmt.Sprintf("model %s is benched for %s: %d strikes (clear them on the Stats tab)", c.Model, c.Role, store.StrikeLimit)
+	case v.need > 0 && c.Role == "worker" && windowOf(v, c) < v.need:
+		return fmt.Sprintf("model %s has a %d-token context window and this task needs about %d", c.Model, windowOf(v, c), v.need)
 	case lacksTools(v, c):
 		return fmt.Sprintf("model %s does not support tool calls, which every role needs", c.Model)
 	case lightForRole(v, c):

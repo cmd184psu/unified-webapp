@@ -113,6 +113,9 @@ type Error struct {
 	Class ErrClass
 	Msg   string
 	Cause error
+	// Tokens is the context size at which an ErrContext run was cut off: the
+	// window the host served the model with.
+	Tokens int64
 }
 
 // Unwrap returns the underlying cause, if any.

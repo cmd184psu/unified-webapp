@@ -108,8 +108,8 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	if out := ok("POST", "/api/backends/probe", `{"host":`+strconv.Quote(ollama.URL)+`,"api_type":"ollama"}`, 200); !strings.Contains(string(out), `"m1":8192`) {
 		t.Fatalf("probe answered no context size: %s", out)
 	}
-	ok("POST", "/api/backends", `{"name":"gpu","host":"http://127.0.0.1:11434","api_type":"ollama","slots":2,"models":[{"model":"m1","context_tokens":8192},{"model":"m2","context_tokens":8192},{"model":"m3"}]}`, 201)
-	ok("POST", "/api/backends", `{"name":"spare","host":"http://127.0.0.1:11435","api_type":"ollama","slots":1,"models":[{"model":"m1"}]}`, 201)
+	ok("POST", "/api/backends", `{"name":"gpu","host":"http://127.0.0.1:11434","api_type":"ollama","slots":2,"models":[{"model":"m1","context_tokens":8192,"window_tokens":65536},{"model":"m2","context_tokens":8192,"window_tokens":65536},{"model":"m3","window_tokens":65536}]}`, 201)
+	ok("POST", "/api/backends", `{"name":"spare","host":"http://127.0.0.1:11435","api_type":"ollama","slots":1,"models":[{"model":"m1","window_tokens":65536}]}`, 201)
 	ok("GET", "/api/backends", "", 200)
 	ok("PATCH", "/api/backends/spare", `{"slots":2}`, 200)
 	ok("POST", "/api/backends/spare/retire", `{"cancel_running":false}`, 200)

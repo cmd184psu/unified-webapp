@@ -25,6 +25,9 @@ type Settings struct {
 	VerifyTimeout   time.Duration
 	OpencodePath    string
 	VerifySlots     int
+	// ContextFloor is the context window assumed for a model whose served
+	// window is not known (H15).
+	ContextFloor int
 	// BackendCooldown is how long an unreachable backend is skipped (MB7).
 	BackendCooldown time.Duration
 	// BrowseRoots are the directories the server-side directory picker may
@@ -110,6 +113,9 @@ func parseSettings(m map[string]string) (Settings, error) {
 		return s, Invalid("opencode_path", "required")
 	}
 	if s.VerifySlots, err = validateInt("verify_slots", m["verify_slots"], 1, 64); err != nil {
+		return s, err
+	}
+	if s.ContextFloor, err = validateInt("context_floor_tokens", m["context_floor_tokens"], 2048, 4194304); err != nil {
 		return s, err
 	}
 	if s.BackendCooldown, err = validateTimeout("backend_cooldown", m["backend_cooldown"]); err != nil {

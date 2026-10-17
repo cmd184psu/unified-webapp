@@ -43,7 +43,18 @@ var migrations = []migration{
 	{13, migration13SQL},
 	{14, migration14SQL},
 	{15, migration15SQL},
+	{16, migration16SQL},
 }
+
+// migration16SQL (H15) records the context window a model is actually served
+// with, apart from the maximum it supports (context_tokens): configured by the
+// owner, or learned when a host cut a model off. 0 means not known; the source
+// says where the number came from.
+const migration16SQL = `
+ALTER TABLE backend_models ADD COLUMN window_tokens INTEGER NOT NULL DEFAULT 0 CHECK (window_tokens >= 0);
+ALTER TABLE backend_models ADD COLUMN window_source TEXT NOT NULL DEFAULT '' CHECK (window_source IN ('', 'set', 'observed', 'host'));
+INSERT INTO settings (key, value) VALUES ('context_floor_tokens', '16384');
+`
 
 // migration15SQL (H10) records whether the host says a model supports tool
 // calls, which every runner role needs: yes, no, or empty when not known.

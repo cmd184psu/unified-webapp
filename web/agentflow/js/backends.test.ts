@@ -112,7 +112,7 @@ test('probing the host turns the model box into a picker of the names it reporte
   stop();
 });
 
-test('U4: probing prefills the context field, it is sent as context_tokens, and the card shows a compact badge', async () => {
+test('U4 (H15): probing does not fill the window field; the host\'s maximum is sent as context_tokens, a typed window as window_tokens, and the card shows both', async () => {
   const t = harness({}, { probeBackend: async () => ({ models: ['m-a', 'm-b'], contexts: { 'm-a': 32768 } }) });
   const stop = t.view.mount();
   await flush();
@@ -121,15 +121,17 @@ test('U4: probing prefills the context field, it is sent as context_tokens, and 
   field(t.host, 'host').value = 'http://127.0.0.1:11434';
   button(t.host, 'Probe host for models').click();
   await flush();
-  eq(field(t.host, 'context_tokens').value, '32768');
+  eq(field(t.host, 'window_tokens').value, '');
+  field(t.host, 'window_tokens').value = '24000';
   button(t.host, 'Add backend').click();
   await flush();
-  eq((t.bodies.create as BackendInput).models, [{ model: 'm-a', paid: false, max_concurrent: 0, context_tokens: 32768, tier: 0 }]);
+  eq((t.bodies.create as BackendInput).models, [{ model: 'm-a', paid: false, max_concurrent: 0, context_tokens: 32768, window_tokens: 24000, tier: 0 }]);
   stop();
-  const card = harness({ backends: [be('b1', { models: [{ model: 'm1', paid: false, max_concurrent: 0, context_tokens: 32768 }] })] });
+  const card = harness({ backends: [be('b1', { models: [{ model: 'm1', paid: false, max_concurrent: 0, context_tokens: 32768, window_tokens: 16384, window_source: 'observed' }] })] });
   const stop2 = card.view.mount();
   await flush();
-  ok(card.host.textContent.includes('32.8k'), 'badge');
+  ok(card.host.textContent.includes('max 32.8k'), 'max badge');
+  ok(card.host.textContent.includes('window 16.4k (learned)'), 'learned window badge');
   stop2();
 });
 
@@ -160,7 +162,7 @@ test('BK1: adding a backend sends the form; a 400 shows next to the field it nam
   fail = false;
   button(t.host, 'Add backend').click();
   await flush();
-  eq(t.bodies.create, { name: 'local1', host: 'http://127.0.0.1:11434', api_type: 'ollama', hosted: false, paid: false, slots: 3, models: [{ model: 'qwen', paid: false, max_concurrent: 1, context_tokens: 0, tier: 0 }] });
+  eq(t.bodies.create, { name: 'local1', host: 'http://127.0.0.1:11434', api_type: 'ollama', hosted: false, paid: false, slots: 3, models: [{ model: 'qwen', paid: false, max_concurrent: 1, context_tokens: 0, window_tokens: 0, tier: 0 }] });
   ok(t.log.includes('notify:Added local1'), 'toast');
   stop();
 });
@@ -470,27 +472,23 @@ test('H5: has_key shows a key set badge in the list and the form; Clear key send
   stop();
 });
 
-test('U5 (review): the context field says unknown, and picking another probed model swaps in that model\'s window unless one was typed', async () => {
+test('U5 (H15): the window field says unknown, and picking another probed model sends that model\'s own maximum', async () => {
   const t = harness({}, { probeBackend: async () => ({ models: ['m-a', 'm-b', 'm-c'], contexts: { 'm-a': 32768, 'm-b': 8192 } }) });
   const stop = t.view.mount();
   await flush();
   button(t.host, 'Add backend').click();
-  eq(field(t.host, 'context_tokens').getAttribute('placeholder'), '?');
+  eq(field(t.host, 'window_tokens').getAttribute('placeholder'), '?');
   field(t.host, 'name').value = 'ctx2';
   field(t.host, 'host').value = 'http://127.0.0.1:11434';
   button(t.host, 'Probe host for models').click();
   await flush();
-  eq(field(t.host, 'context_tokens').value, '32768');
+  eq(field(t.host, 'window_tokens').value, '');
   field(t.host, 'model').value = 'm-b';
   field(t.host, 'model').fire('change');
-  eq(field(t.host, 'context_tokens').value, '8192');
-  field(t.host, 'model').value = 'm-c';
-  field(t.host, 'model').fire('change');
-  eq(field(t.host, 'context_tokens').value, '');
-  field(t.host, 'context_tokens').value = '4000';
-  field(t.host, 'model').value = 'm-a';
-  field(t.host, 'model').fire('change');
-  eq(field(t.host, 'context_tokens').value, '4000');
+  eq(field(t.host, 'window_tokens').value, '');
+  button(t.host, 'Add backend').click();
+  await flush();
+  eq((t.bodies.create as BackendInput).models, [{ model: 'm-b', paid: false, max_concurrent: 0, context_tokens: 8192, window_tokens: 0, tier: 0 }]);
   stop();
 });
 
@@ -550,7 +548,7 @@ test('H3: a model row has a tier control; the choice is sent and the card shows 
   field(t.host, 'tier').value = '3';
   button(t.host, 'Add backend').click();
   await flush();
-  eq((t.bodies.create as BackendInput).models, [{ model: 'qwen', paid: false, max_concurrent: 0, context_tokens: 0, tier: 3 }]);
+  eq((t.bodies.create as BackendInput).models, [{ model: 'qwen', paid: false, max_concurrent: 0, context_tokens: 0, window_tokens: 0, tier: 3 }]);
   stop();
   const card = harness({ backends: [be('b1', { models: [{ model: 'm1', paid: false, max_concurrent: 0, tier: 1 }, { model: 'm2', paid: false, max_concurrent: 0, tier: 3 }] })] });
   const stop2 = card.view.mount();

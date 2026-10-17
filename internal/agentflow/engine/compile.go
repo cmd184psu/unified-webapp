@@ -191,7 +191,30 @@ func (e *Engine) queueProblems(ctx context.Context, effort int64, defs []model.T
 	if err != nil || !ok {
 		return nil, err
 	}
-	return model.QueueCoverageProblems(f, defs), nil
+	probs := model.QueueCoverageProblems(f, defs)
+	ctxProbs, err := e.queueContextProblems(ctx, effort, defs)
+	if err != nil {
+		return nil, err
+	}
+	return append(probs, ctxProbs...), nil
+}
+
+// queueContextProblems finds tasks too big for every worker candidate's
+// context window (H15).
+func (e *Engine) queueContextProblems(ctx context.Context, effort int64, defs []model.TaskDef) ([]string, error) {
+	ef, err := e.deps.Store.GetEffort(ctx, effort)
+	if err != nil {
+		return nil, err
+	}
+	p, err := e.deps.Store.GetProject(ctx, ef.Project)
+	if err != nil {
+		return nil, err
+	}
+	v, err := e.newView(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return QueueContextProblems(defs, workerWindows(v, p)), nil
 }
 
 func (e *Engine) effortFRD(ctx context.Context, effort int64) (model.FRD, bool, error) {

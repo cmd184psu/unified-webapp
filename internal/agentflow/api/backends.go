@@ -30,6 +30,12 @@ type BackendModelView struct {
 	MaxConcurrent int    `json:"max_concurrent"`
 	// ContextTokens is the model's context window, 0 when unknown.
 	ContextTokens int `json:"context_tokens"`
+	// WindowTokens is the context window the model is served with, 0 when not known (H15).
+	// A value sent in is the owner's setting; one left out keeps what the server learned.
+	WindowTokens int `json:"window_tokens"`
+	// WindowSource is where that number came from: set, observed (a run was cut off at
+	// this size), host, or empty. The server sets it; a value sent in is ignored.
+	WindowSource string `json:"window_source"`
 	// Tier rates the model: 1 strong, 2 capable, 3 light, 0 not rated.
 	Tier int `json:"tier"`
 	// Tools is whether the host says the model supports tool calls, which every role needs (H10): yes,
@@ -60,7 +66,7 @@ func (a *API) backendView(b store.Backend) BackendView {
 	v := BackendView{Name: b.Name, Host: b.Host, APIType: b.APIType, Hosted: b.Hosted, Paid: b.Paid,
 		Slots: b.Slots, Retired: b.Retired, HasKey: b.HasKey, Models: []BackendModelView{}}
 	for _, m := range b.Models {
-		v.Models = append(v.Models, BackendModelView{Model: m.Model, Paid: m.Paid, MaxConcurrent: m.MaxConcurrent, ContextTokens: m.ContextTokens, Tier: m.Tier, Tools: m.Tools})
+		v.Models = append(v.Models, BackendModelView{Model: m.Model, Paid: m.Paid, MaxConcurrent: m.MaxConcurrent, ContextTokens: m.ContextTokens, WindowTokens: m.WindowTokens, WindowSource: m.WindowSource, Tier: m.Tier, Tools: m.Tools})
 	}
 	if since, ok := a.deps.Engine.SuspendedBackends()[b.Name]; ok {
 		v.SuspendedSince = since.UnixMilli()
@@ -141,7 +147,7 @@ func (bb backendBody) apply(b *store.Backend) {
 	if bb.Models != nil {
 		b.Models = make([]store.BackendModel, 0, len(*bb.Models))
 		for _, m := range *bb.Models {
-			b.Models = append(b.Models, store.BackendModel{Model: m.Model, Paid: m.Paid, MaxConcurrent: m.MaxConcurrent, ContextTokens: m.ContextTokens, Tier: m.Tier})
+			b.Models = append(b.Models, store.BackendModel{Model: m.Model, Paid: m.Paid, MaxConcurrent: m.MaxConcurrent, ContextTokens: m.ContextTokens, WindowTokens: m.WindowTokens, Tier: m.Tier})
 		}
 	}
 }
@@ -199,6 +205,7 @@ func (a *API) createBackend(w http.ResponseWriter, r *http.Request) {
 	}
 	b := store.Backend{Slots: 1}
 	body.apply(&b)
+	keepWindows(&b, nil)
 	if err := needModels(b); err != nil {
 		writeErr(w, err)
 		return
@@ -241,6 +248,7 @@ func (a *API) patchBackend(w http.ResponseWriter, r *http.Request) {
 	}
 	prev := slices.Clone(b.Models)
 	body.apply(&b)
+	keepWindows(&b, prev)
 	if err := needModels(b); err != nil {
 		writeErr(w, err)
 		return
@@ -378,4 +386,27 @@ func (a *API) clearProjectCandidates(w http.ResponseWriter, r *http.Request) {
 	}
 	a.emit("candidates.update", map[string]any{"role": role, "project": slug})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// keepWindows settles each model's served window after a client's save (H15).
+// A window the client left at 0 keeps what the server held (the owner's value
+// or one learned from a cut-off run); a different number is the owner's own
+// setting; the same number keeps its source, so a round trip through the UI
+// does not turn a learned value into a configured one.
+func keepWindows(b *store.Backend, prev []store.BackendModel) {
+	old := map[string]store.BackendModel{}
+	for _, m := range prev {
+		old[m.Model] = m
+	}
+	for i := range b.Models {
+		p := old[b.Models[i].Model]
+		switch w := b.Models[i].WindowTokens; {
+		case w == 0:
+			b.Models[i].WindowTokens, b.Models[i].WindowSource = p.WindowTokens, p.WindowSource
+		case w == p.WindowTokens:
+			b.Models[i].WindowSource = p.WindowSource
+		default:
+			b.Models[i].WindowSource = "set"
+		}
+	}
 }

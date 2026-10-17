@@ -291,6 +291,7 @@ func (e *Engine) resubmit(ctx context.Context, c *chain, last model.Stage) error
 			pk, why := reviewerFor(v, c.proj, sticky, c.workerModel(), true)
 			return pk, why, nil
 		}
+		e.needFor(v, c.proj, c.task)
 		pk, why := pickWorker(v, c.proj, sticky, nil, 0)
 		return pk, why, nil
 	}

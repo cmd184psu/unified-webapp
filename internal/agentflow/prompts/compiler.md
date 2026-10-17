@@ -46,5 +46,6 @@ Emit only these fields. Any other field makes the queue invalid.
 12. Never emit a task whose only purpose is running, checking or confirming tests, the build or lint (titles such as "Run tests" or "Make sure all tests pass"). Every task must change files; the engine builds, vets and tests after every task automatically, with no task needed. Such a task is rejected.
 13. Never emit a task whose only purpose is creating directories, empty files or placeholders. Git does not track empty directories, so such a task changes nothing and can never pass. A directory comes into being as part of the task that writes the first real file in it.
 14. A Go program builds after every task, so the first task that writes Go code in the module root also writes `main.go` with a minimal `main` function; later tasks extend it and list it again. Never leave `main.go` to a later task while an earlier one writes `package main`.
+15. A worker holds only a limited context window (often 16K tokens), and every file it writes passes through that window several times. Keep each task small: one source file and its test file, or one page file. A task that writes three or more files is split. The runner measures this and rejects a task that is too big for every available model.
 
 Produce the full queue now.

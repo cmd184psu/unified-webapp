@@ -34,6 +34,7 @@ export const LIMIT_FIELDS: LimitField[] = [
 
 const EXECUTION_FIELDS: LimitField[] = [
   { key: 'verify_slots', label: 'Verify slots', hint: 'Verify and merge stages that run at once, 1 to 64' },
+  { key: 'context_floor_tokens', label: 'Context floor', hint: 'Tokens of context assumed for a model whose served window is not known, 2048 or more' },
   { key: 'backend_cooldown', label: 'Backend cooldown', hint: 'How long an unreachable backend is skipped, such as 2m' },
 ];
 

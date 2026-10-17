@@ -184,30 +184,24 @@ export class BackendsView {
     const models: ModelRow[] = [];
     // Names the host reported when probed; model rows then pick from them instead of typing.
     let probed: string[] = [];
-    // Context windows the host reported, by model name; they prefill an empty context field.
+    // The largest context each model supports, as the host reported it; kept and sent back, never typed (H15).
     let contexts: Record<string, number> = {};
+    for (const m of initial?.models ?? []) if (m.context_tokens) contexts[m.model] = m.context_tokens;
     // What the host said about tool calls, by model name (H10); a model it says lacks them cannot be saved.
     let tools: Record<string, string> = {};
     const modelControl = (m: string): ModelControl => probed.length > 0
       ? selectInput('model', probed.map((n): [string, string] => [n, tools[n] === 'no' ? `${n} (no tool support)` : n]), m)
       : textInput('model', m, { placeholder: 'model name (or Probe host)' });
     const modelList = h('div', { class: 'wizard-list' });
-    const prefill = (row: ModelRow): void => {
-      const c = contexts[row.model.value];
-      const next = c > 0 ? String(c) : '';
-      // Fill a blank field, or swap the value a probe put there for the previously picked model; never overwrite a typed one.
-      if (row.ctx.value === '' || row.ctx.value === row.auto) {
-        row.ctx.value = next;
-        row.auto = next;
-      }
-    };
+    // The host's figure is the model's maximum, not what it is served with, so it no longer fills the window field.
+    const prefill = (_row: ModelRow): void => {};
     const flag = (row: ModelRow): void => { row.warn.hidden = tools[row.model.value] !== 'no'; };
     const draw = (row: ModelRow): void => {
       row.model.addEventListener('change', () => { prefill(row); flag(row); });
       replace(row.el,
         row.model, row.warn,
         h('span', { class: 'inline-check' }, row.paid, 'paid'),
-        h('span', { class: 'inline-check', attrs: { title: 'Context window in tokens; blank = unknown' } }, 'ctx', row.ctx),
+        h('span', { class: 'inline-check', attrs: { title: 'The context window the host serves this model with, in tokens. Blank keeps what agentflow knows (learned when a run is cut off, otherwise the context floor in Settings).' } }, 'window', row.ctx),
         h('span', { class: 'inline-check', attrs: { title: 'How capable the model is. Light models are kept off planning roles; a reviewer is never weaker than the worker it checks.' } }, 'tier', row.tier),
         h('span', { class: 'inline-check' }, 'at once', row.max),
         button('Remove', () => {
@@ -221,7 +215,7 @@ export class BackendsView {
         model: modelControl(m),
         paid: checkbox('model_paid', p),
         max: textInput('max_concurrent', max > 0 ? String(max) : '', { type: 'number', placeholder: 'no limit' }),
-        ctx: textInput('context_tokens', ctx > 0 ? String(ctx) : '', { type: 'number', placeholder: '?' }),
+        ctx: textInput('window_tokens', ctx > 0 ? String(ctx) : '', { type: 'number', placeholder: '?' }),
         tier: selectInput('tier', TIERS, String(tier)),
         auto: '',
         warn: h('span', { class: 'badge badge-warn', text: 'no tool support: remove it', attrs: { 'data-role': 'no-tools', hidden: true, title: 'The host says this model cannot make tool calls, which every agentflow role needs. It cannot be saved.' } }),
@@ -231,7 +225,7 @@ export class BackendsView {
       draw(row);
       modelList.appendChild(row.el);
     };
-    for (const m of initial?.models ?? []) addModel(m.model, m.paid, m.max_concurrent, m.context_tokens ?? 0, m.tier ?? 0);
+    for (const m of initial?.models ?? []) addModel(m.model, m.paid, m.max_concurrent, m.window_tokens ?? 0, m.tier ?? 0);
     if (!initial) addModel();
     const probe = async (): Promise<void> => {
       errors.clear();
@@ -268,7 +262,7 @@ export class BackendsView {
         hosted: hosted.checked,
         paid: paid.checked,
         slots: Number(slots.value),
-        models: models.map((m) => ({ model: m.model.value.trim(), paid: m.paid.checked, max_concurrent: Number(m.max.value) || 0, context_tokens: Math.max(0, Math.round(Number(m.ctx.value) || 0)), tier: Number(m.tier.value) || 0 })).filter((m) => m.model !== ''),
+        models: models.map((m) => ({ model: m.model.value.trim(), paid: m.paid.checked, max_concurrent: Number(m.max.value) || 0, context_tokens: contexts[m.model.value.trim()] ?? 0, window_tokens: Math.max(0, Math.round(Number(m.ctx.value) || 0)), tier: Number(m.tier.value) || 0 })).filter((m) => m.model !== ''),
       };
       if (!builtin() && apiKey.value !== '') body.api_key = apiKey.value;
       else if (clearKey) body.api_key = '';
@@ -345,7 +339,8 @@ export class BackendsView {
     }
     const models = b.models.map((m) => h('span', { class: 'row-actions' }, m.model, m.paid ? badge('paid') : null,
       m.max_concurrent > 0 ? badge(`max ${m.max_concurrent} at once`, 'muted') : null,
-      m.context_tokens ? badge(formatTokens(m.context_tokens), 'muted') : null,
+      m.window_tokens ? badge(`window ${formatTokens(m.window_tokens)}${m.window_source === 'observed' ? ' (learned)' : ''}`, m.window_source === 'observed' ? 'warn' : 'muted') : null,
+      m.context_tokens ? badge(`max ${formatTokens(m.context_tokens)}`, 'muted') : null,
       m.tier ? badge(`tier ${m.tier}`, m.tier === 3 ? 'warn' : 'muted') : null,
       m.tools === 'no' ? badge('no tools', 'warn') : null));
     return h('div', { class: 'profile-card', attrs: { 'data-backend': b.name } },
