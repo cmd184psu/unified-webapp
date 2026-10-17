@@ -1,6 +1,6 @@
 # Session handoff (written 2026-10-16 19:05 EDT, before a Claude Code restart)
 
-Read this first in a new session. Branch `agentflow` (never pushed). Live service: `unified.service` (port 8787, host `agentflow.builder.cmdhome.net`, PIN in `~/.unified_common.pin`). Work is committed; `git log --oneline | head -30` shows it. Phase H is described in `docs/agentflow-remediation/phase-hardening.md`, results in `progress.md`, user-facing behaviour in `docs/guides/agentflow.md`.
+Read this first in a new session. Branch `agentflow` (never pushed). Live service: `unified.service` (port 8686, host `agentflow.builder.cmdhome.net`, PIN in `~/.unified_common.pin`). Work is committed; `git log --oneline | head -30` shows it. Phase H is described in `docs/agentflow-remediation/phase-hardening.md`, results in `progress.md`, user-facing behaviour in `docs/guides/agentflow.md`.
 
 ## 1. The trial ended at 20:26: T006 needs_attention, probe 13/17 (see H14 in phase-hardening.md)
 
