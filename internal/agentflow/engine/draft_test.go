@@ -536,3 +536,30 @@ func TestB5_SizeListsUnknownModels(t *testing.T) {
 		t.Fatalf("advice = %q", v.Advice)
 	}
 }
+
+// A draft that leaves out strings from the request is redone by another model,
+// and a third model gets a last try. Before this the retry went back to the same
+// model, so two drafts failed the same way.
+func TestDraftMissingStringsRetriesOnOtherModels(t *testing.T) {
+	f := newPlanFix(t, false)
+	f.addBackend("free", 2, false, false, "m1", "m2", "m3")
+	f.candidates("global", "", "planner", "free/m1", "free/m2", "free/m3")
+	good := strings.Replace(draftReply, `"Greeter"`, `"Greeter /api/zzz"`, 1)
+	f.fake.Script("planner", runner.Step{Reply: draftReply}, runner.Step{Reply: draftReply}, runner.Step{Reply: good})
+	f.startEngine()
+	if err := f.eng.StartDraft(context.Background(), "alice", f.effort, DraftRequest{Purpose: PurposeDraft, Description: "serve /api/zzz"}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "draft finished", func() bool { return f.draftState().State != "running" })
+	if v := f.draftState(); v.State != "idle" || v.Error != "" {
+		t.Fatalf("state = %+v", v)
+	}
+	calls := f.fake.CallsFor("planner")
+	if len(calls) != 3 {
+		t.Fatalf("planner calls = %d, want 3", len(calls))
+	}
+	m := func(i int) string { return calls[i].Request.Model }
+	if m(0) == m(1) || m(1) == m(2) {
+		t.Fatalf("a retry reused the previous model: %s, %s, %s", m(0), m(1), m(2))
+	}
+}

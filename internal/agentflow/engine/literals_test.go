@@ -57,8 +57,8 @@ func TestH1_DraftThatKeepsDroppingAStringFailsNamingIt(t *testing.T) {
 	if !strings.Contains(v.Error, "7070") || !strings.Contains(v.Error, "/api/hello") {
 		t.Fatalf("error = %q, want the missing strings named", v.Error)
 	}
-	if n := len(f.fake.CallsFor("planner")); n != 2 {
-		t.Fatalf("planner calls = %d, want exactly one retry", n)
+	if n := len(f.fake.CallsFor("planner")); n != 3 {
+		t.Fatalf("planner calls = %d, want the draft and two retries", n)
 	}
 	if _, rev := f.latestFRD(); rev != 1 {
 		t.Fatalf("a failed draft changed the FRD: revision %d", rev)

@@ -310,8 +310,8 @@ func (e *Engine) advanceDraft(ctx context.Context, p store.Project, ef model.Eff
 	}
 	defer e.changed()
 	var lit *literalsError
-	if errors.As(err, &lit) && len(run.stages) < 2 {
-		return retry(last.Model) // one more try, the prompt names the strings that must appear
+	if errors.As(err, &lit) && len(run.stages) < 3 {
+		return retry(avoidKey(last.Backend, last.Model)) // another try, on another model; the prompt names the strings that must appear
 	}
 	if err != nil {
 		return e.failDraft(ctx, ef.ID, run.start.After, last.ID, err.Error())
