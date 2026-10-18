@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -184,5 +185,62 @@ func TestH15_DispatchPassesOverAWindowTooSmall(t *testing.T) {
 	}
 	if got := setup(3000, 4000).workerModelDispatched(); got != "small" {
 		t.Fatalf("the worker was %q: with no window big enough the task runs in list order, not waiting", got)
+	}
+}
+
+// A retry after a failure never goes back to the model that just failed while
+// another is eligible. Before this, a retry avoided the backend, and a backend
+// serving five models (opencode's free ones) had nothing else to try, so the
+// same model crashed five times and planning halted.
+func TestRetryGoesToAnotherModelOnTheSameBackend(t *testing.T) {
+	f := newPlanFix(t, false)
+	f.addBackend("free", 2, false, false, "m1", "m2", "m3")
+	f.candidates("global", "", "planner", "free/m1", "free/m2", "free/m3")
+	f.candidates("global", "", "architect", "free/m2", "free/m3")
+	f.candidates("global", "", "critic", "free/m3")
+	f.candidates("global", "", "compiler", "free/m1", "free/m2", "free/m3")
+	f.approvedPlan()
+	f.fake.Script("compiler",
+		runner.Step{ErrClass: runner.ErrCrash, Err: errors.New("Unexpected server error")},
+		runner.Step{Reply: compileClean})
+	f.startEngine()
+	if err := f.eng.Compile(context.Background(), "alice", f.effort); err != nil {
+		t.Fatal(err)
+	}
+	f.waitStatus(model.EffortQueueDraft)
+	calls := f.fake.CallsFor("compiler")
+	if len(calls) != 2 {
+		t.Fatalf("compiler calls = %d, want the crash and one retry", len(calls))
+	}
+	if a, b := calls[0].Request.Model, calls[1].Request.Model; a == b {
+		t.Fatalf("the retry used the model that crashed (%s)", a)
+	}
+}
+
+// A queue that fails the requirement check is recompiled by another model, and
+// a third try is allowed.
+func TestQueueProblemRetryUsesAnotherModelAndAThirdTry(t *testing.T) {
+	f := newPlanFix(t, false)
+	f.addBackend("free", 2, false, false, "m1", "m2", "m3")
+	f.candidates("global", "", "planner", "free/m1")
+	f.candidates("global", "", "architect", "free/m2")
+	f.candidates("global", "", "critic", "free/m3")
+	f.candidates("global", "", "compiler", "free/m1", "free/m2", "free/m3")
+	f.candidates("global", "", "worker", "free/m1")
+	f.frdNaming("/api/hello")
+	f.approvedPlan()
+	f.fake.Script("compiler",
+		runner.Step{Reply: compileClean}, runner.Step{Reply: compileClean}, runner.Step{Reply: compileWithPath})
+	f.startEngine()
+	if err := f.eng.Compile(context.Background(), "alice", f.effort); err != nil {
+		t.Fatal(err)
+	}
+	f.waitStatus(model.EffortQueueDraft)
+	calls := f.fake.CallsFor("compiler")
+	if len(calls) != 3 {
+		t.Fatalf("compiler calls = %d, want 3", len(calls))
+	}
+	if calls[0].Request.Model == calls[1].Request.Model || calls[1].Request.Model == calls[2].Request.Model {
+		t.Fatalf("a retry reused the previous model: %s, %s, %s", calls[0].Request.Model, calls[1].Request.Model, calls[2].Request.Model)
 	}
 }

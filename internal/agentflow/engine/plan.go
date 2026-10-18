@@ -770,22 +770,29 @@ func revisionContext(sess *planSession, stage int64) string {
 	return b.String()
 }
 
+// avoidKey names one backend and model, for a retry that must not use the
+// pair that just failed. Avoiding the whole backend, as this once did, left a
+// backend serving several models (opencode's free ones) with nothing else to
+// try, so the same model crashed again until the infrastructure budget ran out.
+func avoidKey(backend, model string) string { return backend + "\x00" + model }
+
 // pickEffortStage chooses the backend and model for a planning-loop or
 // compiler stage. Candidates are walked in order (MB4); a model another
 // planning role already used is skipped unless nothing else is eligible, in
 // which case warn says so (MB6). Free slots are not required: the lane queues
 // the stage. The string reason is empty on success.
-func (e *Engine) pickEffortStage(ctx context.Context, p store.Project, role string, others map[string]string, avoidBackend string) (pk Pick, warn, reason string, err error) {
+func (e *Engine) pickEffortStage(ctx context.Context, p store.Project, role string, others map[string]string, avoid string) (pk Pick, warn, reason string, err error) {
 	v, err := e.newView(ctx)
 	if err != nil {
 		return Pick{}, "", "", err
 	}
-	if avoidBackend != "" {
-		v.down[avoidBackend] = true
-	}
 	var reasons []string
 	var fallback *Pick
 	for _, c := range v.snap.CandidatesFor(role, p.Slug) {
+		if avoid != "" && avoid == avoidKey(c.Backend, c.Model) {
+			reasons = append(reasons, "model "+c.Model+" on "+c.Backend+" just failed")
+			continue
+		}
 		if why := skipReason(v, p, c, false); why != "" {
 			reasons = append(reasons, why)
 			continue
@@ -818,10 +825,10 @@ func (e *Engine) pickEffortStage(ctx context.Context, p store.Project, role stri
 // startEffortStage submits the next stage of an effort's loop. When no backend
 // is eligible it records why (PlanView.Waiting) and submits nothing; the next
 // pass tries again.
-func (e *Engine) startEffortStage(ctx context.Context, p store.Project, effort int64, role string, others map[string]string, avoidBackend string) error {
-	pk, warn, reason, err := e.pickEffortStage(ctx, p, role, others, avoidBackend)
-	if err == nil && reason != "" && avoidBackend != "" {
-		pk, warn, reason, err = e.pickEffortStage(ctx, p, role, others, "") // nowhere else: the same backend again
+func (e *Engine) startEffortStage(ctx context.Context, p store.Project, effort int64, role string, others map[string]string, avoid string) error {
+	pk, warn, reason, err := e.pickEffortStage(ctx, p, role, others, avoid)
+	if err == nil && reason != "" && avoid != "" {
+		pk, warn, reason, err = e.pickEffortStage(ctx, p, role, others, "") // nowhere else: the same model again
 	}
 	if err != nil {
 		return err
@@ -865,7 +872,7 @@ func (e *Engine) warnOnce(ctx context.Context, effort int64, msg string) error {
 // a strike, repeated after the exponential backoff, and the strike that
 // reaches max_infra_retries halts. stages are the failed stage's run of
 // siblings, oldest first.
-func (e *Engine) effortInfra(ctx context.Context, p store.Project, stages []model.Stage, last model.Stage, retry func(avoidBackend string) error, halt func(reason string) error) error {
+func (e *Engine) effortInfra(ctx context.Context, p store.Project, stages []model.Stage, last model.Stage, retry func(avoid string) error, halt func(reason string) error) error {
 	strikes := 0
 	for i := len(stages) - 1; i >= 0 && IsInfra(stages[i].Outcome); i-- {
 		switch stages[i].Outcome {
@@ -891,7 +898,7 @@ func (e *Engine) effortInfra(ctx context.Context, p store.Project, stages []mode
 		e.advanceAfter(last.ID, wait)
 		return nil
 	}
-	return retry(last.Backend)
+	return retry(avoidKey(last.Backend, last.Model))
 }
 
 // compilerFRDNote lists the FRD ids the compiler must cite and, on a retry,

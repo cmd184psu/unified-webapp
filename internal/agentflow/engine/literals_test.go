@@ -122,14 +122,14 @@ func TestH1_CompiledQueueThatKeepsDroppingAPathHaltsNamingIt(t *testing.T) {
 	f.standardPool()
 	f.frdNaming("/api/hello")
 	f.approvedPlan()
-	f.fake.Script("compiler", runner.Step{Reply: compileNoPath}, runner.Step{Reply: compileNoPath})
+	f.fake.Script("compiler", runner.Step{Reply: compileNoPath}, runner.Step{Reply: compileNoPath}, runner.Step{Reply: compileNoPath})
 	f.startEngine()
 	if err := f.eng.Compile(context.Background(), "alice", f.effort); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "compile halted", func() bool {
 		st := f.effortStages("compiler")
-		return len(st) == 2 && st[1].State == model.StageDone && f.status() == model.EffortPlanApproved
+		return len(st) == 3 && st[2].State == model.StageDone && f.status() == model.EffortPlanApproved
 	})
 	evs, err := f.eng.effortEvents(context.Background(), f.effort, eventCompileHalted)
 	if err != nil || len(evs) != 1 || !strings.Contains(evs[0].DetailJSON, "/api/hello") {
@@ -217,13 +217,13 @@ func TestH14_QueueThatKeepsLeavingARequirementUncitedHalts(t *testing.T) {
 	f.frdNaming("/api/hello")
 	f.approvedPlan()
 	foreign := strings.Replace(compileWithPath, `"AC1: it answers"`, `"R18: my own step"`, 1)
-	f.fake.Script("compiler", runner.Step{Reply: foreign}, runner.Step{Reply: foreign})
+	f.fake.Script("compiler", runner.Step{Reply: foreign}, runner.Step{Reply: foreign}, runner.Step{Reply: foreign})
 	f.startEngine()
 	if err := f.eng.Compile(context.Background(), "alice", f.effort); err != nil {
 		t.Fatal(err)
 	}
 	f.waitStatus(model.EffortPlanApproved)
-	if n := len(f.fake.CallsFor("compiler")); n != 2 {
-		t.Fatalf("compiler calls = %d, want 2", n)
+	if n := len(f.fake.CallsFor("compiler")); n != 3 {
+		t.Fatalf("compiler calls = %d, want 3 (the compile and two retries)", n)
 	}
 }
