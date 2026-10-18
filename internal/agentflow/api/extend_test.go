@@ -144,4 +144,20 @@ func TestH15d_ExtendWindowsRecreatesTheModelAndRecordsIt(t *testing.T) {
 	if bs[0].MemoryBudgetMB != 30720 || bs[0].WindowCapTokens != 32768 {
 		t.Fatalf("settings lost: %+v", bs[0])
 	}
+	// a budget with no room for the weights marks the model, and a save keeps the mark
+	a.ok("PATCH", "/api/backends/gpu", map[string]any{"memory_budget_mb": 100}, http.StatusOK)
+	res = decode[[]ExtendResult](t, a.ok("POST", "/api/backends/gpu/extend-windows", nil, http.StatusOK))
+	if res[0].Window != 0 || res[0].Applied || !modelView(t, a, "gpu", "m1").TooBig {
+		t.Fatalf("too big: %+v, view %+v", res, modelView(t, a, "gpu", "m1"))
+	}
+	a.ok("PATCH", "/api/backends/gpu", map[string]any{"models": []map[string]any{{"model": "m1", "context_tokens": 262144}}}, http.StatusOK)
+	if !modelView(t, a, "gpu", "m1").TooBig {
+		t.Fatal("a save cleared the too-big mark")
+	}
+	// a larger budget clears it
+	a.ok("PATCH", "/api/backends/gpu", map[string]any{"memory_budget_mb": 30720}, http.StatusOK)
+	a.ok("POST", "/api/backends/gpu/extend-windows", nil, http.StatusOK)
+	if modelView(t, a, "gpu", "m1").TooBig {
+		t.Fatal("a budget that fits left the mark")
+	}
 }

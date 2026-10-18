@@ -45,7 +45,15 @@ var migrations = []migration{
 	{15, migration15SQL},
 	{16, migration16SQL},
 	{17, migration17SQL},
+	{18, migration18SQL},
 }
+
+// migration18SQL (H15e) marks a model whose weights leave no room for the
+// minimum context inside its host's memory budget. Dispatch and planning pass
+// over it; Extend windows sets and clears the mark.
+const migration18SQL = `
+ALTER TABLE backend_models ADD COLUMN too_big INTEGER NOT NULL DEFAULT 0 CHECK (too_big IN (0, 1));
+`
 
 // migration17SQL (H15d) gives each backend a memory budget and a cap on the
 // context window it is extended to. 0 means no budget set (windows are not

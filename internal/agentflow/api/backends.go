@@ -42,6 +42,8 @@ type BackendModelView struct {
 	// Tools is whether the host says the model supports tool calls, which every role needs (H10): yes,
 	// no, or empty when not known. The server sets it from the host; a value sent in is ignored.
 	Tools string `json:"tools"`
+	// TooBig is set when the model's weights do not fit the host's memory budget; it is passed over (H15e).
+	TooBig bool `json:"too_big"`
 }
 
 // BackendView is a backend as the API shows it. DownUntil (unix ms) is set
@@ -71,7 +73,7 @@ func (a *API) backendView(b store.Backend) BackendView {
 	v := BackendView{Name: b.Name, Host: b.Host, APIType: b.APIType, Hosted: b.Hosted, Paid: b.Paid,
 		Slots: b.Slots, MemoryBudgetMB: b.MemoryBudgetMB, WindowCapTokens: b.WindowCapTokens, Retired: b.Retired, HasKey: b.HasKey, Models: []BackendModelView{}}
 	for _, m := range b.Models {
-		v.Models = append(v.Models, BackendModelView{Model: m.Model, Paid: m.Paid, MaxConcurrent: m.MaxConcurrent, ContextTokens: m.ContextTokens, WindowTokens: m.WindowTokens, WindowSource: m.WindowSource, Tier: m.Tier, Tools: m.Tools})
+		v.Models = append(v.Models, BackendModelView{Model: m.Model, Paid: m.Paid, MaxConcurrent: m.MaxConcurrent, ContextTokens: m.ContextTokens, WindowTokens: m.WindowTokens, WindowSource: m.WindowSource, Tier: m.Tier, Tools: m.Tools, TooBig: m.TooBig})
 	}
 	if since, ok := a.deps.Engine.SuspendedBackends()[b.Name]; ok {
 		v.SuspendedSince = since.UnixMilli()
@@ -413,6 +415,7 @@ func keepWindows(b *store.Backend, prev []store.BackendModel) {
 	}
 	for i := range b.Models {
 		p := old[b.Models[i].Model]
+		b.Models[i].TooBig = p.TooBig
 		switch w := b.Models[i].WindowTokens; {
 		case w == 0:
 			b.Models[i].WindowTokens, b.Models[i].WindowSource = p.WindowTokens, p.WindowSource

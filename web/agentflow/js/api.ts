@@ -168,6 +168,7 @@ export interface BackendModel {
   tier?: number;
   /** Whether the host says the model supports tool calls, which every role needs (H10); empty or absent = not known. Set by the server. */
   tools?: 'yes' | 'no' | '';
+  too_big?: boolean;
 }
 
 export interface Backend {

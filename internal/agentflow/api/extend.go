@@ -192,9 +192,17 @@ func (a *API) extendOne(ctx context.Context, b store.Backend, m store.BackendMod
 	n := fitWindow(b.MemoryBudgetMB, weights, kv, b.WindowCapTokens, floor)
 	if n == 0 {
 		res.Note = fmt.Sprintf("the %d MB budget leaves no room for even %d tokens of context after %d MB of weights", b.MemoryBudgetMB, floor, weights>>20)
+		if apply && !m.TooBig {
+			if err := a.deps.Store.SetModelTooBig(ctx, b.Name, m.Model, true); err == nil {
+				res.Note += "; the model will be passed over"
+			}
+		}
 		return
 	}
 	res.Window = n
+	if apply && m.TooBig {
+		_ = a.deps.Store.SetModelTooBig(ctx, b.Name, m.Model, false)
+	}
 	if !kv.Known {
 		res.Note = "cache cost guessed (architecture not described): "
 	}

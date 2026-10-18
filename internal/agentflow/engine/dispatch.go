@@ -582,6 +582,8 @@ func skipReason(v *view, p store.Project, c store.Candidate, needSlot bool) stri
 		return fmt.Sprintf("model %s has a %d-token context window and this task needs about %d", c.Model, windowOf(v, c), v.need)
 	case lacksTools(v, c):
 		return fmt.Sprintf("model %s does not support tool calls, which every role needs", c.Model)
+	case tooBig(v, c):
+		return fmt.Sprintf("model %s does not fit its host's memory budget", c.Model)
 	case lightForRole(v, c):
 		return fmt.Sprintf("model %s is rated light (tier 3), too weak for role %s", c.Model, c.Role)
 	case needSlot && v.down[c.Backend]:
@@ -604,6 +606,22 @@ func lacksTools(v *view, c store.Candidate) bool {
 		for _, m := range b.Models {
 			if m.Model == c.Model {
 				return m.Tools == "no"
+			}
+		}
+	}
+	return false
+}
+
+// tooBig says Extend windows found the candidate's weights leave no room for the
+// minimum context inside the host's memory budget (H15e).
+func tooBig(v *view, c store.Candidate) bool {
+	for _, b := range v.snap.Backends {
+		if b.Name != c.Backend {
+			continue
+		}
+		for _, m := range b.Models {
+			if m.Model == c.Model {
+				return m.TooBig
 			}
 		}
 	}

@@ -349,6 +349,7 @@ export class BackendsView {
       m.window_tokens ? badge(`window ${formatTokens(m.window_tokens)}${m.window_source === 'observed' ? ' (learned)' : ''}`, m.window_source === 'observed' ? 'warn' : 'muted') : null,
       m.context_tokens ? badge(`max ${formatTokens(m.context_tokens)}`, 'muted') : null,
       m.tier ? badge(`tier ${m.tier}`, m.tier === 3 ? 'warn' : 'muted') : null,
+      m.too_big ? badge('too big for host', 'warn') : null,
       m.tools === 'no' ? badge('no tools', 'warn') : null));
     return h('div', { class: 'profile-card', attrs: { 'data-backend': b.name } },
       h('div', { class: 'profile-header' },

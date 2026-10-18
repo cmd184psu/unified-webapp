@@ -31,6 +31,10 @@ type BackendModel struct {
 	// every runner role needs (H10): "yes", "no", or "" when not known. The
 	// server fills it from the host; a client's value is not trusted.
 	Tools string
+	// TooBig is set by Extend windows when the model's weights leave no room
+	// for the minimum context inside the host's memory budget (H15e); the
+	// model is then passed over until a larger budget clears it.
+	TooBig bool
 }
 
 // Backend is a model server in agentflow's own terms (AR3): where it is, which
@@ -128,8 +132,8 @@ func b2i(b bool) int {
 
 func insertModels(ctx context.Context, tx *sql.Tx, b Backend) error {
 	for _, m := range b.Models {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO backend_models (backend, model, paid, max_concurrent, context_tokens, tier, tools, window_tokens, window_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			b.Name, m.Model, b2i(m.Paid), m.MaxConcurrent, m.ContextTokens, m.Tier, m.Tools, m.WindowTokens, m.WindowSource); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO backend_models (backend, model, paid, max_concurrent, context_tokens, tier, tools, window_tokens, window_source, too_big) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			b.Name, m.Model, b2i(m.Paid), m.MaxConcurrent, m.ContextTokens, m.Tier, m.Tools, m.WindowTokens, m.WindowSource, b2i(m.TooBig)); err != nil {
 			return err
 		}
 	}
@@ -272,18 +276,19 @@ func loadBackends(ctx context.Context, q querier, name string) ([]Backend, error
 	// The single connection serves one result set at a time, so models are
 	// read after the backend rows are closed.
 	for i := range out {
-		mrows, err := q.QueryContext(ctx, `SELECT model, paid, max_concurrent, context_tokens, tier, tools, window_tokens, window_source FROM backend_models WHERE backend = ? ORDER BY model`, out[i].Name)
+		mrows, err := q.QueryContext(ctx, `SELECT model, paid, max_concurrent, context_tokens, tier, tools, window_tokens, window_source, too_big FROM backend_models WHERE backend = ? ORDER BY model`, out[i].Name)
 		if err != nil {
 			return nil, err
 		}
 		for mrows.Next() {
 			var m BackendModel
-			var paid int
-			if err := mrows.Scan(&m.Model, &paid, &m.MaxConcurrent, &m.ContextTokens, &m.Tier, &m.Tools, &m.WindowTokens, &m.WindowSource); err != nil {
+			var paid, tooBig int
+			if err := mrows.Scan(&m.Model, &paid, &m.MaxConcurrent, &m.ContextTokens, &m.Tier, &m.Tools, &m.WindowTokens, &m.WindowSource, &tooBig); err != nil {
 				mrows.Close()
 				return nil, err
 			}
 			m.Paid = paid != 0
+			m.TooBig = tooBig != 0
 			out[i].Models = append(out[i].Models, m)
 		}
 		if err := mrows.Err(); err != nil {
@@ -357,5 +362,13 @@ func (s *Store) BackendKey(ctx context.Context, name string) (string, error) {
 func (s *Store) SetModelWindow(ctx context.Context, backend, model string, tokens int, source string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE backend_models SET window_tokens = ?, window_source = ? WHERE backend = ? AND model = ?`,
 		tokens, source, backend, model)
+	return err
+}
+
+// SetModelTooBig marks, or clears the mark on, a model whose weights do not fit
+// its host's memory budget (H15e). It is a no-op for a model the backend does
+// not list.
+func (s *Store) SetModelTooBig(ctx context.Context, backend, model string, tooBig bool) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE backend_models SET too_big = ? WHERE backend = ? AND model = ?`, b2i(tooBig), backend, model)
 	return err
 }

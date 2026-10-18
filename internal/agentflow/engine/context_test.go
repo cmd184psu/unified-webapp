@@ -244,3 +244,20 @@ func TestQueueProblemRetryUsesAnotherModelAndAThirdTry(t *testing.T) {
 		t.Fatalf("a retry reused the previous model: %s, %s, %s", calls[0].Request.Model, calls[1].Request.Model, calls[2].Request.Model)
 	}
 }
+
+// H15e: a model Extend windows marked as too big for its host's memory budget
+// is passed over while another can take the task.
+func TestH15e_DispatchPassesOverAModelTooBigForItsHost(t *testing.T) {
+	h := newDispHarness(t)
+	h.tiered("gpu", 5, map[string]int{"huge": 1, "ok": 1, "rev": 1})
+	if err := h.st.SetModelTooBig(context.Background(), "gpu", "huge", true); err != nil {
+		t.Fatal(err)
+	}
+	h.candidates("global", "", "worker", "gpu/huge", "gpu/ok")
+	h.candidates("global", "", "reviewer", "gpu/rev")
+	h.dispProject("alpha", "any", indep(1))
+	h.startRun("alpha")
+	if got := h.workerModelDispatched(); got != "ok" {
+		t.Fatalf("the worker was %q, want ok: huge does not fit its host", got)
+	}
+}

@@ -168,7 +168,7 @@ if args.lineup == "local":
     for b in api("GET", "/api/backends", None, 200):
         if b.get("hosted") or b.get("paid") or b["name"] in args.exclude_backend:
             continue
-        pool += [(m.get("tier") or 2, b["name"], m["model"]) for m in b["models"]]
+        pool += [(m.get("tier") or 2, b["name"], m["model"]) for m in b["models"] if not m.get("too_big")]  # too big for its host: Extend windows marked it
     order = [x for x in args.backend_order.split(",") if x]
     rank = lambda be: order.index(be) if be in order else len(order)
     pick = lambda tiers: [{"backend": be, "model": m} for t in tiers
