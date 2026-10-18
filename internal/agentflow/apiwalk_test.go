@@ -112,6 +112,7 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	ok("POST", "/api/backends", `{"name":"spare","host":"http://127.0.0.1:11435","api_type":"ollama","slots":1,"models":[{"model":"m1","window_tokens":65536}]}`, 201)
 	ok("GET", "/api/backends", "", 200)
 	ok("PATCH", "/api/backends/spare", `{"slots":2}`, 200)
+	ok("POST", "/api/backends/spare/extend-windows", `{}`, 400) // no memory budget set
 	ok("POST", "/api/backends/spare/retire", `{"cancel_running":false}`, 200)
 	ok("POST", "/api/backends/spare/install", `{"model":"walk"}`, 400) // retired: refused before any pull
 	ok("GET", "/api/backends/spare/installs", "", 200)

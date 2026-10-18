@@ -46,7 +46,7 @@ const API_TYPES: Array<[string, string]> = [
 
 export type BackendsDeps = Pick<
   typeof api,
-  'backends' | 'createBackend' | 'probeBackend' | 'patchBackend' | 'retireBackend' | 'enableBackend' | 'candidates' | 'putCandidates' |
+  'backends' | 'createBackend' | 'probeBackend' | 'patchBackend' | 'retireBackend' | 'enableBackend' | 'extendWindows' | 'candidates' | 'putCandidates' |
   'projects' | 'limits' | 'putLimits' | 'settings'
 > & { notify(message: string): void };
 
@@ -57,6 +57,7 @@ export const defaultBackendsDeps = (): BackendsDeps => ({
   patchBackend: api.patchBackend,
   retireBackend: api.retireBackend,
   enableBackend: api.enableBackend,
+  extendWindows: api.extendWindows,
   candidates: api.candidates,
   putCandidates: api.putCandidates,
   projects: api.projects,
@@ -154,6 +155,8 @@ export class BackendsView {
     const host = textInput('host', initial?.host ?? '', { placeholder: 'http://host:port' });
     const apiType = selectInput('api_type', API_TYPES, initial?.api_type ?? 'ollama');
     const slots = textInput('slots', String(initial?.slots ?? 1), { type: 'number' });
+    const budget = textInput('memory_budget_gb', initial?.memory_budget_mb ? String(Math.round(initial.memory_budget_mb / 1024)) : '', { type: 'number', placeholder: 'not set' });
+    const cap = textInput('window_cap_tokens', initial?.window_cap_tokens ? String(initial.window_cap_tokens) : '', { type: 'number', placeholder: 'no cap' });
     const hosted = checkbox('hosted', initial?.hosted ?? false);
     const paid = checkbox('paid', initial?.paid ?? false);
     // The API key is write-only: typed text is sent, an untouched field keeps the stored key, Clear key removes it.
@@ -262,6 +265,8 @@ export class BackendsView {
         hosted: hosted.checked,
         paid: paid.checked,
         slots: Number(slots.value),
+        memory_budget_mb: Math.max(0, Math.round((Number(budget.value) || 0) * 1024)),
+        window_cap_tokens: Math.max(0, Math.round(Number(cap.value) || 0)),
         models: models.map((m) => ({ model: m.model.value.trim(), paid: m.paid.checked, max_concurrent: Number(m.max.value) || 0, context_tokens: contexts[m.model.value.trim()] ?? 0, window_tokens: Math.max(0, Math.round(Number(m.ctx.value) || 0)), tier: Number(m.tier.value) || 0 })).filter((m) => m.model !== ''),
       };
       if (!builtin() && apiKey.value !== '') body.api_key = apiKey.value;
@@ -291,6 +296,8 @@ export class BackendsView {
         hostField.el,
         errors.add('api_type', fieldRow('API type', apiType)).el,
         errors.add('slots', fieldRow('Slots', slots, 'Stages this backend runs at once')).el,
+        errors.add('memory_budget_mb', fieldRow('Memory budget (GB)', budget, 'What one loaded model may use on the host, weights and context together. Needed to extend windows')).el,
+        errors.add('window_cap_tokens', fieldRow('Window cap (tokens)', cap, 'Never extend a window past this, for a host where a long context is too slow')).el,
         errors.add('hosted', fieldRow('Hosted', hosted, 'A remote service rather than your own machine')).el,
         errors.add('paid', fieldRow('Paid', paid, 'Every model on it costs money')).el,
         keyField.el),
@@ -354,6 +361,9 @@ export class BackendsView {
           b.retired ? badge('retired', 'warn') : null,
           b.suspended_since ? badge('suspended: not answering', 'warn') : b.down_until ? badge('unreachable', 'warn') : null),
         h('div', { class: 'profile-actions' },
+          b.api_type === 'ollama' && !b.retired && (b.memory_budget_mb ?? 0) > 0
+            ? button('Extend windows', () => void this.extend(b.name), { field: 'extend-windows', icon: 'approve', word: true })
+            : null,
           button('Edit', () => { this.editing.add(b.name); this.render(); }, { field: 'edit', icon: 'edit' }),
           b.retired
             ? button('Enable', () => void this.enable(b.name), { field: 'enable', icon: 'approve', word: true })
@@ -362,9 +372,22 @@ export class BackendsView {
         b.api_type === 'opencode' ? null : h('div', {}, h('label', { text: 'Host' }), h('span', { text: b.host })),
         h('div', {}, h('label', { text: 'API type' }), h('span', { text: b.api_type })),
         h('div', {}, h('label', { text: 'Slots' }), h('span', { text: String(b.slots) })),
+        b.memory_budget_mb ? h('div', {}, h('label', { text: 'Memory budget' }), h('span', { text: `${Math.round(b.memory_budget_mb / 1024)} GB${b.window_cap_tokens ? `, windows capped at ${formatTokens(b.window_cap_tokens)}` : ''}` })) : null,
         h('div', {}, h('label', { text: 'Models' }), ...models)),
       b.api_type === 'ollama' && !b.retired ? this.panelFor(b.name).el : null,
       this.retiring.has(b.name) ? this.retirePanel(b) : null);
+  }
+
+  /** Raise each model's served window as far as the backend's memory budget allows (H15d). */
+  private async extend(name: string): Promise<void> {
+    try {
+      const res = await this.deps.extendWindows(name);
+      const done = res.filter((r) => r.applied).length;
+      this.deps.notify(done > 0 ? `Extended ${done} of ${res.length} model windows on ${name}` : `No window changed on ${name}: ${res.map((r) => `${r.model}: ${r.note}`).join('; ')}`);
+    } catch {
+      return;
+    }
+    await this.load();
   }
 
   private async enable(name: string): Promise<void> {

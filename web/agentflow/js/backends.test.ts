@@ -43,6 +43,7 @@ function harness(init: Partial<State> = {}, over: Partial<BackendsDeps> = {}) {
     patchBackend: async (name, b) => { log.push('patch:' + name); bodies.patch = b; return result(be(name)); },
     retireBackend: async (name, cancel) => { log.push(`retire:${name}:${cancel}`); return result(be(name, { retired: true }), ['retired the last backend for worker; project p1 is running']); },
     enableBackend: async (name) => { log.push('enable:' + name); return result(be(name)); },
+    extendWindows: async (name) => { log.push('extend:' + name); return [{ model: 'm1', previous: 0, window: 57344, applied: true, note: 'set to 57344 tokens' }]; },
     putCandidates: async (role, list) => {
       log.push('cands:' + role);
       bodies.cands = list;
@@ -162,7 +163,7 @@ test('BK1: adding a backend sends the form; a 400 shows next to the field it nam
   fail = false;
   button(t.host, 'Add backend').click();
   await flush();
-  eq(t.bodies.create, { name: 'local1', host: 'http://127.0.0.1:11434', api_type: 'ollama', hosted: false, paid: false, slots: 3, models: [{ model: 'qwen', paid: false, max_concurrent: 1, context_tokens: 0, window_tokens: 0, tier: 0 }] });
+  eq(t.bodies.create, { name: 'local1', host: 'http://127.0.0.1:11434', api_type: 'ollama', hosted: false, paid: false, slots: 3, memory_budget_mb: 0, window_cap_tokens: 0, models: [{ model: 'qwen', paid: false, max_concurrent: 1, context_tokens: 0, window_tokens: 0, tier: 0 }] });
   ok(t.log.includes('notify:Added local1'), 'toast');
   stop();
 });
@@ -557,3 +558,34 @@ test('H3: a model row has a tier control; the choice is sent and the card shows 
   stop2();
 });
 
+
+test('H15d: the memory budget and window cap are sent; a card with a budget can extend its windows', async () => {
+  const t = harness({});
+  const stop = t.view.mount();
+  await flush();
+  button(t.host, 'Add backend').click();
+  field(t.host, 'name').value = 'big';
+  field(t.host, 'host').value = 'http://127.0.0.1:11434';
+  field(t.host, 'model').value = 'qwen';
+  field(t.host, 'memory_budget_gb').value = '30';
+  field(t.host, 'window_cap_tokens').value = '65536';
+  button(t.host, 'Add backend').click();
+  await flush();
+  const sent = t.bodies.create as BackendInput;
+  eq([sent.memory_budget_mb, sent.window_cap_tokens], [30720, 65536]);
+  stop();
+  const none = harness({ backends: [be('b0')] });
+  const stop0 = none.view.mount();
+  await flush();
+  ok(!none.host.textContent.includes('Extend windows'), 'no button without a budget');
+  stop0();
+  const card = harness({ backends: [be('b1', { memory_budget_mb: 30720, window_cap_tokens: 65536 })] });
+  const stop2 = card.view.mount();
+  await flush();
+  ok(card.host.textContent.includes('30 GB'), 'budget shown');
+  button(card.host, 'Extend windows').click();
+  await flush();
+  ok(card.log.includes('extend:b1'), 'extend called');
+  ok(card.log.some((l) => l.startsWith('notify:Extended 1 of 1')), 'result reported');
+  stop2();
+});

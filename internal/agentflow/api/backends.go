@@ -15,6 +15,7 @@ func (a *API) registerBackends(mux muxer) {
 	mux.HandleFunc("POST /api/backends", a.createBackend)
 	mux.HandleFunc("POST /api/backends/probe", a.probeBackend)
 	mux.HandleFunc("PATCH /api/backends/{name}", a.patchBackend)
+	mux.HandleFunc("POST /api/backends/{name}/extend-windows", a.extendWindows)
 	mux.HandleFunc("POST /api/backends/{name}/retire", a.retireBackend)
 	mux.HandleFunc("POST /api/backends/{name}/enable", a.enableBackend)
 	mux.HandleFunc("GET /api/candidates", a.listCandidates)
@@ -52,7 +53,11 @@ type BackendView struct {
 	Hosted  bool   `json:"hosted"`
 	Paid    bool   `json:"paid"`
 	Slots   int    `json:"slots"`
-	Retired bool   `json:"retired"`
+	// MemoryBudgetMB is what one loaded model may use on the host, weights and context cache (H15d); 0 = not set.
+	MemoryBudgetMB int `json:"memory_budget_mb"`
+	// WindowCapTokens caps an extended window; 0 = no cap.
+	WindowCapTokens int  `json:"window_cap_tokens"`
+	Retired         bool `json:"retired"`
 	// HasKey says an API key is stored; the key is write-only.
 	HasKey    bool               `json:"has_key"`
 	Models    []BackendModelView `json:"models"`
@@ -64,7 +69,7 @@ type BackendView struct {
 
 func (a *API) backendView(b store.Backend) BackendView {
 	v := BackendView{Name: b.Name, Host: b.Host, APIType: b.APIType, Hosted: b.Hosted, Paid: b.Paid,
-		Slots: b.Slots, Retired: b.Retired, HasKey: b.HasKey, Models: []BackendModelView{}}
+		Slots: b.Slots, MemoryBudgetMB: b.MemoryBudgetMB, WindowCapTokens: b.WindowCapTokens, Retired: b.Retired, HasKey: b.HasKey, Models: []BackendModelView{}}
 	for _, m := range b.Models {
 		v.Models = append(v.Models, BackendModelView{Model: m.Model, Paid: m.Paid, MaxConcurrent: m.MaxConcurrent, ContextTokens: m.ContextTokens, WindowTokens: m.WindowTokens, WindowSource: m.WindowSource, Tier: m.Tier, Tools: m.Tools})
 	}
@@ -114,13 +119,15 @@ func (a *API) listBackends(w http.ResponseWriter, r *http.Request) {
 // backendBody is the writable part of a backend; absent fields keep their
 // value on PATCH.
 type backendBody struct {
-	Name    *string             `json:"name"`
-	Host    *string             `json:"host"`
-	APIType *string             `json:"api_type"`
-	Hosted  *bool               `json:"hosted"`
-	Paid    *bool               `json:"paid"`
-	Slots   *int                `json:"slots"`
-	Models  *[]BackendModelView `json:"models"`
+	Name            *string             `json:"name"`
+	Host            *string             `json:"host"`
+	APIType         *string             `json:"api_type"`
+	Hosted          *bool               `json:"hosted"`
+	Paid            *bool               `json:"paid"`
+	Slots           *int                `json:"slots"`
+	MemoryBudgetMB  *int                `json:"memory_budget_mb"`
+	WindowCapTokens *int                `json:"window_cap_tokens"`
+	Models          *[]BackendModelView `json:"models"`
 	// APIKey is write-only: absent keeps the stored key, "" clears it.
 	APIKey *string `json:"api_key"`
 }
@@ -143,6 +150,12 @@ func (bb backendBody) apply(b *store.Backend) {
 	}
 	if bb.Slots != nil {
 		b.Slots = *bb.Slots
+	}
+	if bb.MemoryBudgetMB != nil {
+		b.MemoryBudgetMB = *bb.MemoryBudgetMB
+	}
+	if bb.WindowCapTokens != nil {
+		b.WindowCapTokens = *bb.WindowCapTokens
 	}
 	if bb.Models != nil {
 		b.Models = make([]store.BackendModel, 0, len(*bb.Models))

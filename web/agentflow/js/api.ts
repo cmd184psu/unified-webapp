@@ -177,6 +177,10 @@ export interface Backend {
   hosted: boolean;
   paid: boolean;
   slots: number;
+  /** Memory one loaded model may use on the host, weights and context cache, in MB; 0 = not set (H15d). */
+  memory_budget_mb?: number;
+  /** Cap on an extended window, in tokens; 0 = none. */
+  window_cap_tokens?: number;
   retired: boolean;
   /** True when an API key is stored; the key itself is never sent to the UI. */
   has_key?: boolean;
@@ -195,7 +199,18 @@ export interface BackendInput {
   hosted: boolean;
   paid: boolean;
   slots: number;
+  memory_budget_mb: number;
+  window_cap_tokens: number;
   models: BackendModel[];
+}
+
+/** One model's outcome from POST /api/backends/{name}/extend-windows (H15d). */
+export interface ExtendResult {
+  model: string;
+  previous: number;
+  window: number;
+  applied: boolean;
+  note: string;
 }
 
 /** A backend write answers with the backend and the SV3 warnings. */
@@ -623,6 +638,7 @@ export const api = {
     send('PATCH', `/api/backends/${enc(name)}`, b, o),
   retireBackend: (name: string, cancelRunning: boolean): Promise<BackendResult> =>
     send('POST', `/api/backends/${enc(name)}/retire`, { cancel_running: cancelRunning }),
+  extendWindows: (name: string, apply = true): Promise<ExtendResult[]> => send('POST', `/api/backends/${enc(name)}/extend-windows`, { apply }),
   enableBackend: (name: string): Promise<BackendResult> => send('POST', `/api/backends/${enc(name)}/enable`),
   candidates: (): Promise<Candidate[]> => get('/api/candidates'),
   putCandidates: (role: string, candidates: CandidateInput[], o?: FetchOptions): Promise<Candidate[]> =>

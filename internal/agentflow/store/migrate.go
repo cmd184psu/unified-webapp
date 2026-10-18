@@ -44,7 +44,16 @@ var migrations = []migration{
 	{14, migration14SQL},
 	{15, migration15SQL},
 	{16, migration16SQL},
+	{17, migration17SQL},
 }
+
+// migration17SQL (H15d) gives each backend a memory budget and a cap on the
+// context window it is extended to. 0 means no budget set (windows are not
+// extended) and no cap.
+const migration17SQL = `
+ALTER TABLE backends ADD COLUMN memory_budget_mb INTEGER NOT NULL DEFAULT 0 CHECK (memory_budget_mb >= 0);
+ALTER TABLE backends ADD COLUMN window_cap_tokens INTEGER NOT NULL DEFAULT 0 CHECK (window_cap_tokens >= 0);
+`
 
 // migration16SQL (H15) records the context window a model is actually served
 // with, apart from the maximum it supports (context_tokens): configured by the

@@ -44,7 +44,13 @@ type Backend struct {
 	Hosted  bool
 	Paid    bool
 	Slots   int
-	Retired bool
+	// MemoryBudgetMB is the memory the host may give one loaded model, weights and
+	// context cache together (H15d); 0 means not set, so windows are not extended.
+	MemoryBudgetMB int
+	// WindowCapTokens caps an extended window below what memory allows, for hosts
+	// where a long context is too slow to be useful; 0 means no cap.
+	WindowCapTokens int
+	Retired         bool
 	// HasKey says an API key is stored; the key itself is never loaded with
 	// the backend (see BackendKey).
 	HasKey  bool
@@ -65,6 +71,9 @@ func validateBackend(b Backend) error {
 		if err := validateHostURL("host", b.Host); err != nil {
 			return err
 		}
+	}
+	if b.MemoryBudgetMB < 0 || b.WindowCapTokens < 0 {
+		return Invalid("memory_budget_mb", "memory budget and window cap must be 0 (not set) or more")
 	}
 	if b.Slots < 1 {
 		return Invalid("slots", "must be at least 1")
@@ -143,9 +152,9 @@ func (s *Store) CreateBackend(ctx context.Context, actor string, b Backend) erro
 		}
 		now := time.Now().UnixMilli()
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO backends (name, host, api_type, hosted, paid, slots, retired, created, updated)
-			VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-			b.Name, b.Host, b.APIType, b2i(b.Hosted), b2i(b.Paid), b.Slots, now, now); err != nil {
+			INSERT INTO backends (name, host, api_type, hosted, paid, slots, memory_budget_mb, window_cap_tokens, retired, created, updated)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+			b.Name, b.Host, b.APIType, b2i(b.Hosted), b2i(b.Paid), b.Slots, b.MemoryBudgetMB, b.WindowCapTokens, now, now); err != nil {
 			return err
 		}
 		if err := insertModels(ctx, tx, b); err != nil {
@@ -166,9 +175,9 @@ func (s *Store) UpdateBackend(ctx context.Context, actor string, b Backend) erro
 	}
 	return s.WithTx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `
-			UPDATE backends SET host = ?, api_type = ?, hosted = ?, paid = ?, slots = ?, updated = ?
+			UPDATE backends SET host = ?, api_type = ?, hosted = ?, paid = ?, slots = ?, memory_budget_mb = ?, window_cap_tokens = ?, updated = ?
 			WHERE name = ?`,
-			b.Host, b.APIType, b2i(b.Hosted), b2i(b.Paid), b.Slots, time.Now().UnixMilli(), b.Name)
+			b.Host, b.APIType, b2i(b.Hosted), b2i(b.Paid), b.Slots, b.MemoryBudgetMB, b.WindowCapTokens, time.Now().UnixMilli(), b.Name)
 		if err != nil {
 			return err
 		}
@@ -232,7 +241,7 @@ func (s *Store) EnableBackend(ctx context.Context, actor, name string) error {
 }
 
 func loadBackends(ctx context.Context, q querier, name string) ([]Backend, error) {
-	query := `SELECT name, host, api_type, hosted, paid, slots, retired, api_key <> '', created, updated FROM backends`
+	query := `SELECT name, host, api_type, hosted, paid, slots, memory_budget_mb, window_cap_tokens, retired, api_key <> '', created, updated FROM backends`
 	var args []any
 	if name != "" {
 		query += ` WHERE name = ?`
@@ -247,7 +256,7 @@ func loadBackends(ctx context.Context, q querier, name string) ([]Backend, error
 		var b Backend
 		var hosted, paid, retired, hasKey int
 		var created, updated int64
-		if err := rows.Scan(&b.Name, &b.Host, &b.APIType, &hosted, &paid, &b.Slots, &retired, &hasKey, &created, &updated); err != nil {
+		if err := rows.Scan(&b.Name, &b.Host, &b.APIType, &hosted, &paid, &b.Slots, &b.MemoryBudgetMB, &b.WindowCapTokens, &retired, &hasKey, &created, &updated); err != nil {
 			rows.Close()
 			return nil, err
 		}
