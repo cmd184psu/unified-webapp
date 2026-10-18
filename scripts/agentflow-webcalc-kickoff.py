@@ -209,6 +209,9 @@ status = lambda: api("GET", base, None, 200)["status"]
 if not args.resume:
     api("POST", base + "/frd/draft", {"description": SENTENCE, "polish": False}, 202)
     wait_for("draft", lambda: (api("GET", base + "/frd/draft") or {}).get("state") in ("idle", "failed"), LONG)
+    d = api("GET", base + "/frd/draft") or {}
+    if d.get("state") == "failed":  # do not approve the empty FRD behind a failed draft
+        sys.exit(f"the FRD draft failed: {d.get('error')}")
     api("POST", base + "/frd/approve", None, 200)
     api("POST", base + "/plan/generate", None, 202)
 # From here on the same steps serve a new effort and a resumed one: each gate is
