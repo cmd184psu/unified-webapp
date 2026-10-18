@@ -11,7 +11,8 @@ compile, approves the queue and starts the run. Then it exits; watch the rest in
         [--repo ~/af-webcalc] [--slug webcalc] [--scope local|any] [--lineup global|local] [--wait]
 
 --host is sent as the Host header: the service routes modules by host name.
---lineup local sets this project's own candidate lists from the registered backends' tiers instead
+--lineup free uses only hosted, unpaid backends for every role (the free opencode models, in a fixed rotation so a
+reviewer is not the worker's own model). --lineup local sets this project's own candidate lists from the registered backends' tiers instead
 of using the global lists: planner, architect, critic and compiler take tier 1 then 2 (a model
 not yet rated counts as 2); workers take tier 2, then 1; reviewers take tier 1, then 2. Only
 non-hosted backends are used, and light (tier 3) models only with --include-light.
@@ -27,16 +28,36 @@ import time
 import urllib.error
 import urllib.request
 
+# Spec v2. scripts/agentflow-webcalc-probe.py checks exactly what this promises: change both together.
 SENTENCE = (
     "Build a full-featured calculator web app in Go that runs locally on port 7070, with no authentication and no TLS. "
     "The Go server in the repository root (package main, started with `go run .`) serves a single page with digit buttons, "
     "a decimal point, the operators add, subtract, multiply and divide, equals, clear, backspace, keyboard input, and a list "
-    "of the last ten calculations. All four arithmetic operations must be performed by Go API calls, never in JavaScript: "
-    "POST /api/add, /api/subtract, /api/multiply and /api/divide each take JSON {\"a\": number, \"b\": number} and return "
-    "{\"result\": number}; dividing by zero returns HTTP 400 with {\"error\": \"division by zero\"}; invalid JSON returns "
-    "HTTP 400 with an error. The server keeps the history of the last ten calculations in memory and serves it from GET "
-    "/api/history (newest first), and clears it with DELETE /api/history. The page is served from GET /. Include Go tests "
-    "for the four operations, the error cases and the history.")
+    "of the last ten calculations. All arithmetic must be performed by Go API calls, never in JavaScript. "
+    "The calculation endpoints accept only POST and /api/history accepts only GET and DELETE; any other method returns HTTP 405. "
+    "Every API response has Content-Type application/json. "
+    "POST /api/add, /api/subtract, /api/multiply, /api/divide, /api/power (a to the power b) and /api/modulo (the remainder of a "
+    "divided by b, with the sign of a, like Go's math.Mod) each take JSON {\"a\": number, \"b\": number} and return {\"result\": number}; "
+    "POST /api/sqrt, /api/sin, /api/cos and /api/tan (angles in radians) take {\"a\": number} and return {\"result\": number}. "
+    "POST /api/factorial takes {\"a\": number}, which must be an integer from 0 to 170, and returns its factorial. "
+    "POST /api/primes takes {\"count\": integer from 1 to 1000} and returns {\"result\": [the first count prime numbers, ascending]}; "
+    "because its result is a list, it is not recorded in the history. "
+    "Invalid JSON, or a missing or non-numeric field, returns HTTP 400 with {\"error\": message}. "
+    "Dividing or taking a modulo by zero returns HTTP 400 with {\"error\": \"division by zero\"}; the square root of a negative number, "
+    "a factorial or primes argument outside its range, or a power whose result is not a finite number (for example 0 to the power -1), "
+    "returns HTTP 400 with {\"error\": \"domain error\"}. "
+    "POST /api/evaluate takes {\"expression\": string} and returns {\"result\": number}: the expression uses decimal numbers, the constant pi, "
+    "+ - * /, ^ (power: right-associative, binds tighter than * and /, and tighter than a unary minus before its base, so -2^2 is -4 "
+    "and 2^3^2 is 512; the exponent may carry a unary minus, so 2^-1 is 0.5), parentheses, unary minus (before a number, a function or a "
+    "parenthesised group), and the functions sqrt, sin, cos and tan applied to a parenthesised expression, with the usual precedence "
+    "and left-to-right associativity for the rest; whitespace is ignored. Anything else (an unknown name, a missing operand or "
+    "parenthesis, an empty expression) returns HTTP 400 with {\"error\": \"invalid expression\"}; a division by zero inside it returns "
+    "{\"error\": \"division by zero\"} and a domain error inside it (such as sqrt(-1)) returns {\"error\": \"domain error\"}. "
+    "The server keeps the last ten successful calculations in memory (a failed call is not recorded) and serves them from GET "
+    "/api/history, newest first, as a JSON list of {\"expression\": string, \"result\": number}; for /api/evaluate the expression "
+    "is the string as received, for the other endpoints it is readable text showing the operation and its operands, for example "
+    "\"7 + 2\". DELETE /api/history clears it. The history must be safe for concurrent requests. The page is served from GET /. "
+    "Include Go tests for the operations, the expression evaluator, the error cases and the history.")
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--url", default="https://agentflow.builder.cmdhome.net")
@@ -46,8 +67,8 @@ ap.add_argument("--repo", default=os.path.expanduser("~/af-webcalc"))
 ap.add_argument("--slug", default="webcalc")
 ap.add_argument("--scope", default="any", choices=("local", "any"),
                 help="model scope: any lets hosted backends (the free opencode models) be used")
-ap.add_argument("--lineup", default="global", choices=("global", "local"),
-                help="local: build this project's candidate lists from the non-hosted backends by tier")
+ap.add_argument("--lineup", default="global", choices=("global", "local", "free"),
+                help="local: build this project's candidate lists from the non-hosted backends by tier; free: only the hosted backends that cost nothing (the free opencode models)")
 ap.add_argument("--include-light", action="store_true", help="with --lineup local: let tier 3 models work as workers")
 ap.add_argument("--exclude-backend", action="append", default=["kimi-waste"],
                 help="with --lineup local: backend to leave out (repeatable; default kimi-waste, too slow for a worker)")
@@ -129,6 +150,19 @@ missing = [r for r in ("planner", "architect", "critic", "compiler", "worker", "
 if missing:
     sys.exit("no candidate configured for: " + ", ".join(missing) + " (add them in the UI first)")
 
+if args.lineup == "free":
+    free = [(b["name"], m["model"]) for b in api("GET", "/api/backends", None, 200)
+            if b.get("hosted") and not b.get("paid") and not b.get("retired") for m in b["models"] if not m.get("paid")]
+    if not free:
+        sys.exit("--lineup free: no hosted unpaid backend with a model")
+    # each role starts at a different model, so the reviewer is not the worker's own model
+    lineup = {role: [{"backend": be, "model": m} for be, m in free[i % len(free):] + free[:i % len(free)]]
+              for i, role in enumerate(("planner", "architect", "critic", "compiler", "worker", "reviewer"))}
+    for role, lst in lineup.items():
+        say(f"{role}: " + ", ".join(f"{c['backend']}/{c['model']}" for c in lst))
+    if args.dry_run:
+        sys.exit(0)
+
 if args.lineup == "local":
     pool = []  # (tier, backend, model); tier 0 (not rated) counts as 2
     for b in api("GET", "/api/backends", None, 200):
@@ -163,7 +197,7 @@ if not os.path.isdir(os.path.join(args.repo, ".git")):
 slug = args.slug
 if not args.resume:
     api("POST", "/api/projects", {"slug": slug, "repo_path": args.repo, "model_scope": args.scope}, 201)
-if args.lineup == "local" and not args.resume:
+if args.lineup in ("local", "free") and not args.resume:
     for role, lst in lineup.items():
         api("PUT", f"/api/projects/{slug}/candidates/{role}", {"candidates": lst}, 200)
 
