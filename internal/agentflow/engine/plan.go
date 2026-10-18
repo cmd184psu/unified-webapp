@@ -776,6 +776,22 @@ func revisionContext(sess *planSession, stage int64) string {
 // try, so the same model crashed again until the infrastructure budget ran out.
 func avoidKey(backend, model string) string { return backend + "\x00" + model }
 
+// avoidTried names every backend and model the stages of a run already used,
+// for a retry after a reply that was read but wrong (a draft or queue that left
+// out required strings). Avoiding only the last one let two models trade the
+// task back and forth while a third was never asked.
+func avoidTried(stages []model.Stage) string {
+	keys := make([]string, 0, len(stages))
+	for _, s := range stages {
+		keys = append(keys, avoidKey(s.Backend, s.Model))
+	}
+	return strings.Join(keys, "\x01")
+}
+
+func avoided(avoid, key string) bool {
+	return avoid != "" && slices.Contains(strings.Split(avoid, "\x01"), key)
+}
+
 // pickEffortStage chooses the backend and model for a planning-loop or
 // compiler stage. Candidates are walked in order (MB4); a model another
 // planning role already used is skipped unless nothing else is eligible, in
@@ -789,7 +805,7 @@ func (e *Engine) pickEffortStage(ctx context.Context, p store.Project, role stri
 	var reasons []string
 	var fallback *Pick
 	for _, c := range v.snap.CandidatesFor(role, p.Slug) {
-		if avoid != "" && avoid == avoidKey(c.Backend, c.Model) {
+		if avoided(avoid, avoidKey(c.Backend, c.Model)) {
 			reasons = append(reasons, "model "+c.Model+" on "+c.Backend+" just failed")
 			continue
 		}

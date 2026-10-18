@@ -136,7 +136,7 @@ func (e *Engine) advanceCompile(ctx context.Context, p store.Project, ef model.E
 		return err
 	} else if len(miss) > 0 {
 		if len(stages) < 3 { // two more tries, each on another model; the prompt names the strings that must appear
-			return e.startEffortStage(ctx, p, ef.ID, "compiler", nil, avoidKey(last.Backend, last.Model))
+			return e.startEffortStage(ctx, p, ef.ID, "compiler", nil, avoidTried(stages))
 		}
 		return e.haltCompile(ctx, ef, last, (&literalsError{missing: miss, from: "the task queue"}).Error())
 	}
@@ -144,7 +144,7 @@ func (e *Engine) advanceCompile(ctx context.Context, p store.Project, ef model.E
 		return err
 	} else if len(probs) > 0 {
 		if len(stages) < 3 { // two more tries, each on another model; the prompt names the problems
-			return e.startEffortStage(ctx, p, ef.ID, "compiler", nil, avoidKey(last.Backend, last.Model))
+			return e.startEffortStage(ctx, p, ef.ID, "compiler", nil, avoidTried(stages))
 		}
 		return e.haltCompile(ctx, ef, last, "the task queue does not match the FRD: "+strings.Join(probs, "; "))
 	}

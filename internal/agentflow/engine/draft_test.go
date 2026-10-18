@@ -559,7 +559,7 @@ func TestDraftMissingStringsRetriesOnOtherModels(t *testing.T) {
 		t.Fatalf("planner calls = %d, want 3", len(calls))
 	}
 	m := func(i int) string { return calls[i].Request.Model }
-	if m(0) == m(1) || m(1) == m(2) {
-		t.Fatalf("a retry reused the previous model: %s, %s, %s", m(0), m(1), m(2))
+	if m(0) == m(1) || m(1) == m(2) || m(0) == m(2) {
+		t.Fatalf("a retry reused a model already tried: %s, %s, %s", m(0), m(1), m(2))
 	}
 }

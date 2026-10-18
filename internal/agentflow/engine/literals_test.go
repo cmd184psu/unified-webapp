@@ -47,7 +47,7 @@ func TestH1_DraftThatDropsTheRequestsPortIsRetriedThenAccepted(t *testing.T) {
 func TestH1_DraftThatKeepsDroppingAStringFailsNamingIt(t *testing.T) {
 	f := newPlanFix(t, false)
 	f.standardPool()
-	f.fake.Script("planner", runner.Step{Reply: draftReply}, runner.Step{Reply: draftReply}, runner.Step{Reply: draftReply})
+	f.fake.Script("planner", runner.Step{Reply: draftReply}, runner.Step{Reply: draftReply}, runner.Step{Reply: draftReply}, runner.Step{Reply: draftReply})
 	f.startEngine()
 	ctx := context.Background()
 	if err := f.eng.StartDraft(ctx, "alice", f.effort, DraftRequest{Purpose: PurposeDraft, Description: portAsk}); err != nil {
@@ -57,8 +57,8 @@ func TestH1_DraftThatKeepsDroppingAStringFailsNamingIt(t *testing.T) {
 	if !strings.Contains(v.Error, "7070") || !strings.Contains(v.Error, "/api/hello") {
 		t.Fatalf("error = %q, want the missing strings named", v.Error)
 	}
-	if n := len(f.fake.CallsFor("planner")); n != 3 {
-		t.Fatalf("planner calls = %d, want the draft and two retries", n)
+	if n := len(f.fake.CallsFor("planner")); n != 4 {
+		t.Fatalf("planner calls = %d, want the draft and three retries", n)
 	}
 	if _, rev := f.latestFRD(); rev != 1 {
 		t.Fatalf("a failed draft changed the FRD: revision %d", rev)
