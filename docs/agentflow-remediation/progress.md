@@ -293,6 +293,14 @@ Same one-sentence spec every time (`scripts/agentflow-webcalc-kickoff.py`), scor
 
 Effort 6 onward: `scripts/agentflow-webcalc-local.py` builds the lineup from tiers and probes the result.
 
+**Effort 10: free models, spec v2, independent probe (2026-10-18)**
+
+`webcalc-f1` on the five hosted free models: all 12 tasks passed on their first attempt (12 normal attempts, no repairs). The v2 probe (`scripts/agentflow-webcalc-probe.py`, run outside the project's own tests) scored **build 3/3, API 106/106, page 5/5, SUCCESS**. Not comparable with efforts 3 to 6, which were scored by the v1 probe.
+- Planning: 8 architect, 4 compiler, 3 critic and 1 planner infra failures (crashes, one timeout) before each role passed. The first run halted overnight on five architect crashes in a row (H16); after the fix the retries moved to other models and planning went through.
+- Tokens: worker 6.79M, reviewer 0.36M, planning and compile 0.22M. One worker infra crash, retried.
+- The wall-clock span in the database (about ten hours) includes the overnight halt, so it says nothing about run speed.
+- Not yet shown: the same result on the local models.
+
 ## UX: projects and efforts are easy to confuse (owner, 2026-10-16)
 
 The owner looked at the Board of an old effort and read it as the running work, because the screen shows a *project* picker and an *effort* bar next to each other and the trial projects were named after their runs (`webcalc-local`, `-local2`, `-local3`), each holding one effort called "web calculator". Seen on the way there: the Overview card says "running" twice (the project's run state, then the effort's status); the Project tab opens on the project used last, with nothing to say another project is working; every effort in the list has the same title.
