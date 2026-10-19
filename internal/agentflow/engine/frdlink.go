@@ -38,11 +38,19 @@ func (e *Engine) frdSection(ctx context.Context, task model.Task) string {
 	if len(want) == 0 {
 		return ""
 	}
+	// A criterion's links are broad when the drafter tied every criterion to
+	// every requirement, which would hand one task the whole FRD. A task that
+	// names requirements itself is held to those; links are followed only
+	// when it names none.
+	direct := false
+	for _, r := range f.Requirements {
+		direct = direct || want[r.ID]
+	}
 	var b strings.Builder
 	for _, r := range f.Requirements {
 		linked := false
 		for _, ac := range f.AcceptanceCriteria {
-			if want[ac.ID] {
+			if want[ac.ID] && !direct {
 				for _, rid := range ac.Requirements {
 					linked = linked || rid == r.ID
 				}

@@ -151,7 +151,7 @@ func TestH1_WorkerAndReviewerPromptsCarryTheApprovedRequirementText(t *testing.T
 			t.Fatal(err)
 		}
 		if _, err := h.st.EditTask(ctx, "t", fx.payload.Effort, model.TaskDef{Key: "T1", Phase: "P1", Title: "first", Prompt: "do it",
-			Acceptance: []string{"R1: the server starts", "AC1: adds work"}}); err != nil {
+			Acceptance: []string{"AC1: adds work"}}); err != nil {
 			t.Fatal(err)
 		}
 		st, err := h.st.GetStage(ctx, fx.stage.ID)
@@ -162,11 +162,41 @@ func TestH1_WorkerAndReviewerPromptsCarryTheApprovedRequirementText(t *testing.T
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, want := range []string{"approved requirements behind these criteria", "R1: Listen on port 7070", "R2: POST /api/add adds", "AC1: POST /api/add returns {result}"} {
+		for _, want := range []string{"approved requirements behind these criteria", "R2: POST /api/add adds", "AC1: POST /api/add returns {result}"} {
 			if !strings.Contains(got, want) {
 				t.Fatalf("%s prompt lacks %q:\n%s", role, want, got)
 			}
 		}
+	}
+}
+
+// H19: a drafter that links every criterion to every requirement must not
+// hand a task the whole FRD; a task that names a requirement is held to the
+// requirements it names.
+func TestH19_TaskNamingARequirementIsNotGivenEveryLinkedRequirement(t *testing.T) {
+	h := newHarness(t)
+	h.start()
+	ctx := context.Background()
+	fx := h.attemptStage("b-narrow", "worker")
+	frd := `{"title":"T","objective":"o","requirements":[{"id":"R1","description":"Listen on port 7070"},{"id":"R2","description":"POST /api/add adds"}],` +
+		`"acceptance_criteria":[{"id":"AC1","requirements":["R1","R2"],"criterion":"the page loads"}]}`
+	if _, err := h.st.SaveDoc(ctx, "t", fx.payload.Effort, model.DocFRD, []byte(frd)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.st.EditTask(ctx, "t", fx.payload.Effort, model.TaskDef{Key: "T1", Phase: "P1", Title: "first", Prompt: "do it",
+		Acceptance: []string{"R1: the server starts", "AC1: the page loads"}}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := h.st.GetStage(ctx, fx.stage.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.eng.buildPrompt(ctx, st, fx.payload.Project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "R1: Listen on port 7070") || strings.Contains(got, "R2: POST /api/add adds") {
+		t.Fatalf("prompt:\n%s", got)
 	}
 }
 
