@@ -138,3 +138,7 @@ A behavioral smoke stage that starts the built program (the sandbox forbids netw
 ### H19 A task is held to the requirements it names
 
 Effort 13 (local trial) exhausted T001 ("basic web server with HTML page") in five attempts. The FRD, drafted by a small model, linked every acceptance criterion to every requirement R1 to R9. `frdSection` expands a cited criterion into its linked requirements, so the T001 worker and reviewer both received the whole FRD. The worker wrote the whole application in one 849-line file and the reviewer then demanded R3, R4 and R7 of a task that owns only the page; the repairs corrupted the file. `frdSection` now uses the requirements a task names itself and follows a criterion's links only when the task names none. Test: `TestH19_TaskNamingARequirementIsNotGivenEveryLinkedRequirement`.
+
+### H20 Duty cap per backend
+
+A host that runs hot (the M5 power brick) can be held to a lower pace without taking it offline. Each backend has `duty_percent` (10 to 100; 100 is no cap, stored as 0), set by `PATCH /api/backends/{name}` and by the Pace choice on the backend card, applied at once with no restart. After a stage ends the backend is given no new one for the stage's running time times (100-d)/d, up to 30 minutes (`BackendRestUntil`); stages already running are not touched, and a task that waits says "backend X is resting under its duty cap until HH:MM". Disable (retire) remains the way to stop a host now. The cap is part of the configuration export.

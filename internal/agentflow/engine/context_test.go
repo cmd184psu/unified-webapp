@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/model"
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
@@ -293,5 +294,26 @@ func TestCompileRetryAfterACrashKeepsAwayFromEveryTriedModel(t *testing.T) {
 	m := func(i int) string { return calls[i].Request.Model }
 	if m(0) == m(1) || m(1) == m(2) || m(0) == m(2) {
 		t.Fatalf("a retry went back to a model already tried: %s, %s, %s", m(0), m(1), m(2))
+	}
+}
+
+// H20: a backend resting under its duty cap is passed over for a stage that
+// needs a slot, with the time it comes back; asking only whether the candidate
+// could ever serve is unaffected.
+func TestH20_SkipReasonNamesARestingBackend(t *testing.T) {
+	until := time.Date(2026, 10, 19, 17, 30, 0, 0, time.UTC)
+	v := &view{
+		snap:    store.Snapshot{Backends: []store.Backend{{Name: "gpu", Slots: 1}}},
+		free:    map[string]int{"gpu": 1},
+		down:    map[string]bool{},
+		resting: map[string]time.Time{"gpu": until},
+	}
+	c := store.Candidate{Backend: "gpu", Model: "m", Role: "worker"}
+	got := skipReason(v, store.Project{}, c, true)
+	if !strings.Contains(got, "resting under its duty cap until 17:30") {
+		t.Fatalf("reason = %q", got)
+	}
+	if got := skipReason(v, store.Project{}, c, false); got != "" {
+		t.Fatalf("a resting backend could still serve later, got %q", got)
 	}
 }

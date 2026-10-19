@@ -120,6 +120,9 @@ type view struct {
 	free map[string]int
 	// down are the backends in their unreachable cooldown (MB7).
 	down map[string]bool
+	// resting maps a backend under a duty cap (H20) that is resting to the time
+	// it may start work again, for the reason a task waits.
+	resting map[string]time.Time
 	// modelFree is the remaining per-model concurrency (PX5) of every model
 	// that has a limit, keyed by modelKey.
 	modelFree map[string]int
@@ -147,13 +150,19 @@ func (e *Engine) newView(ctx context.Context) (*view, error) {
 	if err != nil {
 		return nil, err
 	}
-	v := &view{snap: snap, free: map[string]int{}, down: map[string]bool{}, modelFree: map[string]int{}, strikes: strikes}
+	v := &view{snap: snap, free: map[string]int{}, down: map[string]bool{}, resting: map[string]time.Time{}, modelFree: map[string]int{}, strikes: strikes}
 	for b := range e.health.active(e.deps.Clock()) {
 		v.down[b] = true
 	}
+	now := e.deps.Clock()
 	for _, b := range snap.Backends {
 		if !b.Retired {
 			v.free[b.Name] = b.Slots
+			if until, err := e.deps.Store.BackendRestUntil(ctx, b.Name, b.DutyPercent, now); err != nil {
+				return nil, err
+			} else if until > 0 {
+				v.resting[b.Name] = time.UnixMilli(until)
+			}
 			for _, m := range b.Models {
 				if m.MaxConcurrent > 0 {
 					v.modelFree[modelKey(b.Name, m.Model)] = m.MaxConcurrent
@@ -588,6 +597,8 @@ func skipReason(v *view, p store.Project, c store.Candidate, needSlot bool) stri
 		return fmt.Sprintf("model %s is rated light (tier 3), too weak for role %s", c.Model, c.Role)
 	case needSlot && v.down[c.Backend]:
 		return "backend " + c.Backend + " is down"
+	case needSlot && !v.resting[c.Backend].IsZero():
+		return fmt.Sprintf("backend %s is resting under its duty cap until %s", c.Backend, v.resting[c.Backend].Format("15:04"))
 	case needSlot && v.free[c.Backend] <= 0:
 		return "no free slot on " + c.Backend
 	case needSlot && modelFull(v, c):

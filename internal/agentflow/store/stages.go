@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/model"
 )
@@ -143,4 +144,42 @@ func (s *Store) OpenStages(ctx context.Context) ([]model.Stage, error) {
 
 func taskStages(ctx context.Context, q querier, task int64) ([]model.Stage, error) {
 	return queryStages(ctx, q, `attempt IN (SELECT id FROM attempts WHERE task = ?)`, task)
+}
+
+// dutyRestMax bounds one rest under a duty cap, so a very long stage under a
+// low cap does not park its backend for hours.
+const dutyRestMax = 30 * time.Minute
+
+// BackendRestUntil is the time (unix ms) before which a backend under a duty
+// cap of duty percent is given no new stage: each stage that ended within the
+// longest rest is followed by a rest of its running time times (100-duty)/duty,
+// up to dutyRestMax. It is 0 when no rest is owed.
+func (s *Store) BackendRestUntil(ctx context.Context, backend string, duty int, now time.Time) (int64, error) {
+	if duty <= 0 || duty >= 100 {
+		return 0, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT started, finished FROM stages WHERE backend = ? AND started > 0 AND finished >= ?`,
+		backend, now.Add(-dutyRestMax).UnixMilli())
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	var until int64
+	for rows.Next() {
+		var started, finished int64
+		if err := rows.Scan(&started, &finished); err != nil {
+			return 0, err
+		}
+		rest := (finished - started) * int64(100-duty) / int64(duty)
+		if max := dutyRestMax.Milliseconds(); rest > max {
+			rest = max
+		}
+		if end := finished + rest; end > until {
+			until = end
+		}
+	}
+	if until <= now.UnixMilli() {
+		return 0, rows.Err()
+	}
+	return until, rows.Err()
 }

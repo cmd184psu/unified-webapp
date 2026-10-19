@@ -194,6 +194,8 @@ export interface Backend {
   memory_budget_mb?: number;
   /** Cap on an extended window, in tokens; 0 = none. */
   window_cap_tokens?: number;
+  /** Share of the time the backend may be kept busy, 10 to 100; 100 = no cap (H20). */
+  duty_percent?: number;
   retired: boolean;
   /** True when an API key is stored; the key itself is never sent to the UI. */
   has_key?: boolean;
@@ -214,6 +216,7 @@ export interface BackendInput {
   slots: number;
   memory_budget_mb: number;
   window_cap_tokens: number;
+  duty_percent?: number;
   models: BackendModel[];
 }
 

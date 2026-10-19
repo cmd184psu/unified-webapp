@@ -197,6 +197,21 @@ test('edit patches the backend without renaming it', async () => {
   stop();
 });
 
+test('H20: the Pace choice on a backend card sets its duty cap with no restart', async () => {
+  const t = harness({ backends: [be('b1'), be('b2', { retired: true })] });
+  const stop = t.view.mount();
+  await flush();
+  eq(byAttr(t.host, 'data-field', 'duty_percent').length, 1, 'a disabled backend has no pace');
+  const pace = field(t.host, 'duty_percent') as FakeEl;
+  eq(pace.value, '100', 'full speed by default');
+  pace.value = '50';
+  pace.fire('change');
+  await flush();
+  eq(t.log.filter((l) => l.startsWith('patch:')), ['patch:b1']);
+  eq((t.bodies.patch as Partial<BackendInput>).duty_percent, 50);
+  stop();
+});
+
 test('SV3: retiring the last backend shows the warning up front and the server warnings after', async () => {
   const t = harness({ backends: [be('b1')], candidates: [cand('worker', 0, 'b1', 'm1')] });
   const stop = t.view.mount();

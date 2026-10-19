@@ -46,13 +46,22 @@ var migrations = []migration{
 	{16, migration16SQL},
 	{17, migration17SQL},
 	{18, migration18SQL},
+	{19, migration19SQL},
 }
+
+// migration19SQL (H20) gives each backend a duty cap: the share of time it may
+// be kept busy, so a host that runs hot can be held to a lower pace. 0 means
+// no cap.
+const migration19SQL = `
+ALTER TABLE backends ADD COLUMN duty_percent INTEGER NOT NULL DEFAULT 0 CHECK (duty_percent = 0 OR duty_percent BETWEEN 10 AND 99);
+`
 
 // migration18SQL (H15e) marks a model whose weights leave no room for the
 // minimum context inside its host's memory budget. Dispatch and planning pass
 // over it; Extend windows sets and clears the mark.
 const migration18SQL = `
 ALTER TABLE backend_models ADD COLUMN too_big INTEGER NOT NULL DEFAULT 0 CHECK (too_big IN (0, 1));
+
 `
 
 // migration17SQL (H15d) gives each backend a memory budget and a cap on the

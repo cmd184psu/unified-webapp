@@ -373,10 +373,31 @@ export class BackendsView {
         b.api_type === 'opencode' ? null : h('div', {}, h('label', { text: 'Host' }), h('span', { text: b.host })),
         h('div', {}, h('label', { text: 'API type' }), h('span', { text: b.api_type })),
         h('div', {}, h('label', { text: 'Slots' }), h('span', { text: String(b.slots) })),
+        b.retired ? null : h('div', {}, h('label', { text: 'Pace' }), this.paceSelect(b)),
         b.memory_budget_mb ? h('div', {}, h('label', { text: 'Memory budget' }), h('span', { text: `${Math.round(b.memory_budget_mb / 1024)} GB${b.window_cap_tokens ? `, windows capped at ${formatTokens(b.window_cap_tokens)}` : ''}` })) : null,
         h('div', {}, h('label', { text: 'Models' }), ...models)),
       b.api_type === 'ollama' && !b.retired ? this.panelFor(b.name).el : null,
       this.retiring.has(b.name) ? this.retirePanel(b) : null);
+  }
+
+  /** Pace is the duty cap (H20): how much of the time the backend may be kept busy. It applies at once, with no restart. */
+  private paceSelect(b: Backend): HTMLElement {
+    const now = b.duty_percent && b.duty_percent < 100 ? b.duty_percent : 100;
+    const opts: Array<[string, string]> = [['100', 'Full speed'], ['75', 'Busy 75% of the time'], ['50', 'Busy 50% of the time'], ['25', 'Busy 25% of the time']];
+    if (!opts.some(([v]) => v === String(now))) opts.push([String(now), `Busy ${now}% of the time`]);
+    const sel = selectInput('duty_percent', opts, String(now));
+    sel.addEventListener('change', () => {
+      void (async () => {
+        try {
+          await this.deps.patchBackend(b.name, { duty_percent: Number(sel.value) }, { quiet: true });
+          this.deps.notify(Number(sel.value) >= 100 ? `${b.name} runs at full speed` : `${b.name} is held to ${sel.value}% busy`);
+        } catch {
+          // the server's message is already shown
+        }
+        await this.load();
+      })();
+    });
+    return sel;
   }
 
   /** Raise each model's served window as far as the backend's memory budget allows (H15d). */

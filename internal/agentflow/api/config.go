@@ -42,6 +42,7 @@ type configBackend struct {
 	Slots           int    `json:"slots"`
 	MemoryBudgetMB  int    `json:"memory_budget_mb,omitempty"`
 	WindowCapTokens int    `json:"window_cap_tokens,omitempty"`
+	DutyPercent     int    `json:"duty_percent,omitempty"`
 	Retired         bool   `json:"retired,omitempty"`
 	// HasKey is information only: a key is never exported or imported.
 	HasKey bool               `json:"has_key,omitempty"`
@@ -83,7 +84,7 @@ func (a *API) exportConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, b := range snap.Backends {
 		cb := configBackend{Name: b.Name, Host: b.Host, APIType: b.APIType, Hosted: b.Hosted, Paid: b.Paid, Slots: b.Slots,
-			MemoryBudgetMB: b.MemoryBudgetMB, WindowCapTokens: b.WindowCapTokens, Retired: b.Retired, HasKey: b.HasKey, Models: []BackendModelView{}}
+			MemoryBudgetMB: b.MemoryBudgetMB, WindowCapTokens: b.WindowCapTokens, DutyPercent: b.DutyPercent, Retired: b.Retired, HasKey: b.HasKey, Models: []BackendModelView{}}
 		for _, m := range b.Models {
 			cb.Models = append(cb.Models, BackendModelView{Model: m.Model, Paid: m.Paid, MaxConcurrent: m.MaxConcurrent,
 				ContextTokens: m.ContextTokens, WindowTokens: m.WindowTokens, WindowSource: m.WindowSource, Tier: m.Tier, Tools: m.Tools})
@@ -156,7 +157,7 @@ func (a *API) importConfig(w http.ResponseWriter, r *http.Request) {
 			rep.Warnings = append(rep.Warnings, "skipped retired backend "+cb.Name)
 			continue
 		}
-		b := store.Backend{Name: cb.Name, Host: cb.Host, APIType: cb.APIType, Hosted: cb.Hosted, Paid: cb.Paid, Slots: cb.Slots, MemoryBudgetMB: cb.MemoryBudgetMB, WindowCapTokens: cb.WindowCapTokens}
+		b := store.Backend{Name: cb.Name, Host: cb.Host, APIType: cb.APIType, Hosted: cb.Hosted, Paid: cb.Paid, Slots: cb.Slots, MemoryBudgetMB: cb.MemoryBudgetMB, WindowCapTokens: cb.WindowCapTokens, DutyPercent: cb.DutyPercent}
 		for _, m := range cb.Models {
 			bm := store.BackendModel{Model: m.Model, Paid: m.Paid, MaxConcurrent: m.MaxConcurrent, ContextTokens: m.ContextTokens, WindowTokens: m.WindowTokens, Tier: m.Tier}
 			if bm.WindowTokens > 0 {

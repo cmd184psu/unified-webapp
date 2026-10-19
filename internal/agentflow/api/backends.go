@@ -58,8 +58,10 @@ type BackendView struct {
 	// MemoryBudgetMB is what one loaded model may use on the host, weights and context cache (H15d); 0 = not set.
 	MemoryBudgetMB int `json:"memory_budget_mb"`
 	// WindowCapTokens caps an extended window; 0 = no cap.
-	WindowCapTokens int  `json:"window_cap_tokens"`
-	Retired         bool `json:"retired"`
+	WindowCapTokens int `json:"window_cap_tokens"`
+	// DutyPercent is the share of time the backend may be kept busy; 100 = no cap.
+	DutyPercent int  `json:"duty_percent"`
+	Retired     bool `json:"retired"`
 	// HasKey says an API key is stored; the key is write-only.
 	HasKey    bool               `json:"has_key"`
 	Models    []BackendModelView `json:"models"`
@@ -69,9 +71,17 @@ type BackendView struct {
 	SuspendedSince int64 `json:"suspended_since,omitempty"`
 }
 
+// dutyShown is a stored duty cap as the API states it: 100 for no cap.
+func dutyShown(d int) int {
+	if d <= 0 {
+		return 100
+	}
+	return d
+}
+
 func (a *API) backendView(b store.Backend) BackendView {
 	v := BackendView{Name: b.Name, Host: b.Host, APIType: b.APIType, Hosted: b.Hosted, Paid: b.Paid,
-		Slots: b.Slots, MemoryBudgetMB: b.MemoryBudgetMB, WindowCapTokens: b.WindowCapTokens, Retired: b.Retired, HasKey: b.HasKey, Models: []BackendModelView{}}
+		Slots: b.Slots, MemoryBudgetMB: b.MemoryBudgetMB, WindowCapTokens: b.WindowCapTokens, DutyPercent: dutyShown(b.DutyPercent), Retired: b.Retired, HasKey: b.HasKey, Models: []BackendModelView{}}
 	for _, m := range b.Models {
 		v.Models = append(v.Models, BackendModelView{Model: m.Model, Paid: m.Paid, MaxConcurrent: m.MaxConcurrent, ContextTokens: m.ContextTokens, WindowTokens: m.WindowTokens, WindowSource: m.WindowSource, Tier: m.Tier, Tools: m.Tools, TooBig: m.TooBig})
 	}
@@ -129,6 +139,7 @@ type backendBody struct {
 	Slots           *int                `json:"slots"`
 	MemoryBudgetMB  *int                `json:"memory_budget_mb"`
 	WindowCapTokens *int                `json:"window_cap_tokens"`
+	DutyPercent     *int                `json:"duty_percent"`
 	Models          *[]BackendModelView `json:"models"`
 	// APIKey is write-only: absent keeps the stored key, "" clears it.
 	APIKey *string `json:"api_key"`
@@ -158,6 +169,9 @@ func (bb backendBody) apply(b *store.Backend) {
 	}
 	if bb.WindowCapTokens != nil {
 		b.WindowCapTokens = *bb.WindowCapTokens
+	}
+	if bb.DutyPercent != nil {
+		b.DutyPercent = *bb.DutyPercent
 	}
 	if bb.Models != nil {
 		b.Models = make([]store.BackendModel, 0, len(*bb.Models))
