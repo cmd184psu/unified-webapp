@@ -191,7 +191,7 @@ func (e *Engine) queueProblems(ctx context.Context, effort int64, defs []model.T
 	if err != nil || !ok {
 		return nil, err
 	}
-	probs := model.QueueCoverageProblems(f, defs)
+	probs := append(model.QueueCoverageProblems(f, defs), model.QueueTestShapeProblems(defs)...)
 	ctxProbs, err := e.queueContextProblems(ctx, effort, defs)
 	if err != nil {
 		return nil, err

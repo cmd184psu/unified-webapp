@@ -66,7 +66,7 @@ func (x verifyExecutor) Execute(ctx context.Context, rc golane.RunContext, st mo
 	if err != nil {
 		return StageResult{}, fmt.Errorf("task base commit: %w", err)
 	}
-	others, err := e.ownedByOthers(ctx, c)
+	others, err := e.ownedByOthers(ctx, c, e.limitsFor(set))
 	if err != nil {
 		return StageResult{}, err
 	}
@@ -255,9 +255,16 @@ func (e *Engine) reviewEvidence(ctx context.Context, attempt int64) (string, err
 // that this task is not built on: every task that is neither this one nor one
 // of its dependencies, direct or indirect. A dependency's files are already in
 // this task's tree, so changing them cannot conflict at merge; a file of an
-// unrelated task can (H11).
-func (e *Engine) ownedByOthers(ctx context.Context, c *chain) ([]string, error) {
+// unrelated task can (H11). A task already passed (merged) is no longer "to
+// write" anything: its files are in the effort branch this task started from, and
+// a later task that finds a defect in one of them may fix it (the reviewer sees the
+// change as outside files_touched).
+func (e *Engine) ownedByOthers(ctx context.Context, c *chain, lim model.Limits) ([]string, error) {
 	tasks, err := e.deps.Store.ListTasks(ctx, c.eff.ID)
+	if err != nil {
+		return nil, err
+	}
+	status, err := e.deps.Store.TaskStatuses(ctx, c.eff.ID, lim)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +285,7 @@ func (e *Engine) ownedByOthers(ctx context.Context, c *chain) ([]string, error) 
 	walk(c.task.Key)
 	var out []string
 	for _, t := range tasks {
-		if !upstream[t.Key] {
+		if !upstream[t.Key] && !status[t.Key].Done() {
 			out = append(out, t.FilesTouched...)
 		}
 	}

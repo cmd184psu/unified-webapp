@@ -105,7 +105,7 @@ func Structural(ctx context.Context, in Input) (VerifyReport, error) {
 		if len(outOfScope([]string{f}, in.FilesTouched, false)) > 0 || len(in.FilesTouched) == 0 {
 			taken[f] = true
 			scope.Pass = false
-			scope.Details = append(scope.Details, "belongs to another task, which has not been merged into this one: "+f)
+			scope.Details = append(scope.Details, "belongs to another task that is not finished yet, so it is out of scope: "+f+" (do not change it; if this task cannot be done without that change, report blocked and name the file)")
 		}
 	}
 	for _, f := range outOfScope(files, in.FilesTouched, false) {

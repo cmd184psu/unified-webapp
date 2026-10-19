@@ -848,11 +848,43 @@ func TestH11_OwnedByOthersLeavesOutTheTasksItBuildsOn(t *testing.T) {
 	for _, tk := range f.tasks {
 		byKey[tk.Key] = tk
 	}
-	got, err := h.eng.ownedByOthers(context.Background(), &chain{eff: model.Effort{ID: f.effort}, task: byKey["T3"]})
+	got, err := h.eng.ownedByOthers(context.Background(), &chain{eff: model.Effort{ID: f.effort}, task: byKey["T3"]}, model.Limits{MaxAttempts: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 1 || got[0] != "d.go" {
 		t.Fatalf("T3 is built on T2 and T1, so only d.go is another task's: %v", got)
+	}
+}
+
+// A task that has passed and merged is no longer "to write" anything: a later
+// task that finds a defect in its file may fix it. A file an unfinished task
+// still owns stays out of reach.
+func TestOwnedByOthersLeavesOutFinishedTasks(t *testing.T) {
+	h := newDispHarness(t)
+	def := func(key string, files []string, deps ...string) model.TaskDef {
+		return model.TaskDef{Key: key, Phase: "P1", Title: "t", Prompt: "do " + strings.Join(files, " "), Acceptance: []string{"ok"}, FilesTouched: files, DependsOn: deps}
+	}
+	f := h.dispProject("alpha", "any", []model.TaskDef{
+		def("T1", []string{"main.go"}), def("T2", []string{"x.go"}), def("T3", []string{"main_test.go"}), def("T4", []string{"y.go"}),
+	})
+	byKey := map[string]model.Task{}
+	for _, tk := range f.tasks {
+		byKey[tk.Key] = tk
+	}
+	ctx := context.Background()
+	a, err := h.st.StartAttempt(ctx, byKey["T1"].ID, model.AttemptNormal, "wt", "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.st.FinishAttempt(ctx, a.ID, model.OutcomePassed, "", "r"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.eng.ownedByOthers(ctx, &chain{eff: model.Effort{ID: f.effort}, task: byKey["T3"]}, model.Limits{MaxAttempts: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "x.go,y.go" {
+		t.Fatalf("T1 has passed, so main.go is no longer another task's: %v", got)
 	}
 }

@@ -14,6 +14,7 @@ You are reviewing one finished task. You did not write the code. Judge the worke
 - An issue must be a defect that is still present. Describing a fix already in the code is not an issue.
 - Wording and style preferences are "minor" and never a reason to repair on their own.
 - Back every issue with evidence: quote the exact line from the FILES section that shows the defect. If you cannot quote it, it is not a defect. Never ask for a change the code already makes, and never reverse a point you accepted in an earlier review of this task.
+- A file the task changed that is not in the task's `files_touched` (the report lists it as a warning) is acceptable only when the worker's summary names the defect in an earlier task's file that made the fix necessary, and the change is minimal and correct. Otherwise it is a "major" issue.
 - The FILES section also lists files of the tasks this task depends on, as read-only context: code defined there exists even though this task did not write it.
 - Do not praise the attempt. Name the defect.
 - If the task is correct, the verdict is "pass" and `issues` is `[]`.
