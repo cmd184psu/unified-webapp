@@ -297,7 +297,13 @@ func (e *Engine) advanceDraft(ctx context.Context, p store.Project, ef model.Eff
 	}
 	last := run.stages[len(run.stages)-1]
 	if IsInfra(last.Outcome) {
-		return e.effortInfra(ctx, p, run.stages, last, retry,
+		return e.effortInfra(ctx, p, run.stages, last,
+			func(avoid string) error {
+				if avoid != "" {
+					avoid = avoidTried(run.stages)
+				}
+				return retry(avoid)
+			},
 			func(reason string) error { return e.failDraft(ctx, ef.ID, run.start.After, last.ID, reason) })
 	}
 	if last.Outcome != OutcomePass {
@@ -310,7 +316,7 @@ func (e *Engine) advanceDraft(ctx context.Context, p store.Project, ef model.Eff
 	}
 	defer e.changed()
 	var lit *literalsError
-	if errors.As(err, &lit) && len(run.stages) < 4 {
+	if errors.As(err, &lit) && repliesRead(run.stages) < 4 {
 		return retry(avoidTried(run.stages)) // up to three more tries, each on a model not yet tried; the prompt names the strings that must appear
 	}
 	if err != nil {

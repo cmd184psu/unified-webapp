@@ -126,12 +126,28 @@ def api(method, path, body=None, want=None, _retry=True):
         return raw
 
 
+def stopped_on_us():
+    """What the service says has stopped on its own in this effort (GET /api/attention)."""
+    try:
+        items = api("GET", "/api/attention", None, 200) or []
+    except SystemExit:
+        return None
+    mine = [i for i in items if i.get("project") == args.slug and (not args.resume or i.get("effort") == args.resume)]
+    return mine[0] if mine else None
+
+
 def wait_for(what, fn, timeout, every=5):
     end = time.time() + timeout
+    n = 0
     while time.time() < end:
         v = fn()
         if v:
             return v
+        n += 1
+        if n % 6 == 0:  # about every half minute: stop at once when the service says it needs a person
+            item = stopped_on_us()
+            if item:
+                sys.exit(f"stopped while waiting for {what}: {item['message']}")
         time.sleep(every)
     sys.exit(f"timed out waiting for {what}")
 

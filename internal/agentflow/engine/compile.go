@@ -118,7 +118,12 @@ func (e *Engine) advanceCompile(ctx context.Context, p store.Project, ef model.E
 	last := stages[len(stages)-1]
 	if IsInfra(last.Outcome) {
 		return e.effortInfra(ctx, p, stages, last,
-			func(avoid string) error { return e.startEffortStage(ctx, p, ef.ID, "compiler", nil, avoid) },
+			func(avoid string) error {
+				if avoid != "" { // after a crash or timeout, keep away from every model already tried, not only the last
+					avoid = avoidTried(stages)
+				}
+				return e.startEffortStage(ctx, p, ef.ID, "compiler", nil, avoid)
+			},
 			func(reason string) error { return e.haltCompile(ctx, ef, last, reason) })
 	}
 	if last.Outcome != OutcomePass {
@@ -135,7 +140,7 @@ func (e *Engine) advanceCompile(ctx context.Context, p store.Project, ef model.E
 	if miss, err := e.queueMissingLiterals(ctx, ef.ID, defs); err != nil {
 		return err
 	} else if len(miss) > 0 {
-		if len(stages) < 3 { // two more tries, each on another model; the prompt names the strings that must appear
+		if repliesRead(stages) < 3 { // two more tries, each on another model; the prompt names the strings that must appear
 			return e.startEffortStage(ctx, p, ef.ID, "compiler", nil, avoidTried(stages))
 		}
 		return e.haltCompile(ctx, ef, last, (&literalsError{missing: miss, from: "the task queue"}).Error())
@@ -143,7 +148,7 @@ func (e *Engine) advanceCompile(ctx context.Context, p store.Project, ef model.E
 	if probs, err := e.queueProblems(ctx, ef.ID, defs); err != nil {
 		return err
 	} else if len(probs) > 0 {
-		if len(stages) < 3 { // two more tries, each on another model; the prompt names the problems
+		if repliesRead(stages) < 3 { // two more tries, each on another model; the prompt names the problems
 			return e.startEffortStage(ctx, p, ef.ID, "compiler", nil, avoidTried(stages))
 		}
 		return e.haltCompile(ctx, ef, last, "the task queue does not match the FRD: "+strings.Join(probs, "; "))

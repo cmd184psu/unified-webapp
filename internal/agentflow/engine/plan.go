@@ -788,6 +788,18 @@ func avoidTried(stages []model.Stage) string {
 	return strings.Join(keys, "\x01")
 }
 
+// repliesRead counts the stages whose reply was read (outcome pass), so a crash
+// or a timeout does not use up a try that was meant for a wrong answer.
+func repliesRead(stages []model.Stage) int {
+	n := 0
+	for _, s := range stages {
+		if s.Outcome == OutcomePass {
+			n++
+		}
+	}
+	return n
+}
+
 func avoided(avoid, key string) bool {
 	return avoid != "" && slices.Contains(strings.Split(avoid, "\x01"), key)
 }

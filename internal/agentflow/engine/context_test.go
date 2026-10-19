@@ -261,3 +261,37 @@ func TestH15e_DispatchPassesOverAModelTooBigForItsHost(t *testing.T) {
 		t.Fatalf("the worker was %q, want ok: huge does not fit its host", got)
 	}
 }
+
+// A crash or timeout on a retry does not use up one of the tries meant for wrong
+// answers, and the retry after it keeps away from every model already tried.
+// Before this, a timeout on the second model sent the compile back to the first
+// (which had already failed) as the last try, and the effort halted.
+func TestCompileRetryAfterACrashKeepsAwayFromEveryTriedModel(t *testing.T) {
+	f := newPlanFix(t, false)
+	f.addBackend("free", 2, false, false, "m1", "m2", "m3")
+	f.candidates("global", "", "planner", "free/m1")
+	f.candidates("global", "", "architect", "free/m2")
+	f.candidates("global", "", "critic", "free/m3")
+	f.candidates("global", "", "compiler", "free/m1", "free/m2", "free/m3")
+	f.candidates("global", "", "worker", "free/m1")
+	f.frdNaming("/api/hello")
+	f.approvedPlan()
+	f.fake.Script("compiler",
+		runner.Step{Reply: compileClean},
+		runner.Step{ErrClass: runner.ErrCrash, Err: errors.New("Unexpected server error")},
+		runner.Step{Reply: compileClean},
+		runner.Step{Reply: compileWithPath})
+	f.startEngine()
+	if err := f.eng.Compile(context.Background(), "alice", f.effort); err != nil {
+		t.Fatal(err)
+	}
+	f.waitStatus(model.EffortQueueDraft)
+	calls := f.fake.CallsFor("compiler")
+	if len(calls) != 4 {
+		t.Fatalf("compiler calls = %d, want 4", len(calls))
+	}
+	m := func(i int) string { return calls[i].Request.Model }
+	if m(0) == m(1) || m(1) == m(2) || m(0) == m(2) {
+		t.Fatalf("a retry went back to a model already tried: %s, %s, %s", m(0), m(1), m(2))
+	}
+}
