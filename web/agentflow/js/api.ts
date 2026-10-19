@@ -142,6 +142,18 @@ export interface LimitsView {
   effective: Record<string, string>;
 }
 
+/** AttentionItem is one thing that stopped on its own and needs the owner (GET /api/attention). */
+export interface AttentionItem {
+  project: string;
+  effort: number;
+  /** the task key; absent for an item about the whole effort */
+  task?: string;
+  kind: 'draft_failed' | 'plan_halted' | 'compile_halted' | 'task_halted' | 'task_unassignable';
+  message: string;
+  /** Unix ms, 0 when not known */
+  since: number;
+}
+
 export interface Health {
   status: 'ok' | 'degraded';
   opencode: OpenCodeStatus;
@@ -610,6 +622,7 @@ export interface FsDirs {
 export const api = {
   // Health and opencode
   health: (o?: FetchOptions): Promise<Health> => get('/api/health', o),
+  attention: (o?: FetchOptions): Promise<AttentionItem[]> => get('/api/attention', o),
   opencodeVersion: (refresh = false): Promise<OpenCodeStatus> =>
     get(`/api/opencode/version${refresh ? '?refresh=1' : ''}`),
 

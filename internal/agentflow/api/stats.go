@@ -52,6 +52,19 @@ func (a *API) registerStats(mux muxer) {
 	mux.HandleFunc("GET /api/stats/models", a.modelStats)
 	mux.HandleFunc("GET /api/strikes", a.strikeHistory)
 	mux.HandleFunc("POST /api/strikes/clear", a.clearStrikes)
+	mux.HandleFunc("GET /api/attention", a.attention)
+}
+
+// attention is GET /api/attention: what has stopped on its own and needs the
+// owner (a failed draft, a halted plan or compile, an exhausted task, a task no
+// model can take), newest first. An empty list means nothing is waiting.
+func (a *API) attention(w http.ResponseWriter, r *http.Request) {
+	items, err := a.deps.Engine.Attention(r.Context())
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
 }
 
 // StrikeDay is one day's strikes for a model, role and kind: the series a chart

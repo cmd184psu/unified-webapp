@@ -55,6 +55,7 @@ var send = (method, path2, body, o) => apiFetch(path2, { ...o, method, body });
 var api = {
   // Health and opencode
   health: (o) => get("/api/health", o),
+  attention: (o) => get("/api/attention", o),
   opencodeVersion: (refresh = false) => get(`/api/opencode/version${refresh ? "?refresh=1" : ""}`),
   fsDirs: (path2 = "") => get(`/api/fs/dirs${path2 ? `?path=${encodeURIComponent(path2)}` : ""}`, { quiet: true }),
   // Projects
@@ -371,6 +372,88 @@ function startPoll(active2, fn) {
   return () => clearInterval(id);
 }
 
+// web/agentflow/js/attention.ts
+import { showToast } from "/shared/dist/shared.mjs";
+function itemKey(i) {
+  return `${i.project}/${i.effort}/${i.task ?? ""}/${i.kind}/${i.since}`;
+}
+function titleWith(base, count) {
+  const bare = base.replace(/^\(\d+\) /, "");
+  return count > 0 ? `(${count}) ${bare}` : bare;
+}
+var AttentionBanner = class {
+  constructor(host, deps, open = () => {
+  }) {
+    this.host = host;
+    this.deps = deps;
+    this.open = open;
+    this.items = [];
+    this.seen = null;
+    // null until the first load: what was already there is not news
+    this.off = null;
+    this.stopPoll = null;
+  }
+  mount() {
+    this.off = subscribe((ev) => {
+      if (ev.type === "state.changed" || ev.type === "project.run_state") void this.load();
+    });
+    this.stopPoll = startPoll(() => true, () => this.load());
+    void this.load();
+    return () => {
+      this.off?.();
+      this.stopPoll?.();
+      this.off = this.stopPoll = null;
+    };
+  }
+  async load() {
+    try {
+      this.items = await this.deps.attention({ quiet: true });
+    } catch {
+      return;
+    }
+    this.announce();
+    this.render();
+  }
+  announce() {
+    const keys = new Set(this.items.map(itemKey));
+    if (this.seen) {
+      for (const i of this.items) {
+        if (this.seen.has(itemKey(i))) continue;
+        const text = `${i.project}, effort ${i.effort}: ${i.message}`;
+        void showToast(text, "error");
+        try {
+          if (typeof Notification !== "undefined" && Notification.permission === "granted") new Notification("AgentFlow needs you", { body: text });
+        } catch {
+        }
+      }
+    }
+    this.seen = keys;
+  }
+  render() {
+    if (typeof document.title === "string") document.title = titleWith(document.title, this.items.length);
+    if (this.items.length === 0) {
+      replace(this.host);
+      this.host.setAttribute("hidden", "");
+      return;
+    }
+    replace(this.host, h(
+      "div",
+      { class: "warn-box attention-banner", attrs: { role: "alert", "data-role": "attention-banner" } },
+      h("p", { text: this.items.length === 1 ? "One thing has stopped and needs you:" : `${this.items.length} things have stopped and need you:` }),
+      h("ul", {}, ...this.items.map((i) => h(
+        "li",
+        {},
+        h("a", { text: `${i.project}, effort ${i.effort}`, attrs: { href: "#", "data-project": i.project }, on: { click: (e) => {
+          e.preventDefault();
+          this.open(i.project);
+        } } }),
+        h("span", { text: ` \u2014 ${i.message}` })
+      )))
+    ));
+    this.host.removeAttribute("hidden");
+  }
+};
+
 // web/agentflow/js/health.ts
 function healthMessage(hl) {
   if (!hl || hl.status === "ok") return "";
@@ -611,12 +694,12 @@ var RowsEditor = class {
 };
 
 // web/agentflow/js/yolo.ts
-import { confirmDialog, showToast } from "/shared/dist/shared.mjs";
+import { confirmDialog, showToast as showToast2 } from "/shared/dist/shared.mjs";
 var defaultYoloDeps = () => ({
   setYOLO: api.setYOLO,
   yoloInvariants: api.yoloInvariants,
   confirm: (m, label = "Confirm") => confirmDialog(m, { confirmLabel: label }),
-  notify: (m) => void showToast(m, "success")
+  notify: (m) => void showToast2(m, "success")
 });
 function yoloBadge() {
   return h("span", { class: "badge badge-warn", text: "YOLO", attrs: { "data-role": "yolo-badge", title: "YOLO is on: the human gates approve themselves" } });
@@ -761,11 +844,11 @@ function mergeCard(ef, git, copy) {
 }
 
 // web/agentflow/js/unregister.ts
-import { confirmDialog as confirmDialog2, copyText, openModal, showToast as showToast2 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog2, copyText, openModal, showToast as showToast3 } from "/shared/dist/shared.mjs";
 var defaultUnregisterDeps = () => ({
   deleteProject: api.deleteProject,
   confirm: (m, label = "Confirm") => confirmDialog2(m, { confirmLabel: label }),
-  notify: (m) => void showToast2(m, "success"),
+  notify: (m) => void showToast3(m, "success"),
   showCommands: (slug, commands) => showBranchCommands(slug, commands, (t) => void copyText(t))
 });
 function unregisterBlock(p) {
@@ -804,7 +887,7 @@ function showBranchCommands(slug, commands, copy) {
 var defaultDropAllDeps = () => ({
   dropAll: api.dropAllProjects,
   confirm: (m, label = "Confirm") => confirmDialog2(m, { confirmLabel: label }),
-  notify: (m) => void showToast2(m, "success")
+  notify: (m) => void showToast3(m, "success")
 });
 async function dropAll(deps, beforeDrop = () => {
 }) {
@@ -1068,7 +1151,7 @@ var Overview = class {
 };
 
 // web/agentflow/js/backends.ts
-import { showToast as showToast4 } from "/shared/dist/shared.mjs";
+import { showToast as showToast5 } from "/shared/dist/shared.mjs";
 
 // web/agentflow/js/installs.ts
 var defaultInstallDeps = () => ({
@@ -1446,7 +1529,7 @@ var ConfigPanel = class {
 };
 
 // web/agentflow/js/settings.ts
-import { showToast as showToast3 } from "/shared/dist/shared.mjs";
+import { showToast as showToast4 } from "/shared/dist/shared.mjs";
 
 // web/agentflow/js/dirpicker.ts
 import { openModal as openModal2 } from "/shared/dist/shared.mjs";
@@ -1551,7 +1634,7 @@ var defaultSettingsDeps = () => ({
   putSettings: api.putSettings,
   opencodeVersion: api.opencodeVersion,
   pickDir: (start) => pickDirectory(start),
-  notify: (m) => void showToast3(m, "success")
+  notify: (m) => void showToast4(m, "success")
 });
 var str = (v) => v === void 0 || Array.isArray(v) ? "" : String(v);
 var SettingsView = class {
@@ -1831,7 +1914,7 @@ var defaultBackendsDeps = () => ({
   limits: api.limits,
   putLimits: api.putLimits,
   settings: api.settings,
-  notify: (m) => void showToast4(m, "success")
+  notify: (m) => void showToast5(m, "success")
 });
 function lastForRoles(cands, name) {
   return ROLES.filter((role) => {
@@ -2488,7 +2571,7 @@ var Activity = class {
 };
 
 // web/agentflow/js/board.ts
-import { confirmDialog as confirmDialog4, copyText as copyText3, showToast as showToast5 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog4, copyText as copyText3, showToast as showToast6 } from "/shared/dist/shared.mjs";
 
 // web/agentflow/js/stream.ts
 var defaultStreamDeps = () => ({ open: (url) => new EventSource(url) });
@@ -2589,7 +2672,7 @@ var defaultBoardDeps = () => ({
   gitCommands: api.gitCommands,
   confirm: (m, label = "Confirm") => confirmDialog4(m, { confirmLabel: label }),
   copy: (t) => void copyText3(t),
-  notify: (m) => void showToast5(m, "success")
+  notify: (m) => void showToast6(m, "success")
 });
 var rec = (v) => v && typeof v === "object" ? v : {};
 var strs = (v) => Array.isArray(v) ? v.map((x) => String(x)) : [];
@@ -3031,12 +3114,12 @@ function mountBoard(host, slug) {
 }
 
 // web/agentflow/js/history.ts
-import { showToast as showToast6 } from "/shared/dist/shared.mjs";
+import { showToast as showToast7 } from "/shared/dist/shared.mjs";
 var defaultHistoryDeps = () => ({
   efforts: api.efforts,
   importFRD: api.importFRD,
   readFile: (f) => f.text(),
-  notify: (m) => void showToast6(m, "success")
+  notify: (m) => void showToast7(m, "success")
 });
 var when = (ms) => ms ? new Date(ms).toLocaleString() : "";
 function link(label, href, name) {
@@ -3153,10 +3236,10 @@ function mountHistory(host, slug) {
 }
 
 // web/agentflow/js/frd-editor.ts
-import { alertDialog as alertDialog2, showToast as showToast8 } from "/shared/dist/shared.mjs";
+import { alertDialog as alertDialog2, showToast as showToast9 } from "/shared/dist/shared.mjs";
 
 // web/agentflow/js/plan-view.ts
-import { confirmDialog as confirmDialog5, showToast as showToast7 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog5, showToast as showToast8 } from "/shared/dist/shared.mjs";
 var defaultPlanDeps = () => ({
   efforts: api.efforts,
   plan: api.plan,
@@ -3166,7 +3249,7 @@ var defaultPlanDeps = () => ({
   generatePlan: api.generatePlan,
   approvePlan: api.approvePlan,
   confirm: (m) => confirmDialog5(m, { confirmLabel: "Approve" }),
-  notify: (m) => void showToast7(m, "success")
+  notify: (m) => void showToast8(m, "success")
 });
 var PLAN_TABS = ["planner", "architect", "critic"];
 var list = (title, items) => items && items.length > 0 ? h("div", { class: "plan-section" }, h("h4", { text: title }), h("ul", {}, ...items.map((t) => h("li", { text: t })))) : null;
@@ -3554,7 +3637,7 @@ var defaultFrdDeps = () => ({
   splitFRD: api.splitFRD,
   frdParts: api.frdParts,
   startPart: api.startPart,
-  notify: (m) => void showToast8(m, "success")
+  notify: (m) => void showToast9(m, "success")
 });
 var PRIORITIES = [["", "(none)"], ["must", "must"], ["should", "should"], ["could", "could"], ["wont", "won't"]];
 var lines = (s) => s.split("\n").map((l) => l.trim()).filter((l) => l !== "");
@@ -4200,14 +4283,14 @@ function mountFrd(host, slug) {
 }
 
 // web/agentflow/js/queue.ts
-import { confirmDialog as confirmDialog6, showToast as showToast9 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog6, showToast as showToast10 } from "/shared/dist/shared.mjs";
 var defaultQueueDeps = () => ({
   efforts: api.efforts,
   queue: api.queue,
   compile: api.compile,
   approveQueue: api.approveQueue,
   confirm: (m, label = "Confirm") => confirmDialog6(m, { confirmLabel: label }),
-  notify: (m) => void showToast9(m, "success")
+  notify: (m) => void showToast10(m, "success")
 });
 var list2 = (title, items) => h(
   "div",
@@ -4376,7 +4459,7 @@ function mountQueue(host, slug) {
 }
 
 // web/agentflow/js/projects.ts
-import { confirmDialog as confirmDialog7, showToast as showToast10 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog7, showToast as showToast11 } from "/shared/dist/shared.mjs";
 var defaultProjectDeps = () => ({
   createProject: api.createProject,
   patchProject: api.patchProject,
@@ -4389,7 +4472,7 @@ var defaultProjectDeps = () => ({
   definitionOfDone: api.definitionOfDone,
   confirm: (m, label = "Confirm") => confirmDialog7(m, { confirmLabel: label }),
   pickDir: (start) => pickDirectory(start),
-  notify: (m) => void showToast10(m, "success"),
+  notify: (m) => void showToast11(m, "success"),
   showCommands: defaultUnregisterDeps().showCommands
 });
 function splitArgv(s) {
@@ -5080,6 +5163,8 @@ function initSaveMark() {
 initHamburger();
 initSaveMark();
 startEvents();
+var attn = document.getElementById("attention-banner");
+if (attn) new AttentionBanner(attn, api, (slug) => showTab("project", slug)).mount();
 var banner = document.getElementById("health-banner");
 if (banner) new HealthBanner(banner, api).mount();
 showTab("overview");

@@ -227,3 +227,33 @@ func TestH14_QueueThatKeepsLeavingARequirementUncitedHalts(t *testing.T) {
 		t.Fatalf("compiler calls = %d, want 3 (the compile and two retries)", n)
 	}
 }
+
+// A draft that gave up is listed for the owner, and the list clears when the
+// owner starts the draft again.
+func TestAttentionListsAFailedDraft(t *testing.T) {
+	f := newPlanFix(t, false)
+	f.standardPool()
+	f.fake.Script("planner", runner.Step{Reply: draftReply}, runner.Step{Reply: draftReply}, runner.Step{Reply: draftReply}, runner.Step{Reply: draftReply}, runner.Step{Reply: draftReply})
+	f.startEngine()
+	ctx := context.Background()
+	if items, err := f.eng.Attention(ctx); err != nil || len(items) != 0 {
+		t.Fatalf("before anything: %v, %v", items, err)
+	}
+	if err := f.eng.StartDraft(ctx, "alice", f.effort, DraftRequest{Purpose: PurposeDraft, Description: portAsk}); err != nil {
+		t.Fatal(err)
+	}
+	f.waitDraft("failed")
+	items, err := f.eng.Attention(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Kind != "draft_failed" || items[0].Effort != f.effort || !strings.Contains(items[0].Message, "7070") || items[0].Since == 0 {
+		t.Fatalf("attention = %+v", items)
+	}
+	if err := f.eng.StartDraft(ctx, "alice", f.effort, DraftRequest{Purpose: PurposeDraft, Description: portAsk}); err != nil {
+		t.Fatal(err)
+	}
+	if items, _ := f.eng.Attention(ctx); len(items) != 0 {
+		t.Fatalf("a new draft left the old failure listed: %+v", items)
+	}
+}

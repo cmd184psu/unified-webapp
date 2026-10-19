@@ -8,6 +8,7 @@ import { api } from './api.js';
 import { mountSaveMark } from './autosave.js';
 import { h, replace } from './dom.js';
 import { startEvents } from './events.js';
+import { AttentionBanner } from './attention.js';
 import { HealthBanner } from './health.js';
 import { Overview, defaultDeps } from './overview.js';
 import { mountBackends } from './backends.js';
@@ -93,6 +94,8 @@ function initSaveMark(): void {
 initHamburger();
 initSaveMark();
 startEvents();
+const attn = document.getElementById('attention-banner');
+if (attn) new AttentionBanner(attn, api, (slug) => showTab('project', slug)).mount();
 const banner = document.getElementById('health-banner');
 if (banner) new HealthBanner(banner, api).mount();
 showTab('overview');
