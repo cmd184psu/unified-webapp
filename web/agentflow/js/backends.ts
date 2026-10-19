@@ -314,11 +314,11 @@ export class BackendsView {
   }
 
   private retirePanel(b: Backend): HTMLElement {
-    const cancel = checkbox('cancel_running', false);
+    const cancel = checkbox('cancel_running', true);
     const last = lastForRoles(this.candidates, b.name);
     const onlyActive = this.backends.filter((x) => !x.retired && x.name !== b.name).length === 0;
     const notes = [
-      ...(onlyActive ? ['This is the only active backend: after it is retired nothing can be dispatched until you add or enable one.'] : []),
+      ...(onlyActive ? ['This is the only active backend: while it is disabled nothing can be dispatched until you add one or enable one.'] : []),
       ...(last.length ? [`It is the only backend listed for: ${last.join(', ')}. Those roles will wait with no eligible backend.`] : []),
     ];
     const run = async (): Promise<void> => {
@@ -329,15 +329,15 @@ export class BackendsView {
         return;
       }
       this.retiring.delete(b.name);
-      this.showResult(res, `Retired ${b.name}`);
+      this.showResult(res, `${b.name} is disabled`);
       await this.load();
     };
     return h('div', { class: 'warn-box', attrs: { 'data-panel': 'retire' } },
       ...notes.map((n) => h('p', { text: n })),
-      h('span', { class: 'inline-check' }, cancel, 'Cancel stages running on this backend now'),
+      h('span', { class: 'inline-check' }, cancel, 'Stop what is running on this backend now'),
       h('div', { class: 'row-actions' },
-        button('Retire backend', () => void run(), { primary: true, field: 'confirm-retire', icon: 'trash', word: true }),
-        button('Keep it', () => { this.retiring.delete(b.name); this.render(); }, { field: 'cancel-retire', icon: 'cancel', word: true })));
+        button('Disable', () => void run(), { primary: true, field: 'confirm-retire', icon: 'pause', word: true }),
+        button('Keep enabled', () => { this.retiring.delete(b.name); this.render(); }, { field: 'cancel-retire', icon: 'cancel', word: true })));
   }
 
   private card(b: Backend): HTMLElement {
@@ -359,7 +359,7 @@ export class BackendsView {
           b.hosted ? badge('hosted', 'muted') : null,
           b.has_key ? badge('key set', 'ok') : null,
           b.hosted && b.api_type !== 'opencode' && isPrivateHost(b.host) ? h('span', { class: 'badge badge-warn', text: '\u26A0 hosted?', attrs: { title: 'Flagged hosted, but the host is a private or local address: it may be mis-flagged. Edit the backend and untick Hosted if it runs on your own machine or network.', 'data-role': 'hosted-warning' } }) : null,
-          b.retired ? badge('retired', 'warn') : null,
+          b.retired ? badge('disabled', 'warn') : null,
           b.suspended_since ? badge('suspended: not answering', 'warn') : b.down_until ? badge('unreachable', 'warn') : null),
         h('div', { class: 'profile-actions' },
           b.api_type === 'ollama' && !b.retired && (b.memory_budget_mb ?? 0) > 0
@@ -368,7 +368,7 @@ export class BackendsView {
           button('Edit', () => { this.editing.add(b.name); this.render(); }, { field: 'edit', icon: 'edit' }),
           b.retired
             ? button('Enable', () => void this.enable(b.name), { field: 'enable', icon: 'approve', word: true })
-            : button('Retire', () => { this.retiring.add(b.name); this.render(); }, { field: 'retire', icon: 'trash', word: true }))),
+            : button('Disable', () => { this.retiring.add(b.name); this.render(); }, { field: 'retire', icon: 'pause', word: true }))),
       h('div', { class: 'profile-fields' },
         b.api_type === 'opencode' ? null : h('div', {}, h('label', { text: 'Host' }), h('span', { text: b.host })),
         h('div', {}, h('label', { text: 'API type' }), h('span', { text: b.api_type })),
@@ -393,7 +393,7 @@ export class BackendsView {
 
   private async enable(name: string): Promise<void> {
     try {
-      this.showResult(await this.deps.enableBackend(name), `Enabled ${name}`);
+      this.showResult(await this.deps.enableBackend(name), `${name} is enabled`);
     } catch {
       return;
     }

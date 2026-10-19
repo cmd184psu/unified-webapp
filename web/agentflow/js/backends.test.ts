@@ -201,12 +201,12 @@ test('SV3: retiring the last backend shows the warning up front and the server w
   const t = harness({ backends: [be('b1')], candidates: [cand('worker', 0, 'b1', 'm1')] });
   const stop = t.view.mount();
   await flush();
-  button(t.host, 'Retire').click();
+  button(t.host, 'Disable').click();
   const panel = byAttr(t.host, 'data-panel', 'retire')[0];
   ok(panel.textContent.includes('only active backend'), 'last-backend warning');
   ok(panel.textContent.includes('only backend listed for: worker'), 'role named');
   (field(panel, 'cancel_running') as FakeEl).checked = true;
-  button(panel, 'Retire backend').click();
+  button(panel, 'Disable').click();
   await flush();
   eq(t.log.filter((l) => l.startsWith('retire:')), ['retire:b1:true']);
   const warn = byAttr(t.host, 'data-role', 'warnings')[0];
@@ -245,7 +245,7 @@ test('a retired backend can be enabled again', async () => {
   const t = harness({ backends: [be('b1', { retired: true })] });
   const stop = t.view.mount();
   await flush();
-  ok(t.host.textContent.includes('retired'), 'retired badge');
+  ok(t.host.textContent.includes('disabled'), 'disabled badge');
   button(t.host, 'Enable').click();
   await flush();
   eq(t.log.filter((l) => l.startsWith('enable:')), ['enable:b1']);
