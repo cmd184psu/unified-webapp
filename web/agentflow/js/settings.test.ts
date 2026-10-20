@@ -22,6 +22,9 @@ function harness(over: Partial<SettingsDeps> = {}) {
       calls.push('oc:' + !!refresh);
       return refresh ? { status: 'ok', version: '2.0.0' } : { status: 'ok', version: '1.0.0' };
     },
+    restartStatus: async () => ({ state: 'idle', open_stages: 0, pid: 1, started: 0 }),
+    restartService: async (cancel) => { calls.push('restart:' + cancel); return { state: 'draining', open_stages: 2, pid: 1, started: 0, plan: { requested: '', cancel_running: cancel, paused: [] } }; },
+    cancelRestart: async () => { calls.push('cancel-restart'); return { state: 'idle', open_stages: 0, pid: 1, started: 0 }; },
     pickDir: async (start) => { calls.push('pick:' + start); return picked.path; },
     notify: (m) => { calls.push('notify:' + m); },
     ...over,
@@ -50,6 +53,21 @@ test('OC1: the opencode version is shown and the refresh button probes again', a
   await flush();
   ok(t.host.textContent.includes('version 2.0.0'), 'refreshed version: ' + t.host.textContent);
   eq(t.calls.filter((c) => c.startsWith('oc:')), ['oc:false', 'oc:true']);
+  stop();
+});
+
+test('H25: Restart service asks the server, then shows the wait and a way to cancel it', async () => {
+  const t = harness();
+  const stop = t.view.mount();
+  await flush();
+  button(t.host, 'Restart service').click();
+  await flush();
+  eq(t.calls.filter((c) => c.startsWith('restart:')), ['restart:false']);
+  ok(t.host.textContent.includes('Restarting when the 2 running stages end'), 'waiting message: ' + t.host.textContent);
+  button(t.host, 'Cancel restart').click();
+  await flush();
+  eq(t.calls.filter((c) => c === 'cancel-restart').length, 1);
+  ok(byField(t.host, 'cancel_running') !== undefined, 'the restart button is back');
   stop();
 });
 
@@ -109,7 +127,10 @@ test('H1: no text asks for a restart; saving applies at once', async () => {
   const t = harness();
   const stop = t.view.mount();
   await flush();
-  ok(!/restart/i.test(t.host.textContent), 'no restart text');
+  // The Service section has the restart button on purpose (H25); no other text may ask for one.
+  const service = findAll(t.host, (e) => e.getAttribute('data-role') === 'service')[0];
+  ok(service !== undefined && /restart/i.test(service.textContent), 'the Service section offers the restart');
+  ok(!/restart/i.test(t.host.textContent.replace(service.textContent, '')), 'no restart text outside the Service section');
   stop();
 });
 

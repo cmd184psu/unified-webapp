@@ -132,10 +132,12 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 		Git:               git,
 		Version:           rn.Version,
 		BuiltinModels:     builtinModels(rn),
+		Terminate:         terminateHook,
 		SSEMaxSubscribers: cfg.SSEMaxSubscribers,
 	})
 	a.Register(mux)
 	events.Store(a)
+	a.ResumeAfterRestart(context.Background())
 	mux.Handle("/", static.NewHandler(cfg.StaticDir))
 
 	// Models listed before the tool-support check existed learn whether their host
@@ -285,3 +287,11 @@ func builtinModels(rn runner.Runner) func(context.Context) ([]string, error) {
 	}
 	return nil
 }
+
+// terminateHook replaces how a service restart ends the process; nil keeps the
+// default (SIGTERM to this process, which the supervisor answers by starting it
+// again). Tests that call the restart route set it so they do not end the test.
+var terminateHook func()
+
+// SetTerminateForTest sets the restart hook for tests.
+func SetTerminateForTest(f func()) { terminateHook = f }

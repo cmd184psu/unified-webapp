@@ -8,11 +8,11 @@
 
 import { autosave, type Autosave } from './autosave.js';
 import { showToast } from '@shared';
-import { api, type OpenCodeStatus, type Settings } from './api.js';
+import { api, type OpenCodeStatus, type RestartView, type Settings } from './api.js';
 import { h, replace } from './dom.js';
 import { subscribe, type AgentflowEvent } from './events.js';
 import { pickDirectory } from './dirpicker.js';
-import { FormErrors, badge, button, fieldRow, section, textInput } from './forms.js';
+import { FormErrors, badge, button, checkbox, fieldRow, section, textInput } from './forms.js';
 
 export interface LimitField {
   key: string;
@@ -38,7 +38,7 @@ const EXECUTION_FIELDS: LimitField[] = [
   { key: 'backend_cooldown', label: 'Backend cooldown', hint: 'How long an unreachable backend is skipped, such as 2m' },
 ];
 
-export type SettingsDeps = Pick<typeof api, 'settings' | 'putSettings' | 'opencodeVersion'> & {
+export type SettingsDeps = Pick<typeof api, 'settings' | 'putSettings' | 'opencodeVersion' | 'restartStatus' | 'restartService' | 'cancelRestart'> & {
   /** Opens the directory picker at start; the chosen path, or null when cancelled. */
   pickDir(start: string): Promise<string | null>;
   notify(message: string): void;
@@ -48,6 +48,9 @@ export const defaultSettingsDeps = (): SettingsDeps => ({
   settings: api.settings,
   putSettings: api.putSettings,
   opencodeVersion: api.opencodeVersion,
+  restartStatus: api.restartStatus,
+  restartService: api.restartService,
+  cancelRestart: api.cancelRestart,
   pickDir: (start) => pickDirectory(start),
   notify: (m) => void showToast(m, 'success'),
 });
@@ -61,6 +64,9 @@ export class SettingsView {
   private oc: OpenCodeStatus | null = null;
   private ocHost = h('div');
   private roots: string[] = [];
+  private svc: RestartView | null = null;
+  private svcHost = h('div', { attrs: { 'data-role': 'service' } });
+  private svcTimer: ReturnType<typeof setInterval> | null = null;
   private rootsHost = h('div', { class: 'wizard-list', attrs: { 'data-role': 'browse-roots' } });
   private dirty = false;
   private auto: Autosave | null = null;
@@ -77,6 +83,8 @@ export class SettingsView {
     return () => {
       this.off?.();
       this.off = null;
+      if (this.svcTimer) clearInterval(this.svcTimer);
+      this.svcTimer = null;
       void this.auto?.flush();
     };
   }
@@ -88,6 +96,7 @@ export class SettingsView {
       const same = this.auto !== null && JSON.stringify(settings) === JSON.stringify(this.values);
       this.values = settings;
       this.oc = oc;
+      this.svc = await this.deps.restartStatus({ quiet: true }).catch(() => null);
       if (same) return;
       this.roots = Array.isArray(settings.browse_roots) ? [...settings.browse_roots] : [];
     } catch {
@@ -113,6 +122,39 @@ export class SettingsView {
         h('span', { class: 'field-hint', attrs: { 'data-role': 'oc-version' },
           text: oc ? (oc.version ? `version ${oc.version}` : oc.error ?? '') : 'not probed yet' }),
         button('Refresh', () => void this.refreshVersion(), { field: 'oc-refresh', icon: 'refresh' })));
+  }
+
+  /** The Service section: restart the whole service once running work has ended (H25). */
+  private renderService(): void {
+    const svc = this.svc;
+    const cancel = checkbox('cancel_running', false);
+    const run = async (call: () => Promise<RestartView>, said: string): Promise<void> => {
+      try {
+        this.svc = await call();
+      } catch {
+        return;
+      }
+      this.deps.notify(said);
+      this.renderService();
+    };
+    if (this.svcTimer) clearInterval(this.svcTimer);
+    this.svcTimer = null;
+    if (svc?.state === 'draining') {
+      // The service goes away when the work ends; ask again until it does, then until it answers.
+      this.svcTimer = setInterval(() => {
+        void this.deps.restartStatus({ quiet: true }).then((v) => { this.svc = v; this.renderService(); }, () => undefined);
+      }, 5000);
+    }
+    replace(this.svcHost,
+      svc?.state === 'draining'
+        ? h('div', { class: 'warn-box' },
+            h('p', { text: `Restarting when the ${svc.open_stages} running stage${svc.open_stages === 1 ? '' : 's'} end${svc.open_stages === 1 ? 's' : ''}. ${svc.plan?.cancel_running ? 'Running stages were cancelled.' : 'Nothing new starts meanwhile.'}` }),
+            button('Cancel restart', () => void run(() => this.deps.cancelRestart(), 'Restart cancelled'), { field: 'cancel-restart', icon: 'cancel', word: true }))
+        : h('div', {},
+            h('span', { class: 'inline-check' }, cancel, 'Cancel running stages instead of waiting for them'),
+            h('div', { class: 'row-actions' },
+              button('Restart service', () => void run(() => this.deps.restartService(cancel.checked), 'Restart requested'), { field: 'restart-service', icon: 'refresh', word: true }),
+              h('span', { class: 'field-hint', text: svc ? `running since ${new Date(svc.started).toLocaleString()}` : '' }))));
   }
 
   private renderRoots(): void {
@@ -171,6 +213,7 @@ export class SettingsView {
     const exec = h('div', { class: 'profile-fields' }, ...EXECUTION_FIELDS.map((f) => this.row(f)));
     const path = this.row({ key: 'opencode_path', label: 'opencode path', hint: 'Program to run' });
     this.renderOpenCode();
+    this.renderService();
     this.renderRoots();
     this.auto?.stop();
     this.auto = autosave({ snapshot: () => JSON.stringify(this.body()), save: () => this.save() });
@@ -178,6 +221,7 @@ export class SettingsView {
         section('Limits', limits),
         section('Execution', exec),
         section('opencode', path, this.ocHost),
+        section('Service', this.svcHost),
         section('Browse limit', this.rootsHost),
         this.errors.general,
         h('div', { class: 'settings-actions' }, this.auto.status));

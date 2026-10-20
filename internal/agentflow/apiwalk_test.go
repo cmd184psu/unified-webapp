@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,6 +35,9 @@ const (
 // route was never reached, or if any call fell through to the /api/ catch-all.
 // A new route without a place in this walk fails the test.
 func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
+	var terminated atomic.Int32
+	SetTerminateForTest(func() { terminated.Add(1) })
+	t.Cleanup(func() { SetTerminateForTest(nil) })
 	worker.SetPollIntervalForTest(20 * time.Millisecond)
 	t.Cleanup(func() { worker.SetPollIntervalForTest(5 * time.Second) })
 
@@ -261,6 +265,18 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 		}
 		cancel()
 	}
+
+	// Service restart: nothing is running, so the restart ends the process at once
+	// (here a counter); a second request is refused and the pending one can be cancelled.
+	ok("GET", "/api/service/restart", "", 200)
+	ok("POST", "/api/service/restart", ``, 202)
+	for deadline := time.Now().Add(10 * time.Second); terminated.Load() == 0; time.Sleep(50 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the restart did not end the process")
+		}
+	}
+	ok("POST", "/api/service/restart", ``, 409)
+	ok("DELETE", "/api/service/restart", "", 200)
 
 	// Run controls.
 	ok("POST", "/api/projects/demo/run/pause", ``, 409) // not running

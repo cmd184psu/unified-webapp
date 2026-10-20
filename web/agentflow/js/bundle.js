@@ -57,6 +57,9 @@ var api = {
   health: (o) => get("/api/health", o),
   attention: (o) => get("/api/attention", o),
   opencodeVersion: (refresh = false) => get(`/api/opencode/version${refresh ? "?refresh=1" : ""}`),
+  restartStatus: (o) => get("/api/service/restart", o),
+  restartService: (cancelRunning) => send("POST", "/api/service/restart", { cancel_running: cancelRunning }),
+  cancelRestart: () => send("DELETE", "/api/service/restart"),
   fsDirs: (path2 = "") => get(`/api/fs/dirs${path2 ? `?path=${encodeURIComponent(path2)}` : ""}`, { quiet: true }),
   // Projects
   projects: () => get("/api/projects"),
@@ -1633,6 +1636,9 @@ var defaultSettingsDeps = () => ({
   settings: api.settings,
   putSettings: api.putSettings,
   opencodeVersion: api.opencodeVersion,
+  restartStatus: api.restartStatus,
+  restartService: api.restartService,
+  cancelRestart: api.cancelRestart,
   pickDir: (start) => pickDirectory(start),
   notify: (m) => void showToast4(m, "success")
 });
@@ -1647,6 +1653,9 @@ var SettingsView = class {
     this.oc = null;
     this.ocHost = h("div");
     this.roots = [];
+    this.svc = null;
+    this.svcHost = h("div", { attrs: { "data-role": "service" } });
+    this.svcTimer = null;
     this.rootsHost = h("div", { class: "wizard-list", attrs: { "data-role": "browse-roots" } });
     this.dirty = false;
     this.auto = null;
@@ -1661,6 +1670,8 @@ var SettingsView = class {
     return () => {
       this.off?.();
       this.off = null;
+      if (this.svcTimer) clearInterval(this.svcTimer);
+      this.svcTimer = null;
       void this.auto?.flush();
     };
   }
@@ -1670,6 +1681,7 @@ var SettingsView = class {
       const same = this.auto !== null && JSON.stringify(settings) === JSON.stringify(this.values);
       this.values = settings;
       this.oc = oc;
+      this.svc = await this.deps.restartStatus({ quiet: true }).catch(() => null);
       if (same) return;
       this.roots = Array.isArray(settings.browse_roots) ? [...settings.browse_roots] : [];
     } catch {
@@ -1700,6 +1712,49 @@ var SettingsView = class {
           text: oc ? oc.version ? `version ${oc.version}` : oc.error ?? "" : "not probed yet"
         }),
         button("Refresh", () => void this.refreshVersion(), { field: "oc-refresh", icon: "refresh" })
+      )
+    );
+  }
+  /** The Service section: restart the whole service once running work has ended (H25). */
+  renderService() {
+    const svc = this.svc;
+    const cancel = checkbox("cancel_running", false);
+    const run = async (call, said) => {
+      try {
+        this.svc = await call();
+      } catch {
+        return;
+      }
+      this.deps.notify(said);
+      this.renderService();
+    };
+    if (this.svcTimer) clearInterval(this.svcTimer);
+    this.svcTimer = null;
+    if (svc?.state === "draining") {
+      this.svcTimer = setInterval(() => {
+        void this.deps.restartStatus({ quiet: true }).then((v) => {
+          this.svc = v;
+          this.renderService();
+        }, () => void 0);
+      }, 5e3);
+    }
+    replace(
+      this.svcHost,
+      svc?.state === "draining" ? h(
+        "div",
+        { class: "warn-box" },
+        h("p", { text: `Restarting when the ${svc.open_stages} running stage${svc.open_stages === 1 ? "" : "s"} end${svc.open_stages === 1 ? "s" : ""}. ${svc.plan?.cancel_running ? "Running stages were cancelled." : "Nothing new starts meanwhile."}` }),
+        button("Cancel restart", () => void run(() => this.deps.cancelRestart(), "Restart cancelled"), { field: "cancel-restart", icon: "cancel", word: true })
+      ) : h(
+        "div",
+        {},
+        h("span", { class: "inline-check" }, cancel, "Cancel running stages instead of waiting for them"),
+        h(
+          "div",
+          { class: "row-actions" },
+          button("Restart service", () => void run(() => this.deps.restartService(cancel.checked), "Restart requested"), { field: "restart-service", icon: "refresh", word: true }),
+          h("span", { class: "field-hint", text: svc ? `running since ${new Date(svc.started).toLocaleString()}` : "" })
+        )
       )
     );
   }
@@ -1763,6 +1818,7 @@ var SettingsView = class {
     const exec = h("div", { class: "profile-fields" }, ...EXECUTION_FIELDS.map((f) => this.row(f)));
     const path2 = this.row({ key: "opencode_path", label: "opencode path", hint: "Program to run" });
     this.renderOpenCode();
+    this.renderService();
     this.renderRoots();
     this.auto?.stop();
     this.auto = autosave({ snapshot: () => JSON.stringify(this.body()), save: () => this.save() });
@@ -1772,6 +1828,7 @@ var SettingsView = class {
       section("Limits", limits),
       section("Execution", exec),
       section("opencode", path2, this.ocHost),
+      section("Service", this.svcHost),
       section("Browse limit", this.rootsHost),
       this.errors.general,
       h("div", { class: "settings-actions" }, this.auto.status)

@@ -27,6 +27,9 @@ type Deps struct {
 	Version func(ctx context.Context) (string, error)
 	// BuiltinModels lists opencode's own models, for backends of api type "opencode".
 	BuiltinModels func(ctx context.Context) ([]string, error)
+	// Terminate ends the process for a restart; nil sends SIGTERM to this process
+	// (the supervisor starts the service again). Tests set it.
+	Terminate func()
 	// SSEMaxSubscribers caps the event stream's subscribers (D3).
 	SSEMaxSubscribers int
 }
@@ -41,6 +44,8 @@ type API struct {
 	oc OpenCodeStatus
 	// pulls cancels the running model installs by id (H6).
 	pulls map[int64]context.CancelFunc
+	// restart is the restart waiting for running work to end, if any.
+	restart restartState
 }
 
 // OpenCodeStatus is the result of the last opencode version probe.
@@ -132,6 +137,7 @@ func (a *API) Register(mux muxer) {
 	a.registerQueue(mux)
 	a.registerTasks(mux)
 	a.registerRun(mux)
+	a.registerService(mux)
 	a.registerEvents(mux)
 	a.registerExport(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {

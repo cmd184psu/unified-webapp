@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,6 +33,8 @@ type env struct {
 	mux     *http.ServeMux
 	fake    *runner.Fake
 	dataDir string
+	// terminated counts the times a service restart ended the process.
+	terminated atomic.Int32
 }
 
 type envOpt struct {
@@ -89,7 +92,8 @@ func newEnv(t *testing.T, opt envOpt) *env {
 	if err := e.eng.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	e.api = New(Deps{Store: e.st, Engine: e.eng, Git: git, Version: e.fake.Version, SSEMaxSubscribers: opt.maxSubs})
+	e.api = New(Deps{Store: e.st, Engine: e.eng, Git: git, Version: e.fake.Version, SSEMaxSubscribers: opt.maxSubs,
+		Terminate: func() { e.terminated.Add(1) }})
 	api = e.api
 	e.mux = http.NewServeMux()
 	e.api.Register(e.mux)

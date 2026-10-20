@@ -205,6 +205,15 @@ export interface Backend {
   suspended_since?: number;
 }
 
+/** GET /api/service/restart: a restart waits for running work to end, then the service starts again (H25). */
+export interface RestartView {
+  state: 'idle' | 'draining';
+  plan?: { requested: string; cancel_running: boolean; paused: string[] };
+  open_stages: number;
+  pid: number;
+  started: number;
+}
+
 export interface BackendInput {
   /** Write-only: absent keeps the stored key; the server never returns it. */
   api_key?: string;
@@ -628,6 +637,9 @@ export const api = {
   attention: (o?: FetchOptions): Promise<AttentionItem[]> => get('/api/attention', o),
   opencodeVersion: (refresh = false): Promise<OpenCodeStatus> =>
     get(`/api/opencode/version${refresh ? '?refresh=1' : ''}`),
+  restartStatus: (o?: FetchOptions): Promise<RestartView> => get('/api/service/restart', o),
+  restartService: (cancelRunning: boolean): Promise<RestartView> => send('POST', '/api/service/restart', { cancel_running: cancelRunning }),
+  cancelRestart: (): Promise<RestartView> => send('DELETE', '/api/service/restart'),
 
   fsDirs: (path = ''): Promise<FsDirs> => get(`/api/fs/dirs${path ? `?path=${encodeURIComponent(path)}` : ''}`, { quiet: true }),
 
