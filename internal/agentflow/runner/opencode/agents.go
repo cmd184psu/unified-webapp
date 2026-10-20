@@ -189,6 +189,22 @@ type agentDef struct {
 	Description string     `json:"description"`
 	Prompt      string     `json:"prompt"`
 	Permission  permission `json:"permission"`
+	// Temperature and TopP are sent with every request of the role. A model
+	// run at its server's default (Ollama: 0.8) paraphrases, drops exact strings
+	// and varies between tries; the roles that must copy and obey run cool.
+	Temperature float64 `json:"temperature"`
+	TopP        float64 `json:"top_p"`
+}
+
+// temperatureFor is the sampling temperature of a role: the stages that must
+// reproduce the request's exact strings or follow a schema run coolest, the
+// planners a little warmer so a revision can differ from the plan it revises.
+func temperatureFor(role string) float64 {
+	switch role {
+	case "planner", "architect":
+		return 0.4
+	}
+	return 0.2
 }
 
 func agentFor(role string) (agentDef, error) {
@@ -208,5 +224,7 @@ func agentFor(role string) (agentDef, error) {
 		Description: "agentflow " + role,
 		Prompt:      string(b),
 		Permission:  perm,
+		Temperature: temperatureFor(role),
+		TopP:        0.9,
 	}, nil
 }

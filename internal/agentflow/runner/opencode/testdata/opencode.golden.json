@@ -137,7 +137,9 @@
         "task": "deny",
         "webfetch": "deny",
         "websearch": "deny"
-      }
+      },
+      "temperature": 0.4,
+      "top_p": 0.9
     },
     "af-cleanup": {
       "mode": "primary",
@@ -208,7 +210,9 @@
         "task": "deny",
         "webfetch": "deny",
         "websearch": "deny"
-      }
+      },
+      "temperature": 0.2,
+      "top_p": 0.9
     },
     "af-compiler": {
       "mode": "primary",
@@ -303,7 +307,9 @@
         "task": "deny",
         "webfetch": "deny",
         "websearch": "deny"
-      }
+      },
+      "temperature": 0.2,
+      "top_p": 0.9
     },
     "af-critic": {
       "mode": "primary",
@@ -398,7 +404,9 @@
         "task": "deny",
         "webfetch": "deny",
         "websearch": "deny"
-      }
+      },
+      "temperature": 0.2,
+      "top_p": 0.9
     },
     "af-planner": {
       "mode": "primary",
@@ -493,7 +501,9 @@
         "task": "deny",
         "webfetch": "deny",
         "websearch": "deny"
-      }
+      },
+      "temperature": 0.4,
+      "top_p": 0.9
     },
     "af-reviewer": {
       "mode": "primary",
@@ -588,7 +598,9 @@
         "task": "deny",
         "webfetch": "deny",
         "websearch": "deny"
-      }
+      },
+      "temperature": 0.2,
+      "top_p": 0.9
     },
     "af-worker": {
       "mode": "primary",
@@ -659,7 +671,9 @@
         "task": "deny",
         "webfetch": "deny",
         "websearch": "deny"
-      }
+      },
+      "temperature": 0.2,
+      "top_p": 0.9
     }
   }
 }
