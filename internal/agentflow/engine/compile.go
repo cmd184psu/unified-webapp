@@ -197,6 +197,7 @@ func (e *Engine) queueProblems(ctx context.Context, effort int64, defs []model.T
 		return nil, err
 	}
 	probs := append(model.QueueCoverageProblems(f, defs), model.QueueTestShapeProblems(defs)...)
+	probs = append(probs, model.QueueFileNameProblems(defs)...)
 	ctxProbs, err := e.queueContextProblems(ctx, effort, defs)
 	if err != nil {
 		return nil, err

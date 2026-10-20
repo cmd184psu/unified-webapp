@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -71,4 +72,33 @@ func allTestFiles(files []string) bool {
 		}
 	}
 	return true
+}
+
+var rePromptPath = regexp.MustCompile("[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+\\.[A-Za-z0-9]{1,5}")
+
+// QueueFileNameProblems finds a task whose files_touched lists a file under a
+// name that is a path from its prompt with the slashes turned into other
+// characters (the third local webcalc trial: the prompt said history/store.go
+// and files_touched said history.store.go). The worker writes the file the
+// prompt names, the checks and the reviewer look for the one listed, and the
+// task stops with a file that "does not exist".
+func QueueFileNameProblems(defs []TaskDef) []string {
+	var out []string
+	for _, d := range defs {
+		listed := map[string]bool{}
+		for _, f := range d.FilesTouched {
+			listed[f] = true
+		}
+		for _, p := range rePromptPath.FindAllString(d.Prompt, -1) {
+			if listed[p] {
+				continue
+			}
+			for _, sep := range []string{".", "_", "-"} {
+				if alias := strings.ReplaceAll(p, "/", sep); alias != p && listed[alias] {
+					out = append(out, fmt.Sprintf("task %s lists %s in files_touched but its prompt names the file %s: use the path from the prompt", d.Key, alias, p))
+				}
+			}
+		}
+	}
+	return out
 }

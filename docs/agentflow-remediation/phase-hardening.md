@@ -146,3 +146,7 @@ A host that runs hot (the M5 power brick) can be held to a lower pace without ta
 ### H21 A worker timeout sends the task to another model at once
 
 Effort 14 T007 used its five attempts after M5 was taken offline: four were 30-minute worker timeouts on the same win model. `repeatFailers` passed a model over immediately only after a blocked or unreadable result; a timeout needed two in a row, and an attempt on another model in between reset the count, so the slow model got the task back. A worker timeout now counts like the other two. When no other model could ever serve, the model is still used again (the existing fallback). Test: `TestH21_AfterAWorkerTimeoutTheNextAttemptUsesAnotherModel`.
+
+### H22 A file list that disagrees with the path in the prompt goes back to the compiler
+
+Effort 14 T006 stopped for input because `files_touched` said `history.store.go` while the prompt, the worker and the repository used `history/store.go`; the reviewer was told to read a file that does not exist. `QueueFileNameProblems` flags a listed name that is a prompt path with its slashes turned into a dot, underscore or hyphen, and the compile retry sends the compiler back with the finding. Test: `TestQueueFileNameProblemsCatchesASlashTurnedIntoADot`.

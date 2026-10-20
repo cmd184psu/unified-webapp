@@ -25,3 +25,15 @@ func TestQueueTestShapeProblems(t *testing.T) {
 		t.Fatalf("a task not built on the code is not flagged: %v", p)
 	}
 }
+
+func TestQueueFileNameProblemsCatchesASlashTurnedIntoADot(t *testing.T) {
+	bad := []TaskDef{{Key: "T6", Prompt: "Implement `history/store.go` with a History struct and a handler in handler/api.go.", FilesTouched: []string{"history.store.go", "handler/api.go"}}}
+	got := QueueFileNameProblems(bad)
+	if len(got) != 1 || !strings.Contains(got[0], "history.store.go") || !strings.Contains(got[0], "history/store.go") {
+		t.Fatalf("problems = %v", got)
+	}
+	good := []TaskDef{{Key: "T6", Prompt: "Implement history/store.go and handler/api.go.", FilesTouched: []string{"history/store.go", "handler/api.go"}}}
+	if got := QueueFileNameProblems(good); len(got) != 0 {
+		t.Fatalf("a correct queue was flagged: %v", got)
+	}
+}
