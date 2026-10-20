@@ -344,7 +344,7 @@ export class BackendsView {
     if (this.editing.has(b.name)) {
       return this.backendForm(b, () => { this.editing.delete(b.name); void this.load(); });
     }
-    const models = b.models.map((m) => h('span', { class: 'row-actions' }, m.model, m.paid ? badge('paid') : null,
+    const models = b.models.map((m) => h('div', { class: 'model-row' }, h('strong', { class: 'model-name', text: m.model }), m.paid ? badge('paid') : null,
       m.max_concurrent > 0 ? badge(`max ${m.max_concurrent} at once`, 'muted') : null,
       m.window_tokens ? badge(`window ${formatTokens(m.window_tokens)}${m.window_source === 'observed' ? ' (learned)' : ''}`, m.window_source === 'observed' ? 'warn' : 'muted') : null,
       m.context_tokens ? badge(`max ${formatTokens(m.context_tokens)}`, 'muted') : null,
@@ -375,7 +375,7 @@ export class BackendsView {
         h('div', {}, h('label', { text: 'Slots' }), h('span', { text: String(b.slots) })),
         b.retired ? null : h('div', {}, h('label', { text: 'Pace' }), this.paceSelect(b)),
         b.memory_budget_mb ? h('div', {}, h('label', { text: 'Memory budget' }), h('span', { text: `${Math.round(b.memory_budget_mb / 1024)} GB${b.window_cap_tokens ? `, windows capped at ${formatTokens(b.window_cap_tokens)}` : ''}` })) : null,
-        h('div', {}, h('label', { text: 'Models' }), ...models)),
+        h('div', { class: 'profile-wide' }, h('label', { text: 'Models' }), h('div', { class: 'model-list' }, ...models))),
       b.api_type === 'ollama' && !b.retired ? this.panelFor(b.name).el : null,
       this.retiring.has(b.name) ? this.retirePanel(b) : null);
   }
@@ -433,7 +433,7 @@ export class BackendsView {
     return section('Backends',
       h('div', { class: 'section-header' }, h('span', { class: 'field-hint', text: `${this.backends.length} configured` }), this.adding ? null : addBtn),
       addForm,
-      h('div', { class: 'profile-list' }, ...this.backends.map((b) => this.card(b))));
+      h('div', { class: 'profile-list profile-grid' }, ...this.backends.map((b) => this.card(b))));
   }
 
   // ─── Role candidates ─────────────────────────────────────────────────────

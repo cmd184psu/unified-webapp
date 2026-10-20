@@ -466,3 +466,27 @@ func TestContextFullGoesToAnotherModelWithoutAStrike(t *testing.T) {
 		t.Fatalf("a full context window spent %v infra retries (%v)", ins[0].InfraIDs, err)
 	}
 }
+
+// H21: a worker that ran out of time is not given the task again while another
+// model can take it. Before this the next attempt went back to the slow model
+// unless it had timed out twice in a row, and an attempt on another model in
+// between reset that count: a slow host timed out four times in six attempts.
+func TestH21_AfterAWorkerTimeoutTheNextAttemptUsesAnotherModel(t *testing.T) {
+	c := newChainRun(t, nil, chainDefs()[:1])
+	c.addBackend("gpu2", 1, false, false, "m3", "m4")
+	c.candidates("global", "", "worker", "gpu/m1", "gpu/m2")
+	c.candidates("global", "", "reviewer", "gpu2/m4")
+	c.fake.Script("worker",
+		runner.Step{ErrClass: runner.ErrTimeout, Err: context.DeadlineExceeded},
+		runner.Step{Reply: workerOK, Edit: writeWork})
+	c.fake.Script("reviewer", runner.Step{Reply: reviewPass})
+	c.run()
+	waitFor(t, "task passed", func() bool { return c.taskStatus() == model.StatusPassed })
+	as := c.attempts(0)
+	if len(as) < 2 || as[0].Fingerprint != string(FailTimeout) || as[0].WorkerModel != "m1" {
+		t.Fatalf("attempts = %+v: the first should have timed out on m1", as)
+	}
+	if as[1].WorkerModel != "m2" {
+		t.Fatalf("the attempt after a timeout used worker %q, want m2", as[1].WorkerModel)
+	}
+}

@@ -142,3 +142,7 @@ Effort 13 (local trial) exhausted T001 ("basic web server with HTML page") in fi
 ### H20 Duty cap per backend
 
 A host that runs hot (the M5 power brick) can be held to a lower pace without taking it offline. Each backend has `duty_percent` (10 to 100; 100 is no cap, stored as 0), set by `PATCH /api/backends/{name}` and by the Pace choice on the backend card, applied at once with no restart. After a stage ends the backend is given no new one for the stage's running time times (100-d)/d, up to 30 minutes (`BackendRestUntil`); stages already running are not touched, and a task that waits says "backend X is resting under its duty cap until HH:MM". Disable (retire) remains the way to stop a host now. The cap is part of the configuration export.
+
+### H21 A worker timeout sends the task to another model at once
+
+Effort 14 T007 used its five attempts after M5 was taken offline: four were 30-minute worker timeouts on the same win model. `repeatFailers` passed a model over immediately only after a blocked or unreadable result; a timeout needed two in a row, and an attempt on another model in between reset the count, so the slow model got the task back. A worker timeout now counts like the other two. When no other model could ever serve, the model is still used again (the existing fallback). Test: `TestH21_AfterAWorkerTimeoutTheNextAttemptUsesAnotherModel`.

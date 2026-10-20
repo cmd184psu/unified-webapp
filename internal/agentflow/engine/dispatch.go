@@ -437,8 +437,8 @@ func (e *Engine) repeatFailers(ctx context.Context, t model.Task, stuckThreshold
 	if err != nil {
 		return nil, err
 	}
-	if n := len(atts); n > 0 && atts[n-1].Outcome == model.OutcomeFailed && (atts[n-1].Fingerprint == string(FailBlocked) || atts[n-1].Fingerprint == string(FailUnparseable)) {
-		return map[string]int{atts[n-1].WorkerModel: 1}, nil // it said it was blocked, or its reply was unreadable: let another model look
+	if n := len(atts); n > 0 && atts[n-1].Outcome == model.OutcomeFailed && (atts[n-1].Fingerprint == string(FailBlocked) || atts[n-1].Fingerprint == string(FailUnparseable) || atts[n-1].Fingerprint == string(FailTimeout)) {
+		return map[string]int{atts[n-1].WorkerModel: 1}, nil // it said it was blocked, its reply was unreadable, or it ran out of time (H21): let another model look
 	}
 	run := 0
 	for i := len(atts) - 1; i >= 0; i-- {

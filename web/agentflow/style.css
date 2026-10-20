@@ -829,8 +829,8 @@ body {
 /* ── Settings ───────────────────────────────────────────────────────────────── */
 
 .settings-host {
-  padding: var(--space-4);
-  max-width: 48rem;
+  padding: var(--space-5, var(--space-4));
+  max-width: 100rem;
 }
 
 .settings-section {
@@ -869,14 +869,21 @@ body {
 .profile-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-4);
+}
+
+/* Backend cards sit in columns on a wide screen. */
+.profile-list.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(34rem, 1fr));
+  align-items: start;
 }
 
 .profile-card {
   background: var(--color-surface-1);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  padding: var(--space-4);
+  padding: var(--space-5, var(--space-4));
 }
 
 .profile-header {
@@ -906,6 +913,30 @@ body {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+}
+
+.profile-fields > .profile-wide { grid-column: 1 / -1; }
+
+.model-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.model-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-2);
+  border-radius: var(--radius-md);
+}
+
+.model-name {
+  font-weight: 600;
+  font-size: var(--text-sm);
+  margin-right: var(--space-2);
 }
 
 .profile-fields label:not(.ui-toggle) {
