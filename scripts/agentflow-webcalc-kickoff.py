@@ -11,7 +11,7 @@ compile, approves the queue and starts the run. Then it exits; watch the rest in
         [--repo ~/af-webcalc] [--slug webcalc] [--scope local|any] [--lineup global|local] [--wait]
 
 --host is sent as the Host header: the service routes modules by host name.
---lineup free uses only hosted, unpaid backends for every role (the free opencode models, in a fixed rotation so a
+--lineup hybrid uses the free hosted models for planning, compiling and review and the local models for the workers (a hosted model needs --scope any). --lineup free uses only hosted, unpaid backends for every role (the free opencode models, in a fixed rotation so a
 reviewer is not the worker's own model). --lineup local sets this project's own candidate lists from the registered backends' tiers instead
 of using the global lists: planner, architect, critic and compiler take tier 1 then 2 (a model
 not yet rated counts as 2); workers take tier 2, then 1; reviewers take tier 1, then 2. Only
@@ -67,7 +67,7 @@ ap.add_argument("--repo", default=os.path.expanduser("~/af-webcalc"))
 ap.add_argument("--slug", default="webcalc")
 ap.add_argument("--scope", default="any", choices=("local", "any"),
                 help="model scope: any lets hosted backends (the free opencode models) be used")
-ap.add_argument("--lineup", default="global", choices=("global", "local", "free"),
+ap.add_argument("--lineup", default="global", choices=("global", "local", "free", "hybrid"),
                 help="local: build this project's candidate lists from the non-hosted backends by tier; free: only the hosted backends that cost nothing (the free opencode models)")
 ap.add_argument("--include-light", action="store_true", help="with --lineup local: let tier 3 models work as workers")
 ap.add_argument("--exclude-backend", action="append", default=["kimi-waste"],
@@ -166,7 +166,7 @@ missing = [r for r in ("planner", "architect", "critic", "compiler", "worker", "
 if missing:
     sys.exit("no candidate configured for: " + ", ".join(missing) + " (add them in the UI first)")
 
-if args.lineup == "free":
+if args.lineup in ("free", "hybrid"):
     free = [(b["name"], m["model"]) for b in api("GET", "/api/backends", None, 200)
             if b.get("hosted") and not b.get("paid") and not b.get("retired") for m in b["models"] if not m.get("paid")]
     if not free:
@@ -174,12 +174,14 @@ if args.lineup == "free":
     # each role starts at a different model, so the reviewer is not the worker's own model
     lineup = {role: [{"backend": be, "model": m} for be, m in free[i % len(free):] + free[:i % len(free)]]
               for i, role in enumerate(("planner", "architect", "critic", "compiler", "worker", "reviewer"))}
-    for role, lst in lineup.items():
-        say(f"{role}: " + ", ".join(f"{c['backend']}/{c['model']}" for c in lst))
-    if args.dry_run:
-        sys.exit(0)
+    free_lineup = lineup
+    if args.lineup == "free":
+        for role, lst in lineup.items():
+            say(f"{role}: " + ", ".join(f"{c['backend']}/{c['model']}" for c in lst))
+        if args.dry_run:
+            sys.exit(0)
 
-if args.lineup == "local":
+if args.lineup in ("local", "hybrid"):
     pool = []  # (tier, backend, model); tier 0 (not rated) counts as 2
     for b in api("GET", "/api/backends", None, 200):
         if b.get("hosted") or b.get("paid") or b["name"] in args.exclude_backend:
@@ -192,9 +194,11 @@ if args.lineup == "local":
     workers = (2, 3, 1) if args.include_light else (2, 1)
     lineup = {"planner": pick((1, 2)), "architect": pick((1, 2)), "critic": pick((1, 2)), "compiler": pick((1, 2)),
               "worker": pick(workers), "reviewer": pick((1, 2))}
+    if args.lineup == "hybrid":  # the free hosted models plan, compile and review; the local models do the work
+        lineup = {**free_lineup, "worker": lineup["worker"]}
     for role, lst in lineup.items():
         if not lst:
-            sys.exit(f"--lineup local: no non-hosted model fits the {role} role")
+            sys.exit(f"--lineup {args.lineup}: no model fits the {role} role")
         say(f"{role}: " + ", ".join(f"{c['backend'].replace('ollama-', '')}/{c['model']}" for c in lst))
     if args.dry_run:
         sys.exit(0)
@@ -213,7 +217,7 @@ if not os.path.isdir(os.path.join(args.repo, ".git")):
 slug = args.slug
 if not args.resume:
     api("POST", "/api/projects", {"slug": slug, "repo_path": args.repo, "model_scope": args.scope}, 201)
-if args.lineup in ("local", "free") and not args.resume:
+if args.lineup in ("local", "free", "hybrid") and not args.resume:
     for role, lst in lineup.items():
         api("PUT", f"/api/projects/{slug}/candidates/{role}", {"candidates": lst}, 200)
 
