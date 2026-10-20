@@ -949,11 +949,22 @@ func (e *Engine) compilerFRDNote(ctx context.Context, st model.Stage, f model.FR
 		}
 		if out, err := schema.Parse[schema.CompileOut](prev.Parsed); prev.ID != 0 && err == nil {
 			if defs, err := compiledTasks(out); err == nil {
-				if probs, err := e.queueProblems(ctx, st.Effort, defs); err == nil && len(probs) > 0 {
-					b.WriteString("\n## Fix these in the queue you wrote before\n\n")
-					for _, p := range probs {
+				var fixes []string
+				if miss, err := e.queueMissingLiterals(ctx, st.Effort, defs); err == nil && len(miss) > 0 {
+					fixes = append(fixes, (&literalsError{missing: miss, from: "the task queue"}).Error())
+				}
+				if probs, err := e.queueProblems(ctx, st.Effort, defs); err == nil {
+					fixes = append(fixes, probs...)
+				}
+				if len(fixes) > 0 {
+					// The earlier queue is shown so the retry edits it, keeping what was right,
+					// instead of writing a new one that misses other strings (the fourth
+					// local webcalc trial: three queues, each missing different strings).
+					b.WriteString("\n## Fix these in the queue below\n\nStart from this queue, which is almost right: keep every task that is fine and change only what these say.\n\n")
+					for _, p := range fixes {
 						b.WriteString("- " + p + "\n")
 					}
+					b.WriteString("\nThe queue so far:\n\n```json\n" + compactJSON(prev.Parsed) + "\n```\n")
 				}
 			}
 		}

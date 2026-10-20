@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -243,6 +244,14 @@ func TestQueueProblemRetryUsesAnotherModelAndAThirdTry(t *testing.T) {
 	}
 	if calls[0].Request.Model == calls[1].Request.Model || calls[1].Request.Model == calls[2].Request.Model {
 		t.Fatalf("a retry reused the previous model: %s, %s, %s", calls[0].Request.Model, calls[1].Request.Model, calls[2].Request.Model)
+	}
+	// The retry is handed the queue it must fix, not only the list of faults.
+	raw, err := os.ReadFile(calls[1].Request.PromptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "The queue so far") || !strings.Contains(string(raw), "/api/hello") {
+		t.Fatalf("the retry prompt lacks the earlier queue and the missing string:\n%s", raw)
 	}
 }
 

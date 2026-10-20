@@ -150,3 +150,7 @@ Effort 14 T007 used its five attempts after M5 was taken offline: four were 30-m
 ### H22 A file list that disagrees with the path in the prompt goes back to the compiler
 
 Effort 14 T006 stopped for input because `files_touched` said `history.store.go` while the prompt, the worker and the repository used `history/store.go`; the reviewer was told to read a file that does not exist. `QueueFileNameProblems` flags a listed name that is a prompt path with its slashes turned into a dot, underscore or hyphen, and the compile retry sends the compiler back with the finding. Test: `TestQueueFileNameProblemsCatchesASlashTurnedIntoADot`.
+
+### H23 A compile retry is given the queue it must fix
+
+Effort 15 halted at compile after three queues, each missing different strings (`count`, 400, 405, `7 + 2`): the retry prompt said "fix these in the queue you wrote before" but did not show the queue, and did not list the missing strings, so each model wrote a new queue from scratch. The retry prompt now lists the missing strings and the other findings, and includes the earlier queue with the instruction to keep what is right and change only what the findings say. Covered in `TestQueueProblemRetryUsesAnotherModelAndAThirdTry`.
