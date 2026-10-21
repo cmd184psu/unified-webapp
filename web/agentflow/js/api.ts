@@ -148,7 +148,7 @@ export interface AttentionItem {
   effort: number;
   /** the task key; absent for an item about the whole effort */
   task?: string;
-  kind: 'draft_failed' | 'plan_halted' | 'compile_halted' | 'task_halted' | 'task_unassignable';
+  kind: 'stalled' | 'draft_failed' | 'plan_halted' | 'compile_halted' | 'task_halted' | 'task_unassignable';
   message: string;
   /** Unix ms, 0 when not known */
   since: number;

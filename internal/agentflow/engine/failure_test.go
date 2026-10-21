@@ -490,3 +490,62 @@ func TestH21_AfterAWorkerTimeoutTheNextAttemptUsesAnotherModel(t *testing.T) {
 		t.Fatalf("the attempt after a timeout used worker %q, want m2", as[1].WorkerModel)
 	}
 }
+
+// H30: a stage whose model says nothing for the stall time ends as a timeout
+// and the next attempt uses another model; the stall time is set in minutes.
+func TestH30_ASilentStageEndsAsATimeoutAndMovesToAnotherModel(t *testing.T) {
+	old := stallUnit
+	stallUnit = 20 * time.Millisecond
+	t.Cleanup(func() { stallUnit = old })
+	c := newChainRun(t, nil, chainDefs()[:1])
+	c.setLimits(map[string]string{"stall_minutes": "2"})
+	c.addBackend("gpu2", 1, false, false, "m3", "m4")
+	c.candidates("global", "", "worker", "gpu/m1", "gpu/m2")
+	c.candidates("global", "", "reviewer", "gpu2/m4")
+	c.fake.Script("worker",
+		runner.Step{Block: true},
+		runner.Step{Reply: workerOK, Edit: writeWork})
+	c.fake.Script("reviewer", runner.Step{Reply: reviewPass})
+	c.run()
+	waitFor(t, "task passed", func() bool { return c.taskStatus() == model.StatusPassed })
+	as := c.attempts(0)
+	if len(as) < 2 || as[0].Fingerprint != string(FailTimeout) || as[0].WorkerModel != "m1" || as[1].WorkerModel != "m2" {
+		t.Fatalf("attempts = %+v: want a timeout on m1 and then m2", as)
+	}
+}
+
+// H30: a running effort with nothing in flight and nothing happening for the
+// stall time is listed as stalled with what its tasks wait for, and recorded
+// once.
+func TestH30_AnIdleEffortIsListedAsStalled(t *testing.T) {
+	old := stallUnit
+	stallUnit = 20 * time.Millisecond
+	t.Cleanup(func() { stallUnit = old })
+	c := newChainRun(t, nil, chainDefs()[:1])
+	c.setLimits(map[string]string{"stall_minutes": "3"})
+	c.candidates("global", "", "worker", "gpu/m1")
+	c.candidates("global", "", "reviewer", "gpu/m1") // the worker's own model: nobody can review
+	c.fake.Script("worker", runner.Step{Reply: workerOK, Edit: writeWork})
+	c.run()
+	ctx := context.Background()
+	var item AttentionItem
+	waitFor(t, "stalled listed", func() bool {
+		items, _ := c.eng.Attention(ctx)
+		for _, it := range items {
+			if it.Kind == "stalled" {
+				item = it
+				return true
+			}
+		}
+		return false
+	})
+	if !strings.Contains(item.Message, "Nothing has moved for") {
+		t.Fatalf("message = %q", item.Message)
+	}
+	c.eng.watchStalls(ctx)
+	c.eng.watchStalls(ctx)
+	evs, err := c.eng.effortEvents(ctx, c.effort, eventStallDetected)
+	if err != nil || len(evs) != 1 {
+		t.Fatalf("stall events = %d (%v), want 1", len(evs), err)
+	}
+}

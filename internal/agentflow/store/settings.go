@@ -19,12 +19,15 @@ type Settings struct {
 	StuckThreshold  int
 	MaxInfraRetries int
 	PlanMaxRounds   int
-	WorkerTimeout   time.Duration
-	ReviewTimeout   time.Duration
-	PlanTimeout     time.Duration
-	VerifyTimeout   time.Duration
-	OpencodePath    string
-	VerifySlots     int
+	// StallMinutes is how long a stage may say nothing, and how long a running
+	// effort may sit with nothing in flight, before it counts as stalled (H30).
+	StallMinutes  int
+	WorkerTimeout time.Duration
+	ReviewTimeout time.Duration
+	PlanTimeout   time.Duration
+	VerifyTimeout time.Duration
+	OpencodePath  string
+	VerifySlots   int
 	// ContextFloor is the context window assumed for a model whose served
 	// window is not known (H15).
 	ContextFloor int
@@ -37,7 +40,7 @@ type Settings struct {
 
 // limitKeys are the settings a project may override.
 var limitKeys = []string{
-	"max_attempts", "stuck_threshold", "max_infra_retries", "plan_max_rounds",
+	"max_attempts", "stuck_threshold", "max_infra_retries", "plan_max_rounds", "stall_minutes",
 	"worker_timeout", "review_timeout", "plan_timeout", "verify_timeout",
 }
 
@@ -94,6 +97,9 @@ func parseSettings(m map[string]string) (Settings, error) {
 		return s, err
 	}
 	if s.PlanMaxRounds, err = validateInt("plan_max_rounds", m["plan_max_rounds"], 1, 50); err != nil {
+		return s, err
+	}
+	if s.StallMinutes, err = validateInt("stall_minutes", m["stall_minutes"], 1, 100); err != nil {
 		return s, err
 	}
 	if s.WorkerTimeout, err = validateTimeout("worker_timeout", m["worker_timeout"]); err != nil {

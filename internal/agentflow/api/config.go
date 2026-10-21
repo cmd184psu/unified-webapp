@@ -63,7 +63,7 @@ type ConfigDoc struct {
 // which describe how models are used. Where opencode lives, the directory
 // picker's roots and the verify slots belong to the machine and stay as they
 // are on the machine that imports.
-var portableSettings = []string{"max_attempts", "stuck_threshold", "max_infra_retries", "plan_max_rounds",
+var portableSettings = []string{"max_attempts", "stuck_threshold", "max_infra_retries", "plan_max_rounds", "stall_minutes",
 	"worker_timeout", "review_timeout", "plan_timeout", "verify_timeout", "backend_cooldown", "context_floor_tokens"}
 
 // configRoles are the roles that have a global candidate list.

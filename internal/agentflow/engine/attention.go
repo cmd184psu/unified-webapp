@@ -22,7 +22,7 @@ type AttentionItem struct {
 	Effort  int64  `json:"effort"`
 	// Task is the task key, empty for an item about the whole effort.
 	Task string `json:"task,omitempty"`
-	// Kind is draft_failed, plan_halted, compile_halted, task_halted or task_unassignable.
+	// Kind is stalled, draft_failed, plan_halted, compile_halted, task_halted or task_unassignable.
 	Kind    string `json:"kind"`
 	Message string `json:"message"`
 	// Since is when it happened (Unix ms) when the engine knows; 0 otherwise.
@@ -84,6 +84,15 @@ func (e *Engine) effortAttention(ctx context.Context, project string, ef model.E
 	var out []AttentionItem
 	add := func(kind, task, msg string, at time.Time) {
 		out = append(out, AttentionItem{Project: project, Effort: ef.ID, Task: task, Kind: kind, Message: msg, Since: at.UnixMilli()})
+	}
+	if ss, err := e.stallSettingsFor(ctx, project); err == nil {
+		if at, reasons, err := e.IdleStall(ctx, project, ef, ss); err == nil && !at.IsZero() {
+			msg := fmt.Sprintf("Nothing has moved for %d minutes", int(e.deps.Clock().Sub(at)/stallUnit))
+			if len(reasons) > 0 {
+				msg += ": " + strings.Join(reasons, "; ")
+			}
+			add("stalled", "", msg, at)
+		}
 	}
 	switch ef.Status {
 	case model.EffortDraft:

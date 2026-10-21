@@ -10,6 +10,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/model"
@@ -374,10 +375,13 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 	}
 
 	timeout := roleTimeout(set, st.Role)
+	var lastSeen atomic.Int64 // when the model last said anything (H30)
+	lastSeen.Store(d.Clock().UnixNano())
 	req := runner.Request{
 		Role: st.Role, Backend: be, Model: st.Model,
 		Workdir: workdir, StageDir: dir, PromptPath: promptPath, Message: promptMessage, Plugins: proj.Plugins,
 		OnEvent: func(ev runner.Event) {
+			lastSeen.Store(d.Clock().UnixNano())
 			if ev.Text != "" {
 				fmt.Fprintln(rc.Log(), ev.Text)
 			}
@@ -407,7 +411,7 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 			cctx, cancel = context.WithTimeout(ctx, timeout)
 			defer cancel()
 		}
-		res, err := d.Runner.Run(cctx, r)
+		res, err := e.runWatched(cctx, r, set.StallMinutes, &lastSeen)
 		*tokens += usageTokens(res.Usage)
 		out := classifyRun(ctx, st.Role, err)
 		if out == OutcomeInfraContext {

@@ -170,3 +170,15 @@ Planning that gave up after five infrastructure failures put the effort back at 
 ### H27 Check models
 
 The free hosted pool had changed under us: three of five models (space-bunny, cat-jam, muse-spark) answered nothing, not even a one-word prompt, with an instant "Unexpected server error", while the other two worked. Free tiers also run out of quota. `POST /api/backends/{name}/check` (and a Check models button on each backend card) sends a one-word prompt to each model of the backend, one after the other, through the same runner and config a stage uses, and keeps the result per model (`model_checks`, migration 20): answered, not answering, out of quota, unreachable, too slow or an empty reply. `GET` on the same path reports progress. A model whose last check failed is passed over by every picker, with the reason, for six hours or until a later check passes. Infrastructure crashes are still not strikes against a model; this is separate, and owner-triggered.
+
+### H28 A weaker reviewer reviews rather than the task waiting
+
+A reviewer must not be weaker than the worker it judges, but when the pool has none that is not weaker the task waited for ever (T003 of the first hybrid trial waited ten hours for a tier-1 worker's reviewer when only tier-2 hosted models existed). The strict rule still picks first; if every candidate fails only on strength, a weaker one reviews. The worker's own model is never used.
+
+### H29 Local models rank below hosted ones; preflight
+
+The hardware behind a local model is weaker than a datacenter's, so tiers now say so: an unrated model counts as tier 2 if hosted and tier 3 if local, and a local model never counts as stronger than tier 2 whatever its rating. Only a rating the owner set bars a model from planning roles, so a local-only setup still has a planner. `GET /api/projects/{slug}/preflight` looks at a project's candidates the way the pickers will and names any role with no model that can serve it and any worker that would have no reviewer, and warns of hosted models that have not passed Check models lately. The webcalc kickoff script runs Check models and the preflight first and refuses to start on a problem (`--skip-preflight` to skip).
+
+### H30 Stall watchdog
+
+`stall_minutes` (whole minutes, 1 to 100, default 10; a global setting a project may override) defines a stall in two ways. A stage whose model says nothing for that long ends as a timeout, so the usual rules move the work to another model; a model that keeps streaming output is never stalled however long it takes. A running effort, or one being planned or compiled, with nothing in flight and nothing happening for that long is stalled: it is nudged (the planning and dispatch passes run again), recorded once as a `stall.detected` event naming what each task waits for, and listed on the attention list as `stalled`. An effort waiting on a person, in an infrastructure backoff, resting under a duty cap or with every remaining task halted is not stalled.

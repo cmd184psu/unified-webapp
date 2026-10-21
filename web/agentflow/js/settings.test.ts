@@ -5,7 +5,7 @@ import { ApiError, type OpenCodeStatus, type Settings } from './api';
 installFakeDom();
 
 const SETTINGS: Settings = {
-  max_attempts: 5, stuck_threshold: 3, max_infra_retries: 5, plan_max_rounds: 5,
+  max_attempts: 5, stuck_threshold: 3, max_infra_retries: 5, plan_max_rounds: 5, stall_minutes: 10,
   worker_timeout: '30m0s', review_timeout: '15m0s', plan_timeout: '20m0s', verify_timeout: '20m0s',
   opencode_path: 'opencode', verify_slots: 2, context_floor_tokens: 16384, backend_cooldown: '2m0s',
 };

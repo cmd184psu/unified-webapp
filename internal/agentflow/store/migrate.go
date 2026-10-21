@@ -48,7 +48,14 @@ var migrations = []migration{
 	{18, migration18SQL},
 	{19, migration19SQL},
 	{20, migration20SQL},
+	{21, migration21SQL},
 }
+
+// migration21SQL (H30) seeds the stall limit: minutes of silence from a stage,
+// or of nothing in flight in a running effort, before the engine acts.
+const migration21SQL = `
+INSERT OR IGNORE INTO settings (key, value) VALUES ('stall_minutes', '10');
+`
 
 // migration20SQL (H27) keeps the result of the last "Check models" run for each
 // model: whether a one-word prompt was answered, and if not, why. A model that
