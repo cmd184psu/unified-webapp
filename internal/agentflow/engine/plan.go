@@ -481,6 +481,15 @@ func (e *Engine) advancePlan(ctx context.Context, p store.Project, ef model.Effo
 	if IsInfra(last.Outcome) {
 		return e.effortInfra(ctx, p, sess.stages, last,
 			func(avoid string) error {
+				if avoid != "" { // keep away from every model of this role that crashed, so two flaky ones do not trade the stage
+					var failed []model.Stage
+					for _, st := range sess.stages {
+						if st.Role == last.Role && IsInfra(st.Outcome) {
+							failed = append(failed, st)
+						}
+					}
+					avoid = avoidTried(failed)
+				}
 				return e.startEffortStage(ctx, p, ef.ID, last.Role, sess.others(last.Role), avoid)
 			},
 			func(reason string) error { return e.haltPlan(ctx, ef, last, reason) })

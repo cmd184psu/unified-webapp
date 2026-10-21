@@ -90,6 +90,10 @@ func (e *Engine) effortAttention(ctx context.Context, project string, ef model.E
 		if later(eventDraftFailed, eventDraftStart) && later(eventDraftFailed, eventDraftDone) {
 			add("draft_failed", "", "The FRD draft failed: "+reasonOf(last[eventDraftFailed]), last[eventDraftFailed].TS)
 		}
+		// a halted plan drops the effort back to draft, so it is reported here too
+		if later(eventPlanHalted, eventPlanStart) {
+			add("plan_halted", "", "Planning halted: "+reasonOf(last[eventPlanHalted]), last[eventPlanHalted].TS)
+		}
 	case model.EffortPlanning:
 		if later(eventPlanHalted, eventPlanStart) {
 			add("plan_halted", "", "Planning halted: "+reasonOf(last[eventPlanHalted]), last[eventPlanHalted].TS)

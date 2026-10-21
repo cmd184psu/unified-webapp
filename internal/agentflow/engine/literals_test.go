@@ -2,8 +2,10 @@ package engine
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/model"
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
@@ -285,5 +287,43 @@ func TestAttentionListsAFailedDraft(t *testing.T) {
 	}
 	if items, _ := f.eng.Attention(ctx); len(items) != 0 {
 		t.Fatalf("a new draft left the old failure listed: %+v", items)
+	}
+}
+
+// H26: a critic that crashes is not handed back to the model that crashed
+// before it, and when planning gives up the owner is told (the effort is back
+// at draft by then, which the attention list used to skip).
+func TestH26_PlanCrashesMoveToOtherModelsAndAreListedWhenPlanningHalts(t *testing.T) {
+	f := newPlanFix(t, false)
+	f.addBackend("gpu", 2, false, false, "m1", "m2", "m3", "m4", "m5", "m6")
+	f.candidates("global", "", "planner", "gpu/m1")
+	f.candidates("global", "", "architect", "gpu/m2")
+	f.candidates("global", "", "critic", "gpu/m3", "gpu/m4", "gpu/m5", "gpu/m6")
+	ctx := context.Background()
+	if err := f.st.UpdateSettings(ctx, "t", map[string]string{"max_infra_retries": "3"}); err != nil {
+		t.Fatal(err)
+	}
+	f.eng.deps.Clock = func() time.Time { return time.Now().Add(time.Hour) }
+	crash := runner.Step{ErrClass: runner.ErrCrash, Err: os.ErrInvalid}
+	f.fake.Script("planner", runner.Step{Reply: planReply})
+	f.fake.Script("architect", runner.Step{Reply: approveReply})
+	f.fake.Script("critic", crash, crash, crash)
+	f.startEngine()
+	if err := f.eng.GeneratePlan(ctx, "alice", f.effort); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "planning halted", func() bool {
+		items, _ := f.eng.Attention(ctx)
+		return len(items) == 1 && items[0].Kind == "plan_halted"
+	})
+	seen := map[string]bool{}
+	for _, st := range f.effortStages("critic") {
+		if seen[st.Model] {
+			t.Fatalf("critic crashed on %s and was handed to it again: %+v", st.Model, f.effortStages("critic"))
+		}
+		seen[st.Model] = true
+	}
+	if len(seen) != 3 {
+		t.Fatalf("critic stages = %d, want 3", len(seen))
 	}
 }
