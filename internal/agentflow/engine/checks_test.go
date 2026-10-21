@@ -91,6 +91,17 @@ func TestH29_UnratedLocalModelsCountAsLight(t *testing.T) {
 	if a, b := effectiveTier(snap, "box", "a"), effectiveTier(snap, "cloud", "b"); a != 3 || b != 2 {
 		t.Fatalf("unrated local = tier %d, hosted = tier %d, want 3 and 2", a, b)
 	}
+	// a local model rated strong still never counts above tier 2; a hosted one does
+	if err := f.eng.AddBackend(context.Background(), "t", store.Backend{Name: "rated", Host: "http://127.0.0.1:11436", APIType: "ollama", Slots: 1, Models: []store.BackendModel{{Model: "x", Tier: 1}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.eng.AddBackend(context.Background(), "t", store.Backend{Name: "cloud2", Host: "", APIType: "opencode", Hosted: true, Slots: 1, Models: []store.BackendModel{{Model: "y", Tier: 1}}}); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ = f.st.Snapshot(context.Background())
+	if l, h := effectiveTier(snap, "rated", "x"), effectiveTier(snap, "cloud2", "y"); l != 2 || h != 1 {
+		t.Fatalf("local rated 1 = tier %d, hosted rated 1 = tier %d, want 2 and 1", l, h)
+	}
 }
 
 // H29: before a run starts, Preflight says which role has nothing that can

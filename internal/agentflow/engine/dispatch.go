@@ -662,7 +662,8 @@ func tooBig(v *view, c store.Candidate) bool {
 }
 
 // Model tiers (H3): 1 strong, 2 capable, 3 light. A model the owner has not
-// rated counts as 2 if hosted and 3 if local (H29).
+// rated counts as 2 if hosted and 3 if local, and a local model never counts
+// as stronger than tier 2 (H29).
 const defaultTier = 2
 
 // localDefaultTier is what a local model counts as until the owner rates it
@@ -696,12 +697,20 @@ func effectiveTier(snap store.Snapshot, backend, mdl string) int {
 			continue
 		}
 		for _, m := range b.Models {
-			if m.Model == mdl && m.Tier != 0 {
-				return m.Tier
+			if m.Model != mdl {
+				continue
 			}
-			if m.Model == mdl {
-				return unratedTier(b.Hosted)
+			t := m.Tier
+			if t == 0 {
+				t = unratedTier(b.Hosted)
 			}
+			// the hardware behind a local model is weaker than a datacenter's, so
+			// whatever its rating it never counts as stronger than a capable
+			// hosted model (H29)
+			if !b.Hosted && t < defaultTier {
+				t = defaultTier
+			}
+			return t
 		}
 	}
 	return defaultTier

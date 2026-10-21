@@ -541,7 +541,8 @@ func TestH2_ReviewerPrefersAnotherFamily(t *testing.T) {
 // tiered adds a backend whose models carry the given tiers (model -> tier).
 func (h *harness) tiered(name string, slots int, tiers map[string]int) {
 	h.t.Helper()
-	b := store.Backend{Name: name, Host: "http://127.0.0.1:11434", APIType: "ollama", Slots: slots}
+	// hosted, so that tier 1 means something: a local model never counts above tier 2 (H29)
+	b := store.Backend{Name: name, Host: "http://127.0.0.1:11434", APIType: "ollama", Slots: slots, Hosted: true}
 	for m, tier := range tiers {
 		b.Models = append(b.Models, store.BackendModel{Model: m, Tier: tier})
 	}
