@@ -578,7 +578,9 @@ func TestH3_LightModelsAreSkippedForPlanningRoles(t *testing.T) {
 	}
 }
 
-// H3: a reviewer may not be weaker than the worker whose work it judges.
+// H3: a reviewer is not weaker than the worker whose work it judges when the
+// pool has one; H28: when it has none, a weaker one reviews rather than the
+// task waiting for ever.
 func TestH3_ReviewerIsNotWeakerThanTheWorker(t *testing.T) {
 	ctx := context.Background()
 	h := newDispHarness(t)
@@ -588,8 +590,8 @@ func TestH3_ReviewerIsNotWeakerThanTheWorker(t *testing.T) {
 	f := h.dispProject("alpha", "any", indep(1))
 	tk, _ := h.st.GetTask(ctx, f.tasks[0].ID)
 	pk, why, err := h.eng.pickBackend(ctx, "reviewer", tk, store.Project{Slug: "alpha", ModelScope: "any"}, "strong")
-	if err != nil || pk.Model != "" || !strings.Contains(why, "weaker than the worker") {
-		t.Fatalf("a strong worker got reviewer %+v (%q, %v)", pk, why, err)
+	if err != nil || why != "" || pk.Model == "" || pk.Model == "strong" {
+		t.Fatalf("a strong worker with only weaker reviewers got %+v (%q, %v), want a weaker one to review (H28)", pk, why, err)
 	}
 	pk, why, err = h.eng.pickBackend(ctx, "reviewer", tk, store.Project{Slug: "alpha", ModelScope: "any"}, "weak")
 	if err != nil || why != "" || pk.Model != "unrated" {

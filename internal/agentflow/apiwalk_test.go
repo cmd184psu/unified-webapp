@@ -314,6 +314,7 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	ok("GET", "/api/projects/other", "", 404)
 	// The check uses the critic's fake script, so it runs after planning is done.
 	ok("GET", "/api/backends/gpu/check", "", 200)
+	ok("GET", "/api/projects/demo/preflight", "", 200)
 	ok("POST", "/api/backends/gpu/check", "", 202)
 	ok("POST", "/api/backends/nope/check", "", 404)
 	ok("POST", "/api/projects/_all_", `{}`, 400)

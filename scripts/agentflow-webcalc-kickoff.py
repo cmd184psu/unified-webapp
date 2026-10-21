@@ -77,6 +77,7 @@ ap.add_argument("--backend-order", default="ollama-m5,ollama-win,ollama-m4",
 ap.add_argument("--dry-run", action="store_true", help="with --lineup local: print the candidate lists and stop")
 ap.add_argument("--resume", type=int, metavar="EFFORT",
                 help="carry on an effort this script already started (same --slug and --repo): approve the gates it has reached and wait")
+ap.add_argument("--skip-preflight", action="store_true", help="do not check the models and the lineup before starting")
 ap.add_argument("--wait", action="store_true")
 args = ap.parse_args()
 LONG = 6 * 3600  # planning and compiling on local models take hours, not minutes
@@ -221,6 +222,27 @@ if args.lineup in ("local", "free", "hybrid") and not args.resume:
     for role, lst in lineup.items():
         api("PUT", f"/api/projects/{slug}/candidates/{role}", {"candidates": lst}, 200)
 
+if not args.resume and not args.skip_preflight:
+    # Before anything starts: try every hosted model with a one-word prompt, then ask the service
+    # whether every role has a model and every worker a reviewer. A run that cannot get through
+    # should not begin.
+    lu = globals().get("lineup") or {}  # the global lineup sets none: the service's own lists apply
+    used = sorted({c["backend"] for lst in lu.values() for c in lst})
+    hosted = {b["name"] for b in (api("GET", "/api/backends", None, 200) or []) if b.get("hosted")}
+    for name in [n for n in used if n in hosted]:
+        api("POST", f"/api/backends/{name}/check", None, 202)
+    for name in [n for n in used if n in hosted]:
+        while api("GET", f"/api/backends/{name}/check", None, 200)["state"] == "running":
+            time.sleep(5)
+        for c in api("GET", f"/api/backends/{name}/check", None, 200)["results"]:
+            say(f"check {name}/{c['Model']}: " + ("answers" if c["OK"] else f"FAILED ({c['Class']})"))
+    pre = api("GET", f"/api/projects/{slug}/preflight", None, 200)
+    for w in pre["warnings"]:
+        say("preflight warning: " + w)
+    if not pre["ok"]:
+        sys.exit("preflight failed, nothing was started:\n  " + "\n  ".join(pre["problems"]))
+    say("preflight ok")
+
 eid = args.resume or api("POST", f"/api/projects/{slug}/efforts", {"title": "web calculator"}, 201)["id"]
 base = f"/api/projects/{slug}/efforts/{eid}"
 say(f"project {slug}, effort {eid}: open the agentflow UI to watch")
@@ -249,7 +271,7 @@ api("POST", f"/api/projects/{slug}/run/start", None)  # already running is fine
 say("run started")
 
 if args.wait:
-    last = None
+    last = told = None
     while True:
         s = status()
         ts = api("GET", base + "/tasks") or []
@@ -259,5 +281,9 @@ if args.wait:
             last = line
         if s in ("complete", "abandoned") or any(isinstance(t, dict) and t.get("halted") for t in ts):
             break
+        item = stopped_on_us()  # a task can wait on the service's attention list without halting: say so, once
+        if item and item["message"] != told:
+            told = item["message"]
+            say("needs attention: " + told)
         time.sleep(10)
 say("when complete: cd " + args.repo + " && git checkout agentflow/effort-" + str(eid) + " && go run .   (then open http://localhost:7070)")

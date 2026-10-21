@@ -510,7 +510,21 @@ func (e *Engine) pickBackend(ctx context.Context, role string, t model.Task, p s
 // worker's family is the fallback, and the worker's own model is never used.
 // When a different-family reviewer exists but has no free slot, the stage
 // waits for it rather than settling for the weaker check.
+//
+// A reviewer no weaker than the worker is wanted, but when the pool has none
+// the task would wait for ever for a model that is never coming: a weaker
+// one reviews instead (H28), never the worker's own model.
 func reviewerFor(v *view, p store.Project, sticky, workerModel string, needSlot bool) (Pick, string) {
+	pk, why := reviewerPick(v, p, sticky, workerModel, needSlot, true)
+	if why != "" && strings.Contains(why, "is weaker than the worker") {
+		if pk2, why2 := reviewerPick(v, p, sticky, workerModel, needSlot, false); why2 == "" {
+			return pk2, ""
+		}
+	}
+	return pk, why
+}
+
+func reviewerPick(v *view, p store.Project, sticky, workerModel string, needSlot, notWeaker bool) (Pick, string) {
 	cands := v.snap.CandidatesFor("reviewer", p.Slug)
 	level := func(c store.Candidate) int {
 		if model.ModelFamily(c.Model) != model.ModelFamily(workerModel) {
@@ -520,13 +534,13 @@ func reviewerFor(v *view, p store.Project, sticky, workerModel string, needSlot 
 	}
 	best := 2
 	for _, c := range cands {
-		if skipReviewer(v, p, c, workerModel, false) == "" && level(c) < best {
+		if skipReviewer(v, p, c, workerModel, false, notWeaker) == "" && level(c) < best {
 			best = level(c)
 		}
 	}
 	if sticky != "" {
 		for _, c := range cands {
-			if c.Model == sticky && level(c) == best && skipReviewer(v, p, c, workerModel, needSlot) == "" {
+			if c.Model == sticky && level(c) == best && skipReviewer(v, p, c, workerModel, needSlot, notWeaker) == "" {
 				return Pick{Backend: c.Backend, Model: c.Model}, ""
 			}
 		}
@@ -536,7 +550,7 @@ func reviewerFor(v *view, p store.Project, sticky, workerModel string, needSlot 
 		if best < 2 && level(c) != best && c.Model != workerModel {
 			continue
 		}
-		if why := skipReviewer(v, p, c, workerModel, needSlot); why != "" {
+		if why := skipReviewer(v, p, c, workerModel, needSlot, notWeaker); why != "" {
 			reasons = append(reasons, why)
 			continue
 		}
@@ -545,11 +559,11 @@ func reviewerFor(v *view, p store.Project, sticky, workerModel string, needSlot 
 	return Pick{}, noEligible("reviewer", reasons)
 }
 
-func skipReviewer(v *view, p store.Project, c store.Candidate, workerModel string, needSlot bool) string {
+func skipReviewer(v *view, p store.Project, c store.Candidate, workerModel string, needSlot, notWeaker bool) string {
 	if c.Model == workerModel {
 		return "reviewer model equals worker model"
 	}
-	if wt := effectiveTier(v.snap, "", workerModel); effectiveTier(v.snap, c.Backend, c.Model) > wt {
+	if wt := effectiveTier(v.snap, "", workerModel); notWeaker && effectiveTier(v.snap, c.Backend, c.Model) > wt {
 		return fmt.Sprintf("reviewer model %s (tier %d) is weaker than the worker %s (tier %d)", c.Model, effectiveTier(v.snap, c.Backend, c.Model), workerModel, wt)
 	}
 	return skipReason(v, p, c, needSlot)
@@ -647,9 +661,23 @@ func tooBig(v *view, c store.Candidate) bool {
 	return false
 }
 
-// Model tiers (H3): 1 strong, 2 capable, 3 light; a model the owner has not
-// rated counts as 2, so nothing changes until models are rated.
+// Model tiers (H3): 1 strong, 2 capable, 3 light. A model the owner has not
+// rated counts as 2 if hosted and 3 if local (H29).
 const defaultTier = 2
+
+// localDefaultTier is what a local model counts as until the owner rates it
+// (H29): a model small enough to run on the owner's own machines is weaker
+// than a hosted one, so it is not trusted with planning roles or to review a
+// hosted model's work, and a task that keeps failing on it escalates to the
+// hosted pool. A rating the owner sets always wins.
+const localDefaultTier = 3
+
+func unratedTier(hosted bool) int {
+	if hosted {
+		return defaultTier
+	}
+	return localDefaultTier
+}
 
 // planningRole is a role whose output every later stage builds on.
 func planningRole(role string) bool {
@@ -672,7 +700,7 @@ func effectiveTier(snap store.Snapshot, backend, mdl string) int {
 				return m.Tier
 			}
 			if m.Model == mdl {
-				return defaultTier
+				return unratedTier(b.Hosted)
 			}
 		}
 	}
@@ -681,7 +709,23 @@ func effectiveTier(snap store.Snapshot, backend, mdl string) int {
 
 // lightForRole reports whether c is rated light and its role is a planning one.
 func lightForRole(v *view, c store.Candidate) bool {
-	return planningRole(c.Role) && effectiveTier(v.snap, c.Backend, c.Model) == 3
+	if !planningRole(c.Role) {
+		return false
+	}
+	// only a rating the owner set bars a model: the default tier of an unrated
+	// local model (H29) ranks it below hosted ones but does not leave a
+	// local-only setup with no planner
+	for _, b := range v.snap.Backends {
+		if b.Name != c.Backend {
+			continue
+		}
+		for _, m := range b.Models {
+			if m.Model == c.Model {
+				return m.Tier == 3
+			}
+		}
+	}
+	return false
 }
 
 // modelFull reports whether c's model has a concurrency limit and it is used up.

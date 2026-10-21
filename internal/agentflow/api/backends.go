@@ -19,6 +19,7 @@ func (a *API) registerBackends(mux muxer) {
 	mux.HandleFunc("POST /api/backends/{name}/retire", a.retireBackend)
 	mux.HandleFunc("POST /api/backends/{name}/enable", a.enableBackend)
 	mux.HandleFunc("GET /api/backends/{name}/check", a.checkStatus)
+	mux.HandleFunc("GET /api/projects/{slug}/preflight", a.preflight)
 	mux.HandleFunc("POST /api/backends/{name}/check", a.checkModels)
 	mux.HandleFunc("GET /api/candidates", a.listCandidates)
 	mux.HandleFunc("PUT /api/candidates/{role}", a.putGlobalCandidates)
@@ -461,6 +462,16 @@ func (a *API) checkModels(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) checkStatus(w http.ResponseWriter, r *http.Request) {
 	v, err := a.deps.Engine.CheckStatus(r.Context(), r.PathValue("name"))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+// preflight says whether a project's run can get through before it starts (H29).
+func (a *API) preflight(w http.ResponseWriter, r *http.Request) {
+	v, err := a.deps.Engine.Preflight(r.Context(), r.PathValue("slug"))
 	if err != nil {
 		writeErr(w, err)
 		return

@@ -5,8 +5,10 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
+	"cmd184psu/unified-webapp/internal/agentflow/store"
 )
 
 // H27: Check models tries each model with a one-word prompt, one after the
@@ -73,5 +75,53 @@ func TestH27_CheckModelsRecordsEachModelAndFailedOnesAreSkipped(t *testing.T) {
 	})
 	if vw, _ = f.eng.newView(ctx); len(vw.failing) != 0 {
 		t.Fatalf("a passing check left %v failing", vw.failing)
+	}
+}
+
+// H29: a model nobody has rated counts as tier 3 if local and tier 2 if
+// hosted; a rating the owner set is kept.
+func TestH29_UnratedLocalModelsCountAsLight(t *testing.T) {
+	f := newPlanFix(t, true)
+	f.addBackend("box", 1, false, false, "a")
+	f.addBackend("cloud", 1, true, false, "b")
+	snap, err := f.st.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a, b := effectiveTier(snap, "box", "a"), effectiveTier(snap, "cloud", "b"); a != 3 || b != 2 {
+		t.Fatalf("unrated local = tier %d, hosted = tier %d, want 3 and 2", a, b)
+	}
+}
+
+// H29: before a run starts, Preflight says which role has nothing that can
+// serve it and which worker would have no reviewer.
+func TestH29_PreflightNamesRolesWithNoModelAndWorkersWithNoReviewer(t *testing.T) {
+	f := newPlanFix(t, true)
+	f.addBackend("gpu", 2, false, false, "m1", "m2")
+	f.candidates("global", "", "planner", "gpu/m1")
+	f.candidates("global", "", "architect", "gpu/m2")
+	f.candidates("global", "", "critic", "gpu/m2")
+	f.candidates("global", "", "compiler", "gpu/m1")
+	f.candidates("global", "", "worker", "gpu/m1")
+	f.candidates("global", "", "reviewer", "gpu/m1") // the worker's own model: no one else can review
+	ctx := context.Background()
+	v, err := f.eng.Preflight(ctx, f.slug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := strings.Join(v.Problems, "\n")
+	if v.OK || !strings.Contains(all, "worker gpu/m1 would have no reviewer") {
+		t.Fatalf("preflight = %+v", v)
+	}
+	f.candidates("global", "", "reviewer", "gpu/m2")
+	v, err = f.eng.Preflight(ctx, f.slug)
+	if err != nil || !v.OK || len(v.Roles) != 6 {
+		t.Fatalf("with a second model to review: %+v (%v)", v, err)
+	}
+	if err := f.st.SaveModelCheck(ctx, store.ModelCheck{Backend: "gpu", Model: "m2", Class: "failing", Message: "gone", Checked: time.Now().UnixMilli()}); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ = f.eng.Preflight(ctx, f.slug); v.OK || !strings.Contains(strings.Join(v.Problems, "\n"), "no model can serve critic") {
+		t.Fatalf("a role with no candidates: %+v", v)
 	}
 }
