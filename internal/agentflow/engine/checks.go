@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -129,6 +130,10 @@ func (e *Engine) checkOne(ctx context.Context, b store.Backend, mdl string) stor
 	work := filepath.Join(dir, "work")
 	if err := os.MkdirAll(work, 0o700); err != nil {
 		return finish(false, "failing", err.Error())
+	}
+	// the runner only works in a git repository root, so the scratch directory is one
+	if out, err := exec.CommandContext(ctx, "git", "init", "-q", work).CombinedOutput(); err != nil {
+		return finish(false, "failing", "git init: "+strings.TrimSpace(string(out)))
 	}
 	promptPath := filepath.Join(dir, "prompt.md")
 	if err := os.WriteFile(promptPath, []byte(checkPrompt), 0o600); err != nil {
