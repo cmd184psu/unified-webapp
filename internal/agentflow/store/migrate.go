@@ -47,7 +47,25 @@ var migrations = []migration{
 	{17, migration17SQL},
 	{18, migration18SQL},
 	{19, migration19SQL},
+	{20, migration20SQL},
 }
+
+// migration20SQL (H27) keeps the result of the last "Check models" run for each
+// model: whether a one-word prompt was answered, and if not, why. A model that
+// failed its check is passed over until it passes a later one or the result
+// goes stale.
+const migration20SQL = `
+CREATE TABLE model_checks (
+  backend TEXT NOT NULL,
+  model TEXT NOT NULL,
+  ok INTEGER NOT NULL CHECK (ok IN (0, 1)),
+  class TEXT NOT NULL DEFAULT '',
+  message TEXT NOT NULL DEFAULT '',
+  millis INTEGER NOT NULL DEFAULT 0,
+  checked INTEGER NOT NULL,
+  PRIMARY KEY (backend, model)
+);
+`
 
 // migration19SQL (H20) gives each backend a duty cap: the share of time it may
 // be kept busy, so a host that runs hot can be held to a lower pace. 0 means

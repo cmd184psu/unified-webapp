@@ -145,6 +145,9 @@ type Engine struct {
 
 	health healthState
 
+	// checks tracks the running model checks (checks.go).
+	checks checkState
+
 	// planMu serialises the planning and compile driver (plan.go,
 	// compile.go) with the calls that start or approve them. planWaiting
 	// (guarded by mu) says why an effort's next stage is not submitted.

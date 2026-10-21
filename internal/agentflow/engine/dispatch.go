@@ -123,6 +123,8 @@ type view struct {
 	// resting maps a backend under a duty cap (H20) that is resting to the time
 	// it may start work again, for the reason a task waits.
 	resting map[string]time.Time
+	// failing maps modelKey to a recent failed check of that model (H27).
+	failing map[string]store.ModelCheck
 	// modelFree is the remaining per-model concurrency (PX5) of every model
 	// that has a limit, keyed by modelKey.
 	modelFree map[string]int
@@ -151,10 +153,13 @@ func (e *Engine) newView(ctx context.Context) (*view, error) {
 		return nil, err
 	}
 	v := &view{snap: snap, free: map[string]int{}, down: map[string]bool{}, resting: map[string]time.Time{}, modelFree: map[string]int{}, strikes: strikes}
+	now := e.deps.Clock()
+	if v.failing, err = e.failedChecks(ctx, now); err != nil {
+		return nil, err
+	}
 	for b := range e.health.active(e.deps.Clock()) {
 		v.down[b] = true
 	}
-	now := e.deps.Clock()
 	for _, b := range snap.Backends {
 		if !b.Retired {
 			v.free[b.Name] = b.Slots
@@ -587,6 +592,9 @@ func skipReason(v *view, p store.Project, c store.Candidate, needSlot bool) stri
 		return fmt.Sprintf("model %s's last reply could not be read", c.Model)
 	case v.strikes[store.StrikeKey{Backend: c.Backend, Model: c.Model, Role: c.Role}] >= store.StrikeLimit:
 		return fmt.Sprintf("model %s is benched for %s: %d strikes (clear them on the Stats tab)", c.Model, c.Role, store.StrikeLimit)
+	case v.failing[modelKey(c.Backend, c.Model)].Model != "":
+		ck := v.failing[modelKey(c.Backend, c.Model)]
+		return fmt.Sprintf("model %s failed its check (%s) at %s: run Check models on %s to try it again", c.Model, ck.Class, time.UnixMilli(ck.Checked).Format("15:04"), c.Backend)
 	case v.need > 0 && c.Role == "worker" && windowOf(v, c) < v.need:
 		return fmt.Sprintf("model %s has a %d-token context window and this task needs about %d", c.Model, windowOf(v, c), v.need)
 	case lacksTools(v, c):

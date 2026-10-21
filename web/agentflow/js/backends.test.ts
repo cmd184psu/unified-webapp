@@ -1,7 +1,7 @@
 import { timing } from './autosave';
 import { test, run, eq, ok, installFakeDom, FakeEl, asEl, byField, byAttr, button, flush, findAll } from './testkit';
 import type { InstallDeps } from './installs';
-import { BackendsView, isPaid, isPrivateHost, lastForRoles, unconsented, type BackendsDeps } from './backends';
+import { BackendsView, isPaid, isPrivateHost, lastForRoles, setCheckPollMs, unconsented, type BackendsDeps } from './backends';
 import { moveItem, dropIndex } from './candidates';
 import { dispatch } from './events';
 import { ApiError, type Backend, type BackendInput, type BackendResult, type Candidate, type ProjectView } from './api';
@@ -43,6 +43,8 @@ function harness(init: Partial<State> = {}, over: Partial<BackendsDeps> = {}) {
     patchBackend: async (name, b) => { log.push('patch:' + name); bodies.patch = b; return result(be(name)); },
     retireBackend: async (name, cancel) => { log.push(`retire:${name}:${cancel}`); return result(be(name, { retired: true }), ['retired the last backend for worker; project p1 is running']); },
     enableBackend: async (name) => { log.push('enable:' + name); return result(be(name)); },
+    checkModels: async (name) => { log.push('check:' + name); return { state: 'running', current: 'm1', results: [] }; },
+    checkStatus: async () => ({ state: 'idle', results: [] }),
     extendWindows: async (name) => { log.push('extend:' + name); return [{ model: 'm1', previous: 0, window: 57344, applied: true, note: 'set to 57344 tokens' }]; },
     putCandidates: async (role, list) => {
       log.push('cands:' + role);
@@ -603,4 +605,25 @@ test('H15d: the memory budget and window cap are sent; a card with a budget can 
   ok(card.log.includes('extend:b1'), 'extend called');
   ok(card.log.some((l) => l.startsWith('notify:Extended 1 of 1')), 'result reported');
   stop2();
+});
+
+test('H27: Check models runs a one-word test of each model, follows it, and badges each model with its result', async () => {
+  setCheckPollMs(1);
+  const results = [
+    { Backend: 'b1', Model: 'm1', OK: true, Class: '', Message: '', Millis: 1200, Checked: 1 },
+    { Backend: 'b1', Model: 'm2', OK: false, Class: 'failing', Message: 'Unexpected server error', Millis: 2000, Checked: 1 },
+  ];
+  let polls = -1; // the first look, when the page loads, finds no check running
+  const t = harness({ backends: [be('b1', { models: [{ model: 'm1', paid: false, max_concurrent: 0 }, { model: 'm2', paid: false, max_concurrent: 0 }] })] }, {
+    checkStatus: async () => (polls++ < 0 ? { state: 'idle' as const, results: [] } : polls < 2 ? { state: 'running' as const, current: 'm2', results: [results[0]] } : { state: 'idle' as const, results }),
+  });
+  const stop = t.view.mount();
+  await flush();
+  button(t.host, 'Check models').click();
+  for (let i = 0; i < 20; i++) await flush();
+  ok(t.log.includes('check:b1'), 'check started');
+  const text = t.host.textContent;
+  ok(text.includes('answers (1.2s)') && text.includes('not answering'), `badges shown: ${text}`);
+  ok(t.log.some((l) => l.startsWith('notify:1 model on b1 did not answer: m2')), 'result reported');
+  stop();
 });

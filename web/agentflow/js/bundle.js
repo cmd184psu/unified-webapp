@@ -80,6 +80,8 @@ var api = {
   retireBackend: (name, cancelRunning) => send("POST", `/api/backends/${enc(name)}/retire`, { cancel_running: cancelRunning }),
   extendWindows: (name, apply = true) => send("POST", `/api/backends/${enc(name)}/extend-windows`, { apply }),
   enableBackend: (name) => send("POST", `/api/backends/${enc(name)}/enable`),
+  checkModels: (name) => send("POST", `/api/backends/${enc(name)}/check`),
+  checkStatus: (name) => get(`/api/backends/${enc(name)}/check`, { quiet: true }),
   candidates: () => get("/api/candidates"),
   putCandidates: (role, candidates, o) => send("PUT", `/api/candidates/${enc(role)}`, { candidates }, o),
   putProjectCandidates: (slug, role, candidates, o) => send("PUT", `${proj(slug)}/candidates/${enc(role)}`, { candidates }, o),
@@ -1957,6 +1959,7 @@ var API_TYPES = [
   ["anthropic", "anthropic"],
   ["opencode", "opencode built-in"]
 ];
+var checkPollMs = 3e3;
 var defaultBackendsDeps = () => ({
   backends: api.backends,
   createBackend: api.createBackend,
@@ -1964,6 +1967,8 @@ var defaultBackendsDeps = () => ({
   patchBackend: api.patchBackend,
   retireBackend: api.retireBackend,
   enableBackend: api.enableBackend,
+  checkModels: api.checkModels,
+  checkStatus: api.checkStatus,
   extendWindows: api.extendWindows,
   candidates: api.candidates,
   putCandidates: api.putCandidates,
@@ -1993,6 +1998,8 @@ var BackendsView = class {
     this.adding = false;
     this.editing = /* @__PURE__ */ new Set();
     this.retiring = /* @__PURE__ */ new Set();
+    /** The last model check of each backend (H27), refreshed while one runs. */
+    this.checks = /* @__PURE__ */ new Map();
     /** role -> rows being edited; present only while the role has unsaved edits. */
     this.drafts = /* @__PURE__ */ new Map();
     this.limitsSlug = "";
@@ -2037,6 +2044,12 @@ var BackendsView = class {
         this.deps.settings()
       ]);
       Object.assign(this, { backends, candidates, projects, globals, loaded: true });
+      await Promise.all(backends.map(async (b) => {
+        try {
+          this.checks.set(b.name, await this.deps.checkStatus(b.name));
+        } catch {
+        }
+      }));
     } catch {
       if (!this.loaded) return;
     }
@@ -2269,11 +2282,13 @@ var BackendsView = class {
         void this.load();
       });
     }
+    const checked = new Map((this.checks.get(b.name)?.results ?? []).map((c) => [c.Model, c]));
     const models = b.models.map((m) => h(
       "div",
       { class: "model-row" },
       h("strong", { class: "model-name", text: m.model }),
       m.paid ? badge("paid") : null,
+      this.checkBadge(checked.get(m.model), this.checks.get(b.name)?.current === m.model),
       m.max_concurrent > 0 ? badge(`max ${m.max_concurrent} at once`, "muted") : null,
       m.window_tokens ? badge(`window ${formatTokens(m.window_tokens)}${m.window_source === "observed" ? " (learned)" : ""}`, m.window_source === "observed" ? "warn" : "muted") : null,
       m.context_tokens ? badge(`max ${formatTokens(m.context_tokens)}`, "muted") : null,
@@ -2302,6 +2317,7 @@ var BackendsView = class {
           "div",
           { class: "profile-actions" },
           b.api_type === "ollama" && !b.retired && (b.memory_budget_mb ?? 0) > 0 ? button("Extend windows", () => void this.extend(b.name), { field: "extend-windows", icon: "approve", word: true }) : null,
+          b.retired ? null : button(this.checks.get(b.name)?.state === "running" ? "Checking\u2026" : "Check models", () => void this.check(b.name), { field: "check-models", icon: "approve", word: true }),
           button("Edit", () => {
             this.editing.add(b.name);
             this.render();
@@ -2343,6 +2359,36 @@ var BackendsView = class {
       })();
     });
     return sel;
+  }
+  /** One model's last check: answered, or why not. A failed model is passed over until it passes again. */
+  checkBadge(c, now) {
+    if (now) return badge("checking\u2026", "muted");
+    if (!c) return null;
+    const label = { failing: "not answering", rate_limited: "out of quota", unreachable: "unreachable", timeout: "too slow", empty: "empty reply" };
+    const span = c.OK ? badge(`answers (${(c.Millis / 1e3).toFixed(1)}s)`, "ok") : badge(label[c.Class] ?? c.Class, "warn");
+    span.setAttribute("title", `${c.OK ? "Passed" : c.Message || "Failed"} \u2014 checked ${new Date(c.Checked).toLocaleString()}`);
+    span.setAttribute("data-role", c.OK ? "check-ok" : "check-failed");
+    return span;
+  }
+  /** Check every model of a backend, one after the other (H27), and follow the run until it ends. */
+  async check(name) {
+    try {
+      this.checks.set(name, await this.deps.checkModels(name));
+    } catch {
+      return;
+    }
+    this.render();
+    while (this.checks.get(name)?.state === "running") {
+      await new Promise((r) => setTimeout(r, checkPollMs));
+      try {
+        this.checks.set(name, await this.deps.checkStatus(name));
+      } catch {
+        break;
+      }
+      this.render();
+    }
+    const bad = (this.checks.get(name)?.results ?? []).filter((c) => !c.OK);
+    this.deps.notify(bad.length ? `${bad.length} model${bad.length === 1 ? "" : "s"} on ${name} did not answer: ${bad.map((c) => c.Model).join(", ")}` : `Every model on ${name} answered`);
   }
   /** Raise each model's served window as far as the backend's memory budget allows (H15d). */
   async extend(name) {

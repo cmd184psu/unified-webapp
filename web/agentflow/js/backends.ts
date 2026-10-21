@@ -9,7 +9,7 @@
 import { autosave, type Autosave } from './autosave.js';
 import { showToast } from '@shared';
 import {
-  api, type Backend, type BackendInput, type BackendResult, type Candidate, type ProjectView,
+  api, type Backend, type BackendInput, type BackendResult, type Candidate, type CheckView, type ModelCheck, type ProjectView,
 } from './api.js';
 import { h, replace } from './dom.js';
 import { subscribe, type AgentflowEvent } from './events.js';
@@ -44,9 +44,13 @@ const API_TYPES: Array<[string, string]> = [
   ['opencode', 'opencode built-in'],
 ];
 
+/** How often a running model check is looked at again. */
+export let checkPollMs = 3000;
+export const setCheckPollMs = (ms: number): void => { checkPollMs = ms; };
+
 export type BackendsDeps = Pick<
   typeof api,
-  'backends' | 'createBackend' | 'probeBackend' | 'patchBackend' | 'retireBackend' | 'enableBackend' | 'extendWindows' | 'candidates' | 'putCandidates' |
+  'backends' | 'createBackend' | 'probeBackend' | 'patchBackend' | 'retireBackend' | 'enableBackend' | 'checkModels' | 'checkStatus' | 'extendWindows' | 'candidates' | 'putCandidates' |
   'projects' | 'limits' | 'putLimits' | 'settings'
 > & { notify(message: string): void };
 
@@ -57,6 +61,8 @@ export const defaultBackendsDeps = (): BackendsDeps => ({
   patchBackend: api.patchBackend,
   retireBackend: api.retireBackend,
   enableBackend: api.enableBackend,
+  checkModels: api.checkModels,
+  checkStatus: api.checkStatus,
   extendWindows: api.extendWindows,
   candidates: api.candidates,
   putCandidates: api.putCandidates,
@@ -85,6 +91,8 @@ export class BackendsView {
   private adding = false;
   private editing = new Set<string>();
   private retiring = new Set<string>();
+  /** The last model check of each backend (H27), refreshed while one runs. */
+  private checks = new Map<string, CheckView>();
   /** role -> rows being edited; present only while the role has unsaved edits. */
   private drafts = new Map<string, CandRow[]>();
   private limitsSlug = '';
@@ -130,6 +138,13 @@ export class BackendsView {
         this.deps.backends(), this.deps.candidates(), this.deps.projects(), this.deps.settings(),
       ]);
       Object.assign(this, { backends, candidates, projects, globals, loaded: true });
+      await Promise.all(backends.map(async (b) => {
+        try {
+          this.checks.set(b.name, await this.deps.checkStatus(b.name));
+        } catch {
+          // a backend with no check yet shows none
+        }
+      }));
     } catch {
       // apiFetch already told the user; keep what is shown.
       if (!this.loaded) return;
@@ -344,7 +359,9 @@ export class BackendsView {
     if (this.editing.has(b.name)) {
       return this.backendForm(b, () => { this.editing.delete(b.name); void this.load(); });
     }
+    const checked = new Map((this.checks.get(b.name)?.results ?? []).map((c) => [c.Model, c]));
     const models = b.models.map((m) => h('div', { class: 'model-row' }, h('strong', { class: 'model-name', text: m.model }), m.paid ? badge('paid') : null,
+      this.checkBadge(checked.get(m.model), this.checks.get(b.name)?.current === m.model),
       m.max_concurrent > 0 ? badge(`max ${m.max_concurrent} at once`, 'muted') : null,
       m.window_tokens ? badge(`window ${formatTokens(m.window_tokens)}${m.window_source === 'observed' ? ' (learned)' : ''}`, m.window_source === 'observed' ? 'warn' : 'muted') : null,
       m.context_tokens ? badge(`max ${formatTokens(m.context_tokens)}`, 'muted') : null,
@@ -365,6 +382,7 @@ export class BackendsView {
           b.api_type === 'ollama' && !b.retired && (b.memory_budget_mb ?? 0) > 0
             ? button('Extend windows', () => void this.extend(b.name), { field: 'extend-windows', icon: 'approve', word: true })
             : null,
+          b.retired ? null : button(this.checks.get(b.name)?.state === 'running' ? 'Checking\u2026' : 'Check models', () => void this.check(b.name), { field: 'check-models', icon: 'approve', word: true }),
           button('Edit', () => { this.editing.add(b.name); this.render(); }, { field: 'edit', icon: 'edit' }),
           b.retired
             ? button('Enable', () => void this.enable(b.name), { field: 'enable', icon: 'approve', word: true })
@@ -398,6 +416,38 @@ export class BackendsView {
       })();
     });
     return sel;
+  }
+
+  /** One model's last check: answered, or why not. A failed model is passed over until it passes again. */
+  private checkBadge(c: ModelCheck | undefined, now: boolean): HTMLElement | null {
+    if (now) return badge('checking\u2026', 'muted');
+    if (!c) return null;
+    const label: Record<string, string> = { failing: 'not answering', rate_limited: 'out of quota', unreachable: 'unreachable', timeout: 'too slow', empty: 'empty reply' };
+    const span = c.OK ? badge(`answers (${(c.Millis / 1000).toFixed(1)}s)`, 'ok') : badge(label[c.Class] ?? c.Class, 'warn');
+    span.setAttribute('title', `${c.OK ? 'Passed' : c.Message || 'Failed'} \u2014 checked ${new Date(c.Checked).toLocaleString()}`);
+    span.setAttribute('data-role', c.OK ? 'check-ok' : 'check-failed');
+    return span;
+  }
+
+  /** Check every model of a backend, one after the other (H27), and follow the run until it ends. */
+  private async check(name: string): Promise<void> {
+    try {
+      this.checks.set(name, await this.deps.checkModels(name));
+    } catch {
+      return;
+    }
+    this.render();
+    while (this.checks.get(name)?.state === 'running') {
+      await new Promise((r) => setTimeout(r, checkPollMs));
+      try {
+        this.checks.set(name, await this.deps.checkStatus(name));
+      } catch {
+        break;
+      }
+      this.render();
+    }
+    const bad = (this.checks.get(name)?.results ?? []).filter((c) => !c.OK);
+    this.deps.notify(bad.length ? `${bad.length} model${bad.length === 1 ? '' : 's'} on ${name} did not answer: ${bad.map((c) => c.Model).join(', ')}` : `Every model on ${name} answered`);
   }
 
   /** Raise each model's served window as far as the backend's memory budget allows (H15d). */

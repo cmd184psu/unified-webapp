@@ -183,6 +183,23 @@ export interface BackendModel {
   too_big?: boolean;
 }
 
+/** The last check of one model (H27): ok when a one-word prompt was answered; class says why not. */
+export interface ModelCheck {
+  Backend: string;
+  Model: string;
+  OK: boolean;
+  Class: string;
+  Message: string;
+  Millis: number;
+  Checked: number;
+}
+
+export interface CheckView {
+  state: 'idle' | 'running';
+  current?: string;
+  results: ModelCheck[];
+}
+
 export interface Backend {
   name: string;
   host: string;
@@ -669,6 +686,8 @@ export const api = {
     send('POST', `/api/backends/${enc(name)}/retire`, { cancel_running: cancelRunning }),
   extendWindows: (name: string, apply = true): Promise<ExtendResult[]> => send('POST', `/api/backends/${enc(name)}/extend-windows`, { apply }),
   enableBackend: (name: string): Promise<BackendResult> => send('POST', `/api/backends/${enc(name)}/enable`),
+  checkModels: (name: string): Promise<CheckView> => send('POST', `/api/backends/${enc(name)}/check`),
+  checkStatus: (name: string): Promise<CheckView> => get(`/api/backends/${enc(name)}/check`, { quiet: true }),
   candidates: (): Promise<Candidate[]> => get('/api/candidates'),
   putCandidates: (role: string, candidates: CandidateInput[], o?: FetchOptions): Promise<Candidate[]> =>
     send('PUT', `/api/candidates/${enc(role)}`, { candidates }, o),
