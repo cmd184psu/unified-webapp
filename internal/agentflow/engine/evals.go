@@ -332,7 +332,11 @@ func scoreEval(layer, target string, raw json.RawMessage) (flagged, caught bool,
 		var ids []string
 		for _, g := range out.Gaps {
 			ids = append(ids, g.Requirement)
-			caught = caught || strings.Contains(strings.ToUpper(g.Requirement), target)
+			// A gap against the target, or against its acceptance criterion
+			// (AC1), is the planted one; only a gap on the met requirement
+			// (R2) is not.
+			req := strings.ToUpper(g.Requirement)
+			caught = caught || strings.Contains(req, target) || (strings.Contains(req, "AC") && !strings.Contains(req, "R2"))
 		}
 		detail = "verdict " + out.Verdict
 		if len(out.Gaps) > 0 {
