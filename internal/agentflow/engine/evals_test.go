@@ -88,14 +88,14 @@ func TestH32_EvalCasesBuildAndTheDefectIsReal(t *testing.T) {
 				for _, f := range files {
 					writeFile(t, filepath.Join(dir, f.Path), f.Content)
 				}
-				if c.ID == "page-through-api" {
+				if needle, isPage := map[string]string{"page-through-api": "fetch('/api/add'", "page-wrong-route": "fetch('/api/evaluate'"}[c.ID]; isPage {
 					html := ""
 					for _, f := range files {
 						if f.Path == "index.html" {
 							html = f.Content
 						}
 					}
-					if got := strings.Contains(html, "fetch('/api/add'"); got != (variant == "fixed") {
+					if got := strings.Contains(html, needle); got != (variant == "fixed") {
 						t.Fatalf("page calls the API = %v", got)
 					}
 				}
@@ -145,7 +145,7 @@ func TestH32_AcceptanceLayerScoresCaughtDefectsAndFalseAlarms(t *testing.T) {
 		c.fake.Script("reviewer", runner.Step{Reply: acceptGap}, runner.Step{Reply: acceptOK})
 	}
 	v := evalRun(t, c, EvalOptions{Models: []string{"m2"}})
-	if len(v.Summary) != 1 || v.Summary[0].Caught != 4 || v.Summary[0].Defects != 4 || v.Summary[0].FalseAlarms != 0 || v.Summary[0].Fixed != 4 {
+	if len(v.Summary) != 1 || v.Summary[0].Caught != len(evalCases) || v.Summary[0].Defects != len(evalCases) || v.Summary[0].FalseAlarms != 0 || v.Summary[0].Fixed != len(evalCases) {
 		t.Fatalf("summary = %+v", v.Summary)
 	}
 
@@ -153,7 +153,7 @@ func TestH32_AcceptanceLayerScoresCaughtDefectsAndFalseAlarms(t *testing.T) {
 		c.fake.Script("reviewer", runner.Step{Reply: acceptGap}, runner.Step{Reply: acceptGap})
 	}
 	v = evalRun(t, c, EvalOptions{Models: []string{"m2"}})
-	if s := v.Summary[0]; s.Caught != 4 || s.FalseAlarms != 4 {
+	if s := v.Summary[0]; s.Caught != len(evalCases) || s.FalseAlarms != len(evalCases) {
 		t.Fatalf("summary = %+v", s)
 	}
 }

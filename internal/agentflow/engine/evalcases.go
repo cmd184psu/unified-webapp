@@ -62,6 +62,7 @@ var evalCases = []evalCase{
 	powerCase(),
 	juxtaposedCase(),
 	primesCase(),
+	wrongRouteCase(),
 }
 
 func pageCase() evalCase {
@@ -433,5 +434,74 @@ func main() {
 		Acceptance: []string{"R1: a count that is out of range or not a whole number returns 400 {\"error\": \"domain error\"}", "AC1: count 2.5 gives a domain error"},
 		Defect:     base,
 		Fixed:      swap(base, "main.go", good),
+	}
+}
+
+func wrongRouteCase() evalCase {
+	main := `package main
+
+import (
+	"encoding/json"
+	"net/http"
+	"strconv"
+	"strings"
+)
+
+func evaluateHandler(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Expression *string ` + "`json:\"expression\"`" + `
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Expression == nil {
+		fail(w, "expression is required")
+		return
+	}
+	n, err := strconv.ParseFloat(strings.TrimSpace(*in.Expression), 64)
+	if err != nil {
+		fail(w, "invalid expression")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]float64{"result": n})
+}
+
+func main() {
+	http.HandleFunc("POST /api/evaluate", evaluateHandler)
+	http.Handle("GET /", http.FileServer(http.Dir(".")))
+	_ = http.ListenAndServe(":7070", nil)
+}
+`
+	page := func(call string) string {
+		return `<!doctype html>
+<html><body>
+<input id="display" value="">
+<button onclick="equals()">=</button>
+<ul id="history"></ul>
+<script>
+const display = document.getElementById('display');
+async function equals() {
+  ` + call + `
+  const body = await r.json();
+  display.value = r.ok ? String(body.result) : body.error;
+  const li = document.createElement('li');
+  li.textContent = display.value;
+  document.getElementById('history').prepend(li);
+}
+</script>
+</body></html>
+`
+	}
+	bad := page("const r = await fetch('/?expression=' + encodeURIComponent(display.value));")
+	good := page("const r = await fetch('/api/evaluate', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({expression: display.value})});")
+	base := []evalFile{{"go.mod", evalGoMod}, {"helpers.go", evalHelpers}, {"main.go", main}, {"index.html", bad}}
+	return evalCase{
+		ID: "page-wrong-route", Title: "the page calls a route the server does not have", Target: "R1",
+		FRD: `{"title":"Calculator page","objective":"A page over the evaluate endpoint.","requirements":[` +
+			`{"id":"R1","description":"GET / serves a page with an equals button. Pressing it sends the typed expression to POST /api/evaluate as {\"expression\": string} and shows the result or the error; the page calls no other URL and does no arithmetic itself.","priority":"must"},` +
+			`{"id":"R2","description":"POST /api/evaluate returns {\"result\": number}, or HTTP 400 with {\"error\": message} when the expression field is missing.","priority":"must"}],` +
+			`"acceptance_criteria":[{"id":"AC1","requirements":["R1"],"criterion":"pressing equals shows the server's answer"}]}`,
+		TaskTitle:  "Calculator page",
+		TaskPrompt: "Write index.html with an equals button that evaluates the typed expression through the server and lists the answers.",
+		Acceptance: []string{"R1: pressing equals sends the typed expression to POST /api/evaluate and shows the result; the page calls no other URL", "AC1: pressing equals shows the server's answer"},
+		Defect:     base,
+		Fixed:      swap(base, "index.html", good),
 	}
 }

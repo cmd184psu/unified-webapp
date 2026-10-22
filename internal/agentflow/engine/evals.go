@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"cmd184psu/unified-webapp/internal/agentflow/model"
 	"cmd184psu/unified-webapp/internal/agentflow/prompts"
@@ -466,9 +467,14 @@ func (e *Engine) evalCall(ctx context.Context, b store.Backend, mdl string, file
 	if err != nil {
 		return "", err
 	}
+	// A model that goes silent is cut off as a stage's would be (H30), so one
+	// hung call does not hold up the rest of the run.
+	var lastSeen atomic.Int64
+	lastSeen.Store(d.Clock().UnixNano())
+	req.OnEvent = func(runner.Event) { lastSeen.Store(d.Clock().UnixNano()) }
 	cctx, cancel := context.WithTimeout(ctx, set.ReviewTimeout)
 	defer cancel()
-	res, err := d.Runner.Run(cctx, req)
+	res, err := e.runWatched(cctx, req, set.StallMinutes, &lastSeen)
 	if err != nil {
 		return "", err
 	}
