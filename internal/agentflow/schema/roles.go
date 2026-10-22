@@ -285,3 +285,43 @@ func (c *CompileOut) Validate() error {
 	}
 	return nil
 }
+
+// Gap is one requirement the finished work does not meet, found by the
+// acceptance check (H31).
+type Gap struct {
+	Requirement string   `json:"requirement"`
+	Evidence    string   `json:"evidence"`
+	Problem     string   `json:"problem"`
+	Fix         string   `json:"fix"`
+	Files       []string `json:"files,omitempty"`
+}
+
+// AcceptanceOut is the acceptance reviewer's final message.
+type AcceptanceOut struct {
+	Verdict string `json:"verdict"`
+	Summary string `json:"summary,omitempty"`
+	Gaps    []Gap  `json:"gaps"`
+}
+
+// Validate checks the verdict enum, and that "gaps" names at least one gap and
+// each gap says which requirement, where the evidence is, what is wrong and
+// what to change.
+func (a *AcceptanceOut) Validate() error {
+	if err := oneOf("verdict", a.Verdict, "pass", "gaps"); err != nil {
+		return err
+	}
+	if a.Verdict == "gaps" && len(a.Gaps) == 0 {
+		return bad("gaps", "needs at least one entry when the verdict is gaps")
+	}
+	for i, g := range a.Gaps {
+		f := fmt.Sprintf("gaps[%d].", i)
+		for _, req := range []struct{ name, val string }{
+			{"requirement", g.Requirement}, {"evidence", g.Evidence}, {"problem", g.Problem}, {"fix", g.Fix},
+		} {
+			if err := nonEmpty(f+req.name, req.val); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}

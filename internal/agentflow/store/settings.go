@@ -21,13 +21,17 @@ type Settings struct {
 	PlanMaxRounds   int
 	// StallMinutes is how long a stage may say nothing, and how long a running
 	// effort may sit with nothing in flight, before it counts as stalled (H30).
-	StallMinutes  int
-	WorkerTimeout time.Duration
-	ReviewTimeout time.Duration
-	PlanTimeout   time.Duration
-	VerifyTimeout time.Duration
-	OpencodePath  string
-	VerifySlots   int
+	StallMinutes int
+	// AcceptanceRounds is how many times the merged result of a finished effort
+	// is checked against the FRD and the gaps turned into follow-up tasks; 0
+	// turns the check off (H31).
+	AcceptanceRounds int
+	WorkerTimeout    time.Duration
+	ReviewTimeout    time.Duration
+	PlanTimeout      time.Duration
+	VerifyTimeout    time.Duration
+	OpencodePath     string
+	VerifySlots      int
 	// ContextFloor is the context window assumed for a model whose served
 	// window is not known (H15).
 	ContextFloor int
@@ -40,7 +44,7 @@ type Settings struct {
 
 // limitKeys are the settings a project may override.
 var limitKeys = []string{
-	"max_attempts", "stuck_threshold", "max_infra_retries", "plan_max_rounds", "stall_minutes",
+	"max_attempts", "stuck_threshold", "max_infra_retries", "plan_max_rounds", "stall_minutes", "acceptance_rounds",
 	"worker_timeout", "review_timeout", "plan_timeout", "verify_timeout",
 }
 
@@ -100,6 +104,9 @@ func parseSettings(m map[string]string) (Settings, error) {
 		return s, err
 	}
 	if s.StallMinutes, err = validateInt("stall_minutes", m["stall_minutes"], 1, 100); err != nil {
+		return s, err
+	}
+	if s.AcceptanceRounds, err = validateInt("acceptance_rounds", m["acceptance_rounds"], 0, 5); err != nil {
 		return s, err
 	}
 	if s.WorkerTimeout, err = validateTimeout("worker_timeout", m["worker_timeout"]); err != nil {

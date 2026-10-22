@@ -282,8 +282,17 @@ func (e *Engine) dodSection(ctx context.Context, role, project string, att model
 	return b.String(), nil
 }
 
-// workdir is the attempt's worktree, or the project repo for effort stages.
+// workdir is the attempt's worktree, or the project repo for effort stages;
+// an acceptance check reads the effort's merged result, in the integration
+// worktree.
 func (e *Engine) workdir(ctx context.Context, st model.Stage, project string) (string, error) {
+	if isAcceptance(st) && e.deps.Git != nil {
+		if dir, err := e.deps.Git.IntegrationPath(project, effortName(st.Effort)); err == nil {
+			if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+				return dir, nil
+			}
+		}
+	}
 	if st.Attempt != 0 {
 		att, err := e.deps.Store.GetAttempt(ctx, st.Attempt)
 		if err != nil {
@@ -352,6 +361,9 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 	parse := func(final string) (json.RawMessage, string, error) {
 		if purpose != "" {
 			return parseDraft(purpose, final)
+		}
+		if isAcceptance(st) {
+			return parseAcceptance(final)
 		}
 		return parseFinal(st.Role, final, deliberate)
 	}

@@ -280,3 +280,37 @@ func (s *Store) QueueEffort(ctx context.Context, queue int64) (int64, error) {
 	}
 	return effort, err
 }
+
+// AddTasks appends tasks to the effort's approved queue and records event in
+// the same transaction (H31). The queue's hash and revision stay as they were:
+// the person approved those tasks, these are follow-ups the engine adds for
+// gaps it found in the finished work, and a stage already in flight must not
+// become stale for it. A key that is already in the queue is ErrConflict.
+func (s *Store) AddTasks(ctx context.Context, actor string, effort int64, defs []model.TaskDef, action string, detail map[string]any) error {
+	if err := model.ValidateTasks(defs); err != nil {
+		return Invalid("tasks", err.Error())
+	}
+	return s.WithTx(ctx, func(tx *sql.Tx) error {
+		q, qid, err := loadQueue(ctx, tx, effort)
+		if err != nil {
+			return err
+		}
+		if q.Status != model.QueueApproved {
+			return fmt.Errorf("queue of effort %d is %s, not approved: %w", effort, q.Status, ErrConflict)
+		}
+		for _, d := range defs {
+			var n int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE queue = ? AND task_key = ?`, qid, d.Key).Scan(&n); err != nil {
+				return err
+			}
+			if n > 0 {
+				return fmt.Errorf("task %s is already in the queue of effort %d: %w", d.Key, effort, ErrConflict)
+			}
+		}
+		if err := insertTasks(ctx, tx, qid, defs); err != nil {
+			return err
+		}
+		_, err = AppendEvent(tx, actor, action, "effort", fmt.Sprint(effort), detail)
+		return err
+	})
+}

@@ -219,6 +219,7 @@ func TestE2E_FullJourneyOverHTTP(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "af")
 	cfg := config.AgentflowConfig{StaticDir: t.TempDir(), DataDir: dataDir, SSEMaxSubscribers: 4}
 	e := newE2E(t, cfg, fake)
+	e.must("PUT", "/api/settings", `{"acceptance_rounds":0}`, 200) // the scripted reviewers have no acceptance check to answer
 	srv := httptest.NewServer(e.api)
 	t.Cleanup(srv.Close)
 	events := subscribe(t, srv.URL)
@@ -487,6 +488,7 @@ func TestE2E_YOLOJourneyNeedsNoGateClicks(t *testing.T) {
 	}
 	dataDir := filepath.Join(t.TempDir(), "af")
 	e := newE2E(t, config.AgentflowConfig{StaticDir: t.TempDir(), DataDir: dataDir}, fake)
+	e.must("PUT", "/api/settings", `{"acceptance_rounds":0}`, 200) // the scripted reviewers have no acceptance check to answer
 
 	e.must("POST", "/api/backends", `{"name":"gpu","host":"http://127.0.0.1:11434","api_type":"ollama","slots":2,"models":[{"model":"m1"},{"model":"m2"},{"model":"m3"}]}`, 201)
 	for role, m := range map[string]string{"planner": "m1", "architect": "m2", "critic": "m3", "compiler": "m1", "worker": "m1", "reviewer": "m2"} {

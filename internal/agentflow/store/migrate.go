@@ -49,12 +49,19 @@ var migrations = []migration{
 	{19, migration19SQL},
 	{20, migration20SQL},
 	{21, migration21SQL},
+	{22, migration22SQL},
 }
 
 // migration21SQL (H30) seeds the stall limit: minutes of silence from a stage,
 // or of nothing in flight in a running effort, before the engine acts.
 const migration21SQL = `
 INSERT OR IGNORE INTO settings (key, value) VALUES ('stall_minutes', '10');
+`
+
+// migration22SQL (H31) seeds the number of acceptance rounds: how often a
+// finished effort is checked against its FRD before it completes.
+const migration22SQL = `
+INSERT OR IGNORE INTO settings (key, value) VALUES ('acceptance_rounds', '2');
 `
 
 // migration20SQL (H27) keeps the result of the last "Check models" run for each

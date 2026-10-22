@@ -127,7 +127,7 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 
 	// Settings, candidates, statistics.
 	ok("GET", "/api/settings", "", 200)
-	ok("PUT", "/api/settings", `{"max_attempts":3,"plan_max_rounds":3}`, 200)
+	ok("PUT", "/api/settings", `{"max_attempts":3,"plan_max_rounds":3,"acceptance_rounds":0}`, 200)
 	ok("PUT", "/api/settings", `{"browse_roots":[`+strconv.Quote(repo)+`]}`, 200)
 	ok("GET", "/api/fs/dirs", "", 200)
 	ok("GET", "/api/fs/dirs?path="+url.QueryEscape(repo), "", 200)

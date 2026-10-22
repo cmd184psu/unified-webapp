@@ -211,6 +211,9 @@ func (e *Engine) completeEffort(ctx context.Context, proj store.Project, ef mode
 	if !model.AllDone(status) {
 		return nil
 	}
+	if ok, err := e.acceptance(ctx, proj, ef); err != nil || !ok {
+		return err
+	}
 	intWT, err := e.deps.Git.IntegrationPath(proj.Slug, effortName(ef.ID))
 	if err != nil {
 		return err

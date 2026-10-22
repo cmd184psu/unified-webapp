@@ -667,6 +667,9 @@ func (e *Engine) EffortPrompt(ctx context.Context, st model.Stage) (string, erro
 	if purpose := draftPurpose(st); purpose != "" {
 		return e.draftPrompt(ctx, st, purpose)
 	}
+	if isAcceptance(st) {
+		return e.acceptancePrompt(ctx, st)
+	}
 	text, err := prompts.Load(st.Role)
 	if err != nil {
 		return "", err
@@ -863,6 +866,13 @@ func (e *Engine) pickEffortStage(ctx context.Context, p store.Project, role stri
 // is eligible it records why (PlanView.Waiting) and submits nothing; the next
 // pass tries again.
 func (e *Engine) startEffortStage(ctx context.Context, p store.Project, effort int64, role string, others map[string]string, avoid string) error {
+	return e.startEffortStageRef(ctx, p, effort, role, others, avoid, "")
+}
+
+// startEffortStageRef is startEffortStage for a stage that carries a prompt
+// reference, which says what the stage is for (an FRD draft, an acceptance
+// check).
+func (e *Engine) startEffortStageRef(ctx context.Context, p store.Project, effort int64, role string, others map[string]string, avoid, ref string) error {
 	pk, warn, reason, err := e.pickEffortStage(ctx, p, role, others, avoid)
 	if err == nil && reason != "" && avoid != "" {
 		pk, warn, reason, err = e.pickEffortStage(ctx, p, role, others, "") // nowhere else: the same model again
@@ -881,7 +891,7 @@ func (e *Engine) startEffortStage(ctx context.Context, p store.Project, effort i
 	}
 	e.setPlanWaiting(effort, "")
 	_, _, err = e.Submit(ctx, BackendLane(pk.Backend),
-		store.StageSpec{Effort: effort, Role: role, Backend: pk.Backend, Model: pk.Model},
+		store.StageSpec{Effort: effort, Role: role, Backend: pk.Backend, Model: pk.Model, PromptRef: ref},
 		StagePayload{Project: p.Slug, Effort: effort})
 	return err
 }

@@ -26,6 +26,7 @@ export const LIMIT_FIELDS: LimitField[] = [
   { key: 'stuck_threshold', label: 'Stuck threshold', hint: 'Identical failures before a task is stuck; at most max attempts' },
   { key: 'max_infra_retries', label: 'Max infra retries', hint: 'Whole number, 0 to 50' },
   { key: 'plan_max_rounds', label: 'Plan max rounds', hint: 'ralplan rounds before the best plan is presented, 1 to 50' },
+  { key: 'acceptance_rounds', label: 'Acceptance rounds', hint: 'How many times a finished effort is checked against its FRD, with gaps turned into follow-up tasks; 0 turns the check off, 2 by default' },
   { key: 'stall_minutes', label: 'Stall minutes', hint: 'Minutes a stage may say nothing, or a running effort sit idle, before it counts as stalled; 1 to 100, 10 by default' },
   { key: 'worker_timeout', label: 'Worker timeout', hint: 'A duration such as 30m or 1h' },
   { key: 'review_timeout', label: 'Review timeout', hint: 'A duration such as 15m' },
