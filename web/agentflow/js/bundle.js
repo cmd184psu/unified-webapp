@@ -82,6 +82,8 @@ var api = {
   enableBackend: (name) => send("POST", `/api/backends/${enc(name)}/enable`),
   checkModels: (name) => send("POST", `/api/backends/${enc(name)}/check`),
   checkStatus: (name) => get(`/api/backends/${enc(name)}/check`, { quiet: true }),
+  checkReviewers: (name, body = {}) => send("POST", `/api/backends/${enc(name)}/evals`, body),
+  evalStatus: (name) => get(`/api/backends/${enc(name)}/evals`, { quiet: true }),
   candidates: () => get("/api/candidates"),
   putCandidates: (role, candidates, o) => send("PUT", `/api/candidates/${enc(role)}`, { candidates }, o),
   putProjectCandidates: (slug, role, candidates, o) => send("PUT", `${proj(slug)}/candidates/${enc(role)}`, { candidates }, o),
@@ -1624,6 +1626,7 @@ var LIMIT_FIELDS = [
   { key: "stuck_threshold", label: "Stuck threshold", hint: "Identical failures before a task is stuck; at most max attempts" },
   { key: "max_infra_retries", label: "Max infra retries", hint: "Whole number, 0 to 50" },
   { key: "plan_max_rounds", label: "Plan max rounds", hint: "ralplan rounds before the best plan is presented, 1 to 50" },
+  { key: "acceptance_rounds", label: "Acceptance rounds", hint: "How many times a finished effort is checked against its FRD, with gaps turned into follow-up tasks; 0 turns the check off, 2 by default" },
   { key: "stall_minutes", label: "Stall minutes", hint: "Minutes a stage may say nothing, or a running effort sit idle, before it counts as stalled; 1 to 100, 10 by default" },
   { key: "worker_timeout", label: "Worker timeout", hint: "A duration such as 30m or 1h" },
   { key: "review_timeout", label: "Review timeout", hint: "A duration such as 15m" },
@@ -1970,6 +1973,8 @@ var defaultBackendsDeps = () => ({
   enableBackend: api.enableBackend,
   checkModels: api.checkModels,
   checkStatus: api.checkStatus,
+  checkReviewers: api.checkReviewers,
+  evalStatus: api.evalStatus,
   extendWindows: api.extendWindows,
   candidates: api.candidates,
   putCandidates: api.putCandidates,
@@ -2001,6 +2006,8 @@ var BackendsView = class {
     this.retiring = /* @__PURE__ */ new Set();
     /** The last model check of each backend (H27), refreshed while one runs. */
     this.checks = /* @__PURE__ */ new Map();
+    /** The last seeded-defect reviewer check of each backend (H32), refreshed while one runs. */
+    this.evals = /* @__PURE__ */ new Map();
     /** role -> rows being edited; present only while the role has unsaved edits. */
     this.drafts = /* @__PURE__ */ new Map();
     this.limitsSlug = "";
@@ -2048,6 +2055,10 @@ var BackendsView = class {
       await Promise.all(backends.map(async (b) => {
         try {
           this.checks.set(b.name, await this.deps.checkStatus(b.name));
+        } catch {
+        }
+        try {
+          this.evals.set(b.name, await this.deps.evalStatus(b.name));
         } catch {
         }
       }));
@@ -2290,6 +2301,7 @@ var BackendsView = class {
       h("strong", { class: "model-name", text: m.model }),
       m.paid ? badge("paid") : null,
       this.checkBadge(checked.get(m.model), this.checks.get(b.name)?.current === m.model),
+      ...this.evalBadges(b.name, m.model),
       m.max_concurrent > 0 ? badge(`max ${m.max_concurrent} at once`, "muted") : null,
       m.window_tokens ? badge(`window ${formatTokens(m.window_tokens)}${m.window_source === "observed" ? " (learned)" : ""}`, m.window_source === "observed" ? "warn" : "muted") : null,
       m.context_tokens ? badge(`max ${formatTokens(m.context_tokens)}`, "muted") : null,
@@ -2319,6 +2331,7 @@ var BackendsView = class {
           { class: "profile-actions" },
           b.api_type === "ollama" && !b.retired && (b.memory_budget_mb ?? 0) > 0 ? button("Extend windows", () => void this.extend(b.name), { field: "extend-windows", icon: "approve", word: true }) : null,
           b.retired ? null : button(this.checks.get(b.name)?.state === "running" ? "Checking\u2026" : "Check models", () => void this.check(b.name), { field: "check-models", icon: "approve", word: true }),
+          b.retired ? null : button(this.evals.get(b.name)?.state === "running" ? `Checking reviewers\u2026 ${this.evals.get(b.name)?.done}/${this.evals.get(b.name)?.total}` : "Check reviewers", () => void this.checkReviewers(b.name), { field: "check-reviewers", icon: "approve", word: true }),
           button("Edit", () => {
             this.editing.add(b.name);
             this.render();
@@ -2370,6 +2383,45 @@ var BackendsView = class {
     span.setAttribute("title", `${c.OK ? "Passed" : c.Message || "Failed"} \u2014 checked ${new Date(c.Checked).toLocaleString()}`);
     span.setAttribute("data-role", c.OK ? "check-ok" : "check-failed");
     return span;
+  }
+  /**
+   * One model's score on the seeded-defect cases (H32), one badge per layer:
+   * how many planted defects it caught, and how many fixed versions it
+   * wrongly flagged. A reviewer that misses defects, or flags clean code, is
+   * not one to trust with a gate.
+   */
+  evalBadges(backend, mdl) {
+    const ev = this.evals.get(backend);
+    if (!ev) return [];
+    const rows = ev.rows.filter((r) => r.model === mdl);
+    return ev.summary.filter((s) => s.model === mdl).map((s) => {
+      const bad = s.caught < s.defects || s.false_alarms > 0 || s.unread > 0;
+      const label = `${s.layer === "task" ? "task review" : "acceptance"} ${s.caught}/${s.defects}${s.false_alarms ? `, ${s.false_alarms} false alarm${s.false_alarms === 1 ? "" : "s"}` : ""}${s.unread ? `, ${s.unread} unread` : ""}`;
+      const el = badge(label, bad ? "warn" : "ok");
+      el.setAttribute("title", rows.filter((r) => r.layer === s.layer).map((r) => `${r.case} (${r.variant}): ${r.outcome}${r.detail ? ` \u2014 ${r.detail}` : ""}`).join("\n"));
+      el.setAttribute("data-role", "eval-score");
+      return el;
+    });
+  }
+  /** Run the seeded-defect cases through every model of a backend (H32) and follow the run until it ends. */
+  async checkReviewers(name) {
+    try {
+      this.evals.set(name, await this.deps.checkReviewers(name, { layers: ["task", "acceptance"] }));
+    } catch {
+      return;
+    }
+    this.render();
+    while (this.evals.get(name)?.state === "running") {
+      await new Promise((r) => setTimeout(r, checkPollMs));
+      try {
+        this.evals.set(name, await this.deps.evalStatus(name));
+      } catch {
+        break;
+      }
+      this.render();
+    }
+    const weak = (this.evals.get(name)?.summary ?? []).filter((s) => s.caught < s.defects || s.false_alarms > 0);
+    this.deps.notify(weak.length ? `${weak.length} model score${weak.length === 1 ? "" : "s"} on ${name} missed a defect or raised a false alarm` : `Every model on ${name} caught every planted defect`);
   }
   /** Check every model of a backend, one after the other (H27), and follow the run until it ends. */
   async check(name) {

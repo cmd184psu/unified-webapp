@@ -194,6 +194,39 @@ export interface ModelCheck {
   Checked: number;
 }
 
+/** One model's score in one layer of the reviewer check (H32). */
+export interface EvalSummary {
+  model: string;
+  layer: string;
+  caught: number;
+  defects: number;
+  false_alarms: number;
+  fixed: number;
+  unread: number;
+  ran: number;
+}
+
+export interface EvalRow {
+  model: string;
+  layer: string;
+  case: string;
+  variant: string;
+  run: number;
+  outcome: string;
+  detail?: string;
+  millis: number;
+}
+
+export interface EvalView {
+  state: 'idle' | 'running';
+  current?: string;
+  done: number;
+  total: number;
+  summary: EvalSummary[];
+  rows: EvalRow[];
+  cases: Array<{ id: string; title: string }>;
+}
+
 export interface CheckView {
   state: 'idle' | 'running';
   current?: string;
@@ -688,6 +721,8 @@ export const api = {
   enableBackend: (name: string): Promise<BackendResult> => send('POST', `/api/backends/${enc(name)}/enable`),
   checkModels: (name: string): Promise<CheckView> => send('POST', `/api/backends/${enc(name)}/check`),
   checkStatus: (name: string): Promise<CheckView> => get(`/api/backends/${enc(name)}/check`, { quiet: true }),
+  checkReviewers: (name: string, body: { layers?: string[]; repeats?: number } = {}): Promise<EvalView> => send('POST', `/api/backends/${enc(name)}/evals`, body),
+  evalStatus: (name: string): Promise<EvalView> => get(`/api/backends/${enc(name)}/evals`, { quiet: true }),
   candidates: (): Promise<Candidate[]> => get('/api/candidates'),
   putCandidates: (role: string, candidates: CandidateInput[], o?: FetchOptions): Promise<Candidate[]> =>
     send('PUT', `/api/candidates/${enc(role)}`, { candidates }, o),

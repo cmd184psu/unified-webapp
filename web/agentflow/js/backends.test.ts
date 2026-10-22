@@ -45,6 +45,8 @@ function harness(init: Partial<State> = {}, over: Partial<BackendsDeps> = {}) {
     enableBackend: async (name) => { log.push('enable:' + name); return result(be(name)); },
     checkModels: async (name) => { log.push('check:' + name); return { state: 'running', current: 'm1', results: [] }; },
     checkStatus: async () => ({ state: 'idle', results: [] }),
+    checkReviewers: async (name) => { log.push('reviewers:' + name); return { state: 'idle', done: 0, total: 0, summary: [], rows: [], cases: [] }; },
+    evalStatus: async () => ({ state: 'idle', done: 0, total: 0, summary: [], rows: [], cases: [] }),
     extendWindows: async (name) => { log.push('extend:' + name); return [{ model: 'm1', previous: 0, window: 57344, applied: true, note: 'set to 57344 tokens' }]; },
     putCandidates: async (role, list) => {
       log.push('cands:' + role);
@@ -625,5 +627,31 @@ test('H27: Check models runs a one-word test of each model, follows it, and badg
   const text = t.host.textContent;
   ok(text.includes('answers (1.2s)') && text.includes('not answering'), `badges shown: ${text}`);
   ok(t.log.some((l) => l.startsWith('notify:1 model on b1 did not answer: m2')), 'result reported');
+  stop();
+});
+
+test('H32: Check reviewers runs the seeded-defect cases and badges each model with its score', async () => {
+  setCheckPollMs(1);
+  const done = {
+    state: 'idle' as const, done: 4, total: 4, cases: [],
+    summary: [
+      { model: 'm1', layer: 'acceptance', caught: 4, defects: 4, false_alarms: 0, fixed: 4, unread: 0, ran: 1 },
+      { model: 'm2', layer: 'acceptance', caught: 2, defects: 4, false_alarms: 1, fixed: 4, unread: 0, ran: 1 },
+    ],
+    rows: [{ model: 'm2', layer: 'acceptance', case: 'page-through-api', variant: 'defect', run: 1, outcome: 'missed', detail: 'verdict pass', millis: 10 }],
+  };
+  let polls = -1;
+  const t = harness({ backends: [be('b1', { models: [{ model: 'm1', paid: false, max_concurrent: 0 }, { model: 'm2', paid: false, max_concurrent: 0 }] })] }, {
+    evalStatus: async () => (polls++ < 0 ? { state: 'idle' as const, done: 0, total: 0, summary: [], rows: [], cases: [] } : done),
+    checkReviewers: async (name) => { t.log.push('reviewers:' + name); return { ...done, state: 'running' as const, done: 1 }; },
+  });
+  const stop = t.view.mount();
+  await flush();
+  button(t.host, 'Check reviewers').click();
+  for (let i = 0; i < 20; i++) await flush();
+  ok(t.log.includes('reviewers:b1'), 'run started');
+  const text = t.host.textContent;
+  ok(text.includes('acceptance 4/4') && text.includes('acceptance 2/4, 1 false alarm'), `scores shown: ${text}`);
+  ok(t.log.some((l) => l.startsWith('notify:1 model score on b1 missed a defect')), 'result reported');
   stop();
 });

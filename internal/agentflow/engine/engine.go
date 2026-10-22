@@ -147,6 +147,7 @@ type Engine struct {
 
 	// checks tracks the running model checks (checks.go).
 	checks checkState
+	evals  evalState
 
 	// planMu serialises the planning and compile driver (plan.go,
 	// compile.go) with the calls that start or approve them. planWaiting

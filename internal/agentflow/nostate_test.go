@@ -16,6 +16,7 @@ import (
 var stateWriters = map[string]string{
 	"engine/stages.go:modelCall":                  "prompt.md and corrective.md of a stage",
 	"engine/checks.go:checkOne":                   "the one-word prompt of a model check, in its own scratch directory",
+	"engine/evals.go:evalCall":                    "the case files and prompt of a reviewer check, in its own scratch directory",
 	"engine/cleanup.go:checkpoint":                "<data>/tasks/<id>/cleanup_checkpoint_<attempt> marker",
 	"engine/merge.go:recordPreMerge":              "pre_merge.json, the merge recovery marker",
 	"engine/attempt.go:prepareAttempt":            "<data>/tasks/<id>/base_commit",

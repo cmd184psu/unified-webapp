@@ -50,12 +50,31 @@ var migrations = []migration{
 	{20, migration20SQL},
 	{21, migration21SQL},
 	{22, migration22SQL},
+	{23, migration23SQL},
 }
 
 // migration21SQL (H30) seeds the stall limit: minutes of silence from a stage,
 // or of nothing in flight in a running effort, before the engine acts.
 const migration21SQL = `
 INSERT OR IGNORE INTO settings (key, value) VALUES ('stall_minutes', '10');
+`
+
+// migration23SQL (H32) keeps the result of the last "Check reviewers" run of
+// each model and layer: one row per seeded-defect case, variant and repeat.
+const migration23SQL = `
+CREATE TABLE reviewer_evals (
+  backend TEXT NOT NULL,
+  model TEXT NOT NULL,
+  layer TEXT NOT NULL,
+  case_id TEXT NOT NULL,
+  variant TEXT NOT NULL,
+  run INTEGER NOT NULL,
+  outcome TEXT NOT NULL,
+  detail TEXT NOT NULL DEFAULT '',
+  millis INTEGER NOT NULL DEFAULT 0,
+  ran INTEGER NOT NULL,
+  PRIMARY KEY (backend, model, layer, case_id, variant, run)
+);
 `
 
 // migration22SQL (H31) seeds the number of acceptance rounds: how often a

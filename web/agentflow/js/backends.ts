@@ -9,7 +9,7 @@
 import { autosave, type Autosave } from './autosave.js';
 import { showToast } from '@shared';
 import {
-  api, type Backend, type BackendInput, type BackendResult, type Candidate, type CheckView, type ModelCheck, type ProjectView,
+  api, type Backend, type BackendInput, type BackendResult, type Candidate, type CheckView, type EvalView, type EvalSummary, type ModelCheck, type ProjectView,
 } from './api.js';
 import { h, replace } from './dom.js';
 import { subscribe, type AgentflowEvent } from './events.js';
@@ -50,7 +50,7 @@ export const setCheckPollMs = (ms: number): void => { checkPollMs = ms; };
 
 export type BackendsDeps = Pick<
   typeof api,
-  'backends' | 'createBackend' | 'probeBackend' | 'patchBackend' | 'retireBackend' | 'enableBackend' | 'checkModels' | 'checkStatus' | 'extendWindows' | 'candidates' | 'putCandidates' |
+  'backends' | 'createBackend' | 'probeBackend' | 'patchBackend' | 'retireBackend' | 'enableBackend' | 'checkModels' | 'checkStatus' | 'checkReviewers' | 'evalStatus' | 'extendWindows' | 'candidates' | 'putCandidates' |
   'projects' | 'limits' | 'putLimits' | 'settings'
 > & { notify(message: string): void };
 
@@ -63,6 +63,8 @@ export const defaultBackendsDeps = (): BackendsDeps => ({
   enableBackend: api.enableBackend,
   checkModels: api.checkModels,
   checkStatus: api.checkStatus,
+  checkReviewers: api.checkReviewers,
+  evalStatus: api.evalStatus,
   extendWindows: api.extendWindows,
   candidates: api.candidates,
   putCandidates: api.putCandidates,
@@ -93,6 +95,8 @@ export class BackendsView {
   private retiring = new Set<string>();
   /** The last model check of each backend (H27), refreshed while one runs. */
   private checks = new Map<string, CheckView>();
+  /** The last seeded-defect reviewer check of each backend (H32), refreshed while one runs. */
+  private evals = new Map<string, EvalView>();
   /** role -> rows being edited; present only while the role has unsaved edits. */
   private drafts = new Map<string, CandRow[]>();
   private limitsSlug = '';
@@ -143,6 +147,11 @@ export class BackendsView {
           this.checks.set(b.name, await this.deps.checkStatus(b.name));
         } catch {
           // a backend with no check yet shows none
+        }
+        try {
+          this.evals.set(b.name, await this.deps.evalStatus(b.name));
+        } catch {
+          // nor a reviewer check
         }
       }));
     } catch {
@@ -362,6 +371,7 @@ export class BackendsView {
     const checked = new Map((this.checks.get(b.name)?.results ?? []).map((c) => [c.Model, c]));
     const models = b.models.map((m) => h('div', { class: 'model-row' }, h('strong', { class: 'model-name', text: m.model }), m.paid ? badge('paid') : null,
       this.checkBadge(checked.get(m.model), this.checks.get(b.name)?.current === m.model),
+      ...this.evalBadges(b.name, m.model),
       m.max_concurrent > 0 ? badge(`max ${m.max_concurrent} at once`, 'muted') : null,
       m.window_tokens ? badge(`window ${formatTokens(m.window_tokens)}${m.window_source === 'observed' ? ' (learned)' : ''}`, m.window_source === 'observed' ? 'warn' : 'muted') : null,
       m.context_tokens ? badge(`max ${formatTokens(m.context_tokens)}`, 'muted') : null,
@@ -383,6 +393,7 @@ export class BackendsView {
             ? button('Extend windows', () => void this.extend(b.name), { field: 'extend-windows', icon: 'approve', word: true })
             : null,
           b.retired ? null : button(this.checks.get(b.name)?.state === 'running' ? 'Checking\u2026' : 'Check models', () => void this.check(b.name), { field: 'check-models', icon: 'approve', word: true }),
+          b.retired ? null : button(this.evals.get(b.name)?.state === 'running' ? `Checking reviewers\u2026 ${this.evals.get(b.name)?.done}/${this.evals.get(b.name)?.total}` : 'Check reviewers', () => void this.checkReviewers(b.name), { field: 'check-reviewers', icon: 'approve', word: true }),
           button('Edit', () => { this.editing.add(b.name); this.render(); }, { field: 'edit', icon: 'edit' }),
           b.retired
             ? button('Enable', () => void this.enable(b.name), { field: 'enable', icon: 'approve', word: true })
@@ -427,6 +438,47 @@ export class BackendsView {
     span.setAttribute('title', `${c.OK ? 'Passed' : c.Message || 'Failed'} \u2014 checked ${new Date(c.Checked).toLocaleString()}`);
     span.setAttribute('data-role', c.OK ? 'check-ok' : 'check-failed');
     return span;
+  }
+
+  /**
+   * One model's score on the seeded-defect cases (H32), one badge per layer:
+   * how many planted defects it caught, and how many fixed versions it
+   * wrongly flagged. A reviewer that misses defects, or flags clean code, is
+   * not one to trust with a gate.
+   */
+  private evalBadges(backend: string, mdl: string): HTMLElement[] {
+    const ev = this.evals.get(backend);
+    if (!ev) return [];
+    const rows = ev.rows.filter((r) => r.model === mdl);
+    return ev.summary.filter((s: EvalSummary) => s.model === mdl).map((s) => {
+      const bad = s.caught < s.defects || s.false_alarms > 0 || s.unread > 0;
+      const label = `${s.layer === 'task' ? 'task review' : 'acceptance'} ${s.caught}/${s.defects}${s.false_alarms ? `, ${s.false_alarms} false alarm${s.false_alarms === 1 ? '' : 's'}` : ''}${s.unread ? `, ${s.unread} unread` : ''}`;
+      const el = badge(label, bad ? 'warn' : 'ok');
+      el.setAttribute('title', rows.filter((r) => r.layer === s.layer).map((r) => `${r.case} (${r.variant}): ${r.outcome}${r.detail ? ` \u2014 ${r.detail}` : ''}`).join('\n'));
+      el.setAttribute('data-role', 'eval-score');
+      return el;
+    });
+  }
+
+  /** Run the seeded-defect cases through every model of a backend (H32) and follow the run until it ends. */
+  private async checkReviewers(name: string): Promise<void> {
+    try {
+      this.evals.set(name, await this.deps.checkReviewers(name, { layers: ['task', 'acceptance'] }));
+    } catch {
+      return;
+    }
+    this.render();
+    while (this.evals.get(name)?.state === 'running') {
+      await new Promise((r) => setTimeout(r, checkPollMs));
+      try {
+        this.evals.set(name, await this.deps.evalStatus(name));
+      } catch {
+        break;
+      }
+      this.render();
+    }
+    const weak = (this.evals.get(name)?.summary ?? []).filter((s) => s.caught < s.defects || s.false_alarms > 0);
+    this.deps.notify(weak.length ? `${weak.length} model score${weak.length === 1 ? '' : 's'} on ${name} missed a defect or raised a false alarm` : `Every model on ${name} caught every planted defect`);
   }
 
   /** Check every model of a backend, one after the other (H27), and follow the run until it ends. */
