@@ -67,6 +67,10 @@ ap.add_argument("--repo", default=os.path.expanduser("~/af-webcalc"))
 ap.add_argument("--slug", default="webcalc")
 ap.add_argument("--scope", default="any", choices=("local", "any"),
                 help="model scope: any lets hosted backends (the free opencode models) be used")
+ap.add_argument("--hosted-order", default="nemotron-3-ultra-free,glm-5.3-flash-free,big-pickle,deepseek-v4.1-flash-free",
+                help="with --lineup free or hybrid: hosted models to put first, in this order (the best scorers of Check reviewers); the rest follow")
+ap.add_argument("--hosted-exclude", default="flint-40b-free,longcat-2.5-preview-free",
+                help="with --lineup free or hybrid: hosted models to leave out (flaky or withdrawn on the last Check models / Check reviewers)")
 ap.add_argument("--lineup", default="global", choices=("global", "local", "free", "hybrid"),
                 help="local: build this project's candidate lists from the non-hosted backends by tier; free: only the hosted backends that cost nothing (the free opencode models)")
 ap.add_argument("--include-light", action="store_true", help="with --lineup local: let tier 3 models work as workers")
@@ -172,9 +176,13 @@ if args.lineup in ("free", "hybrid"):
             if b.get("hosted") and not b.get("paid") and not b.get("retired") for m in b["models"] if not m.get("paid")]
     if not free:
         sys.exit("--lineup free: no hosted unpaid backend with a model")
+    free = [x for x in free if x[1] not in args.hosted_exclude.split(",")]
+    horder = [x for x in args.hosted_order.split(",") if x]
+    free.sort(key=lambda x: horder.index(x[1]) if x[1] in horder else len(horder))
     # each role starts at a different model, so the reviewer is not the worker's own model
+    # (the reviewer starts at the best model: it is the role a weak model hurts most)
     lineup = {role: [{"backend": be, "model": m} for be, m in free[i % len(free):] + free[:i % len(free)]]
-              for i, role in enumerate(("planner", "architect", "critic", "compiler", "worker", "reviewer"))}
+              for role, i in zip(("planner", "architect", "critic", "compiler", "worker", "reviewer"), (0, 1, 2, 3, 4, 0))}
     free_lineup = lineup
     if args.lineup == "free":
         for role, lst in lineup.items():
@@ -236,6 +244,14 @@ if not args.resume and not args.skip_preflight:
             time.sleep(5)
         for c in api("GET", f"/api/backends/{name}/check", None, 200)["results"]:
             say(f"check {name}/{c['Model']}: " + ("answers" if c["OK"] else f"FAILED ({c['Class']})"))
+    dead = {(name, c["Model"]) for name in used if name in hosted
+            for c in api("GET", f"/api/backends/{name}/check", None, 200)["results"] if not c["OK"]}
+    if dead and lu:  # a model that failed its check is taken off this project's lists, not left to be skipped one run at a time
+        for role, lst in lu.items():
+            keep = [c for c in lst if (c["backend"], c["model"]) not in dead]
+            if keep and len(keep) != len(lst):
+                api("PUT", f"/api/projects/{slug}/candidates/{role}", {"candidates": keep}, 200)
+                lu[role] = keep
     pre = api("GET", f"/api/projects/{slug}/preflight", None, 200)
     for w in pre["warnings"]:
         say("preflight warning: " + w)
