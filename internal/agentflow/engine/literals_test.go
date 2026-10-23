@@ -224,7 +224,7 @@ func TestH14_QueueThatCitesNoAcceptanceCriterionIsRetried(t *testing.T) {
 	f.standardPool()
 	f.frdNaming("/api/hello")
 	f.approvedPlan()
-	uncited := strings.Replace(compileWithPath, `,"AC1: it answers"`, "", 1)
+	uncited := strings.Replace(compileWithPath, `"R1: GET /api/hello returns hello","AC1: it answers"`, `"it answers"`, 1)
 	f.fake.Script("compiler", runner.Step{Reply: uncited}, runner.Step{Reply: compileWithPath})
 	f.startEngine()
 	if err := f.eng.Compile(context.Background(), "alice", f.effort); err != nil {
@@ -238,8 +238,34 @@ func TestH14_QueueThatCitesNoAcceptanceCriterionIsRetried(t *testing.T) {
 	if !strings.Contains(calls[0].Prompt, "## FRD ids") || strings.Contains(calls[0].Prompt, "Fix these") {
 		t.Fatalf("first prompt should list the ids and no problems:\n%s", calls[0].Prompt)
 	}
-	if !strings.Contains(calls[1].Prompt, "Fix these") || !strings.Contains(calls[1].Prompt, "no task cites AC1") {
+	if !strings.Contains(calls[1].Prompt, "Fix these") || !strings.Contains(calls[1].Prompt, "no task cites R1") {
 		t.Fatalf("retry prompt does not say what was wrong:\n%s", calls[1].Prompt)
+	}
+}
+
+// H33: a criterion no task cites, whose requirement a task does cite, is added
+// to that task with the FRD's own wording, instead of costing a retry.
+func TestH33_AnUncitedCriterionIsAddedToTheTaskThatBuildsItsRequirement(t *testing.T) {
+	f := newPlanFix(t, false)
+	f.standardPool()
+	f.frdNaming("/api/hello")
+	f.approvedPlan()
+	uncited := strings.Replace(compileWithPath, `,"AC1: it answers"`, "", 1)
+	f.fake.Script("compiler", runner.Step{Reply: uncited})
+	f.startEngine()
+	if err := f.eng.Compile(context.Background(), "alice", f.effort); err != nil {
+		t.Fatal(err)
+	}
+	f.waitStatus(model.EffortQueueDraft)
+	if n := len(f.fake.CallsFor("compiler")); n != 1 {
+		t.Fatalf("compiler calls = %d, want 1", n)
+	}
+	tasks, _ := f.st.ListTasks(context.Background(), f.effort)
+	if len(tasks) != 1 || tasks[0].Acceptance[len(tasks[0].Acceptance)-1] != "AC1: it answers" {
+		t.Fatalf("tasks = %+v", tasks)
+	}
+	if evs, _ := f.eng.effortEvents(context.Background(), f.effort, "compile.repaired"); len(evs) != 1 {
+		t.Fatalf("repair events = %d", len(evs))
 	}
 }
 

@@ -137,6 +137,16 @@ func (e *Engine) advanceCompile(ctx context.Context, p store.Project, ef model.E
 	if err != nil {
 		return e.haltCompile(ctx, ef, last, err.Error())
 	}
+	if f, ok, err := e.effortFRD(ctx, ef.ID); err != nil {
+		return err
+	} else if ok {
+		var added []string
+		if defs, added = model.RepairCoverage(f, defs); len(added) > 0 {
+			if err := e.noteEffort(ctx, SystemActor, "compile.repaired", ef.ID, map[string]any{"stage": last.ID, "added": added}); err != nil {
+				return err
+			}
+		}
+	}
 	if miss, err := e.queueMissingLiterals(ctx, ef.ID, defs); err != nil {
 		return err
 	} else if len(miss) > 0 {
