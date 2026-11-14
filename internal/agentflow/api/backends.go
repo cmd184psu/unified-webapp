@@ -18,6 +18,7 @@ func (a *API) registerBackends(mux muxer) {
 	mux.HandleFunc("POST /api/backends/{name}/extend-windows", a.extendWindows)
 	mux.HandleFunc("POST /api/backends/{name}/retire", a.retireBackend)
 	mux.HandleFunc("POST /api/backends/{name}/enable", a.enableBackend)
+	mux.HandleFunc("DELETE /api/backends/{name}", a.deleteBackend)
 	mux.HandleFunc("GET /api/backends/{name}/check", a.checkStatus)
 	mux.HandleFunc("GET /api/projects/{slug}/preflight", a.preflight)
 	mux.HandleFunc("POST /api/backends/{name}/check", a.checkModels)
@@ -338,6 +339,18 @@ func (a *API) retireBackend(w http.ResponseWriter, r *http.Request) {
 	}
 	a.emit("backend.update", map[string]any{"backend": name})
 	a.respondBackend(w, r.Context(), name, http.StatusOK, rep)
+}
+
+// deleteBackend answers DELETE /api/backends/{name}: 204 once it is gone, 409
+// while it is enabled or a candidate list (global or project) still names it.
+func (a *API) deleteBackend(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if err := a.deps.Engine.DeleteBackend(r.Context(), actorOf(r), name); err != nil {
+		writeErr(w, err)
+		return
+	}
+	a.emit("backend.update", map[string]any{"backend": name})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *API) enableBackend(w http.ResponseWriter, r *http.Request) {

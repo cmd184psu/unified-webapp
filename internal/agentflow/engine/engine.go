@@ -221,6 +221,17 @@ func (e *Engine) UpdateBackend(ctx context.Context, actor string, b store.Backen
 	return e.SyncLanes(ctx)
 }
 
+// DeleteBackend removes a disabled backend that no candidate list names. Its
+// lane was paused and emptied when it was disabled and stays hidden; stage
+// history keeps the name as text.
+func (e *Engine) DeleteBackend(ctx context.Context, actor, name string) error {
+	if err := e.deps.Store.DeleteBackend(ctx, actor, name); err != nil {
+		return err
+	}
+	e.health.clear(name)
+	return nil
+}
+
 // EnableBackend re-enables a retired backend and its lane.
 func (e *Engine) EnableBackend(ctx context.Context, actor, name string) error {
 	if err := e.deps.Store.EnableBackend(ctx, actor, name); err != nil {

@@ -719,6 +719,7 @@ export const api = {
     send('POST', `/api/backends/${enc(name)}/retire`, { cancel_running: cancelRunning }),
   extendWindows: (name: string, apply = true): Promise<ExtendResult[]> => send('POST', `/api/backends/${enc(name)}/extend-windows`, { apply }),
   enableBackend: (name: string): Promise<BackendResult> => send('POST', `/api/backends/${enc(name)}/enable`),
+  deleteBackend: (name: string): Promise<void> => send('DELETE', `/api/backends/${enc(name)}`),
   checkModels: (name: string): Promise<CheckView> => send('POST', `/api/backends/${enc(name)}/check`),
   checkStatus: (name: string): Promise<CheckView> => get(`/api/backends/${enc(name)}/check`, { quiet: true }),
   checkReviewers: (name: string, body: { layers?: string[]; repeats?: number } = {}): Promise<EvalView> => send('POST', `/api/backends/${enc(name)}/evals`, body),

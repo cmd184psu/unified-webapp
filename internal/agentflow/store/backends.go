@@ -242,6 +242,75 @@ func (s *Store) RetireBackend(ctx context.Context, actor, name string) error {
 	})
 }
 
+// BackendUses names every candidate list that still lists the backend, as
+// "global worker" or "project p reviewer", so a refusal can say what to change.
+func (s *Store) BackendUses(ctx context.Context, name string) ([]string, error) {
+	return backendUses(ctx, s.db, name)
+}
+
+func backendUses(ctx context.Context, q querier, name string) ([]string, error) {
+	rows, err := q.QueryContext(ctx, `
+		SELECT DISTINCT scope, project_id, role FROM role_candidates
+		WHERE backend = ? ORDER BY scope, project_id, role`, name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var scope, project, role string
+		if err := rows.Scan(&scope, &project, &role); err != nil {
+			return nil, err
+		}
+		if scope == "project" {
+			out = append(out, fmt.Sprintf("project %s %s", project, role))
+		} else {
+			out = append(out, "global "+role)
+		}
+	}
+	return out, rows.Err()
+}
+
+// DeleteBackend removes a backend, its models and its model checks and
+// installs. It is refused (ErrConflict) while the backend is enabled, so its
+// lane has already been paused and emptied, and while any global or project
+// candidate list still names it. Stage rows keep the name as plain text, so
+// history is untouched. It returns ErrNotFound for an unknown name.
+func (s *Store) DeleteBackend(ctx context.Context, actor, name string) error {
+	return s.WithTx(ctx, func(tx *sql.Tx) error {
+		var retired int
+		err := tx.QueryRowContext(ctx, `SELECT retired FROM backends WHERE name = ?`, name).Scan(&retired)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("backend %q: %w", name, ErrNotFound)
+		}
+		if err != nil {
+			return err
+		}
+		if retired == 0 {
+			return fmt.Errorf("backend %q is enabled: disable it first: %w", name, ErrConflict)
+		}
+		uses, err := backendUses(ctx, tx, name)
+		if err != nil {
+			return err
+		}
+		if len(uses) > 0 {
+			return fmt.Errorf("backend %q is still on the candidate lists %s: remove it from them first: %w", name, strings.Join(uses, ", "), ErrConflict)
+		}
+		for _, q := range []string{
+			`DELETE FROM backend_models WHERE backend = ?`,
+			`DELETE FROM model_checks WHERE backend = ?`,
+			`DELETE FROM model_installs WHERE backend = ?`,
+			`DELETE FROM backends WHERE name = ?`,
+		} {
+			if _, err := tx.ExecContext(ctx, q, name); err != nil {
+				return err
+			}
+		}
+		_, err = AppendEvent(tx, actor, "backend.delete", "backend", name, map[string]any{"deleted": true})
+		return err
+	})
+}
+
 // EnableBackend reverses RetireBackend (BK3). Enabling an active backend is a
 // no-op.
 func (s *Store) EnableBackend(ctx context.Context, actor, name string) error {

@@ -24,10 +24,12 @@ interface State {
   backends: Backend[];
   candidates: Candidate[];
   projects: ProjectView[];
+  /** what the "Are you sure?" dialog answers */
+  sure: boolean;
 }
 
 function harness(init: Partial<State> = {}, over: Partial<BackendsDeps> = {}) {
-  const st: State = { backends: [], candidates: [], projects: [], ...init };
+  const st: State = { backends: [], candidates: [], projects: [], sure: true, ...init };
   const host = new FakeEl('DIV');
   const log: string[] = [];
   const bodies: Record<string, unknown> = {};
@@ -43,6 +45,8 @@ function harness(init: Partial<State> = {}, over: Partial<BackendsDeps> = {}) {
     patchBackend: async (name, b) => { log.push('patch:' + name); bodies.patch = b; return result(be(name)); },
     retireBackend: async (name, cancel) => { log.push(`retire:${name}:${cancel}`); return result(be(name, { retired: true }), ['retired the last backend for worker; project p1 is running']); },
     enableBackend: async (name) => { log.push('enable:' + name); return result(be(name)); },
+    deleteBackend: async (name) => { log.push('delete:' + name); st.backends = st.backends.filter((b) => b.name !== name); },
+    confirm: async (message, label) => { log.push(`confirm:${label ?? ''}`); bodies.confirm = message; return st.sure; },
     checkModels: async (name) => { log.push('check:' + name); return { state: 'running', current: 'm1', results: [] }; },
     checkStatus: async () => ({ state: 'idle', results: [] }),
     checkReviewers: async (name) => { log.push('reviewers:' + name); return { state: 'idle', done: 0, total: 0, summary: [], rows: [], cases: [] }; },
@@ -653,5 +657,41 @@ test('H32: Check reviewers runs the seeded-defect cases and badges each model wi
   const text = t.host.textContent;
   ok(text.includes('acceptance 4/4') && text.includes('acceptance 2/4, 1 false alarm'), `scores shown: ${text}`);
   ok(t.log.some((l) => l.startsWith('notify:1 model score on b1 missed a defect')), 'result reported');
+  stop();
+});
+
+const trash = (host: FakeEl, name: string): FakeEl => button(byAttr(host, 'data-backend', name)[0], 'Delete');
+
+test('BD1: the trash icon is greyed out, with the reason as its tooltip, while the backend is enabled or on a candidate list', async () => {
+  const t = harness({
+    backends: [be('on'), be('listed', { retired: true }), be('free', { retired: true })],
+    candidates: [cand('worker', 0, 'listed', 'm1'), { scope: 'project', project: 'p1', role: 'reviewer', position: 0, backend: 'listed', model: 'm1', paid: false }],
+  });
+  const stop = t.view.mount();
+  await flush();
+  const on = trash(t.host, 'on'), listed = trash(t.host, 'listed'), free = trash(t.host, 'free');
+  ok(on.getAttribute('disabled') !== null && on.getAttribute('title')!.toLowerCase().includes('disable'), `enabled: ${on.getAttribute('title')}`);
+  ok(listed.getAttribute('disabled') !== null, 'a listed backend is greyed out');
+  const why = listed.getAttribute('title')!;
+  ok(why.includes('global worker') && why.includes('project p1 reviewer'), `the tooltip names both lists: ${why}`);
+  eq(free.getAttribute('disabled'), null, 'a disabled backend on no list can be deleted');
+  stop();
+});
+
+test('BD2: delete asks "Are you sure?" first, then deletes and the card goes', async () => {
+  const t = harness({ backends: [be('b1', { retired: true }), be('b2', { retired: true })] });
+  const stop = t.view.mount();
+  await flush();
+  t.st.sure = false;
+  trash(t.host, 'b1').click();
+  await flush();
+  eq(t.log.filter((l) => l.startsWith('delete:')), [], 'declined: nothing deleted');
+  ok(String(t.bodies.confirm).includes('b1') && String(t.bodies.confirm).includes('history'), `the question names it and says history stays: ${t.bodies.confirm}`);
+  t.st.sure = true;
+  trash(t.host, 'b1').click();
+  await flush();
+  eq(t.log.filter((l) => l.startsWith('delete:')), ['delete:b1']);
+  eq(byAttr(t.host, 'data-backend', 'b1').length, 0, 'the card is gone');
+  eq(byAttr(t.host, 'data-backend', 'b2').length, 1, 'the other card stays');
   stop();
 });

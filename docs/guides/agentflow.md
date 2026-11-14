@@ -143,7 +143,7 @@ Create and manage them in the **Backends** tab or with `POST /api/backends`,
 Ollama host the answer also has `contexts`, a map of model name to the context window the host
 states, leaving out any model that does not answer),
 `PATCH /api/backends/{name}`, `POST /api/backends/{name}/retire` (optionally cancelling
-running stages) and `POST /api/backends/{name}/enable`.
+running stages) and `POST /api/backends/{name}/enable`, and `DELETE /api/backends/{name}`: a backend is deleted only after it is disabled and no candidate list, global or project, still names it (otherwise 409 with the reason); its models and model checks go with it and stage history keeps the name.
 
 A **role candidate list** names the backend and model to try, in order, for each role:
 `worker`, `reviewer`, `planner`, `architect`, `critic`, `compiler`. Set the global lists with

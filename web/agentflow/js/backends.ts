@@ -7,7 +7,7 @@
 // user-supplied string reaches the page through h(), so it is text.
 
 import { autosave, type Autosave } from './autosave.js';
-import { showToast } from '@shared';
+import { confirmDialog, showToast } from '@shared';
 import {
   api, type Backend, type BackendInput, type BackendResult, type Candidate, type CheckView, type EvalView, type EvalSummary, type ModelCheck, type ProjectView,
 } from './api.js';
@@ -50,9 +50,9 @@ export const setCheckPollMs = (ms: number): void => { checkPollMs = ms; };
 
 export type BackendsDeps = Pick<
   typeof api,
-  'backends' | 'createBackend' | 'probeBackend' | 'patchBackend' | 'retireBackend' | 'enableBackend' | 'checkModels' | 'checkStatus' | 'checkReviewers' | 'evalStatus' | 'extendWindows' | 'candidates' | 'putCandidates' |
+  'backends' | 'createBackend' | 'probeBackend' | 'patchBackend' | 'retireBackend' | 'enableBackend' | 'deleteBackend' | 'checkModels' | 'checkStatus' | 'checkReviewers' | 'evalStatus' | 'extendWindows' | 'candidates' | 'putCandidates' |
   'projects' | 'limits' | 'putLimits' | 'settings'
-> & { notify(message: string): void };
+> & { notify(message: string): void; confirm(message: string, confirmLabel?: string): Promise<boolean> };
 
 export const defaultBackendsDeps = (): BackendsDeps => ({
   backends: api.backends,
@@ -61,6 +61,7 @@ export const defaultBackendsDeps = (): BackendsDeps => ({
   patchBackend: api.patchBackend,
   retireBackend: api.retireBackend,
   enableBackend: api.enableBackend,
+  deleteBackend: api.deleteBackend,
   checkModels: api.checkModels,
   checkStatus: api.checkStatus,
   checkReviewers: api.checkReviewers,
@@ -73,7 +74,18 @@ export const defaultBackendsDeps = (): BackendsDeps => ({
   putLimits: api.putLimits,
   settings: api.settings,
   notify: (m) => void showToast(m, 'success'),
+  confirm: (m, label = 'Confirm') => confirmDialog(m, { confirmLabel: label }),
 });
+
+/** usedBy names the candidate lists that still hold the backend, as "global worker" or "project p reviewer". */
+export function usedBy(cands: Candidate[], name: string): string[] {
+  const out = new Set<string>();
+  for (const c of cands) {
+    if (c.backend !== name) continue;
+    out.add(c.scope === 'project' ? `project ${c.project ?? '?'} ${c.role}` : `global ${c.role}`);
+  }
+  return [...out];
+}
 
 /** lastForRoles lists the roles whose only candidates are on the named backend. */
 export function lastForRoles(cands: Candidate[], name: string): string[] {
@@ -397,7 +409,8 @@ export class BackendsView {
           button('Edit', () => { this.editing.add(b.name); this.render(); }, { field: 'edit', icon: 'edit' }),
           b.retired
             ? button('Enable', () => void this.enable(b.name), { field: 'enable', icon: 'approve', word: true })
-            : button('Disable', () => { this.retiring.add(b.name); this.render(); }, { field: 'retire', icon: 'pause', word: true }))),
+            : button('Disable', () => { this.retiring.add(b.name); this.render(); }, { field: 'retire', icon: 'pause', word: true }),
+          button('Delete', () => void this.remove(b), { field: 'delete', icon: 'trash', unavailable: this.whyNotDelete(b) || undefined }))),
       h('div', { class: 'profile-fields' },
         b.api_type === 'opencode' ? null : h('div', {}, h('label', { text: 'Host' }), h('span', { text: b.host })),
         h('div', {}, h('label', { text: 'API type' }), h('span', { text: b.api_type })),
@@ -508,6 +521,26 @@ export class BackendsView {
       const res = await this.deps.extendWindows(name);
       const done = res.filter((r) => r.applied).length;
       this.deps.notify(done > 0 ? `Extended ${done} of ${res.length} model windows on ${name}` : `No window changed on ${name}: ${res.map((r) => `${r.model}: ${r.note}`).join('; ')}`);
+    } catch {
+      return;
+    }
+    await this.load();
+  }
+
+  /** Why a backend cannot be deleted yet, or '' when it can. The server enforces the same two rules. */
+  private whyNotDelete(b: Backend): string {
+    if (!b.retired) return 'Disable this backend first; only a disabled backend can be deleted.';
+    const lists = usedBy(this.candidates, b.name);
+    return lists.length > 0 ? `Still on these candidate lists: ${lists.join(', ')}. Remove it from them to delete it.` : '';
+  }
+
+  private async remove(b: Backend): Promise<void> {
+    const sure = await this.deps.confirm(
+      `Delete backend ${b.name} and its ${b.models.length} model${b.models.length === 1 ? '' : 's'}? Past stages keep the name, so history stays. This cannot be undone.`, 'Delete');
+    if (!sure) return;
+    try {
+      await this.deps.deleteBackend(b.name);
+      this.deps.notify(`${b.name} is deleted`);
     } catch {
       return;
     }

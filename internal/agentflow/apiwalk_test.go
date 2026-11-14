@@ -124,6 +124,11 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	ok("GET", "/api/config/export", "", 200)
 	ok("POST", "/api/config/import", `{"config":{"format":"nope","version":1},"apply":false}`, 400)
 	ok("POST", "/api/backends/spare/enable", ``, 200)
+	// Delete: refused while enabled, then removed once disabled and on no candidate list.
+	ok("POST", "/api/backends", `{"name":"scrap","host":"http://127.0.0.1:11436","api_type":"ollama","slots":1,"models":[{"model":"m1","window_tokens":65536}]}`, 201)
+	ok("DELETE", "/api/backends/scrap", "", 409)
+	ok("POST", "/api/backends/scrap/retire", `{"cancel_running":false}`, 200)
+	ok("DELETE", "/api/backends/scrap", "", 204)
 
 	// Settings, candidates, statistics.
 	ok("GET", "/api/settings", "", 200)

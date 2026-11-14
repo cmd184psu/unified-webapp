@@ -80,6 +80,7 @@ var api = {
   retireBackend: (name, cancelRunning) => send("POST", `/api/backends/${enc(name)}/retire`, { cancel_running: cancelRunning }),
   extendWindows: (name, apply = true) => send("POST", `/api/backends/${enc(name)}/extend-windows`, { apply }),
   enableBackend: (name) => send("POST", `/api/backends/${enc(name)}/enable`),
+  deleteBackend: (name) => send("DELETE", `/api/backends/${enc(name)}`),
   checkModels: (name) => send("POST", `/api/backends/${enc(name)}/check`),
   checkStatus: (name) => get(`/api/backends/${enc(name)}/check`, { quiet: true }),
   checkReviewers: (name, body = {}) => send("POST", `/api/backends/${enc(name)}/evals`, body),
@@ -626,8 +627,9 @@ function button(label, onClick, opts = {}) {
   return h("button", {
     class: "ui-modal-btn" + (opts.primary ? " ui-modal-btn-primary" : "") + (glyph ? " af-has-icon" : "") + (asIcon ? " af-icon-only" : ""),
     text: glyph ? void 0 : label,
-    attrs: { type: "button", "data-action": opts.field, "data-op": opts.op, title: glyph ? label : void 0, "aria-label": asIcon ? label : void 0 },
-    on: { click: onClick }
+    attrs: { type: "button", "data-action": opts.field, "data-op": opts.op, title: opts.unavailable || (glyph ? label : void 0), "aria-label": asIcon ? label : void 0, disabled: !!opts.unavailable, "aria-disabled": opts.unavailable ? "true" : void 0 },
+    on: { click: opts.unavailable ? () => {
+    } : onClick }
   }, glyph ? icon(opts.icon) : null, glyph && opts.word ? h("span", { text: label }) : null);
 }
 function section(title, ...children) {
@@ -1158,7 +1160,7 @@ var Overview = class {
 };
 
 // web/agentflow/js/backends.ts
-import { showToast as showToast5 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog4, showToast as showToast5 } from "/shared/dist/shared.mjs";
 
 // web/agentflow/js/installs.ts
 var defaultInstallDeps = () => ({
@@ -1971,6 +1973,7 @@ var defaultBackendsDeps = () => ({
   patchBackend: api.patchBackend,
   retireBackend: api.retireBackend,
   enableBackend: api.enableBackend,
+  deleteBackend: api.deleteBackend,
   checkModels: api.checkModels,
   checkStatus: api.checkStatus,
   checkReviewers: api.checkReviewers,
@@ -1982,8 +1985,17 @@ var defaultBackendsDeps = () => ({
   limits: api.limits,
   putLimits: api.putLimits,
   settings: api.settings,
-  notify: (m) => void showToast5(m, "success")
+  notify: (m) => void showToast5(m, "success"),
+  confirm: (m, label = "Confirm") => confirmDialog4(m, { confirmLabel: label })
 });
+function usedBy(cands, name) {
+  const out = /* @__PURE__ */ new Set();
+  for (const c of cands) {
+    if (c.backend !== name) continue;
+    out.add(c.scope === "project" ? `project ${c.project ?? "?"} ${c.role}` : `global ${c.role}`);
+  }
+  return [...out];
+}
 function lastForRoles(cands, name) {
   return ROLES.filter((role) => {
     const mine = cands.filter((c) => c.scope === "global" && c.role === role);
@@ -2339,7 +2351,8 @@ var BackendsView = class {
           b.retired ? button("Enable", () => void this.enable(b.name), { field: "enable", icon: "approve", word: true }) : button("Disable", () => {
             this.retiring.add(b.name);
             this.render();
-          }, { field: "retire", icon: "pause", word: true })
+          }, { field: "retire", icon: "pause", word: true }),
+          button("Delete", () => void this.remove(b), { field: "delete", icon: "trash", unavailable: this.whyNotDelete(b) || void 0 })
         )
       ),
       h(
@@ -2449,6 +2462,26 @@ var BackendsView = class {
       const res = await this.deps.extendWindows(name);
       const done = res.filter((r) => r.applied).length;
       this.deps.notify(done > 0 ? `Extended ${done} of ${res.length} model windows on ${name}` : `No window changed on ${name}: ${res.map((r) => `${r.model}: ${r.note}`).join("; ")}`);
+    } catch {
+      return;
+    }
+    await this.load();
+  }
+  /** Why a backend cannot be deleted yet, or '' when it can. The server enforces the same two rules. */
+  whyNotDelete(b) {
+    if (!b.retired) return "Disable this backend first; only a disabled backend can be deleted.";
+    const lists = usedBy(this.candidates, b.name);
+    return lists.length > 0 ? `Still on these candidate lists: ${lists.join(", ")}. Remove it from them to delete it.` : "";
+  }
+  async remove(b) {
+    const sure = await this.deps.confirm(
+      `Delete backend ${b.name} and its ${b.models.length} model${b.models.length === 1 ? "" : "s"}? Past stages keep the name, so history stays. This cannot be undone.`,
+      "Delete"
+    );
+    if (!sure) return;
+    try {
+      await this.deps.deleteBackend(b.name);
+      this.deps.notify(`${b.name} is deleted`);
     } catch {
       return;
     }
@@ -2746,7 +2779,7 @@ var Activity = class {
 };
 
 // web/agentflow/js/board.ts
-import { confirmDialog as confirmDialog4, copyText as copyText3, showToast as showToast6 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog5, copyText as copyText3, showToast as showToast6 } from "/shared/dist/shared.mjs";
 
 // web/agentflow/js/stream.ts
 var defaultStreamDeps = () => ({ open: (url) => new EventSource(url) });
@@ -2845,7 +2878,7 @@ var defaultBoardDeps = () => ({
   overrideTask: api.overrideTask,
   abandonEffort: api.abandonEffort,
   gitCommands: api.gitCommands,
-  confirm: (m, label = "Confirm") => confirmDialog4(m, { confirmLabel: label }),
+  confirm: (m, label = "Confirm") => confirmDialog5(m, { confirmLabel: label }),
   copy: (t) => void copyText3(t),
   notify: (m) => void showToast6(m, "success")
 });
@@ -3414,7 +3447,7 @@ function mountHistory(host, slug) {
 import { alertDialog as alertDialog2, showToast as showToast9 } from "/shared/dist/shared.mjs";
 
 // web/agentflow/js/plan-view.ts
-import { confirmDialog as confirmDialog5, showToast as showToast8 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog6, showToast as showToast8 } from "/shared/dist/shared.mjs";
 var defaultPlanDeps = () => ({
   efforts: api.efforts,
   plan: api.plan,
@@ -3423,7 +3456,7 @@ var defaultPlanDeps = () => ({
   planRevision: api.planRevision,
   generatePlan: api.generatePlan,
   approvePlan: api.approvePlan,
-  confirm: (m) => confirmDialog5(m, { confirmLabel: "Approve" }),
+  confirm: (m) => confirmDialog6(m, { confirmLabel: "Approve" }),
   notify: (m) => void showToast8(m, "success")
 });
 var PLAN_TABS = ["planner", "architect", "critic"];
@@ -4458,13 +4491,13 @@ function mountFrd(host, slug) {
 }
 
 // web/agentflow/js/queue.ts
-import { confirmDialog as confirmDialog6, showToast as showToast10 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog7, showToast as showToast10 } from "/shared/dist/shared.mjs";
 var defaultQueueDeps = () => ({
   efforts: api.efforts,
   queue: api.queue,
   compile: api.compile,
   approveQueue: api.approveQueue,
-  confirm: (m, label = "Confirm") => confirmDialog6(m, { confirmLabel: label }),
+  confirm: (m, label = "Confirm") => confirmDialog7(m, { confirmLabel: label }),
   notify: (m) => void showToast10(m, "success")
 });
 var list2 = (title, items) => h(
@@ -4634,7 +4667,7 @@ function mountQueue(host, slug) {
 }
 
 // web/agentflow/js/projects.ts
-import { confirmDialog as confirmDialog7, showToast as showToast11 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog8, showToast as showToast11 } from "/shared/dist/shared.mjs";
 var defaultProjectDeps = () => ({
   createProject: api.createProject,
   patchProject: api.patchProject,
@@ -4645,7 +4678,7 @@ var defaultProjectDeps = () => ({
   putProjectCandidates: api.putProjectCandidates,
   clearProjectCandidates: api.clearProjectCandidates,
   definitionOfDone: api.definitionOfDone,
-  confirm: (m, label = "Confirm") => confirmDialog7(m, { confirmLabel: label }),
+  confirm: (m, label = "Confirm") => confirmDialog8(m, { confirmLabel: label }),
   pickDir: (start) => pickDirectory(start),
   notify: (m) => void showToast11(m, "success"),
   showCommands: defaultUnregisterDeps().showCommands

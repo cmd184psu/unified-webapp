@@ -78,15 +78,16 @@ export function fieldRow(label: string, control: Control | HTMLElement, hint?: s
  * button builds a plain or primary button. With opts.icon it shows the glyph
  * and keeps the label as its tooltip and accessible name; opts.word also keeps
  * the label as text beside the glyph (for ambiguous or destructive actions).
+ * `unavailable` greys the button out and shows its reason as the tooltip.
  */
-export function button(label: string, onClick: () => void, opts: { primary?: boolean; field?: string; op?: string; icon?: IconName; word?: boolean } = {}): HTMLElement {
+export function button(label: string, onClick: () => void, opts: { primary?: boolean; field?: string; op?: string; icon?: IconName; word?: boolean; unavailable?: string } = {}): HTMLElement {
   const glyph = opts.icon !== undefined;
   const asIcon = glyph && !opts.word;
   return h('button', {
     class: 'ui-modal-btn' + (opts.primary ? ' ui-modal-btn-primary' : '') + (glyph ? ' af-has-icon' : '') + (asIcon ? ' af-icon-only' : ''),
     text: glyph ? undefined : label,
-    attrs: { type: 'button', 'data-action': opts.field, 'data-op': opts.op, title: glyph ? label : undefined, 'aria-label': asIcon ? label : undefined },
-    on: { click: onClick },
+    attrs: { type: 'button', 'data-action': opts.field, 'data-op': opts.op, title: opts.unavailable || (glyph ? label : undefined), 'aria-label': asIcon ? label : undefined, disabled: !!opts.unavailable, 'aria-disabled': opts.unavailable ? 'true' : undefined },
+    on: { click: opts.unavailable ? () => {} : onClick },
   }, glyph ? icon(opts.icon as IconName) : null, glyph && opts.word ? h('span', { text: label }) : null);
 }
 
