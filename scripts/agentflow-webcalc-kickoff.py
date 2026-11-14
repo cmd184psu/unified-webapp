@@ -86,6 +86,7 @@ ap.add_argument("--dry-run", action="store_true", help="with --lineup local: pri
 ap.add_argument("--resume", type=int, metavar="EFFORT",
                 help="carry on an effort this script already started (same --slug and --repo): approve the gates it has reached and wait")
 ap.add_argument("--skip-preflight", action="store_true", help="do not check the models and the lineup before starting")
+ap.add_argument("--title", default="web calculator", help="the effort's title: put the trial in it so efforts differ on screen")
 ap.add_argument("--wait", action="store_true")
 args = ap.parse_args()
 LONG = 6 * 3600  # planning and compiling on local models take hours, not minutes
@@ -263,7 +264,7 @@ if not args.resume and not args.skip_preflight:
         sys.exit("preflight failed, nothing was started:\n  " + "\n  ".join(pre["problems"]))
     say("preflight ok")
 
-eid = args.resume or api("POST", f"/api/projects/{slug}/efforts", {"title": "web calculator"}, 201)["id"]
+eid = args.resume or api("POST", f"/api/projects/{slug}/efforts", {"title": args.title}, 201)["id"]
 base = f"/api/projects/{slug}/efforts/{eid}"
 say(f"project {slug}, effort {eid}: open the agentflow UI to watch")
 status = lambda: api("GET", base, None, 200)["status"]
