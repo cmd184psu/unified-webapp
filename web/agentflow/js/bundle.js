@@ -5312,7 +5312,7 @@ function showTab(id, arg = "") {
 function initHamburger() {
   const trigger = document.getElementById("hamburger-trigger");
   if (!trigger) return;
-  const hamburger = new HamburgerMenu({
+  new HamburgerMenu({
     title: "AgentFlow",
     items: [
       { section: "Settings" },
@@ -5323,16 +5323,16 @@ function initHamburger() {
     ],
     themePicker: true,
     themes,
-    side: "right"
+    side: "right",
+    // Adopt the button index.html already ships; appending a second trigger into it nests a button in a button.
+    mountTrigger: trigger
   });
-  trigger.appendChild(hamburger.trigger);
 }
 function initSaveMark() {
   const right = document.querySelector("#nav .nav-right");
-  const trigger = document.getElementById("hamburger-trigger");
   if (!right) return;
   const holder = h("span", { class: "autosave-holder" });
-  right.insertBefore(holder, trigger);
+  right.prepend(holder);
   mountSaveMark(holder);
 }
 initHamburger();

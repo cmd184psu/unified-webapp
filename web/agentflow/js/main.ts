@@ -67,7 +67,7 @@ function showTab(id: TabId, arg = ''): void {
 function initHamburger(): void {
   const trigger = document.getElementById('hamburger-trigger');
   if (!trigger) return;
-  const hamburger = new HamburgerMenu({
+  new HamburgerMenu({
     title: 'AgentFlow',
     items: [
       { section: 'Settings' },
@@ -77,17 +77,17 @@ function initHamburger(): void {
     themePicker: true,
     themes,
     side: 'right',
+    // Adopt the button index.html already ships; appending a second trigger into it nests a button in a button.
+    mountTrigger: trigger,
   });
-  trigger.appendChild(hamburger.trigger);
 }
 
 function initSaveMark(): void {
   const right = document.querySelector('#nav .nav-right');
-  const trigger = document.getElementById('hamburger-trigger');
   if (!right) return;
   // First in the corner, before the menu: always there, always the same place.
   const holder = h('span', { class: 'autosave-holder' });
-  right.insertBefore(holder, trigger);
+  right.prepend(holder);
   mountSaveMark(holder);
 }
 

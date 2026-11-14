@@ -79,6 +79,21 @@ function findHamburgerSideInEntries(moduleName) {
   return constructed ? "left" : null;
 }
 
+// A module that ships its own #hamburger-trigger must hand it to the menu with
+// `mountTrigger`. Appending the menu's own trigger into it nests a button in a
+// button: the inner one is wider than the outer, so the top bar overflows the
+// page and a scrollbar appears on an empty screen (agentflow, 2026-11-14).
+function findNestedTrigger(moduleName) {
+  const d = descriptors.find((x) => x.name === moduleName);
+  if (!d) return false;
+  for (const entry of d.entry) {
+    if (!fs.existsSync(entry)) continue;
+    const src = fs.readFileSync(entry, "utf8");
+    if (/getElementById\(\s*['"]hamburger-trigger['"]\s*\)/.test(src) && !/mountTrigger\s*:/.test(src)) return true;
+  }
+  return false;
+}
+
 function checkModule(moduleName) {
   const expectedSide = MODULE_SIDES.get(moduleName);
 
@@ -107,6 +122,9 @@ function main() {
     if (NOT_APPLICABLE.has(moduleName)) {
       checked.push(`${moduleName}: not applicable (${NOT_APPLICABLE.get(moduleName)})`);
       continue;
+    }
+    if (findNestedTrigger(moduleName)) {
+      failures.push(`${moduleName}: its entry looks up #hamburger-trigger but never passes it to HamburgerMenu as mountTrigger, so the menu's own trigger lands inside it (a button in a button, wider than its parent)`);
     }
     const result = checkModule(moduleName);
     checked.push(`${moduleName}: expected ${expectedSide}, actual ${result.actual || "unknown"} (${result.source})`);
