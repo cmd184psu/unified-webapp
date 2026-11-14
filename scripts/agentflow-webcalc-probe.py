@@ -9,8 +9,9 @@ about the wrong program.
 
   scripts/agentflow-webcalc-probe.py --repo ~/af-webcalc-local --branch agentflow/effort-4 [--json out.json]
 
-Checks come in three groups. "build" (go build, go test, listens on the port) and "api" (the
-JSON contract) decide success; "page" (the served HTML, which a script cannot run) is reported
+Checks come in four groups. "build" (go build, go test, listens on the port) and "api" (the
+JSON contract) decide success; "ui" (the page driven in headless Chromium by agentflow-webcalc-page.mjs: typing, clicking, where its requests
+go) also decides: a page a person cannot use is a failed build. "page" (the served HTML read as text) is reported
 on its own line and never decides it.
 
 Exit status: 0 when every check passes, 1 when a build or api check fails, 2 when only page
@@ -254,6 +255,16 @@ try:
     check("page does arithmetic through the API", "/api/" in page, "", "page")
     check("page handles keyboard input", any(k in page for k in ("keydown", "keypress", "keyup")), "", "page")
     check("page shows the history list", "history" in page, "", "page")
+    # Behaviour, as a person would use it: a headless Chromium types on the real keyboard, clicks, and reads the display.
+    # The HTML checks above only look for words; these catch a page that never reaches the API, calls another host,
+    # cannot take typed input, or has no way to enter ^ and parentheses.
+    page_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agentflow-webcalc-page.mjs")
+    try:
+        out = subprocess.run(["node", page_script, f"http://127.0.0.1:{PORT}/"], capture_output=True, text=True, timeout=120)
+        for c in json.loads(out.stdout.strip().splitlines()[-1])["checks"]:
+            check(c["name"], c["ok"], c.get("detail", ""), "ui")
+    except Exception as exc:  # no node, no browser, or unreadable output: say so, as a failed page check
+        check("page behaviour in a browser", False, f"could not run {page_script}: {exc}", "ui")
 except SystemExit:
     pass
 finally:
@@ -276,7 +287,8 @@ page_failed = [n for n, g, ok, _ in results if g == "page" and not ok]
 api = totals.get("api", {"passed": 0, "total": 0})
 build = totals.get("build", {"passed": 0, "total": 0})
 page = totals.get("page", {"passed": 0, "total": 0})
-print(f"\nbuild {build['passed']}/{build['total']}   API {api['passed']}/{api['total']}   page {page['passed']}/{page['total']}")
+ui = totals.get("ui", {"passed": 0, "total": 0})
+print(f"\nbuild {build['passed']}/{build['total']}   API {api['passed']}/{api['total']}   UI (browser) {ui['passed']}/{ui['total']}   page text {page['passed']}/{page['total']}")
 print("RESULT: " + ("SUCCESS" if not decisive_failed else "FAILED") + (" (page checks failed)" if not decisive_failed and page_failed else ""))
 if args.json:
     with open(os.path.expanduser(args.json), "w") as f:

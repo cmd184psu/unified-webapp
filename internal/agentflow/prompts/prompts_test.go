@@ -65,3 +65,20 @@ func TestPromptsNeverInstructGitMutation(t *testing.T) {
 		}
 	}
 }
+
+// A person-facing interface must reach what the programmatic one offers (UI/API parity):
+// the drafter writes it into the FRD or flags the gap, and the acceptance check looks for it.
+func TestParityRulesArePresent(t *testing.T) {
+	for role, phrase := range map[string]string{
+		"drafter":    "reach every capability",
+		"acceptance": "enter or trigger",
+	} {
+		s, err := Load(role)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(s, phrase) {
+			t.Fatalf("%s prompt lacks the UI/API parity rule (%q)", role, phrase)
+		}
+	}
+}

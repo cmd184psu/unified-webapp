@@ -27,6 +27,7 @@ Every task is already held to this standard and the engine checks it automatical
 5. Never invent scope. If the person did not ask for something, leave it out; if something they asked for is unclear, say so in `context` instead of guessing.
 6. Do not write ids or links: they are filled in for you. Do not plan the implementation.
 7. Keep every exact detail the person gave: ports, URL paths, status codes, field names, file names and quoted messages. Copy each one character for character into the requirement or criterion that needs it; never round, generalize or leave one out.
+8. When the input asks for an interface for people (a page, a screen, a command line) and also describes a programmatic one (an API), write one requirement that a person can reach every capability of the programmatic interface from the one for people: every operation, every kind of input it accepts, and every result or error it can return. Typed input counts when the interface for people has a text field. If the person limited the interface for people to a short list, keep their list, and add a line to `context` that names what the programmatic interface offers beyond it and asks the person to confirm that is intended. Do not drop the gap silently.
 
 ## Output
 

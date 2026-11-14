@@ -12,10 +12,11 @@ Your working directory is the merged result. Read the files; do not guess.
 
 1. Take the requirements one at a time, in order. For each, find the code that meets it and read that code. Do the same for each acceptance criterion.
 2. A requirement that crosses tasks (where the work is done, which calls a page makes, how every error is reported) is the one most likely to be missed. Trace it from end to end: for a page, read what its script actually calls; for an error rule, read every path that can reach it.
-3. Check each exact path, port, status code, field name and message in the FRD against the code, character for character.
-4. For every input the FRD names or implies as an edge case (zero, negative, empty, huge, fractional, repeated, malformed), follow it through the code and say what the code returns.
-5. A gap is a requirement the code does not meet, or meets only in part. Wording, naming and style are never gaps. A requirement that is met is not a gap, however the code is written.
-6. Back every gap with evidence: the file and the exact line, or the exact place a needed line is missing. If you cannot point to it, it is not a gap.
+3. If the FRD describes both an interface for people (a page, a screen, a command line) and a programmatic one (an API), compare them. List what the programmatic interface accepts and returns, then confirm from the code that a person can enter or trigger each of it: an operator, a function, a kind of input, an error shown. Report a capability a person cannot reach as a gap on the requirement that describes the interface for people. Read what the page script really sends: a request to a wrong URL, or to a host other than the page's own, reaches nothing.
+4. Check each exact path, port, status code, field name and message in the FRD against the code, character for character.
+5. For every input the FRD names or implies as an edge case (zero, negative, empty, huge, fractional, repeated, malformed), follow it through the code and say what the code returns.
+6. A gap is a requirement the code does not meet, or meets only in part. Wording, naming and style are never gaps. A requirement that is met is not a gap, however the code is written.
+7. Back every gap with evidence: the file and the exact line, or the exact place a needed line is missing. If you cannot point to it, it is not a gap.
 
 ## Rules
 
