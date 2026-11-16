@@ -43,6 +43,7 @@ const API_TYPES: Array<[string, string]> = [
   ['anthropic', 'anthropic'],
   ['opencode', 'opencode built-in'],
   ['grok', 'Grok CLI (your Grok plan)'],
+  ['codex', 'Codex CLI (your ChatGPT plan)'],
 ];
 
 /** How often a running model check is looked at again. */
@@ -218,7 +219,7 @@ export class BackendsView {
       'Sent to the server as its bearer credential, for a hosted service or a local one that asks for a key. Stored write-only; leave blank to keep the stored key'));
     const hostField = errors.add('host', fieldRow('Host', host, 'An http or https URL'));
     // opencode's own provider has no host and no key: its free models are reached through opencode itself.
-    const builtin = (): boolean => apiType.value === 'opencode' || apiType.value === 'grok';
+    const builtin = (): boolean => apiType.value === 'opencode' || apiType.value === 'grok' || apiType.value === 'codex';
     const syncKey = (): void => {
       if (!builtin()) keyField.el.removeAttribute('hidden');
       else keyField.el.setAttribute('hidden', '');
@@ -408,7 +409,7 @@ export class BackendsView {
           b.paid ? badge('paid') : null,
           b.hosted ? badge('hosted', 'muted') : null,
           b.has_key ? badge('key set', 'ok') : null,
-          b.hosted && b.api_type !== 'opencode' && b.api_type !== 'grok' && isPrivateHost(b.host) ? h('span', { class: 'badge badge-warn', text: '\u26A0 hosted?', attrs: { title: 'Flagged hosted, but the host is a private or local address: it may be mis-flagged. Edit the backend and untick Hosted if it runs on your own machine or network.', 'data-role': 'hosted-warning' } }) : null,
+          b.hosted && b.api_type !== 'opencode' && b.api_type !== 'grok' && b.api_type !== 'codex' && isPrivateHost(b.host) ? h('span', { class: 'badge badge-warn', text: '\u26A0 hosted?', attrs: { title: 'Flagged hosted, but the host is a private or local address: it may be mis-flagged. Edit the backend and untick Hosted if it runs on your own machine or network.', 'data-role': 'hosted-warning' } }) : null,
           b.retired ? badge('disabled', 'warn') : null,
           b.suspended_since ? badge('suspended: not answering', 'warn') : b.down_until ? badge('unreachable', 'warn') : null),
         h('div', { class: 'profile-actions' },
@@ -423,7 +424,7 @@ export class BackendsView {
             : button('Disable', () => { this.retiring.add(b.name); this.render(); }, { field: 'retire', icon: 'pause', word: true }),
           button('Delete', () => void this.remove(b), { field: 'delete', icon: 'trash', unavailable: this.whyNotDelete(b) || undefined }))),
       h('div', { class: 'profile-fields' },
-        b.api_type === 'opencode' || b.api_type === 'grok' ? null : h('div', {}, h('label', { text: 'Host' }), h('span', { text: b.host })),
+        b.api_type === 'opencode' || b.api_type === 'grok' || b.api_type === 'codex' ? null : h('div', {}, h('label', { text: 'Host' }), h('span', { text: b.host })),
         h('div', {}, h('label', { text: 'API type' }), h('span', { text: b.api_type })),
         h('div', {}, h('label', { text: 'Slots' }), h('span', { text: String(b.slots) })),
         b.retired ? null : h('div', {}, h('label', { text: 'Pace' }), this.paceSelect(b)),

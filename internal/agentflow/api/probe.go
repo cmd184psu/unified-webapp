@@ -35,7 +35,7 @@ func (a *API) probeBackend(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &body, false) {
 		return
 	}
-	if body.APIType == "opencode" || body.APIType == "grok" {
+	if body.APIType == "opencode" || body.APIType == "grok" || body.APIType == "codex" {
 		a.probeBuiltin(w, r, body.APIType)
 		return
 	}

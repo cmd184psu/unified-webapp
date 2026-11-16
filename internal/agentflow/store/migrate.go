@@ -26,6 +26,7 @@ type migration struct {
 //	10 P3  backend_models.context_tokens, projects.definition_of_done_json, frd_parts
 //	11     backends.api_type may be 'opencode' (opencode's own built-in provider)
 //	26     backends.api_type may be 'grok' (the Grok CLI)
+//	27     backends.api_type may be 'codex' (the Codex CLI)
 //
 // Later stories append the next integer; they never edit an earlier entry.
 var migrations = []migration{
@@ -55,7 +56,32 @@ var migrations = []migration{
 	{24, migration24SQL},
 	{25, migration25SQL},
 	{26, migration26SQL},
+	{27, migration27SQL},
 }
+
+// migration27SQL lets a backend be the Codex CLI (api type 'codex'): migration
+// 26's rebuild with the wider api_type CHECK.
+const migration27SQL = `
+CREATE TABLE backends_new (
+  name TEXT PRIMARY KEY,
+  host TEXT NOT NULL,
+  api_type TEXT NOT NULL CHECK (api_type IN ('ollama', 'openai_compatible', 'anthropic', 'opencode', 'grok', 'codex')),
+  hosted INTEGER NOT NULL DEFAULT 0 CHECK (hosted IN (0, 1)),
+  paid INTEGER NOT NULL DEFAULT 0 CHECK (paid IN (0, 1)),
+  slots INTEGER NOT NULL CHECK (slots >= 1),
+  retired INTEGER NOT NULL DEFAULT 0 CHECK (retired IN (0, 1)),
+  created INTEGER NOT NULL,
+  updated INTEGER NOT NULL,
+  api_key TEXT NOT NULL DEFAULT '',
+  memory_budget_mb INTEGER NOT NULL DEFAULT 0 CHECK (memory_budget_mb >= 0),
+  window_cap_tokens INTEGER NOT NULL DEFAULT 0 CHECK (window_cap_tokens >= 0),
+  duty_percent INTEGER NOT NULL DEFAULT 0 CHECK (duty_percent = 0 OR duty_percent BETWEEN 10 AND 99)
+);
+INSERT INTO backends_new (name, host, api_type, hosted, paid, slots, retired, created, updated, api_key, memory_budget_mb, window_cap_tokens, duty_percent)
+  SELECT name, host, api_type, hosted, paid, slots, retired, created, updated, api_key, memory_budget_mb, window_cap_tokens, duty_percent FROM backends;
+DROP TABLE backends;
+ALTER TABLE backends_new RENAME TO backends;
+`
 
 // migration26SQL lets a backend be the Grok CLI (api type 'grok': no host, no
 // key). backends is rebuilt with the wider api_type CHECK and every column it
@@ -300,7 +326,7 @@ ALTER TABLE efforts ADD COLUMN budget_seconds INTEGER NOT NULL DEFAULT 0 CHECK (
 // table with foreign keys on would fire the referencing rows' ON DELETE
 // actions, so these run with foreign keys off (the documented procedure) and
 // are checked with foreign_key_check before they commit.
-var rebuildsTables = map[int]bool{6: true, 11: true, 26: true}
+var rebuildsTables = map[int]bool{6: true, 11: true, 26: true, 27: true}
 
 // migration6SQL (F2) lets a stage have the cleanup role (AT11) and adds the
 // per-project cleanup switch. stages is rebuilt with the same columns, so rows

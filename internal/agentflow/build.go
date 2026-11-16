@@ -21,6 +21,7 @@ import (
 	"cmd184psu/unified-webapp/internal/agentflow/engine"
 	"cmd184psu/unified-webapp/internal/agentflow/gitsvc"
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
+	"cmd184psu/unified-webapp/internal/agentflow/runner/codex"
 	"cmd184psu/unified-webapp/internal/agentflow/runner/grok"
 	"cmd184psu/unified-webapp/internal/agentflow/runner/opencode"
 	"cmd184psu/unified-webapp/internal/agentflow/sandbox"
@@ -158,8 +159,8 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 // freezeConfig renders the stage's opencode configuration (BK5, OC2). The
 // engine cannot import the adapter, so the composition root hands it this.
 func freezeConfig(b engine.FrozenBackend, stageDir string) (string, error) {
-	if b.APIType == grok.APIType {
-		return "", nil // the Grok CLI keeps its own configuration
+	if b.APIType == grok.APIType || b.APIType == codex.APIType {
+		return "", nil // these CLIs keep their own configuration
 	}
 	return opencode.GenerateConfig([]opencode.BackendSpec{{Backend: b.Backend, Models: b.Models}}, stageDir, b.Plugins...)
 }
@@ -175,12 +176,12 @@ func newOpencode(git *gitsvc.Service, st *store.Store) *opencode.Adapter {
 	}
 }
 
-// newRunner routes backends of api type "grok" to the Grok CLI runner and
+// newRunner routes backends of api type "grok" and "codex" to their CLI runners and
 // every other backend to opencode.
 func newRunner(git *gitsvc.Service, st *store.Store) runner.Runner {
 	return &runner.Mux{
 		Default: newOpencode(git, st),
-		ByType:  map[string]runner.Runner{grok.APIType: &grok.Adapter{}},
+		ByType:  map[string]runner.Runner{grok.APIType: &grok.Adapter{}, codex.APIType: &codex.Adapter{}},
 	}
 }
 

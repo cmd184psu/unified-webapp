@@ -192,6 +192,10 @@ deny = ["~/.ssh", "~/.local/share/opencode/auth.json", "~/.unified_common.pin", 
 
 Grok's own `auth.json` has to stay readable inside its sandbox, so a model that went looking could read it; that is the same exposure as using `grok` yourself. Every Grok call carries a large built-in prompt (about 50,000 input tokens for one word), so it uses plan usage quickly: put it on roles where quality matters (reviewers, hard tasks) before cheap per-task work.
 
+### The Codex CLI backend
+
+A backend of api type `codex` runs stages through `codex exec` on your own ChatGPT login (`codex login`), the same way as the Grok CLI backend: no host, no key, no credential copied. The probe button lists the models your login offers. Stages run with `--json`, the prompt on stdin, and Codex's own sandbox: `workspace-write` for roles that write (worker, cleanup), `read-only` for the rest, never asking for approval. Codex cannot hide its own `auth.json` from the model's tools (it reads it inside the sandbox), so the exposure is the same as using `codex` yourself. Codex also loads your global instructions into every call, which adds to the usage each stage costs.
+
 ## Projects
 
 A project links a name (slug) to a repository on the server's disk.

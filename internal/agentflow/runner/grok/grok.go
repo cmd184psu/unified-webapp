@@ -198,12 +198,12 @@ func (a *Adapter) Run(ctx context.Context, req runner.Request) (runner.Result, e
 	case parseErr != nil:
 		return fail(runner.ErrCrash, "read events: "+parseErr.Error(), parseErr)
 	case out.errMsg != "":
-		return fail(classifyMessage(out.errMsg), out.errMsg, waitErr)
+		return fail(runner.ClassifyMessage(out.errMsg), out.errMsg, waitErr)
 	case waitErr != nil:
 		msg := waitErr.Error()
 		if s := strings.TrimSpace(tail.String()); s != "" {
 			msg += ": " + s
-			if c := classifyMessage(s); c != runner.ErrCrash {
+			if c := runner.ClassifyMessage(s); c != runner.ErrCrash {
 				return fail(c, msg, waitErr)
 			}
 		}
@@ -270,24 +270,6 @@ func parseModels(out string) []string {
 		}
 	}
 	return models
-}
-
-var (
-	rateRe  = regexp.MustCompile(`(?i)rate.?limit|usage limit|quota|too many requests|\b429\b|limit reached|out of (credits|usage)|try again (later|in)`)
-	netRe   = regexp.MustCompile(`(?i)connection (refused|reset)|dns|no such host|timed? ?out|network|unreachable|ECONN|\b50[234]\b`)
-	loginRe = regexp.MustCompile(`(?i)not signed in|log ?in|unauthori[sz]ed|\b401\b`)
-)
-
-func classifyMessage(msg string) runner.ErrClass {
-	switch {
-	case loginRe.MatchString(msg):
-		return runner.ErrCrash
-	case rateRe.MatchString(msg):
-		return runner.ErrRateLimit
-	case netRe.MatchString(msg):
-		return runner.ErrUnreachable
-	}
-	return runner.ErrCrash
 }
 
 type streamOut struct {

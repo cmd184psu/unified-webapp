@@ -80,10 +80,10 @@ func validateBackend(b Backend) error {
 		return err
 	}
 	if !apiTypes[b.APIType] {
-		return Invalid("api_type", "must be ollama, openai_compatible, anthropic, opencode or grok")
+		return Invalid("api_type", "must be ollama, openai_compatible, anthropic, opencode, grok or codex")
 	}
-	// opencode's own provider and the Grok CLI have no host of their own.
-	if b.APIType != "opencode" && b.APIType != "grok" {
+	// opencode's own provider and the Grok and Codex CLIs have no host of their own.
+	if b.APIType != "opencode" && b.APIType != "grok" && b.APIType != "codex" {
 		if err := validateHostURL("host", b.Host); err != nil {
 			return err
 		}
