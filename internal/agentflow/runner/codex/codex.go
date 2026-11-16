@@ -34,6 +34,15 @@ type Adapter struct {
 	PathFunc func() string
 	// ParentEnv is where PATH, HOME and LANG are taken from; nil means os.Environ.
 	ParentEnv []string
+	// Effort is the reasoning effort passed to every call; empty means "medium".
+	Effort string
+}
+
+func (a *Adapter) effort() string {
+	if a.Effort == "" {
+		return "medium"
+	}
+	return a.Effort
 }
 
 var _ runner.Runner = (*Adapter)(nil)
@@ -102,6 +111,7 @@ func (a *Adapter) Argv(path string, req runner.Request) []string {
 		"-m", req.Model,
 		"-c", `sandbox_mode="`+sandbox+`"`,
 		"-c", `approval_policy="never"`,
+		"-c", `model_reasoning_effort="`+a.effort()+`"`,
 	)
 	if req.SessionID != "" {
 		argv = append(argv, req.SessionID)
