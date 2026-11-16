@@ -33,7 +33,7 @@ Emit only these fields. Any other field makes the queue invalid.
 ## Rules
 
 1. Tasks are atomic and small enough for one worker run under five minutes.
-2. Use sequential dependencies within a phase. The first task of a phase depends on the last task of each prerequisite phase.
+2. Add a dependency only where one is needed: a task depends on another only when it uses a file or a name the other creates, or lists a file the other also lists. Tasks with no such link carry an empty `depends_on` so they can run side by side; do not chain tasks just because they come one after another in the plan. A task that starts a phase depends on the tasks of the prerequisite phases whose output it uses, not on all of them.
 3. Each `prompt` is self-contained and brief: two to five short sentences naming exact file paths and the desired outcome. It may run longer when it must carry exact details: copy every port, URL path, HTTP method, status code, field name and quoted message the task needs character for character into the `prompt`, never describe them in words (write `POST /api/add`, not "the add endpoint").
 4. A `prompt` must not embed source code, HTML, JSON, XML, or multi-line file contents. Describe desired content in words.
 5. Do not use unescaped double quotes inside `prompt`.

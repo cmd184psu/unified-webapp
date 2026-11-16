@@ -42,7 +42,54 @@ func compiledTasks(out schema.CompileOut) ([]model.TaskDef, error) {
 	if err := model.ValidateTasks(defs); err != nil {
 		return nil, err
 	}
+	if err := unorderedSharedFiles(defs); err != nil {
+		return nil, err
+	}
 	return defs, nil
+}
+
+// unorderedSharedFiles rejects two tasks that list the same file with no
+// dependency path between them. Tasks that may run side by side must not touch
+// the same file: whichever finished last would overwrite the other, and a
+// merge would conflict. Tasks that do share a file are ordered by depends_on.
+func unorderedSharedFiles(defs []model.TaskDef) error {
+	deps := map[string][]string{}
+	for _, d := range defs {
+		deps[d.Key] = d.DependsOn
+	}
+	reach := map[string]map[string]bool{} // task -> every task it depends on, directly or not
+	var walk func(k string) map[string]bool
+	walk = func(k string) map[string]bool {
+		if r, ok := reach[k]; ok {
+			return r
+		}
+		r := map[string]bool{}
+		reach[k] = r
+		for _, d := range deps[k] {
+			r[d] = true
+			for x := range walk(d) {
+				r[x] = true
+			}
+		}
+		return r
+	}
+	owners := map[string][]string{} // file -> the tasks that list it, in queue order
+	for _, d := range defs {
+		for _, f := range d.FilesTouched {
+			owners[f] = append(owners[f], d.Key)
+		}
+	}
+	for _, d := range defs {
+		for _, f := range d.FilesTouched {
+			for _, other := range owners[f] {
+				if other == d.Key || walk(d.Key)[other] || walk(other)[d.Key] {
+					continue
+				}
+				return fmt.Errorf("tasks %s and %s both list %q but neither depends on the other: order them with depends_on, or give each its own file", other, d.Key, f)
+			}
+		}
+	}
+	return nil
 }
 
 // Compile starts compilation of the effort's approved plan: the effort moves

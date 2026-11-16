@@ -176,3 +176,22 @@ func TestC11_CompiledTasksAreValidatedLikeAnyQueue(t *testing.T) {
 		t.Fatalf("clean tasks: %v %+v", err, defs)
 	}
 }
+
+// Tasks that list the same file must be ordered by depends_on, directly or through others;
+// tasks on different files need no order.
+func TestUnorderedSharedFiles(t *testing.T) {
+	def := func(key string, deps []string, files ...string) model.TaskDef {
+		return model.TaskDef{Key: key, DependsOn: deps, FilesTouched: files}
+	}
+	if err := unorderedSharedFiles([]model.TaskDef{def("T1", nil, "a.go"), def("T2", nil, "b.go")}); err != nil {
+		t.Fatalf("disjoint files = %v, want ok", err)
+	}
+	err := unorderedSharedFiles([]model.TaskDef{def("T1", nil, "api.go"), def("T2", nil, "x.go"), def("T3", nil, "api.go")})
+	if err == nil || !strings.Contains(err.Error(), "T1") || !strings.Contains(err.Error(), "T3") || !strings.Contains(err.Error(), "api.go") {
+		t.Fatalf("unordered shared file = %v, want an error naming T1, T3 and api.go", err)
+	}
+	// Ordered through a task in between.
+	if err := unorderedSharedFiles([]model.TaskDef{def("T1", nil, "api.go"), def("T2", []string{"T1"}, "x.go"), def("T3", []string{"T2"}, "api.go")}); err != nil {
+		t.Fatalf("ordered through T2 = %v, want ok", err)
+	}
+}

@@ -82,3 +82,14 @@ func TestParityRulesArePresent(t *testing.T) {
 		}
 	}
 }
+
+// The compiler must not chain every task: independent tasks run side by side.
+func TestCompilerDoesNotChainEverything(t *testing.T) {
+	s, err := Load("compiler")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s, "side by side") || strings.Contains(s, "Use sequential dependencies") {
+		t.Fatal("the compiler prompt must ask for dependencies only where needed, not a chain")
+	}
+}
