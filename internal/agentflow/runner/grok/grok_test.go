@@ -146,3 +146,19 @@ func TestChildEnvCarriesNoAgentflowKeys(t *testing.T) {
 		t.Fatalf("env = %s", env)
 	}
 }
+
+func TestSymlinkedGrokHomeIsResolved(t *testing.T) {
+	home := t.TempDir()
+	real := filepath.Join(t.TempDir(), "real")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, filepath.Join(home, ".grok")); err != nil {
+		t.Fatal(err)
+	}
+	want, _ := filepath.EvalSymlinks(real)
+	env := strings.Join((&Adapter{ParentEnv: []string{"HOME=" + home}}).env(runner.Request{}), " ")
+	if !strings.Contains(env, "GROK_HOME="+want) {
+		t.Fatalf("env = %s, want GROK_HOME=%s", env, want)
+	}
+}

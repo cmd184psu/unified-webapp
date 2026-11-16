@@ -101,6 +101,16 @@ func (a *Adapter) env(req runner.Request) []string {
 			}
 		}
 	}
+	// Grok's sandbox refuses a symlinked grok home (version managers make ~/.grok one),
+	// so point it at the real directory.
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "HOME=") {
+			dir := filepath.Join(strings.TrimPrefix(kv, "HOME="), ".grok")
+			if real, err := filepath.EvalSymlinks(dir); err == nil && real != dir {
+				env = append(env, "GROK_HOME="+real)
+			}
+		}
+	}
 	return append(env, req.Env...)
 }
 
