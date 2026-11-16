@@ -280,8 +280,10 @@ func (e *Engine) resubmit(ctx context.Context, c *chain, last model.Stage) error
 		if avoid != "" {
 			v.down[avoid] = true // like a backend in cooldown: try the others first
 		}
-		if skipModel && (last.Outcome == OutcomeInfraUnparseable || last.Outcome == OutcomeInfraContext) && last.Model != "" {
-			v.avoid = map[string]bool{last.Model: true} // an unreadable reply: another model, not another try of the same one
+		unusable := last.Outcome == OutcomeInfraUnparseable || last.Outcome == OutcomeInfraContext ||
+			(last.Outcome == OutcomeInfraTimeout && last.Role == "reviewer") // a reviewer that stalled
+		if skipModel && unusable && last.Model != "" {
+			v.avoid = map[string]bool{last.Model: true} // an unreadable or stalled reply: another model, not another try of the same one
 		}
 		sticky, err := e.stickyReviewer(ctx, c.task)
 		if err != nil {

@@ -436,6 +436,35 @@ func TestH11_RetryAfterGibberishUsesAnotherModel(t *testing.T) {
 	}
 }
 
+// A reviewer that stalls is not asked again: the retry goes to another reviewer
+// model, even on the same backend and even though the first one is sticky.
+func TestStalledReviewerGoesToAnotherModel(t *testing.T) {
+	c := newChainRun(t, nil, chainDefs()[:1])
+	c.addBackend("gpu2", 1, false, false, "m3", "m4")
+	c.candidates("global", "", "worker", "gpu/m1")
+	c.candidates("global", "", "reviewer", "gpu2/m3", "gpu2/m4")
+	c.fake.Script("worker", runner.Step{Reply: workerOK, Edit: writeWork})
+	c.fake.Script("reviewer",
+		runner.Step{ErrClass: runner.ErrTimeout, Err: os.ErrDeadlineExceeded},
+		runner.Step{Reply: reviewPass})
+	c.run()
+	waitFor(t, "task passed", func() bool { return c.taskStatus() == model.StatusPassed })
+
+	ss, err := c.st.ListAttemptStages(context.Background(), c.attempts(0)[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var revs []string
+	for _, st := range ss {
+		if st.Role == "reviewer" {
+			revs = append(revs, st.Model+":"+st.Outcome)
+		}
+	}
+	if len(revs) != 2 || revs[0] != "m3:"+OutcomeInfraTimeout || revs[1] == "m3:"+OutcomePass {
+		t.Fatalf("reviewer stages = %v, want the retry on a model other than m3", revs)
+	}
+}
+
 // A worker cut off by a full context window is not at fault: the same attempt
 // goes to another model, no infra retry is counted and no strike is recorded.
 func TestContextFullGoesToAnotherModelWithoutAStrike(t *testing.T) {
