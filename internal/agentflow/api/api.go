@@ -27,6 +27,9 @@ type Deps struct {
 	Version func(ctx context.Context) (string, error)
 	// BuiltinModels lists opencode's own models, for backends of api type "opencode".
 	BuiltinModels func(ctx context.Context) ([]string, error)
+	// BuiltinModelsFor lists the own models of the runner serving an api type
+	// ("grok" asks the Grok CLI); when nil BuiltinModels answers for every type.
+	BuiltinModelsFor func(ctx context.Context, apiType string) ([]string, error)
 	// Terminate ends the process for a restart; nil sends SIGTERM to this process
 	// (the supervisor starts the service again). Tests set it.
 	Terminate func()

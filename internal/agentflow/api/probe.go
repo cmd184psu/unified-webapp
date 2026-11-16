@@ -35,8 +35,8 @@ func (a *API) probeBackend(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &body, false) {
 		return
 	}
-	if body.APIType == "opencode" {
-		a.probeBuiltin(w, r)
+	if body.APIType == "opencode" || body.APIType == "grok" {
+		a.probeBuiltin(w, r, body.APIType)
 		return
 	}
 	key := body.APIKey
@@ -213,15 +213,19 @@ func probeModels(ctx context.Context, c *http.Client, host, apiType, key string)
 	return names, nil
 }
 
-// probeBuiltin lists opencode's own models; there is no host to ask.
-func (a *API) probeBuiltin(w http.ResponseWriter, r *http.Request) {
-	if a.deps.BuiltinModels == nil {
-		writeJSON(w, http.StatusBadGateway, errorBody{Error: "opencode is not available", Field: "api_type"})
+// probeBuiltin lists the own models of opencode or the Grok CLI; there is no host to ask.
+func (a *API) probeBuiltin(w http.ResponseWriter, r *http.Request, apiType string) {
+	list := a.deps.BuiltinModels
+	if a.deps.BuiltinModelsFor != nil {
+		list = func(ctx context.Context) ([]string, error) { return a.deps.BuiltinModelsFor(ctx, apiType) }
+	}
+	if list == nil {
+		writeJSON(w, http.StatusBadGateway, errorBody{Error: apiType + " is not available", Field: "api_type"})
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	models, err := a.deps.BuiltinModels(ctx)
+	models, err := list(ctx)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, errorBody{Error: err.Error(), Field: "api_type"})
 		return

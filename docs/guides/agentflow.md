@@ -174,6 +174,24 @@ An unreadable reply from a worker (no JSON object, or JSON the schema rejects af
 
 ---
 
+### The Grok CLI backend
+
+A backend of api type `grok` runs stages through the `grok` command on your own Grok plan, so no key is stored anywhere in agentflow and no login is copied: Grok uses its own login (`grok login`). It has no host. Add the backend, press the probe button to list the models your login offers (`grok models`), then name them on the candidate lists. Mark it hosted and paid only if your plan counts that way; a paid model runs only where a candidate list names it.
+
+Each stage runs `grok --prompt-file ... --output-format streaming-json --sandbox <profile>` in the task worktree, with sub-agents and web search off. Grok's own sandbox confines it: roles that write (worker, cleanup) use the profile `agentflow` (write access to the worktree), every other role `agentflow-ro` (read-only). Both profiles must exist in `~/.grok/sandbox.toml`; agentflow does not write that file. Use:
+
+```toml
+[profiles.agentflow]
+extends = "workspace"
+deny = ["~/.ssh", "~/.local/share/opencode/auth.json", "~/.unified_common.pin", "**/.env"]
+
+[profiles.agentflow-ro]
+extends = "read-only"
+deny = ["~/.ssh", "~/.local/share/opencode/auth.json", "~/.unified_common.pin", "**/.env"]
+```
+
+Grok's own `auth.json` has to stay readable inside its sandbox, so a model that went looking could read it; that is the same exposure as using `grok` yourself. Every Grok call carries a large built-in prompt (about 50,000 input tokens for one word), so it uses plan usage quickly: put it on roles where quality matters (reviewers, hard tasks) before cheap per-task work.
+
 ## Projects
 
 A project links a name (slug) to a repository on the server's disk.

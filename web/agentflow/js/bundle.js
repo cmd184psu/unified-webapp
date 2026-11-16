@@ -81,6 +81,8 @@ var api = {
   extendWindows: (name, apply = true) => send("POST", `/api/backends/${enc(name)}/extend-windows`, { apply }),
   enableBackend: (name) => send("POST", `/api/backends/${enc(name)}/enable`),
   deleteBackend: (name) => send("DELETE", `/api/backends/${enc(name)}`),
+  rests: () => get("/api/rests", { quiet: true }),
+  wakeModel: (backend, model) => send("DELETE", `/api/rests?backend=${enc(backend)}&model=${enc(model)}`),
   checkModels: (name) => send("POST", `/api/backends/${enc(name)}/check`),
   checkStatus: (name) => get(`/api/backends/${enc(name)}/check`, { quiet: true }),
   checkReviewers: (name, body = {}) => send("POST", `/api/backends/${enc(name)}/evals`, body),
@@ -1629,6 +1631,7 @@ var LIMIT_FIELDS = [
   { key: "max_infra_retries", label: "Max infra retries", hint: "Whole number, 0 to 50" },
   { key: "plan_max_rounds", label: "Plan max rounds", hint: "ralplan rounds before the best plan is presented, 1 to 50" },
   { key: "acceptance_rounds", label: "Acceptance rounds", hint: "How many times a finished effort is checked against its FRD, with gaps turned into follow-up tasks; 0 turns the check off, 2 by default" },
+  { key: "review_panel", label: "Review panel", hint: "How many different reviewer models must each pass a task before it merges; 1 to 3, 1 by default" },
   { key: "stall_minutes", label: "Stall minutes", hint: "Minutes a stage may say nothing, or a running effort sit idle, before it counts as stalled; 1 to 100, 10 by default" },
   { key: "worker_timeout", label: "Worker timeout", hint: "A duration such as 30m or 1h" },
   { key: "review_timeout", label: "Review timeout", hint: "A duration such as 15m" },
@@ -1963,7 +1966,8 @@ var API_TYPES = [
   ["ollama", "ollama"],
   ["openai_compatible", "openai compatible"],
   ["anthropic", "anthropic"],
-  ["opencode", "opencode built-in"]
+  ["opencode", "opencode built-in"],
+  ["grok", "Grok CLI (your Grok plan)"]
 ];
 var checkPollMs = 3e3;
 var defaultBackendsDeps = () => ({
@@ -1974,6 +1978,8 @@ var defaultBackendsDeps = () => ({
   retireBackend: api.retireBackend,
   enableBackend: api.enableBackend,
   deleteBackend: api.deleteBackend,
+  rests: api.rests,
+  wakeModel: api.wakeModel,
   checkModels: api.checkModels,
   checkStatus: api.checkStatus,
   checkReviewers: api.checkReviewers,
@@ -2018,6 +2024,8 @@ var BackendsView = class {
     this.retiring = /* @__PURE__ */ new Set();
     /** The last model check of each backend (H27), refreshed while one runs. */
     this.checks = /* @__PURE__ */ new Map();
+    /** The models that are resting after a rate limit or a stall, keyed backend + NUL + model. */
+    this.rests = /* @__PURE__ */ new Map();
     /** The last seeded-defect reviewer check of each backend (H32), refreshed while one runs. */
     this.evals = /* @__PURE__ */ new Map();
     /** role -> rows being edited; present only while the role has unsaved edits. */
@@ -2064,6 +2072,10 @@ var BackendsView = class {
         this.deps.settings()
       ]);
       Object.assign(this, { backends, candidates, projects, globals, loaded: true });
+      try {
+        this.rests = new Map((await this.deps.rests()).map((r) => [r.backend + "\0" + r.model, r]));
+      } catch {
+      }
       await Promise.all(backends.map(async (b) => {
         try {
           this.checks.set(b.name, await this.deps.checkStatus(b.name));
@@ -2118,7 +2130,7 @@ var BackendsView = class {
       "Sent to the server as its bearer credential, for a hosted service or a local one that asks for a key. Stored write-only; leave blank to keep the stored key"
     ));
     const hostField = errors.add("host", fieldRow("Host", host, "An http or https URL"));
-    const builtin = () => apiType.value === "opencode";
+    const builtin = () => apiType.value === "opencode" || apiType.value === "grok";
     const syncKey = () => {
       if (!builtin()) keyField.el.removeAttribute("hidden");
       else keyField.el.setAttribute("hidden", "");
@@ -2319,6 +2331,7 @@ var BackendsView = class {
       m.context_tokens ? badge(`max ${formatTokens(m.context_tokens)}`, "muted") : null,
       m.tier ? badge(`tier ${m.tier}`, m.tier === 3 ? "warn" : "muted") : null,
       m.too_big ? badge("too big for host", "warn") : null,
+      ...this.restParts(b.name, m.model),
       m.tools === "no" ? badge("no tools", "warn") : null
     ));
     return h(
@@ -2334,7 +2347,7 @@ var BackendsView = class {
           b.paid ? badge("paid") : null,
           b.hosted ? badge("hosted", "muted") : null,
           b.has_key ? badge("key set", "ok") : null,
-          b.hosted && b.api_type !== "opencode" && isPrivateHost(b.host) ? h("span", { class: "badge badge-warn", text: "\u26A0 hosted?", attrs: { title: "Flagged hosted, but the host is a private or local address: it may be mis-flagged. Edit the backend and untick Hosted if it runs on your own machine or network.", "data-role": "hosted-warning" } }) : null,
+          b.hosted && b.api_type !== "opencode" && b.api_type !== "grok" && isPrivateHost(b.host) ? h("span", { class: "badge badge-warn", text: "\u26A0 hosted?", attrs: { title: "Flagged hosted, but the host is a private or local address: it may be mis-flagged. Edit the backend and untick Hosted if it runs on your own machine or network.", "data-role": "hosted-warning" } }) : null,
           b.retired ? badge("disabled", "warn") : null,
           b.suspended_since ? badge("suspended: not answering", "warn") : b.down_until ? badge("unreachable", "warn") : null
         ),
@@ -2358,7 +2371,7 @@ var BackendsView = class {
       h(
         "div",
         { class: "profile-fields" },
-        b.api_type === "opencode" ? null : h("div", {}, h("label", { text: "Host" }), h("span", { text: b.host })),
+        b.api_type === "opencode" || b.api_type === "grok" ? null : h("div", {}, h("label", { text: "Host" }), h("span", { text: b.host })),
         h("div", {}, h("label", { text: "API type" }), h("span", { text: b.api_type })),
         h("div", {}, h("label", { text: "Slots" }), h("span", { text: String(b.slots) })),
         b.retired ? null : h("div", {}, h("label", { text: "Pace" }), this.paceSelect(b)),
@@ -2472,6 +2485,25 @@ var BackendsView = class {
     if (!b.retired) return "Disable this backend first; only a disabled backend can be deleted.";
     const lists = usedBy(this.candidates, b.name);
     return lists.length > 0 ? `Still on these candidate lists: ${lists.join(", ")}. Remove it from them to delete it.` : "";
+  }
+  /** restParts shows a resting model with the time it comes back and a way to wake it now. */
+  restParts(backend, model) {
+    const r = this.rests.get(backend + "\0" + model);
+    if (!r || r.until <= Date.now()) return [];
+    const at = new Date(r.until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return [
+      badge(`resting until ${at} (${r.reason}${r.streak > 1 ? `, ${r.streak} in a row` : ""})`, "warn"),
+      button("Wake", () => void this.wake(backend, model), { field: "wake-model", word: true })
+    ];
+  }
+  async wake(backend, model) {
+    try {
+      await this.deps.wakeModel(backend, model);
+      this.deps.notify(`${model} is back in use`);
+    } catch {
+      return;
+    }
+    await this.load();
   }
   async remove(b) {
     const sure = await this.deps.confirm(

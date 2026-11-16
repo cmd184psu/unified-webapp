@@ -21,6 +21,7 @@ import (
 	"cmd184psu/unified-webapp/internal/agentflow/engine"
 	"cmd184psu/unified-webapp/internal/agentflow/gitsvc"
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
+	"cmd184psu/unified-webapp/internal/agentflow/runner/grok"
 	"cmd184psu/unified-webapp/internal/agentflow/runner/opencode"
 	"cmd184psu/unified-webapp/internal/agentflow/sandbox"
 	"cmd184psu/unified-webapp/internal/agentflow/store"
@@ -82,7 +83,7 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 		return nil, fmt.Errorf("agentflow: %w", err)
 	}
 	if rn == nil {
-		rn = newOpencode(git, st)
+		rn = newRunner(git, st)
 	}
 	// The engine exists before the API, so the event hooks reach it through a
 	// pointer set once the API is built (D3). A notice before then is dropped.
@@ -132,6 +133,7 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 		Git:               git,
 		Version:           rn.Version,
 		BuiltinModels:     builtinModels(rn),
+		BuiltinModelsFor:  builtinModelsFor(rn),
 		Terminate:         terminateHook,
 		SSEMaxSubscribers: cfg.SSEMaxSubscribers,
 	})
@@ -156,6 +158,9 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 // freezeConfig renders the stage's opencode configuration (BK5, OC2). The
 // engine cannot import the adapter, so the composition root hands it this.
 func freezeConfig(b engine.FrozenBackend, stageDir string) (string, error) {
+	if b.APIType == grok.APIType {
+		return "", nil // the Grok CLI keeps its own configuration
+	}
 	return opencode.GenerateConfig([]opencode.BackendSpec{{Backend: b.Backend, Models: b.Models}}, stageDir, b.Plugins...)
 }
 
@@ -167,6 +172,15 @@ func newOpencode(git *gitsvc.Service, st *store.Store) *opencode.Adapter {
 	return &opencode.Adapter{
 		PathFunc: func() string { return resolveOpencode(st) },
 		Command:  opencode.SandboxCommand(gitDirs(git, st)),
+	}
+}
+
+// newRunner routes backends of api type "grok" to the Grok CLI runner and
+// every other backend to opencode.
+func newRunner(git *gitsvc.Service, st *store.Store) runner.Runner {
+	return &runner.Mux{
+		Default: newOpencode(git, st),
+		ByType:  map[string]runner.Runner{grok.APIType: &grok.Adapter{}},
 	}
 }
 
@@ -276,6 +290,16 @@ func goModCache() string {
 		return ""
 	}
 	return dir
+}
+
+// builtinModelsFor lists a runner's own models per api type, when it can.
+func builtinModelsFor(rn runner.Runner) func(context.Context, string) ([]string, error) {
+	if m, ok := rn.(interface {
+		BuiltinModelsFor(context.Context, string) ([]string, error)
+	}); ok {
+		return m.BuiltinModelsFor
+	}
+	return nil
 }
 
 // builtinModels is the runner's list of opencode's own models, when it has one.
