@@ -46,19 +46,23 @@ func (a *Adapter) path() (string, error) {
 	if p == "" {
 		p = "codex"
 	}
+	// The service's PATH holds an older system codex; the user's own install is the one logged in
+	// and kept current, so it comes first.
+	if home, herr := os.UserHomeDir(); herr == nil && p == "codex" {
+		if alt := filepath.Join(home, ".local", "bin", "codex"); fileExists(alt) {
+			return alt, nil
+		}
+	}
 	resolved, err := exec.LookPath(p)
 	if err != nil {
-		// The service's PATH often lacks the user's tool dirs.
-		if home, herr := os.UserHomeDir(); herr == nil && p == "codex" {
-			for _, alt := range []string{filepath.Join(home, ".local", "bin", "codex"), "/usr/local/bin/codex"} {
-				if fi, serr := os.Stat(alt); serr == nil && !fi.IsDir() {
-					return alt, nil
-				}
-			}
-		}
 		return "", fmt.Errorf("codex: binary not found: %w", err)
 	}
 	return resolved, nil
+}
+
+func fileExists(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && !fi.IsDir()
 }
 
 func (a *Adapter) parentEnv() []string {
