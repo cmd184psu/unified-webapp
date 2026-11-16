@@ -289,6 +289,16 @@ func (e *Engine) resubmit(ctx context.Context, c *chain, last model.Stage) error
 		if err != nil {
 			return Pick{}, "", err
 		}
+		if last.Role == "reviewer" && skipModel {
+			for _, st := range c.stages { // a panel member that failed is replaced by a model that has not yet passed
+				if st.Role == "reviewer" && st.Outcome == OutcomePass && st.Model != "" {
+					if v.avoid == nil {
+						v.avoid = map[string]bool{}
+					}
+					v.avoid[st.Model] = true
+				}
+			}
+		}
 		if last.Role == "reviewer" {
 			pk, why := reviewerFor(v, c.proj, sticky, c.workerModel(), true)
 			return pk, why, nil

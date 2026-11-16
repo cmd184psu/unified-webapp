@@ -39,6 +39,9 @@ func (c *chain) hasStage(role string) bool {
 // afterReview takes the step after a passing review: straight to commit and
 // merge, or through the cleanup pass when the project enables it.
 func (e *Engine) afterReview(ctx context.Context, c *chain, last model.Stage) (bool, error) {
+	if more, err := e.askAnotherReviewer(ctx, c, last); more || err != nil {
+		return more, err
+	}
 	if !c.proj.CleanupEnabled || c.hasStage("cleanup") {
 		return e.commitAndMerge(ctx, c, last)
 	}
@@ -149,4 +152,44 @@ func cleanupDropsOn(c *chain, st model.Stage) bool {
 		return c.hasStage("cleanup") && !IsInfra(st.Outcome)
 	}
 	return false
+}
+
+// askAnotherReviewer widens the review to a panel: while fewer different reviewer
+// models than the review_panel setting have passed the work, another model is asked.
+// It reports true when it did, or when it is waiting for a reviewer's slot. A panel
+// is best effort: when no further reviewer model could ever serve, the reviews that
+// passed stand, so a thin pool of free models does not hold the task up forever.
+func (e *Engine) askAnotherReviewer(ctx context.Context, c *chain, last model.Stage) (bool, error) {
+	set, err := e.deps.Store.EffectiveSettings(ctx, c.proj.Slug)
+	if err != nil || set.ReviewPanel <= 1 {
+		return false, err
+	}
+	passed := map[string]bool{}
+	for _, st := range c.stages {
+		if st.Role == "reviewer" && st.Outcome == OutcomePass && st.Model != "" {
+			passed[st.Model] = true
+		}
+	}
+	if len(passed) >= set.ReviewPanel {
+		return false, nil
+	}
+	v, err := e.newView(ctx)
+	if err != nil {
+		return false, err
+	}
+	v.avoid = passed
+	if _, why := reviewerFor(v, c.proj, "", c.workerModel(), false); why != "" {
+		return false, nil // no other reviewer model could serve: the panel is as wide as the pool
+	}
+	pk, why := reviewerFor(v, c.proj, "", c.workerModel(), true)
+	if why != "" {
+		return true, e.setWaiting(ctx, c.task, why) // one could serve, but has no free slot yet
+	}
+	if err := e.submit(ctx, c, BackendLane(pk.Backend), "reviewer", pk.Backend, pk.Model, last.QueueHash); err != nil {
+		return false, err
+	}
+	if c.task.WaitingReason != "" {
+		return true, e.deps.Store.SetWaitingReason(ctx, c.task.ID, "")
+	}
+	return true, nil
 }

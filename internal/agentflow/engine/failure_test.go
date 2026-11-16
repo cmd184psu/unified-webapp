@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -576,5 +577,111 @@ func TestH30_AnIdleEffortIsListedAsStalled(t *testing.T) {
 	evs, err := c.eng.effortEvents(ctx, c.effort, eventStallDetected)
 	if err != nil || len(evs) != 1 {
 		t.Fatalf("stall events = %d (%v), want 1", len(evs), err)
+	}
+}
+
+// Two tasks with no dependency path between them are worked at the same time and
+// both reach the integration branch; the chain in a queue, not the engine, decides
+// how much runs side by side.
+func TestIndependentTasksRunTogether(t *testing.T) {
+	defs := []model.TaskDef{
+		{Key: "T1", Phase: "P", Title: "a", Prompt: "do", Acceptance: []string{"ok"}, FilesTouched: []string{"a.txt"}},
+		{Key: "T2", Phase: "P", Title: "b", Prompt: "do", Acceptance: []string{"ok"}, FilesTouched: []string{"b.txt"}},
+	}
+	c := newChainRun(t, nil, defs)
+	var active, peak atomic.Int32
+	for i := 0; i < 2; i++ {
+		c.fake.Script("worker", runner.Step{Reply: workerOK, Edit: func(r runner.Request) error {
+			n := active.Add(1)
+			for {
+				p := peak.Load()
+				if n <= p || peak.CompareAndSwap(p, n) {
+					break
+				}
+			}
+			time.Sleep(1500 * time.Millisecond)
+			active.Add(-1)
+			return writeWork(r)
+		}})
+		c.fake.Script("reviewer", runner.Step{Reply: reviewPass})
+	}
+	c.run()
+	waitFor(t, "both tasks passed", func() bool {
+		ins, err := c.st.TaskInputs(context.Background(), c.effort)
+		return err == nil && len(ins) == 2 && len(c.attempts(0)) == 1 && len(c.attempts(1)) == 1 &&
+			c.attempts(0)[0].Outcome == model.OutcomePassed && c.attempts(1)[0].Outcome == model.OutcomePassed
+	})
+	if peak.Load() != 2 {
+		t.Fatalf("at most %d worker(s) ran at once, want 2 independent tasks to overlap", peak.Load())
+	}
+}
+
+func (c *chainRun) reviewerStages() []string {
+	c.t.Helper()
+	ss, err := c.st.ListAttemptStages(context.Background(), c.attempts(0)[0].ID)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	var out []string
+	for _, st := range ss {
+		if st.Role == "reviewer" {
+			out = append(out, st.Model+":"+st.Outcome)
+		}
+	}
+	return out
+}
+
+// review_panel 2: two different reviewer models must each pass the work before it merges.
+func TestReviewPanelAsksTwoModels(t *testing.T) {
+	c := newChainRun(t, nil, chainDefs()[:1])
+	c.addBackend("gpu2", 1, false, false, "m3", "m4")
+	c.candidates("global", "", "worker", "gpu/m1")
+	c.candidates("global", "", "reviewer", "gpu/m2", "gpu2/m4")
+	if err := c.st.UpdateSettings(context.Background(), "t", map[string]string{"review_panel": "2"}); err != nil {
+		t.Fatal(err)
+	}
+	c.fake.Script("worker", runner.Step{Reply: workerOK, Edit: writeWork})
+	c.fake.Script("reviewer", runner.Step{Reply: reviewPass}, runner.Step{Reply: reviewPass})
+	c.run()
+	waitFor(t, "task passed", func() bool { return c.taskStatus() == model.StatusPassed })
+	if got := strings.Join(c.reviewerStages(), ","); got != "m2:pass,m4:pass" {
+		t.Fatalf("reviewer stages = %s, want m2 then m4, both passing", got)
+	}
+}
+
+// A panel is best effort: with one reviewer model in the pool, its pass stands.
+func TestReviewPanelSettlesForAThinPool(t *testing.T) {
+	c := newChainRun(t, nil, chainDefs()[:1])
+	if err := c.st.UpdateSettings(context.Background(), "t", map[string]string{"review_panel": "2"}); err != nil {
+		t.Fatal(err)
+	}
+	c.fake.Script("worker", runner.Step{Reply: workerOK, Edit: writeWork})
+	c.fake.Script("reviewer", runner.Step{Reply: reviewPass})
+	c.run()
+	waitFor(t, "task passed", func() bool { return c.taskStatus() == model.StatusPassed })
+	if got := strings.Join(c.reviewerStages(), ","); got != "m2:pass" {
+		t.Fatalf("reviewer stages = %s, want the single pass", got)
+	}
+}
+
+// One dissenting panel member stops the merge, as a single reviewer's repair does.
+func TestReviewPanelDissentSendsTheTaskBack(t *testing.T) {
+	c := newChainRun(t, nil, chainDefs()[:1])
+	c.addBackend("gpu2", 1, false, false, "m3", "m4")
+	c.candidates("global", "", "worker", "gpu/m1")
+	c.candidates("global", "", "reviewer", "gpu/m2", "gpu2/m4")
+	if err := c.st.UpdateSettings(context.Background(), "t", map[string]string{"review_panel": "2"}); err != nil {
+		t.Fatal(err)
+	}
+	c.fake.Script("worker", runner.Step{Reply: workerOK, Edit: writeWork})
+	c.fake.Script("reviewer", runner.Step{Reply: reviewPass}, runner.Step{Reply: `{"verdict":"repair","summary":"no","issues":[{"description":"x","severity":"blocker","file":"f","line":1}],"repair_prompt":"fix it","blocked":null}`})
+	c.run()
+	waitFor(t, "second attempt opened", func() bool { return len(c.attempts(0)) >= 2 })
+	as := c.attempts(0)
+	if as[0].Outcome == model.OutcomePassed {
+		t.Fatalf("attempt 1 = %+v: the dissent should have stopped it", as[0])
+	}
+	if got := strings.Join(c.reviewerStages(), ","); got != "m2:pass,m4:repair" {
+		t.Fatalf("reviewer stages = %s", got)
 	}
 }

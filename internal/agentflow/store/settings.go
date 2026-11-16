@@ -26,12 +26,15 @@ type Settings struct {
 	// is checked against the FRD and the gaps turned into follow-up tasks; 0
 	// turns the check off (H31).
 	AcceptanceRounds int
-	WorkerTimeout    time.Duration
-	ReviewTimeout    time.Duration
-	PlanTimeout      time.Duration
-	VerifyTimeout    time.Duration
-	OpencodePath     string
-	VerifySlots      int
+	// ReviewPanel is how many different reviewer models must each pass a
+	// task before it merges; 1 is a single reviewer.
+	ReviewPanel   int
+	WorkerTimeout time.Duration
+	ReviewTimeout time.Duration
+	PlanTimeout   time.Duration
+	VerifyTimeout time.Duration
+	OpencodePath  string
+	VerifySlots   int
 	// ContextFloor is the context window assumed for a model whose served
 	// window is not known (H15).
 	ContextFloor int
@@ -44,7 +47,7 @@ type Settings struct {
 
 // limitKeys are the settings a project may override.
 var limitKeys = []string{
-	"max_attempts", "stuck_threshold", "max_infra_retries", "plan_max_rounds", "stall_minutes", "acceptance_rounds",
+	"max_attempts", "stuck_threshold", "max_infra_retries", "plan_max_rounds", "stall_minutes", "acceptance_rounds", "review_panel",
 	"worker_timeout", "review_timeout", "plan_timeout", "verify_timeout",
 }
 
@@ -107,6 +110,9 @@ func parseSettings(m map[string]string) (Settings, error) {
 		return s, err
 	}
 	if s.AcceptanceRounds, err = validateInt("acceptance_rounds", m["acceptance_rounds"], 0, 5); err != nil {
+		return s, err
+	}
+	if s.ReviewPanel, err = validateInt("review_panel", m["review_panel"], 1, 3); err != nil {
 		return s, err
 	}
 	if s.WorkerTimeout, err = validateTimeout("worker_timeout", m["worker_timeout"]); err != nil {

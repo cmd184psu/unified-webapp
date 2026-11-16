@@ -234,7 +234,7 @@ model: compiled queues containing a `verify` field are rejected.
 
 ### Limits
 
-Global settings are at `GET/PUT /api/settings`; a project overrides eight of them at
+Global settings are at `GET/PUT /api/settings`; a project overrides most of them at
 `GET/PUT /api/projects/{slug}/limits`.
 
 | Key | Default | Meaning |
@@ -243,6 +243,7 @@ Global settings are at `GET/PUT /api/settings`; a project overrides eight of the
 | `stuck_threshold` | 3 | Consecutive failures with the same fingerprint before `stuck`. Must be at most `max_attempts`. |
 | `max_infra_retries` | 5 | Infrastructure failures before `needs_attention`. 0 means unlimited. |
 | `plan_max_rounds` | 5 | Planner, architect, critic rounds. |
+| `review_panel` | 1 | Different reviewer models that must each pass a task before it merges, 1 to 3. The first dissent sends the task back. A panel is best effort: when no further reviewer model could serve, the reviews that passed stand. |
 | `worker_timeout` | 30m | Per worker stage. |
 | `review_timeout` | 15m | Per review stage. |
 | `plan_timeout` | 30m | Per planning stage. |
@@ -342,6 +343,12 @@ is not retried, so the effort stays at plan approved with the reason and **Compi
 (`POST /api/projects/{slug}/efforts/{id}/compile`) starts it again; it also recompiles. The compiler turns the plan into tasks with
 dependencies, acceptance criteria and touched files. Review them in the **Queue** sub-tab
 (`GET /api/projects/{slug}/efforts/{id}/queue`).
+
+Tasks that do not depend on each other, directly or through others, run at the same time (up to the
+backends' free slots); a task waits only for the tasks it depends on. Two tasks that list the same
+file must be ordered by a dependency, and the compiler's reply is rejected when they are not, so
+tasks that run side by side never touch the same file and their merges do not conflict. Each task
+still works in its own worktree.
 
 The queue has a hash. Approving pins that hash:
 `POST /api/projects/{slug}/efforts/{id}/queue/approve` with `{"hash": "<hash>"}`. If the queue

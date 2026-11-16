@@ -51,7 +51,14 @@ var migrations = []migration{
 	{21, migration21SQL},
 	{22, migration22SQL},
 	{23, migration23SQL},
+	{24, migration24SQL},
 }
+
+// migration24SQL seeds the review panel: how many different reviewer models
+// must each pass a task's work before it is merged. 1 is one reviewer, as before.
+const migration24SQL = `
+INSERT OR IGNORE INTO settings (key, value) VALUES ('review_panel', '1');
+`
 
 // migration21SQL (H30) seeds the stall limit: minutes of silence from a stage,
 // or of nothing in flight in a running effort, before the engine acts.
