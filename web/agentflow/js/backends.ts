@@ -9,7 +9,7 @@
 import { autosave, type Autosave } from './autosave.js';
 import { confirmDialog, showToast } from '@shared';
 import {
-  api, type Backend, type BackendInput, type BackendResult, type Candidate, type CheckView, type EvalView, type EvalSummary, type ModelCheck, type ProjectView,
+  api, type Backend, type BackendInput, type BackendResult, type Candidate, type CheckView, type EvalView, type EvalSummary, type ModelCheck, type ModelRest, type ProjectView,
 } from './api.js';
 import { h, replace } from './dom.js';
 import { subscribe, type AgentflowEvent } from './events.js';
@@ -50,7 +50,7 @@ export const setCheckPollMs = (ms: number): void => { checkPollMs = ms; };
 
 export type BackendsDeps = Pick<
   typeof api,
-  'backends' | 'createBackend' | 'probeBackend' | 'patchBackend' | 'retireBackend' | 'enableBackend' | 'deleteBackend' | 'checkModels' | 'checkStatus' | 'checkReviewers' | 'evalStatus' | 'extendWindows' | 'candidates' | 'putCandidates' |
+  'backends' | 'createBackend' | 'probeBackend' | 'patchBackend' | 'retireBackend' | 'enableBackend' | 'deleteBackend' | 'rests' | 'wakeModel' | 'checkModels' | 'checkStatus' | 'checkReviewers' | 'evalStatus' | 'extendWindows' | 'candidates' | 'putCandidates' |
   'projects' | 'limits' | 'putLimits' | 'settings'
 > & { notify(message: string): void; confirm(message: string, confirmLabel?: string): Promise<boolean> };
 
@@ -62,6 +62,8 @@ export const defaultBackendsDeps = (): BackendsDeps => ({
   retireBackend: api.retireBackend,
   enableBackend: api.enableBackend,
   deleteBackend: api.deleteBackend,
+  rests: api.rests,
+  wakeModel: api.wakeModel,
   checkModels: api.checkModels,
   checkStatus: api.checkStatus,
   checkReviewers: api.checkReviewers,
@@ -107,6 +109,8 @@ export class BackendsView {
   private retiring = new Set<string>();
   /** The last model check of each backend (H27), refreshed while one runs. */
   private checks = new Map<string, CheckView>();
+  /** The models that are resting after a rate limit or a stall, keyed backend + NUL + model. */
+  private rests = new Map<string, ModelRest>();
   /** The last seeded-defect reviewer check of each backend (H32), refreshed while one runs. */
   private evals = new Map<string, EvalView>();
   /** role -> rows being edited; present only while the role has unsaved edits. */
@@ -154,6 +158,11 @@ export class BackendsView {
         this.deps.backends(), this.deps.candidates(), this.deps.projects(), this.deps.settings(),
       ]);
       Object.assign(this, { backends, candidates, projects, globals, loaded: true });
+      try {
+        this.rests = new Map((await this.deps.rests()).map((r) => [r.backend + '\u0000' + r.model, r]));
+      } catch {
+        // no list of rests yet: nothing is shown as resting
+      }
       await Promise.all(backends.map(async (b) => {
         try {
           this.checks.set(b.name, await this.deps.checkStatus(b.name));
@@ -389,6 +398,7 @@ export class BackendsView {
       m.context_tokens ? badge(`max ${formatTokens(m.context_tokens)}`, 'muted') : null,
       m.tier ? badge(`tier ${m.tier}`, m.tier === 3 ? 'warn' : 'muted') : null,
       m.too_big ? badge('too big for host', 'warn') : null,
+      ...this.restParts(b.name, m.model),
       m.tools === 'no' ? badge('no tools', 'warn') : null));
     return h('div', { class: 'profile-card', attrs: { 'data-backend': b.name } },
       h('div', { class: 'profile-header' },
@@ -532,6 +542,27 @@ export class BackendsView {
     if (!b.retired) return 'Disable this backend first; only a disabled backend can be deleted.';
     const lists = usedBy(this.candidates, b.name);
     return lists.length > 0 ? `Still on these candidate lists: ${lists.join(', ')}. Remove it from them to delete it.` : '';
+  }
+
+  /** restParts shows a resting model with the time it comes back and a way to wake it now. */
+  private restParts(backend: string, model: string): (HTMLElement | null)[] {
+    const r = this.rests.get(backend + '\u0000' + model);
+    if (!r || r.until <= Date.now()) return [];
+    const at = new Date(r.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return [
+      badge(`resting until ${at} (${r.reason}${r.streak > 1 ? `, ${r.streak} in a row` : ''})`, 'warn'),
+      button('Wake', () => void this.wake(backend, model), { field: 'wake-model', word: true }),
+    ];
+  }
+
+  private async wake(backend: string, model: string): Promise<void> {
+    try {
+      await this.deps.wakeModel(backend, model);
+      this.deps.notify(`${model} is back in use`);
+    } catch {
+      return;
+    }
+    await this.load();
   }
 
   private async remove(b: Backend): Promise<void> {

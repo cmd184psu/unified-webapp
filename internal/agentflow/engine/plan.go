@@ -841,6 +841,10 @@ func (e *Engine) pickEffortStage(ctx context.Context, p store.Project, role stri
 			reasons = append(reasons, "backend "+c.Backend+" is down")
 			continue
 		}
+		if until := restTime(v, c); !until.IsZero() {
+			reasons = append(reasons, restReason(c, until, restWhy(v, c)))
+			continue
+		}
 		clash := ""
 		for r, m := range others {
 			if m == c.Model {

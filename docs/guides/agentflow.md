@@ -232,6 +232,21 @@ and the drafter below never does.
 Feedback commands are the only commands run to verify work. They come from you, never from a
 model: compiled queues containing a `verify` field are rejected.
 
+### Resting models
+
+A hosted model has no usage meter to read. The provider answers "rate limit exceeded" or goes
+quiet, so agentflow rests a model when that happens: a rate limit rests it for 5 minutes, a
+stall (a hosted model silent past the stall limit) for 3, and each failure in a row doubles the
+rest, up to 60 and 20 minutes. Until the rest ends the model gets no new stage and the work goes
+to the next candidate; when every candidate for a role is resting, the task waits and says until
+when, then carries on by itself. Any stage the model answers clears its rest. A rate limit is not
+the task's fault, so it costs no infrastructure retry. A model on a host of your own is never
+rested for being slow.
+
+The Backends tab shows a resting model with the time it comes back, and **Wake** ends the rest
+now. `GET /api/rests` lists them, and `DELETE /api/rests?backend=&model=` wakes one (204, or 404
+when it is not resting). Rests are kept in the database, so a restart does not forget them.
+
 ### Limits
 
 Global settings are at `GET/PUT /api/settings`; a project overrides most of them at

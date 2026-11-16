@@ -151,6 +151,11 @@ func (e *Engine) handleInfra(ctx context.Context, c *chain, last model.Stage) (b
 		// Its backend was retired: not a failure, so no strike and no backoff.
 		return true, e.resubmit(ctx, c, last)
 	}
+	if last.Outcome == OutcomeInfraRateLimit {
+		// A rate limit is nobody's fault and not the task's: the model is resting (noteRest),
+		// so the stage goes to another model, or waits for one, and no strike is spent.
+		return true, e.resubmit(ctx, c, last)
+	}
 	if last.Outcome == OutcomeInfraUnreachable {
 		// A host that does not answer is nobody's fault and not the task's:
 		// no strike, no backoff and no halt (H8). The backend is suspended

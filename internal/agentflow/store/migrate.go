@@ -52,12 +52,28 @@ var migrations = []migration{
 	{22, migration22SQL},
 	{23, migration23SQL},
 	{24, migration24SQL},
+	{25, migration25SQL},
 }
 
 // migration24SQL seeds the review panel: how many different reviewer models
 // must each pass a task's work before it is merged. 1 is one reviewer, as before.
 const migration24SQL = `
 INSERT OR IGNORE INTO settings (key, value) VALUES ('review_panel', '1');
+`
+
+// migration25SQL keeps the models that are resting: a model that hit a rate
+// limit or stalled is given no new stage until its rest ends, and a repeat
+// lengthens the rest (streak). An answered stage clears the row.
+const migration25SQL = `
+CREATE TABLE model_rest (
+  backend TEXT NOT NULL,
+  model TEXT NOT NULL,
+  until INTEGER NOT NULL,
+  reason TEXT NOT NULL DEFAULT '',
+  streak INTEGER NOT NULL DEFAULT 1,
+  since INTEGER NOT NULL,
+  PRIMARY KEY (backend, model)
+);
 `
 
 // migration21SQL (H30) seeds the stall limit: minutes of silence from a stage,

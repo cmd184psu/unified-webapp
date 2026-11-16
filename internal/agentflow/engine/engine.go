@@ -6,6 +6,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -229,6 +230,28 @@ func (e *Engine) DeleteBackend(ctx context.Context, actor, name string) error {
 		return err
 	}
 	e.health.clear(name)
+	return nil
+}
+
+// ModelRests lists the models with a rest on record; those whose Until is in the
+// future are resting now.
+func (e *Engine) ModelRests(ctx context.Context) ([]store.ModelRest, error) {
+	return e.deps.Store.ModelRests(ctx)
+}
+
+// WakeModel ends a model's rest and its streak at once, and kicks the dispatcher so
+// work that waited for it starts. It is ErrNotFound when the model has no rest.
+func (e *Engine) WakeModel(ctx context.Context, backend, model string) error {
+	ok, err := e.deps.Store.ClearModelRest(ctx, backend, model)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("model %s on %s is not resting: %w", model, backend, store.ErrNotFound)
+	}
+	if e.deps.Kick != nil {
+		e.deps.Kick()
+	}
 	return nil
 }
 

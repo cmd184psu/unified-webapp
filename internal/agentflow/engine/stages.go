@@ -64,6 +64,9 @@ func (e *Engine) runStage(ctx context.Context, rc golane.RunContext, p StagePayl
 			fmt.Fprintf(rc.Log(), "mark backend down: %v\n", err)
 		}
 	}
+	if err := e.noteRest(context.WithoutCancel(ctx), p.Stage, res.Outcome); err != nil {
+		fmt.Fprintf(rc.Log(), "rest model: %v\n", err)
+	}
 	if e.deps.Kick != nil {
 		e.deps.Kick()
 	}

@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"cmd184psu/unified-webapp/internal/agentflow/model"
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
 	"cmd184psu/unified-webapp/internal/agentflow/schema"
+	"cmd184psu/unified-webapp/internal/agentflow/store"
 	"cmd184psu/unified-webapp/internal/agentflow/verify"
 )
 
@@ -684,4 +686,62 @@ func TestReviewPanelDissentSendsTheTaskBack(t *testing.T) {
 	if got := strings.Join(c.reviewerStages(), ","); got != "m2:pass,m4:repair" {
 		t.Fatalf("reviewer stages = %s", got)
 	}
+}
+
+// A rate-limited worker goes to the next model at once: the model rests, no infra
+// retry is spent, and the task passes on the other model.
+func TestRateLimitedModelRestsAndWorkMovesOn(t *testing.T) {
+	c := newChainRun(t, nil, chainDefs()[:1])
+	c.addBackend("gpu2", 1, false, false, "m3", "m4")
+	c.candidates("global", "", "worker", "gpu/m1", "gpu2/m3")
+	c.candidates("global", "", "reviewer", "gpu/m2", "gpu2/m4")
+	c.fake.Script("worker",
+		runner.Step{ErrClass: runner.ErrRateLimit, Err: os.ErrDeadlineExceeded},
+		runner.Step{Reply: workerOK, Edit: writeWork})
+	c.fake.Script("reviewer", runner.Step{Reply: reviewPass})
+	c.run()
+	ctx := context.Background()
+	waitFor(t, "task passed", func() bool { return c.taskStatus() == model.StatusPassed })
+
+	ss, err := c.st.ListAttemptStages(ctx, c.attempts(0)[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ss[0].Model != "m1" || ss[0].Outcome != OutcomeInfraRateLimit || ss[1].Role != "worker" || ss[1].Model != "m3" {
+		t.Fatalf("stages = %+v: the retry should leave m1 for m3", ss)
+	}
+	rs, err := c.st.ModelRests(ctx)
+	if err != nil || len(rs) != 1 || rs[0].Model != "m1" || rs[0].Reason != "rate limited" {
+		t.Fatalf("rests = %+v, %v: want m1 resting for a rate limit", rs, err)
+	}
+	if ins, err := c.st.TaskInputs(ctx, c.effort); err != nil || len(ins[0].InfraIDs) != 0 {
+		t.Fatalf("a rate limit spent infra retries %v (%v)", ins[0].InfraIDs, err)
+	}
+}
+
+// When every worker candidate is resting the task waits and says until when; waking
+// the model resumes it with no other action.
+func TestAllModelsRestingWaitsThenResumes(t *testing.T) {
+	c := newChainRun(t, nil, chainDefs()[:1])
+	ctx := context.Background()
+	if _, err := c.st.RestModel(ctx, "gpu", "m1", "rate limited", time.Hour, time.Hour, c.eng.deps.Clock()); err != nil {
+		t.Fatal(err)
+	}
+	c.fake.Script("worker", runner.Step{Reply: workerOK, Edit: writeWork})
+	c.fake.Script("reviewer", runner.Step{Reply: reviewPass})
+	c.run()
+	waitFor(t, "task waits with the reason", func() bool {
+		ts, err := c.st.ListTasks(ctx, c.effort)
+		return err == nil && len(ts) == 1 && strings.Contains(ts[0].WaitingReason, "resting until")
+	})
+	if c.taskStatus() == model.StatusPassed || len(c.attempts(0)) != 0 && c.attempts(0)[0].Outcome != "" {
+		t.Fatal("the task ran while its only model was resting")
+	}
+	if err := c.eng.WakeModel(ctx, "gpu", "m1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.eng.WakeModel(ctx, "gpu", "m1"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("waking a model that is not resting = %v, want ErrNotFound", err)
+	}
+	waitFor(t, "task passed after the model woke", func() bool { return c.taskStatus() == model.StatusPassed })
 }

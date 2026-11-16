@@ -299,6 +299,7 @@ func (s *Store) DeleteBackend(ctx context.Context, actor, name string) error {
 		for _, q := range []string{
 			`DELETE FROM backend_models WHERE backend = ?`,
 			`DELETE FROM model_checks WHERE backend = ?`,
+			`DELETE FROM model_rest WHERE backend = ?`,
 			`DELETE FROM model_installs WHERE backend = ?`,
 			`DELETE FROM backends WHERE name = ?`,
 		} {

@@ -19,6 +19,8 @@ func (a *API) registerBackends(mux muxer) {
 	mux.HandleFunc("POST /api/backends/{name}/retire", a.retireBackend)
 	mux.HandleFunc("POST /api/backends/{name}/enable", a.enableBackend)
 	mux.HandleFunc("DELETE /api/backends/{name}", a.deleteBackend)
+	mux.HandleFunc("GET /api/rests", a.listRests)
+	mux.HandleFunc("DELETE /api/rests", a.wakeModel)
 	mux.HandleFunc("GET /api/backends/{name}/check", a.checkStatus)
 	mux.HandleFunc("GET /api/projects/{slug}/preflight", a.preflight)
 	mux.HandleFunc("POST /api/backends/{name}/check", a.checkModels)
@@ -522,4 +524,35 @@ func (a *API) preflight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
+}
+
+// listRests answers GET /api/rests: the models that hit a rate limit or stalled and
+// so rest, with when each may work again. A row whose time has passed is a model
+// that is back in use but has not answered a stage since, so its streak still counts.
+func (a *API) listRests(w http.ResponseWriter, r *http.Request) {
+	rs, err := a.deps.Engine.ModelRests(r.Context())
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if rs == nil {
+		rs = []store.ModelRest{}
+	}
+	writeJSON(w, http.StatusOK, rs)
+}
+
+// wakeModel answers DELETE /api/rests?backend=&model=: the model's rest ends now (204),
+// or 404 when it has none.
+func (a *API) wakeModel(w http.ResponseWriter, r *http.Request) {
+	backend, model := r.URL.Query().Get("backend"), r.URL.Query().Get("model")
+	if backend == "" || model == "" {
+		writeErr(w, store.Invalid("backend", "backend and model are required"))
+		return
+	}
+	if err := a.deps.Engine.WakeModel(r.Context(), backend, model); err != nil {
+		writeErr(w, err)
+		return
+	}
+	a.emit("backend.update", map[string]any{"backend": backend})
+	w.WriteHeader(http.StatusNoContent)
 }

@@ -129,6 +129,9 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	ok("DELETE", "/api/backends/scrap", "", 409)
 	ok("POST", "/api/backends/scrap/retire", `{"cancel_running":false}`, 200)
 	ok("DELETE", "/api/backends/scrap", "", 204)
+	ok("GET", "/api/rests", "", 200)
+	ok("DELETE", "/api/rests?backend=scrap&model=m1", "", 404) // nothing resting
+	ok("DELETE", "/api/rests", "", 400)
 
 	// Settings, candidates, statistics.
 	ok("GET", "/api/settings", "", 200)

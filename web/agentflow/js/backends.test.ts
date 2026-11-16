@@ -4,7 +4,7 @@ import type { InstallDeps } from './installs';
 import { BackendsView, isPaid, isPrivateHost, lastForRoles, setCheckPollMs, unconsented, type BackendsDeps } from './backends';
 import { moveItem, dropIndex } from './candidates';
 import { dispatch } from './events';
-import { ApiError, type Backend, type BackendInput, type BackendResult, type Candidate, type ProjectView } from './api';
+import { ApiError, type Backend, type ModelRest, type BackendInput, type BackendResult, type Candidate, type ProjectView } from './api';
 
 installFakeDom();
 
@@ -26,10 +26,11 @@ interface State {
   projects: ProjectView[];
   /** what the "Are you sure?" dialog answers */
   sure: boolean;
+  rests: ModelRest[];
 }
 
 function harness(init: Partial<State> = {}, over: Partial<BackendsDeps> = {}) {
-  const st: State = { backends: [], candidates: [], projects: [], sure: true, ...init };
+  const st: State = { backends: [], candidates: [], projects: [], sure: true, rests: [], ...init };
   const host = new FakeEl('DIV');
   const log: string[] = [];
   const bodies: Record<string, unknown> = {};
@@ -45,6 +46,8 @@ function harness(init: Partial<State> = {}, over: Partial<BackendsDeps> = {}) {
     patchBackend: async (name, b) => { log.push('patch:' + name); bodies.patch = b; return result(be(name)); },
     retireBackend: async (name, cancel) => { log.push(`retire:${name}:${cancel}`); return result(be(name, { retired: true }), ['retired the last backend for worker; project p1 is running']); },
     enableBackend: async (name) => { log.push('enable:' + name); return result(be(name)); },
+    rests: async () => st.rests,
+    wakeModel: async (backend, model) => { log.push(`wake:${backend}:${model}`); st.rests = st.rests.filter((r) => !(r.backend === backend && r.model === model)); },
     deleteBackend: async (name) => { log.push('delete:' + name); st.backends = st.backends.filter((b) => b.name !== name); },
     confirm: async (message, label) => { log.push(`confirm:${label ?? ''}`); bodies.confirm = message; return st.sure; },
     checkModels: async (name) => { log.push('check:' + name); return { state: 'running', current: 'm1', results: [] }; },
@@ -693,5 +696,33 @@ test('BD2: delete asks "Are you sure?" first, then deletes and the card goes', a
   eq(t.log.filter((l) => l.startsWith('delete:')), ['delete:b1']);
   eq(byAttr(t.host, 'data-backend', 'b1').length, 0, 'the card is gone');
   eq(byAttr(t.host, 'data-backend', 'b2').length, 1, 'the other card stays');
+  stop();
+});
+
+const wakeBtn = (host: FakeEl, name: string): FakeEl => button(byAttr(host, 'data-backend', name)[0], 'Wake');
+
+test('RS1: a resting model shows when it comes back and why, and Wake ends the rest', async () => {
+  const until = Date.now() + 20 * 60_000;
+  const t = harness({
+    backends: [be('hosted1'), be('plain')],
+    rests: [{ backend: 'hosted1', model: 'm1', until, reason: 'rate limited', streak: 2, since: until - 1000 }],
+  });
+  const stop = t.view.mount();
+  await flush();
+  const card = byAttr(t.host, 'data-backend', 'hosted1')[0].textContent;
+  ok(card.includes('resting until') && card.includes('rate limited') && card.includes('2 in a row'), `the card says it rests: ${card}`);
+  ok(!byAttr(t.host, 'data-backend', 'plain')[0].textContent.includes('resting'), 'a backend with no rest shows nothing');
+  wakeBtn(t.host, 'hosted1').click();
+  await flush();
+  eq(t.log.filter((l) => l.startsWith('wake:')), ['wake:hosted1:m1']);
+  ok(!byAttr(t.host, 'data-backend', 'hosted1')[0].textContent.includes('resting until'), 'the badge is gone after waking');
+  stop();
+});
+
+test('RS2: a rest that has ended shows nothing', async () => {
+  const t = harness({ backends: [be('hosted1')], rests: [{ backend: 'hosted1', model: 'm1', until: Date.now() - 1000, reason: 'stalled', streak: 1, since: 0 }] });
+  const stop = t.view.mount();
+  await flush();
+  ok(!byAttr(t.host, 'data-backend', 'hosted1')[0].textContent.includes('resting'), 'an expired rest is not shown');
   stop();
 });

@@ -184,6 +184,16 @@ export interface BackendModel {
 }
 
 /** The last check of one model (H27): ok when a one-word prompt was answered; class says why not. */
+/** ModelRest is a model that hit a rate limit or stalled; it takes no new stage until `until` (unix ms). */
+export interface ModelRest {
+  backend: string;
+  model: string;
+  until: number;
+  reason: string;
+  streak: number;
+  since: number;
+}
+
 export interface ModelCheck {
   Backend: string;
   Model: string;
@@ -720,6 +730,8 @@ export const api = {
   extendWindows: (name: string, apply = true): Promise<ExtendResult[]> => send('POST', `/api/backends/${enc(name)}/extend-windows`, { apply }),
   enableBackend: (name: string): Promise<BackendResult> => send('POST', `/api/backends/${enc(name)}/enable`),
   deleteBackend: (name: string): Promise<void> => send('DELETE', `/api/backends/${enc(name)}`),
+  rests: (): Promise<ModelRest[]> => get('/api/rests', { quiet: true }),
+  wakeModel: (backend: string, model: string): Promise<void> => send('DELETE', `/api/rests?backend=${enc(backend)}&model=${enc(model)}`),
   checkModels: (name: string): Promise<CheckView> => send('POST', `/api/backends/${enc(name)}/check`),
   checkStatus: (name: string): Promise<CheckView> => get(`/api/backends/${enc(name)}/check`, { quiet: true }),
   checkReviewers: (name: string, body: { layers?: string[]; repeats?: number } = {}): Promise<EvalView> => send('POST', `/api/backends/${enc(name)}/evals`, body),
