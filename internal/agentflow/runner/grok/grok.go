@@ -73,6 +73,12 @@ func (a *Adapter) path() (string, error) {
 	}
 	resolved, err := exec.LookPath(p)
 	if err != nil {
+		// The service's PATH often lacks the user's tool dirs: try where grok installs itself.
+		if home, herr := os.UserHomeDir(); herr == nil && p == "grok" {
+			if alt := filepath.Join(home, ".grok", "bin", "grok"); fileExists(alt) {
+				return alt, nil
+			}
+		}
 		return "", fmt.Errorf("grok: binary not found: %w", err)
 	}
 	return resolved, nil
@@ -96,6 +102,11 @@ func (a *Adapter) env(req runner.Request) []string {
 		}
 	}
 	return append(env, req.Env...)
+}
+
+func fileExists(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && !fi.IsDir()
 }
 
 func writesWorktree(role string) bool { return role == "worker" || role == "cleanup" }
