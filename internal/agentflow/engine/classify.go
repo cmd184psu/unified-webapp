@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
 	"cmd184psu/unified-webapp/internal/agentflow/schema"
@@ -70,7 +71,11 @@ func classifyRun(parent context.Context, role string, err error) string {
 	case runner.ErrContext:
 		return OutcomeInfraContext
 	case runner.ErrTimeout:
-		if role == "worker" || role == "cleanup" {
+		// A worker that was still producing output when its deadline hit ran out of
+		// time on the task. One that went silent (a stall) says nothing about the task:
+		// a hosted model that is throttled looks exactly like this, so it is an
+		// infrastructure failure, the model rests and the stage goes to another.
+		if (role == "worker" || role == "cleanup") && !isStall(re) {
 			return OutcomeTimeout
 		}
 		return OutcomeInfraTimeout
@@ -80,6 +85,11 @@ func classifyRun(parent context.Context, role string, err error) string {
 		}
 	}
 	return OutcomeInfraCrash
+}
+
+// isStall says the runner gave up because the model went quiet (stalls.go).
+func isStall(re *runner.Error) bool {
+	return re != nil && strings.HasPrefix(re.Msg, "stalled:")
 }
 
 // onlyMinorIssues reports whether the review lists issues and every one is

@@ -286,7 +286,7 @@ func (e *Engine) resubmit(ctx context.Context, c *chain, last model.Stage) error
 			v.down[avoid] = true // like a backend in cooldown: try the others first
 		}
 		unusable := last.Outcome == OutcomeInfraUnparseable || last.Outcome == OutcomeInfraContext ||
-			(last.Outcome == OutcomeInfraTimeout && last.Role == "reviewer") // a reviewer that stalled
+			last.Outcome == OutcomeInfraTimeout // a model that stalled
 		if skipModel && unusable && last.Model != "" {
 			v.avoid = map[string]bool{last.Model: true} // an unreadable or stalled reply: another model, not another try of the same one
 		}

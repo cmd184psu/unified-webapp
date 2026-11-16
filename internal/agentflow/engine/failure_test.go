@@ -523,9 +523,10 @@ func TestH21_AfterAWorkerTimeoutTheNextAttemptUsesAnotherModel(t *testing.T) {
 	}
 }
 
-// H30: a stage whose model says nothing for the stall time ends as a timeout
-// and the next attempt uses another model; the stall time is set in minutes.
-func TestH30_ASilentStageEndsAsATimeoutAndMovesToAnotherModel(t *testing.T) {
+// H30: a stage whose model says nothing for the stall time ends as an infrastructure
+// timeout, not a failed attempt: a throttled hosted model looks the same. The model
+// rests and the same attempt goes on with another model; the stall time is set in minutes.
+func TestH30_ASilentStageEndsAsAnInfraTimeoutAndMovesToAnotherModel(t *testing.T) {
 	old := stallUnit
 	stallUnit = 20 * time.Millisecond
 	t.Cleanup(func() { stallUnit = old })
@@ -541,8 +542,15 @@ func TestH30_ASilentStageEndsAsATimeoutAndMovesToAnotherModel(t *testing.T) {
 	c.run()
 	waitFor(t, "task passed", func() bool { return c.taskStatus() == model.StatusPassed })
 	as := c.attempts(0)
-	if len(as) < 2 || as[0].Fingerprint != string(FailTimeout) || as[0].WorkerModel != "m1" || as[1].WorkerModel != "m2" {
-		t.Fatalf("attempts = %+v: want a timeout on m1 and then m2", as)
+	if len(as) != 1 || as[0].Outcome != model.OutcomePassed {
+		t.Fatalf("attempts = %+v: the stall should not have cost an attempt", as)
+	}
+	ss, err := c.st.ListAttemptStages(context.Background(), as[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ss[0].Role != "worker" || ss[0].Model != "m1" || ss[0].Outcome != OutcomeInfraTimeout || ss[1].Role != "worker" || ss[1].Model != "m2" {
+		t.Fatalf("stages = %+v: want an infra timeout on m1 and then m2", ss)
 	}
 }
 
