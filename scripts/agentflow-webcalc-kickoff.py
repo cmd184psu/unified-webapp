@@ -254,7 +254,7 @@ if args.limit and not args.resume:
     for spec in args.limit:
         k, _, v = spec.partition("=")
         lim[k] = int(v) if v.isdigit() else v
-    api("PUT", f"/api/projects/{slug}/limits", lim, 200)
+    api("PUT", f"/api/projects/{slug}/limits", {"limits": lim}, 200)
     say("limits: " + json.dumps(lim))
 
 if not args.resume and not args.skip_preflight:
