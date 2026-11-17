@@ -83,6 +83,10 @@ ap.add_argument("--exclude-backend", action="append", default=["kimi-waste"],
 ap.add_argument("--backend-order", default="ollama-m5,ollama-win,ollama-m4",
                 help="with --lineup local: within a tier, try these backends first, in this order (fastest first)")
 ap.add_argument("--dry-run", action="store_true", help="with --lineup local: print the candidate lists and stop")
+ap.add_argument("--lists", action="append", default=[], metavar="ROLE=BACKEND/MODEL[,BACKEND/MODEL...]",
+                help="set this project's own candidate list for a role (repeatable); other roles use the global lists")
+ap.add_argument("--limit", action="append", default=[], metavar="KEY=VALUE",
+                help="set a project limit such as review_panel=2 or worker_timeout=60m (repeatable)")
 ap.add_argument("--resume", type=int, metavar="EFFORT",
                 help="carry on an effort this script already started (same --slug and --repo): approve the gates it has reached and wait")
 ap.add_argument("--skip-preflight", action="store_true", help="do not check the models and the lineup before starting")
@@ -234,6 +238,24 @@ if not args.resume:
 if args.lineup in ("local", "free", "hybrid") and not args.resume:
     for role, lst in lineup.items():
         api("PUT", f"/api/projects/{slug}/candidates/{role}", {"candidates": lst}, 200)
+
+if args.lists and not args.resume:
+    lineup = globals().get("lineup") or {}
+    for spec in args.lists:
+        role, _, models = spec.partition("=")
+        lst = [{"backend": m.split("/", 1)[0], "model": m.split("/", 1)[1]} for m in models.split(",") if "/" in m]
+        if not role or not lst:
+            sys.exit(f"--lists {spec!r}: want ROLE=BACKEND/MODEL[,BACKEND/MODEL...]")
+        api("PUT", f"/api/projects/{slug}/candidates/{role}", {"candidates": lst}, 200)
+        lineup[role] = lst
+        say(f"{role}: " + ", ".join(f"{c['backend']}/{c['model']}" for c in lst))
+if args.limit and not args.resume:
+    lim = {}
+    for spec in args.limit:
+        k, _, v = spec.partition("=")
+        lim[k] = int(v) if v.isdigit() else v
+    api("PUT", f"/api/projects/{slug}/limits", lim, 200)
+    say("limits: " + json.dumps(lim))
 
 if not args.resume and not args.skip_preflight:
     # Before anything starts: try every hosted model with a one-word prompt, then ask the service
