@@ -1975,9 +1975,10 @@ var API_TYPES = [
   ["grok", "Grok CLI (your Grok plan)"],
   ["codex", "Codex CLI (your ChatGPT plan)"],
   ["claude", "Claude Code CLI (your Claude login)"],
-  ["muse", "Muse Code CLI (your Muse login)"]
+  ["muse", "Muse Code CLI (your Muse login)"],
+  ["agy", "Antigravity CLI (your Google login)"]
 ];
-var cliTypes = /* @__PURE__ */ new Set(["opencode", "grok", "codex", "claude", "muse"]);
+var cliTypes = /* @__PURE__ */ new Set(["opencode", "grok", "codex", "claude", "muse", "agy"]);
 var checkPollMs = 3e3;
 var defaultBackendsDeps = () => ({
   backends: api.backends,

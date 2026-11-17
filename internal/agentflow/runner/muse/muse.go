@@ -1,9 +1,9 @@
-// Package claude is the runner.Runner for the Claude Code CLI (`claude -p`), which runs on
-// the user's own Claude login. Stages run headless with the prompt on stdin and
-// `--output-format stream-json` events on stdout. Claude Code keeps its own login and
-// brings its own sandbox; agentflow never copies a credential. Roles that write (worker,
-// cleanup) get the edit tools and a sandbox that can write the worktree, every other role
-// read-only tools and a sandbox that cannot, both with the user's secrets denied.
+// Package muse is the runner.Runner for the Muse Code CLI (`muse exec`), which runs on the
+// user's own Muse login. Stages run headless with `--json` events on stdout. Muse keeps its
+// own login and brings its own shell sandbox; agentflow never copies a credential. Roles that
+// write (worker, cleanup) may write the worktree, every other role has Muse's write tools off.
+// Muse offers no way to deny reads of chosen paths, so a model on this backend can read what
+// the user can read: keep it off work that touches secrets.
 package muse
 
 import (

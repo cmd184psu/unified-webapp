@@ -46,11 +46,12 @@ const API_TYPES: Array<[string, string]> = [
   ['codex', 'Codex CLI (your ChatGPT plan)'],
   ['claude', 'Claude Code CLI (your Claude login)'],
   ['muse', 'Muse Code CLI (your Muse login)'],
+  ['agy', 'Antigravity CLI (your Google login)'],
 ];
 
 /** How often a running model check is looked at again. */
 /** The api types that are a CLI or built-in provider: no host of their own. */
-const cliTypes = new Set(['opencode', 'grok', 'codex', 'claude', 'muse']);
+const cliTypes = new Set(['opencode', 'grok', 'codex', 'claude', 'muse', 'agy']);
 
 export let checkPollMs = 3000;
 export const setCheckPollMs = (ms: number): void => { checkPollMs = ms; };

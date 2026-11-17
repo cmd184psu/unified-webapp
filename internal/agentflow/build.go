@@ -22,6 +22,7 @@ import (
 	"cmd184psu/unified-webapp/internal/agentflow/engine"
 	"cmd184psu/unified-webapp/internal/agentflow/gitsvc"
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
+	"cmd184psu/unified-webapp/internal/agentflow/runner/agy"
 	"cmd184psu/unified-webapp/internal/agentflow/runner/claude"
 	"cmd184psu/unified-webapp/internal/agentflow/runner/codex"
 	"cmd184psu/unified-webapp/internal/agentflow/runner/grok"
@@ -188,14 +189,14 @@ func newOpencode(git *gitsvc.Service, st *store.Store) *opencode.Adapter {
 	}
 }
 
-// newRunner routes backends of api type "grok", "codex", "claude" and "muse" to their CLI runners and
+// newRunner routes backends of api type "grok", "codex", "claude", "muse" and "agy" to their CLI runners and
 // every other backend to opencode.
 func newRunner(git *gitsvc.Service, st *store.Store) runner.Runner {
 	return &runner.Mux{
 		Default: newOpencode(git, st),
 		ByType: map[string]runner.Runner{
 			grok.APIType: &grok.Adapter{}, codex.APIType: &codex.Adapter{},
-			claude.APIType: &claude.Adapter{}, muse.APIType: &muse.Adapter{},
+			claude.APIType: &claude.Adapter{}, muse.APIType: &muse.Adapter{}, agy.APIType: &agy.Adapter{},
 		},
 	}
 }

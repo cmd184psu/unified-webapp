@@ -283,6 +283,10 @@ being passed over. `GET /api/holds` lists the held models, and
 `PUT /api/holds?backend=&model=&hold=true|false` holds or releases one (204). Holds are kept in the
 database (migration 28).
 
+### The Antigravity CLI backend (agy)
+
+A backend of api type `agy` runs stages through Google's `agy` in print mode on your own Google login (no host, no key, no credential copied). The probe lists what `agy models` offers (Gemini Flash in three effort levels, Claude Sonnet and Opus 4.6, GPT-OSS 120B); add only the ones you want. Each call gets a per-session `--settings` object that agy never saves: its terminal sandbox on (`--sandbox`, commands that would need to leave it ask, and in headless mode that is a refusal), reads denied for `~/.ssh`, opencode's `auth.json`, the service PIN, the Grok, Codex, Claude and agy logins, and every `.env` or `.env.*` file in the worktree (agy's rules take paths, not globs, so they are listed at the start of each call), and for every role but worker and cleanup writes denied to the worktree. A prompt over 100 KB is too big for an argument, so the model is told to read it from its file, which the settings allow. Anything the model creates later, such as a new `.env`, is not covered.
+
 ### BotChat relay
 
 With the **BotChat address** and **BotChat key file** settings both filled in (the settings menu, BotChat section; empty means off, and a change applies at once), agentflow posts what happens into a BotChat service. There is one room per effort, `agentflow-effort-<id>`, made on first use, and events with no effort go to `global`. Agentflow's own code does all the posting, so no model holds the key; the key file is read on every post.

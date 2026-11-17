@@ -60,7 +60,32 @@ var migrations = []migration{
 	{28, migration28SQL},
 	{29, migration29SQL},
 	{30, migration30SQL},
+	{31, migration31SQL},
 }
+
+// migration31SQL lets a backend be Google's Antigravity CLI (api type 'agy'): migration 29's
+// rebuild with the wider api_type CHECK.
+const migration31SQL = `
+CREATE TABLE backends_new (
+  name TEXT PRIMARY KEY,
+  host TEXT NOT NULL,
+  api_type TEXT NOT NULL CHECK (api_type IN ('ollama', 'openai_compatible', 'anthropic', 'opencode', 'grok', 'codex', 'claude', 'muse', 'agy')),
+  hosted INTEGER NOT NULL DEFAULT 0 CHECK (hosted IN (0, 1)),
+  paid INTEGER NOT NULL DEFAULT 0 CHECK (paid IN (0, 1)),
+  slots INTEGER NOT NULL CHECK (slots >= 1),
+  retired INTEGER NOT NULL DEFAULT 0 CHECK (retired IN (0, 1)),
+  created INTEGER NOT NULL,
+  updated INTEGER NOT NULL,
+  api_key TEXT NOT NULL DEFAULT '',
+  memory_budget_mb INTEGER NOT NULL DEFAULT 0 CHECK (memory_budget_mb >= 0),
+  window_cap_tokens INTEGER NOT NULL DEFAULT 0 CHECK (window_cap_tokens >= 0),
+  duty_percent INTEGER NOT NULL DEFAULT 0 CHECK (duty_percent = 0 OR duty_percent BETWEEN 10 AND 99)
+);
+INSERT INTO backends_new (name, host, api_type, hosted, paid, slots, retired, created, updated, api_key, memory_budget_mb, window_cap_tokens, duty_percent)
+  SELECT name, host, api_type, hosted, paid, slots, retired, created, updated, api_key, memory_budget_mb, window_cap_tokens, duty_percent FROM backends;
+DROP TABLE backends;
+ALTER TABLE backends_new RENAME TO backends;
+`
 
 // migration30SQL adds the BotChat connection: the service's address and the file that holds the
 // shared API key (empty means off), and the place the relay remembers how far it has posted.
@@ -373,7 +398,7 @@ ALTER TABLE efforts ADD COLUMN budget_seconds INTEGER NOT NULL DEFAULT 0 CHECK (
 // table with foreign keys on would fire the referencing rows' ON DELETE
 // actions, so these run with foreign keys off (the documented procedure) and
 // are checked with foreign_key_check before they commit.
-var rebuildsTables = map[int]bool{6: true, 11: true, 26: true, 27: true, 29: true}
+var rebuildsTables = map[int]bool{6: true, 11: true, 26: true, 27: true, 29: true, 31: true}
 
 // migration6SQL (F2) lets a stage have the cleanup role (AT11) and adds the
 // per-project cleanup switch. stages is rebuilt with the same columns, so rows
