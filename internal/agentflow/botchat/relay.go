@@ -1,0 +1,281 @@
+package botchat
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"strconv"
+	"strings"
+	"time"
+
+	"cmd184psu/unified-webapp/internal/agentflow/store"
+)
+
+// Coordinator is the callsign agentflow's own code posts under.
+const Coordinator = "af-coord"
+
+// Relay posts what happens in agentflow into BotChat: one room per effort, a message for every
+// stage that ends (under that stage's own callsign) and for the events that matter (run started,
+// queue approved, halted, stalled, accepted). It reads the database, so it adds nothing to the
+// engine's own paths and a restart picks up where it stopped.
+type Relay struct {
+	Store *store.Store
+	// Every is the polling interval; zero means 5 seconds.
+	Every time.Duration
+	// HTTP overrides the client's HTTP client in tests.
+	Client func(url, keyFile string) *Client
+
+	rooms map[string]string
+}
+
+const (
+	keyStageTS    = "stage_ts"
+	keyStageID    = "stage_id"
+	keyEventID    = "event_id"
+	batch         = 100
+	maxText       = 1500
+	globalRoom    = "global"
+	roomNamePrefx = "agentflow-effort-"
+)
+
+// Run polls until ctx ends. A failure is logged and retried on the next tick.
+func (r *Relay) Run(ctx context.Context) {
+	every := r.Every
+	if every <= 0 {
+		every = 5 * time.Second
+	}
+	t := time.NewTicker(every)
+	defer t.Stop()
+	var lastErr string
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		if err := r.Step(ctx); err != nil {
+			if msg := err.Error(); msg != lastErr {
+				log.Printf("agentflow: botchat relay: %v", err)
+				lastErr = msg
+			}
+		} else {
+			lastErr = ""
+		}
+	}
+}
+
+func (r *Relay) client(set store.Settings) *Client {
+	if r.Client != nil {
+		return r.Client(set.BotchatURL, set.BotchatKeyFile)
+	}
+	return &Client{BaseURL: set.BotchatURL, KeyFile: set.BotchatKeyFile}
+}
+
+// Step posts everything new once. It does nothing when the settings leave the relay off.
+func (r *Relay) Step(ctx context.Context) error {
+	set, err := r.Store.GetSettings(ctx)
+	if err != nil {
+		return err
+	}
+	if set.BotchatURL == "" || set.BotchatKeyFile == "" {
+		return nil
+	}
+	c := r.client(set)
+	cur, err := r.cursors(ctx)
+	if err != nil {
+		return err
+	}
+	stages, err := r.Store.FinishedStagesAfter(ctx, cur.ts, cur.stage, batch)
+	if err != nil {
+		return err
+	}
+	for _, s := range stages {
+		if err := r.send(ctx, c, s.Effort, StageCallsign(s), StageText(s)); err != nil {
+			return err
+		}
+		cur.ts, cur.stage = s.Finished, s.ID
+		if err := r.Store.SetBotchatState(ctx, keyStageTS, store.Itoa64(cur.ts)); err != nil {
+			return err
+		}
+		if err := r.Store.SetBotchatState(ctx, keyStageID, store.Itoa64(cur.stage)); err != nil {
+			return err
+		}
+	}
+	events, err := r.Store.EventsAfter(ctx, cur.event, batch)
+	if err != nil {
+		return err
+	}
+	for _, e := range events {
+		if effort, text, ok := EventText(e); ok {
+			if err := r.send(ctx, c, effort, Coordinator, text); err != nil {
+				return err
+			}
+		}
+		cur.event = e.ID
+		if err := r.Store.SetBotchatState(ctx, keyEventID, store.Itoa64(cur.event)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type cursors struct{ ts, stage, event int64 }
+
+// cursors reads how far the relay has posted; the first time, it starts at the present so
+// switching the relay on does not replay history.
+func (r *Relay) cursors(ctx context.Context) (cursors, error) {
+	var c cursors
+	get := func(key string) (int64, bool, error) {
+		v, err := r.Store.BotchatState(ctx, key)
+		if err != nil || v == "" {
+			return 0, false, err
+		}
+		n, err := strconv.ParseInt(v, 10, 64)
+		return n, err == nil, nil
+	}
+	var okTS, okID, okEv bool
+	var err error
+	if c.ts, okTS, err = get(keyStageTS); err != nil {
+		return c, err
+	}
+	if c.stage, okID, err = get(keyStageID); err != nil {
+		return c, err
+	}
+	if c.event, okEv, err = get(keyEventID); err != nil {
+		return c, err
+	}
+	if okTS && okID && okEv {
+		return c, nil
+	}
+	ts, stage, event, err := r.Store.RelayHead(ctx)
+	if err != nil {
+		return c, err
+	}
+	c = cursors{ts: ts, stage: stage, event: event}
+	for k, v := range map[string]int64{keyStageTS: ts, keyStageID: stage, keyEventID: event} {
+		if err := r.Store.SetBotchatState(ctx, k, store.Itoa64(v)); err != nil {
+			return c, err
+		}
+	}
+	return c, nil
+}
+
+// send posts to the room of the effort (the shared `global` room when there is none).
+func (r *Relay) send(ctx context.Context, c *Client, effort int64, from, text string) error {
+	name, wave := globalRoom, ""
+	if effort > 0 {
+		name, wave = roomNamePrefx+strconv.FormatInt(effort, 10), "af-"+strconv.FormatInt(effort, 10)
+	}
+	if r.rooms == nil {
+		r.rooms = map[string]string{}
+	}
+	id, ok := r.rooms[name]
+	if !ok {
+		if name == globalRoom {
+			id = globalRoom
+		} else {
+			var err error
+			if id, err = c.Room(ctx, name, wave, Coordinator); err != nil {
+				return err
+			}
+		}
+		r.rooms[name] = id
+	}
+	if r := []rune(text); len(r) > maxText {
+		text = string(r[:maxText]) + "…"
+	}
+	err := c.Post(ctx, id, from, "everyone", text)
+	if err == ErrNotFound { // the room was deleted: make it again next time
+		delete(r.rooms, name)
+	}
+	return err
+}
+
+// StageCallsign is the identity a stage speaks under: af-<effort>-<role>[-<task>].
+func StageCallsign(s store.FinishedStage) string {
+	cs := "af-" + strconv.FormatInt(s.Effort, 10) + "-" + s.Role
+	if s.Task != "" {
+		cs += "-" + s.Task
+	}
+	return cs
+}
+
+// StageText is the message for a stage that ended.
+func StageText(s store.FinishedStage) string {
+	var b strings.Builder
+	if s.Task != "" {
+		fmt.Fprintf(&b, "%s attempt %d · ", s.Task, s.Attempt)
+	}
+	b.WriteString(s.Role)
+	if s.Model != "" {
+		fmt.Fprintf(&b, " %s", s.Model)
+		if s.Backend != "" {
+			fmt.Fprintf(&b, " (%s)", s.Backend)
+		}
+	}
+	out := s.Outcome
+	if out == "" {
+		out = "done"
+	}
+	fmt.Fprintf(&b, ": %s", out)
+	if s.Finished > s.Started && s.Started > 0 {
+		fmt.Fprintf(&b, " · %.1f min", float64(s.Finished-s.Started)/60000)
+	}
+	if s.Tokens > 0 {
+		fmt.Fprintf(&b, " · %s tokens", compact(s.Tokens))
+	}
+	return b.String()
+}
+
+func compact(n int64) string {
+	if n >= 1000 {
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	}
+	return strconv.FormatInt(n, 10)
+}
+
+// EventText turns an event worth telling into (effort, message); ok is false for the rest.
+func EventText(e store.RelayEvent) (effort int64, text string, ok bool) {
+	var d map[string]any
+	_ = json.Unmarshal([]byte(e.DetailJSON), &d)
+	str := func(k string) string { s, _ := d[k].(string); return s }
+	num := func(k string) int64 { f, _ := d[k].(float64); return int64(f) }
+	switch e.SubjectType {
+	case "effort":
+		effort, _ = strconv.ParseInt(e.SubjectID, 10, 64)
+	default:
+		effort = num("effort")
+	}
+	project := e.SubjectID
+	if e.SubjectType != "project" {
+		project = str("project")
+	}
+	switch e.Action {
+	case "effort.create":
+		return effort, fmt.Sprintf("effort %d created on project %s", effort, project), true
+	case "run.start":
+		return effort, "run started on " + project, true
+	case "run.pause", "run.paused":
+		return effort, "run paused on " + project, true
+	case "run.stop":
+		return effort, "run stopped on " + project, true
+	case "run.complete":
+		return effort, "run complete on " + project, true
+	case "queue.approve":
+		return effort, "queue approved", true
+	case "queue.edit_task":
+		return effort, "task " + str("task") + " edited", true
+	case "compile.halted":
+		return effort, "compile halted: " + str("reason"), true
+	case "plan.halted":
+		return effort, "planning halted: " + str("reason"), true
+	case "stall.detected":
+		return effort, fmt.Sprintf("stalled: nothing in flight for %d min", num("minutes")), true
+	case "acceptance.passed":
+		return effort, "acceptance review passed: " + str("summary"), true
+	case "effort.abandon":
+		return effort, "effort abandoned", true
+	}
+	return 0, "", false
+}

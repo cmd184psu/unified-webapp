@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/api"
+	"cmd184psu/unified-webapp/internal/agentflow/botchat"
 	"cmd184psu/unified-webapp/internal/agentflow/engine"
 	"cmd184psu/unified-webapp/internal/agentflow/gitsvc"
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
@@ -150,9 +151,18 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 	capCtx, stopCaps := context.WithCancel(context.Background())
 	go a.RefreshCapabilities(capCtx)
 
+	// What happens in agentflow is posted to BotChat when the botchat settings name a service
+	// and a key file; with them empty the relay idles.
+	relayDone := make(chan struct{})
+	go func() {
+		defer close(relayDone)
+		(&botchat.Relay{Store: st}).Run(capCtx)
+	}()
+
 	log.Printf("agentflow: data %s, static %s", dataDir, cfg.StaticDir)
 	return &handler{Handler: mux, stop: func() error {
 		stopCaps()
+		<-relayDone
 		eng.Close()
 		return st.Close()
 	}}, nil

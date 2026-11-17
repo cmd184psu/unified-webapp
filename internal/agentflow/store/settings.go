@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -34,7 +35,11 @@ type Settings struct {
 	PlanTimeout   time.Duration
 	VerifyTimeout time.Duration
 	OpencodePath  string
-	VerifySlots   int
+	// BotchatURL is the BotChat service address and BotchatKeyFile the file holding the
+	// API key every agent shares; both empty means the relay is off.
+	BotchatURL     string
+	BotchatKeyFile string
+	VerifySlots    int
 	// ContextFloor is the context window assumed for a model whose served
 	// window is not known (H15).
 	ContextFloor int
@@ -131,6 +136,13 @@ func parseSettings(m map[string]string) (Settings, error) {
 	if s.OpencodePath == "" {
 		return s, Invalid("opencode_path", "required")
 	}
+	if s.BotchatURL, err = validateBotchatURL(m["botchat_url"]); err != nil {
+		return s, err
+	}
+	s.BotchatKeyFile = strings.TrimSpace(m["botchat_key_file"])
+	if s.BotchatKeyFile != "" && !filepath.IsAbs(s.BotchatKeyFile) && !strings.HasPrefix(s.BotchatKeyFile, "~/") {
+		return s, Invalid("botchat_key_file", "must be an absolute path or start with ~/")
+	}
 	if s.VerifySlots, err = validateInt("verify_slots", m["verify_slots"], 1, 64); err != nil {
 		return s, err
 	}
@@ -144,6 +156,20 @@ func parseSettings(m map[string]string) (Settings, error) {
 		return s, err
 	}
 	return s, nil
+}
+
+// validateBotchatURL accepts an empty value (off) or an http(s) address with a host, no login
+// and no query.
+func validateBotchatURL(v string) (string, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", nil
+	}
+	u, err := url.Parse(v)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" {
+		return "", Invalid("botchat_url", "must be an http or https address like https://botchat.example.net")
+	}
+	return strings.TrimRight(v, "/"), nil
 }
 
 // parseBrowseRoots reads the stored browse_roots value: a JSON list of

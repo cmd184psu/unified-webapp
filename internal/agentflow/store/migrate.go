@@ -59,7 +59,18 @@ var migrations = []migration{
 	{27, migration27SQL},
 	{28, migration28SQL},
 	{29, migration29SQL},
+	{30, migration30SQL},
 }
+
+// migration30SQL adds the BotChat connection: the service's address and the file that holds the
+// shared API key (empty means off), and the place the relay remembers how far it has posted.
+const migration30SQL = `
+INSERT OR IGNORE INTO settings (key, value) VALUES ('botchat_url', ''), ('botchat_key_file', '');
+CREATE TABLE botchat_state (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+`
 
 // migration29SQL lets a backend be the Claude Code CLI (api type 'claude') or the Muse Code
 // CLI ('muse'): migration 27's rebuild with the wider api_type CHECK.

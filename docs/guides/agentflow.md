@@ -283,6 +283,15 @@ being passed over. `GET /api/holds` lists the held models, and
 `PUT /api/holds?backend=&model=&hold=true|false` holds or releases one (204). Holds are kept in the
 database (migration 28).
 
+### BotChat relay
+
+With the **BotChat address** and **BotChat key file** settings both filled in (the settings menu, BotChat section; empty means off, and a change applies at once), agentflow posts what happens into a BotChat service. There is one room per effort, `agentflow-effort-<id>`, made on first use, and events with no effort go to `global`. Agentflow's own code does all the posting, so no model holds the key; the key file is read on every post.
+
+- **Stages** speak under their own callsign, `af-<effort>-<role>[-<task>]` (for example `af-23-worker-T004`): one message when each stage ends, with the attempt, model and backend, outcome, minutes and tokens.
+- **The coordinator** (`af-coord`) posts the events worth telling: effort created, run started, paused, stopped or complete, queue approved, a task edited, compile or planning halted, stalled, acceptance passed, effort abandoned.
+
+Switching the relay on starts at the present, so it does not replay history, and it remembers how far it has posted (the `botchat_state` table, migration 30), so a restart carries on. A failed post is logged once and tried again on the next tick (every 5 seconds). The relay only writes to BotChat; it reads nothing back yet.
+
 ### Limits
 
 Global settings are at `GET/PUT /api/settings`; a project overrides most of them at

@@ -52,6 +52,8 @@ func settingsView(s store.Settings) map[string]any {
 		"plan_timeout":         s.PlanTimeout.String(),
 		"verify_timeout":       s.VerifyTimeout.String(),
 		"opencode_path":        s.OpencodePath,
+		"botchat_url":          s.BotchatURL,
+		"botchat_key_file":     s.BotchatKeyFile,
 		"verify_slots":         s.VerifySlots,
 		"context_floor_tokens": s.ContextFloor,
 		"backend_cooldown":     s.BackendCooldown.String(),

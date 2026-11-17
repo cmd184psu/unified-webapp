@@ -215,6 +215,8 @@ export class SettingsView {
     const limits = h('div', { class: 'profile-fields' }, ...LIMIT_FIELDS.map((f) => this.row(f)));
     const exec = h('div', { class: 'profile-fields' }, ...EXECUTION_FIELDS.map((f) => this.row(f)));
     const path = this.row({ key: 'opencode_path', label: 'opencode path', hint: 'Program to run' });
+    const bcUrl = this.row({ key: 'botchat_url', label: 'BotChat address', hint: 'e.g. https://botchat.example.net; empty turns the relay off' });
+    const bcKey = this.row({ key: 'botchat_key_file', label: 'BotChat key file', hint: 'File holding the API key, e.g. ~/.pumamesh_chat_apikey; read on every post' });
     this.renderOpenCode();
     this.renderService();
     this.renderRoots();
@@ -224,6 +226,7 @@ export class SettingsView {
         section('Limits', limits),
         section('Execution', exec),
         section('opencode', path, this.ocHost),
+        section('BotChat', bcUrl, bcKey),
         section('Service', this.svcHost),
         section('Browse limit', this.rootsHost),
         this.errors.general,
