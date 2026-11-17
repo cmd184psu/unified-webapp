@@ -249,6 +249,13 @@ try:
     # The page: a script cannot run its JavaScript, so these look at the HTML only and never decide success.
     code, raw = call("GET", "/")
     page = raw.decode(errors="replace").lower()
+    # The logic may live in a script the page loads (static/app.js): read those too.
+    for src in re.findall(r"<script[^>]+src=[\"']([^\"']+)[\"']", page):
+        if src.startswith(("http:", "https:", "//")):
+            continue
+        sc, sraw = call("GET", src if src.startswith("/") else "/" + src)
+        if sc == 200:
+            page += "\n" + sraw.decode(errors="replace").lower()
     check("GET / serves the page", code == 200 and "<button" in page, str(code), "page")
     check("page has digits 0-9, decimal point, equals, clear, backspace",
           all(re.search(rf">\s*{re.escape(d)}\s*<", page) for d in "0123456789.=") and "clear" in page.replace("\"", " ") and ("backspace" in page or "⌫" in page or "←" in page), "", "page")
