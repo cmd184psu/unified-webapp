@@ -441,7 +441,7 @@ keeps going. Act on a halted task from the Board:
 | Action | Route | Effect |
 |---|---|---|
 | Retry | `POST /api/projects/{slug}/efforts/{id}/tasks/{key}/retry` `{"clean": false}` | Fresh attempt counters. `clean: true` also throws away the task's worktree and branch. |
-| Edit | `PUT /api/projects/{slug}/efforts/{id}/tasks/{key}` | Change the task, then re-approve the queue. |
+| Edit | `PUT /api/projects/{slug}/efforts/{id}/tasks/{key}` | Change the task. The queue returns to draft and needs approving again; add `?approve=true` (the board does) and a queue that was approved is approved again under the new hash, and a run that was going carries on. |
 | Override | `POST /api/projects/{slug}/efforts/{id}/tasks/{key}/override` `{"reason": "..."}` | Mark it done without a pass so dependents can run. |
 | Abandon effort | `POST /api/projects/{slug}/efforts/{id}/abandon` | End the whole effort. |
 
@@ -561,7 +561,7 @@ when the FRD text mentions things like auth, migration or PII.
 
 Editing something that already exists never needs a Save button: a backend, a role's candidate order, the settings drawer, an effort's settings, a project (including its definition of done and plugins), a project's limits, the FRD and a halted task. After five seconds without a change the card compares its fields with what was last saved and saves only if they differ. A refused save marks the field it names and is not retried until something changes again. A small mark shows the state: `…` pending, `↻` saving, `✓` saved, `⚠` not saved. **Done** (✓) saves anything pending and closes the card. One mark in the top corner, before the menu, rolls them all up: `✓` everything is saved, `…` something is waiting for its pause (click to save now), `⚠` something was refused (click to scroll to it).
 
-Two things behave differently because of what a save means. Each FRD save stores a new revision (so a long editing session leaves several), and Done then shows the saved revision for approval. Editing a halted task returns the queue to draft; the form says so, and the queue must be approved again. A repository that is not a git repository is reported as an error on a project edit instead of offering git init.
+Two things behave differently because of what a save means. Each FRD save stores a new revision (so a long editing session leaves several), and Done then shows the saved revision for approval. Editing a halted task of an approved queue approves the edited queue with it and a run carries on; stages built on the old task are discarded. A repository that is not a git repository is reported as an error on a project edit instead of offering git init.
 
 Creating something (Add backend, Create project, Create effort) stays one explicit ✓, because saving on a pause would create half-typed entities.
 

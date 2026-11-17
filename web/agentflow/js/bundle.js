@@ -138,8 +138,8 @@ var api = {
   approveQueue: (slug, id, hash, o) => send("POST", `${eff(slug, id)}/queue/approve`, { hash }, o),
   tasks: (slug, id) => get(`${eff(slug, id)}/tasks`),
   task: (slug, id, key) => get(`${eff(slug, id)}/tasks/${enc(key)}`),
-  /** editTask answers with the queue, which is back in draft until it is approved again (AT9). */
-  editTask: (slug, id, key, def, o) => send("PUT", `${eff(slug, id)}/tasks/${enc(key)}`, def, o),
+  /** editTask answers with the queue. A queue that was approved stays approved (the edit is the review) and a run goes on; one still in draft stays in draft. */
+  editTask: (slug, id, key, def, o) => send("PUT", `${eff(slug, id)}/tasks/${enc(key)}?approve=true`, def, o),
   retryTask: (slug, id, key, clean) => send("POST", `${eff(slug, id)}/tasks/${enc(key)}/retry`, { clean }),
   overrideTask: (slug, id, key, reason) => send("POST", `${eff(slug, id)}/tasks/${enc(key)}/override`, { reason }),
   // Run control: answers with the project's overview
@@ -3149,7 +3149,7 @@ var Board = class {
     this.deps.notify("Effort abandoned");
     await this.refresh();
   }
-  /** saveEdit stores an edited task; the queue returns to draft, which the form says up front. The form stays as it is. */
+  /** saveEdit stores an edited task. An approved queue stays approved and a run goes on, so the edit needs no second approval. The form stays as it is. */
   async saveEdit(def) {
     const ef = this.current;
     if (!ef) return false;
@@ -3160,7 +3160,7 @@ var Board = class {
       this.errors.show(err);
       return false;
     }
-    this.deps.notify(`Saved ${def.key}; approve the queue again`);
+    this.deps.notify(`Saved ${def.key}`);
     return true;
   }
   editForm(d) {
@@ -3186,7 +3186,7 @@ var Board = class {
     const form = h(
       "div",
       { attrs: { "data-role": "edit-task" } },
-      h("p", { class: "field-hint", text: "A saved change returns the queue to draft: approve it again before anything runs." }),
+      h("p", { class: "field-hint", text: "A saved change to an approved queue is approved with it, and a run carries on. Stages built on the old task are discarded." }),
       e.add("title", fieldRow("Title", title)).el,
       e.add("phase", fieldRow("Phase", phase)).el,
       e.add("prompt", fieldRow("Prompt", prompt)).el,

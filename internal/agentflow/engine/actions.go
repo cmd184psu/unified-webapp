@@ -130,6 +130,35 @@ func (e *Engine) EditTask(ctx context.Context, actor string, effort int64, def m
 	return q, nil
 }
 
+// EditTaskAndResume is EditTask for a queue the person had already approved: the
+// edit is itself the review of the new definition, so the new queue is approved at
+// once (pinned to the hash the edit produced) and a run that was going carries on.
+// An effort that was still in queue_draft is only edited: nothing was approved to renew.
+func (e *Engine) EditTaskAndResume(ctx context.Context, actor string, effort int64, def model.TaskDef) (model.Queue, error) {
+	before, err := e.deps.Store.GetEffort(ctx, effort)
+	if err != nil {
+		return model.Queue{}, err
+	}
+	q, err := e.EditTask(ctx, actor, effort, def)
+	if err != nil {
+		return q, err
+	}
+	switch before.Status {
+	case model.EffortQueueAppr, model.EffortRunning, model.EffortPaused:
+	default:
+		return q, nil
+	}
+	if q, err = e.approveQueue(ctx, actor, effort, q.Hash); err != nil {
+		return q, err
+	}
+	if before.Status == model.EffortRunning {
+		if err := e.runs.Start(ctx, actor, before.Project); err != nil {
+			return q, err
+		}
+	}
+	return q, nil
+}
+
 // Override marks a halted task passed by a human decision (AT9). Its
 // dependents unblock, and the effort completes if it was the last open task.
 // The task's worktree and branch are removed; its work is not merged.

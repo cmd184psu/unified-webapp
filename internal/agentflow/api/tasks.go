@@ -154,7 +154,8 @@ func (a *API) getTask(w http.ResponseWriter, r *http.Request) {
 }
 
 // editTask replaces one task's definition; the queue returns to draft (AT9,
-// QA2). The key comes from the path.
+// QA2) unless ?approve=true, which re-approves a queue that was approved and
+// restarts a run that was going. The key comes from the path.
 func (a *API) editTask(w http.ResponseWriter, r *http.Request) {
 	ef, ok := a.loadEffort(w, r)
 	if !ok {
@@ -169,7 +170,11 @@ func (a *API) editTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	def.Key = r.PathValue("key")
-	if _, err := a.deps.Engine.EditTask(r.Context(), actorOf(r), ef.ID, def); err != nil {
+	edit := a.deps.Engine.EditTask
+	if r.URL.Query().Get("approve") == "true" {
+		edit = a.deps.Engine.EditTaskAndResume // an approved queue stays approved and a run goes on
+	}
+	if _, err := edit(r.Context(), actorOf(r), ef.ID, def); err != nil {
 		writeErr(w, err)
 		return
 	}

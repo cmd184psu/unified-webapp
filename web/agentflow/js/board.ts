@@ -266,7 +266,7 @@ export class Board {
     await this.refresh();
   }
 
-  /** saveEdit stores an edited task; the queue returns to draft, which the form says up front. The form stays as it is. */
+  /** saveEdit stores an edited task. An approved queue stays approved and a run goes on, so the edit needs no second approval. The form stays as it is. */
   private async saveEdit(def: TaskDef): Promise<boolean> {
     const ef = this.current;
     if (!ef) return false;
@@ -277,7 +277,7 @@ export class Board {
       this.errors.show(err);
       return false;
     }
-    this.deps.notify(`Saved ${def.key}; approve the queue again`);
+    this.deps.notify(`Saved ${def.key}`);
     return true;
   }
 
@@ -298,7 +298,7 @@ export class Board {
     });
     const auto = autosave({ snapshot: () => JSON.stringify(read()), save: () => this.saveEdit(read()) });
     const form = h('div', { attrs: { 'data-role': 'edit-task' } },
-      h('p', { class: 'field-hint', text: 'A saved change returns the queue to draft: approve it again before anything runs.' }),
+      h('p', { class: 'field-hint', text: 'A saved change to an approved queue is approved with it, and a run carries on. Stages built on the old task are discarded.' }),
       e.add('title', fieldRow('Title', title)).el,
       e.add('phase', fieldRow('Phase', phase)).el,
       e.add('prompt', fieldRow('Prompt', prompt)).el,

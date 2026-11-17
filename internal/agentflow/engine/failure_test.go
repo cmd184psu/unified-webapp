@@ -783,3 +783,31 @@ func TestHeldRestingModelKeepsItsWork(t *testing.T) {
 	}
 	waitFor(t, "task passed on the next candidate once the hold ended", func() bool { return c.taskStatus() == model.StatusPassed })
 }
+
+// Editing a task of a running effort with EditTaskAndResume keeps the queue approved
+// under the new hash and the run going; plain EditTask sends it back to draft.
+func TestEditTaskAndResumeKeepsApprovalAndRun(t *testing.T) {
+	c := newChainRun(t, nil, chainDefs()[:1])
+	ctx := context.Background()
+	appr := model.EffortQueueAppr
+	if _, err := c.st.UpdateEffort(ctx, "tester", c.effort, store.EffortPatch{Status: &appr}); err != nil {
+		t.Fatal(err)
+	}
+	q, err := c.st.GetQueue(ctx, c.effort)
+	if err != nil || len(q.Tasks) == 0 {
+		t.Fatalf("queue = %+v, %v", q, err)
+	}
+	def := q.Tasks[0]
+	def.Title += " (edited)"
+	nq, err := c.eng.EditTaskAndResume(ctx, "tester", c.effort, def)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nq.Hash == q.Hash || nq.Status != "approved" {
+		t.Fatalf("queue after edit: hash %s (was %s), status %s: want a new hash, approved", nq.Hash, q.Hash, nq.Status)
+	}
+	ef, err := c.st.GetEffort(ctx, c.effort)
+	if err != nil || ef.Status == model.EffortQueueDraft {
+		t.Fatalf("effort = %+v, %v: an approved queue's edit must not leave it in draft", ef.Status, err)
+	}
+}

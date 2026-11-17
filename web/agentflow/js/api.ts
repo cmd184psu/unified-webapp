@@ -814,9 +814,9 @@ export const api = {
     send('POST', `${eff(slug, id)}/queue/approve`, { hash }, o),
   tasks: (slug: string, id: number): Promise<TaskView[]> => get(`${eff(slug, id)}/tasks`),
   task: (slug: string, id: number, key: string): Promise<TaskDetail> => get(`${eff(slug, id)}/tasks/${enc(key)}`),
-  /** editTask answers with the queue, which is back in draft until it is approved again (AT9). */
+  /** editTask answers with the queue. A queue that was approved stays approved (the edit is the review) and a run goes on; one still in draft stays in draft. */
   editTask: (slug: string, id: number, key: string, def: TaskDef, o?: FetchOptions): Promise<QueueView> =>
-    send('PUT', `${eff(slug, id)}/tasks/${enc(key)}`, def, o),
+    send('PUT', `${eff(slug, id)}/tasks/${enc(key)}?approve=true`, def, o),
   retryTask: (slug: string, id: number, key: string, clean: boolean): Promise<TaskDetail> =>
     send('POST', `${eff(slug, id)}/tasks/${enc(key)}/retry`, { clean }),
   overrideTask: (slug: string, id: number, key: string, reason: string): Promise<TaskDetail> =>

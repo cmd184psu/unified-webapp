@@ -222,8 +222,8 @@ test('AT9: edit task saves the full definition by itself and says the queue goes
   byField(t.host, 'depends_on').fire('input');
   await new Promise((r) => setTimeout(r, 60));
   await flush();
-  ok(t.host.textContent.includes('returns the queue to draft'), 'said up front');
-  ok(t.log.some((l) => l.startsWith('notify:Saved T004') && l.includes('approve the queue again')), 'toast');
+  ok(t.host.textContent.includes('is approved with it'), 'said up front');
+  ok(t.log.some((l) => l.startsWith('notify:Saved T004')), 'toast');
   eq(t.log.filter((l) => l.startsWith('edit:')), ['edit:T004:new prompt']);
   stop();
 });
