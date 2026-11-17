@@ -63,7 +63,7 @@ func TestRunFinalIsTheLastAgentMessage(t *testing.T) {
 		t.Fatalf("stdin = %q, want the prompt", in)
 	}
 	args, _ := os.ReadFile(filepath.Join(dir, "args.txt"))
-	for _, want := range []string{"exec\n", "--json", "-m\ngpt-6.1-terra", `sandbox_mode="workspace-write"`, `approval_policy="never"`, `model_reasoning_effort="medium"`, "-C\n" + req.Workdir, "-\n"} {
+	for _, want := range []string{"exec\n", "--json", "-m\ngpt-6.1-terra", `default_permissions="agentflow"`, `extends=":workspace"`, `"**/.env"="deny"`, `approval_policy="never"`, `model_reasoning_effort="medium"`, "-C\n" + req.Workdir, "-\n"} {
 		if !strings.Contains(string(args), want) {
 			t.Fatalf("argv lacks %q:\n%s", want, args)
 		}
@@ -72,8 +72,12 @@ func TestRunFinalIsTheLastAgentMessage(t *testing.T) {
 
 func TestSandboxFollowsTheRoleAndFollowUpResumes(t *testing.T) {
 	a := &Adapter{}
-	for role, want := range map[string]string{"worker": "workspace-write", "cleanup": "workspace-write", "reviewer": "read-only", "planner": "read-only"} {
-		if argv := strings.Join(a.Argv("codex", request(t, role)), " "); !strings.Contains(argv, `sandbox_mode="`+want+`"`) {
+	for role, want := range map[string]string{"worker": `extends=":workspace"`, "cleanup": `extends=":workspace"`, "reviewer": `extends=":read-only"`, "planner": `extends=":read-only"`} {
+		argv := strings.Join(a.Argv("codex", request(t, role)), " ")
+		if strings.Contains(argv, "sandbox_mode") {
+			t.Errorf("%s: sandbox_mode cannot be combined with a permissions profile: %s", role, argv)
+		}
+		if !strings.Contains(argv, want) {
 			t.Errorf("%s: %s, want %s", role, argv, want)
 		}
 	}
@@ -138,5 +142,35 @@ func TestChildEnvCarriesNoAgentflowKeys(t *testing.T) {
 	a := &Adapter{ParentEnv: []string{"PATH=/bin", "HOME=/h", "AGENTFLOW_KEY_X=secret", "OPENAI_API_KEY=k"}}
 	if env := strings.Join(a.env(runner.Request{}), " "); strings.Contains(env, "secret") || strings.Contains(env, "OPENAI") {
 		t.Fatalf("env = %s", env)
+	}
+}
+
+// Only secrets that exist are denied, and a symlinked one is denied at its real path.
+func TestSecretPathsListOnlyRealPathsOfWhatExists(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", "")
+	real := filepath.Join(home, "elsewhere", ".codex")
+	if err := os.MkdirAll(real, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(real, "auth.json"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, filepath.Join(home, ".codex")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(home, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{filepath.Join(home, ".ssh"): true, filepath.Join(real, "auth.json"): true}
+	got := secretPaths()
+	if len(got) != len(want) {
+		t.Fatalf("secretPaths = %v, want %v", got, want)
+	}
+	for _, p := range got {
+		if !want[p] {
+			t.Fatalf("secretPaths = %v, want %v", got, want)
+		}
 	}
 }

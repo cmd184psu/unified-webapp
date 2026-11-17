@@ -2,7 +2,8 @@
 // on the user's own ChatGPT login. Stages run headless with the prompt on stdin
 // and `--json` events on stdout. Codex keeps its own login and brings its own
 // sandbox; agentflow never copies a credential. Roles that write (worker,
-// cleanup) get Codex's workspace-write sandbox, every other role read-only.
+// cleanup) run under Codex's workspace permissions profile, every other role under
+// read-only, both with the user's secrets (SSH keys, other logins, .env files) denied.
 package codex
 
 import (
@@ -17,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -96,12 +98,60 @@ func (a *Adapter) env(req runner.Request) []string {
 
 func writesWorktree(role string) bool { return role == "worker" || role == "cleanup" }
 
+// profileName is the permissions profile a role runs under.
+func profileName(role string) string {
+	if writesWorktree(role) {
+		return "agentflow"
+	}
+	return "agentflow-ro"
+}
+
+// secretPaths are the files and folders no model call may read: the user's SSH keys,
+// other tools' logins, the service PIN and the Grok and Codex logins themselves. Codex
+// reads its own login outside the sandbox, so denying it costs nothing. Only paths that
+// exist are listed (the sandbox cannot mount a deny over a missing path), and a symlink is
+// resolved first (it cannot mount over one).
+func secretPaths() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	codexHome := os.Getenv("CODEX_HOME")
+	if codexHome == "" {
+		codexHome = filepath.Join(home, ".codex")
+	}
+	var out []string
+	for _, p := range []string{
+		filepath.Join(home, ".ssh"),
+		filepath.Join(home, ".local", "share", "opencode", "auth.json"),
+		filepath.Join(home, ".unified_common.pin"),
+		filepath.Join(home, ".grok", "auth.json"),
+		filepath.Join(codexHome, "auth.json"),
+	} {
+		if real, err := filepath.EvalSymlinks(p); err == nil {
+			out = append(out, real)
+		}
+	}
+	return out
+}
+
+// permissionsConfig is the -c value that defines the role's profile: Codex's workspace
+// (workers) or read-only (everyone else) profile, with the secrets denied.
+func permissionsConfig(role string) string {
+	parent := ":read-only"
+	if writesWorktree(role) {
+		parent = ":workspace"
+	}
+	var fs []string
+	for _, p := range secretPaths() {
+		fs = append(fs, strconv.Quote(p)+`="deny"`)
+	}
+	fs = append(fs, `":workspace_roots"={ "**/.env"="deny" }`, `glob_scan_max_depth=4`)
+	return "permissions." + profileName(role) + `={ extends="` + parent + `", filesystem={ ` + strings.Join(fs, ", ") + ` } }`
+}
+
 // Argv is the codex command line for req. The prompt goes on stdin ("-").
 func (a *Adapter) Argv(path string, req runner.Request) []string {
-	sandbox := "read-only"
-	if writesWorktree(req.Role) {
-		sandbox = "workspace-write"
-	}
 	argv := []string{path, "exec"}
 	if req.SessionID != "" {
 		argv = append(argv, "resume")
@@ -109,7 +159,8 @@ func (a *Adapter) Argv(path string, req runner.Request) []string {
 	argv = append(argv,
 		"--json", "--skip-git-repo-check", "--ignore-rules",
 		"-m", req.Model,
-		"-c", `sandbox_mode="`+sandbox+`"`,
+		"-c", permissionsConfig(req.Role),
+		"-c", `default_permissions="`+profileName(req.Role)+`"`,
 		"-c", `approval_policy="never"`,
 		"-c", `model_reasoning_effort="`+a.effort()+`"`,
 	)

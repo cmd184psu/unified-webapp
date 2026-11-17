@@ -194,7 +194,7 @@ Grok's own `auth.json` has to stay readable inside its sandbox, so a model that 
 
 ### The Codex CLI backend
 
-A backend of api type `codex` runs stages through `codex exec` on your own ChatGPT login (`codex login`), the same way as the Grok CLI backend: no host, no key, no credential copied. The probe button lists the models your login offers. Stages run with `--json`, the prompt on stdin, and Codex's own sandbox: `workspace-write` for roles that write (worker, cleanup), `read-only` for the rest, never asking for approval. Codex cannot hide its own `auth.json` from the model's tools (it reads it inside the sandbox), so the exposure is the same as using `codex` yourself. Codex also loads your global instructions into every call, which adds to the usage each stage costs.
+A backend of api type `codex` runs stages through `codex exec` on your own ChatGPT login (`codex login`), the same way as the Grok CLI backend: no host, no key, no credential copied. The probe button lists the models your login offers. Stages run with `--json`, the prompt on stdin, and Codex's own sandbox through a permissions profile built for each call: `:workspace` for roles that write (worker, cleanup), `:read-only` for the rest, never asking for approval. The profile denies the model's tools any read of `~/.ssh`, opencode's `auth.json`, the service PIN file, Grok's and Codex's own `auth.json` (Codex reads its login outside the sandbox, so this costs nothing) and every `.env` file under the workspace. Only paths that exist are listed, and a symlinked one is denied at its real path. Codex also loads your global instructions into every call, which adds to the usage each stage costs.
 
 ## Projects
 
