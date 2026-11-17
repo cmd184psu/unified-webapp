@@ -83,6 +83,8 @@ var api = {
   deleteBackend: (name) => send("DELETE", `/api/backends/${enc(name)}`),
   rests: () => get("/api/rests", { quiet: true }),
   wakeModel: (backend, model) => send("DELETE", `/api/rests?backend=${enc(backend)}&model=${enc(model)}`),
+  holds: () => get("/api/holds", { quiet: true }),
+  setHold: (backend, model, hold) => send("PUT", `/api/holds?backend=${enc(backend)}&model=${enc(model)}&hold=${hold}`),
   checkModels: (name) => send("POST", `/api/backends/${enc(name)}/check`),
   checkStatus: (name) => get(`/api/backends/${enc(name)}/check`, { quiet: true }),
   checkReviewers: (name, body = {}) => send("POST", `/api/backends/${enc(name)}/evals`, body),
@@ -1981,6 +1983,8 @@ var defaultBackendsDeps = () => ({
   deleteBackend: api.deleteBackend,
   rests: api.rests,
   wakeModel: api.wakeModel,
+  holds: api.holds,
+  setHold: api.setHold,
   checkModels: api.checkModels,
   checkStatus: api.checkStatus,
   checkReviewers: api.checkReviewers,
@@ -2027,6 +2031,8 @@ var BackendsView = class {
     this.checks = /* @__PURE__ */ new Map();
     /** The models that are resting after a rate limit or a stall, keyed backend + NUL + model. */
     this.rests = /* @__PURE__ */ new Map();
+    /** The models held: while one rests its work waits for it, keyed backend + NUL + model. */
+    this.holds = /* @__PURE__ */ new Set();
     /** The last seeded-defect reviewer check of each backend (H32), refreshed while one runs. */
     this.evals = /* @__PURE__ */ new Map();
     /** role -> rows being edited; present only while the role has unsaved edits. */
@@ -2075,6 +2081,10 @@ var BackendsView = class {
       Object.assign(this, { backends, candidates, projects, globals, loaded: true });
       try {
         this.rests = new Map((await this.deps.rests()).map((r) => [r.backend + "\0" + r.model, r]));
+      } catch {
+      }
+      try {
+        this.holds = new Set((await this.deps.holds()).map((x) => x.backend + "\0" + x.model));
       } catch {
       }
       await Promise.all(backends.map(async (b) => {
@@ -2333,6 +2343,7 @@ var BackendsView = class {
       m.tier ? badge(`tier ${m.tier}`, m.tier === 3 ? "warn" : "muted") : null,
       m.too_big ? badge("too big for host", "warn") : null,
       ...this.restParts(b.name, m.model),
+      ...this.holdParts(b, m.model),
       m.tools === "no" ? badge("no tools", "warn") : null
     ));
     return h(
@@ -2496,6 +2507,24 @@ var BackendsView = class {
       badge(`resting until ${at} (${r.reason}${r.streak > 1 ? `, ${r.streak} in a row` : ""})`, "warn"),
       button("Wake", () => void this.wake(backend, model), { field: "wake-model", word: true })
     ];
+  }
+  /** holdParts is the Hold toggle of a hosted model: held, its work waits while it rests instead of moving on. */
+  holdParts(b, model) {
+    if (!b.hosted) return [];
+    const held = this.holds.has(b.name + "\0" + model);
+    return [
+      held ? badge("held: work waits for it when it rests", "muted") : null,
+      button(held ? "Release" : "Hold", () => void this.hold(b.name, model, !held), { field: "hold-model", word: true })
+    ];
+  }
+  async hold(backend, model, on) {
+    try {
+      await this.deps.setHold(backend, model, on);
+      this.deps.notify(on ? `${model} is held: its work waits for it when it rests` : `${model} is released`);
+    } catch {
+      return;
+    }
+    await this.load();
   }
   async wake(backend, model) {
     try {

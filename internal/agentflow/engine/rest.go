@@ -63,3 +63,18 @@ func restReason(c store.Candidate, until time.Time, why string) string {
 
 func restTime(v *view, c store.Candidate) time.Time { t, _ := restingUntil(v, c); return t }
 func restWhy(v *view, c store.Candidate) string     { _, w := restingUntil(v, c); return w }
+
+// candidates is the role's candidate list as the pickers walk it. A held model
+// (store.ModelHold) that is resting ends the list: its work waits for it rather
+// than falling to a lower candidate, and the dispatcher's next tick after the rest
+// ends takes it up again.
+func (v *view) candidates(role, slug string) []store.Candidate {
+	all := v.snap.CandidatesFor(role, slug)
+	for i, c := range all {
+		k := modelKey(c.Backend, c.Model)
+		if _, resting := v.restModel[k]; resting && v.held[k] {
+			return all[:i+1]
+		}
+	}
+	return all
+}

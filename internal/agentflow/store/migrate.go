@@ -57,7 +57,18 @@ var migrations = []migration{
 	{25, migration25SQL},
 	{26, migration26SQL},
 	{27, migration27SQL},
+	{28, migration28SQL},
 }
+
+// migration28SQL keeps the models that are held: while a held model rests, the
+// stages that would use it wait for it instead of falling to the next candidate.
+const migration28SQL = `
+CREATE TABLE model_hold (
+  backend TEXT NOT NULL,
+  model TEXT NOT NULL,
+  PRIMARY KEY (backend, model)
+);
+`
 
 // migration27SQL lets a backend be the Codex CLI (api type 'codex'): migration
 // 26's rebuild with the wider api_type CHECK.

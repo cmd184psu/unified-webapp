@@ -828,7 +828,7 @@ func (e *Engine) pickEffortStage(ctx context.Context, p store.Project, role stri
 	}
 	var reasons []string
 	var fallback *Pick
-	for _, c := range v.snap.CandidatesFor(role, p.Slug) {
+	for _, c := range v.candidates(role, p.Slug) {
 		if avoided(avoid, avoidKey(c.Backend, c.Model)) {
 			reasons = append(reasons, "model "+c.Model+" on "+c.Backend+" just failed")
 			continue

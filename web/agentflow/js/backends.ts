@@ -52,7 +52,7 @@ export const setCheckPollMs = (ms: number): void => { checkPollMs = ms; };
 
 export type BackendsDeps = Pick<
   typeof api,
-  'backends' | 'createBackend' | 'probeBackend' | 'patchBackend' | 'retireBackend' | 'enableBackend' | 'deleteBackend' | 'rests' | 'wakeModel' | 'checkModels' | 'checkStatus' | 'checkReviewers' | 'evalStatus' | 'extendWindows' | 'candidates' | 'putCandidates' |
+  'backends' | 'createBackend' | 'probeBackend' | 'patchBackend' | 'retireBackend' | 'enableBackend' | 'deleteBackend' | 'rests' | 'wakeModel' | 'holds' | 'setHold' | 'checkModels' | 'checkStatus' | 'checkReviewers' | 'evalStatus' | 'extendWindows' | 'candidates' | 'putCandidates' |
   'projects' | 'limits' | 'putLimits' | 'settings'
 > & { notify(message: string): void; confirm(message: string, confirmLabel?: string): Promise<boolean> };
 
@@ -66,6 +66,8 @@ export const defaultBackendsDeps = (): BackendsDeps => ({
   deleteBackend: api.deleteBackend,
   rests: api.rests,
   wakeModel: api.wakeModel,
+  holds: api.holds,
+  setHold: api.setHold,
   checkModels: api.checkModels,
   checkStatus: api.checkStatus,
   checkReviewers: api.checkReviewers,
@@ -113,6 +115,8 @@ export class BackendsView {
   private checks = new Map<string, CheckView>();
   /** The models that are resting after a rate limit or a stall, keyed backend + NUL + model. */
   private rests = new Map<string, ModelRest>();
+  /** The models held: while one rests its work waits for it, keyed backend + NUL + model. */
+  private holds = new Set<string>();
   /** The last seeded-defect reviewer check of each backend (H32), refreshed while one runs. */
   private evals = new Map<string, EvalView>();
   /** role -> rows being edited; present only while the role has unsaved edits. */
@@ -164,6 +168,11 @@ export class BackendsView {
         this.rests = new Map((await this.deps.rests()).map((r) => [r.backend + '\u0000' + r.model, r]));
       } catch {
         // no list of rests yet: nothing is shown as resting
+      }
+      try {
+        this.holds = new Set((await this.deps.holds()).map((x) => x.backend + '\u0000' + x.model));
+      } catch {
+        // no list of holds yet: nothing is shown as held
       }
       await Promise.all(backends.map(async (b) => {
         try {
@@ -401,6 +410,7 @@ export class BackendsView {
       m.tier ? badge(`tier ${m.tier}`, m.tier === 3 ? 'warn' : 'muted') : null,
       m.too_big ? badge('too big for host', 'warn') : null,
       ...this.restParts(b.name, m.model),
+      ...this.holdParts(b, m.model),
       m.tools === 'no' ? badge('no tools', 'warn') : null));
     return h('div', { class: 'profile-card', attrs: { 'data-backend': b.name } },
       h('div', { class: 'profile-header' },
@@ -555,6 +565,26 @@ export class BackendsView {
       badge(`resting until ${at} (${r.reason}${r.streak > 1 ? `, ${r.streak} in a row` : ''})`, 'warn'),
       button('Wake', () => void this.wake(backend, model), { field: 'wake-model', word: true }),
     ];
+  }
+
+  /** holdParts is the Hold toggle of a hosted model: held, its work waits while it rests instead of moving on. */
+  private holdParts(b: Backend, model: string): (HTMLElement | null)[] {
+    if (!b.hosted) return [];
+    const held = this.holds.has(b.name + '\u0000' + model);
+    return [
+      held ? badge('held: work waits for it when it rests', 'muted') : null,
+      button(held ? 'Release' : 'Hold', () => void this.hold(b.name, model, !held), { field: 'hold-model', word: true }),
+    ];
+  }
+
+  private async hold(backend: string, model: string, on: boolean): Promise<void> {
+    try {
+      await this.deps.setHold(backend, model, on);
+      this.deps.notify(on ? `${model} is held: its work waits for it when it rests` : `${model} is released`);
+    } catch {
+      return;
+    }
+    await this.load();
   }
 
   private async wake(backend: string, model: string): Promise<void> {

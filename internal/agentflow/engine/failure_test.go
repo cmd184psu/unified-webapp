@@ -753,3 +753,33 @@ func TestAllModelsRestingWaitsThenResumes(t *testing.T) {
 	}
 	waitFor(t, "task passed after the model woke", func() bool { return c.taskStatus() == model.StatusPassed })
 }
+
+// A held model that is resting keeps its work: the task waits for it instead of
+// moving to the next candidate. Releasing the hold lets the work move on.
+func TestHeldRestingModelKeepsItsWork(t *testing.T) {
+	c := newChainRun(t, nil, chainDefs()[:1])
+	c.addBackend("gpu2", 1, false, false, "m3", "m4")
+	c.candidates("global", "", "worker", "gpu/m1", "gpu2/m3")
+	c.candidates("global", "", "reviewer", "gpu/m2", "gpu2/m4")
+	ctx := context.Background()
+	if _, err := c.st.RestModel(ctx, "gpu", "m1", "rate limited", time.Hour, time.Hour, c.eng.deps.Clock()); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.eng.SetModelHold(ctx, "gpu", "m1", true); err != nil {
+		t.Fatal(err)
+	}
+	c.fake.Script("worker", runner.Step{Reply: workerOK, Edit: writeWork})
+	c.fake.Script("reviewer", runner.Step{Reply: reviewPass})
+	c.run()
+	waitFor(t, "task waits for the held model", func() bool {
+		ts, err := c.st.ListTasks(ctx, c.effort)
+		return err == nil && len(ts) == 1 && strings.Contains(ts[0].WaitingReason, "model m1 on gpu is resting until")
+	})
+	if c.taskStatus() == model.StatusPassed {
+		t.Fatal("the task moved to another model while the held one rested")
+	}
+	if err := c.eng.SetModelHold(ctx, "gpu", "m1", false); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "task passed on the next candidate once the hold ended", func() bool { return c.taskStatus() == model.StatusPassed })
+}

@@ -269,6 +269,14 @@ The Backends tab shows a resting model with the time it comes back, and **Wake**
 now. `GET /api/rests` lists them, and `DELETE /api/rests?backend=&model=` wakes one (204, or 404
 when it is not resting). Rests are kept in the database, so a restart does not forget them.
 
+**Hold** (a button on each hosted model) says the model's work should wait for it. Normally a
+resting model is passed over and the stage goes to the next candidate; a held model that is resting
+ends the candidate list instead, so its stages wait with the reason "resting until ..." and carry on
+when the rest ends (the dispatcher's next tick) or you press Wake. Release puts the model back to
+being passed over. `GET /api/holds` lists the held models, and
+`PUT /api/holds?backend=&model=&hold=true|false` holds or releases one (204). Holds are kept in the
+database (migration 28).
+
 ### Limits
 
 Global settings are at `GET/PUT /api/settings`; a project overrides most of them at

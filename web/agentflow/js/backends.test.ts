@@ -27,10 +27,11 @@ interface State {
   /** what the "Are you sure?" dialog answers */
   sure: boolean;
   rests: ModelRest[];
+  holds: { backend: string; model: string }[];
 }
 
 function harness(init: Partial<State> = {}, over: Partial<BackendsDeps> = {}) {
-  const st: State = { backends: [], candidates: [], projects: [], sure: true, rests: [], ...init };
+  const st: State = { backends: [], candidates: [], projects: [], sure: true, rests: [], holds: [], ...init };
   const host = new FakeEl('DIV');
   const log: string[] = [];
   const bodies: Record<string, unknown> = {};
@@ -47,6 +48,12 @@ function harness(init: Partial<State> = {}, over: Partial<BackendsDeps> = {}) {
     retireBackend: async (name, cancel) => { log.push(`retire:${name}:${cancel}`); return result(be(name, { retired: true }), ['retired the last backend for worker; project p1 is running']); },
     enableBackend: async (name) => { log.push('enable:' + name); return result(be(name)); },
     rests: async () => st.rests,
+    holds: async () => st.holds,
+    setHold: async (backend, model, hold) => {
+      log.push(`hold:${backend}:${model}:${hold}`);
+      st.holds = st.holds.filter((x) => !(x.backend === backend && x.model === model));
+      if (hold) st.holds.push({ backend, model });
+    },
     wakeModel: async (backend, model) => { log.push(`wake:${backend}:${model}`); st.rests = st.rests.filter((r) => !(r.backend === backend && r.model === model)); },
     deleteBackend: async (name) => { log.push('delete:' + name); st.backends = st.backends.filter((b) => b.name !== name); },
     confirm: async (message, label) => { log.push(`confirm:${label ?? ''}`); bodies.confirm = message; return st.sure; },
@@ -724,5 +731,20 @@ test('RS2: a rest that has ended shows nothing', async () => {
   const stop = t.view.mount();
   await flush();
   ok(!byAttr(t.host, 'data-backend', 'hosted1')[0].textContent.includes('resting'), 'an expired rest is not shown');
+  stop();
+});
+
+test('RS3: Hold keeps a hosted model\'s work waiting for it, Release undoes it, a local backend has no Hold', async () => {
+  const t = harness({ backends: [be('hosted1', { hosted: true }), be('plain')] });
+  const stop = t.view.mount();
+  await flush();
+  ok(!byAttr(t.host, 'data-backend', 'plain')[0].textContent.includes('Hold'), 'a local backend has no Hold');
+  button(byAttr(t.host, 'data-backend', 'hosted1')[0], 'Hold').click();
+  await flush();
+  eq(t.log.filter((l) => l.startsWith('hold:')), ['hold:hosted1:m1:true']);
+  ok(byAttr(t.host, 'data-backend', 'hosted1')[0].textContent.includes('held'), 'the card says the model is held');
+  button(byAttr(t.host, 'data-backend', 'hosted1')[0], 'Release').click();
+  await flush();
+  eq(t.log.filter((l) => l.startsWith('hold:')), ['hold:hosted1:m1:true', 'hold:hosted1:m1:false']);
   stop();
 });

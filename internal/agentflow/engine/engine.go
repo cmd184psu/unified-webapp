@@ -255,6 +255,22 @@ func (e *Engine) WakeModel(ctx context.Context, backend, model string) error {
 	return nil
 }
 
+// ModelHolds lists the held models.
+func (e *Engine) ModelHolds(ctx context.Context) ([]store.ModelHold, error) {
+	return e.deps.Store.ModelHolds(ctx)
+}
+
+// SetModelHold holds a model (its work waits for it while it rests) or releases it.
+func (e *Engine) SetModelHold(ctx context.Context, backend, model string, hold bool) error {
+	if err := e.deps.Store.SetModelHold(ctx, backend, model, hold); err != nil {
+		return err
+	}
+	if e.deps.Kick != nil {
+		e.deps.Kick()
+	}
+	return nil
+}
+
 // EnableBackend re-enables a retired backend and its lane.
 func (e *Engine) EnableBackend(ctx context.Context, actor, name string) error {
 	if err := e.deps.Store.EnableBackend(ctx, actor, name); err != nil {

@@ -36,3 +36,25 @@ func TestModelRestEscalatesAndClears(t *testing.T) {
 		t.Fatal("a second clear found a rest")
 	}
 }
+
+func TestModelHoldSetListRelease(t *testing.T) {
+	s, _ := openTemp(t)
+	for i := 0; i < 2; i++ { // holding twice is the same as holding once
+		if err := s.SetModelHold(ctx, "grok", "grok-4.7", true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hs, err := s.ModelHolds(ctx)
+	if err != nil || len(hs) != 1 || hs[0].Backend != "grok" || hs[0].Model != "grok-4.7" {
+		t.Fatalf("holds = %+v, %v", hs, err)
+	}
+	if err := s.SetModelHold(ctx, "grok", "grok-4.7", false); err != nil {
+		t.Fatal(err)
+	}
+	if hs, _ = s.ModelHolds(ctx); len(hs) != 0 {
+		t.Fatalf("holds after release = %+v", hs)
+	}
+	if err := s.SetModelHold(ctx, "", "m", true); err == nil {
+		t.Fatal("an empty backend was accepted")
+	}
+}

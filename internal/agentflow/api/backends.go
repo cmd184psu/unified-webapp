@@ -21,6 +21,8 @@ func (a *API) registerBackends(mux muxer) {
 	mux.HandleFunc("DELETE /api/backends/{name}", a.deleteBackend)
 	mux.HandleFunc("GET /api/rests", a.listRests)
 	mux.HandleFunc("DELETE /api/rests", a.wakeModel)
+	mux.HandleFunc("GET /api/holds", a.listHolds)
+	mux.HandleFunc("PUT /api/holds", a.setHold)
 	mux.HandleFunc("GET /api/backends/{name}/check", a.checkStatus)
 	mux.HandleFunc("GET /api/projects/{slug}/preflight", a.preflight)
 	mux.HandleFunc("POST /api/backends/{name}/check", a.checkModels)
@@ -554,5 +556,34 @@ func (a *API) wakeModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.emit("backend.update", map[string]any{"backend": backend})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// listHolds answers GET /api/holds: the models whose work waits for them while they rest.
+func (a *API) listHolds(w http.ResponseWriter, r *http.Request) {
+	hs, err := a.deps.Engine.ModelHolds(r.Context())
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if hs == nil {
+		hs = []store.ModelHold{}
+	}
+	writeJSON(w, http.StatusOK, hs)
+}
+
+// setHold answers PUT /api/holds?backend=&model=&hold=true|false: hold or release a model (204).
+func (a *API) setHold(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	hold := q.Get("hold")
+	if hold != "true" && hold != "false" {
+		writeErr(w, store.Invalid("hold", "hold must be true or false"))
+		return
+	}
+	if err := a.deps.Engine.SetModelHold(r.Context(), q.Get("backend"), q.Get("model"), hold == "true"); err != nil {
+		writeErr(w, err)
+		return
+	}
+	a.emit("backend.update", map[string]any{"backend": q.Get("backend")})
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -184,6 +184,12 @@ export interface BackendModel {
 }
 
 /** The last check of one model (H27): ok when a one-word prompt was answered; class says why not. */
+/** ModelHold is a model whose work waits for it while it rests, instead of moving to the next candidate. */
+export interface ModelHold {
+  backend: string;
+  model: string;
+}
+
 /** ModelRest is a model that hit a rate limit or stalled; it takes no new stage until `until` (unix ms). */
 export interface ModelRest {
   backend: string;
@@ -732,6 +738,8 @@ export const api = {
   deleteBackend: (name: string): Promise<void> => send('DELETE', `/api/backends/${enc(name)}`),
   rests: (): Promise<ModelRest[]> => get('/api/rests', { quiet: true }),
   wakeModel: (backend: string, model: string): Promise<void> => send('DELETE', `/api/rests?backend=${enc(backend)}&model=${enc(model)}`),
+  holds: (): Promise<ModelHold[]> => get('/api/holds', { quiet: true }),
+  setHold: (backend: string, model: string, hold: boolean): Promise<void> => send('PUT', `/api/holds?backend=${enc(backend)}&model=${enc(model)}&hold=${hold}`),
   checkModels: (name: string): Promise<CheckView> => send('POST', `/api/backends/${enc(name)}/check`),
   checkStatus: (name: string): Promise<CheckView> => get(`/api/backends/${enc(name)}/check`, { quiet: true }),
   checkReviewers: (name: string, body: { layers?: string[]; repeats?: number } = {}): Promise<EvalView> => send('POST', `/api/backends/${enc(name)}/evals`, body),

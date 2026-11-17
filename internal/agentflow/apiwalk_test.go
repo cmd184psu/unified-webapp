@@ -132,6 +132,10 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	ok("GET", "/api/rests", "", 200)
 	ok("DELETE", "/api/rests?backend=scrap&model=m1", "", 404) // nothing resting
 	ok("DELETE", "/api/rests", "", 400)
+	ok("GET", "/api/holds", "", 200)
+	ok("PUT", "/api/holds?backend=gpu&model=m1&hold=true", "", 204)
+	ok("PUT", "/api/holds?backend=gpu&model=m1&hold=maybe", "", 400)
+	ok("PUT", "/api/holds?backend=gpu&model=m1&hold=false", "", 204)
 
 	// Settings, candidates, statistics.
 	ok("GET", "/api/settings", "", 200)

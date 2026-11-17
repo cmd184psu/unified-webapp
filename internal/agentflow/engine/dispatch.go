@@ -125,6 +125,8 @@ type view struct {
 	resting map[string]time.Time
 	// restModel maps modelKey to a model that is resting after a rate limit or a stall.
 	restModel map[string]store.ModelRest
+	// held is the set of models whose work waits for them while they rest.
+	held map[string]bool
 	// failing maps modelKey to a recent failed check of that model (H27).
 	failing map[string]store.ModelCheck
 	// modelFree is the remaining per-model concurrency (PX5) of every model
@@ -162,6 +164,14 @@ func (e *Engine) newView(ctx context.Context) (*view, error) {
 	rests, err := e.deps.Store.ModelRests(ctx)
 	if err != nil {
 		return nil, err
+	}
+	holds, err := e.deps.Store.ModelHolds(ctx)
+	if err != nil {
+		return nil, err
+	}
+	v.held = map[string]bool{}
+	for _, h := range holds {
+		v.held[modelKey(h.Backend, h.Model)] = true
 	}
 	for _, r := range rests {
 		if r.Until > now.UnixMilli() {
@@ -382,7 +392,7 @@ func (e *Engine) setWaiting(ctx context.Context, t model.Task, reason string) er
 // reaches stuck instead of waiting for ever.
 func pickWorker(v *view, p store.Project, sticky string, avoid map[string]int, maxTier int) (Pick, string) {
 	var reasons []string
-	cands := v.snap.CandidatesFor("worker", p.Slug)
+	cands := v.candidates("worker", p.Slug)
 	tierOK := func(c store.Candidate) bool {
 		return maxTier == 0 || effectiveTier(v.snap, c.Backend, c.Model) <= maxTier
 	}
@@ -494,7 +504,7 @@ func (e *Engine) pickBackend(ctx context.Context, role string, t model.Task, p s
 		pk, reason = reviewerFor(v, p, sticky, workerModel, true)
 	} else {
 		var reasons []string
-		for _, c := range v.snap.CandidatesFor(role, p.Slug) {
+		for _, c := range v.candidates(role, p.Slug) {
 			if why := skipReason(v, p, c, true); why != "" {
 				reasons = append(reasons, why)
 				continue
@@ -536,7 +546,7 @@ func reviewerFor(v *view, p store.Project, sticky, workerModel string, needSlot 
 }
 
 func reviewerPick(v *view, p store.Project, sticky, workerModel string, needSlot, notWeaker bool) (Pick, string) {
-	cands := v.snap.CandidatesFor("reviewer", p.Slug)
+	cands := v.candidates("reviewer", p.Slug)
 	level := func(c store.Candidate) int {
 		if model.ModelFamily(c.Model) != model.ModelFamily(workerModel) {
 			return 0
