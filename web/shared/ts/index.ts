@@ -16,6 +16,8 @@ export { copyText, createCopyButton } from "./clipboard.js";
 export type { CopyButtonOptions } from "./clipboard.js";
 export { FileTree, openTreePicker } from "./filetree.js";
 export type { TreeEntry, TreeSort, FileTreeOptions, TreePickerOptions } from "./filetree.js";
+export { openFilePicker, openDirPicker, fmtBytes } from "./filepicker.js";
+export type { FilePickerOptions, DirPickerOptions } from "./filepicker.js";
 export type { HamburgerMenuOptions, MenuItem } from "./menu.js";
 export { openOutputModal } from "./outputmodal.js";
 export { patchList } from "./patchlist.js";

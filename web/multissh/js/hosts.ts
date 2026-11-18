@@ -1,7 +1,7 @@
 import { openKeyPicker } from "./keypicker";
-import { openDirPicker } from "./dirpicker";
-import { fetchHosts, saveHosts } from "./api";
-import { confirmDialog, createCopyButton, showToast } from "@shared";
+import { fetchHosts, saveHosts, listRemoteDir } from "./api";
+import { confirmDialog, createCopyButton, showToast, openDirPicker } from "@shared";
+import type { TreeEntry } from "@shared";
 import type { AuthMethod, HostConfig, PersistedHost } from "./types";
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -349,10 +349,19 @@ export function mountHostRail(root: HTMLElement, maxHosts: number): HostStore {
         setTimeout(() => (dirInput.placeholder = prev), 2000);
         return;
       }
-      void openDirPicker(
-        { host: h.ip, port: h.port, user: h.user, key: h.key },
-        h.remoteDir || "/tmp",
-      ).then((path) => {
+      const target = { host: h.ip, port: h.port, user: h.user, key: h.key };
+      void openDirPicker({
+        place: `${h.user}@${h.ip}`,
+        startPath: h.remoteDir || "/tmp",
+        load: async (dir): Promise<TreeEntry[]> => {
+          // The top level is the filesystem root itself.
+          if (!dir) return [{ name: "/", path: "/", isDir: true }];
+          const { path, entries } = await listRemoteDir(target, dir.path);
+          return entries
+            .filter((e) => e.isDir)
+            .map((e) => ({ name: e.name, path: path === "/" ? `/${e.name}` : `${path}/${e.name}`, isDir: true }));
+        },
+      }).then((path) => {
         if (path !== null) {
           h.remoteDir = path;
           dirInput.value = path;

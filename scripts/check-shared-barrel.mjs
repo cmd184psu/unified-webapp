@@ -39,8 +39,11 @@ const BARREL = "web/shared/ts/index.ts";
 // statusSymbol, effectiveStatus) and 7 types (QueuePanelAdapter,
 // QueuePanelOptions, QueueSection, QueueActionKind, QueueProgress,
 // PatchListOptions, ExecStatus) — 13 -> 17 values, 14 -> 21 types.
-const ALLOWED_VALUES = ["openModal", "confirmDialog", "alertDialog", "promptDialog", "THEMES", "setTheme", "ThemeManager", "showToast", "HamburgerMenu", "copyText", "createCopyButton", "FileTree", "openTreePicker", "QueuePanel", "patchList", "statusSymbol", "effectiveStatus", "openOutputModal", "createToggle", "watchSecrets"];
-const ALLOWED_TYPES = ["ModalOptions", "ModalHandle", "DialogOptions", "PromptOptions", "ThemeManagerOptions", "ToastTone", "ToastHandle", "HamburgerMenuOptions", "MenuItem", "CopyButtonOptions", "TreeEntry", "TreeSort", "FileTreeOptions", "TreePickerOptions", "QueuePanelAdapter", "QueuePanelOptions", "QueueSection", "QueueActionKind", "QueueProgress", "PatchListOptions", "ExecStatus", "ToggleOptions"];
+// The shared file and directory pickers (openFilePicker, openDirPicker, fmtBytes)
+// came out of multissh so every module can use one canonical picker: 3 values and
+// 2 types (FilePickerOptions, DirPickerOptions) — 20 -> 23 values, 22 -> 24 types.
+const ALLOWED_VALUES = ["openModal", "confirmDialog", "alertDialog", "promptDialog", "THEMES", "setTheme", "ThemeManager", "showToast", "HamburgerMenu", "copyText", "createCopyButton", "FileTree", "openTreePicker", "QueuePanel", "patchList", "statusSymbol", "effectiveStatus", "openOutputModal", "createToggle", "watchSecrets", "openFilePicker", "openDirPicker", "fmtBytes"];
+const ALLOWED_TYPES = ["ModalOptions", "ModalHandle", "DialogOptions", "PromptOptions", "ThemeManagerOptions", "ToastTone", "ToastHandle", "HamburgerMenuOptions", "MenuItem", "CopyButtonOptions", "TreeEntry", "TreeSort", "FileTreeOptions", "TreePickerOptions", "QueuePanelAdapter", "QueuePanelOptions", "QueueSection", "QueueActionKind", "QueueProgress", "PatchListOptions", "ExecStatus", "ToggleOptions", "FilePickerOptions", "DirPickerOptions"];
 
 function fail(message) {
   process.stderr.write(`check-shared-barrel: FAIL ${message}\n`);

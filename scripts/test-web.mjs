@@ -56,6 +56,7 @@ const suites = [
   { name: "shared-menu", entry: "web/shared/ts/menu.test.ts", runner: "esbuild-cjs" },
   { name: "shared-patchlist", entry: "web/shared/ts/patchlist.test.ts", runner: "esbuild-cjs" },
   { name: "shared-queuepanel", entry: "web/shared/ts/queuepanel.test.ts", runner: "esbuild-cjs" },
+  { name: "shared-filepicker", entry: "web/shared/ts/filepicker.test.ts", runner: "esbuild-cjs" },
   { name: "smbedit-layout", entry: "web/smbedit/src/layout.test.ts", runner: "esbuild-cjs" },
   { name: "haproxy-modelform", entry: "web/haproxy/src/modelForm.test.ts", runner: "esbuild-cjs" },
   { name: "haproxy-issues", entry: "web/haproxy/src/issues.test.ts", runner: "esbuild-cjs" },

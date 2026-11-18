@@ -221,27 +221,8 @@ function renderList(list, note, keys, finish) {
   }
 }
 
-// web/multissh/js/dirpicker.ts
-import { openTreePicker } from "/shared/dist/shared.mjs";
-async function openDirPicker(target, startPath = "/tmp") {
-  const chosen = await openTreePicker({
-    title: "Choose remote directory",
-    select: "dir",
-    note: `Folders on ${target.user}@${target.host}. Select one and press the button, or double-click it.`,
-    confirmLabel: "Use this directory",
-    emptyText: "No subdirectories.",
-    startPath,
-    load: async (dir) => {
-      if (!dir) return [{ name: "/", path: "/", isDir: true }];
-      const { path, entries } = await listRemoteDir(target, dir.path);
-      return entries.filter((e) => e.isDir).map((e) => ({ name: e.name, path: path === "/" ? `/${e.name}` : `${path}/${e.name}`, isDir: true }));
-    }
-  });
-  return chosen?.path ?? null;
-}
-
 // web/multissh/js/hosts.ts
-import { confirmDialog, createCopyButton, showToast } from "/shared/dist/shared.mjs";
+import { confirmDialog, createCopyButton, showToast, openDirPicker } from "/shared/dist/shared.mjs";
 function el2(tag, className) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -508,10 +489,16 @@ function mountHostRail(root, maxHosts) {
         setTimeout(() => dirInput.placeholder = prev, 2e3);
         return;
       }
-      void openDirPicker(
-        { host: h2.ip, port: h2.port, user: h2.user, key: h2.key },
-        h2.remoteDir || "/tmp"
-      ).then((path) => {
+      const target = { host: h2.ip, port: h2.port, user: h2.user, key: h2.key };
+      void openDirPicker({
+        place: `${h2.user}@${h2.ip}`,
+        startPath: h2.remoteDir || "/tmp",
+        load: async (dir) => {
+          if (!dir) return [{ name: "/", path: "/", isDir: true }];
+          const { path, entries } = await listRemoteDir(target, dir.path);
+          return entries.filter((e) => e.isDir).map((e) => ({ name: e.name, path: path === "/" ? `/${e.name}` : `${path}/${e.name}`, isDir: true }));
+        }
+      }).then((path) => {
         if (path !== null) {
           h2.remoteDir = path;
           dirInput.value = path;
@@ -10228,44 +10215,12 @@ function buildPanel(index, initialConfig, container, control) {
   return api;
 }
 
-// web/multissh/js/filepicker.ts
-import { openTreePicker as openTreePicker2 } from "/shared/dist/shared.mjs";
-function fmtBytes(n) {
-  if (n < 1024) return `${n} B`;
-  if (n < 1048576) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1048576).toFixed(2)} MB`;
-}
-async function openFilePicker(startPath = "") {
-  const chosen = await openTreePicker2({
-    title: "Choose server file",
-    select: "file",
-    note: "Open folders with the arrow; double-click a file (or select it and press the button) to use it.",
-    confirmLabel: "Use this file",
-    emptyText: "No files here.",
-    startPath: startPath || void 0,
-    load: async (dir) => {
-      const { path, entries } = await listServerFiles(dir ? dir.path : "");
-      return entries.map((e) => ({
-        name: e.name,
-        path: path === "" ? e.name : `${path}/${e.name}`,
-        isDir: e.isDir,
-        meta: e.isDir ? void 0 : fmtBytes(e.size)
-      }));
-    }
-  });
-  return chosen?.path ?? null;
-}
-
 // web/multissh/js/upload.ts
+import { openFilePicker, fmtBytes } from "/shared/dist/shared.mjs";
 function el5(tag, className) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   return node;
-}
-function fmtBytes2(n) {
-  if (n < 1024) return `${n} B`;
-  if (n < 1048576) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1048576).toFixed(2)} MB`;
 }
 function mountUploadApp(root, store) {
   root.innerHTML = "";
@@ -10366,7 +10321,7 @@ function mountUploadApp(root, store) {
     source = s15;
     if (s15.kind === "upload") {
       fileNameEl.textContent = s15.info.name;
-      fileSizeEl.textContent = fmtBytes2(s15.info.size);
+      fileSizeEl.textContent = fmtBytes(s15.info.size);
     } else {
       fileNameEl.textContent = s15.path;
       fileSizeEl.textContent = "server file";
@@ -10400,7 +10355,7 @@ function mountUploadApp(root, store) {
     uploadFile(file, (loaded, total) => {
       const pct = total > 0 ? Math.round(loaded / total * 100) : 0;
       upFill.style.width = `${pct}%`;
-      upText.textContent = `${pct}% \xB7 ${fmtBytes2(loaded)} / ${fmtBytes2(total)}`;
+      upText.textContent = `${pct}% \xB7 ${fmtBytes(loaded)} / ${fmtBytes(total)}`;
     }).then((info) => {
       showSource({ kind: "upload", info });
     }).catch((err) => {
@@ -10432,7 +10387,17 @@ function mountUploadApp(root, store) {
     }
   });
   serverFileBtn.addEventListener("click", () => {
-    void openFilePicker("").then((path) => {
+    void openFilePicker({
+      load: async (dir) => {
+        const { path, entries } = await listServerFiles(dir ? dir.path : "");
+        return entries.map((e) => ({
+          name: e.name,
+          path: path === "" ? e.name : `${path}/${e.name}`,
+          isDir: e.isDir,
+          meta: e.isDir ? void 0 : fmtBytes(e.size)
+        }));
+      }
+    }).then((path) => {
       if (path !== null) {
         showSource({ kind: "file", path });
       }
@@ -10501,7 +10466,7 @@ function buildProgressRow(host, container) {
       if (p.total > 0) {
         const pct = Math.round(p.bytes / p.total * 100);
         fill.style.width = `${pct}%`;
-        bytesEl.textContent = `${fmtBytes2(p.bytes)} / ${fmtBytes2(p.total)} (${pct}%)`;
+        bytesEl.textContent = `${fmtBytes(p.bytes)} / ${fmtBytes(p.total)} (${pct}%)`;
       }
     }
   };
