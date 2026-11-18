@@ -159,13 +159,16 @@ type AttemptEnd struct {
 	N           int
 	Outcome     string
 	WorkerModel string
-	Finished    int64
+	// WorkerBackend is the backend of the attempt's last worker stage, '' when none ran.
+	WorkerBackend string
+	Finished      int64
 }
 
 // AttemptsEndedAfter lists attempts that finished after (ts, id), oldest first.
 func (s *Store) AttemptsEndedAfter(ctx context.Context, ts, id int64, limit int) ([]AttemptEnd, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT a.id, q.effort, t.task_key, a.n, a.outcome, a.worker_model, a.finished
+SELECT a.id, q.effort, t.task_key, a.n, a.outcome, a.worker_model,
+       COALESCE((SELECT s.backend FROM stages s WHERE s.attempt = a.id AND s.role = 'worker' ORDER BY s.id DESC LIMIT 1), ''), a.finished
 FROM attempts a JOIN tasks t ON a.task = t.id JOIN queues q ON t.queue = q.id
 WHERE a.outcome <> '' AND a.finished > 0 AND (a.finished > ? OR (a.finished = ? AND a.id > ?))
 ORDER BY a.finished, a.id LIMIT ?`, ts, ts, id, limit)
@@ -176,7 +179,7 @@ ORDER BY a.finished, a.id LIMIT ?`, ts, ts, id, limit)
 	var out []AttemptEnd
 	for rows.Next() {
 		var a AttemptEnd
-		if err := rows.Scan(&a.ID, &a.Effort, &a.Task, &a.N, &a.Outcome, &a.WorkerModel, &a.Finished); err != nil {
+		if err := rows.Scan(&a.ID, &a.Effort, &a.Task, &a.N, &a.Outcome, &a.WorkerModel, &a.WorkerBackend, &a.Finished); err != nil {
 			return nil, err
 		}
 		out = append(out, a)

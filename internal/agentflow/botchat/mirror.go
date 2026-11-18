@@ -20,8 +20,12 @@ import (
 //	attempt blocked  -> blocked on the coordinator
 //	effort complete  -> plan closed
 
-func workerCallsign(effort int64, task string) string {
-	return "af-" + strconv.FormatInt(effort, 10) + "-worker-" + task
+// workerCallsign is the agent that works a task: af-worker-<backend>-<model>, or af-worker before a model is known.
+func workerCallsign(backend, model string) string {
+	if model == "" {
+		return SeatCallsign("worker", "", "")
+	}
+	return SeatCallsign("worker", backend, model)
 }
 
 func planKey(effort int64) string           { return "plan:" + strconv.FormatInt(effort, 10) }
@@ -69,7 +73,6 @@ func (r *Relay) mirrorEffort(ctx context.Context, c *Client, effort int64) (stri
 			fields := map[string]any{
 				"from": Coordinator, "roomId": roomID, "planId": planID,
 				"title":     t.Key + " " + t.Title,
-				"assignee":  workerCallsign(effort, t.Key),
 				"objective": clip(t.Prompt, 3000),
 			}
 			if len(t.Acceptance) > 0 {
@@ -117,7 +120,7 @@ func (r *Relay) mirrorWorkerStart(ctx context.Context, c *Client, s store.Finish
 	if err != nil || id == "" {
 		return err
 	}
-	who := workerCallsign(s.Effort, s.Task)
+	who := workerCallsign(s.Backend, s.Model)
 	if st, err := c.TaskState(ctx, id); err == nil && st == "ready" {
 		_, _ = c.Transition(ctx, id, who, "claim", nil)
 	}
@@ -134,7 +137,7 @@ func (r *Relay) mirrorAttemptEnd(ctx context.Context, c *Client, a store.Attempt
 	if err != nil || id == "" {
 		return err
 	}
-	who := workerCallsign(a.Effort, a.Task)
+	who := workerCallsign(a.WorkerBackend, a.WorkerModel)
 	switch a.Outcome {
 	case "passed":
 		_, _ = c.Transition(ctx, id, who, "done", map[string]any{

@@ -278,13 +278,14 @@ func (r *Relay) send(ctx context.Context, c *Client, effort int64, from, text st
 	return err
 }
 
-// StageCallsign is the identity a stage speaks under: af-<effort>-<role>[-<task>].
+// StageCallsign is the identity a stage speaks under: the agent that served it, af-<role>-<backend>-<model>
+// (the same name its dispatch seat has). A stage with no model (verify, merge) speaks as af-<role>.
+// The effort is the room and the task is in the message text.
 func StageCallsign(s store.FinishedStage) string {
-	cs := "af-" + strconv.FormatInt(s.Effort, 10) + "-" + s.Role
-	if s.Task != "" {
-		cs += "-" + s.Task
+	if s.Model == "" {
+		return SeatCallsign(s.Role, "", "")
 	}
-	return cs
+	return SeatCallsign(s.Role, s.Backend, s.Model)
 }
 
 // StageText is the message for a stage that ended.

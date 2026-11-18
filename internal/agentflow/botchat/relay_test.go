@@ -110,7 +110,7 @@ func TestRelayStaysOffUntilConfiguredThenPostsNewEventsOnly(t *testing.T) {
 
 func TestMessageFormats(t *testing.T) {
 	s := store.FinishedStage{ID: 5, Effort: 23, Task: "T004", Attempt: 2, Role: "worker", Backend: "opencode-free", Model: "big-pickle", Outcome: "infra:timeout", Tokens: 12500, Started: 0, Finished: 0}
-	if got := StageCallsign(s); got != "af-23-worker-T004" {
+	if got := StageCallsign(s); got != "af-worker-opencode-free-big-pickle" {
 		t.Fatalf("callsign = %q", got)
 	}
 	if got := StageText(s); got != "T004 attempt 2 · worker big-pickle (opencode-free): infra:timeout · 12.5k tokens" {
