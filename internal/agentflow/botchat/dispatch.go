@@ -160,7 +160,7 @@ func (d *Dispatcher) Run(ctx context.Context, req runner.Request) (runner.Result
 func assignment(req runner.Request) string {
 	where := req.Role
 	if req.Job.Task != "" {
-		where = fmt.Sprintf("%s attempt %d · %s", req.Job.Task, req.Job.Attempt, req.Role)
+		where = req.Job.Task + " · " + req.Role
 	}
 	return fmt.Sprintf("%s: please work on this with %s (%s). Your prompt is ready.", where, req.Model, req.Backend.Name)
 }

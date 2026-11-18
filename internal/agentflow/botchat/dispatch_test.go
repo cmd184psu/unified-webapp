@@ -157,7 +157,7 @@ func TestDispatchPitchesPicksUpReadsTheRoomAndReports(t *testing.T) {
 	if seat != "af-worker-grok-grok-4-7" {
 		t.Fatalf("seat = %q", seat)
 	}
-	if !b.said(Coordinator, "[job:42]") || !b.said(seat, "picked up") || !b.said(seat, "[job:42] finished") {
+	if !b.said(Coordinator, "[job:42] T004 · worker") || !b.said(Coordinator, "[job:42]") || !b.said(seat, "picked up") || !b.said(seat, "[job:42] finished") {
 		t.Fatalf("the pitch, the pickup and the report must all be on BotChat: %v", b.msgs)
 	}
 	if len(in.prompts) != 1 || !strings.Contains(in.prompts[0], "use the stdlib only") || !strings.HasSuffix(in.prompts[0], "DO THE TASK") {
