@@ -200,3 +200,32 @@ func (e *Engine) failedChecks(ctx context.Context, now time.Time) (map[string]st
 	}
 	return out, nil
 }
+
+// recheckFailingBackends runs the existing health-check code path once for every
+// non-retired backend whose stored last result is failing, so a restart does not
+// leave a backend stuck 'failing' (AF-1).
+func (e *Engine) recheckFailingBackends(ctx context.Context) {
+	bs, err := e.deps.Store.ListBackends(ctx)
+	if err != nil {
+		return
+	}
+	checks, err := e.deps.Store.ModelChecks(ctx)
+	if err != nil {
+		return
+	}
+	failing := map[string]bool{}
+	for _, c := range checks {
+		if !c.OK {
+			failing[c.Backend] = true
+		}
+	}
+	for _, b := range bs {
+		if b.Retired {
+			continue
+		}
+		if !failing[b.Name] {
+			continue
+		}
+		_ = e.CheckModels(ctx, "system", b.Name)
+	}
+}

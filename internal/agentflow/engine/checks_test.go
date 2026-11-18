@@ -136,3 +136,24 @@ func TestH29_PreflightNamesRolesWithNoModelAndWorkersWithNoReviewer(t *testing.T
 		t.Fatalf("a role with no candidates: %+v", v)
 	}
 }
+
+// AF-1: a backend whose stored last check failed is re-checked at startup.
+func TestAF1_RecheckFailingBackendsAtStartup(t *testing.T) {
+	f := newPlanFix(t, false)
+	f.addBackend("gpu", 1, false, false, "m1")
+	f.fake.Script("critic", runner.Step{Reply: "ok"})
+	ctx := context.Background()
+	// store a failing last result for the model
+	if err := f.st.SaveModelCheck(ctx, store.ModelCheck{Backend: "gpu", Model: "m1", OK: false, Class: "failing", Checked: f.eng.deps.Clock().UnixMilli()}); err != nil {
+		t.Fatal(err)
+	}
+	f.eng.recheckFailingBackends(ctx)
+	var v CheckView
+	waitFor(t, "recheck finished", func() bool {
+		v, _ = f.eng.CheckStatus(ctx, "gpu")
+		return v.State == "idle" && len(v.Results) == 1
+	})
+	if !v.Results[0].OK {
+		t.Fatalf("model not rechecked: %+v", v.Results[0])
+	}
+}

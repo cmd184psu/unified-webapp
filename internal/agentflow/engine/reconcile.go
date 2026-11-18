@@ -292,6 +292,10 @@ func (e *Engine) Start(ctx context.Context) error {
 	if err := e.Resume(ctx); err != nil {
 		return err
 	}
+	// Re-run the health check once at startup for every non-retired backend
+	// whose stored last result is failing, so a restart does not leave a
+	// backend stuck 'failing' until an operator calls POST .../check (AF-1).
+	e.recheckFailingBackends(ctx)
 	// Planning and compile stages closed as lost by the reconcile above are
 	// submitted again now, not a tick later.
 	if err := e.AdvancePlans(ctx); err != nil {
