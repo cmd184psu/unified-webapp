@@ -10,7 +10,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
@@ -85,8 +87,18 @@ func (a *Adapter) versionEnv() []string {
 // dirs are private (a fresh HOME and XDG_CONFIG_HOME) and project config is
 // disabled, so nothing else can add a plugin.
 func Argv(path string, req runner.Request) []string {
+	return ArgvFor(path, req, 1)
+}
+
+// ArgvFor is Argv for an opencode of the given major version. opencode 2.x
+// dropped --pure (OPENCODE_PURE=1 in the stage environment still keeps external
+// plugins out) and by default hands the run to a background service outside the
+// sandbox; --standalone keeps the server inside the stage.
+func ArgvFor(path string, req runner.Request, major int) []string {
 	argv := []string{path, "run"}
-	if len(req.Plugins) == 0 {
+	if major >= 2 {
+		argv = append(argv, "--standalone")
+	} else if len(req.Plugins) == 0 {
 		argv = append(argv, "--pure")
 	}
 	argv = append(argv, "--format", "json", "--auto",
@@ -97,6 +109,29 @@ func Argv(path string, req runner.Request) []string {
 	}
 	return argv
 }
+
+// majorVersion returns the major version of the opencode binary at path,
+// probed once per path; 1 when it cannot be read.
+func (a *Adapter) majorVersion(ctx context.Context, path string) int {
+	majorMu.Lock()
+	defer majorMu.Unlock()
+	if m, ok := majorByPath[path]; ok {
+		return m
+	}
+	m := 1
+	if v, err := a.Version(ctx); err == nil {
+		if n, err := strconv.Atoi(strings.SplitN(v, ".", 2)[0]); err == nil {
+			m = n
+		}
+	}
+	majorByPath[path] = m
+	return m
+}
+
+var (
+	majorMu     sync.Mutex
+	majorByPath = map[string]int{}
+)
 
 // childEnv is the isolated environment of req's child process. A project that
 // opted into plugins also loses the OPENCODE_PURE backup of --pure (see Argv).
@@ -134,7 +169,7 @@ func (a *Adapter) Run(ctx context.Context, req runner.Request) (runner.Result, e
 	}
 	defer events.Close()
 
-	argv := Argv(path, req)
+	argv := ArgvFor(path, req, a.majorVersion(ctx, path))
 	env := childEnv(req, a.parentEnv(), a.KeyEnvs)
 	var cmd *exec.Cmd
 	if a.Command != nil {

@@ -392,3 +392,20 @@ func TestFullContextWindowIsItsOwnClass(t *testing.T) {
 		t.Errorf("message %q should name the window size", re.Msg)
 	}
 }
+
+// opencode 2.x: no --pure (the env backup stays), --standalone keeps the
+// server inside the stage instead of the host's background service.
+func TestArgvForOpencode2(t *testing.T) {
+	req := runner.Request{Role: "worker", Backend: runner.Backend{Name: "local"}, Model: "m"}
+	v1 := strings.Join(ArgvFor("/bin/oc", req, 1), " ")
+	v2 := strings.Join(ArgvFor("/bin/oc", req, 2), " ")
+	if !strings.HasPrefix(v1, "/bin/oc run --pure ") || strings.Contains(v1, "--standalone") {
+		t.Errorf("1.x argv = %q", v1)
+	}
+	if !strings.HasPrefix(v2, "/bin/oc run --standalone ") || strings.Contains(v2, "--pure") {
+		t.Errorf("2.x argv = %q", v2)
+	}
+	if strings.Join(Argv("/bin/oc", req), " ") != v1 {
+		t.Error("Argv must stay the 1.x form")
+	}
+}
