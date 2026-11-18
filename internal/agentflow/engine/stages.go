@@ -547,10 +547,10 @@ func (e *Engine) reviewFiles(ctx context.Context, att model.Attempt, task model.
 		case err != nil:
 			fmt.Fprintf(&b, "\n### %s\n\nMISSING: the file does not exist in the worktree.\n", rel)
 		case total >= reviewTotalCap:
-			fmt.Fprintf(&b, "\n### %s\n\n(omitted: prompt size limit)\n", rel)
+			fmt.Fprintf(&b, "\n### %s\n\n(omitted: prompt size limit; the file is %s in your working directory; read it before judging)\n", rel, rel)
 		default:
 			if len(data) > reviewFileCap {
-				data = append(data[:reviewFileCap], []byte("\n... (truncated)")...)
+				data = append(data[:reviewFileCap], []byte(fmt.Sprintf("\n... (truncated at %d of %d bytes: the whole file is %s in your working directory; read it before judging)", reviewFileCap, len(data), rel))...)
 			}
 			total += len(data)
 			fmt.Fprintf(&b, "\n### %s\n\n```\n%s\n```\n", rel, strings.TrimRight(string(data), "\n"))
