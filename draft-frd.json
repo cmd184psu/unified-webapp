@@ -1,0 +1,97 @@
+{
+  "acceptance_criteria": [
+    {
+      "criterion": "A routed test hostname (curl -H \"Host:\") returns HTTP 200 with agentflow queue state.",
+      "id": "AC1"
+    },
+    {
+      "criterion": "The example config parses and documents the agentflow section.",
+      "id": "AC2"
+    },
+    {
+      "criterion": "gofmt -l prints nothing, go vet ./... is clean, and make test passes.",
+      "id": "AC3"
+    },
+    {
+      "criterion": "git status --short lists no files outside the allowlist: internal/agentflow/, web/agentflow/, docs/guides/agentflow.md, plus append-only registrations, example JSON, and README sections.",
+      "id": "AC4"
+    },
+    {
+      "criterion": "Queue and progress for the configured project are visible through the module endpoint.",
+      "id": "AC5"
+    },
+    {
+      "id": "AC6",
+      "criterion": "No Go or TypeScript fixture duplicates an existing one: every test helper the module uses resolves to an already-present file or shared asset."
+    },
+    {
+      "id": "AC7",
+      "criterion": "The module page renders the shared theme, a working hamburger menu, and a logout button that returns to login."
+    },
+    {
+      "id": "AC8",
+      "criterion": "With the module listed in auth.modules, PIN-gate and LDAP login behave exactly as on other modules, with no module-specific auth code."
+    }
+  ],
+  "approved_date": "",
+  "constraints": [
+    "Additive-only outside the new module: no refactors of dispatch, platform/*, or other modules; no behavior change to existing modules.",
+    "New files only under internal/agentflow/, web/agentflow/, docs/guides/agentflow.md, plus append-only registrations (knownModules, buildModule case), example JSON section, and README section.",
+    "The module must be self-contained: FRD-1 output copied in with import paths rewritten; no build-time dependency on /opt/agentflow.",
+    "Do not touch the taskmaster module, other modules, or shared platform code.",
+    "Work happens on the agentflow branch; keep the branch merge-clean for the other active branch."
+  ],
+  "context": "Phase 2 of bringing agentflow into unified-webapp as a module, on the agentflow branch (currently clean). Module anatomy to follow: internal/<name>/ with Build(cfg) http.Handler, a config.XConfig plus Config field, a knownModules entry plus buildModule case, web/<name>/ statics, example-JSON plus README plus docs/guides entries. Pre-commit gate is make check with gofmt/go vet run separately. Phase 1 (FRD-101, in /opt/agentflow) produces the clean copy this phase vendors.",
+  "created": "2026-10-02",
+  "id": "frd-201",
+  "objective": "Integrate agentflow into unified-webapp as a first-class module so an operator can open the agentflow host and view and drive one project's agentflow run, registered exactly like every other module.",
+  "requirements": [
+    {
+      "description": "A new internal/agentflow package shall expose Build(cfg config.AgentflowConfig) (http.Handler, error) serving the phase-1 operator surface against a configured project directory and data directory.",
+      "id": "R1",
+      "priority": "must"
+    },
+    {
+      "description": "A config.AgentflowConfig struct plus Config.Agentflow field, example-JSON section, and README section shall exist, following the TodoConfig pattern.",
+      "id": "R2",
+      "priority": "must"
+    },
+    {
+      "description": "A knownModules entry and buildModule case shall register the module.",
+      "id": "R3",
+      "priority": "must"
+    },
+    {
+      "description": "A web/agentflow/ static directory shall be wired as the module static_dir with committed artifacts satisfying web-verify.",
+      "id": "R4",
+      "priority": "must"
+    },
+    {
+      "description": "A docs/guides/agentflow.md operator guide shall exist.",
+      "id": "R5",
+      "priority": "must"
+    },
+    {
+      "description": "gofmt -l shall print nothing, go vet ./... shall be clean, and make test shall pass (full make check if the worker environment supports it).",
+      "id": "R6",
+      "priority": "must"
+    },
+    {
+      "id": "R7",
+      "priority": "must",
+      "description": "DRY: the module shall consume existing fixtures, helpers, and assets instead of inventing duplicates — Go test fixtures/helpers already present in the repo, and web/shared theme, menu, session, and icon assets (imported as @shared) on the frontend. New fixtures only where none exist."
+    },
+    {
+      "id": "R8",
+      "priority": "must",
+      "description": "The module UI shall be theme-compatible via web/shared (ThemeManager, tokens) and include the standard hamburger menu (HamburgerMenu from @shared) and a logout button (shared session logout posting to /api/auth/logout), like all other modules."
+    },
+    {
+      "id": "R9",
+      "priority": "must",
+      "description": "The module shall inherit platform authentication with no custom auth code: protection via auth.modules listing, PIN door via pin_file, and LDAP via the shared doors, per the standard module contract."
+    }
+  ],
+  "status": "draft",
+  "title": "agentflow module in unified-webapp"
+}

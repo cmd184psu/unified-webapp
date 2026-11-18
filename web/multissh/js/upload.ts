@@ -1,9 +1,11 @@
-import { openFilePicker } from "./filepicker";
+import { openFilePicker, fmtBytes } from "@shared";
+import type { TreeEntry } from "@shared";
 import {
   uploadFile,
   deleteUpload,
   startBroadcast,
   broadcastWsURL,
+  listServerFiles,
 } from "./api";
 import type {
   UploadInfo,
@@ -22,12 +24,6 @@ function el<K extends keyof HTMLElementTagNameMap>(
   const node = document.createElement(tag);
   if (className) node.className = className;
   return node;
-}
-
-function fmtBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1_048_576) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1_048_576).toFixed(2)} MB`;
 }
 
 type BroadcastSource =
@@ -235,7 +231,17 @@ export function mountUploadApp(root: HTMLElement, store: HostStore): void {
   });
 
   serverFileBtn.addEventListener("click", () => {
-    void openFilePicker("").then((path) => {
+    void openFilePicker({
+      load: async (dir): Promise<TreeEntry[]> => {
+        const { path, entries } = await listServerFiles(dir ? dir.path : "");
+        return entries.map((e) => ({
+          name: e.name,
+          path: path === "" ? e.name : `${path}/${e.name}`,
+          isDir: e.isDir,
+          meta: e.isDir ? undefined : fmtBytes(e.size),
+        }));
+      },
+    }).then((path) => {
       if (path !== null) {
         showSource({ kind: "file", path });
       }

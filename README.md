@@ -1,6 +1,6 @@
 # unified-webapp
 
-Unified Go server for todo-list, slideshow, menuserver, grocery-list, obsidianoid (Obsidian-vault viewer/editor), and timetracker (customer/PS helper with time selector and report composer, routed as `timetracker.*`). A single binary replaces separate services. HAProxy (or `/etc/hosts`) routes hostnames to the correct module; the Go server dispatches on the `Host` header.
+Unified Go server for todo-list, slideshow, menuserver, grocery-list, obsidianoid (Obsidian-vault viewer/editor), timetracker (customer/PS helper with time selector and report composer, routed as `timetracker.*`), and agentflow (model orchestrator: FRD to plan to reviewed, sandboxed task execution in git worktrees). A single binary replaces separate services. HAProxy (or `/etc/hosts`) routes hostnames to the correct module; the Go server dispatches on the `Host` header.
 
 ---
 
@@ -54,8 +54,8 @@ Minimal example with all seven modules. Multiple hostnames can map to the same m
     "utuber-test.cmdhome.net":        "utuber",
     "smbedit.cmdhome.net":            "smbedit",
     "smbedit-test.cmdhome.net":       "smbedit",
-    "issuetracker-test.cmdhome.net":  "issuetracker"
-  },
+      "issuetracker-test.cmdhome.net":   "issuetracker"
+     },
   "grocery": {
     "static_dir": "/opt/unified-webapp/web/grocery",
     "data_file":  "/data/grocery.json",
@@ -301,6 +301,60 @@ recipe-owned item returns **409 Conflict**.
 Clicking the `(Chili)` chip on a Grocery row switches to the Recipes tab, expands that recipe's
 card and scrolls it into view. Clicking the item *name* cycles its state instead — the chip and
 the name are separate controls on the same row.
+
+---
+
+## AgentFlow: model orchestrator (FRD → plan → reviewed task execution)
+
+AgentFlow runs coding models against a git repository you already have. You write a
+requirements document (FRD); a planner, architect and critic produce a plan; you approve the
+plan and the compiled task queue; then models implement each task in an isolated git
+worktree. The engine verifies every change, a second model reviews it, and the engine merges
+it into an integration branch. You merge that branch into your own. AgentFlow never pushes
+and never touches your checked-out branch.
+
+It is a **local, single-user tool**. Every model call runs in a bwrap sandbox with an
+allowlisted environment, so `bwrap`, `git` and the real `opencode` binary (not a shim) must
+be installed on the server. All state is in one SQLite database under `data_dir`. Every
+project starts stopped after a restart.
+
+### Configuration
+
+Section `agentflow` in the server config (`internal/platform/config.AgentflowConfig`):
+
+```json
+"agentflow": {
+    "static_dir": "./web/agentflow",
+    "data_dir":   "./data/agentflow"
+}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `static_dir` | `./web/agentflow` | Directory serving the module's frontend. |
+| `data_dir` | `./data/agentflow` | SQLite database (`agentflow.db`), worktrees and stage directories. |
+
+Backends, models, role candidates, limits and projects are managed in the UI (or under
+`/api/`) and stored in the database. Hosted backends read their keys from the server
+environment as `AGENTFLOW_KEY_<NAME>`; a key change needs a restart. Old keys
+(`project_path`, `prompt_dir`, `profiles`, ...) are ignored and can be removed.
+
+### How to set it up
+
+1. **Route a hostname** in `host_routing`, for example `"agentflow.example.net": "agentflow"`.
+2. **Install requirements**: `bwrap`, `git`, and opencode at `~/.opencode/bin/opencode` or on `PATH`.
+   `GET /api/health` reports `degraded` if opencode is missing.
+3. **Add a backend and role candidates**, then **create a project** for a git repository.
+4. **Work the pipeline in the UI**: FRD, plan, approve, compile, approve the queue, Start.
+5. **Authentication**: list `agentflow` in `auth.modules` to require a session or API key.
+   The module has no login of its own.
+6. **TLS / proxy**: same pattern as any other module (see
+   [Production: HAProxy Configuration](#production-haproxy-configuration)).
+
+The full operator guide is at **[docs/guides/agentflow.md](docs/guides/agentflow.md)** and the
+architecture at **[docs/agentflow-design.md](docs/agentflow-design.md)**.
+
+---
 
 ## Data Directory Layout
 

@@ -9,6 +9,7 @@ const hamburger = new HamburgerMenu({
   items: [],
   themePicker: true,
   themes,
+  side: 'right',
 });
 document.querySelector('.header-right')?.prepend(hamburger.trigger);
 

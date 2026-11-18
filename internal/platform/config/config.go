@@ -33,6 +33,7 @@ type Config struct {
 	Timetracker  TimetrackerConfig  `json:"timetracker"`
 	Sampler      SamplerConfig      `json:"sampler"`
 	Haproxy      HaproxyConfig      `json:"haproxy"`
+	Agentflow    AgentflowConfig    `json:"agentflow"`
 
 	// configPath is the absolute path Load read this Config from (empty when
 	// built via DefaultConfig()/WriteDefault without going through Load, or
@@ -567,6 +568,15 @@ const (
 	DefaultUtuberPythonBin = "python3.12"
 )
 
+// AgentflowConfig holds configuration specific to the agentflow module.
+// Everything else (backends, models, limits, projects) lives in the module's
+// own database under DataDir.
+type AgentflowConfig struct {
+	StaticDir         string `json:"static_dir"`
+	DataDir           string `json:"data_dir"`
+	SSEMaxSubscribers int    `json:"-"`
+}
+
 // DefaultConfig returns a Config populated with safe defaults.
 func DefaultConfig() *Config {
 	return &Config{
@@ -676,6 +686,11 @@ func DefaultConfig() *Config {
 			OS:             "auto",
 			BackupKeep:     DefaultHaproxyBackupKeep,
 			ExpiryWarnDays: DefaultHaproxyExpiryWarnDays,
+		},
+		Agentflow: AgentflowConfig{
+			StaticDir:         "./web/agentflow",
+			DataDir:           "./data/agentflow",
+			SSEMaxSubscribers: DefaultSSEMaxSubscribers,
 		},
 		IssueTracker: IssueTrackerConfig{
 			StaticDir: "./web/issuetracker",
@@ -792,6 +807,9 @@ func Load(path string) (*Config, error) {
 	if err := expandSmbeditPaths(&cfg.Smbedit); err != nil {
 		return nil, err
 	}
+	if err := expandAgentflowPaths(&cfg.Agentflow); err != nil {
+		return nil, err
+	}
 	if cfg.TLSCert != "" {
 		if cfg.TLSCert, err = ExpandPath(cfg.TLSCert); err != nil {
 			return nil, err
@@ -820,6 +838,7 @@ func applyServerDefaults(cfg *Config) {
 	cfg.Obsidianoid.SSEMaxSubscribers = max
 	cfg.Taskmaster.SSEMaxSubscribers = max
 	cfg.Haproxy.SSEMaxSubscribers = max
+	cfg.Agentflow.SSEMaxSubscribers = max
 	if cfg.Server.SharedStaticDir == "" {
 		cfg.Server.SharedStaticDir = "./web/shared"
 	}
@@ -1072,6 +1091,17 @@ func expandSmbeditPaths(s *SmbeditConfig) error {
 		return err
 	}
 	if s.PickerRoot, err = ExpandPath(s.PickerRoot); err != nil {
+		return err
+	}
+	return nil
+}
+
+func expandAgentflowPaths(a *AgentflowConfig) error {
+	var err error
+	if a.StaticDir, err = ExpandPath(a.StaticDir); err != nil {
+		return err
+	}
+	if a.DataDir, err = ExpandPath(a.DataDir); err != nil {
 		return err
 	}
 	return nil

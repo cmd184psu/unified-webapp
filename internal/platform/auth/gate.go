@@ -308,16 +308,37 @@ func (s *Service) handleWhoami(w http.ResponseWriter, r *http.Request, now time.
 // parseToken (bad signature, wrong algorithm, expired), is a silent
 // (nil, false) -- there is no distinct error path here, only "has a valid
 // session" or not.
+//
+// A browser can hold more than one cookie of this name (a stale one set for a
+// parent domain by an older configuration next to the host-only one a login
+// just set) and sends them all, the older first. Reading only the first made
+// the stale one hide the fresh one, so a signed-in user was sent back to the
+// login page with no message. Every cookie is checked exactly as before, the
+// most recently issued valid one wins, and a request with only stale cookies
+// is still refused.
 func (s *Service) sessionClaimsFromRequest(r *http.Request, now time.Time) (*sessionClaims, bool) {
-	c, err := r.Cookie(sessionCookieName)
-	if err != nil || c.Value == "" {
-		return nil, false
+	var best *sessionClaims
+	for _, c := range r.Cookies() {
+		if c.Name != sessionCookieName || c.Value == "" {
+			continue
+		}
+		claims, err := parseToken(s.key, c.Value, now)
+		if err != nil {
+			continue
+		}
+		if best == nil || issuedAt(claims).After(issuedAt(best)) {
+			best = claims
+		}
 	}
-	claims, err := parseToken(s.key, c.Value, now)
-	if err != nil {
-		return nil, false
+	return best, best != nil
+}
+
+// issuedAt is when claims were issued, the zero time when they carry no iat.
+func issuedAt(c *sessionClaims) time.Time {
+	if c.IssuedAt == nil {
+		return time.Time{}
 	}
-	return claims, true
+	return c.IssuedAt.Time
 }
 
 // loginPage serves the embedded, platform-owned login page (T4.4, FR-A12):

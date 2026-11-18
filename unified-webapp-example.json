@@ -122,8 +122,12 @@
   "sampler": {
     "static_dir": "./web/sampler"
   },
-  "haproxy": {
-    "static_dir": "./web/haproxy",
+  "agentflow": {
+    "static_dir": "./web/agentflow",
+    "data_dir": "./data/agentflow"
+  },
+    "haproxy": {
+      "static_dir": "./web/haproxy",
     "data_dir": "./data/haproxy",
     "os": "auto",
     "config_path": "",

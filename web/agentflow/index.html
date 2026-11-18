@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="obsidian">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentFlow</title>
+    <script>
+      (function(){var t=localStorage.getItem('ui-theme:agentflow');if(t)document.documentElement.dataset.theme=t})();
+    </script>
+    <link rel="stylesheet" href="/shared/dist/shared.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- ── Top Navigation Bar ─────────────────────────────────────────────── -->
+    <nav id="nav" class="app-nav">
+      <div class="nav-left">
+        <span class="nav-brand">AgentFlow</span>
+      </div>
+      <div class="nav-right">
+        <button class="icon-btn" id="hamburger-trigger" title="Menu">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="2.5" width="14" height="2" rx="0.5"/><rect x="1" y="7" width="14" height="2" rx="0.5"/><rect x="1" y="11.5" width="14" height="2" rx="0.5"/></svg>
+        </button>
+      </div>
+    </nav>
+
+    <div id="attention-banner" hidden></div>
+    <div id="health-banner" hidden></div>
+
+    <!-- ── Tab Bar ─────────────────────────────────────────────────────────── -->
+    <div id="tab-bar" class="tab-bar" role="tablist"></div>
+
+    <!-- ── Main Content ────────────────────────────────────────────────────── -->
+    <main id="app" class="console-app">
+        <!-- The active tab's view is mounted here by js/main.ts -->
+        <section class="tab-panel" id="panel-view" role="tabpanel"></section>
+
+        <!-- Live Stream Panel (shared, slides in from right) -->
+        <aside class="console-right" id="stream-panel" hidden></aside>
+    </main>
+
+    <script type="module" src="/js/bundle.js"></script>
+</body>
+</html>

@@ -1484,6 +1484,44 @@ function openTreePicker(options) {
   });
 }
 
+// web/shared/ts/filepicker.ts
+function fmtBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1048576) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1048576).toFixed(2)} MB`;
+}
+async function openFilePicker({
+  load,
+  startPath = ""
+}) {
+  const chosen = await openTreePicker({
+    title: "Choose server file",
+    select: "file",
+    note: "Open folders with the arrow; double-click a file (or select it and press the button) to use it.",
+    confirmLabel: "Use this file",
+    emptyText: "No files here.",
+    startPath: startPath || void 0,
+    load
+  });
+  return chosen?.path ?? null;
+}
+async function openDirPicker({
+  load,
+  startPath = "",
+  place: place2
+}) {
+  const chosen = await openTreePicker({
+    title: "Choose remote directory",
+    select: "dir",
+    note: `Folders on ${place2}. Select one and press the button, or double-click it.`,
+    confirmLabel: "Use this directory",
+    emptyText: "No subdirectories.",
+    startPath: startPath || void 0,
+    load
+  });
+  return chosen?.path ?? null;
+}
+
 // web/shared/ts/outputmodal.ts
 var STYLE_ATTR = "data-tm-output-modal-styles";
 function ensureStyles() {
@@ -1940,6 +1978,9 @@ export {
   createCopyButton,
   createToggle,
   effectiveStatus,
+  fmtBytes,
+  openDirPicker,
+  openFilePicker,
   openModal,
   openOutputModal,
   openTreePicker,

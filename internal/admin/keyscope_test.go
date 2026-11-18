@@ -46,10 +46,10 @@ func TestKeyRoutesRequireAndUpdateScope(t *testing.T) {
 	_, mux, _ := newAdminTestHandler(t, config.AuthConfig{}, []string{"todo", "grocery"}, false)
 
 	for _, body := range []map[string]any{
-		{"name": "k"},                                    // no scope: not allowed
-		{"name": "k", "modules": []string{}},             // empty
-		{"name": "k", "modules": []string{"admin"}},      // admin never takes a key
-		{"name": "k", "modules": []string{"no-module"}},  // not a module
+		{"name": "k"},                                   // no scope: not allowed
+		{"name": "k", "modules": []string{}},            // empty
+		{"name": "k", "modules": []string{"admin"}},     // admin never takes a key
+		{"name": "k", "modules": []string{"no-module"}}, // not a module
 	} {
 		if rec := doAdmin(t, mux, http.MethodPost, "/api/keys", body); rec.Code != http.StatusBadRequest {
 			t.Errorf("POST %v = %d, want 400", body, rec.Code)

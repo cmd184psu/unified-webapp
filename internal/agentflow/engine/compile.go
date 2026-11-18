@@ -1,0 +1,390 @@
+package engine
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+
+	"cmd184psu/unified-webapp/internal/agentflow/model"
+	"cmd184psu/unified-webapp/internal/agentflow/schema"
+	"cmd184psu/unified-webapp/internal/agentflow/store"
+)
+
+// Compilation turns an approved plan into a queue draft (QA1) and the queue's
+// approval pins the whole queue by hash (QA2, QA3). The compiler emits no
+// executable content: a reply with a verify field, a cycle or a dangling
+// dependency is rejected inside the stage like any malformed reply, with the
+// one corrective follow-up and then infra:unparseable (SO2, V1).
+
+const (
+	eventCompileStart  = "compile.start"
+	eventCompileHalted = "compile.halted"
+)
+
+// compiledTasks converts the compiler's tasks to queue definitions and
+// validates them: required fields, unique keys, no dangling dependency, no
+// cycle, and no absolute path in a prompt or a touched file.
+func compiledTasks(out schema.CompileOut) ([]model.TaskDef, error) {
+	defs := make([]model.TaskDef, len(out.Tasks))
+	for i, t := range out.Tasks {
+		defs[i] = model.TaskDef{
+			Key: t.ID, Phase: t.Phase, Title: t.Title, Prompt: t.Prompt,
+			Acceptance: t.Acceptance, FilesTouched: t.FilesTouched, DependsOn: t.DependsOn,
+		}
+		for _, f := range append([]string{t.Prompt}, t.FilesTouched...) {
+			if strings.HasPrefix(f, "/") {
+				return nil, fmt.Errorf("task %s contains absolute path %q: use paths relative to the project", t.ID, f)
+			}
+		}
+	}
+	if err := model.ValidateTasks(defs); err != nil {
+		return nil, err
+	}
+	if err := unorderedSharedFiles(defs); err != nil {
+		return nil, err
+	}
+	return defs, nil
+}
+
+// unorderedSharedFiles rejects two tasks that list the same file with no
+// dependency path between them. Tasks that may run side by side must not touch
+// the same file: whichever finished last would overwrite the other, and a
+// merge would conflict. Tasks that do share a file are ordered by depends_on.
+func unorderedSharedFiles(defs []model.TaskDef) error {
+	deps := map[string][]string{}
+	for _, d := range defs {
+		deps[d.Key] = d.DependsOn
+	}
+	reach := map[string]map[string]bool{} // task -> every task it depends on, directly or not
+	var walk func(k string) map[string]bool
+	walk = func(k string) map[string]bool {
+		if r, ok := reach[k]; ok {
+			return r
+		}
+		r := map[string]bool{}
+		reach[k] = r
+		for _, d := range deps[k] {
+			r[d] = true
+			for x := range walk(d) {
+				r[x] = true
+			}
+		}
+		return r
+	}
+	owners := map[string][]string{} // file -> the tasks that list it, in queue order
+	for _, d := range defs {
+		for _, f := range d.FilesTouched {
+			owners[f] = append(owners[f], d.Key)
+		}
+	}
+	for _, d := range defs {
+		for _, f := range d.FilesTouched {
+			for _, other := range owners[f] {
+				if other == d.Key || walk(d.Key)[other] || walk(other)[d.Key] {
+					continue
+				}
+				return fmt.Errorf("tasks %s and %s both list %q but neither depends on the other: order them with depends_on, or give each its own file", other, d.Key, f)
+			}
+		}
+	}
+	return nil
+}
+
+// Compile starts compilation of the effort's approved plan: the effort moves
+// to compiling and the compiler stage is submitted. It is ErrConflict unless
+// the plan is approved (or a draft queue is being recompiled). On an effort
+// that is already compiling it only nudges the driver.
+func (e *Engine) Compile(ctx context.Context, actor string, effort int64) error {
+	e.planMu.Lock()
+	defer e.planMu.Unlock()
+	return e.startCompileLocked(ctx, actor, effort)
+}
+
+func (e *Engine) startCompileLocked(ctx context.Context, actor string, effort int64) error {
+	s := e.deps.Store
+	ef, err := s.GetEffort(ctx, effort)
+	if err != nil {
+		return err
+	}
+	p, err := s.GetProject(ctx, ef.Project)
+	if err != nil {
+		return err
+	}
+	switch ef.Status {
+	case model.EffortCompiling:
+		return e.advanceCompile(ctx, p, ef)
+	case model.EffortPlanApproved, model.EffortQueueDraft:
+	default:
+		return fmt.Errorf("effort %d is %s, the plan is not approved: %w", effort, ef.Status, store.ErrConflict)
+	}
+	if _, err := s.ApprovedRevision(ctx, effort, model.DocPlan); errors.Is(err, store.ErrNotFound) {
+		return fmt.Errorf("effort %d has no approved plan: %w", effort, store.ErrConflict)
+	} else if err != nil {
+		return err
+	}
+	floor, err := e.maxStageID(ctx, effort)
+	if err != nil {
+		return err
+	}
+	if err := e.noteEffort(ctx, actor, eventCompileStart, effort, map[string]any{"after_stage": floor}); err != nil {
+		return err
+	}
+	compiling := model.EffortCompiling
+	if ef, err = s.UpdateEffort(ctx, actor, effort, store.EffortPatch{Status: &compiling}); err != nil {
+		return err
+	}
+	return e.advanceCompile(ctx, p, ef)
+}
+
+// advanceCompile takes the next step of a compiling effort. planMu is held.
+func (e *Engine) advanceCompile(ctx context.Context, p store.Project, ef model.Effort) error {
+	floor, err := e.eventFloor(ctx, ef.ID, eventCompileStart)
+	if err != nil {
+		return err
+	}
+	all, err := e.deps.Store.ListEffortStages(ctx, ef.ID)
+	if err != nil {
+		return err
+	}
+	var stages []model.Stage
+	for _, st := range all {
+		if st.Role == "compiler" && st.ID > floor {
+			stages = append(stages, st)
+		}
+	}
+	for _, st := range stages {
+		if st.State != model.StageDone {
+			return nil // in flight
+		}
+	}
+	if len(stages) == 0 {
+		return e.startEffortStage(ctx, p, ef.ID, "compiler", nil, "")
+	}
+	last := stages[len(stages)-1]
+	if IsInfra(last.Outcome) {
+		return e.effortInfra(ctx, p, stages, last,
+			func(avoid string) error {
+				if avoid != "" { // after a crash or timeout, keep away from every model already tried, not only the last
+					avoid = avoidTried(stages)
+				}
+				return e.startEffortStage(ctx, p, ef.ID, "compiler", nil, avoid)
+			},
+			func(reason string) error { return e.haltCompile(ctx, ef, last, reason) })
+	}
+	if last.Outcome != OutcomePass {
+		return e.haltCompile(ctx, ef, last, "stage ended "+last.Outcome)
+	}
+	out, err := schema.Parse[schema.CompileOut](last.Parsed)
+	if err != nil {
+		return e.haltCompile(ctx, ef, last, err.Error())
+	}
+	defs, err := compiledTasks(out)
+	if err != nil {
+		return e.haltCompile(ctx, ef, last, err.Error())
+	}
+	if f, ok, err := e.effortFRD(ctx, ef.ID); err != nil {
+		return err
+	} else if ok {
+		var added []string
+		if defs, added = model.RepairCoverage(f, defs); len(added) > 0 {
+			if err := e.noteEffort(ctx, SystemActor, "compile.repaired", ef.ID, map[string]any{"stage": last.ID, "added": added}); err != nil {
+				return err
+			}
+		}
+	}
+	if miss, err := e.queueMissingLiterals(ctx, ef.ID, defs); err != nil {
+		return err
+	} else if len(miss) > 0 {
+		if repliesRead(stages) < 3 { // two more tries, each on another model; the prompt names the strings that must appear
+			return e.startEffortStage(ctx, p, ef.ID, "compiler", nil, avoidTried(stages))
+		}
+		return e.haltCompile(ctx, ef, last, (&literalsError{missing: miss, from: "the task queue"}).Error())
+	}
+	if probs, err := e.queueProblems(ctx, ef.ID, defs); err != nil {
+		return err
+	} else if len(probs) > 0 {
+		if repliesRead(stages) < 3 { // two more tries, each on another model; the prompt names the problems
+			return e.startEffortStage(ctx, p, ef.ID, "compiler", nil, avoidTried(stages))
+		}
+		return e.haltCompile(ctx, ef, last, "the task queue does not match the FRD: "+strings.Join(probs, "; "))
+	}
+	q, err := e.deps.Store.SaveQueue(ctx, "compiler:"+last.Model, ef.ID, defs)
+	if err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			return e.haltCompile(ctx, ef, last, err.Error())
+		}
+		return err
+	}
+	draft := model.EffortQueueDraft
+	if _, err := e.deps.Store.UpdateEffort(ctx, SystemActor, ef.ID, store.EffortPatch{Status: &draft}); err != nil {
+		return err
+	}
+	e.changed()
+	e.setPlanWaiting(ef.ID, "")
+	if e.yoloGate(ctx, ef.ID) {
+		_, err := e.approveQueue(ctx, yoloActor, ef.ID, q.Hash)
+		return err
+	}
+	return nil
+}
+
+// queueMissingLiterals lists the exact strings of the effort's FRD that no
+// task of a compiled queue carries (H1).
+func (e *Engine) queueMissingLiterals(ctx context.Context, effort int64, defs []model.TaskDef) ([]string, error) {
+	d, err := e.deps.Store.GetDoc(ctx, effort, model.DocFRD, 0)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	var f model.FRD
+	if json.Unmarshal(d.JSON, &f) != nil {
+		return nil, nil
+	}
+	return model.MissingLiterals(model.ExtractLiterals(model.FRDText(f)), model.TasksText(defs)), nil
+}
+
+// queueProblems checks a compiled queue against the effort's FRD (H14): foreign
+// criterion labels, requirements no task cites, tests in a tests/ directory.
+func (e *Engine) queueProblems(ctx context.Context, effort int64, defs []model.TaskDef) ([]string, error) {
+	f, ok, err := e.effortFRD(ctx, effort)
+	if err != nil || !ok {
+		return nil, err
+	}
+	probs := append(model.QueueCoverageProblems(f, defs), model.QueueTestShapeProblems(defs)...)
+	probs = append(probs, model.QueueFileNameProblems(defs)...)
+	ctxProbs, err := e.queueContextProblems(ctx, effort, defs)
+	if err != nil {
+		return nil, err
+	}
+	return append(probs, ctxProbs...), nil
+}
+
+// queueContextProblems finds tasks too big for every worker candidate's
+// context window (H15).
+func (e *Engine) queueContextProblems(ctx context.Context, effort int64, defs []model.TaskDef) ([]string, error) {
+	ef, err := e.deps.Store.GetEffort(ctx, effort)
+	if err != nil {
+		return nil, err
+	}
+	p, err := e.deps.Store.GetProject(ctx, ef.Project)
+	if err != nil {
+		return nil, err
+	}
+	v, err := e.newView(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return QueueContextProblems(defs, workerWindows(v, p)), nil
+}
+
+func (e *Engine) effortFRD(ctx context.Context, effort int64) (model.FRD, bool, error) {
+	var f model.FRD
+	d, err := e.deps.Store.GetDoc(ctx, effort, model.DocFRD, 0)
+	if errors.Is(err, store.ErrNotFound) {
+		return f, false, nil
+	} else if err != nil {
+		return f, false, err
+	}
+	return f, json.Unmarshal(d.JSON, &f) == nil, nil
+}
+
+// haltCompile gives up compilation: the effort goes back to where it came from
+// (a draft queue if one exists, else the approved plan) with an audit event.
+func (e *Engine) haltCompile(ctx context.Context, ef model.Effort, last model.Stage, reason string) error {
+	defer e.changed()
+	back := model.EffortPlanApproved
+	if _, err := e.deps.Store.GetQueue(ctx, ef.ID); err == nil {
+		back = model.EffortQueueDraft
+	}
+	if _, err := e.deps.Store.UpdateEffort(ctx, SystemActor, ef.ID, store.EffortPatch{Status: &back}); err != nil {
+		return err
+	}
+	e.setPlanWaiting(ef.ID, "compile halted: "+reason)
+	return e.noteEffort(ctx, SystemActor, eventCompileHalted, ef.ID, map[string]any{"stage": last.ID, "reason": reason})
+}
+
+// ApproveQueue approves the whole draft queue the approver reviewed: the hash
+// pins what was shown, so a queue edited or recompiled since is ErrConflict
+// (409) and nothing changes (QA2). Under YOLO the run starts at once.
+func (e *Engine) ApproveQueue(ctx context.Context, actor string, effort int64, expectedHash string) (model.Queue, error) {
+	return e.approveQueue(ctx, actor, effort, expectedHash)
+}
+
+func (e *Engine) approveQueue(ctx context.Context, actor string, effort int64, expectedHash string) (model.Queue, error) {
+	s := e.deps.Store
+	ef, err := s.GetEffort(ctx, effort)
+	if err != nil {
+		return model.Queue{}, err
+	}
+	if ef.Status != model.EffortQueueDraft {
+		return model.Queue{}, fmt.Errorf("effort %d is %s, not queue_draft: %w", effort, ef.Status, store.ErrConflict)
+	}
+	q, err := s.ApproveQueue(ctx, actor, effort, expectedHash)
+	if err != nil {
+		return q, err
+	}
+	if err := e.healQueueStatus(ctx, ef); err != nil {
+		return q, err
+	}
+	if e.yoloGate(ctx, effort) {
+		if err := e.runs.Start(ctx, yoloActor, ef.Project); err != nil {
+			return q, err
+		}
+	}
+	return q, nil
+}
+
+// healQueueStatus moves a queue_draft effort whose queue is approved to
+// queue_approved. It completes an approval that stopped between the queue
+// write and the status write.
+func (e *Engine) healQueueStatus(ctx context.Context, ef model.Effort) error {
+	s := e.deps.Store
+	q, err := s.GetQueue(ctx, ef.ID)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && q.Status != model.QueueApproved) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	cur, err := s.GetEffort(ctx, ef.ID)
+	if err != nil || cur.Status != model.EffortQueueDraft {
+		return err
+	}
+	_, err = s.UpdateEffortStatusIf(ctx, q.ApprovedBy, ef.ID, model.EffortQueueDraft, model.EffortQueueAppr)
+	return err
+}
+
+// QueueView is the approval view of an effort's queue (QA3): every task with
+// its prompt, files_touched, acceptance criteria and dependencies, and the
+// hash an approval must quote.
+type QueueView struct {
+	Effort       int64        `json:"effort"`
+	EffortStatus string       `json:"effort_status"`
+	Revision     int          `json:"revision"`
+	Hash         string       `json:"hash"`
+	Status       string       `json:"status"`
+	ApprovedBy   string       `json:"approved_by,omitempty"`
+	Tasks        []model.Task `json:"tasks"`
+}
+
+// QueueView returns the effort's queue for approval.
+func (e *Engine) QueueView(ctx context.Context, effort int64) (QueueView, error) {
+	s := e.deps.Store
+	ef, err := s.GetEffort(ctx, effort)
+	if err != nil {
+		return QueueView{}, err
+	}
+	q, err := s.GetQueue(ctx, effort)
+	if err != nil {
+		return QueueView{}, err
+	}
+	tasks, err := s.ListTasks(ctx, effort)
+	if err != nil {
+		return QueueView{}, err
+	}
+	return QueueView{Effort: effort, EffortStatus: ef.Status, Revision: q.Revision, Hash: q.Hash,
+		Status: q.Status, ApprovedBy: q.ApprovedBy, Tasks: tasks}, nil
+}

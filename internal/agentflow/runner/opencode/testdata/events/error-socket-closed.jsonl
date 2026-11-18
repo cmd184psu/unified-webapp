@@ -1,0 +1,1 @@
+{"type":"error","timestamp":1791902879323,"sessionID":"ses_eca44ea26ffe3mYvvmkrMjXRkw","error":{"name":"APIError","data":{"message":"Cannot connect to API: The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()","isRetryable":true,"metadata":{"url":"http://127.0.0.1:18080/v1/chat/completions"}}}}

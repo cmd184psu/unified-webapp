@@ -38,7 +38,7 @@ func TestBoardEvents_TaskProgressShape(t *testing.T) {
 
 	release := make(chan struct{})
 	funcs := worker.NewFuncRegistry()
-	require.NoError(t, funcs.Register(golane.NewKind[progressShapePayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p progressShapePayload) (any, error) {
+	require.NoError(t, funcs.Register("acme-module", golane.NewKind[progressShapePayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p progressShapePayload) (any, error) {
 		if p.Report {
 			rc.Progress(42, "Downloading")
 			<-release // hold the row "running" long enough for the test to observe the event before it finishes

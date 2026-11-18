@@ -64,7 +64,7 @@ func submitEcho(t *testing.T, d *db.DB, name string, payload echoPayload) int64 
 
 func TestFuncTask_RunsWithPayloadAndStoresResult(t *testing.T) {
 	funcs := worker.NewFuncRegistry()
-	require.NoError(t, funcs.Register(echoKind("acme-module.echo")))
+	require.NoError(t, funcs.Register("acme-module", echoKind("acme-module.echo")))
 	w, d := newFuncTestWorker(t, funcs)
 
 	execID := submitEcho(t, d, "owned-aaaaaaaaaaaa", echoPayload{Msg: "hi"})
@@ -89,7 +89,7 @@ func TestFuncTask_RespectsLaneWidth(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan string, 10)
 	funcs := worker.NewFuncRegistry()
-	require.NoError(t, funcs.Register(golane.NewKind[echoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p echoPayload) (any, error) {
+	require.NoError(t, funcs.Register("acme-module", golane.NewKind[echoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p echoPayload) (any, error) {
 		started <- rc.JobID()
 		<-release
 		return nil, nil
@@ -150,7 +150,7 @@ func TestFuncTask_UnregisteredKindStaysPending_ThenRunsAfterRegister(t *testing.
 	require.NoError(t, err)
 	require.Equal(t, "pending", e.Status, "an unregistered kind must stay pending, not fail or run")
 
-	require.NoError(t, funcs.Register(echoKind("acme-module.echo")))
+	require.NoError(t, funcs.Register("acme-module", echoKind("acme-module.echo")))
 
 	require.Eventually(t, func() bool {
 		e, err := d.GetExecution(execID)
@@ -160,7 +160,7 @@ func TestFuncTask_UnregisteredKindStaysPending_ThenRunsAfterRegister(t *testing.
 
 func TestFuncTask_LabelUpdate(t *testing.T) {
 	funcs := worker.NewFuncRegistry()
-	require.NoError(t, funcs.Register(golane.NewKind[echoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p echoPayload) (any, error) {
+	require.NoError(t, funcs.Register("acme-module", golane.NewKind[echoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p echoPayload) (any, error) {
 		rc.SetLabel("relabeled")
 		return nil, nil
 	})))
@@ -186,7 +186,7 @@ func TestFuncTask_LabelUpdate(t *testing.T) {
 func TestFuncTask_CancelRunningRecordsCanceled(t *testing.T) {
 	release := make(chan struct{})
 	funcs := worker.NewFuncRegistry()
-	require.NoError(t, funcs.Register(golane.NewKind[echoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p echoPayload) (any, error) {
+	require.NoError(t, funcs.Register("acme-module", golane.NewKind[echoPayload]("acme-module.echo", 1, nil, func(ctx context.Context, rc golane.RunContext, p echoPayload) (any, error) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	})))
@@ -224,4 +224,19 @@ func TestFuncTask_CancelRunningRecordsCanceled(t *testing.T) {
 		e, err := d.GetExecution(execID)
 		return err == nil && e != nil && e.Status == "canceled"
 	}, 10*time.Second, 20*time.Millisecond)
+}
+
+func TestFuncRegistry_SharedPerOwner(t *testing.T) {
+	r := worker.NewFuncRegistry()
+	require.NoError(t, r.Register("a", echoKind("a.echo")))
+	require.NoError(t, r.Register("a", echoKind("a.echo")), "same owner and name is shared")
+	require.ErrorIs(t, r.Register("b", echoKind("a.echo")), golane.ErrKindRegistered)
+
+	v2 := golane.NewKind[echoPayload]("a.echo", 2, nil, func(ctx context.Context, rc golane.RunContext, p echoPayload) (any, error) { return nil, nil })
+	require.ErrorIs(t, r.Register("a", v2), golane.ErrKindRegistered, "version mismatch")
+
+	require.ErrorIs(t, r.Check("b", echoKind("a.echo")), golane.ErrKindRegistered)
+	require.NoError(t, r.Check("a", echoKind("a.echo")))
+	require.NoError(t, r.Check("b", echoKind("b.new")))
+	require.False(t, r.Has("b.new"), "Check must not register")
 }

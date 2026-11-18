@@ -275,6 +275,8 @@
   vertical-align: middle;
 }
 
+/* Matches both the bare <input> of hand-written markup and createToggle's
+   input.ui-toggle-input. */
 .ui-toggle input {
   position: absolute;
   opacity: 0;
@@ -284,35 +286,45 @@
   pointer-events: none;
 }
 
+/* Off: a muted-text track with a surface-coloured thumb; on: the primary
+   colour with its own foreground as the thumb. Tokens only. Each pair keeps
+   at least 3:1 contrast against the page and against each other in every
+   theme (checked against themes.css), unlike a surface-on-surface track,
+   which nearly disappears on light themes. The track is inline-block so it
+   keeps its size even when a module's CSS stops the label being a flex row. */
 .ui-toggle-track {
   position: relative;
+  display: inline-block;
+  box-sizing: border-box;
   flex-shrink: 0;
-  width: 34px;
-  height: 18px;
-  border-radius: 9px;
-  /* Off: a mid-tone, so the white knob stands out on light themes too. */
-  background: var(--color-text-faint);
-  transition: background 0.2s;
+  width: 2.25rem;
+  height: 1.25rem;
+  background: var(--color-text-muted);
+  border: 1px solid var(--color-text-muted);
+  border-radius: var(--radius-full);
+  transition: background var(--transition), border-color var(--transition);
 }
 
 .ui-toggle-track::after {
   content: "";
   position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 14px;
-  height: 14px;
+  top: 1px;
+  left: 1px;
+  width: 1rem;
+  height: 1rem;
   border-radius: 50%;
-  background: var(--color-primary-fg);
-  transition: transform 0.2s;
+  background: var(--color-surface-1);
+  transition: transform var(--transition), background var(--transition);
 }
 
 .ui-toggle input:checked + .ui-toggle-track {
   background: var(--color-primary);
+  border-color: var(--color-primary);
 }
 
 .ui-toggle input:checked + .ui-toggle-track::after {
-  transform: translateX(16px);
+  transform: translateX(1rem);
+  background: var(--color-primary-fg);
 }
 
 .ui-toggle input:focus-visible + .ui-toggle-track {
@@ -323,6 +335,10 @@
 .ui-toggle input:disabled + .ui-toggle-track {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.ui-toggle-label {
+  font-size: var(--text-sm);
 }
 
 /* The compact picker, used when the theme shares the drawer with other
@@ -1031,69 +1047,6 @@
 
 .ui-queue-action:hover {
   background: var(--color-surface-3);
-}
-
-/* ── Toggle switch (web/shared/ts/toggle.ts) ──
-   Standing UI preference: boolean settings use this, never a checkbox. */
-.ui-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  cursor: pointer;
-}
-
-.ui-toggle-input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-.ui-toggle-track {
-  position: relative;
-  flex-shrink: 0;
-  width: 2.25rem;
-  height: 1.25rem;
-  background: var(--color-surface-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  transition: background var(--transition), border-color var(--transition);
-}
-
-.ui-toggle-track::before {
-  content: "";
-  position: absolute;
-  top: 1px;
-  left: 1px;
-  width: 1rem;
-  height: 1rem;
-  background: var(--color-text-faint);
-  border-radius: 50%;
-  transition: transform var(--transition), background var(--transition);
-}
-
-.ui-toggle-input:checked + .ui-toggle-track {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-}
-
-.ui-toggle-input:checked + .ui-toggle-track::before {
-  transform: translateX(1rem);
-  background: var(--color-primary-fg);
-}
-
-.ui-toggle-input:focus-visible + .ui-toggle-track {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-
-.ui-toggle-label {
-  font-size: var(--text-sm);
 }
 
 /* Masked text without type="password": same dots, but browsers do not offer to save or autofill it. */

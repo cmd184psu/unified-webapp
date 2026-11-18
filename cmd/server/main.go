@@ -15,8 +15,8 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"sort"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -25,6 +25,7 @@ import (
 	"golang.org/x/term"
 
 	"cmd184psu/unified-webapp/internal/admin"
+	"cmd184psu/unified-webapp/internal/agentflow"
 	"cmd184psu/unified-webapp/internal/certmachine"
 	"cmd184psu/unified-webapp/internal/grocery"
 	"cmd184psu/unified-webapp/internal/haproxy"
@@ -402,7 +403,7 @@ func limitFor(module string, cfg *config.Config) int64 {
 // knownModules is the buildModule universe -- exactly the module names the
 // switch below handles. auth.FromConfig uses it to validate that every
 // module named in auth.modules is one buildDispatcher can actually build.
-var knownModules = []string{"grocery", "todo", "slideshow", "menuserver", "obsidianoid", "multissh", "certmachine", "taskmaster", "admin", "utuber", "smbedit", "issuetracker", "timetracker", "sampler", "haproxy"}
+var knownModules = []string{"agentflow", "grocery", "todo", "slideshow", "menuserver", "obsidianoid", "multissh", "certmachine", "taskmaster", "admin", "utuber", "smbedit", "issuetracker", "timetracker", "sampler", "haproxy"}
 
 // adminIsRouted reports whether "admin" appears among routing's module
 // values (config.Config.Routing / host_routing). Both main's boot-time
@@ -427,7 +428,7 @@ func moduleIsRouted(routing map[string]string, module string) bool {
 
 // moduleDeps carries per-dispatcher-build state that buildModule needs
 // beyond cfg and svc. Today it exists solely to memoise the one shared
-// *taskmaster.Engine that both the "taskmaster" and "utuber" cases open
+// *taskmaster.Engine that both the "taskmaster", "utuber" and "agentflow" cases open
 // through (plan A1): whichever of them builds first opens the engine, and
 // the other reuses it, so build-order (a random map iteration,
 // buildDispatcher's `for host, module := range cfg.Routing`) never matters
@@ -462,6 +463,12 @@ func (d *moduleDeps) taskmasterEngine() (*taskmaster.Engine, error) {
 
 func buildModule(module string, cfg *config.Config, svc *auth.Service, deps *moduleDeps) (http.Handler, error) {
 	switch module {
+	case "agentflow":
+		e, err := deps.taskmasterEngine()
+		if err != nil {
+			return nil, fmt.Errorf("agentflow needs the taskmaster engine: %w", err)
+		}
+		return agentflow.Build(cfg.Agentflow, e)
 	case "grocery":
 		return grocery.Build(cfg.Grocery)
 	case "todo":
