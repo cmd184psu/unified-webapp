@@ -150,3 +150,45 @@ func (s *Store) StartHead(ctx context.Context) (ts, id int64, err error) {
 	}
 	return
 }
+
+// AttemptEnd is an attempt that finished, for the BotChat task mirror.
+type AttemptEnd struct {
+	ID          int64
+	Effort      int64
+	Task        string
+	N           int
+	Outcome     string
+	WorkerModel string
+	Finished    int64
+}
+
+// AttemptsEndedAfter lists attempts that finished after (ts, id), oldest first.
+func (s *Store) AttemptsEndedAfter(ctx context.Context, ts, id int64, limit int) ([]AttemptEnd, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT a.id, q.effort, t.task_key, a.n, a.outcome, a.worker_model, a.finished
+FROM attempts a JOIN tasks t ON a.task = t.id JOIN queues q ON t.queue = q.id
+WHERE a.outcome <> '' AND a.finished > 0 AND (a.finished > ? OR (a.finished = ? AND a.id > ?))
+ORDER BY a.finished, a.id LIMIT ?`, ts, ts, id, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AttemptEnd
+	for rows.Next() {
+		var a AttemptEnd
+		if err := rows.Scan(&a.ID, &a.Effort, &a.Task, &a.N, &a.Outcome, &a.WorkerModel, &a.Finished); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// AttemptHead is the newest ended attempt's (finished, id), where a fresh mirror starts.
+func (s *Store) AttemptHead(ctx context.Context) (ts, id int64, err error) {
+	err = s.db.QueryRowContext(ctx, `SELECT finished, id FROM attempts WHERE outcome <> '' AND finished > 0 ORDER BY finished DESC, id DESC LIMIT 1`).Scan(&ts, &id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, nil
+	}
+	return
+}

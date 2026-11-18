@@ -148,3 +148,48 @@ func (c *Client) Room(ctx context.Context, name, waveID, from string) (string, e
 func (c *Client) Post(ctx context.Context, roomID, from, to, content string) error {
 	return c.do(ctx, http.MethodPost, "/api/v1/rooms/"+roomID+"/messages", map[string]string{"from": from, "to": to, "content": content}, nil)
 }
+
+type idOnly struct {
+	ID string `json:"id"`
+}
+
+// CreatePlan makes a BotChat plan (a work queue) in a room; planner is the callsign that owns it.
+func (c *Client) CreatePlan(ctx context.Context, roomID, planner, title, objective string, maxActive int) (string, error) {
+	var out idOnly
+	err := c.do(ctx, http.MethodPost, "/api/v1/plans", map[string]any{"from": planner, "roomId": roomID, "title": title, "objective": objective, "maxConcurrentActive": maxActive}, &out)
+	return out.ID, err
+}
+
+// CreateTask makes a BotChat task from the given fields (from, roomId, title, planId, ...).
+func (c *Client) CreateTask(ctx context.Context, fields map[string]any) (string, error) {
+	var out idOnly
+	err := c.do(ctx, http.MethodPost, "/api/v1/tasks", fields, &out)
+	return out.ID, err
+}
+
+// Transition applies a lifecycle action to a task and returns the state it ends in.
+func (c *Client) Transition(ctx context.Context, taskID, from, action string, extra map[string]any) (string, error) {
+	body := map[string]any{"from": from, "action": action}
+	for k, v := range extra {
+		body[k] = v
+	}
+	var out struct {
+		State string `json:"state"`
+	}
+	err := c.do(ctx, http.MethodPost, "/api/v1/tasks/"+taskID+"/transition", body, &out)
+	return out.State, err
+}
+
+// TaskState reads a task's current state.
+func (c *Client) TaskState(ctx context.Context, taskID string) (string, error) {
+	var out struct {
+		State string `json:"state"`
+	}
+	err := c.do(ctx, http.MethodGet, "/api/v1/tasks/"+taskID, nil, &out)
+	return out.State, err
+}
+
+// ClosePlan closes a plan; the service refuses while tasks are unfinished.
+func (c *Client) ClosePlan(ctx context.Context, planID, from string) error {
+	return c.do(ctx, http.MethodPost, "/api/v1/plans/"+planID+"/close", map[string]any{"from": from}, nil)
+}

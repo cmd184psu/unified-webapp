@@ -35,6 +35,8 @@ const (
 	keyEventID    = "event_id"
 	keyStartTS    = "start_ts"
 	keyStartID    = "start_id"
+	keyAttTS      = "att_ts"
+	keyAttID      = "att_id"
 	batch         = 100
 	maxText       = 1500
 	globalRoom    = "global"
@@ -96,6 +98,7 @@ func (r *Relay) Step(ctx context.Context) error {
 		if err := r.send(ctx, c, s.Effort, StageCallsign(s), StartText(s)); err != nil {
 			return err
 		}
+		r.note("task board", r.mirrorWorkerStart(ctx, c, s))
 		cur.sts, cur.sid = s.Started, s.ID
 		if err := r.Store.SetBotchatState(ctx, keyStartTS, store.Itoa64(cur.sts)); err != nil {
 			return err
@@ -120,12 +123,32 @@ func (r *Relay) Step(ctx context.Context) error {
 			return err
 		}
 	}
+	attempts, err := r.Store.AttemptsEndedAfter(ctx, cur.ats, cur.aid, batch)
+	if err != nil {
+		return err
+	}
+	for _, a := range attempts {
+		r.note("task board", r.mirrorAttemptEnd(ctx, c, a))
+		cur.ats, cur.aid = a.Finished, a.ID
+		if err := r.Store.SetBotchatState(ctx, keyAttTS, store.Itoa64(cur.ats)); err != nil {
+			return err
+		}
+		if err := r.Store.SetBotchatState(ctx, keyAttID, store.Itoa64(cur.aid)); err != nil {
+			return err
+		}
+	}
 	events, err := r.Store.EventsAfter(ctx, cur.event, batch)
 	if err != nil {
 		return err
 	}
 	for _, e := range events {
 		if effort, text, ok := EventText(e); ok {
+			switch e.Action {
+			case "queue.approve":
+				r.note("task board", func() error { _, err := r.mirrorEffort(ctx, c, effort); return err }())
+			case "run.complete":
+				r.mirrorEffortDone(ctx, c, effort)
+			}
 			if err := r.send(ctx, c, effort, Coordinator, text); err != nil {
 				return err
 			}
@@ -138,7 +161,7 @@ func (r *Relay) Step(ctx context.Context) error {
 	return nil
 }
 
-type cursors struct{ ts, stage, event, sts, sid int64 }
+type cursors struct{ ts, stage, event, sts, sid, ats, aid int64 }
 
 // cursors reads how far the relay has posted; the first time, it starts at the present so
 // switching the relay on does not replay history.
@@ -170,7 +193,14 @@ func (r *Relay) cursors(ctx context.Context) (cursors, error) {
 	if c.sid, okS2, err = get(keyStartID); err != nil {
 		return c, err
 	}
-	if okTS && okID && okEv && okS1 && okS2 {
+	var okA1, okA2 bool
+	if c.ats, okA1, err = get(keyAttTS); err != nil {
+		return c, err
+	}
+	if c.aid, okA2, err = get(keyAttID); err != nil {
+		return c, err
+	}
+	if okTS && okID && okEv && okS1 && okS2 && okA1 && okA2 {
 		return c, nil
 	}
 	ts, stage, event, err := r.Store.RelayHead(ctx)
@@ -181,8 +211,12 @@ func (r *Relay) cursors(ctx context.Context) (cursors, error) {
 	if err != nil {
 		return c, err
 	}
-	c = cursors{ts: ts, stage: stage, event: event, sts: sts, sid: sid}
-	for k, v := range map[string]int64{keyStageTS: ts, keyStageID: stage, keyEventID: event, keyStartTS: sts, keyStartID: sid} {
+	ats, aid, err := r.Store.AttemptHead(ctx)
+	if err != nil {
+		return c, err
+	}
+	c = cursors{ts: ts, stage: stage, event: event, sts: sts, sid: sid, ats: ats, aid: aid}
+	for k, v := range map[string]int64{keyStageTS: ts, keyStageID: stage, keyEventID: event, keyStartTS: sts, keyStartID: sid, keyAttTS: ats, keyAttID: aid} {
 		if err := r.Store.SetBotchatState(ctx, k, store.Itoa64(v)); err != nil {
 			return c, err
 		}
@@ -190,8 +224,17 @@ func (r *Relay) cursors(ctx context.Context) (cursors, error) {
 	return c, nil
 }
 
-// send posts to the room of the effort (the shared `global` room when there is none).
-func (r *Relay) send(ctx context.Context, c *Client, effort int64, from, text string) error {
+// note logs a task board failure without stopping the relay: the board is a mirror, so a
+// missed move is worth a line in the log, not a stuck run of chat messages.
+func (r *Relay) note(what string, err error) {
+	if err != nil {
+		log.Printf("agentflow: botchat %s: %v", what, err)
+	}
+}
+
+// roomFor is the id of the effort's room (the shared `global` room when there is no effort),
+// made on first use.
+func (r *Relay) roomFor(ctx context.Context, c *Client, effort int64) (string, error) {
 	name, wave := globalRoom, ""
 	if effort > 0 {
 		name, wave = roomNamePrefx+strconv.FormatInt(effort, 10), "af-"+strconv.FormatInt(effort, 10)
@@ -199,24 +242,32 @@ func (r *Relay) send(ctx context.Context, c *Client, effort int64, from, text st
 	if r.rooms == nil {
 		r.rooms = map[string]string{}
 	}
-	id, ok := r.rooms[name]
-	if !ok {
-		if name == globalRoom {
-			id = globalRoom
-		} else {
-			var err error
-			if id, err = c.Room(ctx, name, wave, Coordinator); err != nil {
-				return err
-			}
+	if id, ok := r.rooms[name]; ok {
+		return id, nil
+	}
+	id := globalRoom
+	if name != globalRoom {
+		var err error
+		if id, err = c.Room(ctx, name, wave, Coordinator); err != nil {
+			return "", err
 		}
-		r.rooms[name] = id
+	}
+	r.rooms[name] = id
+	return id, nil
+}
+
+// send posts to the room of the effort.
+func (r *Relay) send(ctx context.Context, c *Client, effort int64, from, text string) error {
+	id, err := r.roomFor(ctx, c, effort)
+	if err != nil {
+		return err
 	}
 	if r := []rune(text); len(r) > maxText {
 		text = string(r[:maxText]) + "…"
 	}
-	err := c.Post(ctx, id, from, "everyone", text)
+	err = c.Post(ctx, id, from, "everyone", text)
 	if err == ErrNotFound { // the room was deleted: make it again next time
-		delete(r.rooms, name)
+		delete(r.rooms, roomNamePrefx+strconv.FormatInt(effort, 10))
 	}
 	return err
 }
