@@ -39,7 +39,10 @@ type Settings struct {
 	// API key every agent shares; both empty means the relay is off.
 	BotchatURL     string
 	BotchatKeyFile string
-	VerifySlots    int
+	// BotchatMode is "mirror" (post what happens) or "dispatch" (also hand each stage to an
+	// agent through BotChat).
+	BotchatMode string
+	VerifySlots int
 	// ContextFloor is the context window assumed for a model whose served
 	// window is not known (H15).
 	ContextFloor int
@@ -142,6 +145,13 @@ func parseSettings(m map[string]string) (Settings, error) {
 	s.BotchatKeyFile = strings.TrimSpace(m["botchat_key_file"])
 	if s.BotchatKeyFile != "" && !filepath.IsAbs(s.BotchatKeyFile) && !strings.HasPrefix(s.BotchatKeyFile, "~/") {
 		return s, Invalid("botchat_key_file", "must be an absolute path or start with ~/")
+	}
+	s.BotchatMode = strings.TrimSpace(m["botchat_mode"])
+	if s.BotchatMode == "" {
+		s.BotchatMode = "mirror"
+	}
+	if s.BotchatMode != "mirror" && s.BotchatMode != "dispatch" {
+		return s, Invalid("botchat_mode", "must be mirror or dispatch")
 	}
 	if s.VerifySlots, err = validateInt("verify_slots", m["verify_slots"], 1, 64); err != nil {
 		return s, err

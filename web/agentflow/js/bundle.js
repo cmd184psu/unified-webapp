@@ -1831,6 +1831,7 @@ var SettingsView = class {
     const exec = h("div", { class: "profile-fields" }, ...EXECUTION_FIELDS.map((f) => this.row(f)));
     const path2 = this.row({ key: "opencode_path", label: "opencode path", hint: "Program to run" });
     const bcUrl = this.row({ key: "botchat_url", label: "BotChat address", hint: "e.g. https://botchat.example.net; empty turns the relay off" });
+    const bcMode = this.row({ key: "botchat_mode", label: "BotChat mode", hint: "mirror: post what happens; dispatch: also hand each stage to an agent through BotChat (falls back to a direct run if BotChat does not answer)" });
     const bcKey = this.row({ key: "botchat_key_file", label: "BotChat key file", hint: "File holding the API key, e.g. ~/.pumamesh_chat_apikey; read on every post" });
     this.renderOpenCode();
     this.renderService();
@@ -1843,7 +1844,7 @@ var SettingsView = class {
       section("Limits", limits),
       section("Execution", exec),
       section("opencode", path2, this.ocHost),
-      section("BotChat", bcUrl, bcKey),
+      section("BotChat", bcUrl, bcKey, bcMode),
       section("Service", this.svcHost),
       section("Browse limit", this.rootsHost),
       this.errors.general,

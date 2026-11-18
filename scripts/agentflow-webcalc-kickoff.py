@@ -91,6 +91,7 @@ ap.add_argument("--resume", type=int, metavar="EFFORT",
                 help="carry on an effort this script already started (same --slug and --repo): approve the gates it has reached and wait")
 ap.add_argument("--skip-preflight", action="store_true", help="do not check the models and the lineup before starting")
 ap.add_argument("--title", default="web calculator", help="the effort's title: put the trial in it so efforts differ on screen")
+ap.add_argument("--sentence", default=None, help="the one-sentence description to draft the FRD from instead of the web calculator spec (a small trial)")
 ap.add_argument("--wait", action="store_true")
 args = ap.parse_args()
 LONG = 6 * 3600  # planning and compiling on local models take hours, not minutes
@@ -292,7 +293,7 @@ say(f"project {slug}, effort {eid}: open the agentflow UI to watch")
 status = lambda: api("GET", base, None, 200)["status"]
 
 if not args.resume:
-    api("POST", base + "/frd/draft", {"description": SENTENCE, "polish": False}, 202)
+    api("POST", base + "/frd/draft", {"description": args.sentence or SENTENCE, "polish": False}, 202)
     wait_for("draft", lambda: (api("GET", base + "/frd/draft") or {}).get("state") in ("idle", "failed"), LONG)
     d = api("GET", base + "/frd/draft") or {}
     if d.get("state") == "failed":  # do not approve the empty FRD behind a failed draft

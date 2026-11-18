@@ -63,9 +63,20 @@ type Request struct {
 	// for a project that has opted into none, which is the default.
 	Plugins []Plugin
 	Env     []string
+	// Job names the engine job this call serves, for runners that route work through a
+	// message service; zero for calls that belong to no stage (a model check).
+	Job Job
 	// OnEvent, when set, receives events as they arrive so the engine can stream
 	// them to the job log. Result.Events still holds the full list.
 	OnEvent func(Event)
+}
+
+// Job identifies the stage a model call belongs to.
+type Job struct {
+	Effort  int64
+	Stage   int64
+	Task    string // the task's key, empty for the planning roles
+	Attempt int64
 }
 
 // Event is one runner-neutral entry of the event stream.

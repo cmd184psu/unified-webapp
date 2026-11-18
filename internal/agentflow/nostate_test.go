@@ -23,6 +23,7 @@ var stateWriters = map[string]string{
 	"engine/attempt.go:prepareConflictRepair":     "conflict_prepared_<attempt> marker",
 	"gitsvc/policy.go:DetectAndRevert":            "restores git's own MERGE_* files in the admin dir",
 	"runner/opencode/run.go:installSandboxConfig": "copy of the frozen runner config in the stage home",
+	"botchat/dispatch.go:withContext":             "prompt.botchat.md: the stage prompt with what the agent read on BotChat in front of it",
 }
 
 // AC-DBS1: no file-based state. Every os.WriteFile, os.Create and

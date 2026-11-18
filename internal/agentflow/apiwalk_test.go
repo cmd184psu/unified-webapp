@@ -258,7 +258,7 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	edit, _ := json.Marshal(map[string]any{"key": tk.Key, "phase": tk.Phase, "title": tk.Title, "prompt": tk.Prompt,
 		"acceptance": tk.Acceptance, "files_touched": tk.FilesTouched, "depends_on": tk.DependsOn})
 	ok("PUT", base+"/tasks/T001", string(edit), 200)
-	ok("PUT", base+"/tasks/T001?approve=true", string(edit), 200) // a draft queue stays a draft
+	ok("PUT", base+"/tasks/T001?approve=true", string(edit), 200)     // a draft queue stays a draft
 	ok("POST", base+"/tasks/T001/retry", `{"clean":false}`, 409)      // not halted
 	ok("POST", base+"/tasks/T001/override", `{"reason":"walk"}`, 409) // not halted
 	var q struct{ Hash string }

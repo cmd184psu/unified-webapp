@@ -87,8 +87,13 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 		st.Close()
 		return nil, fmt.Errorf("agentflow: %w", err)
 	}
+	// One relay speaks for agentflow on BotChat; the dispatcher, which hands stages to agents
+	// through BotChat in dispatch mode, shares its rooms. In any other mode it passes calls through.
+	relay := &botchat.Relay{Store: st}
+	var dispatcher *botchat.Dispatcher
 	if rn == nil {
-		rn = newRunner(git, st)
+		dispatcher = &botchat.Dispatcher{Inner: newRunner(git, st), Store: st, Relay: relay}
+		rn = dispatcher
 	}
 	// The engine exists before the API, so the event hooks reach it through a
 	// pointer set once the API is built (D3). A notice before then is dropped.
@@ -157,13 +162,16 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 	relayDone := make(chan struct{})
 	go func() {
 		defer close(relayDone)
-		(&botchat.Relay{Store: st}).Run(capCtx)
+		relay.Run(capCtx)
 	}()
 
 	log.Printf("agentflow: data %s, static %s", dataDir, cfg.StaticDir)
 	return &handler{Handler: mux, stop: func() error {
 		stopCaps()
 		<-relayDone
+		if dispatcher != nil {
+			dispatcher.Close()
+		}
 		eng.Close()
 		return st.Close()
 	}}, nil

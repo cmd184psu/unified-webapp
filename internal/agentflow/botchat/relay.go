@@ -7,6 +7,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/store"
@@ -26,6 +27,7 @@ type Relay struct {
 	// HTTP overrides the client's HTTP client in tests.
 	Client func(url, keyFile string) *Client
 
+	mu    sync.Mutex // guards rooms: the dispatcher shares the relay's rooms
 	rooms map[string]string
 }
 
@@ -239,6 +241,8 @@ func (r *Relay) roomFor(ctx context.Context, c *Client, effort int64) (string, e
 	if effort > 0 {
 		name, wave = roomNamePrefx+strconv.FormatInt(effort, 10), "af-"+strconv.FormatInt(effort, 10)
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.rooms == nil {
 		r.rooms = map[string]string{}
 	}
@@ -267,7 +271,9 @@ func (r *Relay) send(ctx context.Context, c *Client, effort int64, from, text st
 	}
 	err = c.Post(ctx, id, from, "everyone", text)
 	if err == ErrNotFound { // the room was deleted: make it again next time
+		r.mu.Lock()
 		delete(r.rooms, roomNamePrefx+strconv.FormatInt(effort, 10))
+		r.mu.Unlock()
 	}
 	return err
 }

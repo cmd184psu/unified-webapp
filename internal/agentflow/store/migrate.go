@@ -61,7 +61,14 @@ var migrations = []migration{
 	{29, migration29SQL},
 	{30, migration30SQL},
 	{31, migration31SQL},
+	{32, migration32SQL},
 }
+
+// migration32SQL adds the BotChat mode: 'mirror' posts what happens, 'dispatch' also hands each
+// stage to an agent through BotChat.
+const migration32SQL = `
+INSERT OR IGNORE INTO settings (key, value) VALUES ('botchat_mode', 'mirror');
+`
 
 // migration31SQL lets a backend be Google's Antigravity CLI (api type 'agy'): migration 29's
 // rebuild with the wider api_type CHECK.

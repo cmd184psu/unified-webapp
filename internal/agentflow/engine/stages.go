@@ -389,12 +389,18 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 		}
 	}
 
+	job := runner.Job{Effort: p.Effort, Stage: p.Stage, Attempt: p.Attempt}
+	if p.Task != 0 {
+		if t, err := d.Store.GetTask(ctx, p.Task); err == nil {
+			job.Task = t.Key
+		}
+	}
 	timeout := roleTimeout(set, st.Role)
 	var lastSeen atomic.Int64 // when the model last said anything (H30)
 	lastSeen.Store(d.Clock().UnixNano())
 	req := runner.Request{
 		Role: st.Role, Backend: be, Model: st.Model,
-		Workdir: workdir, StageDir: dir, PromptPath: promptPath, Message: promptMessage, Plugins: proj.Plugins,
+		Workdir: workdir, StageDir: dir, PromptPath: promptPath, Message: promptMessage, Plugins: proj.Plugins, Job: job,
 		OnEvent: func(ev runner.Event) {
 			lastSeen.Store(d.Clock().UnixNano())
 			if ev.Text != "" {
