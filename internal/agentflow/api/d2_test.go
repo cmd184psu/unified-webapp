@@ -45,10 +45,30 @@ func TestSV1_InvalidWritesNameTheField(t *testing.T) {
 	e.field("POST", "/api/projects", map[string]any{"slug": "p", "repo_path": repo(t), "surprise": 1}, "surprise")
 }
 
+// repoRootFromCwd finds the checkout root above the current test directory. go test
+// runs a package from its source directory, so the root is not necessarily cwd.
+func repoRootFromCwd(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("no git repository at or above %s", dir)
+		}
+		dir = parent
+	}
+}
+
 // AC-WC2 (HTTP): the server's own tree cannot be registered.
 func TestWC2_ServerTreeRefused(t *testing.T) {
 	e := newEnv(t, envOpt{})
-	e.field("POST", "/api/projects", map[string]any{"slug": "self", "repo_path": "/opt/unified-webapp"}, "repo_path")
+	e.field("POST", "/api/projects", map[string]any{"slug": "self", "repo_path": repoRootFromCwd(t)}, "repo_path")
 	wd, _ := os.Getwd()
 	e.field("POST", "/api/projects", map[string]any{"slug": "self", "repo_path": wd}, "repo_path")
 	e.field("POST", "/api/projects", map[string]any{"slug": "self", "repo_path": e.dataDir}, "repo_path")

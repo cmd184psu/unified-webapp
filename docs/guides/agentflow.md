@@ -29,6 +29,22 @@ serves its data, but no stage can run.
 The server user runs the models, so run the server as the account that owns the
 repositories you will point it at.
 
+### macOS
+
+macOS is supported. There is no `bwrap`: the engine runs every model stage and feedback command
+under the built-in `/usr/bin/sandbox-exec` (Seatbelt) instead. The rules are the same where macOS
+allows them; see [the macOS sandbox](../agentflow-design.md#macos-sandbox-exec) for the differences.
+
+- **Grok stages** rely on Grok's own sandbox with two profiles in `~/.grok/sandbox.toml`:
+  `agentflow` (write) and `agentflow-ro` (read-only). agentflow never writes that file — copy the
+  exact text from the `SandboxProfiles` constant in `internal/agentflow/runner/grok/grok.go`.
+- **opencode 2.x** is supported. The engine detects the major version and passes `--standalone`
+  on 2.x (keeping the server inside the stage instead of handing the run to a background service
+  outside the sandbox) and `--pure` on 1.x. The real binary is still required (see above).
+- **Feedback commands** run without a shell: they are split on whitespace, with no quoting,
+  redirection or expansion. Use `env VAR=value cmd` for per-command environment and `go -C <dir> ...`
+  instead of `cd <dir> && ...`; wrap anything more involved in a script in your repo.
+
 ---
 
 ## Configuration
