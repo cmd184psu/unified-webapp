@@ -63,6 +63,8 @@ const str = (v: string | number | string[] | undefined): string => (v === undefi
 export class SettingsView {
   private values: Settings = {};
   private inputs = new Map<string, HTMLInputElement>();
+  /** The BotChat dispatch switch; off is mirror mode. It is saved as botchat_mode. */
+  private dispatch: { checked: boolean } | null = null;
   private errors = new FormErrors();
   private oc: OpenCodeStatus | null = null;
   private ocHost = h('div');
@@ -192,6 +194,7 @@ export class SettingsView {
   private body(): Settings {
     const body: Settings = {};
     for (const [key, input] of this.inputs) body[key] = input.value.trim();
+    if (this.dispatch) body.botchat_mode = this.dispatch.checked ? 'dispatch' : 'mirror';
     if ('browse_roots' in this.values || this.roots.length > 0) body.browse_roots = this.roots;
     return body;
   }
@@ -216,8 +219,11 @@ export class SettingsView {
     const exec = h('div', { class: 'profile-fields' }, ...EXECUTION_FIELDS.map((f) => this.row(f)));
     const path = this.row({ key: 'opencode_path', label: 'opencode path', hint: 'Program to run' });
     const bcUrl = this.row({ key: 'botchat_url', label: 'BotChat address', hint: 'e.g. https://botchat.example.net; empty turns the relay off' });
-    const bcMode = this.row({ key: 'botchat_mode', label: 'BotChat mode', hint: 'mirror: post what happens; dispatch: also hand each stage to an agent through BotChat (falls back to a direct run if BotChat does not answer)' });
-    const bcKey = this.row({ key: 'botchat_key_file', label: 'BotChat key file', hint: 'File holding the API key, e.g. ~/.pumamesh_chat_apikey; read on every post' });
+    const dispatch = checkbox('botchat_dispatch', str(this.values.botchat_mode) === 'dispatch');
+    this.dispatch = dispatch;
+    dispatch.addEventListener('change', () => { this.dirty = true; this.auto?.touch(); });
+    const bcMode = fieldRow('Send work through BotChat', dispatch, 'Off (the usual): agentflow runs each stage itself and posts to BotChat what happens. On: each stage is also handed to an agent through BotChat, with a direct run if BotChat does not answer; this adds model tokens and about 2 s per stage.');
+    const bcKey = this.row({ key: 'botchat_key_file', label: 'BotChat key file', hint: 'File holding the API key, e.g. ~/.botchat_apikey; read on every post' });
     this.renderOpenCode();
     this.renderService();
     this.renderRoots();
@@ -227,7 +233,7 @@ export class SettingsView {
         section('Limits', limits),
         section('Execution', exec),
         section('opencode', path, this.ocHost),
-        section('BotChat', bcUrl, bcKey, bcMode),
+        section('BotChat', bcUrl, bcKey, bcMode.el),
         section('Service', this.svcHost),
         section('Browse limit', this.rootsHost),
         this.errors.general,

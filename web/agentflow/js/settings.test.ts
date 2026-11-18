@@ -94,6 +94,24 @@ test('save sends every field and confirms', async () => {
   stop();
 });
 
+test('the BotChat switch saves mirror when off and dispatch when on', async () => {
+  const t = harness();
+  const stop = t.view.mount();
+  await flush();
+  const sw = byField(t.host, 'botchat_dispatch') as unknown as { checked: boolean };
+  eq(sw.checked, false);
+  byField(t.host, 'max_attempts').value = '4';
+  await t.view.saveNow();
+  await flush();
+  eq(t.sent[0].botchat_mode, 'mirror');
+  sw.checked = true;
+  byField(t.host, 'max_attempts').value = '5';
+  await t.view.saveNow();
+  await flush();
+  eq(t.sent[1].botchat_mode, 'dispatch');
+  stop();
+});
+
 test('AC-SV1 (UI): a 400 naming a field shows its message next to that field only', async () => {
   const t = harness({
     putSettings: async () => { throw new ApiError(400, 'stuck_threshold must not exceed max_attempts (3)', 'stuck_threshold'); },
