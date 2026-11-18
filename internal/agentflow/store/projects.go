@@ -180,21 +180,9 @@ func feedbackJSON(cmds []string) (string, error) {
 	return string(b), err
 }
 
-// repoPathTaken reports whether another project already holds repo (PJ4).
-func repoPathTaken(ctx context.Context, tx *sql.Tx, repo, exceptSlug string) error {
-	var owner string
-	err := tx.QueryRowContext(ctx, `SELECT slug FROM projects WHERE repo_path = ? AND slug <> ?`, repo, exceptSlug).Scan(&owner)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	return fmt.Errorf("repo_path already registered by project %q: %w", owner, ErrConflict)
-}
-
 // CreateProject validates and registers a project. The stored repo_path is
-// the symlink-resolved path. A duplicate slug or repo_path is ErrConflict.
+// the symlink-resolved path. A duplicate slug is ErrConflict; several projects
+// may share one repository (migration 33).
 func (s *Store) CreateProject(ctx context.Context, actor string, p Project) error {
 	repo, err := s.validateProject(p)
 	if err != nil {
@@ -215,9 +203,6 @@ func (s *Store) CreateProject(ctx context.Context, actor string, p Project) erro
 		}
 		if n > 0 {
 			return fmt.Errorf("project %q: %w", p.Slug, ErrConflict)
-		}
-		if err := repoPathTaken(ctx, tx, repo, ""); err != nil {
-			return err
 		}
 		if err := checkOverrides(ctx, tx, p); err != nil {
 			return err
@@ -253,9 +238,6 @@ func (s *Store) UpdateProject(ctx context.Context, actor string, p Project) erro
 	}
 	return s.WithTx(ctx, func(tx *sql.Tx) error {
 		if err := requireProject(ctx, tx, p.Slug); err != nil {
-			return err
-		}
-		if err := repoPathTaken(ctx, tx, repo, p.Slug); err != nil {
 			return err
 		}
 		if err := checkOverrides(ctx, tx, p); err != nil {

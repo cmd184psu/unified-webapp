@@ -215,6 +215,25 @@ Every model stage and every feedback command runs under bwrap.
 - **Network.** Model stages share the host network namespace (they must reach their backend).
   See [Security posture](#12-security-posture).
 
+### macOS (sandbox-exec)
+
+macOS has no bwrap; there the same `sandbox.Command` builds a Seatbelt profile and runs the
+stage under `/usr/bin/sandbox-exec` (`sandbox/seatbelt_darwin.go`). Same rules where macOS
+allows them: writes only to the stage home (which is `HOME` and holds `TMPDIR`) and, for a
+worker, the worktree; git admin dirs and the worktree's gitfile read-only; the server user's
+credentials (`~/.ssh`, `~/.gnupg`, `~/.aws`, API key dotfiles, the opencode auth file, the
+server config) and the server's data dir (except the stage's own home and worktree)
+unreadable; the same allowlisted environment; loopback only without `Net`; own process group.
+
+Differences, by design of the host:
+
+- **No path remapping.** `SandboxHome` and every `ExtraROBinds` destination are rewritten to
+  their host paths in the environment and argv.
+- **Reads are allowed by default.** Toolchains read system paths; only the paths above are
+  denied. bwrap's empty root has no macOS equivalent.
+- **No PID namespace.** Cancel signals the process group; a descendant that starts its own
+  process group can outlive a cancelled stage.
+
 ### opencode isolation
 
 The stage directory `<data_dir>/stages/<id>/` holds `prompt.md`, the frozen config at
@@ -379,5 +398,7 @@ these findings and they were **noted, not fixed**:
 - Known races: a task retry resets then removes the worktree (a dispatcher pass in between
   could start an attempt in a doomed worktree); queue approval is read-then-write; one global
   mutex is held across a baseline run.
+- macOS sandbox: reads outside the denied paths are allowed, and there is no PID namespace
+  (see [macOS](#macos-sandbox-exec)).
 - The module has no authentication of its own. It inherits platform auth: list `agentflow`
   in `auth.modules` to require a session or API key.

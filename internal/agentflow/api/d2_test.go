@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"cmd184psu/unified-webapp/internal/platform/auth"
@@ -159,7 +160,8 @@ func TestProjectsCRUDAndLimits(t *testing.T) {
 		t.Fatalf("created = %+v", v)
 	}
 	e.ok("POST", "/api/projects", map[string]any{"slug": "p1", "repo_path": repo(t)}, 409)
-	e.ok("POST", "/api/projects", map[string]any{"slug": "p2", "repo_path": r}, 409) // PJ4: one project per repo
+	e.ok("POST", "/api/projects", map[string]any{"slug": "p2", "repo_path": r}, 201) // multi-project: projects may share a repo
+	e.ok("DELETE", "/api/projects/p2", nil, 200)
 	e.ok("GET", "/api/projects/ghost", nil, 404)
 
 	v = decode[ProjectView](t, e.ok("PATCH", "/api/projects/p1", map[string]any{"feedback_cmds": []string{"make"}}, 200))
@@ -195,7 +197,10 @@ func TestProjectsCRUDAndLimits(t *testing.T) {
 // only after explicit confirmation.
 func TestPJ1_GitInit(t *testing.T) {
 	e := newEnv(t, envOpt{})
-	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(t.TempDir()) // macOS: /var -> /private/var
+	if err != nil {
+		t.Fatal(err)
+	}
 	e.field("POST", "/api/projects", map[string]any{"slug": "g", "repo_path": dir}, "repo_path")
 	e.field("POST", "/api/projects/git-init", map[string]any{"repo_path": dir}, "confirm")
 	e.ok("POST", "/api/projects/git-init", map[string]any{"repo_path": dir, "confirm": true}, 201)

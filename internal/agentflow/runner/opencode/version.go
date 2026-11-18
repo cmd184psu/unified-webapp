@@ -43,15 +43,17 @@ func (a *Adapter) Version(ctx context.Context) (string, error) {
 	return parseVersion(string(out))
 }
 
-// BuiltinModels runs `opencode models opencode` and returns the model names of
+// BuiltinModels runs `opencode models` and returns the model names of
 // opencode's own provider (the free ones among them), without the provider
-// prefix. Like Version it is a plain host call that touches no stage.
+// prefix. Only lines that start with "opencode/" count: opencode 2.x no longer
+// takes a provider argument (it prints its help), and its full list mixes in
+// every other configured provider. Like Version it is a plain host call that touches no stage.
 func (a *Adapter) BuiltinModels(ctx context.Context) ([]string, error) {
 	path, err := a.path()
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, path, "models", BuiltinProvider)
+	cmd := exec.CommandContext(ctx, path, "models")
 	cmd.Env = a.versionEnv()
 	out, err := cmd.Output()
 	if err != nil {
@@ -59,7 +61,11 @@ func (a *Adapter) BuiltinModels(ctx context.Context) ([]string, error) {
 	}
 	var names []string
 	for _, line := range strings.Split(string(out), "\n") {
-		if n := strings.TrimPrefix(strings.TrimSpace(line), BuiltinProvider+"/"); n != "" && !strings.ContainsAny(n, " \t") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, BuiltinProvider+"/") {
+			continue
+		}
+		if n := strings.TrimPrefix(line, BuiltinProvider+"/"); n != "" && !strings.ContainsAny(n, " \t") {
 			names = append(names, n)
 		}
 	}

@@ -9,6 +9,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -49,8 +50,14 @@ func (r *sandboxRunner) Run(ctx context.Context, req runner.Request) (runner.Res
 	if err != nil {
 		return runner.Result{}, err
 	}
+	homeCheck := `test "$(ls /home)" = agent || { echo "host home is visible" >&2; exit 4; }`
+	if runtime.GOOS == "darwin" {
+		// No path remapping on macOS: HOME is the stage home itself.
+		realStageHome, _ := filepath.EvalSymlinks(home)
+		homeCheck = `test "$HOME" = "` + realStageHome + `" || { echo "HOME is not the stage home" >&2; exit 4; }`
+	}
 	script := `for p in "$@"; do if test -e "$p" || test -r "$p"; then echo "reachable: $p" >&2; exit 3; fi; done
-test "$(ls /home)" = agent || { echo "host home is visible" >&2; exit 4; }
+` + homeCheck + `
 printf '%s' '{"summary":"sandboxed","files_changed":[],"learnings":[]}'`
 	cmd, err := sandbox.Command(ctx, sandbox.Spec{
 		Worktree: req.Workdir, RepoGitDir: filepath.Join(r.repo, ".git"), WorktreeGitDir: admin,
@@ -59,7 +66,7 @@ printf '%s' '{"summary":"sandboxed","files_changed":[],"learnings":[]}'`
 	if err != nil {
 		return runner.Result{}, err
 	}
-	if filepath.Base(cmd.Path) == "bwrap" {
+	if b := filepath.Base(cmd.Path); b == "bwrap" || b == "sandbox-exec" {
 		r.bwrap.Add(1)
 	}
 	var out, errb strings.Builder
@@ -120,6 +127,11 @@ func TestC12_YOLOEffortRunsFromTheSavedFRDToASandboxedWorker(t *testing.T) {
 			t.Fatal(err)
 		}
 		writeFile(t, p, "secret")
+	}
+	if runtime.GOOS == "darwin" {
+		// macOS (sandbox-exec) hides the server user's credentials, not every
+		// path on the host: only the real HOME's entries are checked there.
+		sr.credPaths = sr.credPaths[3:]
 	}
 	h.tweak = func(d *Deps) { d.Git, d.DataDir, d.Runner = git, dataDir, sr }
 	h.start()

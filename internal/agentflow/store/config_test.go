@@ -343,30 +343,30 @@ func TestProjectValidationAndUniqueness(t *testing.T) {
 	if n := countRows(t, s, "projects"); n != 0 {
 		t.Fatalf("rejected creates leaked %d rows", n)
 	}
-	// PJ4: one repo_path per project, also through a symlink alias.
+	// Multi-project (migration 33): several projects may share one repository,
+	// also through a symlink alias; a slug is still unique.
 	if err := s.CreateProject(ctx, "t", Project{Slug: "a", RepoPath: repo, ModelScope: "local", FeedbackCmds: []string{"go vet ./..."}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CreateProject(ctx, "t", Project{Slug: "b", RepoPath: repo, ModelScope: "local"}); !errors.Is(err, ErrConflict) {
-		t.Fatalf("duplicate repo_path = %v, want ErrConflict", err)
+	if err := s.CreateProject(ctx, "t", Project{Slug: "b", RepoPath: repo, ModelScope: "local"}); err != nil {
+		t.Fatalf("second project on the same repo = %v, want nil", err)
 	}
 	alias := filepath.Join(t.TempDir(), "alias")
 	if err := os.Symlink(repo, alias); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CreateProject(ctx, "t", Project{Slug: "b", RepoPath: alias, ModelScope: "local"}); !errors.Is(err, ErrConflict) {
-		t.Fatalf("aliased repo_path = %v, want ErrConflict", err)
+	if err := s.CreateProject(ctx, "t", Project{Slug: "c", RepoPath: alias, ModelScope: "local"}); err != nil {
+		t.Fatalf("project through an alias of a shared repo = %v, want nil", err)
 	}
 	if err := s.CreateProject(ctx, "t", Project{Slug: "a", RepoPath: mkRepo(t), ModelScope: "local"}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("duplicate slug = %v, want ErrConflict", err)
 	}
-	// A second repo is fine; moving it onto the first one is not.
 	repo2 := mkRepo(t)
-	if err := s.CreateProject(ctx, "t", Project{Slug: "b", RepoPath: repo2, ModelScope: "any"}); err != nil {
+	if err := s.UpdateProject(ctx, "t", Project{Slug: "b", RepoPath: repo2, ModelScope: "any"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpdateProject(ctx, "t", Project{Slug: "b", RepoPath: repo, ModelScope: "any"}); !errors.Is(err, ErrConflict) {
-		t.Fatalf("update onto taken repo_path = %v", err)
+	if err := s.UpdateProject(ctx, "t", Project{Slug: "b", RepoPath: repo, ModelScope: "any"}); err != nil {
+		t.Fatalf("update onto a shared repo_path = %v, want nil", err)
 	}
 	if err := s.UpdateProject(ctx, "t", Project{Slug: "ghost", RepoPath: repo2, ModelScope: "any"}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("update unknown = %v", err)
@@ -382,7 +382,7 @@ func TestProjectValidationAndUniqueness(t *testing.T) {
 	if _, err := s.GetProject(ctx, "ghost"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("get unknown = %v", err)
 	}
-	if ps, _ := s.ListProjects(ctx); len(ps) != 2 || ps[0].Slug != "a" {
+	if ps, _ := s.ListProjects(ctx); len(ps) != 3 || ps[0].Slug != "a" {
 		t.Fatalf("list = %+v", ps)
 	}
 }
@@ -572,7 +572,7 @@ func TestConfigWritesAppendAuditEventsInSameTx(t *testing.T) {
 	}
 	// A failed write leaves no event behind.
 	before := countRows(t, s, "events")
-	s.CreateProject(ctx, "alice", Project{Slug: "q", RepoPath: repo, ModelScope: "any"})
+	s.CreateProject(ctx, "alice", Project{Slug: "p", RepoPath: repo, ModelScope: "any"}) // duplicate slug
 	if countRows(t, s, "events") != before {
 		t.Fatal("failed write appended an event")
 	}

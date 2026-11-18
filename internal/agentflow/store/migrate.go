@@ -62,10 +62,33 @@ var migrations = []migration{
 	{30, migration30SQL},
 	{31, migration31SQL},
 	{32, migration32SQL},
+	{33, migration33SQL},
 }
 
 // migration32SQL adds the BotChat mode: 'mirror' posts what happens, 'dispatch' also hands each
 // stage to an agent through BotChat.
+// migration33SQL lets several projects share one repository (multi-project): the
+// projects table is rebuilt without the UNIQUE on repo_path. Each project still
+// has its own worktrees, integration branches and active effort; gitsvc already
+// serialises git operations per repository.
+const migration33SQL = `
+CREATE TABLE projects_new (
+  slug TEXT PRIMARY KEY,
+  repo_path TEXT NOT NULL,
+  model_scope TEXT NOT NULL CHECK (model_scope IN ('local', 'any')),
+  feedback_cmds_json TEXT NOT NULL DEFAULT '[]',
+  created INTEGER NOT NULL,
+  updated INTEGER NOT NULL,
+  definition_of_done_json TEXT NOT NULL DEFAULT '',
+  cleanup_enabled INTEGER NOT NULL DEFAULT 0 CHECK (cleanup_enabled IN (0, 1))
+);
+INSERT INTO projects_new (slug, repo_path, model_scope, feedback_cmds_json, created, updated, definition_of_done_json, cleanup_enabled)
+  SELECT slug, repo_path, model_scope, feedback_cmds_json, created, updated, definition_of_done_json, cleanup_enabled FROM projects;
+DROP TABLE projects;
+ALTER TABLE projects_new RENAME TO projects;
+CREATE INDEX idx_projects_repo_path ON projects(repo_path);
+`
+
 const migration32SQL = `
 INSERT OR IGNORE INTO settings (key, value) VALUES ('botchat_mode', 'mirror');
 `
@@ -405,7 +428,7 @@ ALTER TABLE efforts ADD COLUMN budget_seconds INTEGER NOT NULL DEFAULT 0 CHECK (
 // table with foreign keys on would fire the referencing rows' ON DELETE
 // actions, so these run with foreign keys off (the documented procedure) and
 // are checked with foreign_key_check before they commit.
-var rebuildsTables = map[int]bool{6: true, 11: true, 26: true, 27: true, 29: true, 31: true}
+var rebuildsTables = map[int]bool{6: true, 11: true, 26: true, 27: true, 29: true, 31: true, 33: true}
 
 // migration6SQL (F2) lets a stage have the cleanup role (AT11) and adds the
 // per-project cleanup switch. stages is rebuilt with the same columns, so rows

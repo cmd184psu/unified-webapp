@@ -26,7 +26,11 @@ func TestArgvFollowsTheRole(t *testing.T) {
 }
 
 func TestSettingsSandboxDeniesSecretsAndReviewerWrites(t *testing.T) {
-	home := t.TempDir()
+	// macOS: TempDir is under /var -> /private/var; the code lists real paths.
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("HOME", home)
 	if err := os.Mkdir(filepath.Join(home, ".ssh"), 0o700); err != nil {
 		t.Fatal(err)

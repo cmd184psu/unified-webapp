@@ -15,7 +15,7 @@ It is a local, single-user tool. How it works inside is in
 
 | Needs | Why |
 |---|---|
-| Linux with `bwrap` (bubblewrap) and unprivileged user namespaces | Every model stage runs in a bwrap sandbox. There is no unsandboxed mode. |
+| Linux with `bwrap` (bubblewrap) and unprivileged user namespaces, **or macOS** (uses the built-in `/usr/bin/sandbox-exec`) | Every model stage and verify command runs sandboxed. There is no unsandboxed mode. See the design doc, [Sandbox](../agentflow-design.md#7-sandbox), for how the macOS sandbox differs. |
 | `git` on the server's `PATH` | The engine runs all git work. |
 | The real `opencode` binary | The model runner. Install it so the binary is at `~/.opencode/bin/opencode`, or on `PATH`. |
 | A project repository that is already a git repository | See [Projects](#projects). |

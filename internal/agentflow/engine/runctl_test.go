@@ -356,6 +356,11 @@ func (r sleepRunner) Run(ctx context.Context, req runner.Request) (runner.Result
 }
 
 func sleepers(arg string) int {
+	if _, err := os.Stat("/proc"); err != nil {
+		// macOS has no /proc: count with pgrep (exit 1 = none).
+		out, _ := exec.Command("pgrep", "-f", "^sleep "+arg+"$").Output()
+		return len(bytes.Fields(out))
+	}
 	n := 0
 	ents, _ := os.ReadDir("/proc")
 	for _, e := range ents {

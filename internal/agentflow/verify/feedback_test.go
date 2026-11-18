@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -23,7 +24,7 @@ type fb struct {
 
 func newFB(t *testing.T) *fb {
 	t.Helper()
-	if _, err := exec.LookPath("bwrap"); err != nil {
+	if _, err := exec.LookPath("bwrap"); err != nil && runtime.GOOS != "darwin" {
 		t.Fatalf("bwrap not installed; it is a fixed host dependency (D16): %v", err)
 	}
 	root := t.TempDir()
