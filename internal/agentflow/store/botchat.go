@@ -37,6 +37,10 @@ type FinishedStage struct {
 	Tokens   int64
 	Started  int64
 	Finished int64
+	// Parsed is the stage's parsed final message (JSON) and RawHead the first 500 bytes of
+	// its raw output, which is all a verify or merge stage has to say.
+	Parsed  string
+	RawHead string
 }
 
 // FinishedStagesAfter lists stages that finished after (ts, id) in finish order: the pair is a
@@ -44,7 +48,7 @@ type FinishedStage struct {
 func (s *Store) FinishedStagesAfter(ctx context.Context, ts, id int64, limit int) ([]FinishedStage, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT s.id, COALESCE(s.effort, q.effort, 0), COALESCE(t.task_key, ''), COALESCE(a.n, 0),
-       s.role, s.backend, s.model, s.outcome, s.tokens, s.started, s.finished
+       s.role, s.backend, s.model, s.outcome, s.tokens, s.started, s.finished, s.parsed_json, substr(s.raw_output, 1, 500)
 FROM stages s
 LEFT JOIN attempts a ON s.attempt = a.id
 LEFT JOIN tasks t ON a.task = t.id
@@ -58,7 +62,7 @@ ORDER BY s.finished, s.id LIMIT ?`, ts, ts, id, limit)
 	var out []FinishedStage
 	for rows.Next() {
 		var f FinishedStage
-		if err := rows.Scan(&f.ID, &f.Effort, &f.Task, &f.Attempt, &f.Role, &f.Backend, &f.Model, &f.Outcome, &f.Tokens, &f.Started, &f.Finished); err != nil {
+		if err := rows.Scan(&f.ID, &f.Effort, &f.Task, &f.Attempt, &f.Role, &f.Backend, &f.Model, &f.Outcome, &f.Tokens, &f.Started, &f.Finished, &f.Parsed, &f.RawHead); err != nil {
 			return nil, err
 		}
 		out = append(out, f)
@@ -96,6 +100,7 @@ func (s *Store) EventsAfter(ctx context.Context, id int64, limit int) ([]RelayEv
 // RelayHead is where a fresh relay starts so it does not replay history: the newest finished
 // stage's (finished, id) and the newest event id.
 func (s *Store) RelayHead(ctx context.Context) (ts, stage, event int64, err error) {
+	// (the start cursor begins at the same present: see StartHead)
 	err = s.db.QueryRowContext(ctx, `SELECT COALESCE(finished, 0), id FROM stages WHERE state = 'done' ORDER BY finished DESC, id DESC LIMIT 1`).Scan(&ts, &stage)
 	if errors.Is(err, sql.ErrNoRows) {
 		ts, stage, err = 0, 0, nil
@@ -109,3 +114,39 @@ func (s *Store) RelayHead(ctx context.Context) (ts, stage, event int64, err erro
 
 // itoa64 is for the relay's bookkeeping values.
 func Itoa64(n int64) string { return strconv.FormatInt(n, 10) }
+
+// StartedStagesAfter lists stages that started after (ts, id) in start order, whether or not they
+// have finished since: a stage too quick to be seen running is still announced.
+func (s *Store) StartedStagesAfter(ctx context.Context, ts, id int64, limit int) ([]FinishedStage, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT s.id, COALESCE(s.effort, q.effort, 0), COALESCE(t.task_key, ''), COALESCE(a.n, 0),
+       s.role, s.backend, s.model, s.started
+FROM stages s
+LEFT JOIN attempts a ON s.attempt = a.id
+LEFT JOIN tasks t ON a.task = t.id
+LEFT JOIN queues q ON t.queue = q.id
+WHERE s.started > 0 AND (s.started > ? OR (s.started = ? AND s.id > ?))
+ORDER BY s.started, s.id LIMIT ?`, ts, ts, id, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FinishedStage
+	for rows.Next() {
+		var f FinishedStage
+		if err := rows.Scan(&f.ID, &f.Effort, &f.Task, &f.Attempt, &f.Role, &f.Backend, &f.Model, &f.Started); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// StartHead is the newest started stage's (started, id), where a fresh relay's start cursor begins.
+func (s *Store) StartHead(ctx context.Context) (ts, id int64, err error) {
+	err = s.db.QueryRowContext(ctx, `SELECT started, id FROM stages WHERE started > 0 ORDER BY started DESC, id DESC LIMIT 1`).Scan(&ts, &id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, nil
+	}
+	return
+}

@@ -128,3 +128,29 @@ func TestMessageFormats(t *testing.T) {
 		t.Fatalf("%d %q %v", ef, txt, ok)
 	}
 }
+
+func TestStartAndDetailMessages(t *testing.T) {
+	st := store.FinishedStage{Effort: 4, Task: "T002", Attempt: 1, Role: "worker", Backend: "grok", Model: "grok-4.7"}
+	if got := StartText(st); got != "T002 attempt 1 · assigned to worker grok-4.7 (grok)" {
+		t.Fatalf("start = %q", got)
+	}
+	if got := StartText(store.FinishedStage{Role: "verify"}); got != "verify started" {
+		t.Fatalf("start = %q", got)
+	}
+	rv := store.FinishedStage{Effort: 4, Task: "T002", Attempt: 1, Role: "reviewer", Model: "m", Backend: "b", Outcome: "repair",
+		Parsed: `{"verdict":"repair","summary":"missing test","issues":[{"description":"no test for divide by zero","severity":"major","file":"api_test.go"}]}`}
+	got := StageText(rv)
+	for _, want := range []string{"reviewer m (b): repair", "verdict repair: missing test", "- [major] no test for divide by zero (api_test.go)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("review text lacks %q:\n%s", want, got)
+		}
+	}
+	w := store.FinishedStage{Role: "worker", Outcome: "blocked", Parsed: `{"blocked":"needs main.go, which belongs to T005"}`}
+	if got := StageText(w); !strings.Contains(got, "blocked: needs main.go") {
+		t.Errorf("worker text = %q", got)
+	}
+	v := store.FinishedStage{Role: "verify", Outcome: "repair", RawHead: "verify failed: scope belongs to another task"}
+	if got := StageText(v); !strings.Contains(got, "verify failed: scope belongs") {
+		t.Errorf("verify text = %q", got)
+	}
+}

@@ -33,6 +33,8 @@ const (
 	keyStageTS    = "stage_ts"
 	keyStageID    = "stage_id"
 	keyEventID    = "event_id"
+	keyStartTS    = "start_ts"
+	keyStartID    = "start_id"
 	batch         = 100
 	maxText       = 1500
 	globalRoom    = "global"
@@ -86,6 +88,22 @@ func (r *Relay) Step(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	started, err := r.Store.StartedStagesAfter(ctx, cur.sts, cur.sid, batch)
+	if err != nil {
+		return err
+	}
+	for _, s := range started {
+		if err := r.send(ctx, c, s.Effort, StageCallsign(s), StartText(s)); err != nil {
+			return err
+		}
+		cur.sts, cur.sid = s.Started, s.ID
+		if err := r.Store.SetBotchatState(ctx, keyStartTS, store.Itoa64(cur.sts)); err != nil {
+			return err
+		}
+		if err := r.Store.SetBotchatState(ctx, keyStartID, store.Itoa64(cur.sid)); err != nil {
+			return err
+		}
+	}
 	stages, err := r.Store.FinishedStagesAfter(ctx, cur.ts, cur.stage, batch)
 	if err != nil {
 		return err
@@ -120,7 +138,7 @@ func (r *Relay) Step(ctx context.Context) error {
 	return nil
 }
 
-type cursors struct{ ts, stage, event int64 }
+type cursors struct{ ts, stage, event, sts, sid int64 }
 
 // cursors reads how far the relay has posted; the first time, it starts at the present so
 // switching the relay on does not replay history.
@@ -145,15 +163,26 @@ func (r *Relay) cursors(ctx context.Context) (cursors, error) {
 	if c.event, okEv, err = get(keyEventID); err != nil {
 		return c, err
 	}
-	if okTS && okID && okEv {
+	var okS1, okS2 bool
+	if c.sts, okS1, err = get(keyStartTS); err != nil {
+		return c, err
+	}
+	if c.sid, okS2, err = get(keyStartID); err != nil {
+		return c, err
+	}
+	if okTS && okID && okEv && okS1 && okS2 {
 		return c, nil
 	}
 	ts, stage, event, err := r.Store.RelayHead(ctx)
 	if err != nil {
 		return c, err
 	}
-	c = cursors{ts: ts, stage: stage, event: event}
-	for k, v := range map[string]int64{keyStageTS: ts, keyStageID: stage, keyEventID: event} {
+	sts, sid, err := r.Store.StartHead(ctx)
+	if err != nil {
+		return c, err
+	}
+	c = cursors{ts: ts, stage: stage, event: event, sts: sts, sid: sid}
+	for k, v := range map[string]int64{keyStageTS: ts, keyStageID: stage, keyEventID: event, keyStartTS: sts, keyStartID: sid} {
 		if err := r.Store.SetBotchatState(ctx, k, store.Itoa64(v)); err != nil {
 			return c, err
 		}
@@ -225,7 +254,85 @@ func StageText(s store.FinishedStage) string {
 	if s.Tokens > 0 {
 		fmt.Fprintf(&b, " · %s tokens", compact(s.Tokens))
 	}
+	if d := stageDetail(s); d != "" {
+		b.WriteString("\n" + d)
+	}
 	return b.String()
+}
+
+// StartText is the message for a stage that was just handed to its model.
+func StartText(s store.FinishedStage) string {
+	var b strings.Builder
+	if s.Task != "" {
+		fmt.Fprintf(&b, "%s attempt %d · ", s.Task, s.Attempt)
+	}
+	switch {
+	case s.Model != "" && s.Backend != "":
+		fmt.Fprintf(&b, "assigned to %s %s (%s)", s.Role, s.Model, s.Backend)
+	case s.Model != "":
+		fmt.Fprintf(&b, "assigned to %s %s", s.Role, s.Model)
+	default:
+		fmt.Fprintf(&b, "%s started", s.Role)
+	}
+	return b.String()
+}
+
+// stageDetail is what the stage had to say, short enough for a chat: a reviewer's verdict and
+// issues, a worker's summary or the reason it is blocked, a verify or merge stage's own words.
+func stageDetail(s store.FinishedStage) string {
+	var p struct {
+		Verdict string `json:"verdict"`
+		Summary string `json:"summary"`
+		Blocked string `json:"blocked"`
+		Issues  []struct {
+			Description string `json:"description"`
+			Severity    string `json:"severity"`
+			File        string `json:"file"`
+		} `json:"issues"`
+		Files []string `json:"files_changed"`
+	}
+	if s.Parsed != "" && json.Unmarshal([]byte(s.Parsed), &p) == nil {
+		var lines []string
+		switch s.Role {
+		case "reviewer", "architect", "critic":
+			if p.Verdict != "" || p.Summary != "" {
+				lines = append(lines, strings.TrimSpace("verdict "+p.Verdict+": "+p.Summary))
+			}
+			for i, is := range p.Issues {
+				if i == 8 {
+					lines = append(lines, fmt.Sprintf("… and %d more issues", len(p.Issues)-8))
+					break
+				}
+				where := ""
+				if is.File != "" {
+					where = " (" + is.File + ")"
+				}
+				lines = append(lines, fmt.Sprintf("- [%s] %s%s", is.Severity, clip(is.Description, 300), where))
+			}
+		default:
+			switch {
+			case p.Blocked != "":
+				lines = append(lines, "blocked: "+clip(p.Blocked, 400))
+			case p.Summary != "":
+				lines = append(lines, clip(p.Summary, 400))
+			}
+			if len(p.Files) > 0 {
+				lines = append(lines, fmt.Sprintf("%d file(s) changed", len(p.Files)))
+			}
+		}
+		return strings.Join(lines, "\n")
+	}
+	if (s.Role == "verify" || s.Role == "merge") && strings.TrimSpace(s.RawHead) != "" {
+		return clip(strings.TrimSpace(s.RawHead), 500)
+	}
+	return ""
+}
+
+func clip(t string, n int) string {
+	if r := []rune(strings.TrimSpace(t)); len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return strings.TrimSpace(t)
 }
 
 func compact(n int64) string {
