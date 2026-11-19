@@ -212,6 +212,14 @@ Every model stage and every feedback command runs under bwrap.
   project repository itself, bound read-only.
 - **Feedback commands** run with the worktree read-only, `GOPROXY=off` and the host Go module
   cache bound read-only at `/sandbox/gomod`.
+- **Project toolchains (AF-6).** A project may set `toolchains`; `dotnet` is the first. It mounts the host
+  `~/.dotnet` read-only at `/sandbox/dotnet` (on `PATH`, as `DOTNET_ROOT`) and the host `~/.nuget/packages`
+  read-only at `/sandbox/nuget` (`NUGET_PACKAGES`), with `DOTNET_CLI_HOME` in the writable stage home and
+  `DOTNET_NOLOGO`, `DOTNET_SKIP_FIRST_TIME_EXPERIENCE` and `DOTNET_CLI_TELEMETRY_OPTOUT` set, so a C# project
+  builds and tests offline with no wrapper script. A project may also set `feedback_env`, extra variables for
+  its feedback commands (never a secret), and `verify_in_copy`: verify then copies the worktree into the stage
+  home without `.git`, `bin` and `obj` and runs the feedback commands there read-write, because `dotnet build`
+  writes build output next to the sources and the worktree itself stays read-only.
 - **Network.** Model stages share the host network namespace (they must reach their backend).
   See [Security posture](#12-security-posture).
 

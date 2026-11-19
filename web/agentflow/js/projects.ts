@@ -64,6 +64,15 @@ export function isNotARepo(err: unknown): boolean {
 
 export const SCOPES: Array<[string, string]> = [['local', 'local (only local backends)'], ['any', 'any (hosted backends allowed)']];
 
+/** TOOLCHAINS are the host toolchains a project may mount in its sandbox (AF-6); dotnet is the first. */
+export const TOOLCHAINS: Array<[string, string]> = [['dotnet', '.NET SDK and the host NuGet cache, read-only and offline']];
+
+/** EnvRow is one feedback environment variable, as the editor holds it. */
+export interface EnvRow {
+  key: string;
+  value: string;
+}
+
 export interface ProjectMode {
   /** The project being edited; undefined creates one. */
   project?: ProjectView;
@@ -78,6 +87,9 @@ export class ProjectForm {
   private repoBtn: HTMLElement;
   private scope: HTMLSelectElement;
   private cleanup: ToggleEl;
+  private toolchains = new Map<string, ToggleEl>();
+  private env: RowsEditor<EnvRow>;
+  private verifyInCopy: ToggleEl;
   private backends: Backend[] = [];
   private cands: Candidate[] = [];
   private drafts = new Map<string, CandRow[]>();
@@ -103,6 +115,8 @@ export class ProjectForm {
     this.drawRepo();
     this.scope = selectInput('model_scope', SCOPES, p?.model_scope ?? 'local');
     this.cleanup = checkbox('cleanup_enabled', p?.cleanup_enabled ?? false);
+    for (const [name] of TOOLCHAINS) this.toolchains.set(name, checkbox(`toolchain_${name}`, (p?.toolchains ?? []).includes(name)));
+    this.verifyInCopy = checkbox('verify_in_copy', p?.verify_in_copy ?? false);
     this.cmds = new RowsEditor<string>((c) => {
       const input = textInput('feedback_cmd', c, { placeholder: 'go test ./...' });
       const preview = h('code', { class: 'field-hint', attrs: { 'data-role': 'argv' } });
@@ -119,6 +133,11 @@ export class ProjectForm {
       sync();
       return { el: h('div', { class: 'wizard-field' }, input, preview, warn), read: () => joinArgv(splitArgv(input.value)) };
     }, p?.feedback_cmds ?? [], () => '', 'Add command', () => this.bump());
+    this.env = new RowsEditor<EnvRow>((row) => {
+      const key = textInput('feedback_env_key', row.key, { placeholder: 'CIV3_PATH' });
+      const value = textInput('feedback_env_value', row.value, { placeholder: '/path/to/civ3' });
+      return { el: h('div', { class: 'row-actions' }, key, value), read: () => ({ key: key.value.trim(), value: value.value }) };
+    }, Object.entries(p?.feedback_env ?? {}).map(([key, value]) => ({ key, value })), () => ({ key: '', value: '' }), 'Add variable', () => this.bump());
     this.plugins = new RowsEditor<PluginPin>((pl) => {
       const name = textInput('plugin_name', pl.name, { placeholder: 'package-name' });
       const version = textInput('plugin_version', pl.version, { placeholder: '1.2.3' });
@@ -165,6 +184,9 @@ export class ProjectForm {
       feedback_cmds: this.cmds.read().filter((c) => c !== ''),
       cleanup_enabled: this.cleanup.checked,
       plugins: this.plugins.read().filter((pl) => pl.name !== '' || pl.version !== ''),
+      toolchains: TOOLCHAINS.map(([name]) => name).filter((name) => this.toolchains.get(name)?.checked),
+      feedback_env: Object.fromEntries(this.env.read().filter((r) => r.key !== '').map((r) => [r.key, r.value])),
+      verify_in_copy: this.verifyInCopy.checked,
     };
   }
 
@@ -173,7 +195,7 @@ export class ProjectForm {
     this.errors.clear();
     const body = this.body();
     const attempt = (): Promise<ProjectView> => this.mode.project
-      ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, feedback_cmds: body.feedback_cmds, cleanup_enabled: body.cleanup_enabled, plugins: body.plugins, ...this.dodPatch() }, { quiet: true })
+      ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, feedback_cmds: body.feedback_cmds, cleanup_enabled: body.cleanup_enabled, plugins: body.plugins, toolchains: body.toolchains, feedback_env: body.feedback_env, verify_in_copy: body.verify_in_copy, ...this.dodPatch() }, { quiet: true })
       : this.deps.createProject(body, { quiet: true });
     let saved: ProjectView;
     try {
@@ -206,7 +228,7 @@ export class ProjectForm {
     this.errors.clear();
     const b = this.body();
     try {
-      await this.deps.patchProject(p.slug, { repo_path: b.repo_path, model_scope: b.model_scope, feedback_cmds: b.feedback_cmds, cleanup_enabled: b.cleanup_enabled, plugins: b.plugins, ...this.dodPatch() }, { quiet: true });
+      await this.deps.patchProject(p.slug, { repo_path: b.repo_path, model_scope: b.model_scope, feedback_cmds: b.feedback_cmds, cleanup_enabled: b.cleanup_enabled, plugins: b.plugins, toolchains: b.toolchains, feedback_env: b.feedback_env, verify_in_copy: b.verify_in_copy, ...this.dodPatch() }, { quiet: true });
     } catch (err) {
       this.errors.show(err);
       return false;
@@ -307,6 +329,14 @@ export class ProjectForm {
     return b;
   }
 
+  /** drawToolchains is one checkbox per known toolchain, with what it mounts. */
+  private drawToolchains(): HTMLElement {
+    return h('div', {}, ...TOOLCHAINS.map(([name, hint]) => {
+      const box = this.toolchains.get(name);
+      return h('div', { class: 'field-hint' }, box ?? h('span'), ' ' + hint);
+    }));
+  }
+
   render(): void {
     const p = this.mode.project;
     const e = this.errors;
@@ -322,6 +352,12 @@ export class ProjectForm {
             e.add('model_scope', fieldRow('Model scope', this.scope, 'local keeps this project off hosted backends')).el,
             e.add('cleanup_enabled', fieldRow('Cleanup pass', this.cleanup,
               'After a task passes review, run a cleanup agent and verify again; if that breaks verification the cleanup is rolled back')).el),
+          e.add('feedback_env', fieldRow('Feedback environment', this.env.el,
+            'Set for every feedback command, for values such as an install path; never a secret')).el,
+          e.add('toolchains', fieldRow('Toolchains', this.drawToolchains(),
+            'Mounted read-only in every sandbox for this project; dotnet brings the SDK and the host NuGet cache, so build and test run offline')).el,
+          e.add('verify_in_copy', fieldRow('Verify in a copy', this.verifyInCopy,
+            'Run feedback commands on a throwaway copy of the worktree, without .git, bin or obj; needed when the toolchain writes build output')).el,
           e.add('feedback_cmds', fieldRow('Feedback commands', this.cmds.el,
             'Run in the sandbox to verify each task, as a program and arguments, never through a shell. Blank: detected from go.mod, pyproject.toml or package.json')).el,
           p ? e.add('definition_of_done', fieldRow('Definition of done', this.dodHost, 'Applies to every task; need not be written as acceptance criteria')).el : null,

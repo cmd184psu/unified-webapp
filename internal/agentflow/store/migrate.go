@@ -27,6 +27,7 @@ type migration struct {
 //	11     backends.api_type may be 'opencode' (opencode's own built-in provider)
 //	26     backends.api_type may be 'grok' (the Grok CLI)
 //	27     backends.api_type may be 'codex' (the Codex CLI)
+//	34 AF-6 projects.toolchains_json, projects.feedback_env_json, projects.verify_in_copy
 //
 // Later stories append the next integer; they never edit an earlier entry.
 var migrations = []migration{
@@ -63,6 +64,7 @@ var migrations = []migration{
 	{31, migration31SQL},
 	{32, migration32SQL},
 	{33, migration33SQL},
+	{34, migration34SQL},
 }
 
 // migration32SQL adds the BotChat mode: 'mirror' posts what happens, 'dispatch' also hands each
@@ -71,6 +73,16 @@ var migrations = []migration{
 // projects table is rebuilt without the UNIQUE on repo_path. Each project still
 // has its own worktrees, integration branches and active effort; gitsvc already
 // serialises git operations per repository.
+// migration34SQL (AF-6) gives a project host toolchains to mount in its
+// sandbox ('dotnet' first), extra environment for its feedback commands, and
+// the switch that runs those commands on a copy of the worktree because the
+// toolchain writes build output there.
+const migration34SQL = `
+ALTER TABLE projects ADD COLUMN toolchains_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE projects ADD COLUMN feedback_env_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE projects ADD COLUMN verify_in_copy INTEGER NOT NULL DEFAULT 0 CHECK (verify_in_copy IN (0, 1));
+`
+
 const migration33SQL = `
 CREATE TABLE projects_new (
   slug TEXT PRIMARY KEY,

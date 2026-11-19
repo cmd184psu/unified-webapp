@@ -125,9 +125,10 @@ func failingChecks(rep verify.VerifyReport) string {
 }
 
 // feedbackSpec is the sandbox for feedback commands run on wt: the configured
-// template plus this worktree and its trusted git dirs. The worktree is
-// read-only; caches go to the stage home.
-func (e *Engine) feedbackSpec(wt, admin, home string) (sandbox.Spec, error) {
+// template plus this worktree, its trusted git dirs, and the project's
+// toolchains and feedback environment (AF-6). The worktree is read-only unless
+// the caller runs in a copy; caches go to the stage home.
+func (e *Engine) feedbackSpec(p store.Project, wt, admin, home string) (sandbox.Spec, error) {
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return sandbox.Spec{}, err
 	}
@@ -136,13 +137,42 @@ func (e *Engine) feedbackSpec(wt, admin, home string) (sandbox.Spec, error) {
 	s.WorktreeGitDir = admin
 	s.RepoGitDir = filepath.Dir(filepath.Dir(admin))
 	s.StageHome = home
+	if err := sandbox.ApplyToolchains(&s, p.Toolchains); err != nil {
+		return sandbox.Spec{}, err
+	}
+	for k, v := range p.FeedbackEnv {
+		if s.Env == nil {
+			s.Env = map[string]string{}
+		}
+		s.Env[k] = v
+	}
 	return s, nil
+}
+
+// verifyWorktree is the directory feedback commands run in: wt itself, or a
+// copy of it when the project sets verify_in_copy. A feedback command may not
+// write to the worktree it verifies, and a toolchain such as .NET writes bin/
+// and obj/ next to the sources, so that project is verified on a copy the
+// stage home holds and the next run replaces (AF-6).
+func verifyWorktree(p store.Project, wt, home string) (string, bool, error) {
+	if !p.VerifyInCopy {
+		return wt, false, nil
+	}
+	dst := filepath.Join(home, "verify-copy")
+	if err := verify.CopyWorktree(dst, wt); err != nil {
+		return "", false, err
+	}
+	return dst, true, nil
 }
 
 // feedback runs the project's feedback commands on wt and compares them with
 // the effort's baseline into rep (V5). It returns the raw results so a merge
 // can refresh the baseline from them.
 func (e *Engine) feedback(ctx context.Context, c *chain, rep *verify.VerifyReport, wt, admin, home string, set store.Settings, touched []string) ([]verify.CommandResult, error) {
+	wt, writable, err := verifyWorktree(c.proj, wt, home)
+	if err != nil {
+		return nil, err
+	}
 	cmds, err := verify.Commands(c.proj.FeedbackCmds, wt)
 	if err != nil {
 		return nil, err
@@ -150,11 +180,12 @@ func (e *Engine) feedback(ctx context.Context, c *chain, rep *verify.VerifyRepor
 	if len(cmds) == 0 {
 		return nil, nil
 	}
-	spec, err := e.feedbackSpec(wt, admin, home)
+	spec, err := e.feedbackSpec(c.proj, wt, admin, home)
 	if err != nil {
 		return nil, err
 	}
-	results, err := verify.RunFeedback(ctx, verify.FeedbackConfig{Spec: spec, Timeout: set.VerifyTimeout}, cmds)
+	spec.ReadOnlyWorktree = !writable
+	results, err := verify.RunFeedback(ctx, verify.FeedbackConfig{Spec: spec, Timeout: set.VerifyTimeout, WritableWorktree: writable}, cmds)
 	if err != nil {
 		return nil, err
 	}
@@ -223,13 +254,22 @@ func (e *Engine) ensureBaseline(ctx context.Context, proj store.Project, effort 
 		if err != nil {
 			return err
 		}
-		spec, err := e.feedbackSpec(intWT, admin, filepath.Join(e.deps.DataDir, "baselines", strconv.FormatInt(effort, 10)))
+		home := filepath.Join(e.deps.DataDir, "baselines", strconv.FormatInt(effort, 10))
+		wt, writable, err := verifyWorktree(proj, intWT, home)
 		if err != nil {
 			return err
 		}
+		if cmds, err = verify.Commands(proj.FeedbackCmds, wt); err != nil {
+			return err
+		}
+		spec, err := e.feedbackSpec(proj, wt, admin, home)
+		if err != nil {
+			return err
+		}
+		spec.ReadOnlyWorktree = !writable
 		bctx, cancel := withTimeout(ctx, set.VerifyTimeout)
 		defer cancel()
-		if base, err = verify.RecordBaseline(bctx, verify.FeedbackConfig{Spec: spec, Timeout: set.VerifyTimeout}, cmds, head.Commit); err != nil {
+		if base, err = verify.RecordBaseline(bctx, verify.FeedbackConfig{Spec: spec, Timeout: set.VerifyTimeout, WritableWorktree: writable}, cmds, head.Commit); err != nil {
 			return fmt.Errorf("record baseline: %w", err)
 		}
 	}

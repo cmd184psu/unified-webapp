@@ -42,11 +42,16 @@ func ParseArgv(s string) (Argv, error) {
 // FeedbackConfig describes where and how feedback commands run. Spec carries
 // the worktree, trusted git dirs, stage home and any Go module cache binds or
 // environment (for example GOPROXY=off); its Argv is replaced per command and
-// the worktree is always bound read-only, because a feedback command has no
-// business writing to it. Caches go to Spec.StageHome.
+// the worktree is bound read-only unless WritableWorktree is set, because a
+// feedback command has no business writing to the tree it verifies. Caches go
+// to Spec.StageHome.
 type FeedbackConfig struct {
-	Spec    sandbox.Spec
-	Timeout time.Duration
+	Spec sandbox.Spec
+	// WritableWorktree binds the worktree read-write. Only verify_in_copy sets
+	// it: the commands then run in a throwaway copy, because a toolchain such
+	// as .NET writes build output next to the sources (AF-6).
+	WritableWorktree bool
+	Timeout          time.Duration
 }
 
 // CommandResult is the outcome of one feedback command. Output is the first
@@ -80,7 +85,7 @@ func RunFeedback(ctx context.Context, cfg FeedbackConfig, cmds []Argv) ([]Comman
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results[i], errs[i] = runOne(ctx, cfg.Spec, argv, timeout)
+			results[i], errs[i] = runOne(ctx, cfg.Spec, argv, timeout, cfg.WritableWorktree)
 			if errs[i] == nil {
 				results[i].Failures = fingerprint(results[i], module)
 			}
@@ -98,13 +103,13 @@ func RunFeedback(ctx context.Context, cfg FeedbackConfig, cmds []Argv) ([]Comman
 	return results, nil
 }
 
-func runOne(ctx context.Context, spec sandbox.Spec, argv Argv, timeout time.Duration) (CommandResult, error) {
+func runOne(ctx context.Context, spec sandbox.Spec, argv Argv, timeout time.Duration, writable bool) (CommandResult, error) {
 	res := CommandResult{Argv: argv}
 	if len(argv) == 0 {
 		return res, errors.New("empty command")
 	}
 	spec.Argv = argv
-	spec.ReadOnlyWorktree = true
+	spec.ReadOnlyWorktree = !writable
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd, err := sandbox.Command(cctx, spec)

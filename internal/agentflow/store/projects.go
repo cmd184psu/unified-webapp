@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
+	"cmd184psu/unified-webapp/internal/agentflow/sandbox"
 )
 
 // Project is a registered repository (PJ1). ModelScope "local" restricts it
@@ -30,8 +32,18 @@ type Project struct {
 	// Plugins are the runner plugins the project opted into, each pinned to an
 	// exact version (OA3); none by default.
 	Plugins []runner.Plugin
-	Created time.Time
-	Updated time.Time
+	// Toolchains are the host toolchains the sandbox mounts for this project,
+	// so a C# project needs no wrapper script (AF-6). None by default.
+	Toolchains []string
+	// FeedbackEnv is set for every feedback command, for values a project's
+	// checks need such as an install path (AF-6).
+	FeedbackEnv map[string]string
+	// VerifyInCopy runs feedback commands on a throwaway copy of the worktree,
+	// without .git, bin and obj, because the worktree is bound read-only and a
+	// toolchain that writes build output cannot use it (AF-6).
+	VerifyInCopy bool
+	Created      time.Time
+	Updated      time.Time
 }
 
 func projectSlugs(ctx context.Context, q querier) ([]string, error) {
@@ -82,6 +94,12 @@ func (s *Store) validateProject(p Project) (resolved string, err error) {
 	if err := validatePlugins(p.Plugins); err != nil {
 		return "", err
 	}
+	if err := validateToolchains(p.Toolchains); err != nil {
+		return "", err
+	}
+	if err := validateFeedbackEnv(p.FeedbackEnv); err != nil {
+		return "", err
+	}
 	for k := range p.Limits {
 		if !isLimitKey(k) {
 			return "", Invalid("limits."+k, "not an overridable limit")
@@ -106,6 +124,48 @@ func validatePlugins(plugins []runner.Plugin) error {
 			return Invalid(fmt.Sprintf("plugins[%d].name", i), fmt.Sprintf("plugin %q is listed twice", pl.Name))
 		}
 		seen[pl.Name] = true
+	}
+	return nil
+}
+
+// envKeyRE is a portable environment variable name.
+var envKeyRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// validateToolchains accepts only toolchains agentflow can mount, each named
+// once.
+func validateToolchains(names []string) error {
+	seen := map[string]bool{}
+	for i, n := range names {
+		if !sandbox.ValidToolchain(n) {
+			return Invalid(fmt.Sprintf("toolchains[%d]", i), fmt.Sprintf("unknown toolchain %q (known: %s)", n, strings.Join(sandbox.Toolchains, ", ")))
+		}
+		if seen[n] {
+			return Invalid(fmt.Sprintf("toolchains[%d]", i), fmt.Sprintf("toolchain %q is listed twice", n))
+		}
+		seen[n] = true
+	}
+	return nil
+}
+
+// validateFeedbackEnv rejects an environment the sandbox cannot apply: a
+// malformed name, a blank value, or HOME and PATH, which the sandbox sets
+// itself. Keys are checked in sorted order so the error is deterministic.
+func validateFeedbackEnv(env map[string]string) error {
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if !envKeyRE.MatchString(k) {
+			return Invalid("feedback_env."+k, "must be a variable name such as CIV3_PATH")
+		}
+		if k == "HOME" || k == "PATH" {
+			return Invalid("feedback_env."+k, "is set by the sandbox")
+		}
+		if strings.TrimSpace(env[k]) == "" {
+			return Invalid("feedback_env."+k, "must not be blank")
+		}
 	}
 	return nil
 }
@@ -172,6 +232,24 @@ func dodJSON(items []string) (string, error) {
 	return string(b), err
 }
 
+// toolchainJSON stores the toolchain names; none is "[]".
+func toolchainJSON(names []string) (string, error) {
+	if names == nil {
+		names = []string{}
+	}
+	b, err := json.Marshal(names)
+	return string(b), err
+}
+
+// envJSON stores a project's feedback environment; none is "{}".
+func envJSON(env map[string]string) (string, error) {
+	if env == nil {
+		env = map[string]string{}
+	}
+	b, err := json.Marshal(env)
+	return string(b), err
+}
+
 func feedbackJSON(cmds []string) (string, error) {
 	if cmds == nil {
 		cmds = []string{}
@@ -196,6 +274,14 @@ func (s *Store) CreateProject(ctx context.Context, actor string, p Project) erro
 	if err != nil {
 		return Invalid("definition_of_done", "not JSON-encodable")
 	}
+	tl, err := toolchainJSON(p.Toolchains)
+	if err != nil {
+		return Invalid("toolchains", "not JSON-encodable")
+	}
+	env, err := envJSON(p.FeedbackEnv)
+	if err != nil {
+		return Invalid("feedback_env", "not JSON-encodable")
+	}
 	return s.WithTx(ctx, func(tx *sql.Tx) error {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects WHERE slug = ?`, p.Slug).Scan(&n); err != nil {
@@ -209,8 +295,8 @@ func (s *Store) CreateProject(ctx context.Context, actor string, p Project) erro
 		}
 		now := time.Now().UnixMilli()
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO projects (slug, repo_path, model_scope, feedback_cmds_json, definition_of_done_json, cleanup_enabled, created, updated)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, p.Slug, repo, p.ModelScope, fb, dod, b2i(p.CleanupEnabled), now, now); err != nil {
+			INSERT INTO projects (slug, repo_path, model_scope, feedback_cmds_json, definition_of_done_json, cleanup_enabled, toolchains_json, feedback_env_json, verify_in_copy, created, updated)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, p.Slug, repo, p.ModelScope, fb, dod, b2i(p.CleanupEnabled), tl, env, b2i(p.VerifyInCopy), now, now); err != nil {
 			return err
 		}
 		if err := writeProjectBody(ctx, tx, p); err != nil {
@@ -236,6 +322,14 @@ func (s *Store) UpdateProject(ctx context.Context, actor string, p Project) erro
 	if err != nil {
 		return Invalid("definition_of_done", "not JSON-encodable")
 	}
+	tl, err := toolchainJSON(p.Toolchains)
+	if err != nil {
+		return Invalid("toolchains", "not JSON-encodable")
+	}
+	env, err := envJSON(p.FeedbackEnv)
+	if err != nil {
+		return Invalid("feedback_env", "not JSON-encodable")
+	}
 	return s.WithTx(ctx, func(tx *sql.Tx) error {
 		if err := requireProject(ctx, tx, p.Slug); err != nil {
 			return err
@@ -244,8 +338,8 @@ func (s *Store) UpdateProject(ctx context.Context, actor string, p Project) erro
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE projects SET repo_path = ?, model_scope = ?, feedback_cmds_json = ?, definition_of_done_json = ?, cleanup_enabled = ?, updated = ?
-			WHERE slug = ?`, repo, p.ModelScope, fb, dod, b2i(p.CleanupEnabled), time.Now().UnixMilli(), p.Slug); err != nil {
+			UPDATE projects SET repo_path = ?, model_scope = ?, feedback_cmds_json = ?, definition_of_done_json = ?, cleanup_enabled = ?, toolchains_json = ?, feedback_env_json = ?, verify_in_copy = ?, updated = ?
+			WHERE slug = ?`, repo, p.ModelScope, fb, dod, b2i(p.CleanupEnabled), tl, env, b2i(p.VerifyInCopy), time.Now().UnixMilli(), p.Slug); err != nil {
 			return err
 		}
 		if err := writeProjectBody(ctx, tx, p); err != nil {
@@ -257,7 +351,7 @@ func (s *Store) UpdateProject(ctx context.Context, actor string, p Project) erro
 }
 
 func loadProjects(ctx context.Context, q querier, slug string) ([]Project, error) {
-	query := `SELECT slug, repo_path, model_scope, feedback_cmds_json, definition_of_done_json, cleanup_enabled, created, updated FROM projects`
+	query := `SELECT slug, repo_path, model_scope, feedback_cmds_json, definition_of_done_json, cleanup_enabled, toolchains_json, feedback_env_json, verify_in_copy, created, updated FROM projects`
 	var args []any
 	if slug != "" {
 		query += ` WHERE slug = ?`
@@ -270,10 +364,10 @@ func loadProjects(ctx context.Context, q querier, slug string) ([]Project, error
 	var out []Project
 	for rows.Next() {
 		var p Project
-		var fb, dod string
-		var cleanup int
+		var fb, dod, tl, env string
+		var cleanup, inCopy int
 		var created, updated int64
-		if err := rows.Scan(&p.Slug, &p.RepoPath, &p.ModelScope, &fb, &dod, &cleanup, &created, &updated); err != nil {
+		if err := rows.Scan(&p.Slug, &p.RepoPath, &p.ModelScope, &fb, &dod, &cleanup, &tl, &env, &inCopy, &created, &updated); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -287,7 +381,16 @@ func loadProjects(ctx context.Context, q querier, slug string) ([]Project, error
 				return nil, fmt.Errorf("project %q definition of done: %w", p.Slug, err)
 			}
 		}
+		if err := json.Unmarshal([]byte(tl), &p.Toolchains); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("project %q toolchains: %w", p.Slug, err)
+		}
+		if err := json.Unmarshal([]byte(env), &p.FeedbackEnv); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("project %q feedback environment: %w", p.Slug, err)
+		}
 		p.CleanupEnabled = cleanup != 0
+		p.VerifyInCopy = inCopy != 0
 		p.Created, p.Updated = time.UnixMilli(created), time.UnixMilli(updated)
 		out = append(out, p)
 	}

@@ -86,6 +86,12 @@ export interface ProjectView {
   cleanup_enabled?: boolean;
   /** Runner plugins the project opted into, each pinned to an exact version (OA3). */
   plugins?: PluginPin[];
+  /** Host toolchains mounted read-only in the project's sandbox (AF-6); dotnet first. */
+  toolchains?: string[];
+  /** Extra environment for the project's feedback commands (AF-6). */
+  feedback_env?: Record<string, string>;
+  /** Run feedback commands on a copy of the worktree (AF-6). */
+  verify_in_copy?: boolean;
   created: number;
   updated: number;
   run_state: string;
@@ -125,6 +131,9 @@ export interface ProjectInput {
   limits?: Record<string, string | number>;
   cleanup_enabled?: boolean;
   plugins?: PluginPin[];
+  toolchains?: string[];
+  feedback_env?: Record<string, string>;
+  verify_in_copy?: boolean;
 }
 
 /** ProjectPatch: definition_of_done replaces the detected list; null clears the override. */

@@ -72,8 +72,26 @@ test('PJ1: create sends slug, repo_path, scope and the feedback commands as argv
   allByField(t.host, 'feedback_cmd')[1].value = '   ';
   button(t.host, 'Create project').click();
   await flush();
-  eq(t.bodies.create, { slug: 'demo', repo_path: '/srv/demo', model_scope: 'any', feedback_cmds: ['go test ./...'], cleanup_enabled: true, plugins: [] });
+  eq(t.bodies.create, { slug: 'demo', repo_path: '/srv/demo', model_scope: 'any', feedback_cmds: ['go test ./...'], cleanup_enabled: true, plugins: [], toolchains: [], feedback_env: {}, verify_in_copy: false });
   eq(t.done, ['demo']);
+});
+
+test('AF-6: toolchains, the feedback environment and verify-in-copy are saved with the project', async () => {
+  const t = harness();
+  await t.form.mount();
+  byField(t.host, 'slug').value = 'cs';
+  await pick(t, '/srv/cs');
+  byField(t.host, 'toolchain_dotnet').checked = true;
+  byField(t.host, 'verify_in_copy').checked = true;
+  button(t.host, 'Add variable').click();
+  allByField(t.host, 'feedback_env_key')[0].value = ' CIV3_PATH ';
+  allByField(t.host, 'feedback_env_value')[0].value = '/civ3';
+  button(t.host, 'Create project').click();
+  await flush();
+  const body = t.bodies.create as ProjectInput;
+  eq(body.toolchains, ['dotnet']);
+  eq(body.feedback_env, { CIV3_PATH: '/civ3' });
+  eq(body.verify_in_copy, true);
 });
 
 test('H2: the Repository field is a button showing the placeholder, then the chosen path; cancelling keeps it', async () => {
@@ -162,7 +180,7 @@ test('edit: the slug is fixed, the save patches, and the role editor shows the g
   ok(worker.textContent.includes('Uses the global list: b1/m1'), 'fallback note: ' + worker.textContent);
   await pick(t, '/r/moved');
   await settle();
-  eq(t.bodies.patch, { repo_path: '/r/moved', model_scope: 'local', feedback_cmds: ['go vet ./...'], cleanup_enabled: false, plugins: [] });
+  eq(t.bodies.patch, { repo_path: '/r/moved', model_scope: 'local', feedback_cmds: ['go vet ./...'], cleanup_enabled: false, plugins: [], toolchains: [], feedback_env: {}, verify_in_copy: false });
   eq(t.done, []);
   button(t.host, 'Done').click();
   await flush();

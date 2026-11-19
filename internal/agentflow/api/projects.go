@@ -77,20 +77,27 @@ type ProjectView struct {
 	Limits           map[string]string `json:"limits"`
 	Cleanup          bool              `json:"cleanup_enabled"`
 	Plugins          []PluginView      `json:"plugins"`
-	Created          int64             `json:"created"`
-	Updated          int64             `json:"updated"`
-	RunState         string            `json:"run_state"`
-	Remembered       string            `json:"remembered_run_state"`
-	StopReason       string            `json:"stop_reason"`
-	Effort           *model.Effort     `json:"effort"`
-	Progress         map[string]int    `json:"progress"`
-	Current          []WorkItem        `json:"current"`
+	// Toolchains are the host toolchains the sandbox mounts (AF-6).
+	Toolchains []string `json:"toolchains"`
+	// FeedbackEnv is set for every feedback command.
+	FeedbackEnv map[string]string `json:"feedback_env"`
+	// VerifyInCopy runs feedback commands on a copy of the worktree.
+	VerifyInCopy bool           `json:"verify_in_copy"`
+	Created      int64          `json:"created"`
+	Updated      int64          `json:"updated"`
+	RunState     string         `json:"run_state"`
+	Remembered   string         `json:"remembered_run_state"`
+	StopReason   string         `json:"stop_reason"`
+	Effort       *model.Effort  `json:"effort"`
+	Progress     map[string]int `json:"progress"`
+	Current      []WorkItem     `json:"current"`
 }
 
 // projectView assembles the overview of one project.
 func (a *API) projectView(ctx context.Context, p store.Project) (ProjectView, error) {
 	v := ProjectView{
 		Slug: p.Slug, RepoPath: p.RepoPath, ModelScope: p.ModelScope, FeedbackCmds: p.FeedbackCmds, DefinitionOfDone: p.DefinitionOfDone, Limits: p.Limits, Cleanup: p.CleanupEnabled,
+		Toolchains: p.Toolchains, FeedbackEnv: p.FeedbackEnv, VerifyInCopy: p.VerifyInCopy,
 		Created: p.Created.UnixMilli(), Updated: p.Updated.UnixMilli(),
 		RunState: a.deps.Engine.Runs().State(p.Slug), Remembered: model.RunStopped,
 		StopReason: a.deps.Engine.Runs().StopReason(p.Slug),
@@ -101,6 +108,12 @@ func (a *API) projectView(ctx context.Context, p store.Project) (ProjectView, er
 	}
 	if v.Limits == nil {
 		v.Limits = map[string]string{}
+	}
+	if v.Toolchains == nil {
+		v.Toolchains = []string{}
+	}
+	if v.FeedbackEnv == nil {
+		v.FeedbackEnv = map[string]string{}
 	}
 	v.Plugins = []PluginView{}
 	for _, pl := range p.Plugins {
@@ -208,6 +221,9 @@ type projectBody struct {
 	Limits       *map[string]string `json:"limits"`
 	Cleanup      *bool              `json:"cleanup_enabled"`
 	Plugins      *[]PluginView      `json:"plugins"`
+	Toolchains   *[]string          `json:"toolchains"`
+	FeedbackEnv  *map[string]string `json:"feedback_env"`
+	VerifyInCopy *bool              `json:"verify_in_copy"`
 	// DefinitionOfDone is a list, or null to go back to the derived one.
 	DefinitionOfDone json.RawMessage `json:"definition_of_done"`
 }
@@ -230,6 +246,15 @@ func (b projectBody) apply(p *store.Project) error {
 	}
 	if b.Cleanup != nil {
 		p.CleanupEnabled = *b.Cleanup
+	}
+	if b.Toolchains != nil {
+		p.Toolchains = *b.Toolchains
+	}
+	if b.FeedbackEnv != nil {
+		p.FeedbackEnv = *b.FeedbackEnv
+	}
+	if b.VerifyInCopy != nil {
+		p.VerifyInCopy = *b.VerifyInCopy
 	}
 	if b.Plugins != nil {
 		p.Plugins = make([]runner.Plugin, 0, len(*b.Plugins))
