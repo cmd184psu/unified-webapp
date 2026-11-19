@@ -139,13 +139,17 @@ func (f *Fake) SendKeys(_ context.Context, name string, keys ...string) error {
 	return nil
 }
 
-// Capture returns everything the program wrote.
+// Capture returns what the program wrote since it last cleared the screen (a form feed).
 func (f *Fake) Capture(_ context.Context, name string, _ int) (string, error) {
 	s, ok := f.get(name)
 	if !ok {
 		return "", ErrNoSession
 	}
-	return s.out.String(), nil
+	out := s.out.String()
+	if i := strings.LastIndexByte(out, '\f'); i >= 0 {
+		out = out[i+1:]
+	}
+	return out, nil
 }
 
 // List lists sessions by prefix.

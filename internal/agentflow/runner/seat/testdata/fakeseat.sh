@@ -2,7 +2,15 @@
 # A fake interactive seat: it reads the one line agentflow types, finds RESULT.json in it and
 # answers as SEAT_MODE says. done: report at once. question: ask, read the answer, then report.
 # wait: report once the file named by SEAT_GO exists. silent: never report. exit: quit.
+# halt: show a takeover prompt until SEAT_GO exists, then clear the screen and act as done.
 # deafonce: swallow the first line without showing it (a TUI still drawing), then as done.
+if [ "$SEAT_MODE" = halt ]; then
+  # like freebuff when its one session is live elsewhere: wait for the owner, then clear
+  echo "Your paid session is in use elsewhere. Take over to move it here"
+  while [ ! -f "$SEAT_GO" ]; do sleep 0.01; done
+  printf '\f'
+  SEAT_MODE=done
+fi
 echo "fake seat ready"
 if [ "$SEAT_MODE" = deafonce ]; then read -r dropped; SEAT_MODE=done; fi
 read -r line

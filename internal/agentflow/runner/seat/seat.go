@@ -93,6 +93,11 @@ type Profile struct {
 	// HideDirs are directories under the server user's home the program may not read
 	// ("~/.config"); LinkFiles stay readable inside them.
 	HideDirs []string `json:"hide_dirs,omitempty"`
+	// HaltTexts are screen texts that mean the program wants a decision only the owner may
+	// make (log in; take over a session that is in use elsewhere, which would stop the
+	// owner's other instance). While one shows, agentflow types nothing and presses no key,
+	// not even an answer, and the stage waits as needing attention.
+	HaltTexts []string `json:"halt_texts,omitempty"`
 	// Env is extra environment for the program.
 	Env map[string]string `json:"env,omitempty"`
 }
@@ -111,8 +116,24 @@ func Freebuff() Profile {
 		CopyFiles:   []string{"credentials.json", "device-key.json", "settings.json"},
 		LinkFiles:   []string{"freebuff", "rg", "tree-sitter.wasm", "freebuff-metadata.json"},
 		HideDirs:    []string{"~/.config"},
+		// One freebuff login has one live session: Enter on this prompt would stop the owner's
+		// own freebuff elsewhere.
+		HaltTexts: []string{"in use elsewhere", "Take over to move it here", "Press ENTER to login"},
 	}
 }
+
+// halted returns the halt text on the screen, or "".
+func halted(prof Profile, screen string) string {
+	for _, t := range prof.HaltTexts {
+		if t != "" && strings.Contains(screen, t) {
+			return t
+		}
+	}
+	return ""
+}
+
+// errHalted: the program shows a halt text; nothing may be typed until the owner acts.
+var errHalted = errors.New("the seat waits for the owner")
 
 // Launch is a sandboxed command ready to run, and the stage home as the program sees it.
 type Launch struct {
@@ -319,16 +340,18 @@ func (a *Adapter) Run(ctx context.Context, req runner.Request) (runner.Result, e
 		}
 	}
 	if !st.PromptSent {
-		if err := a.sendPrompt(ctx, m, name, req, st.Home); err != nil {
+		if err := a.sendPrompt(ctx, m, name, req, st.Home); err != nil && !errors.Is(err, errHalted) {
 			if ctx.Err() != nil {
 				return stopped(ctx, m, name)
 			}
 			return failed(runner.ErrCrash, "seat: type the task: "+err.Error(), err)
+		} else if err == nil {
+			st.PromptSent = true
+			if err := writeState(req.StageDir, st); err != nil {
+				return failed(runner.ErrCrash, "seat: state", err)
+			}
 		}
-		st.PromptSent = true
-		if err := writeState(req.StageDir, st); err != nil {
-			return failed(runner.ErrCrash, "seat: state", err)
-		}
+		// Halted: wait sends the line once the owner has dealt with the program.
 	}
 	return a.wait(ctx, m, name, req, st)
 }
@@ -395,8 +418,9 @@ func (a *Adapter) start(ctx context.Context, m mux.Multiplexer, name string, req
 			_ = m.Kill(ctx, name)
 			return state{}, &runner.Error{Class: runner.ErrCrash, Msg: "seat: the program exited at start: " + tail(screen, 1500)}
 		}
-		if prof.ReadyText != "" {
-			if screen, err := m.Capture(ctx, name, 0); err == nil && strings.Contains(screen, prof.ReadyText) {
+		if prof.ReadyText != "" || len(prof.HaltTexts) > 0 {
+			if screen, err := m.Capture(ctx, name, 0); err == nil &&
+				((prof.ReadyText != "" && strings.Contains(screen, prof.ReadyText)) || halted(prof, screen) != "") {
 				break
 			}
 		}
@@ -444,6 +468,9 @@ func (a *Adapter) sendPrompt(ctx context.Context, m mux.Multiplexer, name string
 	// A TUI that is still drawing can drop what is typed: the line counts as sent once the
 	// screen shows it, and is typed again (at most three times) when it does not.
 	for try := 0; try < 3; try++ {
+		if screen, err := m.Capture(ctx, name, 200); err == nil && halted(prof, screen) != "" {
+			return errHalted
+		}
 		if err := m.SendText(ctx, name, line); err != nil {
 			return err
 		}
@@ -484,7 +511,7 @@ func (a *Adapter) wait(ctx context.Context, m mux.Multiplexer, name string, req 
 		board = &runner.SeatBoard{}
 	}
 	lastScreen, lastChange := "", a.now()
-	silent := false
+	silent, haltedNow := false, false
 	defer func() {
 		if ctx.Err() == nil {
 			board.Clear(stage)
@@ -540,6 +567,25 @@ func (a *Adapter) wait(ctx context.Context, m mux.Multiplexer, name string, req 
 				return failed(runner.ErrCrash, "seat: the program exited without a report: "+tail(screen, 1500), nil)
 			}
 			continue
+		}
+		prof, _ := a.profile(ctx, st.Profile)
+		if screen, err := m.Capture(ctx, name, 200); err == nil {
+			if h := halted(prof, screen); h != "" {
+				board.Set(runner.SeatNotice{Stage: stage, Kind: runner.SeatQuestion, Since: a.now(), Session: name, Attach: attach,
+					Message: fmt.Sprintf("The seat program shows %q and needs the owner; agentflow types nothing until it is gone. Attach with `%s`", h, attach)})
+				haltedNow = true
+			} else if haltedNow {
+				haltedNow = false
+				if n, ok := board.Get(stage); ok && n.Kind == runner.SeatQuestion && strings.Contains(n.Message, "needs the owner") {
+					board.Clear(stage)
+				}
+			}
+			if !haltedNow && !st.PromptSent {
+				if err := a.sendPrompt(ctx, m, name, req, st.Home); err == nil {
+					st.PromptSent = true
+					_ = writeState(req.StageDir, st)
+				}
+			}
 		}
 		if screen, err := m.Capture(ctx, name, 0); err == nil && screen != lastScreen {
 			lastScreen, lastChange = screen, a.now()
@@ -599,15 +645,20 @@ func (a *Adapter) Answer(ctx context.Context, stage int64, stageDir, text string
 	if err != nil {
 		return err
 	}
+	st, _ := readState(stageDir)
+	prof, perr := a.profile(ctx, st.Profile)
+	if perr != nil {
+		prof = Freebuff()
+	}
+	if screen, err := m.Capture(ctx, name, 200); err == nil {
+		if h := halted(prof, screen); h != "" {
+			return fmt.Errorf("seat: the program shows %q; answer it yourself with `%s`, agentflow types nothing there", h, m.AttachCommand(name))
+		}
+	}
 	if err := m.SendText(ctx, name, oneLine(text)); err != nil {
 		return err
 	}
 	time.Sleep(200 * time.Millisecond)
-	st, _ := readState(stageDir)
-	prof, err := a.profile(ctx, st.Profile)
-	if err != nil {
-		prof = Freebuff()
-	}
 	if err := m.SendKeys(ctx, name, prof.SubmitKeys...); err != nil {
 		return err
 	}

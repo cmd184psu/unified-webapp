@@ -28,7 +28,8 @@ func fakeSeat(t *testing.T, fm *mux.Fake, mode string, env map[string]string) *A
 	return &Adapter{
 		Mux: func(context.Context) (mux.Multiplexer, error) { return fm, nil },
 		Profiles: func(context.Context) map[string]Profile {
-			return map[string]Profile{"fake": {Command: []string{"/bin/sh", script}, StartupWait: Duration(20 * time.Millisecond), ReadyText: "fake seat ready", Env: e}}
+			return map[string]Profile{"fake": {Command: []string{"/bin/sh", script}, StartupWait: Duration(2 * time.Second), ReadyText: "fake seat ready", Env: e,
+				HaltTexts: []string{"in use elsewhere"}}}
 		},
 		Instance: "test-instance",
 		Board:    &runner.SeatBoard{},
@@ -333,5 +334,45 @@ func TestADroppedLineIsTypedAgain(t *testing.T) {
 	}
 	if typed := fm.TypedInto(SessionName(req.Job)); len(typed) != 4 {
 		t.Fatalf("typed %q; want the line and Enter twice", typed)
+	}
+}
+
+// A program asking the owner to take over its session (which would stop the owner's other
+// instance) or to log in gets no keys at all, not even an answer; the stage waits as needing
+// attention and goes on once the prompt is gone.
+func TestHaltTextStopsAllTyping(t *testing.T) {
+	fm := &mux.Fake{}
+	t.Cleanup(fm.KillAll)
+	goFile := filepath.Join(t.TempDir(), "go")
+	a := fakeSeat(t, fm, "halt", map[string]string{"SEAT_GO": goFile})
+	req := seatReq(t, "worker")
+	name := SessionName(req.Job)
+	ch := runAsync(a, context.Background(), req)
+	waitFor(t, "the halt notice", func() bool {
+		select {
+		case o := <-ch:
+			scr, _ := fm.Capture(context.Background(), name, 0)
+			t.Fatalf("Run ended early: %v; typed %q; screen %q", o.err, fm.TypedInto(name), scr)
+		default:
+		}
+		n, ok := a.Board.Get(42)
+		return ok && n.Kind == runner.SeatQuestion && strings.Contains(n.Message, "in use elsewhere")
+	})
+	time.Sleep(50 * time.Millisecond)
+	if typed := fm.TypedInto(name); len(typed) != 0 {
+		t.Fatalf("typed %q into a halted seat", typed)
+	}
+	if err := a.Answer(context.Background(), 42, req.StageDir, "yes"); err == nil {
+		t.Fatal("an answer must not be typed into a halted seat")
+	}
+	if typed := fm.TypedInto(name); len(typed) != 0 {
+		t.Fatalf("typed %q into a halted seat", typed)
+	}
+	if err := os.WriteFile(goFile, nil, 0o600); err != nil { // the owner deals with it
+		t.Fatal(err)
+	}
+	o := get(t, ch)
+	if o.err != nil || !strings.Contains(o.res.Final, "did it") {
+		t.Fatalf("after the halt: %s %v", o.res.Final, o.err)
 	}
 }

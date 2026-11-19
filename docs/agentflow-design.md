@@ -478,7 +478,11 @@ the UI shows them under the attention banner.
   `credentials.json`, `device-key.json`, `settings.json`), `link_files` (large read-only files
   linked from there: the real `freebuff` binary, `rg`, `tree-sitter.wasm`,
   `freebuff-metadata.json`) and `hide_dirs` (`~/.config`: the sandbox reads nothing there but
-  the linked files). Message history and project data are never shared.
+  the linked files). Message history and project data are never shared. `halt_texts` are
+  screen texts that mean the program wants a decision only the owner may make; while one shows,
+  agentflow types nothing and presses no key, not even an answer, and the stage is listed as
+  `seat_question`. freebuff's: its login prompt, and "session in use elsewhere ... take over":
+  one freebuff login has one live session, and taking it over stops the owner's other instance.
 - `botchat_url`, `botchat_key_file`: the BotChat service, read on every call.
 
 Where the seat runs (the host sandbox today, a container later) is the sandbox builder's
