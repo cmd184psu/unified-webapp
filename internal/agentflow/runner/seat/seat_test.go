@@ -320,3 +320,18 @@ func TestInstallConfigCopiesTheLoginAndLinksTheRest(t *testing.T) {
 		t.Fatal("a config dir outside the home directory must be refused")
 	}
 }
+
+// A line the program dropped while it was still drawing is typed again.
+func TestADroppedLineIsTypedAgain(t *testing.T) {
+	fm := &mux.Fake{}
+	t.Cleanup(fm.KillAll)
+	a := fakeSeat(t, fm, "deafonce", nil)
+	req := seatReq(t, "worker")
+	o := get(t, runAsync(a, context.Background(), req))
+	if o.err != nil {
+		t.Fatalf("Run: %v", o.err)
+	}
+	if typed := fm.TypedInto(SessionName(req.Job)); len(typed) != 4 {
+		t.Fatalf("typed %q; want the line and Enter twice", typed)
+	}
+}

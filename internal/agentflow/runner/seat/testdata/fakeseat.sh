@@ -2,7 +2,9 @@
 # A fake interactive seat: it reads the one line agentflow types, finds RESULT.json in it and
 # answers as SEAT_MODE says. done: report at once. question: ask, read the answer, then report.
 # wait: report once the file named by SEAT_GO exists. silent: never report. exit: quit.
+# deafonce: swallow the first line without showing it (a TUI still drawing), then as done.
 echo "fake seat ready"
+if [ "$SEAT_MODE" = deafonce ]; then read -r dropped; SEAT_MODE=done; fi
 read -r line
 echo "got: $line"
 result=$(printf '%s\n' "$line" | sed -n 's/.*write \(.*RESULT\.json\) as.*/\1/p')

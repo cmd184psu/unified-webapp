@@ -102,7 +102,8 @@ type Profile struct {
 func Freebuff() Profile {
 	return Profile{
 		Command:     []string{"/opt/homebrew/bin/freebuff", "--cwd", "{workdir}"},
-		StartupWait: Duration(8 * time.Second),
+		StartupWait: Duration(60 * time.Second),
+		ReadyText:   "Enter a coding task",
 		SubmitKeys:  []string{"Enter"},
 		Net:         true,
 		Env:         map[string]string{"TERM": "xterm-256color", "COLORTERM": "truecolor"},
@@ -311,8 +312,17 @@ func (a *Adapter) Run(ctx context.Context, req runner.Request) (runner.Result, e
 	} else {
 		emit("seat.adopted", "seat session "+name+" adopted: "+m.AttachCommand(name))
 	}
+	if !st.PromptSent && alive && have {
+		// Adopted before the line was confirmed: it may have gone in after all.
+		if screen, err := m.Capture(ctx, name, 2000); err == nil && strings.Contains(screen, TaskFile) {
+			st.PromptSent = true
+		}
+	}
 	if !st.PromptSent {
 		if err := a.sendPrompt(ctx, m, name, req, st.Home); err != nil {
+			if ctx.Err() != nil {
+				return stopped(ctx, m, name)
+			}
 			return failed(runner.ErrCrash, "seat: type the task: "+err.Error(), err)
 		}
 		st.PromptSent = true
@@ -428,13 +438,39 @@ func (a *Adapter) sendPrompt(ctx context.Context, m mux.Multiplexer, name string
 	if seenHome == "" {
 		seenHome = HomeDir(req.StageDir)
 	}
+	task := filepath.Join(seenHome, TaskFile)
 	line := fmt.Sprintf("Read the file %s and do exactly what it says. When you stop, write %s as that file describes.",
-		filepath.Join(seenHome, TaskFile), filepath.Join(seenHome, ResultFile))
-	if err := m.SendText(ctx, name, line); err != nil {
-		return err
+		task, filepath.Join(seenHome, ResultFile))
+	// A TUI that is still drawing can drop what is typed: the line counts as sent once the
+	// screen shows it, and is typed again (at most three times) when it does not.
+	for try := 0; try < 3; try++ {
+		if err := m.SendText(ctx, name, line); err != nil {
+			return err
+		}
+		time.Sleep(200 * time.Millisecond) // some TUIs drop a key pressed in the same burst as a paste
+		if err := m.SendKeys(ctx, name, prof.SubmitKeys...); err != nil {
+			return err
+		}
+		for wait := 0; wait < 20; wait++ {
+			if screen, err := m.Capture(ctx, name, 200); err == nil && strings.Contains(screen, TaskFile) {
+				return nil
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(a.echoWait()):
+			}
+		}
 	}
-	time.Sleep(200 * time.Millisecond) // some TUIs drop a key pressed in the same burst as a paste
-	return m.SendKeys(ctx, name, prof.SubmitKeys...)
+	return fmt.Errorf("the seat never showed the typed line naming %s", task)
+}
+
+// echoWait is how long to wait between looks for the typed line on the screen.
+func (a *Adapter) echoWait() time.Duration {
+	if a.Poll > 0 && a.Poll < 500*time.Millisecond {
+		return a.Poll
+	}
+	return 500 * time.Millisecond
 }
 
 // wait polls RESULT.json and the screen until the seat reports, the program dies, or the
@@ -527,11 +563,7 @@ func (a *Adapter) wait(ctx context.Context, m mux.Multiplexer, name string, req 
 		}
 		select {
 		case <-ctx.Done():
-			if ok, err := m.Has(context.WithoutCancel(ctx), name); err == nil && !ok {
-				return runner.Result{Incomplete: true}, ctx.Err()
-			}
-			// The session lives on (a restart, a shutdown): leave it for the next process.
-			return runner.Result{Incomplete: true}, &runner.Error{Class: runner.ErrDetached, Msg: "seat " + name + " keeps running", Cause: ctx.Err()}
+			return stopped(ctx, m, name)
 		case <-time.After(a.poll()):
 		}
 	}
@@ -797,4 +829,13 @@ func (a *Adapter) forgetLogin(ctx context.Context, st state, home string) {
 	if prof, err := a.profile(context.WithoutCancel(ctx), st.Profile); err == nil {
 		removeLogin(prof, home)
 	}
+}
+
+// stopped ends a call whose context is done: as cancelled when the session was killed (a
+// cancel kills it first), as detached when it lives on (a restart): the next process adopts it.
+func stopped(ctx context.Context, m mux.Multiplexer, name string) (runner.Result, error) {
+	if ok, err := m.Has(context.WithoutCancel(ctx), name); err == nil && !ok {
+		return runner.Result{Incomplete: true}, ctx.Err()
+	}
+	return runner.Result{Incomplete: true}, &runner.Error{Class: runner.ErrDetached, Msg: "seat " + name + " keeps running", Cause: ctx.Err()}
 }
