@@ -71,8 +71,8 @@ func (a *API) terminate() {
 
 func (a *API) restartView(ctx context.Context) RestartView {
 	v := RestartView{State: "idle", PID: os.Getpid(), Started: processStarted.UnixMilli()}
-	if open, err := a.deps.Store.OpenStages(ctx); err == nil {
-		v.OpenStages = len(open)
+	if open, err := a.deps.Engine.OpenStagesExceptSeats(ctx); err == nil {
+		v.OpenStages = open
 	}
 	a.restart.mu.Lock()
 	defer a.restart.mu.Unlock()
@@ -164,7 +164,9 @@ func (a *API) awaitRestart(ctx context.Context) {
 			return
 		case <-tick.C:
 			a.deps.Engine.Runs().Settle(ctx)
-			if open, err := a.deps.Store.OpenStages(ctx); err == nil && len(open) == 0 {
+			// A seat stage survives the restart (its session or task is adopted again), so
+			// the restart does not wait for it.
+			if open, err := a.deps.Engine.OpenStagesExceptSeats(ctx); err == nil && open == 0 {
 				a.restart.mu.Lock()
 				plan := a.restart.plan
 				a.restart.mu.Unlock()

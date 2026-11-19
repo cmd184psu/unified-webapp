@@ -59,6 +59,11 @@ func settingsView(s store.Settings) map[string]any {
 		"context_floor_tokens": s.ContextFloor,
 		"backend_cooldown":     s.BackendCooldown.String(),
 		"browse_roots":         s.BrowseRoots,
+		"seat_mux":             s.SeatMux,
+		"seat_profiles":        s.SeatProfiles,
+		"notify_macos":         onOff(s.NotifyMacOS),
+		"notify_command":       s.NotifyCommand,
+		"notify_url":           s.NotifyURL,
 	}
 }
 
@@ -131,4 +136,11 @@ func (a *API) getOpencodeVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, a.openCode())
+}
+
+func onOff(b bool) string {
+	if b {
+		return "on"
+	}
+	return "off"
 }

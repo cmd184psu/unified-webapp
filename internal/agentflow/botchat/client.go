@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -232,4 +233,70 @@ func (c *Client) TaskState(ctx context.Context, taskID string) (string, error) {
 // ClosePlan closes a plan; the service refuses while tasks are unfinished.
 func (c *Client) ClosePlan(ctx context.Context, planID, from string) error {
 	return c.do(ctx, http.MethodPost, "/api/v1/plans/"+planID+"/close", map[string]any{"from": from}, nil)
+}
+
+// MessagesAfter lists up to limit messages of a room with a seq above after, oldest first.
+func (c *Client) MessagesAfter(ctx context.Context, roomID string, after int64, limit int) ([]Message, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	var raw json.RawMessage
+	path := "/api/v1/rooms/" + roomID + "/messages?after=" + strconv.FormatInt(after, 10) + "&limit=" + strconv.Itoa(limit)
+	if err := c.do(ctx, http.MethodGet, path, nil, &raw); err != nil {
+		return nil, err
+	}
+	var msgs []Message
+	if json.Unmarshal(raw, &msgs) == nil {
+		return msgs, nil
+	}
+	var wrap struct {
+		Messages []Message `json:"messages"`
+	}
+	if err := json.Unmarshal(raw, &wrap); err != nil {
+		return nil, fmt.Errorf("botchat: cannot read the room's messages: %w", err)
+	}
+	out := wrap.Messages[:0]
+	for _, m := range wrap.Messages {
+		if m.Seq > after {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
+// TaskInfo is the part of a task the seat runner reads.
+type TaskInfo struct {
+	ID        string `json:"id"`
+	State     string `json:"state"`
+	Assignee  string `json:"assignee"`
+	RoomID    string `json:"roomId"`
+	Blocker   string `json:"blocker"`
+	WaitingOn string `json:"waitingOn"`
+}
+
+// Task reads one task.
+func (c *Client) Task(ctx context.Context, taskID string) (TaskInfo, error) {
+	var t TaskInfo
+	err := c.do(ctx, http.MethodGet, "/api/v1/tasks/"+taskID, nil, &t)
+	return t, err
+}
+
+// ListTasks lists a room's tasks assigned to a callsign.
+func (c *Client) ListTasks(ctx context.Context, roomID, assignee string) ([]TaskInfo, error) {
+	var raw json.RawMessage
+	path := "/api/v1/tasks?roomId=" + url.QueryEscape(roomID) + "&assignee=" + url.QueryEscape(assignee)
+	if err := c.do(ctx, http.MethodGet, path, nil, &raw); err != nil {
+		return nil, err
+	}
+	var ts []TaskInfo
+	if json.Unmarshal(raw, &ts) == nil {
+		return ts, nil
+	}
+	var wrap struct {
+		Tasks []TaskInfo `json:"tasks"`
+	}
+	if err := json.Unmarshal(raw, &wrap); err != nil {
+		return nil, fmt.Errorf("botchat: cannot read the task list: %w", err)
+	}
+	return wrap.Tasks, nil
 }

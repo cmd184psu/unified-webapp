@@ -440,10 +440,12 @@ func (r *RunControl) cancelInFlight(ctx context.Context, effort int64) error {
 	}
 	var errs []error
 	for _, st := range stages {
+		e := r.e
 		for _, ref := range idx[st.ID] {
 			if jobTerminal(ref.job.Status) {
 				continue
 			}
+			e.cancelSeat(ctx, st)
 			if _, err := ref.lane.Cancel(ref.job.ID); err != nil {
 				errs = append(errs, fmt.Errorf("cancel job %s: %w", ref.job.ID, err))
 			}

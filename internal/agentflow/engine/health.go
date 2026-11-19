@@ -261,6 +261,9 @@ func (e *Engine) drainLane(ctx context.Context, l golane.Lane, backend string, o
 			}
 			rerouted = append(rerouted, st.ID)
 		case opt.CancelRunning && !jobTerminal(j.Status):
+			if st, err := e.deps.Store.GetStage(ctx, p.Stage); err == nil {
+				e.cancelSeat(ctx, st)
+			}
 			if _, err := l.Cancel(j.ID); err != nil {
 				errs = append(errs, fmt.Errorf("cancel job %s: %w", j.ID, err))
 				continue

@@ -166,6 +166,11 @@ func (e *Engine) reconcile(ctx context.Context, fromPrevious bool) (ReconcileRep
 		if alive {
 			continue
 		}
+		// A seat survives a restart: its stage gets a new job and the runner adopts the
+		// seat's session or task instead of starting again.
+		if e.adoptSeat(ctx, st, idx[st.ID]) {
+			continue
+		}
 		// The job list was read before this re-read, so a job that finished
 		// since has its outcome written (write-before-return) and shows done.
 		cur, err := e.deps.Store.GetStage(ctx, st.ID)
@@ -185,6 +190,7 @@ func (e *Engine) reconcile(ctx context.Context, fromPrevious bool) (ReconcileRep
 			}
 		}
 	}
+	e.sweepSeats(ctx)
 	ab, err := e.abandonInterrupted(ctx, fromPrevious)
 	rep.Abandoned = ab
 	if err != nil {

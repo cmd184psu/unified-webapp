@@ -157,10 +157,37 @@ export interface AttentionItem {
   effort: number;
   /** the task key; absent for an item about the whole effort */
   task?: string;
-  kind: 'stalled' | 'draft_failed' | 'plan_halted' | 'compile_halted' | 'task_halted' | 'task_unassignable';
+  kind: 'stalled' | 'draft_failed' | 'plan_halted' | 'compile_halted' | 'task_halted' | 'task_unassignable' | 'seat_question' | 'seat_silent';
   message: string;
   /** Unix ms, 0 when not known */
   since: number;
+  /** the stage, for a seat stage waiting on the owner */
+  stage?: number;
+}
+
+/** SeatNotice is what a seat stage waits on the owner with. */
+export interface SeatNotice {
+  stage: number;
+  kind: 'seat_question' | 'seat_silent';
+  message: string;
+  since: string;
+  session?: string;
+  attach?: string;
+}
+
+/** SeatStage is one open stage worked by a seat (GET /api/seats). */
+export interface SeatStage {
+  stage: number;
+  project: string;
+  effort: number;
+  task?: string;
+  role: string;
+  backend: string;
+  api_type: string;
+  model: string;
+  /** `tmux attach -t <name>` for a terminal seat; absent for a BotChat seat */
+  attach?: string;
+  waiting?: SeatNotice;
 }
 
 export interface Health {
@@ -710,6 +737,9 @@ export const api = {
   // Health and opencode
   health: (o?: FetchOptions): Promise<Health> => get('/api/health', o),
   attention: (o?: FetchOptions): Promise<AttentionItem[]> => get('/api/attention', o),
+  seats: (o?: FetchOptions): Promise<SeatStage[]> => get('/api/seats', o),
+  answerSeat: (stage: number, text: string): Promise<{ stage: number; answered: boolean }> => send('POST', `/api/seats/${stage}/answer`, { text }),
+  cancelSeat: (stage: number): Promise<{ stage: number; cancelled: boolean }> => send('POST', `/api/seats/${stage}/cancel`),
   opencodeVersion: (refresh = false): Promise<OpenCodeStatus> =>
     get(`/api/opencode/version${refresh ? '?refresh=1' : ''}`),
   restartStatus: (o?: FetchOptions): Promise<RestartView> => get('/api/service/restart', o),

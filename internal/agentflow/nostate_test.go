@@ -24,6 +24,12 @@ var stateWriters = map[string]string{
 	"gitsvc/policy.go:DetectAndRevert":            "restores git's own MERGE_* files in the admin dir",
 	"runner/opencode/run.go:installSandboxConfig": "copy of the frozen runner config in the stage home",
 	"botchat/dispatch.go:withContext":             "prompt.botchat.md: the stage prompt with what the agent read on BotChat in front of it",
+	// AF-9/AF-11 seats outlive the process; the next one adopts the stage from these files.
+	"runner/botchatseat/botchatseat.go:writeState": "botchat-seat.json in the stage dir: the stage's BotChat task and read cursor",
+	"runner/seat/seat.go:writeState":               "seat.json in the stage dir: the stage's terminal session",
+	"runner/seat/seat.go:writeTask":                "TASK.md in the stage home: the prompt the seat reads",
+	"runner/seat/seat.go:wait":                     "QUESTION.open and seat-screen.txt in the stage dir: the open question, the seat's last screen",
+	"runner/mux/tmux.go:Create":                    "<stage dir>/<session>.launch.sh: a command too long for tmux's command line",
 }
 
 // AC-DBS1: no file-based state. Every os.WriteFile, os.Create and

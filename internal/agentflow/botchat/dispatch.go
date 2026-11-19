@@ -107,7 +107,10 @@ func SeatCallsign(role, backend, model string) string {
 // Run sends the call through BotChat, or runs it directly when that is off or not possible.
 func (d *Dispatcher) Run(ctx context.Context, req runner.Request) (runner.Result, error) {
 	set, err := d.Store.GetSettings(ctx)
-	if err != nil || set.BotchatMode != "dispatch" || set.BotchatURL == "" || set.BotchatKeyFile == "" || req.Job.Stage == 0 {
+	// A seat backend already is someone working outside agentflow: it goes straight to its
+	// own runner, never pitched to another agent.
+	if err != nil || set.BotchatMode != "dispatch" || set.BotchatURL == "" || set.BotchatKeyFile == "" || req.Job.Stage == 0 ||
+		req.Backend.APIType == "botchat_seat" || req.Backend.APIType == "freebuff_seat" {
 		return d.Inner.Run(ctx, req)
 	}
 	direct := func(why string, err error) (runner.Result, error) {

@@ -56,6 +56,9 @@ var api = {
   // Health and opencode
   health: (o) => get("/api/health", o),
   attention: (o) => get("/api/attention", o),
+  seats: (o) => get("/api/seats", o),
+  answerSeat: (stage, text) => send("POST", `/api/seats/${stage}/answer`, { text }),
+  cancelSeat: (stage) => send("POST", `/api/seats/${stage}/cancel`),
   opencodeVersion: (refresh = false) => get(`/api/opencode/version${refresh ? "?refresh=1" : ""}`),
   restartStatus: (o) => get("/api/service/restart", o),
   restartService: (cancelRunning) => send("POST", "/api/service/restart", { cancel_running: cancelRunning }),
@@ -461,6 +464,94 @@ var AttentionBanner = class {
         } } }),
         h("span", { text: ` \u2014 ${i.message}` })
       )))
+    ));
+    this.host.removeAttribute("hidden");
+  }
+};
+
+// web/agentflow/js/seats.ts
+function seatLabel(s) {
+  const where = [s.project, s.effort ? `effort ${s.effort}` : "", s.task ?? ""].filter(Boolean).join(", ");
+  return `${where} \u2014 ${s.role} on ${s.backend} (stage ${s.stage})`;
+}
+var SeatPanel = class {
+  constructor(host, deps) {
+    this.host = host;
+    this.deps = deps;
+    this.seats = [];
+    this.armed = /* @__PURE__ */ new Set();
+    // stages whose Cancel was pressed once
+    this.off = null;
+    this.stopPoll = null;
+  }
+  mount() {
+    this.off = subscribe((ev) => {
+      if (ev.type === "state.changed") void this.load();
+    });
+    this.stopPoll = startPoll(() => true, () => this.load());
+    void this.load();
+    return () => {
+      this.off?.();
+      this.stopPoll?.();
+      this.off = this.stopPoll = null;
+    };
+  }
+  async load() {
+    try {
+      this.seats = await this.deps.seats({ quiet: true });
+    } catch {
+      return;
+    }
+    this.render();
+  }
+  async answer(stage, input) {
+    const text = input.value.trim();
+    if (!text) return;
+    await this.deps.answerSeat(stage, text);
+    input.value = "";
+    await this.load();
+  }
+  async cancel(stage) {
+    if (!this.armed.has(stage)) {
+      this.armed.add(stage);
+      this.render();
+      return;
+    }
+    this.armed.delete(stage);
+    await this.deps.cancelSeat(stage);
+    await this.load();
+  }
+  render() {
+    if (this.seats.length === 0) {
+      replace(this.host);
+      this.host.setAttribute("hidden", "");
+      return;
+    }
+    replace(this.host, h(
+      "div",
+      { class: "seat-panel", attrs: { "data-role": "seat-panel" } },
+      h("p", { text: this.seats.length === 1 ? "One seat is working:" : `${this.seats.length} seats are working:` }),
+      h("ul", {}, ...this.seats.map((s) => {
+        const input = h("input", { attrs: { type: "text", placeholder: "Answer the seat", "data-role": "seat-answer" } });
+        return h(
+          "li",
+          { attrs: { "data-stage": String(s.stage) } },
+          h("span", { text: seatLabel(s) }),
+          s.attach ? h("code", { class: "seat-attach", text: s.attach, attrs: { "data-role": "seat-attach" } }) : h("span", { text: ` \u2014 ${s.model} on BotChat` }),
+          s.waiting ? h("div", { class: "warn-box", text: s.waiting.message }) : h("span", {}),
+          h(
+            "div",
+            { class: "seat-actions" },
+            input,
+            h("button", { text: "Send", attrs: { type: "button", "data-role": "seat-send" }, on: { click: () => {
+              void this.answer(s.stage, input);
+            } } }),
+            h("button", { text: this.armed.has(s.stage) ? "Really cancel the stage" : "Cancel", attrs: { type: "button", "data-role": "seat-cancel" }, on: { click: () => {
+              void this.cancel(s.stage);
+            } } })
+          )
+        );
+      }))
     ));
     this.host.removeAttribute("hidden");
   }
@@ -4776,6 +4867,7 @@ function isNotARepo(err) {
   return err instanceof ApiError && err.field === "repo_path" && /not a git repository/.test(err.message);
 }
 var SCOPES = [["local", "local (only local backends)"], ["any", "any (hosted backends allowed)"]];
+var TOOLCHAINS = [["dotnet", ".NET SDK and the host NuGet cache, read-only and offline"]];
 var ProjectForm = class {
   constructor(host, deps, mode, done) {
     this.host = host;
@@ -4783,6 +4875,7 @@ var ProjectForm = class {
     this.mode = mode;
     this.done = done;
     this.errors = new FormErrors();
+    this.toolchains = /* @__PURE__ */ new Map();
     this.backends = [];
     this.cands = [];
     this.drafts = /* @__PURE__ */ new Map();
@@ -4806,6 +4899,8 @@ var ProjectForm = class {
     this.drawRepo();
     this.scope = selectInput("model_scope", SCOPES, p?.model_scope ?? "local");
     this.cleanup = checkbox("cleanup_enabled", p?.cleanup_enabled ?? false);
+    for (const [name] of TOOLCHAINS) this.toolchains.set(name, checkbox(`toolchain_${name}`, (p?.toolchains ?? []).includes(name)));
+    this.verifyInCopy = checkbox("verify_in_copy", p?.verify_in_copy ?? false);
     this.cmds = new RowsEditor((c) => {
       const input = textInput("feedback_cmd", c, { placeholder: "go test ./..." });
       const preview = h("code", { class: "field-hint", attrs: { "data-role": "argv" } });
@@ -4822,6 +4917,11 @@ var ProjectForm = class {
       sync();
       return { el: h("div", { class: "wizard-field" }, input, preview, warn), read: () => joinArgv(splitArgv(input.value)) };
     }, p?.feedback_cmds ?? [], () => "", "Add command", () => this.bump());
+    this.env = new RowsEditor((row) => {
+      const key = textInput("feedback_env_key", row.key, { placeholder: "CIV3_PATH" });
+      const value = textInput("feedback_env_value", row.value, { placeholder: "/path/to/civ3" });
+      return { el: h("div", { class: "row-actions" }, key, value), read: () => ({ key: key.value.trim(), value: value.value }) };
+    }, Object.entries(p?.feedback_env ?? {}).map(([key, value]) => ({ key, value })), () => ({ key: "", value: "" }), "Add variable", () => this.bump());
     this.plugins = new RowsEditor((pl) => {
       const name = textInput("plugin_name", pl.name, { placeholder: "package-name" });
       const version = textInput("plugin_version", pl.version, { placeholder: "1.2.3" });
@@ -4861,14 +4961,17 @@ var ProjectForm = class {
       model_scope: this.scope.value,
       feedback_cmds: this.cmds.read().filter((c) => c !== ""),
       cleanup_enabled: this.cleanup.checked,
-      plugins: this.plugins.read().filter((pl) => pl.name !== "" || pl.version !== "")
+      plugins: this.plugins.read().filter((pl) => pl.name !== "" || pl.version !== ""),
+      toolchains: TOOLCHAINS.map(([name]) => name).filter((name) => this.toolchains.get(name)?.checked),
+      feedback_env: Object.fromEntries(this.env.read().filter((r) => r.key !== "").map((r) => [r.key, r.value])),
+      verify_in_copy: this.verifyInCopy.checked
     };
   }
   /** save creates or updates the project; a repo path that is not yet a repository offers git init (PJ1). */
   async save() {
     this.errors.clear();
     const body = this.body();
-    const attempt = () => this.mode.project ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, feedback_cmds: body.feedback_cmds, cleanup_enabled: body.cleanup_enabled, plugins: body.plugins, ...this.dodPatch() }, { quiet: true }) : this.deps.createProject(body, { quiet: true });
+    const attempt = () => this.mode.project ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, feedback_cmds: body.feedback_cmds, cleanup_enabled: body.cleanup_enabled, plugins: body.plugins, toolchains: body.toolchains, feedback_env: body.feedback_env, verify_in_copy: body.verify_in_copy, ...this.dodPatch() }, { quiet: true }) : this.deps.createProject(body, { quiet: true });
     let saved;
     try {
       saved = await attempt();
@@ -4899,7 +5002,7 @@ var ProjectForm = class {
     this.errors.clear();
     const b = this.body();
     try {
-      await this.deps.patchProject(p.slug, { repo_path: b.repo_path, model_scope: b.model_scope, feedback_cmds: b.feedback_cmds, cleanup_enabled: b.cleanup_enabled, plugins: b.plugins, ...this.dodPatch() }, { quiet: true });
+      await this.deps.patchProject(p.slug, { repo_path: b.repo_path, model_scope: b.model_scope, feedback_cmds: b.feedback_cmds, cleanup_enabled: b.cleanup_enabled, plugins: b.plugins, toolchains: b.toolchains, feedback_env: b.feedback_env, verify_in_copy: b.verify_in_copy, ...this.dodPatch() }, { quiet: true });
     } catch (err) {
       this.errors.show(err);
       return false;
@@ -5002,6 +5105,13 @@ var ProjectForm = class {
     }
     return b;
   }
+  /** drawToolchains is one checkbox per known toolchain, with what it mounts. */
+  drawToolchains() {
+    return h("div", {}, ...TOOLCHAINS.map(([name, hint]) => {
+      const box = this.toolchains.get(name);
+      return h("div", { class: "field-hint" }, box ?? h("span"), " " + hint);
+    }));
+  }
   render() {
     const p = this.mode.project;
     const e = this.errors;
@@ -5026,6 +5136,21 @@ var ProjectForm = class {
             "After a task passes review, run a cleanup agent and verify again; if that breaks verification the cleanup is rolled back"
           )).el
         ),
+        e.add("feedback_env", fieldRow(
+          "Feedback environment",
+          this.env.el,
+          "Set for every feedback command, for values such as an install path; never a secret"
+        )).el,
+        e.add("toolchains", fieldRow(
+          "Toolchains",
+          this.drawToolchains(),
+          "Mounted read-only in every sandbox for this project; dotnet brings the SDK and the host NuGet cache, so build and test run offline"
+        )).el,
+        e.add("verify_in_copy", fieldRow(
+          "Verify in a copy",
+          this.verifyInCopy,
+          "Run feedback commands on a throwaway copy of the worktree, without .git, bin or obj; needed when the toolchain writes build output"
+        )).el,
         e.add("feedback_cmds", fieldRow(
           "Feedback commands",
           this.cmds.el,
@@ -5452,6 +5577,8 @@ initSaveMark();
 startEvents();
 var attn = document.getElementById("attention-banner");
 if (attn) new AttentionBanner(attn, api, (slug) => showTab("project", slug)).mount();
+var seatPanel = document.getElementById("seat-panel");
+if (seatPanel) new SeatPanel(seatPanel, api).mount();
 var banner = document.getElementById("health-banner");
 if (banner) new HealthBanner(banner, api).mount();
 showTab("overview");

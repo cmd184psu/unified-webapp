@@ -38,6 +38,12 @@ func (e *Engine) runStage(ctx context.Context, rc golane.RunContext, p StagePayl
 	if res.skip {
 		return map[string]int64{"stage": p.Stage}, nil
 	}
+	if res.Outcome == OutcomeDetached {
+		// A seat that keeps working outside the process: no outcome, the stage stays open and
+		// the next process adopts it (reconcile.go).
+		fmt.Fprintf(rc.Log(), "seat detached: %v\n", res.cause)
+		return nil, fmt.Errorf("stage %d: seat detached: %w", p.Stage, res.cause)
+	}
 	if res.Outcome == OutcomeInfraCrash && ctx.Err() != nil {
 		// Cancelled (stop, brake, shutdown) while still setting up: the store
 		// calls failed on the dead context, which is a cancel, not a crash.
@@ -378,7 +384,11 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 	if err := os.WriteFile(promptPath, []byte(prompt), 0o600); err != nil {
 		return fail(err)
 	}
-	be := runner.Backend{Name: b.Name, Host: b.Host, APIType: b.APIType}
+	be := runner.Backend{Name: b.Name, Host: b.Host, APIType: b.APIType, Slots: b.Slots}
+	// A seat keeps its own clock: no deadline and no stall watch on the call, the role's
+	// timeout goes to the runner as a budget, and a seat past it is reported as needing
+	// attention instead of being failed and retried (AF-9 review finding 1).
+	seat := e.isSeatAPI(b.APIType)
 	if d.FreezeConfig != nil {
 		fb := FrozenBackend{Backend: be, Plugins: proj.Plugins}
 		for _, m := range b.Models {
@@ -389,7 +399,7 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 		}
 	}
 
-	job := runner.Job{Effort: p.Effort, Stage: p.Stage, Attempt: p.Attempt}
+	job := runner.Job{Project: p.Project, Effort: p.Effort, Stage: p.Stage, Attempt: p.Attempt}
 	if p.Task != 0 {
 		if t, err := d.Store.GetTask(ctx, p.Task); err == nil {
 			job.Task = t.Key
@@ -425,15 +435,25 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 			req.Env = append(req.Env, name+"="+key)
 		}
 	}
+	if seat {
+		req.Budget = timeout
+	}
 	call := func(r runner.Request) (runner.Result, string, error) {
 		cctx := ctx
-		if timeout > 0 {
+		if timeout > 0 && !seat {
 			var cancel context.CancelFunc
 			cctx, cancel = context.WithTimeout(ctx, timeout)
 			defer cancel()
 		}
-		res, err := e.runWatched(cctx, r, set.StallMinutes, &lastSeen)
+		stall := set.StallMinutes
+		if seat {
+			stall = 0
+		}
+		res, err := e.runWatched(cctx, r, stall, &lastSeen)
 		*tokens += usageTokens(res.Usage)
+		if isDetached(err) {
+			return res, OutcomeDetached, err
+		}
 		out := classifyRun(ctx, st.Role, err)
 		if out == OutcomeInfraContext {
 			e.learnWindow(ctx, st, err)
@@ -580,4 +600,10 @@ func (e *Engine) dependencyFiles(ctx context.Context, att model.Attempt, task mo
 		}
 	}
 	return out
+}
+
+// isDetached says the runner stopped waiting while its seat works on outside the process.
+func isDetached(err error) bool {
+	var re *runner.Error
+	return errors.As(err, &re) && re.Class == runner.ErrDetached
 }

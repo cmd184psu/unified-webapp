@@ -413,26 +413,79 @@ these findings and they were **noted, not fixed**:
 - The module has no authentication of its own. It inherits platform auth: list `agentflow`
   in `auth.modules` to require a session or API key.
 
-## BotChat seats (`botchat_seat`)
+## Seats (`botchat_seat`, `freebuff_seat`)
 
-A backend may have api type `botchat_seat`: it has no model behind it, and each instance is a
-BotChat callsign (a person or that person's own agent), so a stage costs agentflow no tokens.
-When the engine hands a worker or reviewer stage to such a backend, the runner
-(`internal/agentflow/runner/botchatseat`) creates a BotChat task assigned to the callsign in the
-`agentflow seats` room, carrying the stage prompt verbatim, the worktree's `branch@sha` and the
-acceptance criteria, promotes it, and announces it to the callsign. A stage has at most
-`ReadyLimit` (2) open tasks per seat; past that the call is refused as `rate_limit`.
+A seat is a backend with no model behind it: each stage is worked by someone outside agentflow,
+so it costs no tokens. There are two kinds, and they share one set of rules.
 
-The stage ends when the seat posts, in that room:
+- **`botchat_seat`** (`internal/agentflow/runner/botchatseat`): each instance is a BotChat
+  callsign (a person or that person's own agent). The stage becomes a BotChat task assigned to
+  the callsign in the `agentflow seats` room, carrying the stage prompt and the worktree path.
+- **`freebuff_seat`** (`internal/agentflow/runner/seat`): an interactive terminal coding
+  assistant with no headless mode (freebuff first). Agentflow starts it itself in a
+  multiplexer session named `af-<project>-<effort>-<task>-<stage>`, inside the stage's sandbox
+  (seatbelt or bwrap, the stage home as HOME, credentials hidden, the network on). The backend's
+  model names the profile (`freebuff` by default).
 
-- `DONE TASK-<key> <branch>@<sha>` - the runner makes sure the commit is in the worktree
-  (fetching when needed) and the engine's own verify and review stages run on it as for any
-  other runner, so a seat's work is never trusted blindly;
-- `REVIEW TASK-<key>: PASS` or `REVIEW TASK-<key>: CHANGES-REQUESTED` - the runner turns it into
-  the verdict JSON the engine's review parsing expects (`pass`, `repair`).
+### The rules every seat follows
 
-The BotChat address and key file come from the `botchat_url` and `botchat_key_file` settings,
-read on every call; the key is never logged. A backend's host, when set, overrides the address.
-Agentflow never moves the seat's task on its own behalf: the seat claims, starts and completes
-it. A seat that has not reported by the stage deadline fails the stage with `timeout`, which
-means `needs_attention`, never a silent retry.
+- **Work without committing.** A seat leaves its changes in the worktree; the engine commits
+  them and runs its own verify and review, as for any other runner. The git policy reverts a
+  commit a stage makes, so a seat is told not to.
+- **The report.** A terminal seat finds its whole prompt in `TASK.md` in the stage home (one
+  short line typed into the session points at it) and ends the stage by writing
+  `RESULT.json` next to it: `{"status":"done",...}` with the worker's summary and files, or the
+  reviewer's verdict object; `{"status":"question","question":...}`; or
+  `{"status":"blocked","blocked":...}`. A BotChat seat posts `DONE TASK-<id>` or
+  `REVIEW TASK-<id>: PASS|CHANGES-REQUESTED` naming the BotChat task id it was given, or moves
+  the task on the board (done, blocked, cancelled). Only messages posted after the task was
+  announced count. Either report becomes the exact JSON the engine parses for the role.
+- **Questions.** A question (or a blocked BotChat task) puts the stage on the attention list
+  as `seat_question`; the owner answers with `POST /api/seats/{stage}/answer` `{"text"}`,
+  which is typed into the session (or posted to the callsign), or attaches with
+  `tmux attach -t <name>`. The stage keeps waiting meanwhile.
+- **No retry for silence.** A seat call has no deadline and no stall watch. The role's timeout
+  is the seat's budget: past it with nothing new on its screen (or nothing said on BotChat) the
+  stage is listed as `seat_silent` and keeps its session. A seat is never given a new attempt
+  for being slow.
+- **Survives a restart.** Sessions belong to tmux, tasks to BotChat; what the runner needs to
+  find them again is in the stage directory (`seat.json`, `botchat-seat.json`). A shutdown ends
+  the call as `detached`: no outcome is written and the stage stays open. At start, reconcile
+  gives each open seat stage whose seat is still alive a new lane job, and the runner adopts
+  the session or task instead of starting again. A drain restart (`POST /api/service/restart`)
+  does not wait for seat stages. Sessions whose stage is closed are ended at start and on every
+  reconcile; each session is tagged with its agentflow instance (from the data directory), so
+  one agentflow never adopts or ends another's sessions, or anyone's own tmux sessions.
+- **Cancel.** `POST /api/seats/{stage}/cancel`, a project stop, a task reset or a retire with
+  cancel kills the session (or cancels the BotChat task) first, so the stage ends as
+  `infra:cancel`, not detached.
+- **Slots.** A BotChat seat may hold as many open tasks as the backend's `slots`, counted from
+  BotChat itself (assigned, acknowledged, working, blocked, rework, ready); past that the call
+  is refused as `rate_limit`. A finished task is accepted and closed, so it frees its slot.
+
+`GET /api/seats` lists the open seat stages with their attach command and what they wait on;
+the UI shows them under the attention banner.
+
+### Settings
+
+- `seat_mux`: the multiplexer, `tmux`. Nothing outside `runner/mux` talks to tmux; another
+  multiplexer can be put behind the same interface.
+- `seat_profiles`: JSON object of profiles by name, laid over the built-ins:
+  `command` (`{workdir}` is the worktree), `startup_wait`, `ready_text`, `submit_keys`, `net`,
+  `env`, and `auth_paths` (files under the home directory the program needs to be logged in,
+  copied into the stage home).
+- `botchat_url`, `botchat_key_file`: the BotChat service, read on every call.
+
+Where the seat runs (the host sandbox today, a container later) is the sandbox builder's
+business; how agentflow talks to it (session, typed line, `RESULT.json`) is the runner's. A
+container seat would only change the command the session runs.
+
+## Notifications
+
+When the attention list (`GET /api/attention`) gains an item, agentflow sends exactly
+`Agentflow needs attention` and nothing else: no project, task or reason leaves the machine.
+At most one notification per 10 minutes while items persist; an item that appears inside that
+gap is announced when it ends if something still needs attention. The first look after a start
+only learns what is already listed. Targets: `notify_macos` (`on`/`off`, a macOS notification),
+`notify_command` (run with the text as its one argument) and `notify_url` (POST
+`{"text": ...}`).

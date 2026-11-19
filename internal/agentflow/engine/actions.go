@@ -292,6 +292,7 @@ func (e *Engine) cancelAttemptStages(ctx context.Context, attempt int64) error {
 		if st.State == model.StageDone {
 			continue
 		}
+		e.cancelSeat(ctx, st)
 		for _, ref := range idx[st.ID] {
 			if !jobTerminal(ref.job.Status) {
 				if _, err := ref.lane.Cancel(ref.job.ID); err != nil {

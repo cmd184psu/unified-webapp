@@ -143,6 +143,7 @@ func (a *API) Register(mux muxer) {
 	a.registerService(mux)
 	a.registerEvents(mux)
 	a.registerExport(mux)
+	a.registerSeats(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	})

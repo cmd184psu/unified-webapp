@@ -6,6 +6,7 @@ package runner
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 // ErrClass classifies why a run failed. The engine maps these to infra versus
@@ -21,12 +22,16 @@ const (
 	// ErrContext: the model ran out of context window mid-task (finish reason
 	// "length"). The host's setting is at fault, not the model.
 	ErrContext ErrClass = "context_full"
+	// ErrDetached: the call stopped waiting but the work goes on outside this
+	// process (a seat in a terminal session that outlives a restart). The engine
+	// writes no outcome; the stage is adopted again when the process is back.
+	ErrDetached ErrClass = "detached"
 )
 
 // Valid reports whether c is one of the defined classes.
 func (c ErrClass) Valid() bool {
 	switch c {
-	case ErrNone, ErrRateLimit, ErrUnreachable, ErrCrash, ErrTimeout, ErrContext:
+	case ErrNone, ErrRateLimit, ErrUnreachable, ErrCrash, ErrTimeout, ErrContext, ErrDetached:
 		return true
 	}
 	return false
@@ -38,6 +43,9 @@ type Backend struct {
 	Name    string
 	Host    string
 	APIType string
+	// Slots is how many stages the backend runs at once; for a seat it is how many
+	// open tasks the seat may hold.
+	Slots int
 }
 
 // Request is one model call.
@@ -66,6 +74,10 @@ type Request struct {
 	// Job names the engine job this call serves, for runners that route work through a
 	// message service; zero for calls that belong to no stage (a model check).
 	Job Job
+	// Budget is the role's time budget for runners that keep their own clock (seats):
+	// the engine then sets no deadline on the call, and a seat silent past the budget
+	// is reported as needing attention instead of failing. Zero means no budget.
+	Budget time.Duration
 	// OnEvent, when set, receives events as they arrive so the engine can stream
 	// them to the job log. Result.Events still holds the full list.
 	OnEvent func(Event)
@@ -73,6 +85,8 @@ type Request struct {
 
 // Job identifies the stage a model call belongs to.
 type Job struct {
+	// Project is the project slug, empty for calls outside a project.
+	Project string
 	Effort  int64
 	Stage   int64
 	Task    string // the task's key, empty for the planning roles

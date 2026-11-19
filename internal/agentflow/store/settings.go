@@ -48,6 +48,17 @@ type Settings struct {
 	ContextFloor int
 	// BackendCooldown is how long an unreachable backend is skipped (MB7).
 	BackendCooldown time.Duration
+	// SeatMux is the multiplexer interactive seats run in ("tmux").
+	SeatMux string
+	// SeatProfiles is a JSON object of interactive seat profiles by name, overriding the
+	// built-in ones; empty uses the built-ins.
+	SeatProfiles string
+	// NotifyMacOS shows a macOS notification when something new needs attention.
+	NotifyMacOS bool
+	// NotifyCommand is run with the notice text as its one argument; NotifyURL is POSTed
+	// {"text": ...}. Empty means off.
+	NotifyCommand string
+	NotifyURL     string
 	// BrowseRoots are the directories the server-side directory picker may
 	// list; an empty stored value means the server user's home directory.
 	BrowseRoots []string
@@ -165,7 +176,45 @@ func parseSettings(m map[string]string) (Settings, error) {
 	if s.BrowseRoots, err = parseBrowseRoots(m["browse_roots"]); err != nil {
 		return s, err
 	}
+	s.SeatMux = strings.TrimSpace(m["seat_mux"])
+	if s.SeatMux == "" {
+		s.SeatMux = "tmux"
+	}
+	if s.SeatMux != "tmux" {
+		return s, Invalid("seat_mux", "must be tmux")
+	}
+	s.SeatProfiles = strings.TrimSpace(m["seat_profiles"])
+	if s.SeatProfiles != "" {
+		var probe map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(s.SeatProfiles), &probe); err != nil {
+			return s, Invalid("seat_profiles", "must be a JSON object of profiles by name")
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(m["notify_macos"])) {
+	case "", "on", "true", "1", "yes":
+		s.NotifyMacOS = true
+	case "off", "false", "0", "no":
+	default:
+		return s, Invalid("notify_macos", "must be on or off")
+	}
+	s.NotifyCommand = strings.TrimSpace(m["notify_command"])
+	if s.NotifyURL, err = validateNotifyURL(m["notify_url"]); err != nil {
+		return s, err
+	}
 	return s, nil
+}
+
+// validateNotifyURL accepts an empty value (off) or an http(s) address.
+func validateNotifyURL(v string) (string, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", nil
+	}
+	u, err := url.Parse(v)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return "", Invalid("notify_url", "must be an http or https address")
+	}
+	return v, nil
 }
 
 // validateBotchatURL accepts an empty value (off) or an http(s) address with a host, no login

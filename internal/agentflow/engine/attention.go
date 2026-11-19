@@ -22,11 +22,14 @@ type AttentionItem struct {
 	Effort  int64  `json:"effort"`
 	// Task is the task key, empty for an item about the whole effort.
 	Task string `json:"task,omitempty"`
-	// Kind is stalled, draft_failed, plan_halted, compile_halted, task_halted or task_unassignable.
+	// Kind is stalled, draft_failed, plan_halted, compile_halted, task_halted,
+	// task_unassignable, seat_question or seat_silent.
 	Kind    string `json:"kind"`
 	Message string `json:"message"`
 	// Since is when it happened (Unix ms) when the engine knows; 0 otherwise.
 	Since int64 `json:"since"`
+	// Stage is the stage the item is about, for a seat stage waiting on the owner.
+	Stage int64 `json:"stage,omitempty"`
 }
 
 // Attention lists everything that needs the owner, newest first. It is derived
@@ -59,6 +62,7 @@ func (e *Engine) Attention(ctx context.Context) ([]AttentionItem, error) {
 			out = append(out, items...)
 		}
 	}
+	out = append(out, e.seatAttention(ctx)...)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Since > out[j].Since })
 	return out, nil
 }

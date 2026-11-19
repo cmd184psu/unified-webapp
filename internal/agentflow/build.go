@@ -29,6 +29,7 @@ import (
 	"cmd184psu/unified-webapp/internal/agentflow/runner/grok"
 	"cmd184psu/unified-webapp/internal/agentflow/runner/muse"
 	"cmd184psu/unified-webapp/internal/agentflow/runner/opencode"
+	"cmd184psu/unified-webapp/internal/agentflow/runner/seat"
 	"cmd184psu/unified-webapp/internal/agentflow/sandbox"
 	"cmd184psu/unified-webapp/internal/agentflow/store"
 	"cmd184psu/unified-webapp/internal/platform/config"
@@ -92,8 +93,11 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 	// through BotChat in dispatch mode, shares its rooms. In any other mode it passes calls through.
 	relay := &botchat.Relay{Store: st}
 	var dispatcher *botchat.Dispatcher
+	var seatCtl engine.SeatControl
 	if rn == nil {
-		dispatcher = &botchat.Dispatcher{Inner: newRunner(git, st), Store: st, Relay: relay}
+		ss := newSeats(dataDir, git, st)
+		seatCtl = ss
+		dispatcher = &botchat.Dispatcher{Inner: newRunner(git, st, ss), Store: st, Relay: relay}
 		rn = dispatcher
 	}
 	// The engine exists before the API, so the event hooks reach it through a
@@ -108,6 +112,7 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 		KeyEnv:       opencode.KeyEnv,
 		Git:          git,
 		Sandbox:      feedbackSandbox(),
+		Seats:        seatCtl,
 		PublishRun: func(ev engine.RunEvent) {
 			if a := events.Load(); a != nil {
 				a.PublishRun(ev)
@@ -165,11 +170,18 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 		defer close(relayDone)
 		relay.Run(capCtx)
 	}()
+	// The owner hears "Agentflow needs attention" when the attention list gains an item.
+	notifyDone := make(chan struct{})
+	go func() {
+		defer close(notifyDone)
+		attentionWatcher(eng, st).Run(capCtx)
+	}()
 
 	log.Printf("agentflow: data %s, static %s", dataDir, cfg.StaticDir)
 	return &handler{Handler: mux, stop: func() error {
 		stopCaps()
 		<-relayDone
+		<-notifyDone
 		if dispatcher != nil {
 			dispatcher.Close()
 		}
@@ -200,20 +212,16 @@ func newOpencode(git *gitsvc.Service, st *store.Store) *opencode.Adapter {
 
 // newRunner routes backends of api type "grok", "codex", "claude", "muse" and "agy" to their CLI runners and
 // every other backend to opencode.
-func newRunner(git *gitsvc.Service, st *store.Store) runner.Runner {
+func newRunner(git *gitsvc.Service, st *store.Store, ss *seats) runner.Runner {
 	return &runner.Mux{
 		Default: newOpencode(git, st),
 		ByType: map[string]runner.Runner{
 			grok.APIType: &grok.Adapter{}, codex.APIType: &codex.Adapter{},
 			claude.APIType: &claude.Adapter{}, muse.APIType: &muse.Adapter{}, agy.APIType: &agy.Adapter{},
-			// A seat costs no tokens: the stage waits for its callsign to report on BotChat.
-			botchatseat.APIType: &botchatseat.Adapter{Settings: func(ctx context.Context) (string, string) {
-				set, err := st.GetSettings(ctx)
-				if err != nil {
-					return "", ""
-				}
-				return set.BotchatURL, set.BotchatKeyFile
-			}},
+			// A seat costs no tokens: the stage waits for its callsign to report on BotChat,
+			// or for the interactive program agentflow runs in a terminal session.
+			botchatseat.APIType: ss.chat,
+			seat.APIType:        ss.term,
 		},
 	}
 }

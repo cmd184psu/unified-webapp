@@ -83,6 +83,9 @@ type Deps struct {
 	// MaxPolicyViolations is how many git-policy violations halt a task as
 	// needs_attention; 0 means DefaultMaxPolicyViolations.
 	MaxPolicyViolations int
+	// Seats controls the seat runners (stages worked outside agentflow that survive a
+	// restart); nil means no backend is a seat.
+	Seats SeatControl
 	// TestWidthZero registers every agentflow lane at width 0 and never raises
 	// it, so no job runs unless a test sets a width itself.
 	TestWidthZero bool

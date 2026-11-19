@@ -416,6 +416,11 @@ func (e *Engine) policedStage(ctx context.Context, rc golane.RunContext, st mode
 		return fail(err)
 	}
 	res := e.modelStage(ctx, rc, st, p)
+	if res.Outcome == OutcomeDetached {
+		// The seat is still working in this worktree: judging its git state now would undo
+		// work in progress. The adopted stage takes a fresh snapshot.
+		return res
+	}
 	viols, err := g.DetectAndRevert(context.WithoutCancel(ctx), snap)
 	if err != nil {
 		return fail(fmt.Errorf("revert policy violation: %w", err))
