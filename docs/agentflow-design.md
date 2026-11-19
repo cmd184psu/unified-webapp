@@ -219,7 +219,9 @@ Every model stage and every feedback command runs under bwrap.
   builds and tests offline with no wrapper script. A project may also set `feedback_env`, extra variables for
   its feedback commands (never a secret), and `verify_in_copy`: verify then copies the worktree into the stage
   home without `.git`, `bin` and `obj` and runs the feedback commands there read-write, because `dotnet build`
-  writes build output next to the sources and the worktree itself stays read-only.
+  writes build output next to the sources and the worktree itself stays read-only. A C# feedback command passes
+  `-m:1`: MSBuild's parallel worker nodes deadlock when process spawning is confined, so a fresh copy stalls for
+  five minutes, while the same build with `-m:1` finishes in seconds.
 - **Network.** Model stages share the host network namespace (they must reach their backend).
   See [Security posture](#12-security-posture).
 
