@@ -31,6 +31,10 @@ type rawEvent struct {
 			Message    string `json:"message"`
 			StatusCode int    `json:"statusCode"`
 		} `json:"data"`
+		// opencode 2.x shape: {"type":"provider.rate-limit","message":...,"status":429}
+		Type    string `json:"type"`
+		Message string `json:"message"`
+		Status  int    `json:"status"`
 	} `json:"error"`
 }
 
@@ -102,11 +106,23 @@ func (o *outcome) add(line []byte) runner.Event {
 	case "error":
 		ev.Text = re.Error.Data.Message
 		if ev.Text == "" {
+			ev.Text = re.Error.Message
+		}
+		if ev.Text == "" {
 			ev.Text = re.Error.Name
+		}
+		if ev.Text == "" {
+			ev.Text = re.Error.Type
 		}
 		o.hasError = true
 		o.errMessage = ev.Text
 		o.errStatus = re.Error.Data.StatusCode
+		if o.errStatus == 0 {
+			o.errStatus = re.Error.Status
+		}
+		if o.errStatus == 0 && re.Error.Type == "provider.rate-limit" {
+			o.errStatus = 429
+		}
 	}
 	o.events = append(o.events, ev)
 	return ev
