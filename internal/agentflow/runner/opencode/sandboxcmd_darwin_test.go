@@ -38,7 +38,7 @@ func TestSandboxedRunUsesWorktreeAsCwd(t *testing.T) {
 		t.Fatal(err)
 	}
 	home := HomeDir(stage)
-	factory := SandboxCommand(func(runner.Request) (string, string, error) { return repo, wtGit, nil })
+	factory := SandboxCommand(func(runner.Request) (string, string, error) { return repo, wtGit, nil }, nil)
 	for role, readOnly := range map[string]bool{"worker": false, "reviewer": true} {
 		req := runner.Request{Role: role, Backend: runner.Backend{Name: "local"}, Model: "m", Workdir: wt, StageDir: stage, PromptPath: "p"}
 		cmd, err := factory(context.Background(), req, Argv(bin, req), IsolationEnv(stage, []string{"PATH=/usr/bin"}, nil))

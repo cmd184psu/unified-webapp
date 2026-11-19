@@ -128,10 +128,27 @@ func runOne(ctx context.Context, spec sandbox.Spec, argv Argv, timeout time.Dura
 		res.ExitCode = -1
 	case errors.As(err, &exit):
 		res.ExitCode = exit.ExitCode()
+		// 126 and 127 mean the command never started (not found, not
+		// executable); docker's 125 means the CLI or runtime refused it. A
+		// verifier that recorded that as an ordinary failure would make the
+		// baseline hold the broken command and every later run pass silently
+		// (the 11-19 bridge bug). Compare must never see these as results.
+		if startFailure(res.ExitCode, spec.Docker != nil) {
+			return res, fmt.Errorf("command could not start (exit %d): %s", res.ExitCode, strings.TrimSpace(res.Output))
+		}
 	default:
 		return res, err
 	}
 	return res, nil
+}
+
+// startFailure reports whether a command's exit status means it never ran: 126
+// (not executable), 127 (not found) or, in a container, 125 (the docker CLI or
+// runtime refused it). Such a result must never reach Compare, or the broken
+// command would be recorded in the baseline and every later run would pass
+// silently.
+func startFailure(code int, docker bool) bool {
+	return code == 126 || code == 127 || (docker && code == 125)
 }
 
 // limitedBuffer keeps the first and last max/2 bytes written and counts the

@@ -49,9 +49,9 @@ var homeSecrets = []string{
 // ~/.x_api_key, ~/.x_chat_api, ~/.beam_*, ~/.reflection*.
 const homeSecretRegex = `^%s/\.([A-Za-z0-9_-]*_api[A-Za-z0-9_]*|beam_[^/]*|reflection[^/]*|api_key[^/]*)$`
 
-// Command builds the sandbox-exec command for spec. Cancelling ctx signals the
-// process group (SIGTERM, then SIGKILL).
-func Command(ctx context.Context, spec Spec) (*exec.Cmd, error) {
+// hostCommand builds the sandbox-exec command for spec. Cancelling ctx signals
+// the process group (SIGTERM, then SIGKILL).
+func hostCommand(ctx context.Context, spec Spec) (*exec.Cmd, error) {
 	if err := spec.validate(); err != nil {
 		return nil, err
 	}

@@ -318,6 +318,11 @@ allowlisted environment, so `bwrap`, `git` and the real `opencode` binary (not a
 be installed on the server. All state is in one SQLite database under `data_dir`. Every
 project starts stopped after a restart.
 
+A project may instead run every stage in a Docker container (`sandbox: "docker"`), which is
+how a C# SDK or a Ghidra install that is not on the host becomes usable. The Colima VM is
+started on demand and stopped after 15 idle minutes; on Linux the native daemon is only
+checked. See **[docs/agentflow-docker.md](docs/agentflow-docker.md)**.
+
 ### Configuration
 
 Section `agentflow` in the server config (`internal/platform/config.AgentflowConfig`):
@@ -343,7 +348,8 @@ environment as `AGENTFLOW_KEY_<NAME>`; a key change needs a restart. Old keys
 
 1. **Route a hostname** in `host_routing`, for example `"agentflow.example.net": "agentflow"`.
 2. **Install requirements**: `bwrap`, `git`, and opencode at `~/.opencode/bin/opencode` or on `PATH`.
-   `GET /api/health` reports `degraded` if opencode is missing.
+   `GET /api/health` reports `degraded` if opencode is missing. Docker is needed only for a
+   project that sets `sandbox: "docker"`; on macOS agentflow starts and stops Colima itself.
 3. **Add a backend and role candidates**, then **create a project** for a git repository.
 4. **Work the pipeline in the UI**: FRD, plan, approve, compile, approve the queue, Start.
 5. **Authentication**: list `agentflow` in `auth.modules` to require a session or API key.

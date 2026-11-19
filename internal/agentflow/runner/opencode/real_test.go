@@ -85,7 +85,7 @@ func TestRealOpencodeAgainstStub(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(gd, "worktrees", "w"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		a.Command = SandboxCommand(func(runner.Request) (string, string, error) { return gd, filepath.Join(gd, "worktrees", "w"), nil })
+		a.Command = SandboxCommand(func(runner.Request) (string, string, error) { return gd, filepath.Join(gd, "worktrees", "w"), nil }, nil)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()

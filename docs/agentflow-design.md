@@ -222,7 +222,15 @@ Every model stage and every feedback command runs under bwrap.
   writes build output next to the sources and the worktree itself stays read-only. A C# feedback command passes
   `-m:1`: MSBuild's parallel worker nodes deadlock when process spawning is confined, so a fresh copy stalls for
   five minutes, while the same build with `-m:1` finishes in seconds.
+- **Docker projects (AF-12).** A project may set `sandbox: "docker"` and everything above runs
+  in its image instead: the worktree at its host path (read-write for a worker, read-only
+  otherwise), the git dirs read-only, the stage home at `/home/agent`, the same environment
+  allowlist, and no network unless the project asks for it. The engine starts the container
+  runtime before the first stage and stops it when idle; a runtime that cannot start fails the
+  stage with the reason rather than falling back to the host. Details and the image rebuild:
+  [agentflow-docker.md](agentflow-docker.md).
 - **Network.** Model stages share the host network namespace (they must reach their backend).
+  A container stage has no network by default.
   See [Security posture](#12-security-posture).
 
 ### macOS (sandbox-exec)
@@ -243,6 +251,20 @@ Differences, by design of the host:
   denied. bwrap's empty root has no macOS equivalent.
 - **No PID namespace.** Cancel signals the process group; a descendant that starts its own
   process group can outlive a cancelled stage.
+
+### Docker (container stages)
+
+`Spec.Docker` selects the container backend, so `sandbox.Command` is the only entry point on
+both paths. The container gets the worktree, the trusted git directories and the stage home
+at the same absolute paths (a worktree's `.git` file holds absolute paths), plus the
+project's declared mounts. Two differences from the host sandbox are deliberate: the image
+supplies the toolchain, and the stage's network is `none` unless the project opts into
+`provider` (a proxy) or `full`. Cancelling a stage closes the docker CLI *and* kills the
+container by name, because the container is not a child of the server.
+
+The runtime is behind `dockervm.Driver`: Colima on macOS, the native daemon on Linux. The
+manager holds one start/stop at a time, reuses a runtime that already answers, counts running
+`agentflow=1` containers before stopping, and never starts or stops a host daemon on Linux.
 
 ### opencode isolation
 

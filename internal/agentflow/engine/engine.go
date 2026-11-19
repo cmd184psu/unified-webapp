@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"cmd184psu/unified-webapp/internal/agentflow/dockervm"
 	"cmd184psu/unified-webapp/internal/agentflow/gitsvc"
 	"cmd184psu/unified-webapp/internal/agentflow/model"
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
@@ -61,6 +62,12 @@ type Deps struct {
 	// (a Go module cache), PATH dirs and environment. The engine fills in the
 	// worktree and git dirs; feedback commands never get a writable worktree.
 	Sandbox sandbox.Spec
+	// Containers is the container runtime a docker project needs (AF-12). Nil
+	// makes a docker project fail with a clear error instead of silently
+	// running on the host.
+	Containers *dockervm.Manager
+	// DockerProxy is the allowlisting proxy a provider network uses.
+	DockerProxy string
 	// Verify and Merge run the engine-owned stages. Nil uses the built-in
 	// executors when Git is set.
 	Verify, Merge Executor

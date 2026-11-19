@@ -82,15 +82,23 @@ type ProjectView struct {
 	// FeedbackEnv is set for every feedback command.
 	FeedbackEnv map[string]string `json:"feedback_env"`
 	// VerifyInCopy runs feedback commands on a copy of the worktree.
-	VerifyInCopy bool           `json:"verify_in_copy"`
-	Created      int64          `json:"created"`
-	Updated      int64          `json:"updated"`
-	RunState     string         `json:"run_state"`
-	Remembered   string         `json:"remembered_run_state"`
-	StopReason   string         `json:"stop_reason"`
-	Effort       *model.Effort  `json:"effort"`
-	Progress     map[string]int `json:"progress"`
-	Current      []WorkItem     `json:"current"`
+	VerifyInCopy bool `json:"verify_in_copy"`
+	// Sandbox is host or docker (AF-12).
+	Sandbox string `json:"sandbox"`
+	// DockerImage, DockerNetwork, DockerMounts and DockerSELinux describe the
+	// container a docker project's stages run in.
+	DockerImage   string         `json:"docker_image"`
+	DockerNetwork string         `json:"docker_network"`
+	DockerMounts  []string       `json:"docker_mounts"`
+	DockerSELinux bool           `json:"docker_selinux"`
+	Created       int64          `json:"created"`
+	Updated       int64          `json:"updated"`
+	RunState      string         `json:"run_state"`
+	Remembered    string         `json:"remembered_run_state"`
+	StopReason    string         `json:"stop_reason"`
+	Effort        *model.Effort  `json:"effort"`
+	Progress      map[string]int `json:"progress"`
+	Current       []WorkItem     `json:"current"`
 }
 
 // projectView assembles the overview of one project.
@@ -98,6 +106,7 @@ func (a *API) projectView(ctx context.Context, p store.Project) (ProjectView, er
 	v := ProjectView{
 		Slug: p.Slug, RepoPath: p.RepoPath, ModelScope: p.ModelScope, FeedbackCmds: p.FeedbackCmds, DefinitionOfDone: p.DefinitionOfDone, Limits: p.Limits, Cleanup: p.CleanupEnabled,
 		Toolchains: p.Toolchains, FeedbackEnv: p.FeedbackEnv, VerifyInCopy: p.VerifyInCopy,
+		Sandbox: p.Sandbox, DockerImage: p.DockerImage, DockerNetwork: p.DockerNetwork, DockerMounts: p.DockerMounts, DockerSELinux: p.DockerSELinux,
 		Created: p.Created.UnixMilli(), Updated: p.Updated.UnixMilli(),
 		RunState: a.deps.Engine.Runs().State(p.Slug), Remembered: model.RunStopped,
 		StopReason: a.deps.Engine.Runs().StopReason(p.Slug),
@@ -114,6 +123,15 @@ func (a *API) projectView(ctx context.Context, p store.Project) (ProjectView, er
 	}
 	if v.FeedbackEnv == nil {
 		v.FeedbackEnv = map[string]string{}
+	}
+	if v.Sandbox == "" {
+		v.Sandbox = "host"
+	}
+	if v.DockerMounts == nil {
+		v.DockerMounts = []string{}
+	}
+	if v.DockerNetwork == "" {
+		v.DockerNetwork = "none"
 	}
 	v.Plugins = []PluginView{}
 	for _, pl := range p.Plugins {
@@ -214,16 +232,21 @@ func (a *API) respondProject(w http.ResponseWriter, r *http.Request, slug string
 // projectBody is the writable part of a project. Absent fields keep their
 // value on PATCH and take the default on POST.
 type projectBody struct {
-	Slug         *string            `json:"slug"`
-	RepoPath     *string            `json:"repo_path"`
-	ModelScope   *string            `json:"model_scope"`
-	FeedbackCmds *[]string          `json:"feedback_cmds"`
-	Limits       *map[string]string `json:"limits"`
-	Cleanup      *bool              `json:"cleanup_enabled"`
-	Plugins      *[]PluginView      `json:"plugins"`
-	Toolchains   *[]string          `json:"toolchains"`
-	FeedbackEnv  *map[string]string `json:"feedback_env"`
-	VerifyInCopy *bool              `json:"verify_in_copy"`
+	Slug          *string            `json:"slug"`
+	RepoPath      *string            `json:"repo_path"`
+	ModelScope    *string            `json:"model_scope"`
+	FeedbackCmds  *[]string          `json:"feedback_cmds"`
+	Limits        *map[string]string `json:"limits"`
+	Cleanup       *bool              `json:"cleanup_enabled"`
+	Plugins       *[]PluginView      `json:"plugins"`
+	Toolchains    *[]string          `json:"toolchains"`
+	FeedbackEnv   *map[string]string `json:"feedback_env"`
+	VerifyInCopy  *bool              `json:"verify_in_copy"`
+	Sandbox       *string            `json:"sandbox"`
+	DockerImage   *string            `json:"docker_image"`
+	DockerNet     *string            `json:"docker_network"`
+	DockerMounts  *[]string          `json:"docker_mounts"`
+	DockerSELinux *bool              `json:"docker_selinux"`
 	// DefinitionOfDone is a list, or null to go back to the derived one.
 	DefinitionOfDone json.RawMessage `json:"definition_of_done"`
 }
@@ -255,6 +278,21 @@ func (b projectBody) apply(p *store.Project) error {
 	}
 	if b.VerifyInCopy != nil {
 		p.VerifyInCopy = *b.VerifyInCopy
+	}
+	if b.Sandbox != nil {
+		p.Sandbox = *b.Sandbox
+	}
+	if b.DockerImage != nil {
+		p.DockerImage = *b.DockerImage
+	}
+	if b.DockerNet != nil {
+		p.DockerNetwork = *b.DockerNet
+	}
+	if b.DockerMounts != nil {
+		p.DockerMounts = *b.DockerMounts
+	}
+	if b.DockerSELinux != nil {
+		p.DockerSELinux = *b.DockerSELinux
 	}
 	if b.Plugins != nil {
 		p.Plugins = make([]runner.Plugin, 0, len(*b.Plugins))

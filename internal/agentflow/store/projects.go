@@ -42,8 +42,20 @@ type Project struct {
 	// without .git, bin and obj, because the worktree is bound read-only and a
 	// toolchain that writes build output cannot use it (AF-6).
 	VerifyInCopy bool
-	Created      time.Time
-	Updated      time.Time
+	// Sandbox is host (bwrap or Seatbelt) or docker (AF-12). A docker project
+	// runs every stage in its image, which is how a C# or Ghidra toolchain that
+	// does not exist on the host becomes usable.
+	Sandbox string
+	// DockerImage is name:tag; empty means sandbox.DefaultDockerImage.
+	DockerImage string
+	// DockerNetwork is none, provider or full; empty means none.
+	DockerNetwork string
+	// DockerMounts are extra bind mounts, each "src:dst" or "src:dst:rw".
+	DockerMounts []string
+	// DockerSELinux relabels the bind mounts (:z) for hosts that need it.
+	DockerSELinux bool
+	Created       time.Time
+	Updated       time.Time
 }
 
 func projectSlugs(ctx context.Context, q querier) ([]string, error) {
@@ -98,6 +110,9 @@ func (s *Store) validateProject(p Project) (resolved string, err error) {
 		return "", err
 	}
 	if err := validateFeedbackEnv(p.FeedbackEnv); err != nil {
+		return "", err
+	}
+	if err := validateDocker(p); err != nil {
 		return "", err
 	}
 	for k := range p.Limits {
@@ -165,6 +180,34 @@ func validateFeedbackEnv(env map[string]string) error {
 		}
 		if strings.TrimSpace(env[k]) == "" {
 			return Invalid("feedback_env."+k, "must not be blank")
+		}
+	}
+	return nil
+}
+
+// validateDocker checks a container project's settings (AF-12). The mode is
+// host (bwrap or Seatbelt) or docker; a docker project names an image and may
+// narrow its network, add mounts and enable SELinux relabelling.
+func validateDocker(p Project) error {
+	switch p.Sandbox {
+	case "", "host", "docker":
+	default:
+		return Invalid("sandbox", "must be host or docker")
+	}
+	if p.Sandbox != "docker" {
+		return nil
+	}
+	if p.DockerImage != "" && !strings.Contains(p.DockerImage, ":") {
+		return Invalid("docker_image", "must be name:tag")
+	}
+	switch p.DockerNetwork {
+	case "", sandbox.NetworkNone, sandbox.NetworkProvider, sandbox.NetworkFull:
+	default:
+		return Invalid("docker_network", "must be none, provider or full")
+	}
+	for i, m := range p.DockerMounts {
+		if _, err := sandbox.ParseMount(m); err != nil {
+			return Invalid(fmt.Sprintf("docker_mounts[%d]", i), "must be src:dst or src:dst:rw with absolute paths")
 		}
 	}
 	return nil
@@ -241,6 +284,32 @@ func toolchainJSON(names []string) (string, error) {
 	return string(b), err
 }
 
+// sandboxMode is the stored mode: an unset field is the host sandbox, which
+// keeps every project that predates AF-12 unchanged.
+func sandboxMode(p Project) string {
+	if p.Sandbox == "" {
+		return "host"
+	}
+	return p.Sandbox
+}
+
+// dockerNetwork is the stored network mode: an unset field is none.
+func dockerNetwork(p Project) string {
+	if p.DockerNetwork == "" {
+		return sandbox.NetworkNone
+	}
+	return p.DockerNetwork
+}
+
+// dockerMountsJSON stores a container project's extra mounts; none is "[]".
+func dockerMountsJSON(mounts []string) (string, error) {
+	if mounts == nil {
+		mounts = []string{}
+	}
+	b, err := json.Marshal(mounts)
+	return string(b), err
+}
+
 // envJSON stores a project's feedback environment; none is "{}".
 func envJSON(env map[string]string) (string, error) {
 	if env == nil {
@@ -282,6 +351,10 @@ func (s *Store) CreateProject(ctx context.Context, actor string, p Project) erro
 	if err != nil {
 		return Invalid("feedback_env", "not JSON-encodable")
 	}
+	dm, err := dockerMountsJSON(p.DockerMounts)
+	if err != nil {
+		return Invalid("docker_mounts", "not JSON-encodable")
+	}
 	return s.WithTx(ctx, func(tx *sql.Tx) error {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects WHERE slug = ?`, p.Slug).Scan(&n); err != nil {
@@ -295,8 +368,8 @@ func (s *Store) CreateProject(ctx context.Context, actor string, p Project) erro
 		}
 		now := time.Now().UnixMilli()
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO projects (slug, repo_path, model_scope, feedback_cmds_json, definition_of_done_json, cleanup_enabled, toolchains_json, feedback_env_json, verify_in_copy, created, updated)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, p.Slug, repo, p.ModelScope, fb, dod, b2i(p.CleanupEnabled), tl, env, b2i(p.VerifyInCopy), now, now); err != nil {
+			INSERT INTO projects (slug, repo_path, model_scope, feedback_cmds_json, definition_of_done_json, cleanup_enabled, toolchains_json, feedback_env_json, verify_in_copy, sandbox, docker_image, docker_network, docker_mounts_json, docker_selinux, created, updated)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, p.Slug, repo, p.ModelScope, fb, dod, b2i(p.CleanupEnabled), tl, env, b2i(p.VerifyInCopy), sandboxMode(p), p.DockerImage, dockerNetwork(p), dm, b2i(p.DockerSELinux), now, now); err != nil {
 			return err
 		}
 		if err := writeProjectBody(ctx, tx, p); err != nil {
@@ -330,6 +403,10 @@ func (s *Store) UpdateProject(ctx context.Context, actor string, p Project) erro
 	if err != nil {
 		return Invalid("feedback_env", "not JSON-encodable")
 	}
+	dm, err := dockerMountsJSON(p.DockerMounts)
+	if err != nil {
+		return Invalid("docker_mounts", "not JSON-encodable")
+	}
 	return s.WithTx(ctx, func(tx *sql.Tx) error {
 		if err := requireProject(ctx, tx, p.Slug); err != nil {
 			return err
@@ -338,8 +415,8 @@ func (s *Store) UpdateProject(ctx context.Context, actor string, p Project) erro
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE projects SET repo_path = ?, model_scope = ?, feedback_cmds_json = ?, definition_of_done_json = ?, cleanup_enabled = ?, toolchains_json = ?, feedback_env_json = ?, verify_in_copy = ?, updated = ?
-			WHERE slug = ?`, repo, p.ModelScope, fb, dod, b2i(p.CleanupEnabled), tl, env, b2i(p.VerifyInCopy), time.Now().UnixMilli(), p.Slug); err != nil {
+			UPDATE projects SET repo_path = ?, model_scope = ?, feedback_cmds_json = ?, definition_of_done_json = ?, cleanup_enabled = ?, toolchains_json = ?, feedback_env_json = ?, verify_in_copy = ?, sandbox = ?, docker_image = ?, docker_network = ?, docker_mounts_json = ?, docker_selinux = ?, updated = ?
+			WHERE slug = ?`, repo, p.ModelScope, fb, dod, b2i(p.CleanupEnabled), tl, env, b2i(p.VerifyInCopy), sandboxMode(p), p.DockerImage, dockerNetwork(p), dm, b2i(p.DockerSELinux), time.Now().UnixMilli(), p.Slug); err != nil {
 			return err
 		}
 		if err := writeProjectBody(ctx, tx, p); err != nil {
@@ -351,7 +428,7 @@ func (s *Store) UpdateProject(ctx context.Context, actor string, p Project) erro
 }
 
 func loadProjects(ctx context.Context, q querier, slug string) ([]Project, error) {
-	query := `SELECT slug, repo_path, model_scope, feedback_cmds_json, definition_of_done_json, cleanup_enabled, toolchains_json, feedback_env_json, verify_in_copy, created, updated FROM projects`
+	query := `SELECT slug, repo_path, model_scope, feedback_cmds_json, definition_of_done_json, cleanup_enabled, toolchains_json, feedback_env_json, verify_in_copy, sandbox, docker_image, docker_network, docker_mounts_json, docker_selinux, created, updated FROM projects`
 	var args []any
 	if slug != "" {
 		query += ` WHERE slug = ?`
@@ -364,10 +441,10 @@ func loadProjects(ctx context.Context, q querier, slug string) ([]Project, error
 	var out []Project
 	for rows.Next() {
 		var p Project
-		var fb, dod, tl, env string
-		var cleanup, inCopy int
+		var fb, dod, tl, env, dm string
+		var cleanup, inCopy, selinux int
 		var created, updated int64
-		if err := rows.Scan(&p.Slug, &p.RepoPath, &p.ModelScope, &fb, &dod, &cleanup, &tl, &env, &inCopy, &created, &updated); err != nil {
+		if err := rows.Scan(&p.Slug, &p.RepoPath, &p.ModelScope, &fb, &dod, &cleanup, &tl, &env, &inCopy, &p.Sandbox, &p.DockerImage, &p.DockerNetwork, &dm, &selinux, &created, &updated); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -389,8 +466,13 @@ func loadProjects(ctx context.Context, q querier, slug string) ([]Project, error
 			rows.Close()
 			return nil, fmt.Errorf("project %q feedback environment: %w", p.Slug, err)
 		}
+		if err := json.Unmarshal([]byte(dm), &p.DockerMounts); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("project %q docker mounts: %w", p.Slug, err)
+		}
 		p.CleanupEnabled = cleanup != 0
 		p.VerifyInCopy = inCopy != 0
+		p.DockerSELinux = selinux != 0
 		p.Created, p.Updated = time.UnixMilli(created), time.UnixMilli(updated)
 		out = append(out, p)
 	}
