@@ -28,6 +28,7 @@ var stateWriters = map[string]string{
 	"runner/botchatseat/botchatseat.go:writeState": "botchat-seat.json in the stage dir: the stage's BotChat task and read cursor",
 	"runner/seat/seat.go:writeState":               "seat.json in the stage dir: the stage's terminal session",
 	"runner/seat/seat.go:writeTask":                "TASK.md in the stage home: the prompt the seat reads",
+	"runner/seat/seat.go:installConfig":            "the seat program's login copied into the stage home (0600, removed when the stage ends)",
 	"runner/seat/seat.go:wait":                     "QUESTION.open and seat-screen.txt in the stage dir: the open question, the seat's last screen",
 	"runner/mux/tmux.go:Create":                    "<stage dir>/<session>.launch.sh: a command too long for tmux's command line",
 }
