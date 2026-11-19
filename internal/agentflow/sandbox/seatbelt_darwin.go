@@ -216,6 +216,28 @@ func seatbeltProfile(spec Spec, wt, home, repoGit, wtGit string, binds []string)
 		b.WriteString("(deny file-write* (subpath " + q(repoGit) + ") (subpath " + q(wtGit) + ") (literal " + q(filepath.Join(wt, ".git")) + "))\n")
 	}
 
+	// Hidden host dirs, with the single files a seat program still needs from them.
+	if len(spec.HideDirs) > 0 {
+		b.WriteString("(deny file-read*")
+		for _, d := range spec.HideDirs {
+			b.WriteString(" (subpath " + q(realOr(d)) + ")")
+		}
+		b.WriteString(")\n")
+		// Path lookups through the hidden dirs need metadata; listing or reading them does not get it.
+		b.WriteString("(allow file-read-metadata")
+		for _, d := range spec.HideDirs {
+			b.WriteString(" (subpath " + q(realOr(d)) + ")")
+		}
+		b.WriteString(")\n")
+		if len(spec.ReadFiles) > 0 {
+			b.WriteString("(allow file-read*")
+			for _, f := range spec.ReadFiles {
+				b.WriteString(" (literal " + q(realOr(f)) + ")")
+			}
+			b.WriteString(")\n")
+		}
+	}
+
 	// Credentials of the server user: last, so nothing above re-opens them.
 	if uh, err := os.UserHomeDir(); err == nil {
 		if real, err := filepath.EvalSymlinks(uh); err == nil {
@@ -253,4 +275,12 @@ func regexQuote(p string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// realOr is p with symlinks resolved, or p when it cannot be resolved.
+func realOr(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return p
 }

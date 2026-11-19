@@ -39,6 +39,13 @@ type Spec struct {
 	Env map[string]string
 	// Argv is the command to run inside the sandbox.
 	Argv []string
+	// HideDirs are host directories the stage may not read (a seat: ~/.config). On Linux the
+	// host home is hidden already, so they only matter on macOS.
+	HideDirs []string
+	// ReadFiles are single host files the stage may read even inside HideDirs (a seat
+	// program's own large read-only files). On Linux each is bound read-only at its own path.
+	// A credential path is never re-opened by this list.
+	ReadFiles []string
 }
 
 // forbiddenEnv reports whether key may not be passed through Spec.Env.
@@ -102,6 +109,11 @@ func (s Spec) validate() error {
 	}
 	if len(s.Argv) == 0 {
 		return errors.New("sandbox: empty Argv")
+	}
+	for _, p := range append(append([]string{}, s.HideDirs...), s.ReadFiles...) {
+		if !filepath.IsAbs(p) || filepath.Clean(p) != p {
+			return fmt.Errorf("sandbox: HideDirs and ReadFiles need absolute, clean paths, got %q", p)
+		}
 	}
 	return nil
 }

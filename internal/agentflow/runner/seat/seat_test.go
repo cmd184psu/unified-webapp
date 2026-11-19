@@ -274,3 +274,49 @@ func TestReviewerReportBecomesAValidReview(t *testing.T) {
 		t.Fatalf("%s: %v", final, err)
 	}
 }
+
+// The stage home gets a private copy of the login (0600) and links to the big read-only
+// files; the login copy goes when the stage is over.
+func TestInstallConfigCopiesTheLoginAndLinksTheRest(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg := filepath.Join(home, ".config", "manicode")
+	if err := os.MkdirAll(cfg, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"credentials.json", "device-key.json", "settings.json", "freebuff", "rg", "message-history.json"} {
+		if err := os.WriteFile(filepath.Join(cfg, f), []byte("x-"+f), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stageHome := filepath.Join(t.TempDir(), "home")
+	read, err := installConfig(Freebuff(), stageHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := filepath.Join(stageHome, ".config", "manicode")
+	for _, f := range []string{"credentials.json", "device-key.json", "settings.json"} {
+		fi, err := os.Lstat(filepath.Join(got, f))
+		if err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm() != 0o600 {
+			t.Fatalf("%s: %v %v; want a private copy", f, fi, err)
+		}
+	}
+	if fi, err := os.Lstat(filepath.Join(got, "freebuff")); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("freebuff should be a link: %v %v", fi, err)
+	}
+	if _, err := os.Lstat(filepath.Join(got, "message-history.json")); err == nil {
+		t.Fatal("message history must not be shared")
+	}
+	if len(read) != 2 || read[0] != filepath.Join(cfg, "freebuff") || read[1] != filepath.Join(cfg, "rg") {
+		t.Fatalf("readable files = %v (tree-sitter.wasm and metadata are absent here)", read)
+	}
+	removeLogin(Freebuff(), stageHome)
+	if _, err := os.Stat(filepath.Join(got, "credentials.json")); err == nil {
+		t.Fatal("the login copy should be gone")
+	}
+	p := Freebuff()
+	p.ConfigDir = "/etc"
+	if _, err := installConfig(p, stageHome); err == nil {
+		t.Fatal("a config dir outside the home directory must be refused")
+	}
+}

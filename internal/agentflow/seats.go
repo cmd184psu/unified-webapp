@@ -67,7 +67,7 @@ func newSeats(dataDir string, git *gitsvc.Service, st *store.Store) *seats {
 }
 
 // seatProfiles reads the seat_profiles setting. A profile named like a built-in one is laid
-// over it, so {"freebuff": {"auth_paths": [...]}} changes only that field.
+// over it, so {"freebuff": {"config_dir": "..."}} changes only that field.
 func seatProfiles(text string) map[string]seat.Profile {
 	out := map[string]seat.Profile{"freebuff": seat.Freebuff()}
 	if text == "" {
@@ -96,7 +96,8 @@ const seatBinDst = "/opt/agentflow-seat"
 // home as HOME, credentials hidden, the worktree writable only for a writing role, git admin
 // dirs read-only. The program then runs in a terminal session, not as agentflow's child.
 func seatSandbox(dirs func(runner.Request) (string, string, error)) seat.Sandboxer {
-	return func(req runner.Request, argv []string, env map[string]string, net bool) (seat.Launch, error) {
+	return func(req runner.Request, o seat.SandboxOpts) (seat.Launch, error) {
+		argv, env, net := o.Argv, o.Env, o.Net
 		repo, wt, err := dirs(req)
 		if err != nil {
 			return seat.Launch{}, err
@@ -114,6 +115,8 @@ func seatSandbox(dirs func(runner.Request) (string, string, error)) seat.Sandbox
 			Net:              net,
 			Env:              env,
 			Argv:             argv,
+			HideDirs:         o.HideDirs,
+			ReadFiles:        o.ReadFiles,
 		}
 		if runtime.GOOS == "linux" && len(argv) > 0 && filepath.IsAbs(argv[0]) {
 			// bwrap shows only what is bound: the program's binary goes in read-only.

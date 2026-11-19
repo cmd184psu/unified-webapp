@@ -17,7 +17,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -82,14 +81,24 @@ type Profile struct {
 	SubmitKeys []string `json:"submit_keys,omitempty"`
 	// Net gives the program the network; a hosted assistant needs it.
 	Net bool `json:"net"`
-	// AuthPaths are files or directories under the server user's home that the program
-	// needs to be logged in; each is copied to the same place under the stage home.
-	AuthPaths []string `json:"auth_paths,omitempty"`
+	// ConfigDir is the program's own config directory under the server user's home
+	// ("~/.config/manicode" for freebuff). The stage home gets the same directory, holding:
+	ConfigDir string `json:"config_dir,omitempty"`
+	// CopyFiles: files of ConfigDir copied in (mode 0600): the login. They are removed when
+	// the stage ends and never logged.
+	CopyFiles []string `json:"copy_files,omitempty"`
+	// LinkFiles: large read-only files of ConfigDir linked in (the program's real binary, its
+	// tools). The sandbox may read exactly these from the user's config.
+	LinkFiles []string `json:"link_files,omitempty"`
+	// HideDirs are directories under the server user's home the program may not read
+	// ("~/.config"); LinkFiles stay readable inside them.
+	HideDirs []string `json:"hide_dirs,omitempty"`
 	// Env is extra environment for the program.
 	Env map[string]string `json:"env,omitempty"`
 }
 
 // Freebuff is the built-in profile: freebuff in the worktree, given the network.
+// freebuff 0.2.x keeps its login and its real CLI in ~/.config/manicode, found through $HOME.
 func Freebuff() Profile {
 	return Profile{
 		Command:     []string{"/opt/homebrew/bin/freebuff", "--cwd", "{workdir}"},
@@ -97,6 +106,10 @@ func Freebuff() Profile {
 		SubmitKeys:  []string{"Enter"},
 		Net:         true,
 		Env:         map[string]string{"TERM": "xterm-256color", "COLORTERM": "truecolor"},
+		ConfigDir:   "~/.config/manicode",
+		CopyFiles:   []string{"credentials.json", "device-key.json", "settings.json"},
+		LinkFiles:   []string{"freebuff", "rg", "tree-sitter.wasm", "freebuff-metadata.json"},
+		HideDirs:    []string{"~/.config"},
 	}
 }
 
@@ -109,9 +122,19 @@ type Launch struct {
 	Home string
 }
 
-// Sandboxer builds the sandboxed command for a stage: argv runs in the stage's sandbox
-// with the stage home, a writable worktree only for writing roles, and the network when net.
-type Sandboxer func(req runner.Request, argv []string, env map[string]string, net bool) (Launch, error)
+// SandboxOpts is what a seat program needs from its sandbox.
+type SandboxOpts struct {
+	Argv []string
+	Env  map[string]string
+	Net  bool
+	// HideDirs and ReadFiles are absolute host paths (see sandbox.Spec).
+	HideDirs  []string
+	ReadFiles []string
+}
+
+// Sandboxer builds the sandboxed command for a stage: the program runs in the stage's sandbox
+// with the stage home, a writable worktree only for writing roles, and the network when asked.
+type Sandboxer func(req runner.Request, o SandboxOpts) (Launch, error)
 
 // Adapter is the interactive seat runner.
 type Adapter struct {
@@ -307,8 +330,15 @@ func (a *Adapter) start(ctx context.Context, m mux.Multiplexer, name string, req
 		return state{}, &runner.Error{Class: runner.ErrCrash, Msg: "seat: " + err.Error()}
 	}
 	home := HomeDir(req.StageDir)
-	if err := copyAuth(prof.AuthPaths, home); err != nil {
-		return state{}, err
+	readFiles, err := installConfig(prof, home)
+	if err != nil {
+		return state{}, &runner.Error{Class: runner.ErrCrash, Msg: "seat: " + err.Error()}
+	}
+	hide := make([]string, 0, len(prof.HideDirs))
+	for _, d := range prof.HideDirs {
+		if p, err := underHome(d); err == nil {
+			hide = append(hide, p)
+		}
 	}
 	_ = os.Remove(filepath.Join(home, ResultFile))
 	argv := make([]string, len(prof.Command))
@@ -326,7 +356,7 @@ func (a *Adapter) start(ctx context.Context, m mux.Multiplexer, name string, req
 	}
 	var l Launch
 	if a.Sandbox != nil {
-		if l, err = a.Sandbox(req, argv, env, prof.Net); err != nil {
+		if l, err = a.Sandbox(req, SandboxOpts{Argv: argv, Env: env, Net: prof.Net, HideDirs: hide, ReadFiles: readFiles}); err != nil {
 			return state{}, fmt.Errorf("sandbox: %w", err)
 		}
 	} else {
@@ -449,6 +479,7 @@ func (a *Adapter) wait(ctx context.Context, m mux.Multiplexer, name string, req 
 				_ = os.WriteFile(filepath.Join(req.StageDir, "seat-screen.txt"), []byte(screen), 0o600)
 				_ = os.Rename(filepath.Join(home, ResultFile), filepath.Join(home, "RESULT.final.json"))
 				_ = m.Kill(context.WithoutCancel(ctx), name)
+				a.forgetLogin(ctx, st, home)
 				board.Clear(stage)
 				return runner.Result{Final: final}, nil
 			}
@@ -458,6 +489,7 @@ func (a *Adapter) wait(ctx context.Context, m mux.Multiplexer, name string, req 
 		}
 		alive, err := m.Has(ctx, name)
 		if err == nil && !alive {
+			a.forgetLogin(ctx, st, home)
 			if ctx.Err() != nil {
 				return runner.Result{Incomplete: true}, ctx.Err() // cancelled: the session was killed first
 			}
@@ -468,6 +500,7 @@ func (a *Adapter) wait(ctx context.Context, m mux.Multiplexer, name string, req 
 				screen, _ := m.Capture(ctx, name, 200)
 				_ = os.WriteFile(filepath.Join(req.StageDir, "seat-screen.txt"), []byte(screen), 0o600)
 				_ = m.Kill(context.WithoutCancel(ctx), name)
+				a.forgetLogin(ctx, st, home)
 				return failed(runner.ErrCrash, "seat: the program exited without a report: "+tail(screen, 1500), nil)
 			}
 			continue
@@ -658,40 +691,93 @@ func (a *Adapter) Sweep(ctx context.Context, open func(stage int64) bool) ([]str
 	return killed, nil
 }
 
-// copyAuth copies each auth path (relative to the server user's home, or absolute under it)
-// to the same place under the stage home.
-func copyAuth(paths []string, stageHome string) error {
-	if len(paths) == 0 {
-		return nil
-	}
+// underHome resolves "~/x" or "x" (relative to the home directory) to an absolute path under
+// the server user's home, refusing anything outside it.
+func underHome(p string) (string, error) {
 	userHome, err := os.UserHomeDir()
 	if err != nil {
-		return err
+		return "", err
 	}
-	for _, p := range paths {
-		src := p
-		if strings.HasPrefix(p, "~/") {
-			src = filepath.Join(userHome, p[2:])
-		} else if !filepath.IsAbs(p) {
-			src = filepath.Join(userHome, p)
+	src := p
+	if strings.HasPrefix(p, "~/") {
+		src = filepath.Join(userHome, p[2:])
+	} else if !filepath.IsAbs(p) {
+		src = filepath.Join(userHome, p)
+	}
+	src = filepath.Clean(src)
+	rel, err := filepath.Rel(userHome, src)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("%s is not under the home directory", p)
+	}
+	return src, nil
+}
+
+// configDirs is the profile's config directory on the host and in the stage home.
+func configDirs(prof Profile, stageHome string) (host, stage string, err error) {
+	host, err = underHome(prof.ConfigDir)
+	if err != nil {
+		return "", "", err
+	}
+	userHome, _ := os.UserHomeDir()
+	rel, _ := filepath.Rel(userHome, host)
+	return host, filepath.Join(stageHome, rel), nil
+}
+
+// installConfig gives the stage home the program's config directory: a private copy of the
+// login files and links to the large read-only ones. It returns the linked files' host paths,
+// which the sandbox lets the program read. Nothing is logged.
+func installConfig(prof Profile, stageHome string) ([]string, error) {
+	if prof.ConfigDir == "" {
+		return nil, nil
+	}
+	host, stage, err := configDirs(prof, stageHome)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(stage, 0o700); err != nil {
+		return nil, err
+	}
+	for _, f := range prof.CopyFiles {
+		if f != filepath.Base(f) {
+			return nil, fmt.Errorf("copy file %q must be a plain name in %s", f, prof.ConfigDir)
 		}
-		rel, err := filepath.Rel(userHome, filepath.Clean(src))
-		if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
-			return fmt.Errorf("seat: auth path %s is not under the home directory", p)
+		b, err := os.ReadFile(filepath.Join(host, f))
+		if err != nil {
+			return nil, fmt.Errorf("the seat's login file %s in %s cannot be read: %w", f, prof.ConfigDir, errors.Unwrap(err))
 		}
+		if err := os.WriteFile(filepath.Join(stage, f), b, 0o600); err != nil {
+			return nil, err
+		}
+	}
+	var read []string
+	for _, f := range prof.LinkFiles {
+		if f != filepath.Base(f) {
+			return nil, fmt.Errorf("link file %q must be a plain name in %s", f, prof.ConfigDir)
+		}
+		src := filepath.Join(host, f)
 		if _, err := os.Stat(src); err != nil {
-			return fmt.Errorf("seat: auth path %s: %w", p, err)
+			continue // an optional tool the program may not have installed
 		}
-		dst := filepath.Join(stageHome, rel)
-		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-			return err
+		dst := filepath.Join(stage, f)
+		_ = os.Remove(dst)
+		if err := os.Symlink(src, dst); err != nil {
+			return nil, err
 		}
-		// cp -R keeps the tree; the copy is private to the stage.
-		if out, err := exec.Command("/bin/cp", "-R", src, dst).CombinedOutput(); err != nil {
-			return fmt.Errorf("seat: copy auth %s: %v: %s", p, err, strings.TrimSpace(string(out)))
+		read = append(read, src)
+	}
+	return read, nil
+}
+
+// removeLogin deletes the stage's copy of the login files once the stage is over.
+func removeLogin(prof Profile, stageHome string) {
+	if prof.ConfigDir == "" {
+		return
+	}
+	if _, stage, err := configDirs(prof, stageHome); err == nil {
+		for _, f := range prof.CopyFiles {
+			_ = os.Remove(filepath.Join(stage, filepath.Base(f)))
 		}
 	}
-	return nil
 }
 
 func tail(s string, n int) string {
@@ -704,4 +790,11 @@ func tail(s string, n int) string {
 
 func oneLine(s string) string {
 	return strings.Join(strings.Fields(s), " ")
+}
+
+// forgetLogin removes the stage's copy of the seat's login.
+func (a *Adapter) forgetLogin(ctx context.Context, st state, home string) {
+	if prof, err := a.profile(context.WithoutCancel(ctx), st.Profile); err == nil {
+		removeLogin(prof, home)
+	}
 }

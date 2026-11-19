@@ -472,8 +472,13 @@ the UI shows them under the attention banner.
   multiplexer can be put behind the same interface.
 - `seat_profiles`: JSON object of profiles by name, laid over the built-ins:
   `command` (`{workdir}` is the worktree), `startup_wait`, `ready_text`, `submit_keys`, `net`,
-  `env`, and `auth_paths` (files under the home directory the program needs to be logged in,
-  copied into the stage home).
+  `env`, and the program's login: `config_dir` (its config directory under the home directory,
+  `~/.config/manicode` for freebuff), `copy_files` (copied into the same directory under the
+  stage home, mode 0600, removed when the stage ends, never logged: freebuff's
+  `credentials.json`, `device-key.json`, `settings.json`), `link_files` (large read-only files
+  linked from there: the real `freebuff` binary, `rg`, `tree-sitter.wasm`,
+  `freebuff-metadata.json`) and `hide_dirs` (`~/.config`: the sandbox reads nothing there but
+  the linked files). Message history and project data are never shared.
 - `botchat_url`, `botchat_key_file`: the BotChat service, read on every call.
 
 Where the seat runs (the host sandbox today, a container later) is the sandbox builder's

@@ -87,6 +87,14 @@ func Command(ctx context.Context, spec Spec) (*exec.Cmd, error) {
 		}
 		args = append(args, "--ro-bind", src, b.Dst)
 	}
+	// A seat program's own read-only files, at their host paths (the host home is hidden).
+	for _, f := range spec.ReadFiles {
+		src, err := filepath.EvalSymlinks(f)
+		if err != nil {
+			return nil, fmt.Errorf("sandbox: ReadFiles: %w", err)
+		}
+		args = append(args, "--ro-bind", src, f)
+	}
 	// The synthetic root tmpfs (where /etc, /sandbox ... live) becomes read-only;
 	// the separate mounts above keep their own modes.
 	args = append(args, "--remount-ro", "/")

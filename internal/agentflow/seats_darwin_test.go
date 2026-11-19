@@ -14,6 +14,7 @@ import (
 
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
 	"cmd184psu/unified-webapp/internal/agentflow/runner/mux"
+	"cmd184psu/unified-webapp/internal/agentflow/runner/seat"
 )
 
 // A seat stage runs its program in the stage sandbox even though tmux, not agentflow, starts
@@ -40,7 +41,16 @@ func TestSeatSessionIsSandboxed(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for p, s := range map[string]string{".ssh/id_ed25519": "SECRET-SSH", ".claude_chat_api": "SECRET-KEY", ".beam_api_x": "SECRET-BEAM"} {
+	for _, d := range []string{".config/manicode", ".config/other"} {
+		if err := os.MkdirAll(filepath.Join(home, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(home, ".config/manicode/freebuff"), []byte("#!/bin/sh\necho FB-BIN-OK\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for p, s := range map[string]string{".ssh/id_ed25519": "SECRET-SSH", ".claude_chat_api": "SECRET-KEY", ".beam_api_x": "SECRET-BEAM",
+		".config/other/token": "SECRET-OTHER", ".config/manicode/message-history.json": "SECRET-HISTORY"} {
 		if err := os.WriteFile(filepath.Join(home, p), []byte(s+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -67,9 +77,18 @@ func TestSeatSessionIsSandboxed(t *testing.T) {
 		return gitDir, filepath.Join(gitDir, "worktrees", "wt"), nil
 	}
 
-	script := fmt.Sprintf(`for f in %s/.ssh/id_ed25519 %s/.claude_chat_api %s/.beam_api_x; do cat "$f" 2>/dev/null; done; echo "env=[$SERVER_ONLY] home=[$HOME]"; echo ok > a.txt && echo wrote; sleep 30`, home, home, home)
+	// The stage home links the seat program's binary from the user's config, as installConfig does.
+	stageCfg := filepath.Join(stageDir, "home", ".config", "manicode")
+	if err := os.MkdirAll(stageCfg, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(home, ".config/manicode/freebuff"), filepath.Join(stageCfg, "freebuff")); err != nil {
+		t.Fatal(err)
+	}
+	script := fmt.Sprintf(`for f in %[1]s/.ssh/id_ed25519 %[1]s/.claude_chat_api %[1]s/.beam_api_x %[1]s/.config/other/token %[1]s/.config/manicode/message-history.json; do cat "$f" 2>/dev/null; done; ls %[1]s/.config 2>/dev/null; sh "$HOME/.config/manicode/freebuff"; echo "env=[$SERVER_ONLY] home=[$HOME]"; echo ok > a.txt && echo wrote; sleep 30`, home)
 	req := runner.Request{Role: "worker", Workdir: wt, StageDir: stageDir}
-	l, err := seatSandbox(dirs)(req, []string{"/bin/sh", "-c", script}, map[string]string{"TERM": "xterm-256color"}, true)
+	l, err := seatSandbox(dirs)(req, seat.SandboxOpts{Argv: []string{"/bin/sh", "-c", script}, Env: map[string]string{"TERM": "xterm-256color"}, Net: true,
+		HideDirs: []string{filepath.Join(home, ".config")}, ReadFiles: []string{filepath.Join(home, ".config/manicode/freebuff")}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,6 +123,12 @@ func TestSeatSessionIsSandboxed(t *testing.T) {
 	}
 	if strings.Contains(screen, "SECRET") {
 		t.Fatalf("a credential was readable in the seat's session:\n%s", screen)
+	}
+	if strings.Contains(screen, "manicode") || strings.Contains(screen, "other") {
+		t.Fatalf("~/.config was listable in the seat's session:\n%s", screen)
+	}
+	if !strings.Contains(screen, "FB-BIN-OK") {
+		t.Fatalf("the linked program file was not readable:\n%s", screen)
 	}
 	if strings.Contains(screen, "LEAKED-ENV") {
 		t.Fatalf("the server's environment leaked into the seat:\n%s", screen)
