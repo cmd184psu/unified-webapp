@@ -412,3 +412,27 @@ these findings and they were **noted, not fixed**:
   (see [macOS](#macos-sandbox-exec)).
 - The module has no authentication of its own. It inherits platform auth: list `agentflow`
   in `auth.modules` to require a session or API key.
+
+## BotChat seats (`botchat_seat`)
+
+A backend may have api type `botchat_seat`: it has no model behind it, and each instance is a
+BotChat callsign (a person or that person's own agent), so a stage costs agentflow no tokens.
+When the engine hands a worker or reviewer stage to such a backend, the runner
+(`internal/agentflow/runner/botchatseat`) creates a BotChat task assigned to the callsign in the
+`agentflow seats` room, carrying the stage prompt verbatim, the worktree's `branch@sha` and the
+acceptance criteria, promotes it, and announces it to the callsign. A stage has at most
+`ReadyLimit` (2) open tasks per seat; past that the call is refused as `rate_limit`.
+
+The stage ends when the seat posts, in that room:
+
+- `DONE TASK-<key> <branch>@<sha>` - the runner makes sure the commit is in the worktree
+  (fetching when needed) and the engine's own verify and review stages run on it as for any
+  other runner, so a seat's work is never trusted blindly;
+- `REVIEW TASK-<key>: PASS` or `REVIEW TASK-<key>: CHANGES-REQUESTED` - the runner turns it into
+  the verdict JSON the engine's review parsing expects (`pass`, `repair`).
+
+The BotChat address and key file come from the `botchat_url` and `botchat_key_file` settings,
+read on every call; the key is never logged. A backend's host, when set, overrides the address.
+Agentflow never moves the seat's task on its own behalf: the seat claims, starts and completes
+it. A seat that has not reported by the stage deadline fails the stage with `timeout`, which
+means `needs_attention`, never a silent retry.

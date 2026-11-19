@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -147,6 +148,45 @@ func (c *Client) Room(ctx context.Context, name, waveID, from string) (string, e
 // Post sends one message to a room. `to` is a callsign or "everyone".
 func (c *Client) Post(ctx context.Context, roomID, from, to, content string) error {
 	return c.do(ctx, http.MethodPost, "/api/v1/rooms/"+roomID+"/messages", map[string]string{"from": from, "to": to, "content": content}, nil)
+}
+
+// Message is one message in a room.
+type Message struct {
+	Seq      int64  `json:"seq"`
+	From     string `json:"from"`
+	Callsign string `json:"callsign"`
+	Content  string `json:"content"`
+}
+
+// Sender is the callsign that posted the message.
+func (m Message) Sender() string {
+	if m.From != "" {
+		return m.From
+	}
+	return m.Callsign
+}
+
+// Messages lists the newest messages of a room, oldest first. The answer is either a bare
+// array or an object holding it.
+func (c *Client) Messages(ctx context.Context, roomID string, limit int) ([]Message, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var raw json.RawMessage
+	if err := c.do(ctx, http.MethodGet, "/api/v1/rooms/"+roomID+"/messages?limit="+strconv.Itoa(limit), nil, &raw); err != nil {
+		return nil, err
+	}
+	var msgs []Message
+	if json.Unmarshal(raw, &msgs) == nil {
+		return msgs, nil
+	}
+	var wrap struct {
+		Messages []Message `json:"messages"`
+	}
+	if err := json.Unmarshal(raw, &wrap); err != nil {
+		return nil, fmt.Errorf("botchat: cannot read the room's messages: %w", err)
+	}
+	return wrap.Messages, nil
 }
 
 type idOnly struct {

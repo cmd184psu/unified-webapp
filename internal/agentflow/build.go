@@ -23,6 +23,7 @@ import (
 	"cmd184psu/unified-webapp/internal/agentflow/gitsvc"
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
 	"cmd184psu/unified-webapp/internal/agentflow/runner/agy"
+	"cmd184psu/unified-webapp/internal/agentflow/runner/botchatseat"
 	"cmd184psu/unified-webapp/internal/agentflow/runner/claude"
 	"cmd184psu/unified-webapp/internal/agentflow/runner/codex"
 	"cmd184psu/unified-webapp/internal/agentflow/runner/grok"
@@ -205,6 +206,14 @@ func newRunner(git *gitsvc.Service, st *store.Store) runner.Runner {
 		ByType: map[string]runner.Runner{
 			grok.APIType: &grok.Adapter{}, codex.APIType: &codex.Adapter{},
 			claude.APIType: &claude.Adapter{}, muse.APIType: &muse.Adapter{}, agy.APIType: &agy.Adapter{},
+			// A seat costs no tokens: the stage waits for its callsign to report on BotChat.
+			botchatseat.APIType: &botchatseat.Adapter{Settings: func(ctx context.Context) (string, string) {
+				set, err := st.GetSettings(ctx)
+				if err != nil {
+					return "", ""
+				}
+				return set.BotchatURL, set.BotchatKeyFile
+			}},
 		},
 	}
 }

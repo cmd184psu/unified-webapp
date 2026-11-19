@@ -78,7 +78,7 @@ func dutyStored(d int) int {
 // HostlessAPIType says the api type is a CLI or built-in provider that has no host of its own.
 func HostlessAPIType(t string) bool {
 	switch t {
-	case "opencode", "grok", "codex", "claude", "muse", "agy":
+	case "opencode", "grok", "codex", "claude", "muse", "agy", "botchat_seat":
 		return true
 	}
 	return false
@@ -89,7 +89,7 @@ func validateBackend(b Backend) error {
 		return err
 	}
 	if !apiTypes[b.APIType] {
-		return Invalid("api_type", "must be ollama, openai_compatible, anthropic, opencode, grok, codex, claude, muse or agy")
+		return Invalid("api_type", "must be ollama, openai_compatible, anthropic, opencode, grok, codex, claude, muse, agy or botchat_seat")
 	}
 	// opencode's own provider and the Grok and Codex CLIs have no host of their own.
 	if !HostlessAPIType(b.APIType) {
