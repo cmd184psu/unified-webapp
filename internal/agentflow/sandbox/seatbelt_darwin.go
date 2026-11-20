@@ -234,8 +234,22 @@ func seatbeltProfile(spec Spec, wt, home, repoGit, wtGit string, binds []string)
 	}
 
 	if !spec.Net {
+		// Loopback only: the stage may connect to 127.0.0.1/::1 (a .NET
+		// verify's vstest testhost handshake needs this; Spec.LoopbackNet is
+		// the same policy on Linux) and may listen there, but neither
+		// direction reaches another host.
 		b.WriteString("(deny network-outbound (remote ip \"*:*\"))\n")
 		b.WriteString("(allow network-outbound (remote ip \"localhost:*\"))\n")
+		if spec.LoopbackNet {
+			// .NET's dual-stack vstest connect logs its destination as a
+			// wildcard address, which the remote filter does not match, but its
+			// local address is always loopback. This rule is still loopback
+			// only: a packet whose local address is 127.0.0.1/::1 cannot leave
+			// the host.
+			b.WriteString("(allow network-outbound (local ip \"localhost:*\"))\n")
+		}
+		b.WriteString("(deny network-inbound (remote ip \"*:*\"))\n")
+		b.WriteString("(allow network-inbound (remote ip \"localhost:*\"))\n")
 	}
 	if qerr != nil {
 		return "", qerr

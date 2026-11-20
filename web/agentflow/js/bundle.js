@@ -3271,6 +3271,7 @@ var Board = class {
         "div",
         { class: "inline-row", attrs: { "data-stage": s.id } },
         h("span", { text: `${s.role} \xB7 ${s.backend ? `${s.backend}/${s.model}` : "engine"} \xB7 ${s.outcome || s.state}` }),
+        s.relaxations?.length ? badge(`relaxed: ${s.relaxations.join(", ")}`, "warn") : null,
         button("Output", () => this.stream.open(s), { field: "open-stream", icon: "view" })
       ))),
       worker?.parsed ? block("Worker summary", h("p", { text: String(rec(worker.parsed).summary ?? "") })) : null,
@@ -3928,6 +3929,7 @@ var defaultFrdDeps = () => ({
 });
 var PRIORITIES = [["", "(none)"], ["must", "must"], ["should", "should"], ["could", "could"], ["wont", "won't"]];
 var lines = (s) => s.split("\n").map((l) => l.trim()).filter((l) => l !== "");
+var commaList = (s) => s.split(",").map((l) => l.trim()).filter((l) => l !== "");
 var when2 = (ms) => ms ? new Date(ms).toLocaleString() : "";
 function blankFRD(slug, effort) {
   return {
@@ -3949,6 +3951,7 @@ var FrdForm = class {
       objective: textArea("objective", base.objective ?? "", 3),
       context: textArea("context", base.context ?? "", 3),
       constraints: textArea("constraints", (base.constraints ?? []).join("\n"), 3),
+      toolchains: textInput("toolchains", (base.toolchains ?? []).join(", "), { placeholder: "dotnet" }),
       out_of_scope: textArea("out_of_scope", (base.out_of_scope ?? []).join("\n"), 3)
     };
     for (const c of Object.values(this.f)) c.addEventListener("input", onChange);
@@ -3992,6 +3995,7 @@ var FrdForm = class {
       e.add("objective", fieldRow("Objective", this.f.objective)).el,
       e.add("context", fieldRow("Context", this.f.context)).el,
       e.add("constraints", fieldRow("Constraints", this.f.constraints, "One per line")).el,
+      e.add("toolchains", fieldRow("Toolchains", this.f.toolchains, "Comma-separated, for example dotnet")).el,
       e.add("groups", fieldRow("Groups", this.groups.el)).el,
       e.add("requirements", fieldRow("Requirements", this.reqs.el)).el,
       e.add("acceptance_criteria", fieldRow("Acceptance criteria", this.acs.el)).el,
@@ -4016,6 +4020,7 @@ var FrdForm = class {
       objective: v("objective"),
       context: v("context") || void 0,
       constraints: some(lines(this.f.constraints.value)),
+      toolchains: some(commaList(this.f.toolchains.value)),
       groups: some(this.groups.read().filter((g) => g.id || g.title)),
       requirements,
       acceptance_criteria: acs,
@@ -4776,6 +4781,7 @@ function isNotARepo(err) {
   return err instanceof ApiError && err.field === "repo_path" && /not a git repository/.test(err.message);
 }
 var SCOPES = [["local", "local (only local backends)"], ["any", "any (hosted backends allowed)"]];
+var TOOLCHAINS = [["dotnet", ".NET SDK and the host NuGet cache, read-only and offline"]];
 var ProjectForm = class {
   constructor(host, deps, mode, done) {
     this.host = host;
@@ -4783,6 +4789,7 @@ var ProjectForm = class {
     this.mode = mode;
     this.done = done;
     this.errors = new FormErrors();
+    this.toolchains = /* @__PURE__ */ new Map();
     this.backends = [];
     this.cands = [];
     this.drafts = /* @__PURE__ */ new Map();
@@ -4806,6 +4813,8 @@ var ProjectForm = class {
     this.drawRepo();
     this.scope = selectInput("model_scope", SCOPES, p?.model_scope ?? "local");
     this.cleanup = checkbox("cleanup_enabled", p?.cleanup_enabled ?? false);
+    for (const [name] of TOOLCHAINS) this.toolchains.set(name, checkbox(`toolchain_${name}`, (p?.toolchains ?? []).includes(name)));
+    this.verifyInCopy = checkbox("verify_in_copy", p?.verify_in_copy ?? false);
     this.cmds = new RowsEditor((c) => {
       const input = textInput("feedback_cmd", c, { placeholder: "go test ./..." });
       const preview = h("code", { class: "field-hint", attrs: { "data-role": "argv" } });
@@ -4822,6 +4831,11 @@ var ProjectForm = class {
       sync();
       return { el: h("div", { class: "wizard-field" }, input, preview, warn), read: () => joinArgv(splitArgv(input.value)) };
     }, p?.feedback_cmds ?? [], () => "", "Add command", () => this.bump());
+    this.env = new RowsEditor((row) => {
+      const key = textInput("feedback_env_key", row.key, { placeholder: "CIV3_PATH" });
+      const value = textInput("feedback_env_value", row.value, { placeholder: "/path/to/civ3" });
+      return { el: h("div", { class: "row-actions" }, key, value), read: () => ({ key: key.value.trim(), value: value.value }) };
+    }, Object.entries(p?.feedback_env ?? {}).map(([key, value]) => ({ key, value })), () => ({ key: "", value: "" }), "Add variable", () => this.bump());
     this.plugins = new RowsEditor((pl) => {
       const name = textInput("plugin_name", pl.name, { placeholder: "package-name" });
       const version = textInput("plugin_version", pl.version, { placeholder: "1.2.3" });
@@ -4861,14 +4875,17 @@ var ProjectForm = class {
       model_scope: this.scope.value,
       feedback_cmds: this.cmds.read().filter((c) => c !== ""),
       cleanup_enabled: this.cleanup.checked,
-      plugins: this.plugins.read().filter((pl) => pl.name !== "" || pl.version !== "")
+      plugins: this.plugins.read().filter((pl) => pl.name !== "" || pl.version !== ""),
+      toolchains: TOOLCHAINS.map(([name]) => name).filter((name) => this.toolchains.get(name)?.checked),
+      feedback_env: Object.fromEntries(this.env.read().filter((r) => r.key !== "").map((r) => [r.key, r.value])),
+      verify_in_copy: this.verifyInCopy.checked
     };
   }
   /** save creates or updates the project; a repo path that is not yet a repository offers git init (PJ1). */
   async save() {
     this.errors.clear();
     const body = this.body();
-    const attempt = () => this.mode.project ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, feedback_cmds: body.feedback_cmds, cleanup_enabled: body.cleanup_enabled, plugins: body.plugins, ...this.dodPatch() }, { quiet: true }) : this.deps.createProject(body, { quiet: true });
+    const attempt = () => this.mode.project ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, feedback_cmds: body.feedback_cmds, cleanup_enabled: body.cleanup_enabled, plugins: body.plugins, toolchains: body.toolchains, feedback_env: body.feedback_env, verify_in_copy: body.verify_in_copy, ...this.dodPatch() }, { quiet: true }) : this.deps.createProject(body, { quiet: true });
     let saved;
     try {
       saved = await attempt();
@@ -4899,7 +4916,7 @@ var ProjectForm = class {
     this.errors.clear();
     const b = this.body();
     try {
-      await this.deps.patchProject(p.slug, { repo_path: b.repo_path, model_scope: b.model_scope, feedback_cmds: b.feedback_cmds, cleanup_enabled: b.cleanup_enabled, plugins: b.plugins, ...this.dodPatch() }, { quiet: true });
+      await this.deps.patchProject(p.slug, { repo_path: b.repo_path, model_scope: b.model_scope, feedback_cmds: b.feedback_cmds, cleanup_enabled: b.cleanup_enabled, plugins: b.plugins, toolchains: b.toolchains, feedback_env: b.feedback_env, verify_in_copy: b.verify_in_copy, ...this.dodPatch() }, { quiet: true });
     } catch (err) {
       this.errors.show(err);
       return false;
@@ -5002,6 +5019,13 @@ var ProjectForm = class {
     }
     return b;
   }
+  /** drawToolchains is one checkbox per known toolchain, with what it mounts. */
+  drawToolchains() {
+    return h("div", {}, ...TOOLCHAINS.map(([name, hint]) => {
+      const box = this.toolchains.get(name);
+      return h("div", { class: "field-hint" }, box ?? h("span"), " " + hint);
+    }));
+  }
   render() {
     const p = this.mode.project;
     const e = this.errors;
@@ -5026,6 +5050,21 @@ var ProjectForm = class {
             "After a task passes review, run a cleanup agent and verify again; if that breaks verification the cleanup is rolled back"
           )).el
         ),
+        e.add("feedback_env", fieldRow(
+          "Feedback environment",
+          this.env.el,
+          "Set for every feedback command, for values such as an install path; never a secret"
+        )).el,
+        e.add("toolchains", fieldRow(
+          "Toolchains",
+          this.drawToolchains(),
+          "Mounted read-only in every sandbox for this project; dotnet brings the SDK and the host NuGet cache, so build and test run offline"
+        )).el,
+        e.add("verify_in_copy", fieldRow(
+          "Verify in a copy",
+          this.verifyInCopy,
+          "Run feedback commands on a throwaway copy of the worktree, without .git, bin or obj; needed when the toolchain writes build output"
+        )).el,
         e.add("feedback_cmds", fieldRow(
           "Feedback commands",
           this.cmds.el,

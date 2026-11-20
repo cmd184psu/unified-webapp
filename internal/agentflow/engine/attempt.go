@@ -301,7 +301,19 @@ func (e *Engine) submit(ctx context.Context, c *chain, lane, role, backend, mdl,
 }
 
 func (e *Engine) submitVerify(ctx context.Context, c *chain, last model.Stage) error {
-	return e.submit(ctx, c, VerifyLane, "verify", verifyBackend, "", last.QueueHash)
+	_, _, err := e.Submit(ctx, VerifyLane,
+		store.StageSpec{Attempt: c.att.ID, Role: "verify", Backend: verifyBackend, QueueHash: last.QueueHash, Relaxations: verifyRelaxations(c.task, c.proj)},
+		c.payload(last.QueueHash))
+	return err
+}
+
+// submitMerge queues the merge stage, which also verifies the integrated tree;
+// it records the same relaxations its post-merge feedback run uses.
+func (e *Engine) submitMerge(ctx context.Context, c *chain, last model.Stage) error {
+	_, _, err := e.Submit(ctx, MergeLane,
+		store.StageSpec{Attempt: c.att.ID, Role: "merge", Backend: mergeBackend, QueueHash: last.QueueHash, Relaxations: verifyRelaxations(c.task, c.proj)},
+		c.payload(last.QueueHash))
+	return err
 }
 
 // submitReview picks the reviewer now that the work stage has closed (MB6,
@@ -358,7 +370,7 @@ func (e *Engine) commitAndMerge(ctx context.Context, c *chain, last model.Stage)
 	case err != nil:
 		return false, err
 	}
-	return true, e.submit(ctx, c, MergeLane, "merge", mergeBackend, "", last.QueueHash)
+	return true, e.submitMerge(ctx, c, last)
 }
 
 // atBase reports whether the task worktree's HEAD is still the commit it was

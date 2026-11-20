@@ -222,6 +222,18 @@ Every model stage and every feedback command runs under bwrap.
   writes build output next to the sources and the worktree itself stays read-only. A C# feedback command passes
   `-m:1`: MSBuild's parallel worker nodes deadlock when process spawning is confined, so a fresh copy stalls for
   five minutes, while the same build with `-m:1` finishes in seconds.
+- **Task toolchains and per-stage relaxation (AF-6b).** A task may also carry `toolchains`. The FRD's optional
+  `Toolchains: dotnet` line goes into the plan phases that touch those files, and the compiler copies it into their tasks;
+  independently the engine infers `dotnet` from any `*.cs`, `*.csproj` or `*.sln` path in `files_touched` and acts on the
+  union, so a hint can add a toolchain but never remove an inferred one, and an older queue needs no migration. For a dotnet
+  task the engine applies exactly three relaxations: `loopback` (the verify stage may connect to and listen on 127.0.0.1/::1
+  for the vstest testhost handshake, and still reaches no other host), `verify_in_copy` (the feedback commands run in the
+  writable copy, since MSBuild writes `bin/` and `obj/` next to the sources) and `-m:1` on every dotnet MSBuild command the
+  project did not already cap; the worker must come from an adapter outside agentflow's sandbox (codex, claude, muse, agy,
+  grok), and a sandboxed opencode/Beam candidate is skipped for that task. Each relaxation is recorded on the stage
+  (`relaxations`), shown in the attempt's stage list and written to the stage log, and nothing else is relaxed: credentials
+  and key files stay unreadable, the agentflow data dir and sibling stages stay hidden, git dirs stay read-only, there is no
+  outbound internet, and writes stay confined to the stage home and the verify copy.
 - **Network.** Model stages share the host network namespace (they must reach their backend).
   See [Security posture](#12-security-posture).
 

@@ -65,6 +65,7 @@ var migrations = []migration{
 	{32, migration32SQL},
 	{33, migration33SQL},
 	{34, migration34SQL},
+	{35, migration35SQL},
 }
 
 // migration32SQL adds the BotChat mode: 'mirror' posts what happens, 'dispatch' also hands each
@@ -73,6 +74,14 @@ var migrations = []migration{
 // projects table is rebuilt without the UNIQUE on repo_path. Each project still
 // has its own worktrees, integration branches and active effort; gitsvc already
 // serialises git operations per repository.
+// migration35SQL (AF-6b) lets a task name the host toolchains its verify
+// stage needs, so the engine can relax the sandbox for exactly those files,
+// and records on a stage which protections were relaxed for it.
+const migration35SQL = `
+ALTER TABLE tasks ADD COLUMN toolchains_json TEXT NOT NULL DEFAULT '';
+ALTER TABLE stages ADD COLUMN relaxations_json TEXT NOT NULL DEFAULT '';
+`
+
 // migration34SQL (AF-6) gives a project host toolchains to mount in its
 // sandbox ('dotnet' first), extra environment for its feedback commands, and
 // the switch that runs those commands on a copy of the worktree because the

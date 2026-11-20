@@ -476,6 +476,7 @@ export interface FRD {
   objective: string;
   context?: string;
   constraints?: string[];
+  toolchains?: string[];
   groups?: FRDGroup[];
   state_model?: unknown;
   requirements: FRDRequirement[];
@@ -596,6 +597,7 @@ export interface Stage {
   prompt_path: string;
   started: number;
   finished: number;
+  relaxations?: string[];
 }
 
 export interface Attempt {

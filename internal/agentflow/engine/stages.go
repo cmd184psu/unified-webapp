@@ -134,6 +134,11 @@ func (e *Engine) execute(ctx context.Context, rc golane.RunContext, p StagePaylo
 			return fail(err)
 		}
 	}
+	// Every relaxation is written to the stage log as well as the stage row,
+	// so the run is auditable from either place (AF-6b).
+	if len(st.Relaxations) > 0 {
+		fmt.Fprintf(rc.Log(), "relaxations for this stage: %s\n", strings.Join(st.Relaxations, ", "))
+	}
 	if stale, err := e.stale(ctx, p); err != nil {
 		return fail(err)
 	} else if stale {

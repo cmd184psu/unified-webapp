@@ -21,6 +21,7 @@ You are reviewing an implementation plan for architectural soundness against its
 - Each issue quotes the requirement or plan text it concerns. Drop an issue you cannot quote.
 - "approve" when the plan is sound. "revise" when it can be fixed by a new draft. "reject" when it cannot satisfy the FRD.
 - A phase or task whose only purpose is running, checking or verifying tests, the build or lint is a defect: every task must change files and the engine verifies each task automatically. File it and ask for the phase to be dropped or merged into one that changes files.
+- When the FRD carries a `Toolchains:` line, every phase that touches those files must carry the same `toolchains` entry (`["dotnet"]` for C#). A phase that names `*.cs`, `*.csproj` or `*.sln` files without it is a defect: the compiler and the engine would still infer dotnet, but the plan would hide a toolchain the work needs.
 - Severity "blocker" only when a core behavior is absent or the ordering cannot work; wording preferences are "minor".
 
 ## Output

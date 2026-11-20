@@ -77,8 +77,10 @@ func (x verifyExecutor) Execute(ctx context.Context, rc golane.RunContext, st mo
 	if err != nil {
 		return StageResult{}, err
 	}
+	toolchains := model.MergeToolchains(c.proj.Toolchains, model.TaskToolchains(c.task.TaskDef))
+	dotnet := model.HasToolchain(c.task.TaskDef, model.ToolchainDotnet)
 	if rep.Pass {
-		if _, err := e.feedback(ctx, c, &rep, c.att.Worktree, admin, filepath.Join(e.StageDir(st.ID), "home"), set, c.touchedFiles()); err != nil {
+		if _, err := e.feedback(ctx, c, &rep, c.att.Worktree, admin, filepath.Join(e.StageDir(st.ID), "home"), set, c.touchedFiles(), toolchains, dotnet); err != nil {
 			return StageResult{}, err
 		}
 	}
@@ -128,7 +130,7 @@ func failingChecks(rep verify.VerifyReport) string {
 // template plus this worktree, its trusted git dirs, and the project's
 // toolchains and feedback environment (AF-6). The worktree is read-only unless
 // the caller runs in a copy; caches go to the stage home.
-func (e *Engine) feedbackSpec(p store.Project, wt, admin, home string) (sandbox.Spec, error) {
+func (e *Engine) feedbackSpec(p store.Project, wt, admin, home string, toolchains []string) (sandbox.Spec, error) {
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return sandbox.Spec{}, err
 	}
@@ -137,7 +139,7 @@ func (e *Engine) feedbackSpec(p store.Project, wt, admin, home string) (sandbox.
 	s.WorktreeGitDir = admin
 	s.RepoGitDir = filepath.Dir(filepath.Dir(admin))
 	s.StageHome = home
-	if err := sandbox.ApplyToolchains(&s, p.Toolchains); err != nil {
+	if err := sandbox.ApplyToolchains(&s, toolchains); err != nil {
 		return sandbox.Spec{}, err
 	}
 	for k, v := range p.FeedbackEnv {
@@ -154,8 +156,8 @@ func (e *Engine) feedbackSpec(p store.Project, wt, admin, home string) (sandbox.
 // write to the worktree it verifies, and a toolchain such as .NET writes bin/
 // and obj/ next to the sources, so that project is verified on a copy the
 // stage home holds and the next run replaces (AF-6).
-func verifyWorktree(p store.Project, wt, home string) (string, bool, error) {
-	if !p.VerifyInCopy {
+func verifyWorktree(p store.Project, wt, home string, forceCopy bool) (string, bool, error) {
+	if !p.VerifyInCopy && !forceCopy {
 		return wt, false, nil
 	}
 	dst := filepath.Join(home, "verify-copy")
@@ -168,8 +170,8 @@ func verifyWorktree(p store.Project, wt, home string) (string, bool, error) {
 // feedback runs the project's feedback commands on wt and compares them with
 // the effort's baseline into rep (V5). It returns the raw results so a merge
 // can refresh the baseline from them.
-func (e *Engine) feedback(ctx context.Context, c *chain, rep *verify.VerifyReport, wt, admin, home string, set store.Settings, touched []string) ([]verify.CommandResult, error) {
-	wt, writable, err := verifyWorktree(c.proj, wt, home)
+func (e *Engine) feedback(ctx context.Context, c *chain, rep *verify.VerifyReport, wt, admin, home string, set store.Settings, touched []string, toolchains []string, loopback bool) ([]verify.CommandResult, error) {
+	wt, writable, err := verifyWorktree(c.proj, wt, home, loopback)
 	if err != nil {
 		return nil, err
 	}
@@ -177,14 +179,16 @@ func (e *Engine) feedback(ctx context.Context, c *chain, rep *verify.VerifyRepor
 	if err != nil {
 		return nil, err
 	}
+	cmds = verify.ForToolchains(cmds, toolchains)
 	if len(cmds) == 0 {
 		return nil, nil
 	}
-	spec, err := e.feedbackSpec(c.proj, wt, admin, home)
+	spec, err := e.feedbackSpec(c.proj, wt, admin, home, toolchains)
 	if err != nil {
 		return nil, err
 	}
 	spec.ReadOnlyWorktree = !writable
+	spec.LoopbackNet = loopback
 	results, err := verify.RunFeedback(ctx, verify.FeedbackConfig{Spec: spec, Timeout: set.VerifyTimeout, WritableWorktree: writable}, cmds)
 	if err != nil {
 		return nil, err
@@ -255,14 +259,14 @@ func (e *Engine) ensureBaseline(ctx context.Context, proj store.Project, effort 
 			return err
 		}
 		home := filepath.Join(e.deps.DataDir, "baselines", strconv.FormatInt(effort, 10))
-		wt, writable, err := verifyWorktree(proj, intWT, home)
+		wt, writable, err := verifyWorktree(proj, intWT, home, false)
 		if err != nil {
 			return err
 		}
 		if cmds, err = verify.Commands(proj.FeedbackCmds, wt); err != nil {
 			return err
 		}
-		spec, err := e.feedbackSpec(proj, wt, admin, home)
+		spec, err := e.feedbackSpec(proj, wt, admin, home, proj.Toolchains)
 		if err != nil {
 			return err
 		}

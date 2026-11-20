@@ -20,10 +20,13 @@ func TestVerifyWorktreeCopiesOnlyWhenAsked(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(wt, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if got, writable, err := verifyWorktree(store.Project{}, wt, home); err != nil || got != wt || writable {
+	if got, writable, err := verifyWorktree(store.Project{}, wt, home, false); err != nil || got != wt || writable {
 		t.Fatalf("without verify_in_copy: %q writable=%v err=%v", got, writable, err)
 	}
-	got, writable, err := verifyWorktree(store.Project{VerifyInCopy: true}, wt, home)
+	if got, writable, err := verifyWorktree(store.Project{}, wt, home, true); err != nil || !writable || got != filepath.Join(home, "verify-copy") {
+		t.Fatalf("forced copy (a dotnet task): %q writable=%v err=%v", got, writable, err)
+	}
+	got, writable, err := verifyWorktree(store.Project{VerifyInCopy: true}, wt, home, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +57,7 @@ func TestFeedbackSpecAppliesProjectSettings(t *testing.T) {
 	e := &Engine{deps: Deps{Sandbox: sandbox.Spec{Env: map[string]string{"GOPROXY": "off"}}}}
 	admin := filepath.Join(t.TempDir(), "repo", ".git", "worktrees", "w")
 	p := store.Project{Toolchains: []string{"dotnet"}, FeedbackEnv: map[string]string{"CIV3_PATH": "/civ3"}}
-	spec, err := e.feedbackSpec(p, t.TempDir(), admin, t.TempDir())
+	spec, err := e.feedbackSpec(p, t.TempDir(), admin, t.TempDir(), p.Toolchains)
 	if err != nil {
 		t.Fatal(err)
 	}

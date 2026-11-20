@@ -315,7 +315,7 @@ func (e *Engine) dispatchOne(ctx context.Context, v *view, p store.Project) (boo
 			continue
 		}
 		e.needFor(v, p, t)
-		pk, reason := pickWorker(v, p, sticky, avoid, maxTier)
+		pk, reason := pickWorker(v, p, sticky, avoid, maxTier, dotnetTask(t))
 		v.need = 0
 		if reason != "" {
 			errs = append(errs, e.setWaiting(ctx, t, reason))
@@ -359,7 +359,7 @@ func (e *Engine) submitWork(ctx context.Context, v *view, ef model.Effort, hash 
 		return err
 	}
 	_, _, err = e.Submit(ctx, BackendLane(pk.Backend),
-		store.StageSpec{Attempt: att.ID, Role: "worker", Backend: pk.Backend, Model: pk.Model, QueueHash: hash},
+		store.StageSpec{Attempt: att.ID, Role: "worker", Backend: pk.Backend, Model: pk.Model, QueueHash: hash, Relaxations: workerRelaxations(t)},
 		StagePayload{Project: p.Slug, Effort: ef.ID, Task: t.ID, Attempt: att.ID, QueueHash: hash})
 	if err != nil {
 		// Nothing runs: close the attempt so the task is not left "running".
@@ -390,14 +390,24 @@ func (e *Engine) setWaiting(ctx context.Context, t model.Task, reason string) er
 // way repeatedly (H7): they are passed over for another model, unless no other
 // model could ever serve, in which case the repeat is allowed so the task
 // reaches stuck instead of waiting for ever.
-func pickWorker(v *view, p store.Project, sticky string, avoid map[string]int, maxTier int) (Pick, string) {
+func pickWorker(v *view, p store.Project, sticky string, avoid map[string]int, maxTier int, unconfined bool) (Pick, string) {
 	var reasons []string
 	cands := v.candidates("worker", p.Slug)
+	skipSandboxed := func(c store.Candidate) string {
+		if unconfined && sandboxedBackend(v, c.Backend) {
+			return fmt.Sprintf("backend %s runs in the sandbox and this task needs an unconfined worker (dotnet)", c.Backend)
+		}
+		return ""
+	}
 	tierOK := func(c store.Candidate) bool {
 		return maxTier == 0 || effectiveTier(v.snap, c.Backend, c.Model) <= maxTier
 	}
 	for _, c := range cands {
 		if why := skipReason(v, p, c, true); why != "" {
+			reasons = append(reasons, why)
+			continue
+		}
+		if why := skipSandboxed(c); why != "" {
 			reasons = append(reasons, why)
 			continue
 		}
@@ -417,15 +427,15 @@ func pickWorker(v *view, p store.Project, sticky string, avoid map[string]int, m
 	if len(avoid) > 0 || maxTier > 0 {
 		ever := false
 		for _, c := range cands {
-			if avoid[c.Model] == 0 && tierOK(c) && skipReason(v, p, c, false) == "" {
+			if avoid[c.Model] == 0 && tierOK(c) && skipReason(v, p, c, false) == "" && skipSandboxed(c) == "" {
 				ever = true
 			}
 		}
 		if !ever { // nothing better could ever serve: relax the escalation first, then the avoidance
 			if maxTier > 0 {
-				return pickWorker(v, p, sticky, avoid, 0)
+				return pickWorker(v, p, sticky, avoid, 0, unconfined)
 			}
-			return pickWorker(v, p, sticky, nil, 0)
+			return pickWorker(v, p, sticky, nil, 0, unconfined)
 		}
 	}
 	return Pick{}, noEligible("worker", reasons)

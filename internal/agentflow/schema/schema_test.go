@@ -225,6 +225,35 @@ func TestCompileOutRejectsVerifyField(t *testing.T) {
 	}
 }
 
+// AF-6b: a task and a plan phase may name a host toolchain, and only a known
+// one.
+func TestTasksAndPhasesCarryKnownToolchains(t *testing.T) {
+	ok := `{"tasks":[{"id":"T001","phase":"P1","title":"t","prompt":"p","acceptance":["R1: x"],"files_touched":["a.cs"],"toolchains":["dotnet"]}]}`
+	out, err := Parse[CompileOut](json.RawMessage(ok))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Tasks) != 1 || len(out.Tasks[0].Toolchains) != 1 || out.Tasks[0].Toolchains[0] != "dotnet" {
+		t.Fatalf("toolchains = %v", out.Tasks)
+	}
+	bad := `{"tasks":[{"id":"T001","phase":"P1","title":"t","prompt":"p","acceptance":["R1: x"],"files_touched":["a.cs"],"toolchains":["gcc"]}]}`
+	if _, err := Parse[CompileOut](json.RawMessage(bad)); err == nil || !strings.Contains(err.Error(), "unknown toolchain") {
+		t.Fatalf("want unknown toolchain error, got %v", err)
+	}
+	dup := `{"tasks":[{"id":"T001","phase":"P1","title":"t","prompt":"p","acceptance":["R1: x"],"files_touched":["a.cs"],"toolchains":["dotnet","dotnet"]}]}`
+	if _, err := Parse[CompileOut](json.RawMessage(dup)); err == nil || !strings.Contains(err.Error(), "twice") {
+		t.Fatalf("want duplicate toolchain error, got %v", err)
+	}
+	phase := `{"principles":["p"],"drivers":["d"],"options":[{"name":"A","description":"a"},{"name":"B","description":"b"}],"phases":[{"id":"P1","name":"n","tasks_description":"t","toolchains":["dotnet"]}],"adr":{"decision":"d","drivers":["d"],"alternatives":["a"],"why":"w","consequences":["c"],"followups":["f"]}}`
+	p, err := Parse[PlanOut](json.RawMessage(phase))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Phases[0].Toolchains) != 1 || p.Phases[0].Toolchains[0] != "dotnet" {
+		t.Fatalf("phase toolchains = %v", p.Phases[0].Toolchains)
+	}
+}
+
 func TestCompileOutRejectsVerificationOnlyTasks(t *testing.T) {
 	task := func(title string) string {
 		return `{"tasks":[{"id":"T003","phase":"P1","title":"` + title + `","prompt":"p","acceptance":["R1: x"],"files_touched":["a.go"]}]}`

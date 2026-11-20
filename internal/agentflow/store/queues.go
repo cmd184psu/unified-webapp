@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"cmd184psu/unified-webapp/internal/agentflow/model"
+	"cmd184psu/unified-webapp/internal/agentflow/sandbox"
 )
 
 func jsonList(l []string) string {
@@ -18,11 +20,26 @@ func jsonList(l []string) string {
 	return string(b)
 }
 
+// validateTaskToolchains rejects a task that names a toolchain the sandbox
+// cannot mount, so a bad definition fails when it is saved rather than at the
+// task's first feedback command.
+func validateTaskToolchains(defs []model.TaskDef) error {
+	for _, d := range defs {
+		for i, n := range d.Toolchains {
+			if !sandbox.ValidToolchain(n) {
+				return Invalid(fmt.Sprintf("tasks.%s.toolchains[%d]", d.Key, i),
+					fmt.Sprintf("unknown toolchain %q (known: %s)", n, strings.Join(sandbox.Toolchains, ", ")))
+			}
+		}
+	}
+	return nil
+}
+
 func insertTasks(ctx context.Context, tx *sql.Tx, queue int64, defs []model.TaskDef) error {
 	ids := map[string]int64{}
 	for _, d := range defs {
-		res, err := tx.ExecContext(ctx, `INSERT INTO tasks (queue, task_key, phase, title, prompt, acceptance_json, files_touched_json)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`, queue, d.Key, d.Phase, d.Title, d.Prompt, jsonList(d.Acceptance), jsonList(d.FilesTouched))
+		res, err := tx.ExecContext(ctx, `INSERT INTO tasks (queue, task_key, phase, title, prompt, acceptance_json, files_touched_json, toolchains_json)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, queue, d.Key, d.Phase, d.Title, d.Prompt, jsonList(d.Acceptance), jsonList(d.FilesTouched), jsonList(d.Toolchains))
 		if err != nil {
 			return err
 		}
@@ -62,7 +79,7 @@ func loadQueue(ctx context.Context, q querier, effort int64) (model.Queue, int64
 
 // loadTasks returns a queue's tasks in insertion order with dependency keys.
 func loadTasks(ctx context.Context, q querier, queue int64) ([]model.Task, error) {
-	rows, err := q.QueryContext(ctx, `SELECT id, task_key, phase, title, prompt, acceptance_json, files_touched_json, waiting_reason
+	rows, err := q.QueryContext(ctx, `SELECT id, task_key, phase, title, prompt, acceptance_json, files_touched_json, toolchains_json, waiting_reason
 		FROM tasks WHERE queue = ? ORDER BY id`, queue)
 	if err != nil {
 		return nil, err
@@ -70,8 +87,8 @@ func loadTasks(ctx context.Context, q querier, queue int64) ([]model.Task, error
 	var out []model.Task
 	for rows.Next() {
 		t := model.Task{Queue: queue}
-		var acc, files string
-		if err := rows.Scan(&t.ID, &t.Key, &t.Phase, &t.Title, &t.Prompt, &acc, &files, &t.WaitingReason); err != nil {
+		var acc, files, toolchains string
+		if err := rows.Scan(&t.ID, &t.Key, &t.Phase, &t.Title, &t.Prompt, &acc, &files, &toolchains, &t.WaitingReason); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -82,6 +99,12 @@ func loadTasks(ctx context.Context, q querier, queue int64) ([]model.Task, error
 		if err := json.Unmarshal([]byte(files), &t.FilesTouched); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("task %s files_touched: %w", t.Key, err)
+		}
+		if toolchains != "" {
+			if err := json.Unmarshal([]byte(toolchains), &t.Toolchains); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("task %s toolchains: %w", t.Key, err)
+			}
 		}
 		out = append(out, t)
 	}
@@ -98,6 +121,9 @@ func loadTasks(ctx context.Context, q querier, queue int64) ([]model.Task, error
 		}
 		if out[i].FilesTouched == nil {
 			out[i].FilesTouched = []string{}
+		}
+		if out[i].Toolchains == nil {
+			out[i].Toolchains = []string{}
 		}
 		drows, err := q.QueryContext(ctx, `SELECT t.task_key FROM task_deps d JOIN tasks t ON t.id = d.depends_on
 			WHERE d.task = ? ORDER BY t.task_key`, out[i].ID)
@@ -132,6 +158,9 @@ func queueHasAttempts(ctx context.Context, tx *sql.Tx, queue int64) (bool, error
 func (s *Store) SaveQueue(ctx context.Context, actor string, effort int64, defs []model.TaskDef) (model.Queue, error) {
 	if err := model.ValidateTasks(defs); err != nil {
 		return model.Queue{}, Invalid("queue", err.Error())
+	}
+	if err := validateTaskToolchains(defs); err != nil {
+		return model.Queue{}, err
 	}
 	hash := model.QueueHash(defs)
 	err := s.WithTx(ctx, func(tx *sql.Tx) error {
@@ -203,8 +232,11 @@ func (s *Store) EditTask(ctx context.Context, actor string, effort int64, def mo
 		if err := model.ValidateTasks(defs); err != nil {
 			return Invalid("queue", err.Error())
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE tasks SET phase = ?, title = ?, prompt = ?, acceptance_json = ?, files_touched_json = ?
-			WHERE queue = ? AND task_key = ?`, def.Phase, def.Title, def.Prompt, jsonList(def.Acceptance), jsonList(def.FilesTouched), qid, def.Key); err != nil {
+		if err := validateTaskToolchains(defs); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE tasks SET phase = ?, title = ?, prompt = ?, acceptance_json = ?, files_touched_json = ?, toolchains_json = ?
+			WHERE queue = ? AND task_key = ?`, def.Phase, def.Title, def.Prompt, jsonList(def.Acceptance), jsonList(def.FilesTouched), jsonList(def.Toolchains), qid, def.Key); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM task_deps WHERE task IN (SELECT id FROM tasks WHERE queue = ? AND task_key = ?)`, qid, def.Key); err != nil {
@@ -289,6 +321,9 @@ func (s *Store) QueueEffort(ctx context.Context, queue int64) (int64, error) {
 func (s *Store) AddTasks(ctx context.Context, actor string, effort int64, defs []model.TaskDef, action string, detail map[string]any) error {
 	if err := model.ValidateTasks(defs); err != nil {
 		return Invalid("tasks", err.Error())
+	}
+	if err := validateTaskToolchains(defs); err != nil {
+		return err
 	}
 	return s.WithTx(ctx, func(tx *sql.Tx) error {
 		q, qid, err := loadQueue(ctx, tx, effort)

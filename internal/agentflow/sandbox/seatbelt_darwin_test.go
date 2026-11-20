@@ -255,3 +255,99 @@ func TestSeatbeltRefusesUnquotablePath(t *testing.T) {
 		t.Error("a path with a quote was accepted into the profile")
 	}
 }
+
+// netcheckSrc is a helper the loopback test builds on the host and runs inside
+// the sandbox: "loopback" listens on 127.0.0.1:0 and connects to itself,
+// "external" dials 1.1.1.1:443.
+const netcheckSrc = `package main
+
+import (
+	"fmt"
+	"net"
+	"os"
+	"time"
+)
+
+func main() {
+	switch os.Args[1] {
+	case "loopback":
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			fmt.Println("LISTEN-FAIL", err)
+			os.Exit(1)
+		}
+		go func() {
+			c, err := ln.Accept()
+			if err == nil {
+				c.Write([]byte("pong"))
+				c.Close()
+			}
+		}()
+		c, err := net.DialTimeout("tcp", ln.Addr().String(), 3*time.Second)
+		if err != nil {
+			fmt.Println("DIAL-FAIL", err)
+			os.Exit(1)
+		}
+		b := make([]byte, 4)
+		n, _ := c.Read(b)
+		fmt.Println("LOOPBACK-OK", string(b[:n]))
+	case "external":
+		c, err := net.DialTimeout("tcp", "1.1.1.1:443", 3*time.Second)
+		if err != nil {
+			fmt.Println("BLOCKED", err)
+			os.Exit(3)
+		}
+		c.Close()
+		fmt.Println("REACHED")
+		os.Exit(2)
+	}
+}
+`
+
+func buildNetcheck(t *testing.T, root string) string {
+	t.Helper()
+	src := filepath.Join(root, "netcheck-src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "go.mod"), []byte("module netcheck\n\ngo 1.21\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "main.go"), []byte(netcheckSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(root, "netcheck")
+	cmd := exec.Command("go", "build", "-o", out, ".")
+	cmd.Dir = src
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build netcheck: %v\n%s", err, b)
+	}
+	return out
+}
+
+// AF-6b: a verify stage without Net may listen and connect on 127.0.0.1
+// (vstest's testhost handshake) and still reaches no other host, and the
+// loopback relaxation does not open the credentials.
+func TestSeatbeltLoopbackOnly(t *testing.T) {
+	f := newSBFixture(t)
+	bin := buildNetcheck(t, f.root)
+
+	s := f.spec(bin, "loopback")
+	s.Net, s.LoopbackNet = false, true
+	if out, err := sbRun(t, s); err != nil || !strings.Contains(out, "LOOPBACK-OK") {
+		t.Fatalf("loopback listen+connect failed: %v %q", err, out)
+	}
+
+	s = f.spec(bin, "external")
+	s.Net, s.LoopbackNet = false, true
+	if out, err := sbRun(t, s); err == nil {
+		t.Fatalf("external network reachable with loopback only: %q", out)
+	}
+
+	// The relaxation is network only: credentials stay unreadable.
+	leak := f.sh("cat " + filepath.Join(f.home, ".claude_chat_api"))
+	leak.Net, leak.LoopbackNet = false, true
+	if out, _ := sbRun(t, leak); strings.Contains(out, "SECRET") {
+		t.Errorf("credential readable in a loopback-relaxed stage: %q", out)
+	}
+}

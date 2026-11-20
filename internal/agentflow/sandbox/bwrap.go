@@ -7,6 +7,7 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,6 +17,17 @@ import (
 // systemDirs are bound read-only when present. Anything not listed here (/opt,
 // /var, /srv, /mnt, the server's cwd and data dir) does not exist inside.
 var systemDirs = []string{"/usr"}
+
+// loopbackIP finds the host's ip(8), which the loopback shim runs inside the
+// namespace. /usr is bound read-only, so the host path is the sandbox path.
+func loopbackIP() (string, error) {
+	for _, p := range []string{"/usr/sbin/ip", "/sbin/ip", "/usr/bin/ip", "/bin/ip"} {
+		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
+			return p, nil
+		}
+	}
+	return "", errors.New("sandbox: LoopbackNet needs ip(8), which is not installed")
+}
 
 // etcEntries are the only parts of /etc made visible: loader, name service,
 // resolver, TLS roots and timezone. /etc/ssh, /etc/gitconfig and the rest stay
@@ -90,8 +102,19 @@ func Command(ctx context.Context, spec Spec) (*exec.Cmd, error) {
 	// The synthetic root tmpfs (where /etc, /sandbox ... live) becomes read-only;
 	// the separate mounts above keep their own modes.
 	args = append(args, "--remount-ro", "/")
+	argv := spec.Argv
 	if !spec.Net {
 		args = append(args, "--unshare-net")
+	}
+	if spec.LoopbackNet {
+		// A fresh network namespace has a loopback device that is down. Bring
+		// it up before the stage runs and nothing else: the namespace has no
+		// route out, so 127.0.0.1/::1 are the only addresses that answer.
+		ip, err := loopbackIP()
+		if err != nil {
+			return nil, err
+		}
+		argv = append([]string{"/bin/sh", "-c", ip + ` link set lo up; exec "$@"`, "sandbox"}, argv...)
 	}
 
 	path := "/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin"
@@ -106,7 +129,7 @@ func Command(ctx context.Context, spec Spec) (*exec.Cmd, error) {
 	args = append(args, "--clearenv")
 	args = append(args, setenvArgs(env)...)
 	args = append(args, "--")
-	args = append(args, spec.Argv...)
+	args = append(args, argv...)
 
 	cmd := exec.CommandContext(ctx, bwrap, args...)
 	cmd.Env = []string{} // bwrap itself inherits nothing from the server

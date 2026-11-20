@@ -133,6 +133,10 @@ type TaskDef struct {
 	Acceptance   []string `json:"acceptance"`
 	FilesTouched []string `json:"files_touched"`
 	DependsOn    []string `json:"depends_on"`
+	// Toolchains are the host toolchains the task's verify stage needs, for
+	// example "dotnet" (AF-6b). The engine also infers them from FilesTouched
+	// and acts on the union, so a hint can add a toolchain but never remove one.
+	Toolchains []string `json:"toolchains,omitempty"`
 }
 
 // Queue is an effort's task queue. Hash covers the task definitions.
@@ -192,6 +196,10 @@ type Stage struct {
 	// Tokens is the runner-reported token usage of the stage (AT12); 0 for
 	// engine stages and for runners that report none.
 	Tokens int64 `json:"tokens"`
+	// Relaxations are the sandbox protections this stage was allowed to relax,
+	// for example loopback for a .NET verify or unconfined_runner for a worker
+	// outside the sandbox (AF-6b). Empty for a normally confined stage.
+	Relaxations []string `json:"relaxations,omitempty"`
 }
 
 // VerifyReport is the engine's deterministic verification of an attempt.
@@ -245,6 +253,10 @@ type FRD struct {
 	Findings           json.RawMessage  `json:"findings,omitempty"`
 	OutOfScope         []string         `json:"out_of_scope,omitempty"`
 	PlanningSpikes     json.RawMessage  `json:"planning_spikes,omitempty"`
+	// Toolchains are the host toolchains the work needs, for example
+	// "dotnet" (AF-6b). The planner carries them into the phases that touch
+	// that toolchain's files and the compiler into the tasks.
+	Toolchains []string `json:"toolchains,omitempty"`
 }
 
 // FRDGroup groups related requirements.
