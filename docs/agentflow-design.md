@@ -468,6 +468,9 @@ so it costs no tokens. There are two kinds, and they share one set of rules.
   does not wait for seat stages. Sessions whose stage is closed are ended at start and on every
   reconcile; each session is tagged with its agentflow instance (from the data directory), so
   one agentflow never adopts or ends another's sessions, or anyone's own tmux sessions.
+  After a crash restart (no drain) every project boots stopped while an adopted seat keeps
+  working. A result the seat reports then is kept, not abandoned with its attempt, and is
+  applied when the project runs again.
 - **Cancel.** `POST /api/seats/{stage}/cancel`, a project stop, a task reset or a retire with
   cancel kills the session (or cancels the BotChat task) first, so the stage ends as
   `infra:cancel`, not detached.

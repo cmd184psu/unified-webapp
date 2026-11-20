@@ -112,6 +112,18 @@ func (e *Engine) adoptSeat(ctx context.Context, st model.Stage, refs []jobRef) b
 	return true
 }
 
+// seatResultWaits says a stopped project keeps the attempt whose last stage is a seat stage
+// that finished with a real result. After a crash restart every project boots stopped (RC1)
+// while an adopted seat keeps working; its result is kept and applied when the project runs
+// again, instead of being abandoned with the attempt. An operator stop never gets here with
+// one: it cancels the seat first and abandons the attempt itself.
+func (e *Engine) seatResultWaits(ctx context.Context, last model.Stage) bool {
+	if _, ok := e.seatType(ctx, last); !ok {
+		return false
+	}
+	return last.Outcome != "" && last.Outcome != OutcomeDiscarded && !IsInfra(last.Outcome)
+}
+
 // sweepSeats ends the seat sessions whose stage is closed.
 func (e *Engine) sweepSeats(ctx context.Context) {
 	if e.deps.Seats == nil {

@@ -288,6 +288,55 @@ func TestSeatStageSurvivesARestart(t *testing.T) {
 	}
 }
 
+// After a crash restart every project boots stopped while an adopted seat keeps working. A
+// result it reports then is kept and applied once the project runs again; the attempt is not
+// abandoned.
+func TestASeatResultWhileStoppedIsKeptForTheResume(t *testing.T) {
+	seats := newFakeSeats()
+	c := newSeatChain(t, seats)
+	c.run()
+	waitUntil(t, "the seat call", func() bool { return seats.callCount() == 1 })
+	st := c.openSeatStage()
+	if st.ID == 0 {
+		t.Fatal("no open seat stage")
+	}
+	c.eng.Close() // a crash: no drain, no pause
+	c.restart()
+	if err := c.eng.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.eng.Runs().State(c.slug); got != model.RunStopped {
+		t.Fatalf("the project boots %s, want stopped", got)
+	}
+	waitUntil(t, "the adopted call", func() bool { return seats.callCount() == 2 })
+	seats.ch(st.ID) <- workerOK
+	waitUntil(t, "the worker outcome", func() bool {
+		cur, _ := c.st.GetStage(context.Background(), st.ID)
+		return cur.State == model.StageDone && cur.Outcome == OutcomePass
+	})
+	for i := 0; i < 3; i++ {
+		if err := c.eng.Advance(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	atts := c.attempts(0)
+	if len(atts) != 1 || atts[0].Outcome != "" {
+		t.Fatalf("attempts %+v: the seat's result must be kept while the project is stopped", atts)
+	}
+	c.fake.Script("reviewer", runner.Step{Reply: reviewPass})
+	if err := c.eng.Runs().Start(context.Background(), "t", c.slug); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the attempt to go on past the seat stage", func() bool {
+		_ = c.eng.Advance(context.Background())
+		stages, _ := c.st.ListAttemptStages(context.Background(), atts[0].ID)
+		return len(stages) > 1
+	})
+	if n := len(c.attempts(0)); n != 1 {
+		t.Fatalf("attempts = %d; the resume must continue the same attempt", n)
+	}
+}
+
 // Cancelling a seat stage stops the seat first, so the call ends as cancelled, not detached.
 func TestCancelSeatKillsTheSession(t *testing.T) {
 	seats := newFakeSeats()

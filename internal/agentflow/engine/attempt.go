@@ -220,6 +220,9 @@ func (e *Engine) advanceAttempt(ctx context.Context, c *chain) (bool, error) {
 	// Stop waits for advMu after it flips the state, so no step that read
 	// "running" is still submitting once Stop takes its snapshot.
 	if e.runs.State(c.proj.Slug) == model.RunStopped {
+		if e.seatResultWaits(ctx, stages[len(stages)-1]) {
+			return false, nil
+		}
 		return true, e.finishAttempt(ctx, c, model.OutcomeAbandoned)
 	}
 	last := stages[len(stages)-1]
