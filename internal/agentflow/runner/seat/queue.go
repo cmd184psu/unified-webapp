@@ -307,6 +307,7 @@ func (a *Adapter) runQueue(ctx context.Context, m mux.Multiplexer, req runner.Re
 			switch rep.Status {
 			case seatkit.StatusQuestion:
 				st.Questions++
+				st.Engaged = true // it has the task: never nudge it again
 				_ = os.Rename(st.Result, filepath.Join(resDir, fmt.Sprintf("QUESTION.%d.json", st.Questions)))
 				_ = os.WriteFile(filepath.Join(resDir, "QUESTION.open"), []byte(rep.Question), 0o600)
 				_ = saveQueueState(req.StageDir, &st)
@@ -322,7 +323,9 @@ func (a *Adapter) runQueue(ctx context.Context, m mux.Multiplexer, req runner.Re
 				return runner.Result{Final: final}, nil
 			}
 		}
+		questionOpen := false
 		if q, err := os.ReadFile(filepath.Join(resDir, "QUESTION.open")); err == nil {
+			questionOpen = true
 			notice(runner.SeatQuestion, "The seat asks: "+oneLine(string(q)))
 		}
 		alive, err := m.Has(ctx, st.Session)
@@ -353,7 +356,7 @@ func (a *Adapter) runQueue(ctx context.Context, m mux.Multiplexer, req runner.Re
 					clearOwn("shown nothing new")
 				}
 			}
-			if st.Engaged {
+			if st.Engaged || questionOpen {
 				if req.Budget > 0 && !silent && a.now().Sub(lastChange) >= req.Budget {
 					silent = true
 					if _, ok := board.Get(stage); !ok {
