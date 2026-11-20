@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // AF-9 named botchat_seat in code but never in the backends CHECK, so such a backend could
 // not be saved; migration 35 allows it and AF-11's freebuff_seat. Neither has a host. The
@@ -28,6 +31,12 @@ func TestSeatBackendsCanBeSaved(t *testing.T) {
 	}
 	if err := s.UpdateSettings(ctx, "t", map[string]string{"seat_profiles": "not json"}); err == nil {
 		t.Fatal("seat_profiles must be a JSON object")
+	}
+	if err := s.UpdateSettings(ctx, "t", map[string]string{"seat_profiles": `{"fb":{"quiet_lines":["working ("]}}`}); err == nil || !strings.Contains(err.Error(), "quiet_lines") {
+		t.Fatalf("a quiet_lines pattern that does not compile must be refused: %v", err)
+	}
+	if err := s.UpdateSettings(ctx, "t", map[string]string{"seat_profiles": `{"fb":{"quiet_lines":["^\\s*[⠋⠙⠹] working [0-9]+s$"]}}`}); err != nil {
+		t.Fatalf("a valid quiet_lines pattern: %v", err)
 	}
 	if err := s.UpdateSettings(ctx, "t", map[string]string{"seat_profiles": `{"freebuff":{"auth_paths":[".config/freebuff"]}}`, "notify_macos": "off"}); err != nil {
 		t.Fatal(err)

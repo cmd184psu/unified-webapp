@@ -174,6 +174,51 @@ func TestSilencePastTheBudgetIsANotice(t *testing.T) {
 	}
 }
 
+// A seat whose screen only changes in its quiet lines (a ticking timer) has gone silent; the
+// same seat without quiet lines never looks silent.
+func TestQuietLinesLetASpinnerGoSilent(t *testing.T) {
+	for _, quiet := range []bool{true, false} {
+		fm := &mux.Fake{}
+		a := fakeSeat(t, fm, "spinner", nil)
+		if quiet {
+			base := a.Profiles
+			a.Profiles = func(ctx context.Context) map[string]Profile {
+				ps := base(ctx)
+				p := ps["fake"]
+				p.QuietLines = []string{`^working [0-9]+s$`}
+				ps["fake"] = p
+				return ps
+			}
+		}
+		req := seatReq(t, "worker")
+		req.Budget = 100 * time.Millisecond
+		ctx, cancel := context.WithCancel(context.Background())
+		ch := runAsync(a, ctx, req)
+		if quiet {
+			waitFor(t, "the silence notice", func() bool {
+				n, ok := a.Board.Get(42)
+				return ok && n.Kind == runner.SeatSilent
+			})
+		} else {
+			time.Sleep(600 * time.Millisecond)
+			if n, ok := a.Board.Get(42); ok && n.Kind == runner.SeatSilent {
+				t.Fatal("without quiet lines a ticking screen is not silent")
+			}
+		}
+		cancel()
+		get(t, ch)
+		fm.KillAll()
+	}
+}
+
+func TestStillViewDropsOnlyQuietLines(t *testing.T) {
+	p := Profile{QuietLines: []string{`elapsed [0-9:]+`, "("}} // a bad pattern is skipped
+	got := stillView(p, "hello\n⠋ elapsed 0:12\nworld")
+	if got != "hello\nworld" {
+		t.Fatalf("stillView = %q", got)
+	}
+}
+
 // A restart: the first process stops waiting, the session lives on, the next process adopts
 // it by name without starting or typing again.
 func TestARestartAdoptsTheSession(t *testing.T) {

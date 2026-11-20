@@ -18,8 +18,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
@@ -101,6 +103,10 @@ type Profile struct {
 	HaltTexts []string `json:"halt_texts,omitempty"`
 	// Env is extra environment for the program.
 	Env map[string]string `json:"env,omitempty"`
+	// QuietLines are regular expressions for screen lines that change on their own (a
+	// spinner, a clock, an elapsed timer). A line matching one is left out when the screen is
+	// compared to judge whether the seat has gone silent (or reacted to a nudge).
+	QuietLines []string `json:"quiet_lines,omitempty"`
 
 	// TmuxSession makes the profile a queue seat (AF-11b): the owner's own, already running
 	// session. agentflow never starts, kills or sandboxes it; Command is not used.
@@ -137,8 +143,49 @@ func Freebuff() Profile {
 }
 
 // halted returns the halt text on the screen, or "".
-// stillView is the screen as silence detection compares it.
-func stillView(prof Profile, screen string) string { return screen }
+// stillView is the screen as silence detection compares it: without the profile's quiet
+// lines. A pattern that does not compile is skipped (the setting refuses one on save).
+func stillView(prof Profile, screen string) string {
+	if len(prof.QuietLines) == 0 {
+		return screen
+	}
+	var res []*regexp.Regexp
+	for _, p := range prof.QuietLines {
+		if re := quietRegexp(p); re != nil {
+			res = append(res, re)
+		}
+	}
+	lines := strings.Split(screen, "\n")
+	kept := lines[:0]
+	for _, l := range lines {
+		quiet := false
+		for _, re := range res {
+			if re.MatchString(l) {
+				quiet = true
+				break
+			}
+		}
+		if !quiet {
+			kept = append(kept, l)
+		}
+	}
+	return strings.Join(kept, "\n")
+}
+
+var quietCache sync.Map // pattern -> *regexp.Regexp (nil when it does not compile)
+
+func quietRegexp(p string) *regexp.Regexp {
+	if v, ok := quietCache.Load(p); ok {
+		re, _ := v.(*regexp.Regexp)
+		return re
+	}
+	re, err := regexp.Compile(p)
+	if err != nil {
+		re = nil
+	}
+	quietCache.Store(p, re)
+	return re
+}
 
 func halted(prof Profile, screen string) string {
 	for _, t := range prof.HaltTexts {
@@ -628,8 +675,8 @@ func (a *Adapter) wait(ctx context.Context, m mux.Multiplexer, name string, req 
 				}
 			}
 		}
-		if screen, err := m.Capture(ctx, name, 0); err == nil && screen != lastScreen {
-			lastScreen, lastChange = screen, a.now()
+		if screen, err := m.Capture(ctx, name, 0); err == nil && stillView(prof, screen) != lastScreen {
+			lastScreen, lastChange = stillView(prof, screen), a.now()
 			if silent {
 				silent = false
 				if n, ok := board.Get(stage); ok && n.Kind == runner.SeatSilent {

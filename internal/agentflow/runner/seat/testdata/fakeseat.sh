@@ -24,6 +24,9 @@ question)
   read -r answer
   echo "answer: $answer"
   printf '{"status":"done","summary":"used %s"}' "$answer" > "$result" ;;
+spinner)
+  # never reports; a ticking status line changes the screen all the time
+  i=0; while true; do i=$((i+1)); printf 'working %ss\n' "$i"; sleep 0.02; done ;;
 wait)
   while [ ! -f "$SEAT_GO" ]; do sleep 0.01; done
   printf '{"status":"done","summary":"after the restart"}' > "$result" ;;

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -188,6 +189,19 @@ func parseSettings(m map[string]string) (Settings, error) {
 		var probe map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(s.SeatProfiles), &probe); err != nil {
 			return s, Invalid("seat_profiles", "must be a JSON object of profiles by name")
+		}
+		for name, raw := range probe {
+			var p struct {
+				QuietLines []string `json:"quiet_lines"`
+			}
+			if json.Unmarshal(raw, &p) != nil {
+				return s, Invalid("seat_profiles", fmt.Sprintf("profile %q must be a JSON object", name))
+			}
+			for _, q := range p.QuietLines {
+				if _, err := regexp.Compile(q); err != nil {
+					return s, Invalid("seat_profiles", fmt.Sprintf("profile %q: quiet_lines %q is not a regular expression: %v", name, q, err))
+				}
+			}
 		}
 	}
 	switch strings.ToLower(strings.TrimSpace(m["notify_macos"])) {

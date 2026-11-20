@@ -500,6 +500,10 @@ the UI shows them under the attention banner.
   one freebuff login has one live session, and taking it over stops the owner's other instance.
   A queue seat profile has `tmux_session`, `queue_file`, `nudge_text`, `nudge_wait` and
   `halt_texts` instead of a command.
+  `quiet_lines` are regular expressions for screen lines that change on their own (a spinner,
+  a clock, an elapsed timer); matching lines are left out when the screen is compared to judge
+  silence (or a queue seat's reaction to a nudge). A pattern that does not compile is refused
+  when the setting is saved.
 - `botchat_url`, `botchat_key_file`: the BotChat service, read on every call.
 
 Where the seat runs (the host sandbox today, a container later) is the sandbox builder's
