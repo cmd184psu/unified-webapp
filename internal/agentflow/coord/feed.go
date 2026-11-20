@@ -112,6 +112,10 @@ func (r *run) feed(ctx context.Context) error {
 			return err
 		}
 		if r.dry {
+			if r.rep.Queues == nil {
+				r.rep.Queues = map[string]string{}
+			}
+			r.rep.Queues[cs] = text
 			continue
 		}
 		if err := os.WriteFile(r.queuePath(cs), []byte(text), 0o644); err != nil {

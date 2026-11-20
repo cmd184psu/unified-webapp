@@ -26,9 +26,11 @@ type Report struct {
 	Finished  time.Time  `json:"finished"`
 	Dry       bool       `json:"dry"`
 	Decisions []Decision `json:"decisions"`
-	// Writes are the BotChat writes a dry run held back.
-	Writes []string `json:"writes,omitempty"`
-	Error  string   `json:"error,omitempty"`
+	// Writes are the BotChat writes a dry run held back; Queues the queue files it would have
+	// written, by callsign.
+	Writes []string          `json:"writes,omitempty"`
+	Queues map[string]string `json:"queues,omitempty"`
+	Error  string            `json:"error,omitempty"`
 }
 
 // Git is what the coordinator does with the repositories.
