@@ -300,3 +300,9 @@ func (c *Client) ListTasks(ctx context.Context, roomID, assignee string) ([]Task
 	}
 	return wrap.Tasks, nil
 }
+
+// Do sends one request to the service and decodes the JSON answer into out (when not nil). The
+// coordinator module (AF-13) uses it for the task board calls this client has no helper for.
+func (c *Client) Do(ctx context.Context, method, path string, body, out any) error {
+	return c.do(ctx, method, path, body, out)
+}

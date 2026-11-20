@@ -153,6 +153,13 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	ok("GET", "/api/strikes", "", 200)
 	ok("GET", "/api/attention", "", 200)
 	ok("GET", "/api/seats", "", 200)
+	// AF-13: the coordinator module is off without coord.json: every route says so.
+	ok("GET", "/api/coord", "", 404)
+	ok("POST", "/api/coord/run", `{"dry":true}`, 404)
+	ok("GET", "/api/seats/external", "", 404)
+	ok("GET", "/api/seats/deepseek4/queue", "", 404)
+	ok("POST", "/api/seats/deepseek4/nudge", "{}", 404)
+	ok("POST", "/api/handoffs/TASK-1/merge", `{"dry":true}`, 404)
 	ok("POST", "/api/seats/999999/answer", `{"text":"go on"}`, 404)
 	ok("POST", "/api/seats/999999/cancel", "", 404)
 	ok("GET", "/api/yolo/invariants", "", 200)

@@ -4,6 +4,7 @@
 package api
 
 import (
+	"cmd184psu/unified-webapp/internal/agentflow/coord"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -35,6 +36,8 @@ type Deps struct {
 	Terminate func()
 	// SSEMaxSubscribers caps the event stream's subscribers (D3).
 	SSEMaxSubscribers int
+	// Coord is the external seats module (AF-13); nil when it is off (no coord.json).
+	Coord *coord.Service
 }
 
 // API serves the agentflow routes.
@@ -145,6 +148,7 @@ func (a *API) Register(mux muxer) {
 	a.registerEvents(mux)
 	a.registerExport(mux)
 	a.registerSeats(mux)
+	a.registerCoord(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	})

@@ -105,13 +105,14 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 	})
 	var dispatcher *botchat.Dispatcher
 	var seatCtl engine.SeatControl
+	var ss *seats
 	if rn == nil {
 		// Containers a previous process left (a crash, or a kill mid-stage) cannot be adopted:
 		// remove this instance's before anything runs. Never starts the VM.
 		if removed, _ := sandbox.DockerSweep(context.Background(), containers.Instance()); len(removed) > 0 {
 			log.Printf("agentflow: removed %d leftover container(s): %s", len(removed), strings.Join(removed, ", "))
 		}
-		ss := newSeats(dataDir, git, st)
+		ss = newSeats(dataDir, git, st)
 		seatCtl = ss
 		dispatcher = &botchat.Dispatcher{Inner: newRunner(git, st, ss, containers), Store: st, Relay: relay}
 		rn = dispatcher
@@ -160,8 +161,11 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 		return nil, fmt.Errorf("agentflow: start engine: %w", err)
 	}
 
+	coordSvc := newCoord(dataDir, ss, st)
+
 	mux := http.NewServeMux()
 	a := api.New(api.Deps{
+		Coord:             coordSvc,
 		Store:             st,
 		Engine:            eng,
 		Git:               git,
@@ -181,6 +185,7 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 	capCtx, stopCaps := context.WithCancel(context.Background())
 	go a.RefreshCapabilities(capCtx)
 	go containers.Run(capCtx)
+	coordSvc.Start(capCtx)
 
 	// What happens in agentflow is posted to BotChat when the botchat settings name a service
 	// and a key file; with them empty the relay idles.
