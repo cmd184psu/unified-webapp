@@ -260,3 +260,56 @@ func TestDaemonDriverNeverStopsTheHost(t *testing.T) {
 		t.Fatalf("Stop = %v", err)
 	}
 }
+
+// notOwned is a driver whose VM someone else started.
+type notOwned struct{ fakeDriver }
+
+func (n *notOwned) Owned() bool { return false }
+
+// TestIdleStopLeavesAVMItDidNotStart: a VM that was already up when agentflow needed it is
+// never stopped by the idle timer (AF-12 review finding 4).
+func TestIdleStopLeavesAVMItDidNotStart(t *testing.T) {
+	drv := &notOwned{}
+	clock := time.Unix(1000, 0)
+	m := NewWithDriver(drv, Config{Idle: time.Minute})
+	m.now = func() time.Time { return clock }
+	if err := m.Ensure(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	clock = clock.Add(2 * time.Minute)
+	if stopped, err := m.StopIfIdle(context.Background()); err != nil || stopped {
+		t.Fatalf("StopIfIdle = %v, %v", stopped, err)
+	}
+	if drv.stops != 0 {
+		t.Fatal("stopped a VM agentflow did not start")
+	}
+}
+
+// TestColimaOwnershipAndAllContainers: the driver owns a VM only when it ran colima start,
+// and counts every running container, not only agentflow's, before a stop.
+func TestColimaOwnershipAndAllContainers(t *testing.T) {
+	docker, colima, state := fakeColima(t)
+	if err := os.WriteFile(state, nil, 0o644); err != nil { // already up: someone else's
+		t.Fatal(err)
+	}
+	d := &colimaDriver{docker: docker, colima: colima, timeout: 5 * time.Second}
+	if err := d.Start(context.Background()); err != nil || d.Owned() {
+		t.Fatalf("an already running VM is not ours: owned=%v err=%v", d.Owned(), err)
+	}
+	if err := os.Remove(state); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Start(context.Background()); err != nil || !d.Owned() {
+		t.Fatalf("a VM agentflow started is ours: owned=%v err=%v", d.Owned(), err)
+	}
+	writeExec(t, docker, `#!/bin/sh
+case "$1" in
+  info) exit 0 ;;
+  ps) case "$*" in *label=agentflow*) ;; *) printf 'owners-db\nowners-cache\n' ;; esac ;;
+esac
+exit 0
+`)
+	if n, err := d.Running(context.Background()); err != nil || n != 2 {
+		t.Fatalf("Running = %d, %v; want every container counted", n, err)
+	}
+}

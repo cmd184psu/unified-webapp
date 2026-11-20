@@ -20,7 +20,13 @@ type colimaDriver struct {
 	timeout        time.Duration
 	// config overrides the colima.yaml read by Shared (tests).
 	config string
+	// startedHere: this process ran `colima start`. A VM someone else started is theirs:
+	// the idle stop leaves it running. The manager serializes Start and Stop.
+	startedHere bool
 }
+
+// Owned says agentflow started the VM, so the idle stop may stop it.
+func (d *colimaDriver) Owned() bool { return d.startedHere }
 
 func (d *colimaDriver) Name() string { return "colima" }
 
@@ -96,6 +102,7 @@ func (d *colimaDriver) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("colima start: %w: %s", err, strings.TrimSpace(string(out)))
 	}
+	d.startedHere = true
 	return d.wait(startCtx)
 }
 
@@ -123,11 +130,14 @@ func (d *colimaDriver) Stop(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("colima stop: %w: %s", err, strings.TrimSpace(string(out)))
 	}
+	d.startedHere = false
 	return nil
 }
 
+// Running counts every running container in the VM, not only agentflow's: stopping the VM
+// would end them all, so any one of them keeps it up.
 func (d *colimaDriver) Running(ctx context.Context) (int, error) {
-	return countContainers(ctx, d.docker)
+	return countContainers(ctx, d.docker, false)
 }
 
 func (d *colimaDriver) Status(ctx context.Context) (string, error) {
@@ -143,11 +153,16 @@ func (d *colimaDriver) info(ctx context.Context) error {
 	return cmd.Run()
 }
 
-// countContainers is the number of this instance's running containers.
-func countContainers(ctx context.Context, docker string) (int, error) {
+// countContainers is the number of running containers: agentflow's only (label
+// agentflow=1), or all of them.
+func countContainers(ctx context.Context, docker string, agentflowOnly bool) (int, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, docker, "ps", "--filter", "label=agentflow=1", "--format", "{{.Names}}").Output()
+	args := []string{"ps", "--format", "{{.Names}}"}
+	if agentflowOnly {
+		args = []string{"ps", "--filter", "label=agentflow=1", "--format", "{{.Names}}"}
+	}
+	out, err := exec.CommandContext(ctx, docker, args...).Output()
 	if err != nil {
 		return 0, err
 	}

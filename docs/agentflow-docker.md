@@ -82,7 +82,9 @@ The owner does not want a VM running unless work needs it.
 `docker info`; only when it fails does it run `colima start` (no flags: it reuses
 `~/.colima/default/colima.yaml`) and wait for the daemon, two minutes by default.
 After the last agentflow container has been gone for `AGENTFLOW_DOCKER_IDLE`,
-`colima stop` runs. Starts and stops are serialized, never at login. A VM that
+`colima stop` runs, but only for a VM agentflow started itself, and only when
+no container at all is running in it. A VM that was already up when a stage
+needed it belongs to whoever started it and is left running. Starts and stops are serialized, never at login. A VM that
 cannot start is logged as `ATTENTION:` and fails the stage with the reason
 instead of retrying silently; the task ends as needing attention.
 

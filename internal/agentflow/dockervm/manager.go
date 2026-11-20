@@ -208,6 +208,16 @@ func (m *Manager) StopIfIdle(ctx context.Context) (bool, error) {
 	}
 	m.mu.Unlock()
 
+	if o, ok := m.drv.(interface{ Owned() bool }); ok && !o.Owned() {
+		// Someone else started the VM: it is theirs to stop. Stop tracking it; the next
+		// docker stage checks it again.
+		m.mu.Lock()
+		m.started = false
+		m.mu.Unlock()
+		m.cfg.logf("%s: idle, but agentflow did not start it: left running", m.drv.Name())
+		return false, nil
+	}
+
 	n, err := m.drv.Running(ctx)
 	if err != nil {
 		// The runtime not answering means there is nothing to stop.

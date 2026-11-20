@@ -34,7 +34,7 @@ func (d *daemonDriver) Start(ctx context.Context) error {
 func (d *daemonDriver) Stop(context.Context) error { return nil }
 
 func (d *daemonDriver) Running(ctx context.Context) (int, error) {
-	return countContainers(ctx, d.docker)
+	return countContainers(ctx, d.docker, true)
 }
 
 func (d *daemonDriver) Status(ctx context.Context) (string, error) {
