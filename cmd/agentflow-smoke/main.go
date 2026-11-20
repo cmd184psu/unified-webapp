@@ -7,6 +7,9 @@
 // notify_command setting is wrapped for the run (the previous command still runs) and put
 // back. The drain restart scenario pauses every running project on the instance until the
 // restart, so it runs by default only against dev (port 8788); -restart turns it on elsewhere.
+//
+// Production: agentflow-smoke -base http://127.0.0.1:8787 -host agentflow.applepipro.cmdhome.net
+// (-host is sent as the Host header, for an instance that routes by name).
 package main
 
 import (
@@ -22,12 +25,14 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/model"
@@ -44,6 +49,7 @@ type smoke struct {
 	tmp     string
 	repoDir string
 	client  *http.Client
+	host    string // the Host header, when -host is set
 
 	backends []string
 	projects []string
@@ -54,6 +60,7 @@ type smoke struct {
 	notifyWrapped bool
 	oldNotify     string
 
+	cleaned sync.Once
 	mu      sync.Mutex
 	results []result
 	efforts map[string]int64
@@ -67,6 +74,8 @@ type result struct {
 
 func main() {
 	urlFlag := flag.String("url", "http://127.0.0.1:8788", "the agentflow instance")
+	flag.StringVar(urlFlag, "base", "http://127.0.0.1:8788", "the same as -url")
+	hostFlag := flag.String("host", "", "send this Host header (for example agentflow.applepipro.cmdhome.net against 127.0.0.1:8787)")
 	dbFlag := flag.String("db", "", "the instance's agentflow.db, read only for the restart scenario's adoption event (default: dev's, for port 8788)")
 	restartFlag := flag.String("restart", "auto", "run the drain-restart scenario: yes, no, auto (yes on 8788 only)")
 	opencodeStub := flag.String("stub", "", "the opencode stub server binary (scripts/agentflow-smoke.sh builds it)")
@@ -88,14 +97,25 @@ func main() {
 	}
 
 	s := &smoke{base: strings.TrimRight(*urlFlag, "/"), db: db, ts: time.Now().Format("150405"),
-		client: &http.Client{Timeout: 30 * time.Second}}
+		client: &http.Client{Timeout: 30 * time.Second}, host: *hostFlag}
 	if s.tmp, err = os.MkdirTemp("/tmp", "af-smoke-"); err != nil { // short: tmux and sandboxes like short paths
 		fatal("temp dir: %v", err)
 	}
-	fmt.Printf("agentflow-smoke %s against %s (run %s, temp %s)\n", runtime.GOOS, s.base, s.ts, s.tmp)
+	fmt.Printf("agentflow-smoke %s against %s%s (run %s, temp %s)\n", runtime.GOOS, s.base, hostNote(s.host), s.ts, s.tmp)
 	start := time.Now()
 	if err := s.get("/api/health", nil); err != nil {
 		fatal("instance not reachable: %v", err)
+	}
+	if !*keep {
+		// An interrupted run still removes what it made (it may be running against production).
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-sig
+			fmt.Println("agentflow-smoke: interrupted; cleaning up")
+			s.cleanup()
+			os.Exit(130)
+		}()
 	}
 	if err := s.setup(*opencodeStub); err != nil {
 		s.record("setup", err)
@@ -163,6 +183,9 @@ func (s *smoke) do(method, path string, body, out any) error {
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if s.host != "" {
+		req.Host = s.host
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -937,8 +960,17 @@ func shQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) 
 
 // --- cleanup ---
 
-func (s *smoke) cleanup() {
-	for _, slug := range s.projects {
+func (s *smoke) cleanup() { s.cleaned.Do(s.cleanupOnce) }
+
+func (s *smoke) cleanupOnce() {
+	s.mu.Lock()
+	projects := append([]string(nil), s.projects...)
+	efforts := make(map[string]int64, len(s.efforts))
+	for k, v := range s.efforts {
+		efforts[k] = v
+	}
+	s.mu.Unlock()
+	for _, slug := range projects {
 		_ = s.do("POST", "/api/projects/"+slug+"/run/stop", map[string]any{}, nil)
 	}
 	time.Sleep(2 * time.Second)
@@ -950,8 +982,8 @@ func (s *smoke) cleanup() {
 			}
 		}
 	}
-	for _, slug := range s.projects {
-		if id, ok := s.efforts[slug]; ok {
+	for _, slug := range projects {
+		if id, ok := efforts[slug]; ok {
 			var ev effortView
 			if s.get(fmt.Sprintf("/api/projects/%s/efforts/%d", slug, id), &ev) == nil && ev.Status != "complete" && ev.Status != "abandoned" {
 				if err := s.do("POST", fmt.Sprintf("/api/projects/%s/efforts/%d/abandon", slug, id), map[string]any{}, nil); err != nil {
@@ -995,4 +1027,11 @@ func (s *smoke) cleanup() {
 	} else {
 		fmt.Println("cleanup: done; the run's files are in", trash)
 	}
+}
+
+func hostNote(h string) string {
+	if h == "" {
+		return ""
+	}
+	return " as " + h
 }
