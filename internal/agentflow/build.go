@@ -288,6 +288,13 @@ func dockerFor(git *gitsvc.Service, st *store.Store, containers *dockervm.Manage
 		if containers != nil {
 			d.Shared = containers.SharedPaths()
 			d.Instance = containers.Instance()
+			// Refuse before booting the VM: the rest of the mounts are checked when the
+			// command is built.
+			for _, path := range []string{wd, filepath.Join(req.StageDir, "home")} {
+				if r, err := filepath.EvalSymlinks(path); err == nil && !sandbox.SharedWith(r, d.Shared) {
+					return nil, fmt.Errorf("project %s: %s is not shared with the docker VM; add it to the VM's mounts", p.Slug, r)
+				}
+			}
 			if err := containers.Ensure(ctx); err != nil {
 				return nil, err
 			}

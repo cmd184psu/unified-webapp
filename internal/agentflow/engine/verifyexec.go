@@ -125,9 +125,10 @@ func failingChecks(rep verify.VerifyReport) string {
 }
 
 // dockerSpec is the container a project's feedback commands run in, or nil for
-// a host project. It starts the runtime first, so a Docker that cannot come up
-// fails with the reason rather than at the first command (AF-12).
-func (e *Engine) dockerSpec(ctx context.Context, p store.Project, name string) (*sandbox.Docker, error) {
+// a host project. It checks spec's mounts first (a path the VM does not share is
+// refused without booting it), then starts the runtime, so a Docker that cannot
+// come up fails with the reason rather than at the first command (AF-12).
+func (e *Engine) dockerSpec(ctx context.Context, p store.Project, name string, spec sandbox.Spec) (*sandbox.Docker, error) {
 	if p.Sandbox != "docker" {
 		return nil, nil
 	}
@@ -140,6 +141,10 @@ func (e *Engine) dockerSpec(ctx context.Context, p store.Project, name string) (
 	}
 	d.Shared = e.deps.Containers.SharedPaths()
 	d.Instance = e.deps.Containers.Instance()
+	spec.Docker = d
+	if err := sandbox.CheckDockerMounts(spec); err != nil {
+		return nil, fmt.Errorf("project %s: %w", p.Slug, err)
+	}
 	if err := e.deps.Containers.Ensure(ctx); err != nil {
 		return nil, err
 	}
@@ -206,7 +211,7 @@ func (e *Engine) feedback(ctx context.Context, c *chain, rep *verify.VerifyRepor
 	if err != nil {
 		return nil, err
 	}
-	if spec.Docker, err = e.dockerSpec(ctx, c.proj, sandbox.ContainerName(c.proj.Slug, c.eff.ID, c.task.ID, strconv.FormatInt(stage, 10))); err != nil {
+	if spec.Docker, err = e.dockerSpec(ctx, c.proj, sandbox.ContainerName(c.proj.Slug, c.eff.ID, c.task.ID, strconv.FormatInt(stage, 10)), spec); err != nil {
 		return nil, err
 	}
 	if spec.Docker != nil {
@@ -294,7 +299,7 @@ func (e *Engine) ensureBaseline(ctx context.Context, proj store.Project, effort 
 		if err != nil {
 			return err
 		}
-		if spec.Docker, err = e.dockerSpec(ctx, proj, sandbox.ContainerName(proj.Slug, effort, 0, "baseline")); err != nil {
+		if spec.Docker, err = e.dockerSpec(ctx, proj, sandbox.ContainerName(proj.Slug, effort, 0, "baseline"), spec); err != nil {
 			return err
 		}
 		if spec.Docker != nil {

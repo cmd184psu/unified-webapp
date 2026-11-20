@@ -273,6 +273,20 @@ func dockerMounts(spec Spec) ([]string, error) {
 	return out, nil
 }
 
+// CheckDockerMounts renders spec's bind mounts without running anything: a source that is
+// missing or not shared with the VM is an error. Callers check before starting the VM, so a
+// stage that would be refused never boots it.
+func CheckDockerMounts(spec Spec) error {
+	if spec.Docker == nil {
+		return nil
+	}
+	_, err := dockerMounts(spec)
+	return err
+}
+
+// SharedWith says the runtime can see path (see Docker.Shared).
+func SharedWith(path string, shared []string) bool { return sharedWith(path, shared) }
+
 // sharedWith says the runtime can see path: it is under one of the shared roots, or there is
 // no VM between the host and the containers (shared is nil).
 func sharedWith(path string, shared []string) bool {
