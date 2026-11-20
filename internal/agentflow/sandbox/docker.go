@@ -355,12 +355,16 @@ func dockerArgs(spec Spec) ([]string, error) {
 	for _, m := range mounts {
 		args = append(args, "--volume", m)
 	}
-	// The tool caches (Ghidra's XDG cache above all) live in a container-local
-	// tmpfs: Ghidra cannot create its cache directory on a virtiofs bind mount,
-	// even as root, and fails to start. The stage home itself stays host-backed
-	// so the worktree's build output is visible to the host; only the cache is
-	// per-stage.
-	args = append(args, "--tmpfs", SandboxHome+"/.cache")
+	// The tools' XDG directories (Ghidra's cache, settings and data above all) live
+	// in container-local tmpfs: Ghidra cannot create them on a virtiofs bind mount,
+	// even as root, and fails to start. The stage home itself stays host-backed so
+	// the worktree's build output is visible to the host; only these are per-stage.
+	// mode=1777: a tmpfs is root's 0755 by default, and the image runs as a plain
+	// user (AF-13 4b: Ghidra failed with "Failed to create directory
+	// /home/agent/.cache/<user>-ghidra" under the uid-1000 image).
+	for _, d := range []string{".cache", ".config", ".local"} {
+		args = append(args, "--tmpfs", SandboxHome+"/"+d+":rw,mode=1777")
+	}
 	args = append(args, "--workdir", spec.Worktree, d.Image)
 	argv := spec.Argv
 	if d.Runner != "" {

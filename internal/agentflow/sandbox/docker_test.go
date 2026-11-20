@@ -106,7 +106,8 @@ func TestDockerArgsShape(t *testing.T) {
 	if !hasPair(args, "--env", "HOME="+SandboxHome) {
 		t.Fatalf("HOME is not the stage home: %v", args)
 	}
-	if !hasPair(args, "--tmpfs", SandboxHome+"/.cache") {
+	// AF-13 4b: world-writable, because the image runs as a plain user; config and data too.
+	if !hasPair(args, "--tmpfs", SandboxHome+"/.cache:rw,mode=1777") || !hasPair(args, "--tmpfs", SandboxHome+"/.config:rw,mode=1777") || !hasPair(args, "--tmpfs", SandboxHome+"/.local:rw,mode=1777") {
 		t.Fatalf("tool caches are not container-local: %v", args)
 	}
 	for _, a := range args {
