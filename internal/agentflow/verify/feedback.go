@@ -83,9 +83,16 @@ func RunFeedback(ctx context.Context, cfg FeedbackConfig, cmds []Argv) ([]Comman
 	var wg sync.WaitGroup
 	for i, argv := range cmds {
 		wg.Add(1)
+		spec := cfg.Spec
+		if spec.Docker != nil {
+			// The commands run at once, each in its own container: one name each (AF-12).
+			d := *spec.Docker
+			d.Name = fmt.Sprintf("%s-c%d", d.Name, i)
+			spec.Docker = &d
+		}
 		go func() {
 			defer wg.Done()
-			results[i], errs[i] = runOne(ctx, cfg.Spec, argv, timeout, cfg.WritableWorktree)
+			results[i], errs[i] = runOne(ctx, spec, argv, timeout, cfg.WritableWorktree)
 			if errs[i] == nil {
 				results[i].Failures = fingerprint(results[i], module)
 			}
