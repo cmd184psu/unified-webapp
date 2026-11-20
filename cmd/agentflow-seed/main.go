@@ -1,72 +1,63 @@
-// Command agentflow-seed saves and approves a task queue for an effort in a running agentflow
-// instance's database, skipping planning. It is the supported seeding path for
-// scripts/agentflow-smoke.sh, which needs a known one-task queue without any model.
+// Command agentflow-seed saves and approves a task queue for an effort of a smoke-* project
+// in a running agentflow instance, skipping planning, through the server's
+// POST /api/projects/{slug}/efforts/{id}/queue/seed. It is the supported seeding path behind
+// scripts/agentflow-smoke.sh, for a known queue without any model.
 //
-//	agentflow-seed -db <data dir>/agentflow.db -effort 12 -tasks tasks.json
+//	agentflow-seed -url http://127.0.0.1:8788 -project smoke-x -effort 12 -tasks tasks.json
 //
 // tasks.json is a JSON array of task definitions ({"key","phase","title","prompt",
-// "acceptance","files_touched","depends_on"}). The database must already be at this build's
-// schema version (the tool never migrates), and only an effort of a project named smoke-* is
-// seeded unless -any-project is given: an approved queue skips every planning review.
+// "acceptance","files_touched","depends_on"}). The server refuses any project not named
+// smoke-*: an approved queue skips every planning review. The database is never written from
+// outside the server, which would make its own transactions fail with SQLITE_BUSY.
 package main
 
 import (
-	"context"
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strings"
-
-	"cmd184psu/unified-webapp/internal/agentflow/model"
-	"cmd184psu/unified-webapp/internal/agentflow/store"
+	"time"
 )
 
 func main() {
-	db := flag.String("db", "", "the instance's agentflow.db")
+	base := flag.String("url", "http://127.0.0.1:8788", "the agentflow instance")
+	project := flag.String("project", "", "project slug (smoke-*)")
 	effort := flag.Int64("effort", 0, "effort id")
 	tasks := flag.String("tasks", "", "JSON file: an array of task definitions")
-	actor := flag.String("actor", "agentflow-seed", "actor recorded on the queue events")
-	anyProject := flag.Bool("any-project", false, "seed an effort of a project not named smoke-*")
 	flag.Parse()
-	if err := run(*db, *effort, *tasks, *actor, *anyProject); err != nil {
+	if err := run(strings.TrimRight(*base, "/"), *project, *effort, *tasks); err != nil {
 		fmt.Fprintln(os.Stderr, "agentflow-seed:", err)
 		os.Exit(1)
 	}
 }
 
-func run(db string, effort int64, tasksFile, actor string, anyProject bool) error {
-	if db == "" || effort <= 0 || tasksFile == "" {
-		return fmt.Errorf("-db, -effort and -tasks are required")
+func run(base, project string, effort int64, tasksFile string) error {
+	if project == "" || effort <= 0 || tasksFile == "" {
+		return fmt.Errorf("-project, -effort and -tasks are required")
 	}
 	b, err := os.ReadFile(tasksFile)
 	if err != nil {
 		return err
 	}
-	var defs []model.TaskDef
+	var defs []json.RawMessage
 	if err := json.Unmarshal(b, &defs); err != nil {
 		return fmt.Errorf("%s: %w", tasksFile, err)
 	}
-	st, err := store.OpenCurrent(db)
+	body, _ := json.Marshal(map[string]any{"tasks": defs})
+	url := fmt.Sprintf("%s/api/projects/%s/efforts/%d/queue/seed", base, project, effort)
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
-	defer st.Close()
-	ctx := context.Background()
-	ef, err := st.GetEffort(ctx, effort)
-	if err != nil {
-		return fmt.Errorf("effort %d: %w", effort, err)
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s: %d %s", url, resp.StatusCode, strings.TrimSpace(string(out)))
 	}
-	if !anyProject && !strings.HasPrefix(ef.Project, "smoke-") {
-		return fmt.Errorf("effort %d belongs to project %q, not a smoke-* project (pass -any-project to seed it anyway)", effort, ef.Project)
-	}
-	q, err := st.SaveQueue(ctx, actor, effort, defs)
-	if err != nil {
-		return err
-	}
-	if _, err := st.ApproveQueue(ctx, actor, effort, q.Hash); err != nil {
-		return err
-	}
-	fmt.Printf("queue approved: effort %d, %d task(s), hash %s\n", effort, len(defs), q.Hash)
+	fmt.Printf("queue approved: %s effort %d, %d task(s)\n", project, effort, len(defs))
 	return nil
 }

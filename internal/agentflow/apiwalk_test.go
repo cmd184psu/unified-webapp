@@ -269,6 +269,7 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 		t.Fatalf("queue: %v", err)
 	}
 	ok("POST", base+"/yolo", `{"on":false}`, 0)
+	ok("POST", base+"/queue/seed", `{"tasks":[]}`, 403) // not a smoke-* project
 	ok("POST", base+"/queue/approve", `{"hash":`+strconv.Quote(q.Hash)+`}`, 200)
 
 	// Live streams: the event stream and one stage's output.

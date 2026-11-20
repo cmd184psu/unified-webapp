@@ -11,7 +11,7 @@ package main
 
 import (
 	"bytes"
-	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -31,7 +31,8 @@ import (
 	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/model"
-	"cmd184psu/unified-webapp/internal/agentflow/store"
+
+	_ "modernc.org/sqlite"
 )
 
 const notifyText = "Agentflow needs attention"
@@ -55,7 +56,6 @@ type smoke struct {
 
 	mu      sync.Mutex
 	results []result
-	dbMu    sync.Mutex // one writer at a time beside the server
 	efforts map[string]int64
 }
 
@@ -67,7 +67,7 @@ type result struct {
 
 func main() {
 	urlFlag := flag.String("url", "http://127.0.0.1:8788", "the agentflow instance")
-	dbFlag := flag.String("db", "", "the instance's agentflow.db (default: dev's, for port 8788)")
+	dbFlag := flag.String("db", "", "the instance's agentflow.db, read only for the restart scenario's adoption event (default: dev's, for port 8788)")
 	restartFlag := flag.String("restart", "auto", "run the drain-restart scenario: yes, no, auto (yes on 8788 only)")
 	opencodeStub := flag.String("stub", "", "the opencode stub server binary (scripts/agentflow-smoke.sh builds it)")
 	keep := flag.Bool("keep", false, "leave the projects, backends and temp dir for inspection")
@@ -77,15 +77,15 @@ func main() {
 	if err != nil {
 		fatal("bad -url: %v", err)
 	}
+	restart := *restartFlag == "yes" || (*restartFlag == "auto" && u.Port() == "8788")
 	db := *dbFlag
-	if db == "" {
-		if u.Port() != "8788" {
-			fatal("-db is required for an instance other than dev (8788)")
-		}
+	if db == "" && u.Port() == "8788" {
 		home, _ := os.UserHomeDir()
 		db = filepath.Join(home, "work", "af-dev", "data", "agentflow", "agentflow.db")
 	}
-	restart := *restartFlag == "yes" || (*restartFlag == "auto" && u.Port() == "8788")
+	if restart && db == "" {
+		fatal("-db is required for the restart scenario on an instance other than dev (8788)")
+	}
 
 	s := &smoke{base: strings.TrimRight(*urlFlag, "/"), db: db, ts: time.Now().Format("150405"),
 		client: &http.Client{Timeout: 30 * time.Second}}
@@ -408,42 +408,14 @@ func (s *smoke) newProject(p *scenarioProject, reviewer [2]string) error {
 	prompt := fmt.Sprintf("Create the file %s in the repository root containing one line. SMOKE-MODE: %s SMOKE-FILE: %s", p.file, p.mode, p.file)
 	defs := []model.TaskDef{{Key: "T001", Phase: "P1", Title: "smoke " + p.key, Prompt: prompt,
 		Acceptance: []string{p.file + " exists"}, FilesTouched: []string{p.file}}}
-	return s.seed(p.effort, defs)
+	return s.seed(p.slug, p.effort, defs)
 }
 
-func (s *smoke) seed(effort int64, defs []model.TaskDef) error {
-	var err error
-	for try := 0; try < 10; try++ {
-		if err = s.seedOnce(effort, defs); err == nil || !busy(err) {
-			return err
-		}
-		time.Sleep(time.Duration(200*(try+1)) * time.Millisecond)
-	}
-	return err
-}
-
-// busy is SQLite's lock contention with the running server (SQLITE_BUSY and its
-// extended codes, such as 517 BUSY_SNAPSHOT): worth another try.
-func busy(err error) bool {
-	m := err.Error()
-	return strings.Contains(m, "SQLITE_BUSY") || strings.Contains(m, "database is locked")
-}
-
-func (s *smoke) seedOnce(effort int64, defs []model.TaskDef) error {
-	s.dbMu.Lock()
-	defer s.dbMu.Unlock()
-	st, err := store.OpenCurrent(s.db)
-	if err != nil {
-		return fmt.Errorf("seed: %w", err)
-	}
-	defer st.Close()
-	ctx := context.Background()
-	q, err := st.SaveQueue(ctx, "agentflow-smoke", effort, defs)
-	if err != nil {
-		return fmt.Errorf("seed: %w", err)
-	}
-	_, err = st.ApproveQueue(ctx, "agentflow-smoke", effort, q.Hash)
-	return err
+// seed saves and approves the effort's queue through the server (smoke-* projects only).
+// Never by writing the database from here: an outside writer makes the server's own
+// transactions fail with SQLITE_BUSY.
+func (s *smoke) seed(slug string, effort int64, defs []model.TaskDef) error {
+	return s.do("POST", fmt.Sprintf("/api/projects/%s/efforts/%d/queue/seed", slug, effort), map[string]any{"tasks": defs}, nil)
 }
 
 func (s *smoke) start(p *scenarioProject) error {
@@ -588,16 +560,16 @@ func (s *smoke) capture(session string) string {
 	return string(out)
 }
 
+// events counts a stage's audit events, read from the instance's database through a
+// read-only connection (a WAL reader never blocks the server's writes).
 func (s *smoke) events(action string, stage int64) (int, error) {
-	s.dbMu.Lock()
-	defer s.dbMu.Unlock()
-	st, err := store.OpenCurrent(s.db)
+	db, err := sql.Open("sqlite", "file:"+s.db+"?mode=ro")
 	if err != nil {
 		return 0, err
 	}
-	defer st.Close()
+	defer db.Close()
 	var n int
-	err = st.DB().QueryRow(`SELECT COUNT(*) FROM events WHERE action = ? AND subject_type = 'stage' AND subject_id = ?`, action, strconv.FormatInt(stage, 10)).Scan(&n)
+	err = db.QueryRow(`SELECT COUNT(*) FROM events WHERE action = ? AND subject_type = 'stage' AND subject_id = ?`, action, strconv.FormatInt(stage, 10)).Scan(&n)
 	return n, err
 }
 

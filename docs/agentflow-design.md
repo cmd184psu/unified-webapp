@@ -544,8 +544,11 @@ text and its debounce; a halt text; a queue seat nudge; and a classic opencode w
 the local stub model server. It creates only `smoke-<time>-*` projects, backends and seat
 profiles and `af-smoke-<time>-*` tmux sessions, wraps `notify_command` for the run (the
 previous command still runs) and removes or restores all of it at the end. Queues are seeded
-with `cmd/agentflow-seed`'s path (`store.OpenCurrent`, which never migrates a database and
-seeds only `smoke-*` projects unless told otherwise). A second run within ten minutes of a
+through `POST /api/projects/{slug}/efforts/{id}/queue/seed`, which saves and approves a queue
+for a `smoke-*` project only (any other project is refused: an approved queue skips every
+planning review); `cmd/agentflow-seed` is its command-line client. Nothing outside the server
+writes its database: an outside writer makes the server's own transactions fail with
+`SQLITE_BUSY`. A second run within ten minutes of a
 notification fails the notify scenario: that is the debounce holding.
 
 ## Notifications
