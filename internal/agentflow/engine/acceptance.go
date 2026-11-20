@@ -25,6 +25,7 @@ import (
 
 const (
 	acceptanceRef          = "acceptance"
+	acceptancePhase        = "acceptance" // the phase of a gap's follow-up task
 	eventAcceptanceFound   = "acceptance.found"
 	eventAcceptancePassed  = "acceptance.passed"
 	eventAcceptanceLeft    = "acceptance.gaps_left"
@@ -63,6 +64,11 @@ func (e *Engine) acceptancePrompt(ctx context.Context, st model.Stage) (string, 
 	if d, err := e.deps.Store.GetDoc(ctx, st.Effort, model.DocFRD, 0); err == nil {
 		frd = compactJSON(d.JSON)
 	}
+	rep, ok, err := e.mergedHeadReport(ctx, st.Effort)
+	if err != nil {
+		return "", err
+	}
+	text = strings.ReplaceAll(text, "{{ENGINE_CHECKS}}", engineChecksSection(rep, ok))
 	return strings.ReplaceAll(text, "{{FRD_JSON}}", frd), nil
 }
 
@@ -142,10 +148,22 @@ func (e *Engine) acceptance(ctx context.Context, proj store.Project, ef model.Ef
 	if err != nil {
 		return skip(err.Error())
 	}
-	if out.Verdict == "pass" || len(out.Gaps) == 0 {
-		return true, e.noteEffort(ctx, SystemActor, eventAcceptancePassed, ef.ID, map[string]any{"round": round + 1, "stage": last.ID, "summary": out.Summary})
-	}
 	gaps := out.Gaps
+	var covered []schema.Gap
+	if out.Verdict != "pass" && len(gaps) > 0 {
+		rep, ok, err := e.mergedHeadReport(ctx, ef.ID)
+		if err != nil {
+			return false, err
+		}
+		gaps, covered = dropCoveredGaps(gaps, rep, ok)
+	}
+	if out.Verdict == "pass" || len(gaps) == 0 {
+		detail := map[string]any{"round": round + 1, "stage": last.ID, "summary": out.Summary}
+		if len(covered) > 0 {
+			detail["covered_by_verify"] = covered
+		}
+		return true, e.noteEffort(ctx, SystemActor, eventAcceptancePassed, ef.ID, detail)
+	}
 	if len(gaps) > maxAcceptanceGaps {
 		gaps = gaps[:maxAcceptanceGaps]
 	}
@@ -157,8 +175,11 @@ func (e *Engine) acceptance(ctx context.Context, proj store.Project, ef model.Ef
 		return true, e.noteEffort(ctx, SystemActor, eventAcceptanceLeft, ef.ID, map[string]any{"round": round + 1, "stage": last.ID, "gaps": gaps})
 	}
 	defs := followUpTasks(round+1, gaps)
-	err = e.deps.Store.AddTasks(ctx, SystemActor, ef.ID, defs, eventAcceptanceFound,
-		map[string]any{"round": round + 1, "after_stage": last.ID, "stage": last.ID, "gaps": gaps})
+	detail := map[string]any{"round": round + 1, "after_stage": last.ID, "stage": last.ID, "gaps": gaps}
+	if len(covered) > 0 {
+		detail["covered_by_verify"] = covered
+	}
+	err = e.deps.Store.AddTasks(ctx, SystemActor, ef.ID, defs, eventAcceptanceFound, detail)
 	if err != nil {
 		return false, err
 	}
@@ -182,9 +203,10 @@ func followUpTasks(round int, gaps []schema.Gap) []model.TaskDef {
 	for i, g := range gaps {
 		d := model.TaskDef{
 			Key:   fmt.Sprintf("A%d-%d", round, i+1),
-			Phase: "acceptance",
+			Phase: acceptancePhase,
 			Title: "Close gap in " + g.Requirement + ": " + clip(g.Problem, 80),
-			Prompt: fmt.Sprintf("A check of the finished work against the approved requirements found a gap. Close it, and change nothing else: every other task is done and passed.\n\nRequirement: %s\n\nWhat is wrong: %s\n\nEvidence: %s\n\nWhat to change: %s\n",
+			Prompt: fmt.Sprintf("A check of the finished work against the approved requirements found a gap. Close it, and change nothing else: every other task is done and passed.\n\nRequirement: %s\n\nWhat is wrong: %s\n\nEvidence: %s\n\nWhat to change: %s\n\n"+
+				"The engine builds, vets, formats-checks and tests the result itself after you finish; do not stop or ask for input because you cannot run those commands. If the files already meet the requirement, change nothing and say why in no_changes_reason.\n",
 				g.Requirement, g.Problem, g.Evidence, g.Fix),
 			Acceptance: []string{g.Requirement + ": the gap is closed: " + g.Problem},
 		}

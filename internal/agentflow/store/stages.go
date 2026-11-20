@@ -192,3 +192,16 @@ func (s *Store) BackendRestUntil(ctx context.Context, backend string, duty int, 
 	}
 	return until, rows.Err()
 }
+
+// LatestMergeStage returns the effort's newest finished merge stage with the given outcome, or
+// ErrNotFound. Its parsed report is the post-merge verify of the effort's merged head (AF-13).
+func (s *Store) LatestMergeStage(ctx context.Context, effort int64, outcome string) (model.Stage, error) {
+	out, err := s.queryStages(ctx, `role = 'merge' AND state = 'done' AND outcome = ? AND attempt IN (SELECT a.id FROM attempts a JOIN tasks t ON t.id = a.task JOIN queues q ON q.id = t.queue WHERE q.effort = ?)`, outcome, effort)
+	if err != nil {
+		return model.Stage{}, err
+	}
+	if len(out) == 0 {
+		return model.Stage{}, fmt.Errorf("merge stage of effort %d: %w", effort, ErrNotFound)
+	}
+	return out[len(out)-1], nil
+}

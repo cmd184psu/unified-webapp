@@ -327,6 +327,19 @@ func (e *Engine) submitReview(ctx context.Context, c *chain, last model.Stage) (
 	if !verifyPassed(last) {
 		return true, e.fail(ctx, c, Failure{Kind: FailVerify, Stage: last})
 	}
+	// AF-13: an acceptance gap task whose worker changed nothing, with a reason, and whose
+	// verify passed on the unchanged head (the feedback commands ran on it) is done: the
+	// acceptance check runs again over the same tree, so a reviewer adds nothing, and no
+	// coordinator answer is needed.
+	if c.task.Phase == acceptancePhase {
+		if reason := c.noChangesReason(); reason != "" {
+			if none, err := e.atBase(ctx, c); err != nil {
+				return false, err
+			} else if none {
+				return true, e.completeNoChanges(ctx, c, reason)
+			}
+		}
+	}
 	pk, reason, err := e.pickBackend(ctx, "reviewer", c.task, c.proj, c.workerModel())
 	if err != nil || reason != "" {
 		return false, err

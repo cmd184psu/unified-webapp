@@ -8,6 +8,10 @@ Your working directory is the merged result. Read the files; do not guess.
 
 {{FRD_JSON}}
 
+## The engine's checks
+
+{{ENGINE_CHECKS}}
+
 ## How to check
 
 1. Take the requirements one at a time, in order. For each, find the code that meets it and read that code. Do the same for each acceptance criterion.
@@ -17,6 +21,7 @@ Your working directory is the merged result. Read the files; do not guess.
 5. For every input the FRD names or implies as an edge case (zero, negative, empty, huge, fractional, repeated, malformed), follow it through the code and say what the code returns.
 6. A gap is a requirement the code does not meet, or meets only in part. Wording, naming and style are never gaps. A requirement that is met is not a gap, however the code is written.
 7. Back every gap with evidence: the file and the exact line, or the exact place a needed line is missing. If you cannot point to it, it is not a gap.
+8. A criterion that the engine's checks above cover (it builds, vet is clean, the tests pass, the code is formatted, lint is clean) is verified by those checks: it is met when they passed and not met when they failed. Never report a gap because you could not run a command yourself, and never ask a worker to run one.
 
 ## Rules
 
