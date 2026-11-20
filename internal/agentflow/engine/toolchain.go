@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"encoding/json"
+
 	"cmd184psu/unified-webapp/internal/agentflow/model"
 	"cmd184psu/unified-webapp/internal/agentflow/store"
 )
@@ -47,15 +49,39 @@ func workerRelaxations(t model.Task) []string {
 	return []string{relaxUnconfinedRunner}
 }
 
-// sandboxedBackend reports whether the backend's agent runs inside agentflow's
-// sandbox. The opencode adapter is the only one that does (hosted opencode
-// backends such as Beam included); the codex, claude, muse, agy and grok
-// adapters run their host CLI directly.
-func sandboxedBackend(v *view, name string) bool {
+// sandboxedBackend reports whether the candidate's agent runs inside agentflow's
+// sandbox. The opencode adapter does (hosted opencode backends such as Beam
+// included), and so does a freebuff_seat (AF-11), whose program agentflow starts
+// in the host sandbox, unless the candidate's profile is a queue seat: that one is
+// the owner's own session, which agentflow never starts. The codex, claude, muse,
+// agy and grok adapters run their host CLI directly, and a botchat_seat is an
+// agent outside agentflow altogether.
+func sandboxedBackend(v *view, c store.Candidate) bool {
 	for _, b := range v.snap.Backends {
-		if b.Name == name {
-			return b.APIType == "opencode"
+		if b.Name == c.Backend {
+			switch b.APIType {
+			case "opencode":
+				return true
+			case "freebuff_seat":
+				return !queueSeatProfile(v.snap.Settings.SeatProfiles, c.Model)
+			}
+			return false
 		}
 	}
 	return false
+}
+
+// queueSeatProfile reports whether the seat_profiles setting makes name a queue
+// seat (it names the owner's tmux_session). A built-in profile never is.
+func queueSeatProfile(profiles, name string) bool {
+	if profiles == "" {
+		return false
+	}
+	var m map[string]struct {
+		TmuxSession string `json:"tmux_session"`
+	}
+	if json.Unmarshal([]byte(profiles), &m) != nil {
+		return false
+	}
+	return m[name].TmuxSession != ""
 }

@@ -113,3 +113,26 @@ func TestAF6bNoUnconfinedWorkerWaits(t *testing.T) {
 		t.Fatalf("waiting reason = %q", tk.WaitingReason)
 	}
 }
+
+// AF-13: a freebuff seat runs its program in the host sandbox, so a dotnet task
+// skips it, but a queue seat is the owner's own session and does not.
+func TestAF13FreebuffSeatIsSandboxedUnlessItIsAQueueSeat(t *testing.T) {
+	v := &view{snap: store.Snapshot{
+		Settings: store.Settings{SeatProfiles: `{"q":{"tmux_session":"deepseek4","queue_file":"/x/q.md"},"fb":{"command":["freebuff"]}}`},
+		Backends: []store.Backend{{Name: "seat", APIType: "freebuff_seat"}, {Name: "bc", APIType: "botchat_seat"}, {Name: "oc", APIType: "opencode"}},
+	}}
+	for _, tc := range []struct {
+		c    store.Candidate
+		want bool
+	}{
+		{store.Candidate{Backend: "seat", Model: "fb"}, true},
+		{store.Candidate{Backend: "seat", Model: "freebuff"}, true},
+		{store.Candidate{Backend: "seat", Model: "q"}, false},
+		{store.Candidate{Backend: "bc", Model: "deepseek4"}, false},
+		{store.Candidate{Backend: "oc", Model: "m"}, true},
+	} {
+		if got := sandboxedBackend(v, tc.c); got != tc.want {
+			t.Errorf("%s/%s sandboxed = %v, want %v", tc.c.Backend, tc.c.Model, got, tc.want)
+		}
+	}
+}

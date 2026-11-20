@@ -406,7 +406,7 @@ func pickWorker(v *view, p store.Project, sticky string, avoid map[string]int, m
 	var reasons []string
 	cands := v.candidates("worker", p.Slug)
 	skipSandboxed := func(c store.Candidate) string {
-		if unconfined && sandboxedBackend(v, c.Backend) {
+		if unconfined && sandboxedBackend(v, c) {
 			return fmt.Sprintf("backend %s runs in the sandbox and this task needs an unconfined worker (dotnet)", c.Backend)
 		}
 		return ""
