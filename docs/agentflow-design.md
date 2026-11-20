@@ -426,6 +426,18 @@ so it costs no tokens. There are two kinds, and they share one set of rules.
   multiplexer session named `af-<project>-<effort>-<task>-<stage>`, inside the stage's sandbox
   (seatbelt or bwrap, the stage home as HOME, credentials hidden, the network on). The backend's
   model names the profile (`freebuff` by default).
+- **Queue seats** (a `freebuff_seat` profile with `tmux_session`, AF-11b): a seat the owner
+  runs by hand in their own tmux session, working from a queue file. Agentflow never starts,
+  kills or sandboxes that session. It writes the stage's task into `queue_file` as a block
+  between `<!-- agentflow stage N begin -->` and `<!-- agentflow stage N end -->` (the rest of
+  the file is kept), with the worktree to work in and an absolute `RESULT.json` path in the
+  stage directory. It then nudges the session: `nudge_text` (default `check your queue`),
+  Enter, about 2 s, Enter. If the screen stays still for `nudge_wait` (60 s) it nudges again,
+  three times at most, then lists the stage as `seat_silent`. A halt text on the screen means
+  no key at all and `seat_question`; a session that is not running is listed, never started.
+  When the stage ends, or is cancelled, its block leaves the queue file, and that is all a
+  cancel does. This is the only way agentflow types into a session it did not start, and only
+  once the owner configures such a profile.
 
 ### The rules every seat follows
 
@@ -483,6 +495,8 @@ the UI shows them under the attention banner.
   agentflow types nothing and presses no key, not even an answer, and the stage is listed as
   `seat_question`. freebuff's: its login prompt, and "session in use elsewhere ... take over":
   one freebuff login has one live session, and taking it over stops the owner's other instance.
+  A queue seat profile has `tmux_session`, `queue_file`, `nudge_text`, `nudge_wait` and
+  `halt_texts` instead of a command.
 - `botchat_url`, `botchat_key_file`: the BotChat service, read on every call.
 
 Where the seat runs (the host sandbox today, a container later) is the sandbox builder's

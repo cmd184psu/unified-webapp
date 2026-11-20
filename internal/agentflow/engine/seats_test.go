@@ -87,7 +87,7 @@ func (f *fakeSeats) Cancel(_ context.Context, _ string, stage int64, _ string) e
 	return nil
 }
 func (f *fakeSeats) Answer(context.Context, string, int64, string, string) error { return nil }
-func (f *fakeSeats) Attach(_ context.Context, _ string, stage int64) string {
+func (f *fakeSeats) Attach(_ context.Context, _ string, stage int64, _ string) string {
 	return "tmux attach -t af-test-" + strconv.FormatInt(stage, 10)
 }
 func (f *fakeSeats) Sweep(_ context.Context, open func(int64) bool) error {

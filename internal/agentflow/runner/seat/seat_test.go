@@ -192,7 +192,7 @@ func TestARestartAdoptsTheSession(t *testing.T) {
 		t.Fatalf("err = %v, want detached", o.err)
 	}
 	b := fakeSeat(t, fm, "wait", map[string]string{"SEAT_GO": goFile}) // the next process
-	if !b.Alive(context.Background(), 42) {
+	if !b.Alive(context.Background(), 42, req.StageDir) {
 		t.Fatal("the next process should see the session")
 	}
 	ch = runAsync(b, context.Background(), req)
@@ -226,8 +226,10 @@ func TestKillEndsTheCallAsCancelled(t *testing.T) {
 	req := seatReq(t, "worker")
 	ctx, cancel := context.WithCancel(context.Background())
 	ch := runAsync(a, ctx, req)
-	waitFor(t, "the session", func() bool { return a.Alive(context.Background(), 42) && len(fm.TypedInto(SessionName(req.Job))) == 2 })
-	if err := a.Kill(context.Background(), 42); err != nil {
+	waitFor(t, "the session", func() bool {
+		return a.Alive(context.Background(), 42, req.StageDir) && len(fm.TypedInto(SessionName(req.Job))) == 2
+	})
+	if err := a.Kill(context.Background(), 42, req.StageDir); err != nil {
 		t.Fatal(err)
 	}
 	cancel()
@@ -417,7 +419,7 @@ func TestACancelledSeatDropsItsLoginCopy(t *testing.T) {
 	if _, err := os.Stat(loginCopy(req)); err != nil {
 		t.Fatalf("the running seat needs its login copy: %v", err)
 	}
-	if err := a.Kill(context.Background(), 42); err != nil {
+	if err := a.Kill(context.Background(), 42, req.StageDir); err != nil {
 		t.Fatal(err)
 	}
 	cancel()

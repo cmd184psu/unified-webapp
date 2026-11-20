@@ -31,7 +31,7 @@ type SeatControl interface {
 	// Answer hands the owner's answer to the stage's seat.
 	Answer(ctx context.Context, apiType string, stage int64, stageDir, text string) error
 	// Attach is the command that opens the stage's terminal, "" when it has none.
-	Attach(ctx context.Context, apiType string, stage int64) string
+	Attach(ctx context.Context, apiType string, stage int64, stageDir string) string
 	// Sweep ends seat sessions whose stage is no longer open.
 	Sweep(ctx context.Context, open func(stage int64) bool) error
 	// Notices lists the seat stages waiting on the owner.
@@ -190,7 +190,7 @@ func (e *Engine) SeatStages(ctx context.Context) ([]SeatStage, error) {
 		}
 		project, effort, task := e.stageWhere(ctx, st)
 		ss := SeatStage{Stage: st.ID, Project: project, Effort: effort, Task: task, Role: st.Role,
-			Backend: st.Backend, APIType: t, Model: st.Model, Attach: e.deps.Seats.Attach(ctx, t, st.ID)}
+			Backend: st.Backend, APIType: t, Model: st.Model, Attach: e.deps.Seats.Attach(ctx, t, st.ID, e.StageDir(st.ID))}
 		if n, ok := notices[st.ID]; ok {
 			n := n
 			ss.Waiting = &n

@@ -30,6 +30,9 @@ var stateWriters = map[string]string{
 	"runner/seat/seat.go:writeTask":                "TASK.md in the stage home: the prompt the seat reads",
 	"runner/seat/seat.go:installConfig":            "the seat program's login copied into the stage home (0600, removed when the stage ends)",
 	"runner/seat/seat.go:wait":                     "QUESTION.open and seat-screen.txt in the stage dir: the open question, the seat's last screen",
+	"runner/seat/queue.go:writeQueueState":         "queue-seat.json in the stage dir: the queue seat stage (owner session, queue file, nudges)",
+	"runner/seat/queue.go:writeKeepingMode":        "the queue seat's queue file the owner configured: only the stage's marked block is added or removed",
+	"runner/seat/queue.go:runQueue":                "QUESTION.open in the stage dir: the queue seat's open question",
 	"runner/mux/tmux.go:Create":                    "<stage dir>/<session>.launch.sh: a command too long for tmux's command line",
 }
 

@@ -101,6 +101,19 @@ type Profile struct {
 	HaltTexts []string `json:"halt_texts,omitempty"`
 	// Env is extra environment for the program.
 	Env map[string]string `json:"env,omitempty"`
+
+	// TmuxSession makes the profile a queue seat (AF-11b): the owner's own, already running
+	// session. agentflow never starts, kills or sandboxes it; Command is not used.
+	TmuxSession string `json:"tmux_session,omitempty"`
+	// QueueFile is the queue seat's queue file (absolute or "~/..."): the stage's task is
+	// written into it as a marked block, removed when the stage ends or is cancelled.
+	QueueFile string `json:"queue_file,omitempty"`
+	// NudgeText is typed to wake a queue seat (default "check your queue"), then Enter, a
+	// pause and Enter again.
+	NudgeText string `json:"nudge_text,omitempty"`
+	// NudgeWait is how long a nudged screen may stand still before the next nudge (60s);
+	// after three nudges the stage needs attention.
+	NudgeWait Duration `json:"nudge_wait,omitempty"`
 }
 
 // Freebuff is the built-in profile: freebuff in the worktree, given the network.
@@ -124,6 +137,9 @@ func Freebuff() Profile {
 }
 
 // halted returns the halt text on the screen, or "".
+// stillView is the screen as silence detection compares it.
+func stillView(prof Profile, screen string) string { return screen }
+
 func halted(prof Profile, screen string) string {
 	for _, t := range prof.HaltTexts {
 		if t != "" && strings.Contains(screen, t) {
@@ -175,6 +191,8 @@ type Adapter struct {
 	// Poll is how often RESULT.json and the screen are read (default 3s).
 	Poll  time.Duration
 	Clock func() time.Time
+	// NudgeGap is the pause between a queue seat nudge's two Enters (default 2s).
+	NudgeGap time.Duration
 }
 
 var _ runner.Runner = (*Adapter)(nil)
@@ -239,6 +257,12 @@ func (a *Adapter) profile(ctx context.Context, name string) (Profile, error) {
 	}
 	if a.Profiles != nil {
 		if p, ok := a.Profiles(ctx)[name]; ok {
+			if p.TmuxSession != "" {
+				if !mux.Valid(p.TmuxSession) || p.QueueFile == "" {
+					return p, fmt.Errorf("queue seat profile %q needs a valid tmux_session and a queue_file", name)
+				}
+				return p, nil
+			}
 			if len(p.Command) == 0 {
 				return p, fmt.Errorf("seat profile %q has no command", name)
 			}
@@ -308,6 +332,11 @@ func (a *Adapter) run(ctx context.Context, req runner.Request) (runner.Result, e
 	m, err := a.Mux(ctx)
 	if err != nil {
 		return failed(runner.ErrCrash, "seat: "+err.Error(), err)
+	}
+	if prof, err := a.profile(ctx, req.Model); err == nil && prof.TmuxSession != "" {
+		return a.runQueue(ctx, m, req, req.Model, prof)
+	} else if q, ok := readQueueState(req.StageDir); ok {
+		return failed(runner.ErrCrash, fmt.Sprintf("seat: stage was queued to %s but profile %q is no longer a queue seat", q.Session, req.Model), err)
 	}
 	name := SessionName(req.Job)
 	home := HomeDir(req.StageDir)
@@ -649,6 +678,9 @@ func (a *Adapter) Answer(ctx context.Context, stage int64, stageDir, text string
 	if text == "" {
 		return errors.New("seat: the answer is empty")
 	}
+	if isQueue(stageDir) {
+		return a.answerQueue(ctx, stage, stageDir, text)
+	}
 	m, err := a.Mux(ctx)
 	if err != nil {
 		return err
@@ -724,7 +756,10 @@ func (a *Adapter) SessionFor(ctx context.Context, stage int64) (string, error) {
 }
 
 // Attach is the command that opens the stage's session, or "" with none.
-func (a *Adapter) Attach(ctx context.Context, stage int64) string {
+func (a *Adapter) Attach(ctx context.Context, stage int64, stageDir string) string {
+	if q, ok := readQueueState(stageDir); ok {
+		return "tmux attach -t " + q.Session
+	}
 	n, err := a.SessionFor(ctx, stage)
 	if err != nil {
 		return ""
@@ -737,13 +772,20 @@ func (a *Adapter) Attach(ctx context.Context, stage int64) string {
 }
 
 // Alive says the stage has a live session of this instance.
-func (a *Adapter) Alive(ctx context.Context, stage int64) bool {
+func (a *Adapter) Alive(ctx context.Context, stage int64, stageDir string) bool {
+	if q, ok := readQueueState(stageDir); ok {
+		return !q.Cancelled // the task waits in the queue file even while the session is down
+	}
 	_, err := a.SessionFor(ctx, stage)
 	return err == nil
 }
 
-// Kill ends the stage's session; the running call then returns as cancelled.
-func (a *Adapter) Kill(ctx context.Context, stage int64) error {
+// Kill ends the stage's session; the running call then returns as cancelled. A queue seat's
+// session is never killed: its task leaves the queue file instead.
+func (a *Adapter) Kill(ctx context.Context, stage int64, stageDir string) error {
+	if isQueue(stageDir) {
+		return a.cancelQueue(stage, stageDir)
+	}
 	n, err := a.SessionFor(ctx, stage)
 	if errors.Is(err, mux.ErrNoSession) {
 		return nil

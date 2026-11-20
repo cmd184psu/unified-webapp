@@ -146,7 +146,7 @@ func (s *seats) IsSeat(apiType string) bool {
 func (s *seats) Alive(ctx context.Context, apiType string, stage int64, stageDir string) bool {
 	switch apiType {
 	case seat.APIType:
-		return s.term.Alive(ctx, stage)
+		return s.term.Alive(ctx, stage, stageDir)
 	case botchatseat.APIType:
 		return s.chat.Alive(ctx, stageDir)
 	}
@@ -156,7 +156,7 @@ func (s *seats) Alive(ctx context.Context, apiType string, stage int64, stageDir
 func (s *seats) Cancel(ctx context.Context, apiType string, stage int64, stageDir string) error {
 	switch apiType {
 	case seat.APIType:
-		return s.term.Kill(ctx, stage)
+		return s.term.Kill(ctx, stage, stageDir)
 	case botchatseat.APIType:
 		return s.chat.Cancel(ctx, stage, stageDir)
 	}
@@ -173,9 +173,9 @@ func (s *seats) Answer(ctx context.Context, apiType string, stage int64, stageDi
 	return fmt.Errorf("api type %s is not a seat", apiType)
 }
 
-func (s *seats) Attach(ctx context.Context, apiType string, stage int64) string {
+func (s *seats) Attach(ctx context.Context, apiType string, stage int64, stageDir string) string {
 	if apiType == seat.APIType {
-		return s.term.Attach(ctx, stage)
+		return s.term.Attach(ctx, stage, stageDir)
 	}
 	return ""
 }
