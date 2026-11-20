@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	_ "modernc.org/sqlite"
@@ -36,6 +37,30 @@ func dsnFor(path string) string {
 // the database is newer than this build.
 func Open(path string) (*Store, error) {
 	return openWith(path, migrations)
+}
+
+// OpenCurrent opens an existing database without changing its schema, for a tool that writes
+// to a running instance's database (cmd/agentflow-seed). It refuses one whose schema is not
+// exactly this build's: only the server migrates its database.
+func OpenCurrent(path string) (*Store, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, err
+	}
+	want := migrations[len(migrations)-1].version
+	db, err := sql.Open("sqlite", dsnFor(path))
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite: %w", err)
+	}
+	var have int
+	err = db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&have)
+	db.Close()
+	if err != nil {
+		return nil, fmt.Errorf("read schema_version: %w", err)
+	}
+	if have != want {
+		return nil, fmt.Errorf("database schema is version %d, this build's is %d: use a build of the instance's own version", have, want)
+	}
+	return openWith(path, migrations) // every step is already applied: nothing runs
 }
 
 func openWith(path string, migs []migration) (*Store, error) {

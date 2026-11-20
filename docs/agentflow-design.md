@@ -503,6 +503,22 @@ Where the seat runs (the host sandbox today, a container later) is the sandbox b
 business; how agentflow talks to it (session, typed line, `RESULT.json`) is the runner's. A
 container seat would only change the command the session runs.
 
+## Smoke check (`scripts/agentflow-smoke.sh`)
+
+One command proves a running instance end to end with stand-ins only (no model, no tokens,
+about two minutes): `scripts/agentflow-smoke.sh` for dev (8788), or
+`scripts/agentflow-smoke.sh -url http://127.0.0.1:8787 -db <data dir>/agentflow.db` for
+another instance. It prints `PASS`/`FAIL` per scenario: worker, verify, review and merge; a
+question and its answer; a drain restart that adopts the seat (dev only unless
+`-restart yes`, because it pauses every running project); cancel; silence; the notification
+text and its debounce; a halt text; a queue seat nudge; and a classic opencode worker against
+the local stub model server. It creates only `smoke-<time>-*` projects, backends and seat
+profiles and `af-smoke-<time>-*` tmux sessions, wraps `notify_command` for the run (the
+previous command still runs) and removes or restores all of it at the end. Queues are seeded
+with `cmd/agentflow-seed`'s path (`store.OpenCurrent`, which never migrates a database and
+seeds only `smoke-*` projects unless told otherwise). A second run within ten minutes of a
+notification fails the notify scenario: that is the debounce holding.
+
 ## Notifications
 
 When the attention list (`GET /api/attention`) gains an item, agentflow sends exactly

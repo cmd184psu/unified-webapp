@@ -1,4 +1,4 @@
-// Command smoke is the operator-run live check behind scripts/agentflow-smoke.sh.
+// Command smoke is the operator-run live check behind scripts/agentflow-opencode-smoke.sh.
 // It runs ONE real opencode stage through the production adapter and proves
 //
 //	AC-OC1: a prompt of at least AGENTFLOW_SMOKE_PROMPT_KB (default 500) KB

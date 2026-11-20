@@ -3,6 +3,10 @@ package main
 // OpenAI-compatible stub. Script file (JSON array) is consumed one entry per
 // /chat/completions request; when exhausted, the last entry repeats (or default text).
 // entry: {"kind":"text|tool|status|hang|close","text":"..","tool":"bash","args":{..},"status":429,"body":".."}
+//
+// With -agent the script is [tool call, final answer] and the reply depends on the request,
+// not on how many came before: a request whose last message is a tool result gets the final
+// answer, any other the tool call (requests without tools, opencode's title, get "Title Stub").
 import (
 	"encoding/json"
 	"flag"
@@ -29,6 +33,7 @@ var (
 	mu     sync.Mutex
 	script []entry
 	idx    int
+	agent  = new(bool)
 	logf   *os.File
 )
 
@@ -57,6 +62,7 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:18080", "")
 	sf := flag.String("script", "", "")
 	lf := flag.String("log", "stub.log.jsonl", "")
+	flag.BoolVar(agent, "agent", false, "answer by request shape: the tool call, then the final answer")
 	flag.Parse()
 	var err error
 	logf, err = os.OpenFile(*lf, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
@@ -130,7 +136,17 @@ func handle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	e := entry{Kind: "text", Text: "Title Stub"}
-	if len(req.Tools) > 0 {
+	if len(req.Tools) > 0 && *agent && len(script) == 2 {
+		last := ""
+		if n := len(req.Messages); n > 0 {
+			last, _ = req.Messages[n-1]["role"].(string)
+		}
+		if last == "tool" {
+			e = script[1]
+		} else {
+			e = script[0]
+		}
+	} else if len(req.Tools) > 0 {
 		e = next()
 	}
 	if d := os.Getenv("STUB_DUMP"); d != "" && len(req.Tools) > 0 {

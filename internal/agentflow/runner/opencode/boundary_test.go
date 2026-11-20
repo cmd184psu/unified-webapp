@@ -58,7 +58,7 @@ func TestImportBoundary(t *testing.T) {
 		}
 		rel, _ := filepath.Rel(root, filepath.Dir(path))
 		rel = filepath.ToSlash(rel)
-		// testdata/smoke is the operator-run live smoke (scripts/agentflow-smoke.sh):
+		// testdata/smoke is the operator-run live smoke (scripts/agentflow-opencode-smoke.sh):
 		// never built by ./..., never part of the server.
 		allowed := rel == "internal/agentflow" || rel == "internal/agentflow/runner/opencode" ||
 			rel == "internal/agentflow/runner/opencode/testdata/smoke"
