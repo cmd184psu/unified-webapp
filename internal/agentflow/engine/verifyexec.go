@@ -78,7 +78,7 @@ func (x verifyExecutor) Execute(ctx context.Context, rc golane.RunContext, st mo
 		return StageResult{}, err
 	}
 	if rep.Pass {
-		if _, err := e.feedback(ctx, c, &rep, c.att.Worktree, admin, filepath.Join(e.StageDir(st.ID), "home"), set, c.touchedFiles()); err != nil {
+		if _, err := e.feedback(ctx, c, &rep, c.att.Worktree, admin, filepath.Join(e.StageDir(st.ID), "home"), st.ID, set, c.touchedFiles()); err != nil {
 			return StageResult{}, err
 		}
 	}
@@ -122,6 +122,26 @@ func failingChecks(rep verify.VerifyReport) string {
 		}
 	}
 	return strings.Join(out, " | ")
+}
+
+// dockerSpec is the container a project's feedback commands run in, or nil for
+// a host project. It starts the runtime first, so a Docker that cannot come up
+// fails with the reason rather than at the first command (AF-12).
+func (e *Engine) dockerSpec(ctx context.Context, p store.Project, name string) (*sandbox.Docker, error) {
+	if p.Sandbox != "docker" {
+		return nil, nil
+	}
+	d, err := sandbox.NewDocker(p.DockerImage, p.DockerNetwork, p.DockerSELinux, e.deps.DockerProxy, name, sandbox.HostUser(), p.DockerMounts)
+	if err != nil {
+		return nil, fmt.Errorf("project %s: %w", p.Slug, err)
+	}
+	if e.deps.Containers == nil {
+		return nil, fmt.Errorf("project %s: docker sandbox is not configured", p.Slug)
+	}
+	if err := e.deps.Containers.Ensure(ctx); err != nil {
+		return nil, err
+	}
+	return d, nil
 }
 
 // feedbackSpec is the sandbox for feedback commands run on wt: the configured
@@ -168,7 +188,7 @@ func verifyWorktree(p store.Project, wt, home string) (string, bool, error) {
 // feedback runs the project's feedback commands on wt and compares them with
 // the effort's baseline into rep (V5). It returns the raw results so a merge
 // can refresh the baseline from them.
-func (e *Engine) feedback(ctx context.Context, c *chain, rep *verify.VerifyReport, wt, admin, home string, set store.Settings, touched []string) ([]verify.CommandResult, error) {
+func (e *Engine) feedback(ctx context.Context, c *chain, rep *verify.VerifyReport, wt, admin, home string, stage int64, set store.Settings, touched []string) ([]verify.CommandResult, error) {
 	wt, writable, err := verifyWorktree(c.proj, wt, home)
 	if err != nil {
 		return nil, err
@@ -183,6 +203,12 @@ func (e *Engine) feedback(ctx context.Context, c *chain, rep *verify.VerifyRepor
 	spec, err := e.feedbackSpec(c.proj, wt, admin, home)
 	if err != nil {
 		return nil, err
+	}
+	if spec.Docker, err = e.dockerSpec(ctx, c.proj, sandbox.ContainerName(c.proj.Slug, c.eff.ID, c.task.ID, strconv.FormatInt(stage, 10))); err != nil {
+		return nil, err
+	}
+	if spec.Docker != nil {
+		defer e.deps.Containers.Release()
 	}
 	spec.ReadOnlyWorktree = !writable
 	results, err := verify.RunFeedback(ctx, verify.FeedbackConfig{Spec: spec, Timeout: set.VerifyTimeout, WritableWorktree: writable}, cmds)
@@ -265,6 +291,12 @@ func (e *Engine) ensureBaseline(ctx context.Context, proj store.Project, effort 
 		spec, err := e.feedbackSpec(proj, wt, admin, home)
 		if err != nil {
 			return err
+		}
+		if spec.Docker, err = e.dockerSpec(ctx, proj, sandbox.ContainerName(proj.Slug, effort, 0, "baseline")); err != nil {
+			return err
+		}
+		if spec.Docker != nil {
+			defer e.deps.Containers.Release()
 		}
 		spec.ReadOnlyWorktree = !writable
 		bctx, cancel := withTimeout(ctx, set.VerifyTimeout)

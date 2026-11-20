@@ -30,12 +30,12 @@ var etcEntries = []string{
 // hosts and real directories otherwise.
 var rootLinks = []string{"/bin", "/sbin", "/lib", "/lib64"}
 
-// Command builds the bwrap command for spec. Cancelling ctx (or its deadline)
+// hostCommand builds the bwrap command for spec. Cancelling ctx (or its deadline)
 // signals the process group, but the guarantee that nothing outlives the stage
 // is bwrap's --unshare-pid plus --die-with-parent: when bwrap dies, the kernel
 // kills every process in the sandbox's PID namespace. Unlike a bare
 // *exec.Cmd constructor it validates spec and so also returns an error.
-func Command(ctx context.Context, spec Spec) (*exec.Cmd, error) {
+func hostCommand(ctx context.Context, spec Spec) (*exec.Cmd, error) {
 	if err := spec.validate(); err != nil {
 		return nil, err
 	}

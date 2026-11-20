@@ -29,6 +29,7 @@ type migration struct {
 //	27     backends.api_type may be 'codex' (the Codex CLI)
 //	34 AF-6 projects.toolchains_json, projects.feedback_env_json, projects.verify_in_copy
 //	35 AF-11 backends.api_type may be 'botchat_seat' or 'freebuff_seat'; seat and notify settings
+//	36 AF-12 projects.sandbox, docker_image, docker_network, docker_mounts_json, docker_selinux
 //
 // Later stories append the next integer; they never edit an earlier entry.
 var migrations = []migration{
@@ -67,6 +68,7 @@ var migrations = []migration{
 	{33, migration33SQL},
 	{34, migration34SQL},
 	{35, migration35SQL},
+	{36, migration36SQL},
 }
 
 // migration35SQL (AF-9, AF-11) lets a backend be a seat: 'botchat_seat' (a BotChat callsign)
@@ -96,6 +98,17 @@ ALTER TABLE backends_new RENAME TO backends;
 INSERT OR IGNORE INTO settings (key, value) VALUES
   ('seat_mux', 'tmux'), ('seat_profiles', ''),
   ('notify_macos', 'on'), ('notify_command', ''), ('notify_url', '');
+`
+
+// migration36SQL (AF-12) lets a project run its stages in a container instead
+// of the host sandbox, with the image, network mode, extra mounts and SELinux
+// relabelling it needs. Existing projects stay on the host sandbox.
+const migration36SQL = `
+ALTER TABLE projects ADD COLUMN sandbox TEXT NOT NULL DEFAULT 'host' CHECK (sandbox IN ('host', 'docker'));
+ALTER TABLE projects ADD COLUMN docker_image TEXT NOT NULL DEFAULT '';
+ALTER TABLE projects ADD COLUMN docker_network TEXT NOT NULL DEFAULT 'none' CHECK (docker_network IN ('none', 'provider', 'full'));
+ALTER TABLE projects ADD COLUMN docker_mounts_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE projects ADD COLUMN docker_selinux INTEGER NOT NULL DEFAULT 0 CHECK (docker_selinux IN (0, 1));
 `
 
 // migration32SQL adds the BotChat mode: 'mirror' posts what happens, 'dispatch' also hands each

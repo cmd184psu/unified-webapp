@@ -35,6 +35,10 @@ type Spec struct {
 	ExtraROBinds []Bind
 	// PathDirs are sandbox directories appended to PATH.
 	PathDirs []string
+	// Docker, when set, runs the stage as a container instead of the host
+	// sandbox (AF-12). The worktree, git dirs and stage home are mounted; the
+	// network, image and extra mounts come from the project.
+	Docker *Docker
 	// Env holds explicit extra variables; it may override the allowlist.
 	Env map[string]string
 	// Argv is the command to run inside the sandbox.
@@ -105,6 +109,11 @@ func (s Spec) validate() error {
 	for k := range s.Env {
 		if forbiddenEnv(k) {
 			return fmt.Errorf("sandbox: Spec.Env may not set %s", k)
+		}
+	}
+	if s.Docker != nil {
+		if err := s.Docker.validate(s); err != nil {
+			return err
 		}
 	}
 	if len(s.Argv) == 0 {

@@ -19,6 +19,7 @@ import (
 
 	"cmd184psu/unified-webapp/internal/agentflow/api"
 	"cmd184psu/unified-webapp/internal/agentflow/botchat"
+	"cmd184psu/unified-webapp/internal/agentflow/dockervm"
 	"cmd184psu/unified-webapp/internal/agentflow/engine"
 	"cmd184psu/unified-webapp/internal/agentflow/gitsvc"
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
@@ -92,12 +93,21 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 	// One relay speaks for agentflow on BotChat; the dispatcher, which hands stages to agents
 	// through BotChat in dispatch mode, shares its rooms. In any other mode it passes calls through.
 	relay := &botchat.Relay{Store: st}
+	// A docker project needs a container runtime that is up only while work
+	// runs: Colima on macOS, the native daemon on Linux (AF-12).
+	containers := dockervm.New(dockervm.Config{
+		Idle: envDuration("AGENTFLOW_DOCKER_IDLE", dockervm.DefaultIdle),
+		Logf: func(format string, args ...any) { log.Printf(format, args...) },
+		Attention: func(msg string) {
+			log.Printf("ATTENTION: %s", msg)
+		},
+	})
 	var dispatcher *botchat.Dispatcher
 	var seatCtl engine.SeatControl
 	if rn == nil {
 		ss := newSeats(dataDir, git, st)
 		seatCtl = ss
-		dispatcher = &botchat.Dispatcher{Inner: newRunner(git, st, ss), Store: st, Relay: relay}
+		dispatcher = &botchat.Dispatcher{Inner: newRunner(git, st, ss, containers), Store: st, Relay: relay}
 		rn = dispatcher
 	}
 	// The engine exists before the API, so the event hooks reach it through a
@@ -113,6 +123,8 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 		Git:          git,
 		Sandbox:      feedbackSandbox(),
 		Seats:        seatCtl,
+		Containers:   containers,
+		DockerProxy:  os.Getenv("AGENTFLOW_DOCKER_PROXY"),
 		PublishRun: func(ev engine.RunEvent) {
 			if a := events.Load(); a != nil {
 				a.PublishRun(ev)
@@ -162,6 +174,7 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 	// says they support tool calls (H10); best effort, in the background.
 	capCtx, stopCaps := context.WithCancel(context.Background())
 	go a.RefreshCapabilities(capCtx)
+	go containers.Run(capCtx)
 
 	// What happens in agentflow is posted to BotChat when the botchat settings name a service
 	// and a key file; with them empty the relay idles.
@@ -203,18 +216,18 @@ func freezeConfig(b engine.FrozenBackend, stageDir string) (string, error) {
 // bwrap sandbox. The binary comes from the opencode_path setting at every run
 // and probe, and API keys are resolved per stage by the engine, so neither
 // needs a restart.
-func newOpencode(git *gitsvc.Service, st *store.Store) *opencode.Adapter {
+func newOpencode(git *gitsvc.Service, st *store.Store, containers *dockervm.Manager) *opencode.Adapter {
 	return &opencode.Adapter{
 		PathFunc: func() string { return resolveOpencode(st) },
-		Command:  opencode.SandboxCommand(gitDirs(git, st)),
+		Command:  opencode.SandboxCommand(gitDirs(git, st), dockerFor(git, st, containers)),
 	}
 }
 
 // newRunner routes backends of api type "grok", "codex", "claude", "muse" and "agy" to their CLI runners and
 // every other backend to opencode.
-func newRunner(git *gitsvc.Service, st *store.Store, ss *seats) runner.Runner {
+func newRunner(git *gitsvc.Service, st *store.Store, ss *seats, containers *dockervm.Manager) runner.Runner {
 	return &runner.Mux{
-		Default: newOpencode(git, st),
+		Default: newOpencode(git, st, containers),
 		ByType: map[string]runner.Runner{
 			grok.APIType: &grok.Adapter{}, codex.APIType: &codex.Adapter{},
 			claude.APIType: &claude.Adapter{}, muse.APIType: &muse.Adapter{}, agy.APIType: &agy.Adapter{},
@@ -224,6 +237,66 @@ func newRunner(git *gitsvc.Service, st *store.Store, ss *seats) runner.Runner {
 			seat.APIType:        ss.term,
 		},
 	}
+}
+
+// dockerFor maps a model stage's worktree to its project's container (AF-12).
+// A host project, or a stage outside every project, keeps the host sandbox.
+func dockerFor(git *gitsvc.Service, st *store.Store, containers *dockervm.Manager) opencode.DockerFor {
+	return func(req runner.Request) (*sandbox.Docker, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		wd, err := filepath.EvalSymlinks(req.Workdir)
+		if err != nil {
+			return nil, fmt.Errorf("agentflow: workdir: %w", err)
+		}
+		var p store.Project
+		found := false
+		if rel, relErr := filepath.Rel(git.WorktreeRoot(), wd); relErr == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+			slug, _, _ := strings.Cut(rel, string(filepath.Separator))
+			if p, err = st.GetProject(ctx, slug); err != nil {
+				return nil, err
+			}
+			found = true
+		} else if ps, err := st.ListProjects(ctx); err != nil {
+			return nil, err
+		} else {
+			for _, cand := range ps {
+				if resolved, err := filepath.EvalSymlinks(cand.RepoPath); err == nil && resolved == wd {
+					p, found = cand, true
+					break
+				}
+			}
+		}
+		if !found || p.Sandbox != "docker" {
+			return nil, nil
+		}
+		name := sandbox.ContainerName(p.Slug, 0, 0, "stage-"+filepath.Base(req.StageDir))
+		d, err := sandbox.NewDocker(p.DockerImage, p.DockerNetwork, p.DockerSELinux,
+			os.Getenv("AGENTFLOW_DOCKER_PROXY"), name, sandbox.HostUser(), p.DockerMounts)
+		if err != nil {
+			return nil, fmt.Errorf("project %s: %w", p.Slug, err)
+		}
+		// A macOS host's runner binary cannot run in a Linux container; the
+		// image must carry one and name it here.
+		d.Runner = os.Getenv("AGENTFLOW_DOCKER_RUNNER")
+		if containers != nil {
+			if err := containers.Ensure(ctx); err != nil {
+				return nil, err
+			}
+		}
+		return d, nil
+	}
+}
+
+// envDuration reads a duration override from the environment, falling back to
+// def when it is unset or malformed.
+func envDuration(key string, def time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return def
 }
 
 // resolveOpencode reads the opencode_path setting now. The default value

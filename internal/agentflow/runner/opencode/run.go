@@ -284,12 +284,18 @@ func installSandboxConfig(stageDir string) error {
 	return os.WriteFile(filepath.Join(dir, "opencode.json"), data, 0o644)
 }
 
+// DockerFor resolves the container a request's project runs in (AF-12), or nil
+// for the host sandbox. The composition root owns it because only it can map a
+// worktree to a project.
+type DockerFor func(req runner.Request) (*sandbox.Docker, error)
+
 // SandboxCommand returns the production CommandFactory: it runs opencode in a
 // bwrap sandbox (B8) with the real binary bound read-only, the stage home bound
 // as HOME (holding a copy of the frozen config) and the host network shared so
 // the model backend is reachable. Only the worker role gets a writable
-// worktree.
-func SandboxCommand(gitDirs GitDirs) CommandFactory {
+// worktree. With a docker project the same spec runs as a container; its image
+// must carry the runner, named by Docker.Runner.
+func SandboxCommand(gitDirs GitDirs, dockerFor DockerFor) CommandFactory {
 	return func(ctx context.Context, req runner.Request, argv, env []string) (*exec.Cmd, error) {
 		repo, wt, err := gitDirs(req)
 		if err != nil {
@@ -309,7 +315,7 @@ func SandboxCommand(gitDirs GitDirs) CommandFactory {
 			}
 			sbEnv[k] = v
 		}
-		return sandbox.Command(ctx, sandbox.Spec{
+		spec := sandbox.Spec{
 			Worktree:         req.Workdir,
 			ReadOnlyWorktree: !writesWorktree(req.Role),
 			RepoGitDir:       repo,
@@ -319,6 +325,21 @@ func SandboxCommand(gitDirs GitDirs) CommandFactory {
 			ExtraROBinds:     []sandbox.Bind{{Src: bin, Dst: sandboxBin}},
 			Env:              sbEnv,
 			Argv:             append([]string{sandboxBin}, rest...),
-		})
+		}
+		if dockerFor != nil {
+			d, err := dockerFor(req)
+			if err != nil {
+				return nil, err
+			}
+			if d != nil {
+				spec.Docker = d
+				if d.Runner != "" {
+					// The image carries the runner; the host binary is not mounted.
+					spec.ExtraROBinds = nil
+					spec.Argv = append([]string{d.Runner}, rest...)
+				}
+			}
+		}
+		return sandbox.Command(ctx, spec)
 	}
 }

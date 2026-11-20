@@ -163,7 +163,7 @@ func (x mergeExecutor) verifyMerged(ctx context.Context, rc golane.RunContext, c
 		return verify.VerifyReport{}, nil, err
 	}
 	rep := verify.VerifyReport{Checks: []verify.Check{}, Warnings: []string{}, NewFailures: []string{}, BaselineFailures: []string{}}
-	results, err := e.feedback(ctx, c, &rep, intWT, admin, filepath.Join(e.StageDir(st.ID), "home"), set, c.touchedFiles())
+	results, err := e.feedback(ctx, c, &rep, intWT, admin, filepath.Join(e.StageDir(st.ID), "home"), st.ID, set, c.touchedFiles())
 	return rep, results, err
 }
 
