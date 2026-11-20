@@ -4,6 +4,9 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
+
+	"cmd184psu/unified-webapp/internal/agentflow/model"
 
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
 	"cmd184psu/unified-webapp/internal/agentflow/schema"
@@ -37,6 +40,7 @@ func TestAF13_ARepeatedFindingGoesToTheResolverAndTheTaskContinues(t *testing.T)
 	c := newChainRun(t, nil, chainDefs()[:1])
 	c.addBackend("big", 2, false, false, "claude-sonnet-5-5")
 	c.candidates("global", "", "resolver", "big/claude-sonnet-5-5")
+	c.setLimits(map[string]string{"resolver_mode": "auto"})
 	c.fake.Script("worker", runner.Step{Reply: workerOK, Edit: writeWork}, runner.Step{Reply: workerOK, Edit: writeWork}, runner.Step{Reply: workerOK, Edit: writeWork})
 	c.fake.Script("reviewer", runner.Step{Reply: reviewPhasePlayers1}, runner.Step{Reply: reviewPhasePlayers2}, runner.Step{Reply: resolverClarify}, runner.Step{Reply: reviewPass})
 	c.run()
@@ -71,6 +75,7 @@ func TestAF13_ASecondStreakAfterAResolutionEscalates(t *testing.T) {
 	c := newChainRun(t, nil, chainDefs()[:1])
 	c.addBackend("big", 2, false, false, "claude-sonnet-5-5")
 	c.candidates("global", "", "resolver", "big/claude-sonnet-5-5")
+	c.setLimits(map[string]string{"resolver_mode": "auto"})
 	c.fake.Script("worker", runner.Step{Reply: workerOK, Edit: writeWork}, runner.Step{Reply: workerOK, Edit: writeWork}, runner.Step{Reply: workerOK, Edit: writeWork}, runner.Step{Reply: workerOK, Edit: writeWork})
 	c.fake.Script("reviewer", runner.Step{Reply: reviewPhasePlayers1}, runner.Step{Reply: reviewPhasePlayers2}, runner.Step{Reply: resolverClarify},
 		runner.Step{Reply: reviewPhasePlayers1}, runner.Step{Reply: reviewPhasePlayers2})
@@ -81,5 +86,63 @@ func TestAF13_ASecondStreakAfterAResolutionEscalates(t *testing.T) {
 	})
 	if n := len(c.fake.CallsFor("reviewer")); n != 5 {
 		t.Fatalf("reviewer-role calls = %d, want 5 (no second resolver run)", n)
+	}
+}
+
+// AF-13 item 6: in advise mode (the default) the decision is recorded and shown, nothing is
+// applied and the task stays halted; applying it amends the task and the next attempt passes.
+func TestAF13_AdviseModeWaitsForTheOwnerToApply(t *testing.T) {
+	ctx := context.Background()
+	c := newChainRun(t, nil, chainDefs()[:1])
+	c.addBackend("big", 2, false, false, "claude-sonnet-5-5")
+	c.candidates("global", "", "resolver", "big/claude-sonnet-5-5")
+	c.fake.Script("worker", runner.Step{Reply: workerOK, Edit: writeWork}, runner.Step{Reply: workerOK, Edit: writeWork}, runner.Step{Reply: workerOK, Edit: writeWork})
+	c.fake.Script("reviewer", runner.Step{Reply: reviewPhasePlayers1}, runner.Step{Reply: reviewPhasePlayers2}, runner.Step{Reply: resolverClarify}, runner.Step{Reply: reviewPass})
+	c.run()
+	waitFor(t, "the advice", func() bool {
+		tk, _ := c.st.GetTask(ctx, c.tasks[0].ID)
+		return strings.Contains(tk.WaitingReason, "advises override_finding")
+	})
+	time.Sleep(200 * time.Millisecond)
+	if n := len(c.attempts(0)); n != 2 {
+		t.Fatalf("attempts = %d: advice must not retry the task", n)
+	}
+	tk, _ := c.st.GetTask(ctx, c.tasks[0].ID)
+	if strings.Contains(tk.Prompt, "Out of scope") {
+		t.Fatal("advice must not amend the task before it is applied")
+	}
+	rs, _ := c.eng.Resolutions(ctx, c.effort, "T1")
+	if len(rs) != 1 || !rs[0].Pending || rs[0].Applied {
+		t.Fatalf("resolutions = %+v", rs)
+	}
+	if _, err := c.eng.ApplyResolution(ctx, "owner", tk.ID); err != nil {
+		t.Fatal(err)
+	}
+	c.waitComplete()
+	tk, _ = c.st.GetTask(ctx, tk.ID)
+	if !strings.Contains(tk.Prompt, "Out of scope for this task") || len(c.attempts(0)) != 3 {
+		t.Fatalf("after apply: prompt %q, attempts %d", tk.Prompt, len(c.attempts(0)))
+	}
+	if rs, _ := c.eng.Resolutions(ctx, c.effort, "T1"); len(rs) != 1 || rs[0].Pending || !rs[0].Applied {
+		t.Fatalf("resolutions after apply = %+v", rs)
+	}
+	if _, err := c.eng.ApplyResolution(ctx, "owner", tk.ID); err == nil {
+		t.Fatal("nothing is left to apply")
+	}
+}
+
+// resolver_mode off: no resolver stage; a stuck task goes to the owner as before.
+func TestAF13_OffModeRunsNoResolver(t *testing.T) {
+	c := newChainRun(t, nil, chainDefs()[:1])
+	c.addBackend("big", 2, false, false, "claude-sonnet-5-5")
+	c.candidates("global", "", "resolver", "big/claude-sonnet-5-5")
+	c.setLimits(map[string]string{"resolver_mode": "off"})
+	c.fake.Script("worker", runner.Step{Reply: workerOK, Edit: writeWork}, runner.Step{Reply: workerOK, Edit: writeWork})
+	c.fake.Script("reviewer", runner.Step{Reply: reviewPhasePlayers1}, runner.Step{Reply: reviewPhasePlayers2})
+	c.run()
+	waitFor(t, "stuck", func() bool { return c.taskStatus() == model.StatusStuck })
+	time.Sleep(300 * time.Millisecond)
+	if n := len(c.fake.CallsFor("reviewer")); n != 2 {
+		t.Fatalf("reviewer-role calls = %d, want 2 (no resolver)", n)
 	}
 }

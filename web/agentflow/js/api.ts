@@ -725,6 +725,9 @@ export interface Resolution {
   backend?: string;
   stage?: number;
   auto?: boolean;
+  /** advice waiting for the owner (resolver_mode advise) */
+  pending?: boolean;
+  applied?: boolean;
 }
 
 export interface Invariant {
@@ -947,6 +950,9 @@ export const api = {
     send('PUT', `${eff(slug, id)}/tasks/${enc(key)}?approve=true`, def, o),
   retryTask: (slug: string, id: number, key: string, clean: boolean): Promise<TaskDetail> =>
     send('POST', `${eff(slug, id)}/tasks/${enc(key)}/retry`, { clean }),
+  /** applyResolution carries out the resolver's advice on a halted task (resolver_mode advise). */
+  applyResolution: (slug: string, id: number, key: string): Promise<TaskDetail> =>
+    send('POST', `${eff(slug, id)}/tasks/${enc(key)}/resolution/apply`, {}),
   /** allowTaskFiles adds the files a stopped task asked for to its list and retries it in the same worktree (AF-13); no files allows them all. */
   allowTaskFiles: (slug: string, id: number, key: string, files: string[] = []): Promise<TaskDetail> =>
     send('POST', `${eff(slug, id)}/tasks/${enc(key)}/allow-files`, { files }),

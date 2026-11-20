@@ -32,6 +32,7 @@ func limitMap(s store.Settings) map[string]string {
 		"review_timeout":    dur(s.ReviewTimeout),
 		"plan_timeout":      dur(s.PlanTimeout),
 		"verify_timeout":    dur(s.VerifyTimeout),
+		"resolver_mode":     s.ResolverMode,
 	}
 }
 
@@ -64,6 +65,7 @@ func settingsView(s store.Settings) map[string]any {
 		"notify_macos":         onOff(s.NotifyMacOS),
 		"notify_command":       s.NotifyCommand,
 		"notify_url":           s.NotifyURL,
+		"resolver_mode":        s.ResolverMode,
 	}
 }
 

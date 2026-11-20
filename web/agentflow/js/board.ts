@@ -23,7 +23,7 @@ import { StreamPanel, defaultStreamDeps, type StreamDeps } from './stream.js';
 export type BoardDeps = Pick<
   typeof api,
   'project' | 'efforts' | 'tasks' | 'task' | 'run' | 'retryTask' | 'editTask' | 'overrideTask' | 'abandonEffort' | 'gitCommands'
-> & {
+> & Partial<Pick<typeof api, 'applyResolution'>> & {
   confirm(message: string, confirmLabel?: string): Promise<boolean>;
   copy(text: string): void;
   notify(message: string): void;
@@ -36,6 +36,7 @@ export const defaultBoardDeps = (): BoardDeps => ({
   task: api.task,
   run: api.run,
   retryTask: api.retryTask,
+  applyResolution: api.applyResolution,
   editTask: api.editTask,
   overrideTask: api.overrideTask,
   abandonEffort: api.abandonEffort,
@@ -235,6 +236,20 @@ export class Board {
     await this.refresh();
   }
 
+  private async applyAdvice(key: string): Promise<void> {
+    const ef = this.current;
+    const apply = this.deps.applyResolution;
+    if (!ef || !apply || !(await this.deps.confirm(`Apply the resolver's advice to ${key} and retry it in the same worktree?`, 'Apply'))) return;
+    try {
+      await apply(this.slug, ef.id, key);
+    } catch {
+      return;
+    }
+    this.fresh = true;
+    this.deps.notify(`Applied the resolver's advice to ${key}`);
+    await this.refresh();
+  }
+
   private async override(key: string, reason: string): Promise<void> {
     const ef = this.current;
     if (!ef) return;
@@ -376,7 +391,10 @@ export class Board {
         d.depends_on?.length ? block('Depends on', h('p', { text: (d.depends_on ?? []).join(', ') })) : null,
         block('Attempts', ...(d.attempt_list.length ? d.attempt_list.map((a) => this.attempt(a)) : [h('p', { class: 'field-hint', text: 'No attempts yet.' })])),
         d.resolutions?.length ? block('Resolver', bullets(d.resolutions.map((r) =>
-          `resolved by ${r.model ? `${r.model} on ${r.backend}` : 'the engine'}: ${r.decision}: ${r.reason}`))) : null,
+          `${r.pending ? 'advised' : 'resolved'} by ${r.model ? `${r.model} on ${r.backend}` : 'the engine'}: ${r.decision}: ${r.reason}${r.pending ? ' (not applied yet)' : ''}`)),
+          d.resolutions.some((r) => r.pending) && this.deps.applyResolution
+            ? h('button', { text: 'Apply the resolver\'s advice and retry', attrs: { type: 'button', 'data-role': 'apply-resolution' }, on: { click: () => void this.applyAdvice(d.key) } })
+            : null) : null,
         d.progress.length ? block('Progress log', bullets(d.progress)) : null));
   }
 

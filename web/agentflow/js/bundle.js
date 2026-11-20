@@ -152,6 +152,8 @@ var api = {
   /** editTask answers with the queue. A queue that was approved stays approved (the edit is the review) and a run goes on; one still in draft stays in draft. */
   editTask: (slug, id, key, def, o) => send("PUT", `${eff(slug, id)}/tasks/${enc(key)}?approve=true`, def, o),
   retryTask: (slug, id, key, clean) => send("POST", `${eff(slug, id)}/tasks/${enc(key)}/retry`, { clean }),
+  /** applyResolution carries out the resolver's advice on a halted task (resolver_mode advise). */
+  applyResolution: (slug, id, key) => send("POST", `${eff(slug, id)}/tasks/${enc(key)}/resolution/apply`, {}),
   /** allowTaskFiles adds the files a stopped task asked for to its list and retries it in the same worktree (AF-13); no files allows them all. */
   allowTaskFiles: (slug, id, key, files = []) => send("POST", `${eff(slug, id)}/tasks/${enc(key)}/allow-files`, { files }),
   overrideTask: (slug, id, key, reason) => send("POST", `${eff(slug, id)}/tasks/${enc(key)}/override`, { reason }),
@@ -1772,7 +1774,8 @@ var LIMIT_FIELDS = [
   { key: "worker_timeout", label: "Worker timeout", hint: "A duration such as 30m or 1h" },
   { key: "review_timeout", label: "Review timeout", hint: "A duration such as 15m" },
   { key: "plan_timeout", label: "Plan timeout", hint: "A duration such as 20m" },
-  { key: "verify_timeout", label: "Verify timeout", hint: "A duration such as 20m" }
+  { key: "verify_timeout", label: "Verify timeout", hint: "A duration such as 20m" },
+  { key: "resolver_mode", label: "Resolver mode", hint: "What the resolver may do with a stuck task: off, advise (its decision waits for you to apply it; the default) or auto (applied at once)" }
 ];
 var EXECUTION_FIELDS = [
   { key: "verify_slots", label: "Verify slots", hint: "Verify and merge stages that run at once, 1 to 64" },
@@ -3132,6 +3135,7 @@ var defaultBoardDeps = () => ({
   task: api.task,
   run: api.run,
   retryTask: api.retryTask,
+  applyResolution: api.applyResolution,
   editTask: api.editTask,
   overrideTask: api.overrideTask,
   abandonEffort: api.abandonEffort,
@@ -3314,6 +3318,19 @@ var Board = class {
     }
     this.fresh = true;
     this.deps.notify(`Retrying ${key}`);
+    await this.refresh();
+  }
+  async applyAdvice(key) {
+    const ef = this.current;
+    const apply = this.deps.applyResolution;
+    if (!ef || !apply || !await this.deps.confirm(`Apply the resolver's advice to ${key} and retry it in the same worktree?`, "Apply")) return;
+    try {
+      await apply(this.slug, ef.id, key);
+    } catch {
+      return;
+    }
+    this.fresh = true;
+    this.deps.notify(`Applied the resolver's advice to ${key}`);
     await this.refresh();
   }
   async override(key, reason) {
@@ -3503,7 +3520,11 @@ var Board = class {
         d.files_touched?.length ? block("Files touched", mono((d.files_touched ?? []).join("\n"))) : null,
         d.depends_on?.length ? block("Depends on", h("p", { text: (d.depends_on ?? []).join(", ") })) : null,
         block("Attempts", ...d.attempt_list.length ? d.attempt_list.map((a) => this.attempt(a)) : [h("p", { class: "field-hint", text: "No attempts yet." })]),
-        d.resolutions?.length ? block("Resolver", bullets(d.resolutions.map((r) => `resolved by ${r.model ? `${r.model} on ${r.backend}` : "the engine"}: ${r.decision}: ${r.reason}`))) : null,
+        d.resolutions?.length ? block(
+          "Resolver",
+          bullets(d.resolutions.map((r) => `${r.pending ? "advised" : "resolved"} by ${r.model ? `${r.model} on ${r.backend}` : "the engine"}: ${r.decision}: ${r.reason}${r.pending ? " (not applied yet)" : ""}`)),
+          d.resolutions.some((r) => r.pending) && this.deps.applyResolution ? h("button", { text: "Apply the resolver's advice and retry", attrs: { type: "button", "data-role": "apply-resolution" }, on: { click: () => void this.applyAdvice(d.key) } }) : null
+        ) : null,
         d.progress.length ? block("Progress log", bullets(d.progress)) : null
       )
     );

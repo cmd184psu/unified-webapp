@@ -33,6 +33,7 @@ export const LIMIT_FIELDS: LimitField[] = [
   { key: 'review_timeout', label: 'Review timeout', hint: 'A duration such as 15m' },
   { key: 'plan_timeout', label: 'Plan timeout', hint: 'A duration such as 20m' },
   { key: 'verify_timeout', label: 'Verify timeout', hint: 'A duration such as 20m' },
+  { key: 'resolver_mode', label: 'Resolver mode', hint: 'What the resolver may do with a stuck task: off, advise (its decision waits for you to apply it; the default) or auto (applied at once)' },
 ];
 
 const EXECUTION_FIELDS: LimitField[] = [

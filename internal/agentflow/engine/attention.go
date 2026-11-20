@@ -149,7 +149,11 @@ func (e *Engine) effortAttention(ctx context.Context, project string, ef model.E
 				if r.Model != "" {
 					by = r.Model + " on " + r.Backend
 				}
-				add("task_resolved", t.Key, fmt.Sprintf("%s %q resolved by %s: %s: %s", t.Key, t.Title, by, r.Decision, r.Reason), time.Time{})
+				what := "resolved by"
+				if r.Advised && !r.Applied {
+					what = "has advice waiting to be applied from" // resolver_mode advise
+				}
+				add("task_resolved", t.Key, fmt.Sprintf("%s %q %s %s: %s: %s", t.Key, t.Title, what, by, r.Decision, r.Reason), time.Time{})
 			}
 			switch {
 			case st.Halted():

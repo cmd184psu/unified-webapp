@@ -92,8 +92,20 @@ func (e *Engine) resolverPick(ctx context.Context, p store.Project, lastReviewer
 	return pk, reason, true, err
 }
 
-// resolverOn reports whether the project has a resolver.
+// resolverMode is the project's resolver_mode (off, advise, auto).
+func (e *Engine) resolverMode(ctx context.Context, p store.Project) string {
+	set, err := e.deps.Store.EffectiveSettings(ctx, p.Slug)
+	if err != nil {
+		return store.ResolverOff
+	}
+	return set.ResolverMode
+}
+
+// resolverOn reports whether the project has a resolver and its mode is not off.
 func (e *Engine) resolverOn(ctx context.Context, p store.Project) bool {
+	if e.resolverMode(ctx, p) == store.ResolverOff {
+		return false
+	}
 	_, _, ok, err := e.resolverPick(ctx, p, "")
 	return err == nil && ok
 }
@@ -150,6 +162,10 @@ type resolvedEvent struct {
 	Model        string `json:"model,omitempty"`
 	Backend      string `json:"backend,omitempty"`
 	Auto         bool   `json:"auto,omitempty"`
+	// Advised: resolver_mode advise recorded the decision for the owner; Applied: it was
+	// carried out (at once in auto mode, or when the owner applied the advice).
+	Advised bool `json:"advised,omitempty"`
+	Applied bool `json:"applied,omitempty"`
 }
 
 func readResolved(evs []store.Event, key string) []resolvedEvent {
@@ -195,7 +211,7 @@ func (e *Engine) resolveTask(ctx context.Context, proj store.Project, ef model.E
 	}
 	if len(mine) == 0 {
 		for _, d := range past {
-			if d.Decision != "escalate" {
+			if d.Decision != "escalate" && d.Applied {
 				return escalate(fmt.Sprintf("it failed again after the resolver's %s decision (%s)", d.Decision, clip(d.Reason, 200)))
 			}
 		}
@@ -215,7 +231,67 @@ func (e *Engine) resolveTask(ctx context.Context, proj store.Project, ef model.E
 	if err != nil {
 		return escalate("the resolver's reply could not be read: " + err.Error())
 	}
+	if e.resolverMode(ctx, proj) != store.ResolverAuto && out.Decision != "escalate" {
+		// advise (the default): record the decision for the owner; the task stays halted
+		// until it is applied (POST .../tasks/{key}/resolution/apply).
+		by := st.Model + " on " + st.Backend
+		if err := e.deps.Store.SetWaitingReason(ctx, t.ID, fmt.Sprintf("the resolver (%s) advises %s: %s. Apply it from the task page.", by, out.Decision, out.Reason)); err != nil {
+			return err
+		}
+		return e.noteEffort(ctx, SystemActor, eventTaskResolved, ef.ID, resolvedEvent{Task: t.Key, Decision: out.Decision, Reason: out.Reason, Stage: st.ID,
+			AfterAttempt: last.ID, Model: st.Model, Backend: st.Backend, Advised: true})
+	}
 	return e.applyResolution(ctx, ef, t, last, st, out)
+}
+
+// ApplyResolution carries out the resolver's advice on a halted task (resolver_mode advise):
+// the newest decision recorded for its current failure streak, not applied yet.
+func (e *Engine) ApplyResolution(ctx context.Context, actor string, task int64) (Resolution, error) {
+	_, ef, t, err := e.locateTask(ctx, task)
+	if err != nil {
+		return Resolution{}, err
+	}
+	atts, err := e.deps.Store.ListAttempts(ctx, t.ID)
+	if err != nil {
+		return Resolution{}, err
+	}
+	if len(atts) == 0 {
+		return Resolution{}, fmt.Errorf("task %s has no resolver advice: %w", t.Key, store.ErrConflict)
+	}
+	last := atts[len(atts)-1]
+	evs, err := e.effortEvents(ctx, ef.ID, eventTaskResolved)
+	if err != nil {
+		return Resolution{}, err
+	}
+	var adv *resolvedEvent
+	for _, d := range readResolved(evs, t.Key) {
+		d := d
+		if d.AfterAttempt != last.ID {
+			continue
+		}
+		if d.Applied {
+			adv = nil
+			continue
+		}
+		if d.Advised {
+			adv = &d
+		}
+	}
+	if adv == nil {
+		return Resolution{}, fmt.Errorf("task %s has no resolver advice waiting to be applied: %w", t.Key, store.ErrConflict)
+	}
+	st, err := e.deps.Store.GetStage(ctx, adv.Stage)
+	if err != nil {
+		return Resolution{}, err
+	}
+	out, err := schema.Parse[schema.ResolverOut](st.Parsed)
+	if err != nil {
+		return Resolution{}, err
+	}
+	if err := e.applyResolution(ctx, ef, t, last, st, out); err != nil {
+		return Resolution{}, err
+	}
+	return Resolution{Decision: out.Decision, Reason: out.Reason, Model: st.Model, Backend: st.Backend, Stage: st.ID, Applied: true}, nil
 }
 
 func (e *Engine) startResolver(ctx context.Context, proj store.Project, ef model.Effort, t model.Task, last model.Attempt, ref, avoid string) error {
@@ -237,7 +313,7 @@ func (e *Engine) startResolver(ctx context.Context, proj store.Project, ef model
 func (e *Engine) applyResolution(ctx context.Context, ef model.Effort, t model.Task, last model.Attempt, st model.Stage, out schema.ResolverOut) error {
 	s := e.deps.Store
 	by := st.Model + " on " + st.Backend
-	ev := resolvedEvent{Task: t.Key, Decision: out.Decision, Reason: out.Reason, Stage: st.ID, AfterAttempt: last.ID, Model: st.Model, Backend: st.Backend}
+	ev := resolvedEvent{Task: t.Key, Decision: out.Decision, Reason: out.Reason, Stage: st.ID, AfterAttempt: last.ID, Model: st.Model, Backend: st.Backend, Applied: out.Decision != "escalate"}
 	evidence := strings.Join(out.Evidence, ", ")
 	var err error
 	switch out.Decision {
@@ -275,7 +351,7 @@ func (e *Engine) applyResolution(ctx context.Context, ef model.Effort, t model.T
 	}
 	if err != nil {
 		// A decision the store refuses (a split whose tasks do not validate) is the owner's.
-		ev.Decision, ev.Reason, ev.Auto = "escalate", fmt.Sprintf("the resolver's %s decision could not be applied: %v", out.Decision, err), true
+		ev.Decision, ev.Reason, ev.Auto, ev.Applied = "escalate", fmt.Sprintf("the resolver's %s decision could not be applied: %v", out.Decision, err), true, false
 		if err := s.SetWaitingReason(ctx, t.ID, "needs a human (resolver): "+ev.Reason); err != nil {
 			return err
 		}
@@ -374,6 +450,9 @@ type Resolution struct {
 	Backend  string `json:"backend,omitempty"`
 	Stage    int64  `json:"stage,omitempty"`
 	Auto     bool   `json:"auto,omitempty"`
+	// Pending: advice waiting for the owner to apply it; Applied: carried out.
+	Pending bool `json:"pending,omitempty"`
+	Applied bool `json:"applied,omitempty"`
 }
 
 // Resolutions lists the resolver's decisions on a task, oldest first.
@@ -383,8 +462,17 @@ func (e *Engine) Resolutions(ctx context.Context, effort int64, key string) ([]R
 		return nil, err
 	}
 	out := []Resolution{}
+	at := map[int64]int{} // stage -> index: an application replaces the advice it applied
 	for _, r := range readResolved(evs, key) {
-		out = append(out, Resolution{Decision: r.Decision, Reason: r.Reason, Model: r.Model, Backend: r.Backend, Stage: r.Stage, Auto: r.Auto})
+		res := Resolution{Decision: r.Decision, Reason: r.Reason, Model: r.Model, Backend: r.Backend, Stage: r.Stage, Auto: r.Auto, Pending: r.Advised && !r.Applied, Applied: r.Applied}
+		if i, ok := at[r.Stage]; ok && r.Stage != 0 {
+			out[i] = res
+			continue
+		}
+		if r.Stage != 0 {
+			at[r.Stage] = len(out)
+		}
+		out = append(out, res)
 	}
 	return out, nil
 }

@@ -33,6 +33,7 @@ type migration struct {
 //	37 AF-6b tasks.toolchains_json, stages.relaxations_json
 //	38 AF-10 service_hold
 //	39 AF-13 role_candidates.role may be 'resolver'; stuck_threshold default 3 -> 2
+//	40 AF-13 resolver_mode setting (off | advise | auto), default advise
 //
 // Later stories append the next integer; they never edit an earlier entry.
 var migrations = []migration{
@@ -75,7 +76,14 @@ var migrations = []migration{
 	{37, migration37SQL},
 	{38, migration38SQL},
 	{39, migration39SQL},
+	{40, migration40SQL},
 }
+
+// migration40SQL (AF-13 item 6) makes the resolver advise-only unless the owner chooses
+// otherwise: its decision is recorded and the owner applies it.
+const migration40SQL = `
+INSERT OR IGNORE INTO settings (key, value) VALUES ('resolver_mode', 'advise');
+`
 
 // migration39SQL (AF-13 3b) lets a project list resolver candidates, the role that reads a
 // stuck task's evidence and decides one way through, and stops the retry loop after two

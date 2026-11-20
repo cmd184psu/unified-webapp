@@ -63,12 +63,23 @@ type Settings struct {
 	// BrowseRoots are the directories the server-side directory picker may
 	// list; an empty stored value means the server user's home directory.
 	BrowseRoots []string
+	// ResolverMode is what the resolver may do with a stuck task (AF-13 item 6): off (the
+	// task goes to the owner as before), advise (its decision is recorded and shown, and the
+	// owner applies it) or auto (the engine applies it and retries). A project may override it.
+	ResolverMode string
 }
+
+// Resolver modes.
+const (
+	ResolverOff    = "off"
+	ResolverAdvise = "advise"
+	ResolverAuto   = "auto"
+)
 
 // limitKeys are the settings a project may override.
 var limitKeys = []string{
 	"max_attempts", "stuck_threshold", "max_infra_retries", "plan_max_rounds", "stall_minutes", "acceptance_rounds", "review_panel",
-	"worker_timeout", "review_timeout", "plan_timeout", "verify_timeout",
+	"worker_timeout", "review_timeout", "plan_timeout", "verify_timeout", "resolver_mode",
 }
 
 func isLimitKey(k string) bool {
@@ -164,6 +175,13 @@ func parseSettings(m map[string]string) (Settings, error) {
 	}
 	if s.BotchatMode != "mirror" && s.BotchatMode != "dispatch" {
 		return s, Invalid("botchat_mode", "must be mirror or dispatch")
+	}
+	s.ResolverMode = strings.TrimSpace(m["resolver_mode"])
+	if s.ResolverMode == "" {
+		s.ResolverMode = ResolverAdvise
+	}
+	if s.ResolverMode != ResolverOff && s.ResolverMode != ResolverAdvise && s.ResolverMode != ResolverAuto {
+		return s, Invalid("resolver_mode", "must be off, advise or auto")
 	}
 	if s.VerifySlots, err = validateInt("verify_slots", m["verify_slots"], 1, 64); err != nil {
 		return s, err

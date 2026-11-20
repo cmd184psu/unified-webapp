@@ -16,6 +16,7 @@ func (a *API) registerTasks(mux muxer) {
 	mux.HandleFunc("PUT "+e+"/tasks/{key}", a.editTask)
 	mux.HandleFunc("POST "+e+"/tasks/{key}/retry", a.retryTask)
 	mux.HandleFunc("POST "+e+"/tasks/{key}/allow-files", a.allowTaskFiles)
+	mux.HandleFunc("POST "+e+"/tasks/{key}/resolution/apply", a.applyResolution)
 	mux.HandleFunc("POST "+e+"/tasks/{key}/override", a.overrideTask)
 	mux.HandleFunc("POST "+e+"/abandon", a.abandonEffort)
 	mux.HandleFunc("GET "+e+"/git-commands", a.gitCommands)
@@ -240,6 +241,25 @@ func (a *API) allowTaskFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := a.deps.Engine.AllowFiles(r.Context(), actorOf(r), t.ID, body.Files); err != nil {
+		writeErr(w, err)
+		return
+	}
+	a.taskChanged(w, r, ef, t.Key)
+}
+
+// applyResolution is POST .../tasks/{key}/resolution/apply: carry out the resolver's advice on
+// a halted task (resolver_mode advise) and retry it in the same worktree. 409 when no advice
+// waits for the task's current failure streak.
+func (a *API) applyResolution(w http.ResponseWriter, r *http.Request) {
+	ef, ok := a.loadEffort(w, r)
+	if !ok {
+		return
+	}
+	t, ok := a.taskByKey(w, r, ef)
+	if !ok {
+		return
+	}
+	if _, err := a.deps.Engine.ApplyResolution(r.Context(), actorOf(r), t.ID); err != nil {
 		writeErr(w, err)
 		return
 	}
