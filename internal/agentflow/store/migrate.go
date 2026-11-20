@@ -30,6 +30,8 @@ type migration struct {
 //	34 AF-6 projects.toolchains_json, projects.feedback_env_json, projects.verify_in_copy
 //	35 AF-11 backends.api_type may be 'botchat_seat' or 'freebuff_seat'; seat and notify settings
 //	36 AF-12 projects.sandbox, docker_image, docker_network, docker_mounts_json, docker_selinux
+//	37 AF-6b tasks.toolchains_json, stages.relaxations_json
+//	38 AF-10 service_hold
 //
 // Later stories append the next integer; they never edit an earlier entry.
 var migrations = []migration{
@@ -70,6 +72,7 @@ var migrations = []migration{
 	{35, migration35SQL},
 	{36, migration36SQL},
 	{37, migration37SQL},
+	{38, migration38SQL},
 }
 
 // migration35SQL (AF-9, AF-11) lets a backend be a seat: 'botchat_seat' (a BotChat callsign)
@@ -110,6 +113,21 @@ ALTER TABLE projects ADD COLUMN docker_image TEXT NOT NULL DEFAULT '';
 ALTER TABLE projects ADD COLUMN docker_network TEXT NOT NULL DEFAULT 'none' CHECK (docker_network IN ('none', 'provider', 'full'));
 ALTER TABLE projects ADD COLUMN docker_mounts_json TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE projects ADD COLUMN docker_selinux INTEGER NOT NULL DEFAULT 0 CHECK (docker_selinux IN (0, 1));
+`
+
+// migration38SQL (AF-10, numbered 35 on its branch) keeps a hold on the whole service: while it is set,
+// nothing new is dispatched in any project and a run/start is refused. It keeps
+// the projects it paused, so lifting it starts them again, and it survives a
+// restart. restart is set when a drain restart ran out of time and became a
+// hold: the last open stage closing finishes that restart.
+const migration38SQL = `
+CREATE TABLE service_hold (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  reason TEXT NOT NULL DEFAULT '',
+  since INTEGER NOT NULL,
+  paused TEXT NOT NULL DEFAULT '[]',
+  restart INTEGER NOT NULL DEFAULT 0 CHECK (restart IN (0, 1))
+);
 `
 
 // migration32SQL adds the BotChat mode: 'mirror' posts what happens, 'dispatch' also hands each

@@ -1327,6 +1327,24 @@ body {
 .autosave-state[data-state="failed"] { color: var(--color-danger); }
 
 .autosave-holder { display: inline-flex; align-items: center; margin-right: 0.5rem; }
+
+/* The service hold (AF-10): nothing starts while it is set. */
+.nav-hold {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-tint);
+  color: var(--color-warning);
+  font-size: var(--text-sm);
+  max-width: 22rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nav-hold[hidden] { display: none; }
 .autosave-mark { color: var(--color-text-muted); font-size: 1.1rem; min-width: 2rem; }
 .autosave-mark[data-state="pending"] { color: var(--color-text); }
 .autosave-mark[data-state="failed"] { color: var(--color-danger); }

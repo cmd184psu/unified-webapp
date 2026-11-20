@@ -25,6 +25,9 @@ function harness(over: Partial<SettingsDeps> = {}) {
     restartStatus: async () => ({ state: 'idle', open_stages: 0, pid: 1, started: 0 }),
     restartService: async (cancel) => { calls.push('restart:' + cancel); return { state: 'draining', open_stages: 2, pid: 1, started: 0, plan: { requested: '', cancel_running: cancel, paused: [] } }; },
     cancelRestart: async () => { calls.push('cancel-restart'); return { state: 'idle', open_stages: 0, pid: 1, started: 0 }; },
+    serviceHold: async () => ({ active: false, open_stages: 0 }),
+    holdService: async (reason) => { calls.push('hold:' + reason); return { active: true, reason, paused: [], open_stages: 1 }; },
+    liftHold: async () => { calls.push('lift-hold'); return { active: false, open_stages: 0 }; },
     pickDir: async (start) => { calls.push('pick:' + start); return picked.path; },
     notify: (m) => { calls.push('notify:' + m); },
     ...over,
@@ -68,6 +71,22 @@ test('H25: Restart service asks the server, then shows the wait and a way to can
   await flush();
   eq(t.calls.filter((c) => c === 'cancel-restart').length, 1);
   ok(byField(t.host, 'cancel_running') !== undefined, 'the restart button is back');
+  stop();
+});
+
+test('AF10: holding the service shows its reason, and lifting it asks the server', async () => {
+  const t = harness();
+  const stop = t.view.mount();
+  await flush();
+  byField(t.host, 'hold_reason').value = 'changing a backend by hand';
+  button(t.host, 'Hold service').click();
+  await flush();
+  eq(t.calls.filter((c) => c.startsWith('hold:')), ['hold:changing a backend by hand']);
+  ok(t.host.textContent.includes('Service held: changing a backend by hand'), 'hold shown: ' + t.host.textContent);
+  button(t.host, 'Lift hold').click();
+  await flush();
+  eq(t.calls.filter((c) => c === 'lift-hold').length, 1);
+  ok(byField(t.host, 'hold_reason') !== undefined, 'the hold control is back');
   stop();
 });
 

@@ -139,6 +139,9 @@ type view struct {
 	// need is the context a worker task needs; a worker candidate with a
 	// smaller window is passed over (H15). 0 means no requirement.
 	need int
+	// hold is set while the whole service is held (AF-10): no project starts a
+	// new stage, though the running ones finish.
+	hold bool
 }
 
 func modelKey(backend, model string) string { return backend + "\x00" + model }
@@ -156,7 +159,11 @@ func (e *Engine) newView(ctx context.Context) (*view, error) {
 	if err != nil {
 		return nil, err
 	}
-	v := &view{snap: snap, free: map[string]int{}, down: map[string]bool{}, resting: map[string]time.Time{}, restModel: map[string]store.ModelRest{}, modelFree: map[string]int{}, strikes: strikes}
+	hold, err := e.deps.Store.ServiceHold(ctx)
+	if err != nil {
+		return nil, err
+	}
+	v := &view{snap: snap, free: map[string]int{}, down: map[string]bool{}, resting: map[string]time.Time{}, restModel: map[string]store.ModelRest{}, modelFree: map[string]int{}, strikes: strikes, hold: hold.Active}
 	now := e.deps.Clock()
 	if v.failing, err = e.failedChecks(ctx, now); err != nil {
 		return nil, err
@@ -215,6 +222,11 @@ func (d *dispatcher) pass(ctx context.Context) error {
 	v, err := d.e.newView(ctx)
 	if err != nil {
 		return err
+	}
+	if v.hold {
+		// The service is held (AF-10): stages already running finish, but no
+		// project starts a new one until the hold is lifted.
+		return nil
 	}
 	var running []store.Project
 	var errs []error

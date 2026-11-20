@@ -63,6 +63,9 @@ var api = {
   restartStatus: (o) => get("/api/service/restart", o),
   restartService: (cancelRunning) => send("POST", "/api/service/restart", { cancel_running: cancelRunning }),
   cancelRestart: () => send("DELETE", "/api/service/restart"),
+  serviceHold: (o) => get("/api/service/hold", o),
+  holdService: (reason) => send("POST", "/api/service/hold", { reason }),
+  liftHold: () => send("DELETE", "/api/service/hold"),
   fsDirs: (path2 = "") => get(`/api/fs/dirs${path2 ? `?path=${encodeURIComponent(path2)}` : ""}`, { quiet: true }),
   // Projects
   projects: () => get("/api/projects"),
@@ -1743,6 +1746,9 @@ var defaultSettingsDeps = () => ({
   restartStatus: api.restartStatus,
   restartService: api.restartService,
   cancelRestart: api.cancelRestart,
+  serviceHold: api.serviceHold,
+  holdService: api.holdService,
+  liftHold: api.liftHold,
   pickDir: (start) => pickDirectory(start),
   notify: (m) => void showToast4(m, "success")
 });
@@ -1760,6 +1766,7 @@ var SettingsView = class {
     this.ocHost = h("div");
     this.roots = [];
     this.svc = null;
+    this.hold = null;
     this.svcHost = h("div", { attrs: { "data-role": "service" } });
     this.svcTimer = null;
     this.rootsHost = h("div", { class: "wizard-list", attrs: { "data-role": "browse-roots" } });
@@ -1788,6 +1795,7 @@ var SettingsView = class {
       this.values = settings;
       this.oc = oc;
       this.svc = await this.deps.restartStatus({ quiet: true }).catch(() => null);
+      this.hold = await this.deps.serviceHold({ quiet: true }).catch(() => null);
       if (same) return;
       this.roots = Array.isArray(settings.browse_roots) ? [...settings.browse_roots] : [];
     } catch {
@@ -1821,13 +1829,27 @@ var SettingsView = class {
       )
     );
   }
-  /** The Service section: restart the whole service once running work has ended (H25). */
+  /**
+   * The Service section: hold the whole service so it starts nothing new
+   * (AF-10), and restart it once running work has ended (H25).
+   */
   renderService() {
     const svc = this.svc;
+    const hold = this.hold;
     const cancel = checkbox("cancel_running", false);
+    const stages = (n) => `${n} running stage${n === 1 ? "" : "s"}`;
     const run = async (call, said) => {
       try {
         this.svc = await call();
+      } catch {
+        return;
+      }
+      this.deps.notify(said);
+      this.renderService();
+    };
+    const runHold = async (call, said) => {
+      try {
+        this.hold = await call();
       } catch {
         return;
       }
@@ -1844,23 +1866,49 @@ var SettingsView = class {
         }, () => void 0);
       }, 5e3);
     }
-    replace(
-      this.svcHost,
-      svc?.state === "draining" ? h(
-        "div",
-        { class: "warn-box" },
-        h("p", { text: `Restarting when the ${svc.open_stages} running stage${svc.open_stages === 1 ? "" : "s"} end${svc.open_stages === 1 ? "s" : ""}. ${svc.plan?.cancel_running ? "Running stages were cancelled." : "Nothing new starts meanwhile."}` }),
-        button("Cancel restart", () => void run(() => this.deps.cancelRestart(), "Restart cancelled"), { field: "cancel-restart", icon: "cancel", word: true })
-      ) : h(
-        "div",
-        {},
-        h("span", { class: "inline-check" }, cancel, "Cancel running stages instead of waiting for them"),
+    if (hold?.active) {
+      replace(
+        this.svcHost,
         h(
           "div",
-          { class: "row-actions" },
-          button("Restart service", () => void run(() => this.deps.restartService(cancel.checked), "Restart requested"), { field: "restart-service", icon: "refresh", word: true }),
-          h("span", { class: "field-hint", text: svc ? `running since ${new Date(svc.started).toLocaleString()}` : "" })
+          { class: "warn-box", attrs: { "data-role": "service-hold" } },
+          h("p", { text: `Service held: ${hold.reason ?? ""}` }),
+          h("p", { class: "field-hint", text: hold.restart ? `A restart waits for the ${stages(hold.open_stages)} to end, and nothing new starts until it does.` : `${stages(hold.open_stages)} still finishing; no project starts anything new.` }),
+          h(
+            "div",
+            { class: "row-actions" },
+            button(hold.restart ? "Lift hold and cancel restart" : "Lift hold", () => void runHold(() => this.deps.liftHold(), "Hold lifted"), { field: "lift-hold", icon: "cancel", word: true })
+          )
         )
+      );
+      return;
+    }
+    const reason = textInput("hold_reason", "", { placeholder: "why the service should start nothing" });
+    const restartBox = svc?.state === "draining" ? h(
+      "div",
+      { class: "warn-box" },
+      h("p", { text: `Restarting when the ${stages(svc.open_stages)} end. ${svc.plan?.cancel_running ? "Running stages were cancelled." : "Nothing new starts meanwhile."}` }),
+      button("Cancel restart", () => void run(() => this.deps.cancelRestart(), "Restart cancelled"), { field: "cancel-restart", icon: "cancel", word: true })
+    ) : h(
+      "div",
+      {},
+      h("span", { class: "inline-check" }, cancel, "Cancel running stages instead of waiting for them"),
+      h(
+        "div",
+        { class: "row-actions" },
+        button("Restart service", () => void run(() => this.deps.restartService(cancel.checked), "Restart requested"), { field: "restart-service", icon: "refresh", word: true }),
+        h("span", { class: "field-hint", text: svc ? `running since ${new Date(svc.started).toLocaleString()}` : "" })
+      )
+    );
+    replace(
+      this.svcHost,
+      restartBox,
+      h("p", { class: "field-hint", text: "A hold pauses every running project and lets nothing new start, for a change you make by hand." }),
+      h(
+        "div",
+        { class: "inline-row" },
+        reason,
+        button("Hold service", () => void runHold(() => this.deps.holdService(reason.value.trim()), "Service held"), { field: "hold-service", icon: "pause", word: true })
       )
     );
   }
@@ -5570,6 +5618,29 @@ function initHamburger() {
     mountTrigger: trigger
   });
 }
+function initServiceHold() {
+  const right = document.querySelector("#nav .nav-right");
+  if (!right) return;
+  const chip2 = h("span", { class: "nav-hold", attrs: { "data-role": "service-hold", hidden: "", role: "status" } });
+  right.prepend(chip2);
+  const load = async () => {
+    let hold;
+    try {
+      hold = await api.serviceHold({ quiet: true });
+    } catch {
+      return;
+    }
+    if (!hold?.active) {
+      chip2.setAttribute("hidden", "");
+      return;
+    }
+    chip2.textContent = `Service held: ${hold.reason ?? ""}`;
+    chip2.title = hold.restart ? "A restart waits for a long stage to end" : "Nothing new starts until the hold is lifted";
+    chip2.removeAttribute("hidden");
+  };
+  startPoll(() => true, load);
+  void load();
+}
 function initSaveMark() {
   const right = document.querySelector("#nav .nav-right");
   if (!right) return;
@@ -5579,6 +5650,7 @@ function initSaveMark() {
 }
 initHamburger();
 initSaveMark();
+initServiceHold();
 startEvents();
 var attn = document.getElementById("attention-banner");
 if (attn) new AttentionBanner(attn, api, (slug) => showTab("project", slug)).mount();

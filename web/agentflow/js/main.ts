@@ -7,7 +7,7 @@ import { ThemeManager, HamburgerMenu } from '@shared';
 import { api } from './api.js';
 import { mountSaveMark } from './autosave.js';
 import { h, replace } from './dom.js';
-import { startEvents } from './events.js';
+import { startEvents, startPoll } from './events.js';
 import { AttentionBanner } from './attention.js';
 import { SeatPanel } from './seats.js';
 import { HealthBanner } from './health.js';
@@ -83,6 +83,32 @@ function initHamburger(): void {
   });
 }
 
+// initServiceHold puts the hold in the header (AF-10): while the service is
+// held nothing starts anywhere, and a background tab has to show that.
+function initServiceHold(): void {
+  const right = document.querySelector('#nav .nav-right');
+  if (!right) return;
+  const chip = h('span', { class: 'nav-hold', attrs: { 'data-role': 'service-hold', hidden: '', role: 'status' } });
+  right.prepend(chip);
+  const load = async (): Promise<void> => {
+    let hold;
+    try {
+      hold = await api.serviceHold({ quiet: true });
+    } catch {
+      return;
+    }
+    if (!hold?.active) {
+      chip.setAttribute('hidden', '');
+      return;
+    }
+    chip.textContent = `Service held: ${hold.reason ?? ''}`;
+    chip.title = hold.restart ? 'A restart waits for a long stage to end' : 'Nothing new starts until the hold is lifted';
+    chip.removeAttribute('hidden');
+  };
+  startPoll(() => true, load);
+  void load();
+}
+
 function initSaveMark(): void {
   const right = document.querySelector('#nav .nav-right');
   if (!right) return;
@@ -94,6 +120,7 @@ function initSaveMark(): void {
 
 initHamburger();
 initSaveMark();
+initServiceHold();
 startEvents();
 const attn = document.getElementById('attention-banner');
 if (attn) new AttentionBanner(attn, api, (slug) => showTab('project', slug)).mount();

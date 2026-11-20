@@ -181,10 +181,29 @@ func (r *RunControl) budgetOpen(ctx context.Context, ef model.Effort) error {
 	return nil
 }
 
+// held refuses new work while the whole service is held (AF-10), naming the
+// reason in the conflict.
+func (r *RunControl) held(ctx context.Context) error {
+	h, err := r.e.deps.Store.ServiceHold(ctx)
+	if err != nil {
+		return err
+	}
+	if h.Active {
+		return fmt.Errorf("the service is held: %s: %w", h.Reason, store.ErrConflict)
+	}
+	return nil
+}
+
 // Start lets the dispatcher run the project. ErrConflict unless the active
-// effort's queue is approved. Starting a pausing or paused project resumes it;
-// a running one is left as it is.
+// effort's queue is approved, or while the service is held. Starting a pausing
+// or paused project resumes it; a running one is left as it is.
 func (r *RunControl) Start(ctx context.Context, actor, project string) error {
+	if _, err := r.e.deps.Store.GetProject(ctx, project); err != nil {
+		return err
+	}
+	if err := r.held(ctx); err != nil {
+		return err
+	}
 	ef, err := r.approvedEffort(ctx, project)
 	if err != nil {
 		return err
@@ -208,6 +227,12 @@ func (r *RunControl) Start(ctx context.Context, actor, project string) error {
 // RunOne lets the dispatcher start exactly one task's next attempt, then the
 // project pauses. Only a stopped or paused project can run one (ErrConflict).
 func (r *RunControl) RunOne(ctx context.Context, actor, project string) error {
+	if _, err := r.e.deps.Store.GetProject(ctx, project); err != nil {
+		return err
+	}
+	if err := r.held(ctx); err != nil {
+		return err
+	}
 	ef, err := r.approvedEffort(ctx, project)
 	if err != nil {
 		return err

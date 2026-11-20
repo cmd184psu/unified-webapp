@@ -23,7 +23,8 @@ type AttentionItem struct {
 	// Task is the task key, empty for an item about the whole effort.
 	Task string `json:"task,omitempty"`
 	// Kind is stalled, draft_failed, plan_halted, compile_halted, task_halted,
-	// task_unassignable, seat_question or seat_silent.
+	// task_unassignable, seat_question, seat_silent, or service_hold (Project and Effort are
+	// then zero).
 	Kind    string `json:"kind"`
 	Message string `json:"message"`
 	// Since is when it happened (Unix ms) when the engine knows; 0 otherwise.
@@ -42,6 +43,12 @@ func (e *Engine) Attention(ctx context.Context) ([]AttentionItem, error) {
 		return nil, err
 	}
 	out := []AttentionItem{}
+	if h, err := s.ServiceHold(ctx); err != nil {
+		return nil, err
+	} else if h.Active {
+		// A held service starts nothing anywhere: one item, not one per project.
+		out = append(out, AttentionItem{Kind: "service_hold", Message: "The service is held: " + h.Reason, Since: h.Since})
+	}
 	for _, p := range projects {
 		efforts, err := s.ListEfforts(ctx, p.Slug)
 		if err != nil {

@@ -283,6 +283,14 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 		cancel()
 	}
 
+	// Service hold (AF-10): nothing new starts while it is set, a run/start is
+	// refused, and lifting it starts again the projects it paused.
+	ok("POST", "/api/service/hold", `{"reason":"walking the API"}`, 200)
+	ok("POST", "/api/projects/demo/run/start", ``, 409) // the hold refuses it
+	ok("POST", "/api/service/hold", `{}`, 400)          // a reason is required
+	ok("GET", "/api/service/hold", "", 200)
+	ok("DELETE", "/api/service/hold", "", 200)
+
 	// Service restart: nothing is running, so the restart ends the process at once
 	// (here a counter); a second request is refused and the pending one can be cancelled.
 	ok("GET", "/api/service/restart", "", 200)
