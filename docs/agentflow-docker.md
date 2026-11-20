@@ -44,6 +44,9 @@ usually needs none of them, because the image already has the SDK.
   `TERM`, `GIT_*`, `XDG_*`, `GOCACHE`, `GOMODCACHE`, `GOPATH`, `GOTOOLCHAIN`)
   plus what the stage passes. Git and forge credentials, `~/.ssh` and the
   server's data directory are not mounted.
+- What the stage passes (its backend's API key among it) is named on the
+  `docker run` command line (`--env NAME`) and its value travels in the docker
+  CLI's own environment, so it never appears in `ps` or a log.
 - No network by default.
 
 Containers are named `af-<project>-<effort>-<task>-<stage>` and labelled

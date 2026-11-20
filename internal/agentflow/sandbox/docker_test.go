@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -217,5 +218,39 @@ func TestParseMount(t *testing.T) {
 		if !c.ok && err == nil {
 			t.Errorf("ParseMount(%q) accepted", c.in)
 		}
+	}
+}
+
+// TestDockerSecretsNeverInArgv: what the stage passes (its backend's API key) is named on the
+// docker command line but its value travels in the docker CLI's environment, so `ps` and logs
+// never show it (AF-12 review finding 1).
+func TestDockerSecretsNeverInArgv(t *testing.T) {
+	fake := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fake, "docker"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fake+string(os.PathListSeparator)+os.Getenv("PATH"))
+	spec := containerSpec(t, &Docker{Image: "agentflow-worker:0.1", Name: "af-oc3-1-2-worker", Network: NetworkNone}, false)
+	spec.Env = map[string]string{"AGENTFLOW_KEY_GPU": "sk-very-secret", "LANG": "en_US.UTF-8"}
+	cmd, err := dockerCommand(context.Background(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range cmd.Args {
+		if strings.Contains(a, "sk-very-secret") {
+			t.Fatalf("the key is in the docker argv: %v", cmd.Args)
+		}
+	}
+	if !hasPair(cmd.Args, "--env", "AGENTFLOW_KEY_GPU") || !hasPair(cmd.Args, "--env", "LANG") || hasPair(cmd.Args, "--env", "LANG=C.UTF-8") {
+		t.Fatalf("stage variables must be passed by name, overriding the allowlist: %v", cmd.Args)
+	}
+	found := false
+	for _, kv := range cmd.Env {
+		if kv == "AGENTFLOW_KEY_GPU=sk-very-secret" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the docker CLI must carry the value in its environment")
 	}
 }

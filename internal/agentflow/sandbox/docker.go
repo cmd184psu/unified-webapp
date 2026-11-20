@@ -284,9 +284,13 @@ func dockerArgs(spec Spec) ([]string, error) {
 	if d.User != "" {
 		args = append(args, "--user", d.User)
 	}
+	// The fixed allowlist goes on the command line with its values. What the stage passes
+	// (its backend's API key among it) goes by name only: docker takes the value from its
+	// own environment (dockerCommand puts it there), so no secret is ever in an argv that
+	// `ps` shows or a log records.
 	env := dockerEnv(d)
-	for k, v := range spec.Env {
-		env[k] = v
+	for k := range spec.Env {
+		delete(env, k)
 	}
 	keys := make([]string, 0, len(env))
 	for k := range env {
@@ -295,6 +299,9 @@ func dockerArgs(spec Spec) ([]string, error) {
 	sort.Strings(keys)
 	for _, k := range keys {
 		args = append(args, "--env", k+"="+env[k])
+	}
+	for _, k := range stageEnvKeys(spec) {
+		args = append(args, "--env", k)
 	}
 	mounts, err := dockerMounts(spec)
 	if err != nil {
@@ -315,6 +322,16 @@ func dockerArgs(spec Spec) ([]string, error) {
 		argv = append([]string{d.Runner}, spec.Argv[1:]...)
 	}
 	return append(args, argv...), nil
+}
+
+// stageEnvKeys are the names of the variables the stage passes, sorted.
+func stageEnvKeys(spec Spec) []string {
+	keys := make([]string, 0, len(spec.Env))
+	for k := range spec.Env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // dockerShellEnv is the environment of the docker CLI itself: the server's PATH
@@ -394,6 +411,9 @@ func dockerCommand(ctx context.Context, spec Spec) (*exec.Cmd, error) {
 	}
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = dockerShellEnv()
+	for _, k := range stageEnvKeys(spec) {
+		cmd.Env = append(cmd.Env, k+"="+spec.Env[k]) // read by `--env NAME`, never in argv
+	}
 	cmd.WaitDelay = killGrace + time.Second
 	name := spec.Docker.Name
 	cmd.Cancel = func() error {
