@@ -157,12 +157,20 @@ export interface AttentionItem {
   effort: number;
   /** the task key; absent for an item about the whole effort */
   task?: string;
-  kind: 'stalled' | 'draft_failed' | 'plan_halted' | 'compile_halted' | 'task_halted' | 'task_unassignable' | 'seat_question' | 'seat_silent';
+  kind: 'stalled' | 'draft_failed' | 'plan_halted' | 'compile_halted' | 'task_halted' | 'task_needs_files' | 'task_unassignable' | 'seat_question' | 'seat_silent' | 'service_hold';
   message: string;
   /** Unix ms, 0 when not known */
   since: number;
   /** the stage, for a seat stage waiting on the owner */
   stage?: number;
+  /** task_needs_files: the files the worker asks to be allowed, with its reasons (AF-13) */
+  needs_files?: NeededFile[];
+}
+
+/** NeededFile is a file outside a task's list that its worker could not finish without. */
+export interface NeededFile {
+  path: string;
+  reason: string;
 }
 
 /** SeatNotice is what a seat stage waits on the owner with. */
@@ -877,6 +885,9 @@ export const api = {
     send('PUT', `${eff(slug, id)}/tasks/${enc(key)}?approve=true`, def, o),
   retryTask: (slug: string, id: number, key: string, clean: boolean): Promise<TaskDetail> =>
     send('POST', `${eff(slug, id)}/tasks/${enc(key)}/retry`, { clean }),
+  /** allowTaskFiles adds the files a stopped task asked for to its list and retries it in the same worktree (AF-13); no files allows them all. */
+  allowTaskFiles: (slug: string, id: number, key: string, files: string[] = []): Promise<TaskDetail> =>
+    send('POST', `${eff(slug, id)}/tasks/${enc(key)}/allow-files`, { files }),
   overrideTask: (slug: string, id: number, key: string, reason: string): Promise<TaskDetail> =>
     send('POST', `${eff(slug, id)}/tasks/${enc(key)}/override`, { reason }),
 

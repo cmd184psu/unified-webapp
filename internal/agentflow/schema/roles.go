@@ -25,6 +25,16 @@ type WorkerOut struct {
 	// NoChangesReason is set when the files already satisfy the task, so the
 	// worker changed nothing; it names the evidence.
 	NoChangesReason string `json:"no_changes_reason,omitempty"`
+	// NeedsFiles names files outside the task's files_touched that the worker could not finish
+	// without (AF-13). The worker leaves them alone; the owner may allow them, and the task is
+	// retried in the same worktree with them added to its list.
+	NeedsFiles []NeededFile `json:"needs_files,omitempty"`
+}
+
+// NeededFile is one file a worker asks to be allowed to change, and why.
+type NeededFile struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
 }
 
 // ReviewOut is the task reviewer's final message.
@@ -184,7 +194,19 @@ func validateIssues(field string, issues []Issue) error {
 
 // Validate checks required fields.
 func (w *WorkerOut) Validate() error {
-	return nonEmpty("summary", w.Summary)
+	if err := nonEmpty("summary", w.Summary); err != nil {
+		return err
+	}
+	for i, f := range w.NeedsFiles {
+		p := strings.TrimSpace(f.Path)
+		if p == "" || strings.HasPrefix(p, "/") || p == ".." || strings.HasPrefix(p, "../") || strings.Contains(p, "/../") {
+			return bad(fmt.Sprintf("needs_files[%d].path", i), "must be a path relative to the repository root, got %q", f.Path)
+		}
+		if err := nonEmpty(fmt.Sprintf("needs_files[%d].reason", i), f.Reason); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Validate checks the verdict enum, required fields and issues. A blocked

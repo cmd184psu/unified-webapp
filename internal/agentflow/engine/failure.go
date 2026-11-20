@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/gitsvc"
@@ -56,7 +57,11 @@ func (e *Engine) failAttempt(ctx context.Context, c *chain, f Failure) error {
 	outcome, fp, result := model.OutcomeFailed, "", "failed ("+string(f.Kind)+")"
 	switch f.Kind {
 	case FailBlocked:
-		if f.Stage.Role == "worker" && !e.blockedBefore(ctx, c) {
+		if nf := neededFiles(f.Stage, c.task); len(nf) > 0 {
+			// A request for files outside the list is the owner's call, not another model's
+			// (AF-13): the task stops as needs_input showing the files and reasons.
+			outcome, result = model.OutcomeBlocked, "needs files outside its list: "+strings.Join(neededPaths(nf), ", ")
+		} else if f.Stage.Role == "worker" && !e.blockedBefore(ctx, c) {
 			// A first claim of being blocked is often a weak model's mistake (an invented
 			// path, a missing file that exists): another model gets the task before the
 			// owner is asked (H12). It is a failed attempt with its own fingerprint.
@@ -73,7 +78,11 @@ func (e *Engine) failAttempt(ctx context.Context, c *chain, f Failure) error {
 		return err
 	}
 	if outcome == model.OutcomeBlocked {
-		if err := e.deps.Store.SetWaitingReason(ctx, c.task.ID, blockedReason(f.Stage)); err != nil {
+		reason := blockedReason(f.Stage)
+		if nf := neededFiles(f.Stage, c.task); len(nf) > 0 {
+			reason = needsFilesReason(nf)
+		}
+		if err := e.deps.Store.SetWaitingReason(ctx, c.task.ID, reason); err != nil {
 			return err
 		}
 	}

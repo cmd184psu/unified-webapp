@@ -15,6 +15,7 @@ func (a *API) registerTasks(mux muxer) {
 	mux.HandleFunc("GET "+e+"/tasks/{key}", a.getTask)
 	mux.HandleFunc("PUT "+e+"/tasks/{key}", a.editTask)
 	mux.HandleFunc("POST "+e+"/tasks/{key}/retry", a.retryTask)
+	mux.HandleFunc("POST "+e+"/tasks/{key}/allow-files", a.allowTaskFiles)
 	mux.HandleFunc("POST "+e+"/tasks/{key}/override", a.overrideTask)
 	mux.HandleFunc("POST "+e+"/abandon", a.abandonEffort)
 	mux.HandleFunc("GET "+e+"/git-commands", a.gitCommands)
@@ -208,6 +209,31 @@ func (a *API) retryTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.deps.Engine.Retry(r.Context(), actorOf(r), t.ID, body.Clean); err != nil {
+		writeErr(w, err)
+		return
+	}
+	a.taskChanged(w, r, ef, t.Key)
+}
+
+// allowTaskFiles is POST .../tasks/{key}/allow-files {"files": [...]}: a task stopped because
+// its worker needs files outside its list (AF-13) gets them added to files_touched and is retried
+// in the same worktree. No files (or no body) allows every file it asked for.
+func (a *API) allowTaskFiles(w http.ResponseWriter, r *http.Request) {
+	ef, ok := a.loadEffort(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Files []string `json:"files"`
+	}
+	if !decodeBody(w, r, &body, true) {
+		return
+	}
+	t, ok := a.taskByKey(w, r, ef)
+	if !ok {
+		return
+	}
+	if _, err := a.deps.Engine.AllowFiles(r.Context(), actorOf(r), t.ID, body.Files); err != nil {
 		writeErr(w, err)
 		return
 	}

@@ -147,6 +147,8 @@ var api = {
   /** editTask answers with the queue. A queue that was approved stays approved (the edit is the review) and a run goes on; one still in draft stays in draft. */
   editTask: (slug, id, key, def, o) => send("PUT", `${eff(slug, id)}/tasks/${enc(key)}?approve=true`, def, o),
   retryTask: (slug, id, key, clean) => send("POST", `${eff(slug, id)}/tasks/${enc(key)}/retry`, { clean }),
+  /** allowTaskFiles adds the files a stopped task asked for to its list and retries it in the same worktree (AF-13); no files allows them all. */
+  allowTaskFiles: (slug, id, key, files = []) => send("POST", `${eff(slug, id)}/tasks/${enc(key)}/allow-files`, { files }),
   overrideTask: (slug, id, key, reason) => send("POST", `${eff(slug, id)}/tasks/${enc(key)}/override`, { reason }),
   // Run control: answers with the project's overview
   run: (slug, op) => send("POST", `${proj(slug)}/run/${op}`)
@@ -392,6 +394,13 @@ function startPoll(active2, fn) {
 
 // web/agentflow/js/attention.ts
 import { showToast } from "/shared/dist/shared.mjs";
+function toast(text, kind) {
+  try {
+    void Promise.resolve(showToast(text, kind)).catch(() => {
+    });
+  } catch {
+  }
+}
 function itemKey(i) {
   return `${i.project}/${i.effort}/${i.task ?? ""}/${i.kind}/${i.since}`;
 }
@@ -465,10 +474,36 @@ var AttentionBanner = class {
           e.preventDefault();
           this.open(i.project);
         } } }),
-        h("span", { text: ` \u2014 ${i.message}` })
+        h("span", { text: ` \u2014 ${i.message}` }),
+        ...this.needsFiles(i)
       )))
     ));
     this.host.removeAttribute("hidden");
+  }
+  /** needsFiles is a task_needs_files item's file list and its Allow button (AF-13). */
+  needsFiles(i) {
+    const allow = this.deps.allowTaskFiles;
+    if (i.kind !== "task_needs_files" || !i.task || !i.needs_files?.length || !allow) return [];
+    const task = i.task;
+    return [
+      h("ul", { class: "needs-files" }, ...i.needs_files.map((f) => h("li", {}, h("code", { text: f.path }), h("span", { text: ` \u2014 ${f.reason}` })))),
+      h("button", {
+        text: i.needs_files.length === 1 ? "Allow this file and retry" : `Allow these ${i.needs_files.length} files and retry`,
+        attrs: { type: "button", "data-role": "allow-files" },
+        on: { click: async (e) => {
+          const btn = e.currentTarget ?? e.target;
+          if (btn) btn.disabled = true;
+          try {
+            await allow(i.project, i.effort, task);
+            toast(`${task}: files allowed; it continues in the same worktree`, "success");
+          } catch (err) {
+            toast(`${task}: ${err instanceof Error ? err.message : String(err)}`, "error");
+            if (btn) btn.disabled = false;
+          }
+          void this.load();
+        } }
+      })
+    ];
   }
 };
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/model"
+	"cmd184psu/unified-webapp/internal/agentflow/schema"
 	"cmd184psu/unified-webapp/internal/agentflow/store"
 )
 
@@ -23,14 +24,17 @@ type AttentionItem struct {
 	// Task is the task key, empty for an item about the whole effort.
 	Task string `json:"task,omitempty"`
 	// Kind is stalled, draft_failed, plan_halted, compile_halted, task_halted,
-	// task_unassignable, seat_question, seat_silent, or service_hold (Project and Effort are
-	// then zero).
+	// task_needs_files, task_unassignable, seat_question, seat_silent, or service_hold (Project
+	// and Effort are then zero).
 	Kind    string `json:"kind"`
 	Message string `json:"message"`
 	// Since is when it happened (Unix ms) when the engine knows; 0 otherwise.
 	Since int64 `json:"since"`
 	// Stage is the stage the item is about, for a seat stage waiting on the owner.
 	Stage int64 `json:"stage,omitempty"`
+	// NeedsFiles are the files a task_needs_files item asks the owner to allow (AF-13), with
+	// the worker's reasons; POST .../tasks/{key}/allow-files allows them.
+	NeedsFiles []schema.NeededFile `json:"needs_files,omitempty"`
 }
 
 // Attention lists everything that needs the owner, newest first. It is derived
@@ -135,6 +139,11 @@ func (e *Engine) effortAttention(ctx context.Context, project string, ef model.E
 			st := status[t.Key]
 			switch {
 			case st.Halted():
+				if nf, err := e.PendingNeededFiles(ctx, t); err == nil && len(nf) > 0 {
+					add("task_needs_files", t.Key, fmt.Sprintf("%s %q %s", t.Key, t.Title, needsFilesReason(nf)), time.Time{})
+					out[len(out)-1].NeedsFiles = nf
+					continue
+				}
 				add("task_halted", t.Key, fmt.Sprintf("%s %q is %s", t.Key, t.Title, st), time.Time{})
 			case !st.Done() && strings.HasPrefix(t.WaitingReason, "no eligible backend"):
 				add("task_unassignable", t.Key, fmt.Sprintf("%s %q is waiting: %s", t.Key, t.Title, t.WaitingReason), time.Time{})

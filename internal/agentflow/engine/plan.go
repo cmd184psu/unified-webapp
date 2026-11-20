@@ -651,7 +651,7 @@ func (e *Engine) approvePlanLocked(ctx context.Context, actor string, effort int
 // planner's job. The planner's reply is rejected without the pre-mortem
 // (schema.PlanOut.ValidateDeliberate, which feeds the SO2 corrective), and the
 // critic is told to check both.
-const deliberatePlannerRules = "10. Deliberate mode is on. Add `premortem`: exactly three scenarios in which this plan fails, each one string naming the cause, the effect and the mitigation. " +
+const deliberatePlannerRules = "11. Deliberate mode is on. Add `premortem`: exactly three scenarios in which this plan fails, each one string naming the cause, the effect and the mitigation. " +
 	"Add `test_plan`: an expanded test plan with entries for unit tests, integration tests, end-to-end tests and observability (what proves it works in operation), each tied to the phase that delivers it."
 
 const deliberateCriticChecks = "## Deliberate mode\n\n" +

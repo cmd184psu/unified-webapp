@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -274,4 +275,42 @@ func (s *Store) TaskStatuses(ctx context.Context, effort int64, lim model.Limits
 		return nil, err
 	}
 	return model.DeriveAll(in, lim), nil
+}
+
+// AllowTaskFiles adds files to a task's files_touched (AF-13: the owner allows files a worker
+// asked for). Like an acceptance follow-up task, it changes the approved queue in place: the
+// queue's hash, and so every stage already queued, stays valid.
+func (s *Store) AllowTaskFiles(ctx context.Context, actor string, task int64, files []string) error {
+	return s.WithTx(ctx, func(tx *sql.Tx) error {
+		var key, js string
+		if err := tx.QueryRowContext(ctx, `SELECT task_key, files_touched_json FROM tasks WHERE id = ?`, task).Scan(&key, &js); errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("task %d: %w", task, ErrNotFound)
+		} else if err != nil {
+			return err
+		}
+		var cur []string
+		if err := json.Unmarshal([]byte(js), &cur); err != nil {
+			return fmt.Errorf("task %s files_touched: %w", key, err)
+		}
+		have := map[string]bool{}
+		for _, f := range cur {
+			have[f] = true
+		}
+		var added []string
+		for _, f := range files {
+			if f == "" || strings.HasPrefix(f, "/") || f == ".." || strings.HasPrefix(f, "../") {
+				return Invalid("files", fmt.Sprintf("%q is not a path relative to the repository root", f))
+			}
+			if !have[f] {
+				have[f] = true
+				cur = append(cur, f)
+				added = append(added, f)
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE tasks SET files_touched_json = ? WHERE id = ?`, jsonList(cur), task); err != nil {
+			return err
+		}
+		_, err := AppendEvent(tx, actor, "task.files_allowed", "task", fmt.Sprint(task), map[string]any{"task": key, "files": added})
+		return err
+	})
 }

@@ -120,7 +120,7 @@ func parseFinal(role, final string, deliberate bool) (json.RawMessage, string, e
 		if err != nil {
 			return nil, "", err
 		}
-		if w.Blocked != "" {
+		if w.Blocked != "" || len(w.NeedsFiles) > 0 {
 			return raw, OutcomeBlocked, nil
 		}
 	case "reviewer":

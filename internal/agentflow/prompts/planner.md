@@ -27,6 +27,7 @@ Current repository files (relative paths, capped). When this is empty, treat the
 7. State the principles guiding the plan, the decision drivers, and at least two options you considered. Choose one and record the decision in the ADR.
 8. When the FRD carries a `Toolchains:` line, carry it into every phase that touches those files as a `toolchains` array on that phase (`["dotnet"]` for C#), and repeat the line in the phase description. A phase whose files are `*.cs`, `*.csproj` or `*.sln` names `dotnet` even when the FRD omitted the line.
 9. Name each phase's tests beside the code it adds, one test file per source file (`truce.go` with `truce_test.go`). Do not route every phase's tests into one shared file such as `peace_test.go`: a test file is shared between tasks, never owned, and one file named by many tasks only makes them collide at merge.
+10. A phase that ports a step of an existing program (for example a C# turn phase into Go) usually needs new fields on the game model and the save format as well as the step itself. Name those files in the phase description too (for a game port: the state or model file under `src/game/` and the save loader under `src/save/`), so the tasks list them; a worker cannot change a file its task does not list.
 {{DELIBERATE_RULES}}
 
 ## Output

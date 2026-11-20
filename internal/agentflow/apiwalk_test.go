@@ -263,6 +263,7 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	ok("PUT", base+"/tasks/T001", string(edit), 200)
 	ok("PUT", base+"/tasks/T001?approve=true", string(edit), 200)     // a draft queue stays a draft
 	ok("POST", base+"/tasks/T001/retry", `{"clean":false}`, 409)      // not halted
+	ok("POST", base+"/tasks/T001/allow-files", `{}`, 409)             // not waiting for files
 	ok("POST", base+"/tasks/T001/override", `{"reason":"walk"}`, 409) // not halted
 	var q struct{ Hash string }
 	if err := json.Unmarshal(ok("GET", base+"/queue", "", 200), &q); err != nil || q.Hash == "" {
