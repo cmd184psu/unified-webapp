@@ -638,6 +638,10 @@ func (h *harness) workerModelDispatched() string {
 func TestH7_RepeatFailureMovesToAnotherModel(t *testing.T) {
 	setup := func(workers ...string) (*harness, runFix) {
 		h := newDispHarness(t)
+		// These rules predate AF-13's default of 2; they are about the model choice in between.
+		if err := h.st.UpdateSettings(context.Background(), "t", map[string]string{"stuck_threshold": "3"}); err != nil {
+			t.Fatal(err)
+		}
 		h.addBackend("gpu", 5, false, false, "m1", "m2", "m3")
 		h.candidates("global", "", "worker", workers...)
 		h.candidates("global", "", "reviewer", "gpu/m3")
@@ -674,6 +678,10 @@ func TestH7_RepeatFailureMovesToAnotherModel(t *testing.T) {
 // owner clears them; the task waits with the reason when nobody else is listed.
 func TestH7_ThreeStrikesBenchAModel(t *testing.T) {
 	h := newDispHarness(t)
+	// These rules predate AF-13's default of 2; they are about the model choice in between.
+	if err := h.st.UpdateSettings(context.Background(), "t", map[string]string{"stuck_threshold": "3"}); err != nil {
+		t.Fatal(err)
+	}
 	h.addBackend("gpu", 5, false, false, "m1", "m2", "m3")
 	h.candidates("global", "", "worker", "gpu/m1", "gpu/m2")
 	h.candidates("global", "", "reviewer", "gpu/m3")
@@ -811,6 +819,10 @@ func TestH10_ModelWithoutToolsIsSkipped(t *testing.T) {
 func TestH11_RepeatedFailureEscalatesTheTier(t *testing.T) {
 	setup := func(workers ...string) (*harness, runFix) {
 		h := newDispHarness(t)
+		// These rules predate AF-13's default of 2; they are about the model choice in between.
+		if err := h.st.UpdateSettings(context.Background(), "t", map[string]string{"stuck_threshold": "3"}); err != nil {
+			t.Fatal(err)
+		}
 		h.tiered("gpu", 5, map[string]int{"lo": 2, "hi": 1, "rev": 1})
 		h.candidates("global", "", "worker", workers...)
 		h.candidates("global", "", "reviewer", "gpu/rev")

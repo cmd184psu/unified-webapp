@@ -74,7 +74,7 @@ func TestSettingsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.MaxAttempts != 5 || got.StuckThreshold != 3 || got.MaxInfraRetries != 5 || got.PlanMaxRounds != 5 ||
+	if got.MaxAttempts != 5 || got.StuckThreshold != 2 || got.MaxInfraRetries != 5 || got.PlanMaxRounds != 5 ||
 		got.OpencodePath != "opencode" || got.VerifySlots != 2 ||
 		got.WorkerTimeout <= 0 || got.ReviewTimeout <= 0 || got.PlanTimeout <= 0 || got.VerifyTimeout <= 0 {
 		t.Fatalf("defaults = %+v", got)
@@ -117,7 +117,7 @@ func TestSettingsValidationBounds(t *testing.T) {
 		{"max_attempts text", map[string]string{"max_attempts": "lots"}, "max_attempts"},
 		{"stuck low", map[string]string{"stuck_threshold": "1"}, "stuck_threshold"},
 		{"stuck above max_attempts", map[string]string{"stuck_threshold": "6"}, "stuck_threshold"},
-		{"max_attempts below stuck", map[string]string{"max_attempts": "2"}, "stuck_threshold"},
+		{"max_attempts below stuck", map[string]string{"max_attempts": "2", "stuck_threshold": "3"}, "stuck_threshold"},
 		{"infra negative", map[string]string{"max_infra_retries": "-1"}, "max_infra_retries"},
 		{"plan rounds zero", map[string]string{"plan_max_rounds": "0"}, "plan_max_rounds"},
 		{"worker timeout short", map[string]string{"worker_timeout": "29s"}, "worker_timeout"},
@@ -334,7 +334,7 @@ func TestProjectValidationAndUniqueness(t *testing.T) {
 		{"blank feedback", Project{Slug: "p", RepoPath: repo, ModelScope: "any", FeedbackCmds: []string{"go vet", " "}}, "feedback_cmds[1]"},
 		{"unknown limit", Project{Slug: "p", RepoPath: repo, ModelScope: "any", Limits: map[string]string{"verify_slots": "3"}}, "limits.verify_slots"},
 		{"limit out of range", Project{Slug: "p", RepoPath: repo, ModelScope: "any", Limits: map[string]string{"max_attempts": "99"}}, "limits.max_attempts"},
-		{"limit cross rule", Project{Slug: "p", RepoPath: repo, ModelScope: "any", Limits: map[string]string{"max_attempts": "2"}}, "limits.stuck_threshold"},
+		{"limit cross rule", Project{Slug: "p", RepoPath: repo, ModelScope: "any", Limits: map[string]string{"max_attempts": "2", "stuck_threshold": "3"}}, "limits.stuck_threshold"},
 		{"limit bad timeout", Project{Slug: "p", RepoPath: repo, ModelScope: "any", Limits: map[string]string{"worker_timeout": "5s"}}, "limits.worker_timeout"},
 	}
 	for _, c := range cases {
@@ -486,7 +486,7 @@ func TestProjectOverridesFallBackToGlobal(t *testing.T) {
 	if eff.MaxAttempts != 9 || eff.WorkerTimeout != 45*time.Minute {
 		t.Fatalf("overrides not applied: %+v", eff)
 	}
-	if eff.PlanMaxRounds != 5 || eff.StuckThreshold != 3 {
+	if eff.PlanMaxRounds != 5 || eff.StuckThreshold != 2 { // AF-13: two repeats stop the loop
 		t.Fatalf("blank/absent did not fall back: %+v", eff)
 	}
 	if p, _ := s.GetProject(ctx, "p"); len(p.Limits) != 2 {

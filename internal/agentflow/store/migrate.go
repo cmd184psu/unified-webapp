@@ -32,6 +32,7 @@ type migration struct {
 //	36 AF-12 projects.sandbox, docker_image, docker_network, docker_mounts_json, docker_selinux
 //	37 AF-6b tasks.toolchains_json, stages.relaxations_json
 //	38 AF-10 service_hold
+//	39 AF-13 role_candidates.role may be 'resolver'; stuck_threshold default 3 -> 2
 //
 // Later stories append the next integer; they never edit an earlier entry.
 var migrations = []migration{
@@ -73,7 +74,30 @@ var migrations = []migration{
 	{36, migration36SQL},
 	{37, migration37SQL},
 	{38, migration38SQL},
+	{39, migration39SQL},
 }
+
+// migration39SQL (AF-13 3b) lets a project list resolver candidates, the role that reads a
+// stuck task's evidence and decides one way through, and stops the retry loop after two
+// attempts that fail the same way (an owner who set another threshold keeps it).
+const migration39SQL = `
+CREATE TABLE role_candidates_new (
+  scope TEXT NOT NULL CHECK (scope IN ('global', 'project')),
+  project_id TEXT NOT NULL DEFAULT '',
+  role TEXT NOT NULL CHECK (role IN ('worker', 'reviewer', 'planner', 'architect', 'critic', 'compiler', 'resolver')),
+  position INTEGER NOT NULL CHECK (position >= 0),
+  backend TEXT NOT NULL REFERENCES backends(name),
+  model TEXT NOT NULL,
+  PRIMARY KEY (scope, project_id, role, position),
+  CHECK ((scope = 'global') = (project_id = '')),
+  FOREIGN KEY (backend, model) REFERENCES backend_models(backend, model) DEFERRABLE INITIALLY DEFERRED
+);
+INSERT INTO role_candidates_new (scope, project_id, role, position, backend, model)
+  SELECT scope, project_id, role, position, backend, model FROM role_candidates;
+DROP TABLE role_candidates;
+ALTER TABLE role_candidates_new RENAME TO role_candidates;
+UPDATE settings SET value = '2' WHERE key = 'stuck_threshold' AND value = '3';
+`
 
 // migration35SQL (AF-9, AF-11) lets a backend be a seat: 'botchat_seat' (a BotChat callsign)
 // or 'freebuff_seat' (an interactive program agentflow runs in a terminal session). AF-9 added

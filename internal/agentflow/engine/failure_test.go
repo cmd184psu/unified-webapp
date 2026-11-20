@@ -83,6 +83,7 @@ func writeWork(r runner.Request) error {
 // a failed state, and each repair attempt reuses the first attempt's worktree.
 func TestC7_ACAT1_SameVerifyFailureThriceIsStuck(t *testing.T) {
 	c := newChainRun(t, nil, chainDefs()[:1])
+	c.setLimits(map[string]string{"stuck_threshold": "3"}) // the AT4 rule at its old default; AF-13 defaults to 2
 	for i := 0; i < 3; i++ {
 		c.fake.Script("worker", runner.Step{Reply: workerOK}) // changes nothing: verify no_changes
 	}
@@ -499,10 +500,9 @@ func TestContextFullGoesToAnotherModelWithoutAStrike(t *testing.T) {
 	}
 }
 
-// H21: a worker that ran out of time is not given the task again while another
-// model can take it. Before this the next attempt went back to the slow model
-// unless it had timed out twice in a row, and an attempt on another model in
-// between reset that count: a slow host timed out four times in six attempts.
+// H21, AF-13 3b: a worker that ran out of time is not given the task again while
+// another model can take it, and the timeout no longer costs an attempt: it is an
+// infrastructure failure, so the same attempt goes on with another model.
 func TestH21_AfterAWorkerTimeoutTheNextAttemptUsesAnotherModel(t *testing.T) {
 	c := newChainRun(t, nil, chainDefs()[:1])
 	c.addBackend("gpu2", 1, false, false, "m3", "m4")
@@ -515,11 +515,15 @@ func TestH21_AfterAWorkerTimeoutTheNextAttemptUsesAnotherModel(t *testing.T) {
 	c.run()
 	waitFor(t, "task passed", func() bool { return c.taskStatus() == model.StatusPassed })
 	as := c.attempts(0)
-	if len(as) < 2 || as[0].Fingerprint != string(FailTimeout) || as[0].WorkerModel != "m1" {
-		t.Fatalf("attempts = %+v: the first should have timed out on m1", as)
+	if len(as) != 1 || as[0].Outcome != model.OutcomePassed {
+		t.Fatalf("attempts = %+v: a timeout must not cost an attempt", as)
 	}
-	if as[1].WorkerModel != "m2" {
-		t.Fatalf("the attempt after a timeout used worker %q, want m2", as[1].WorkerModel)
+	ss, err := c.st.ListAttemptStages(context.Background(), as[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ss[0].Model != "m1" || ss[0].Outcome != OutcomeInfraTimeout || ss[1].Role != "worker" || ss[1].Model != "m2" {
+		t.Fatalf("stages = %+v: want an infra timeout on m1 and then m2", ss)
 	}
 }
 

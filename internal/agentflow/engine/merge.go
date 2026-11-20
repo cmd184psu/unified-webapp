@@ -211,7 +211,7 @@ func (e *Engine) completeEffort(ctx context.Context, proj store.Project, ef mode
 		return err
 	}
 	if !model.AllDone(status) {
-		return nil
+		return e.resolvePass(ctx, proj, ef, status)
 	}
 	if ok, err := e.acceptance(ctx, proj, ef); err != nil || !ok {
 		return err

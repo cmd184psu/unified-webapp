@@ -67,7 +67,7 @@ var portableSettings = []string{"max_attempts", "stuck_threshold", "max_infra_re
 	"worker_timeout", "review_timeout", "plan_timeout", "verify_timeout", "backend_cooldown", "context_floor_tokens"}
 
 // configRoles are the roles that have a global candidate list.
-var configRoles = []string{"planner", "architect", "critic", "compiler", "worker", "reviewer"}
+var configRoles = []string{"planner", "architect", "critic", "compiler", "worker", "reviewer", "resolver"}
 
 // exportConfig answers GET /api/config/export with the configuration as a download.
 func (a *API) exportConfig(w http.ResponseWriter, r *http.Request) {

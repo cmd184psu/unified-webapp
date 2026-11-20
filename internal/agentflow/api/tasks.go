@@ -45,6 +45,8 @@ type TaskDetail struct {
 	TaskView
 	AttemptList []AttemptView `json:"attempt_list"`
 	Progress    []string      `json:"progress"`
+	// Resolutions are the resolver's decisions on the task (AF-13 3b), oldest first.
+	Resolutions []engine.Resolution `json:"resolutions"`
 }
 
 func (a *API) taskViews(r *http.Request, ef model.Effort) ([]TaskView, error) {
@@ -150,6 +152,10 @@ func (a *API) getTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if d.Progress == nil {
 		d.Progress = []string{}
+	}
+	if d.Resolutions, err = a.deps.Engine.Resolutions(r.Context(), ef.ID, t.Key); err != nil {
+		writeErr(w, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, d)
 }

@@ -427,7 +427,7 @@ func TestAT7_ClassificationThroughTheRuntime(t *testing.T) {
 		{"unreachable", "worker", runner.Step{ErrClass: runner.ErrUnreachable, Err: errors.New("refused")}, OutcomeInfraUnreachable, true},
 		{"crash", "worker", runner.Step{ErrClass: runner.ErrCrash, Err: errors.New("exit 2")}, OutcomeInfraCrash, true},
 		{"plain error", "reviewer", runner.Step{Err: errors.New("weird")}, OutcomeInfraCrash, true},
-		{"worker timeout", "worker", runner.Step{ErrClass: runner.ErrTimeout, Reply: "partial"}, OutcomeTimeout, false},
+		{"worker timeout", "worker", runner.Step{ErrClass: runner.ErrTimeout, Reply: "partial"}, OutcomeInfraTimeout, true},
 		{"reviewer timeout", "reviewer", runner.Step{ErrClass: runner.ErrTimeout}, OutcomeInfraTimeout, true},
 	}
 	for _, tc := range cases {
@@ -482,8 +482,8 @@ func TestClassifyRun_RoleDeadlineVersusParentCancel(t *testing.T) {
 		want   string
 	}{
 		{"success", live, "worker", nil, ""},
-		{"role deadline from the engine's own ctx", live, "worker", context.DeadlineExceeded, OutcomeTimeout},
-		{"wrapped deadline", live, "worker", fmt.Errorf("x: %w", context.DeadlineExceeded), OutcomeTimeout},
+		{"role deadline from the engine's own ctx", live, "worker", context.DeadlineExceeded, OutcomeInfraTimeout},
+		{"wrapped deadline", live, "worker", fmt.Errorf("x: %w", context.DeadlineExceeded), OutcomeInfraTimeout},
 		{"reviewer deadline", live, "reviewer", context.DeadlineExceeded, OutcomeInfraTimeout},
 		{"parent cancelled wins over a timeout class", dead, "worker", rerr(runner.ErrTimeout), OutcomeInfraCancel},
 		{"parent cancelled wins over a crash", dead, "worker", rerr(runner.ErrCrash), OutcomeInfraCancel},

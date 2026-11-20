@@ -24,7 +24,7 @@ type AttentionItem struct {
 	// Task is the task key, empty for an item about the whole effort.
 	Task string `json:"task,omitempty"`
 	// Kind is stalled, draft_failed, plan_halted, compile_halted, task_halted,
-	// task_needs_files, task_unassignable, seat_question, seat_silent, or service_hold (Project
+	// task_needs_files, task_resolved, task_unassignable, seat_question, seat_silent, or service_hold (Project
 	// and Effort are then zero).
 	Kind    string `json:"kind"`
 	Message string `json:"message"`
@@ -135,8 +135,22 @@ func (e *Engine) effortAttention(ctx context.Context, project string, ef model.E
 		if err != nil {
 			return nil, err
 		}
+		resolved, err := e.effortEvents(ctx, ef.ID, eventTaskResolved)
+		if err != nil {
+			return nil, err
+		}
 		for _, t := range tasks {
 			st := status[t.Key]
+			// AF-13 3b: every resolver decision on an unfinished task is listed, so the owner
+			// sees what was decided for them ("resolved by <model>: <decision>").
+			if rs := readResolved(resolved, t.Key); len(rs) > 0 && !st.Done() {
+				r := rs[len(rs)-1]
+				by := "the resolver"
+				if r.Model != "" {
+					by = r.Model + " on " + r.Backend
+				}
+				add("task_resolved", t.Key, fmt.Sprintf("%s %q resolved by %s: %s: %s", t.Key, t.Title, by, r.Decision, r.Reason), time.Time{})
+			}
 			switch {
 			case st.Halted():
 				if nf, err := e.PendingNeededFiles(ctx, t); err == nil && len(nf) > 0 {

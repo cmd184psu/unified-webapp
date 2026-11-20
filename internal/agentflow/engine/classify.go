@@ -71,13 +71,10 @@ func classifyRun(parent context.Context, role string, err error) string {
 	case runner.ErrContext:
 		return OutcomeInfraContext
 	case runner.ErrTimeout:
-		// A worker that was still producing output when its deadline hit ran out of
-		// time on the task. One that went silent (a stall) says nothing about the task:
-		// a hosted model that is throttled looks exactly like this, so it is an
-		// infrastructure failure, the model rests and the stage goes to another.
-		if (role == "worker" || role == "cleanup") && !isStall(re) {
-			return OutcomeTimeout
-		}
+		// A stage deadline is an infrastructure failure for every role (AF-13 3b): it is
+		// retried without spending an attempt, up to max_infra_retries, after which the
+		// task needs attention. Counting it as an attempt let one slow model burn every
+		// attempt of a task on the same timeout.
 		return OutcomeInfraTimeout
 	case runner.ErrNone:
 		if errors.Is(err, context.Canceled) {

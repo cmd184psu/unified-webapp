@@ -375,6 +375,8 @@ export class Board {
         d.files_touched?.length ? block('Files touched', mono((d.files_touched ?? []).join('\n'))) : null,
         d.depends_on?.length ? block('Depends on', h('p', { text: (d.depends_on ?? []).join(', ') })) : null,
         block('Attempts', ...(d.attempt_list.length ? d.attempt_list.map((a) => this.attempt(a)) : [h('p', { class: 'field-hint', text: 'No attempts yet.' })])),
+        d.resolutions?.length ? block('Resolver', bullets(d.resolutions.map((r) =>
+          `resolved by ${r.model ? `${r.model} on ${r.backend}` : 'the engine'}: ${r.decision}: ${r.reason}`))) : null,
         d.progress.length ? block('Progress log', bullets(d.progress)) : null));
   }
 

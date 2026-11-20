@@ -15,7 +15,7 @@ import (
 )
 
 // Roles that carry an ordered candidate model list (MB4).
-var roles = []string{"worker", "reviewer", "planner", "architect", "critic", "compiler"}
+var roles = []string{"worker", "reviewer", "planner", "architect", "critic", "compiler", "resolver"}
 
 var (
 	// backendNameRE keeps the lane name "agentflow-<name>" within taskmaster's

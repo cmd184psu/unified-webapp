@@ -307,6 +307,16 @@ func (e *Engine) workdir(ctx context.Context, st model.Stage, project string) (s
 			}
 		}
 	}
+	if isResolver(st) {
+		// The resolver reads the task's kept worktree: its last attempt is on disk.
+		if _, after := resolverTarget(st.PromptRef); after > 0 {
+			if att, err := e.deps.Store.GetAttempt(ctx, after); err == nil && att.Worktree != "" {
+				if fi, err := os.Stat(att.Worktree); err == nil && fi.IsDir() {
+					return att.Worktree, nil
+				}
+			}
+		}
+	}
 	if st.Attempt != 0 {
 		att, err := e.deps.Store.GetAttempt(ctx, st.Attempt)
 		if err != nil {
@@ -378,6 +388,9 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 		}
 		if isAcceptance(st) {
 			return parseAcceptance(final)
+		}
+		if isResolver(st) {
+			return parseResolver(final)
 		}
 		return parseFinal(st.Role, final, deliberate)
 	}

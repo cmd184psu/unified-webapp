@@ -314,3 +314,20 @@ func (s *Store) AllowTaskFiles(ctx context.Context, actor string, task int64, fi
 		return err
 	})
 }
+
+// AmendTaskPrompt appends text to a task's prompt, which its worker and reviewer read (AF-13:
+// a resolver's clarification or an out-of-scope finding). Like AllowTaskFiles it changes the
+// approved queue in place.
+func (s *Store) AmendTaskPrompt(ctx context.Context, actor string, task int64, text string) error {
+	return s.WithTx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE tasks SET prompt = prompt || ? WHERE id = ?`, "\n\n"+strings.TrimSpace(text), task)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return fmt.Errorf("task %d: %w", task, ErrNotFound)
+		}
+		_, err = AppendEvent(tx, actor, "task.prompt_amended", "task", fmt.Sprint(task), map[string]any{"text": text})
+		return err
+	})
+}

@@ -61,7 +61,7 @@ func (e *Engine) failAttempt(ctx context.Context, c *chain, f Failure) error {
 			// A request for files outside the list is the owner's call, not another model's
 			// (AF-13): the task stops as needs_input showing the files and reasons.
 			outcome, result = model.OutcomeBlocked, "needs files outside its list: "+strings.Join(neededPaths(nf), ", ")
-		} else if f.Stage.Role == "worker" && !e.blockedBefore(ctx, c) {
+		} else if f.Stage.Role == "worker" && !e.blockedBefore(ctx, c) && !e.resolverOn(ctx, c.proj) {
 			// A first claim of being blocked is often a weak model's mistake (an invented
 			// path, a missing file that exists): another model gets the task before the
 			// owner is asked (H12). It is a failed attempt with its own fingerprint.
@@ -73,6 +73,11 @@ func (e *Engine) failAttempt(ctx context.Context, c *chain, f Failure) error {
 		outcome, result = model.OutcomePolicyViolation, "broke the git policy (reverted)"
 	default:
 		fp = fingerprintOf(f)
+		if f.Kind == FailReview {
+			if prev := e.repeatedReview(ctx, c, f.Stage); prev != "" {
+				fp = prev // the same finding again, in other words
+			}
+		}
 	}
 	if err := e.appendProgress(ctx, c, result); err != nil {
 		return err

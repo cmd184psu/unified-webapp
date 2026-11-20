@@ -9,7 +9,7 @@ import { autosave } from './autosave.js';
 import { h, replace } from './dom.js';
 import { FormErrors, badge, button, checkbox, selectInput } from './forms.js';
 
-export const ROLES = ['worker', 'reviewer', 'planner', 'architect', 'critic', 'compiler'];
+export const ROLES = ['worker', 'reviewer', 'planner', 'architect', 'critic', 'compiler', 'resolver'];
 
 /** CandRow is one candidate being edited; optIn is the explicit consent a paid one needs. */
 export interface CandRow {

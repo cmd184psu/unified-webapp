@@ -157,7 +157,7 @@ export interface AttentionItem {
   effort: number;
   /** the task key; absent for an item about the whole effort */
   task?: string;
-  kind: 'stalled' | 'draft_failed' | 'plan_halted' | 'compile_halted' | 'task_halted' | 'task_needs_files' | 'task_unassignable' | 'seat_question' | 'seat_silent' | 'service_hold';
+  kind: 'stalled' | 'draft_failed' | 'plan_halted' | 'compile_halted' | 'task_halted' | 'task_needs_files' | 'task_resolved' | 'task_unassignable' | 'seat_question' | 'seat_silent' | 'service_hold';
   message: string;
   /** Unix ms, 0 when not known */
   since: number;
@@ -668,6 +668,63 @@ export interface Attempt {
 export interface TaskDetail extends TaskView {
   attempt_list: Attempt[];
   progress: string[];
+  /** the resolver's decisions on the task, oldest first (AF-13); absent from older servers */
+  resolutions?: Resolution[];
+}
+
+/** ExternalSeat is a seat the owner runs by hand, as the coordinator module sees it (AF-13). */
+export interface ExternalSeat {
+  callsign: string;
+  session: string;
+  running: boolean;
+  since: string;
+  halt?: string;
+  dead?: boolean;
+  ready: boolean;
+  last_note?: string;
+  last_action?: string;
+  feed: boolean;
+  nudge: boolean;
+  current?: string;
+  queue_file: string;
+}
+
+/** CoordDecision is one thing a coordinator pass decided. */
+export interface CoordDecision {
+  kind: string;
+  task?: string;
+  seat?: string;
+  detail: string;
+}
+
+/** CoordReport is one coordinator pass. */
+export interface CoordReport {
+  started: string;
+  finished: string;
+  dry: boolean;
+  decisions: CoordDecision[] | null;
+  writes?: string[];
+  error?: string;
+}
+
+/** CoordStatus is GET /api/coord. */
+export interface CoordStatus {
+  enabled: boolean;
+  dry_run: boolean;
+  me: string;
+  base: string;
+  last_run: CoordReport | null;
+  watch: CoordDecision[] | null;
+}
+
+/** Resolution is one resolver decision on a stuck task. */
+export interface Resolution {
+  decision: 'clarify' | 'allow_files' | 'override_finding' | 'split' | 'escalate';
+  reason: string;
+  model?: string;
+  backend?: string;
+  stage?: number;
+  auto?: boolean;
 }
 
 export interface Invariant {
@@ -761,6 +818,11 @@ export const api = {
   // Health and opencode
   health: (o?: FetchOptions): Promise<Health> => get('/api/health', o),
   attention: (o?: FetchOptions): Promise<AttentionItem[]> => get('/api/attention', o),
+  coordStatus: (o?: FetchOptions): Promise<CoordStatus> => get('/api/coord', o),
+  coordRun: (dry: boolean): Promise<CoordReport> => send('POST', '/api/coord/run', { dry }),
+  externalSeats: (o?: FetchOptions): Promise<ExternalSeat[]> => get('/api/seats/external', o),
+  seatQueue: (callsign: string): Promise<{ callsign: string; text: string }> => get(`/api/seats/${encodeURIComponent(callsign)}/queue`),
+  nudgeSeat: (callsign: string): Promise<{ nudged: string }> => send('POST', `/api/seats/${encodeURIComponent(callsign)}/nudge`, {}),
   seats: (o?: FetchOptions): Promise<SeatStage[]> => get('/api/seats', o),
   answerSeat: (stage: number, text: string): Promise<{ stage: number; answered: boolean }> => send('POST', `/api/seats/${stage}/answer`, { text }),
   cancelSeat: (stage: number): Promise<{ stage: number; cancelled: boolean }> => send('POST', `/api/seats/${stage}/cancel`),

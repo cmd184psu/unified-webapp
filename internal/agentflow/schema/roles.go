@@ -379,3 +379,51 @@ func (a *AcceptanceOut) Validate() error {
 	}
 	return nil
 }
+
+// ResolverOut is the resolver's decision on a stuck task (AF-13 3b): one way through, with
+// the evidence (file:line) it rests on.
+type ResolverOut struct {
+	// Decision is clarify, allow_files, override_finding, split or escalate.
+	Decision string   `json:"decision"`
+	Reason   string   `json:"reason"`
+	Evidence []string `json:"evidence"`
+	// Clarification amends the task's prompt (clarify), shown to the worker and the reviewer.
+	Clarification string `json:"clarification,omitempty"`
+	// Files are added to files_touched (allow_files).
+	Files []NeededFile `json:"files,omitempty"`
+	// Finding is the reviewer finding declared out of scope for this task (override_finding).
+	Finding string `json:"finding,omitempty"`
+	// Tasks are new tasks taking part of this one (split); they run after it.
+	Tasks []CompileTask `json:"tasks,omitempty"`
+}
+
+func (r *ResolverOut) Validate() error {
+	if err := oneOf("decision", r.Decision, "clarify", "allow_files", "override_finding", "split", "escalate"); err != nil {
+		return err
+	}
+	if err := nonEmpty("reason", r.Reason); err != nil {
+		return err
+	}
+	if r.Decision != "escalate" {
+		if err := nonEmptyList("evidence", r.Evidence); err != nil {
+			return err
+		}
+	}
+	switch r.Decision {
+	case "clarify":
+		return nonEmpty("clarification", r.Clarification)
+	case "allow_files":
+		if len(r.Files) == 0 {
+			return bad("files", "allow_files needs at least one file")
+		}
+		w := WorkerOut{Summary: "x", NeedsFiles: r.Files}
+		return w.Validate()
+	case "override_finding":
+		return nonEmpty("finding", r.Finding)
+	case "split":
+		if len(r.Tasks) == 0 {
+			return bad("tasks", "split needs at least one task")
+		}
+	}
+	return nil
+}

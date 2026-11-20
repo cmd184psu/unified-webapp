@@ -670,6 +670,9 @@ func (e *Engine) EffortPrompt(ctx context.Context, st model.Stage) (string, erro
 	if isAcceptance(st) {
 		return e.acceptancePrompt(ctx, st)
 	}
+	if isResolver(st) {
+		return e.resolverPrompt(ctx, st)
+	}
 	text, err := prompts.Load(st.Role)
 	if err != nil {
 		return "", err
