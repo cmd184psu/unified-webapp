@@ -81,6 +81,9 @@ func (a *Adapter) env(req runner.Request) []string {
 			}
 		}
 	}
+	if req.StageDir != "" {
+		env = append(env, "GOCACHE="+goCache(req.StageDir), "GOTOOLCHAIN=local")
+	}
 	return append(env, req.Env...)
 }
 
@@ -113,7 +116,7 @@ func secretPaths() []string {
 // settingsJSON is the --settings value for one call: the sandbox on and not escapable, the
 // secrets unreadable both to commands (sandbox) and to the Read tool (permission rules),
 // and for roles that do not write the worktree unwritable.
-func settingsJSON(role, workdir string) string {
+func settingsJSON(role, workdir, stageDir string) string {
 	deny := []string{}
 	rules := []string{"Read(**/.env)"}
 	for _, p := range secretPaths() {
@@ -124,15 +127,30 @@ func settingsJSON(role, workdir string) string {
 	if !writesWorktree(role) && workdir != "" {
 		fs["denyWrite"] = []string{workdir}
 	}
+	if stageDir != "" {
+		fs["allowWrite"] = []string{goCache(stageDir)}
+	}
 	b, _ := json.Marshal(map[string]any{
 		"sandbox": map[string]any{
 			"enabled": true, "autoAllowBashIfSandboxed": true, "allowUnsandboxedCommands": false, "failIfUnavailable": true,
 			"filesystem": fs,
 		},
-		"permissions": map[string]any{"deny": rules},
+		"permissions": map[string]any{"deny": rules, "allow": checkCommands},
 	})
 	return string(b)
 }
+
+// checkCommands are the project checks a model may run without an approval nobody can give
+// (AF-13 item 7: on production a haiku worker was told "This command requires approval" for
+// go vet and even gofmt -l, and reported blocked). They still run inside the sandbox.
+var checkCommands = []string{
+	"Bash(go build:*)", "Bash(go vet:*)", "Bash(go test:*)", "Bash(go list:*)", "Bash(go version)", "Bash(gofmt:*)",
+	"Bash(dotnet build:*)", "Bash(dotnet test:*)", "Bash(node --check:*)", "Bash(node scripts/test-:*)",
+}
+
+// goCache is the Go build cache of one model call: in its stage dir, writable in the sandbox,
+// so go never needs the user's cache.
+func goCache(stageDir string) string { return filepath.Join(stageDir, "gocache") }
 
 // Argv is the claude command line for req. The prompt goes on stdin.
 func (a *Adapter) Argv(path string, req runner.Request) []string {
@@ -143,7 +161,7 @@ func (a *Adapter) Argv(path string, req runner.Request) []string {
 	argv := []string{path, "-p", "--output-format", "stream-json", "--verbose",
 		"--model", req.Model,
 		"--setting-sources", "local", "--strict-mcp-config",
-		"--settings", settingsJSON(req.Role, req.Workdir),
+		"--settings", settingsJSON(req.Role, req.Workdir, req.StageDir),
 		"--tools", tools, "--permission-mode", mode,
 	}
 	if req.SessionID != "" {

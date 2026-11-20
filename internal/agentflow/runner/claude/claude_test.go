@@ -50,7 +50,7 @@ func TestSettingsSandboxDeniesSecretsAndReviewerWrites(t *testing.T) {
 				Deny []string `json:"deny"`
 			} `json:"permissions"`
 		}
-		if err := json.Unmarshal([]byte(settingsJSON(role, "/work")), &s); err != nil {
+		if err := json.Unmarshal([]byte(settingsJSON(role, "/work", "")), &s); err != nil {
 			t.Fatal(err)
 		}
 		if !s.Sandbox.Enabled || s.Sandbox.Unsandbox || !s.Sandbox.FailIfNone {
@@ -100,5 +100,37 @@ func TestParseStreamErrorResultIsTheFailure(t *testing.T) {
 func TestParseVersion(t *testing.T) {
 	if v, err := parseVersion("2.1.326 (Claude Code)\n"); err != nil || v != "2.1.326" {
 		t.Fatalf("%q %v", v, err)
+	}
+}
+
+// AF-13 item 7: the project's checks are allowed without an approval, and go gets a build cache
+// in the stage dir that the sandbox lets it write.
+func TestChecksNeedNoApprovalAndGoHasACache(t *testing.T) {
+	var s struct {
+		Sandbox struct {
+			Filesystem struct {
+				AllowWrite []string `json:"allowWrite"`
+			} `json:"filesystem"`
+		} `json:"sandbox"`
+		Permissions struct {
+			Allow []string `json:"allow"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal([]byte(settingsJSON("worker", "/work", "/stages/7")), &s); err != nil {
+		t.Fatal(err)
+	}
+	allow := strings.Join(s.Permissions.Allow, " ")
+	for _, want := range []string{"Bash(go vet:*)", "Bash(go test:*)", "Bash(gofmt:*)"} {
+		if !strings.Contains(allow, want) {
+			t.Errorf("allow = %v, want %s", s.Permissions.Allow, want)
+		}
+	}
+	if len(s.Sandbox.Filesystem.AllowWrite) != 1 || s.Sandbox.Filesystem.AllowWrite[0] != "/stages/7/gocache" {
+		t.Fatalf("allowWrite = %v", s.Sandbox.Filesystem.AllowWrite)
+	}
+	a := &Adapter{}
+	env := strings.Join(a.env(runner.Request{StageDir: "/stages/7"}), " ")
+	if !strings.Contains(env, "GOCACHE=/stages/7/gocache") {
+		t.Fatalf("env = %s", env)
 	}
 }
