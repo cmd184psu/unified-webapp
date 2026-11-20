@@ -378,7 +378,13 @@ func (e *Engine) ownedByOthers(ctx context.Context, c *chain, lim model.Limits) 
 	var out []string
 	for _, t := range tasks {
 		if !upstream[t.Key] && !status[t.Key].Done() {
-			out = append(out, t.FilesTouched...)
+			for _, f := range t.FilesTouched {
+				// A test file is shared (AF-13): another task listing it does not
+				// make an edit to it out of scope.
+				if !model.IsTestFile(f) {
+					out = append(out, f)
+				}
+			}
 		}
 	}
 	return out, nil

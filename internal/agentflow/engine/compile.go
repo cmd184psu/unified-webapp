@@ -56,6 +56,9 @@ func compiledTasks(out schema.CompileOut) ([]model.TaskDef, error) {
 // dependency path between them. Tasks that may run side by side must not touch
 // the same file: whichever finished last would overwrite the other, and a
 // merge would conflict. Tasks that do share a file are ordered by depends_on.
+// A test file next to the code (model.IsTestFile) is shared, not owned (AF-13):
+// tasks that add tests to the same package's test file need no order, and the
+// merge stage serialises them.
 func unorderedSharedFiles(defs []model.TaskDef) error {
 	deps := map[string][]string{}
 	for _, d := range defs {
@@ -80,7 +83,9 @@ func unorderedSharedFiles(defs []model.TaskDef) error {
 	owners := map[string][]string{} // file -> the tasks that list it, in queue order
 	for _, d := range defs {
 		for _, f := range d.FilesTouched {
-			owners[f] = append(owners[f], d.Key)
+			if !model.IsTestFile(f) {
+				owners[f] = append(owners[f], d.Key)
+			}
 		}
 	}
 	for _, d := range defs {

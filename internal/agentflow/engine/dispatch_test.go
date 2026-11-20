@@ -891,3 +891,28 @@ func TestOwnedByOthersLeavesOutFinishedTasks(t *testing.T) {
 		t.Fatalf("T1 has passed, so main.go is no longer another task's: %v", got)
 	}
 }
+
+// AF-13 (fs3-peace/9, A1-2): 23 tasks listed src/rules/peace_test.go, so any task that edited it
+// failed scope while another was unfinished. A test file is shared and never another task's.
+func TestOwnedByOthersLeavesOutSharedTestFiles(t *testing.T) {
+	h := newDispHarness(t)
+	def := func(key string, files ...string) model.TaskDef {
+		return model.TaskDef{Key: key, Phase: "P1", Title: "t", Prompt: "do " + strings.Join(files, " "), Acceptance: []string{"ok"}, FilesTouched: files}
+	}
+	f := h.dispProject("alpha", "any", []model.TaskDef{
+		def("T1", "src/rules/truce.go", "src/rules/peace_test.go"),
+		def("T2", "src/rules/border.go", "src/rules/peace_test.go"),
+		def("T3", "src/rules/war.go"),
+	})
+	byKey := map[string]model.Task{}
+	for _, tk := range f.tasks {
+		byKey[tk.Key] = tk
+	}
+	got, err := h.eng.ownedByOthers(context.Background(), &chain{eff: model.Effort{ID: f.effort}, task: byKey["T3"]}, model.Limits{MaxAttempts: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "src/rules/truce.go,src/rules/border.go" {
+		t.Fatalf("the shared test file must not be another task's: %v", got)
+	}
+}

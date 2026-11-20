@@ -195,3 +195,21 @@ func TestUnorderedSharedFiles(t *testing.T) {
 		t.Fatalf("ordered through T2 = %v, want ok", err)
 	}
 }
+
+// AF-13 (fs3-peace/9): a test file next to the code is shared, not owned, so tasks that add tests to
+// the same package's test file need no order; a source file still does.
+func TestUnorderedSharedFilesLeavesOutTestFiles(t *testing.T) {
+	def := func(key string, files ...string) model.TaskDef {
+		return model.TaskDef{Key: key, FilesTouched: files}
+	}
+	if err := unorderedSharedFiles([]model.TaskDef{
+		def("A1-2", "src/rules/truce.go", "src/rules/peace_test.go"),
+		def("A1-6", "src/rules/border.go", "src/rules/peace_test.go"),
+		def("A1-9", "web/x.ts", "web/x.test.ts", "src/rules/peace_test.go"),
+	}); err != nil {
+		t.Fatalf("a shared test file = %v, want ok", err)
+	}
+	if err := unorderedSharedFiles([]model.TaskDef{def("A1-2", "src/rules/peace.go", "src/rules/peace_test.go"), def("A1-6", "src/rules/peace.go")}); err == nil || !strings.Contains(err.Error(), "peace.go") {
+		t.Fatalf("a shared source file = %v, want the error", err)
+	}
+}

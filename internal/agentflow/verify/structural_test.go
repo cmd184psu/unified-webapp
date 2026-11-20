@@ -438,3 +438,21 @@ func TestScopeFailsOnAnotherTasksFile(t *testing.T) {
 		t.Fatalf("a file the task lists itself must be allowed: %+v", rep)
 	}
 }
+
+// AF-13: an edit to a file the task lists is in scope even when other unfinished tasks list it
+// too (they serialise through the merge stage); a file the task does not list still fails.
+func TestScopeAllowsAFileTheTaskListsEvenIfOthersDo(t *testing.T) {
+	dir, base := newRepo(t)
+	write(t, dir, "rules/peace.go", "package rules\n")
+	write(t, dir, "rules/war.go", "package rules\n")
+	in := Input{Worktree: dir, GitDir: filepath.Join(dir, ".git"), BaseCommit: base,
+		FilesTouched: []string{"rules/peace.go"}, OwnedByOthers: []string{"rules/peace.go", "rules/peace.go", "rules/war.go"}}
+	rep, err := Structural(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := details(rep, CheckScope)
+	if rep.Pass || strings.Contains(d, "rules/peace.go") || !strings.Contains(d, "rules/war.go") {
+		t.Fatalf("scope details %q: peace.go is the task's own, war.go is not", d)
+	}
+}

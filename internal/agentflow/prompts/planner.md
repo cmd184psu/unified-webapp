@@ -26,6 +26,7 @@ Current repository files (relative paths, capped). When this is empty, treat the
 6. Keep every exact detail of the FRD (ports, URL paths, status codes, field names, messages) character for character in the phase descriptions that need it. Never replace one with a default of your own.
 7. State the principles guiding the plan, the decision drivers, and at least two options you considered. Choose one and record the decision in the ADR.
 8. When the FRD carries a `Toolchains:` line, carry it into every phase that touches those files as a `toolchains` array on that phase (`["dotnet"]` for C#), and repeat the line in the phase description. A phase whose files are `*.cs`, `*.csproj` or `*.sln` names `dotnet` even when the FRD omitted the line.
+9. Name each phase's tests beside the code it adds, one test file per source file (`truce.go` with `truce_test.go`). Do not route every phase's tests into one shared file such as `peace_test.go`: a test file is shared between tasks, never owned, and one file named by many tasks only makes them collide at merge.
 {{DELIBERATE_RULES}}
 
 ## Output
