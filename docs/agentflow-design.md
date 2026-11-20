@@ -413,6 +413,32 @@ these findings and they were **noted, not fixed**:
 - The module has no authentication of its own. It inherits platform auth: list `agentflow`
   in `auth.modules` to require a session or API key.
 
+## Service hold (AF-10)
+
+`POST /api/service/hold` with `{"reason": "changing a backend by hand"}` holds the whole
+service: every running project is paused and remembered, the dispatcher starts no new stage
+in any project (the stages already running finish), and `POST /api/projects/{slug}/run/start`
+and `.../run/run-one` answer `409` naming the reason. `GET /api/service/hold` reports
+`{active, reason, since, paused, restart, open_stages}`; `DELETE /api/service/hold` lifts the
+hold and starts again exactly the projects it paused. The hold lives in `agentflow.db`
+(`service_hold`, migration 35), so a restart keeps it, and `/api/attention` carries one
+`service_hold` item while it is set. The Settings drawer's Service section and the header
+show it.
+
+A drain restart (`POST /api/service/restart`) still waits up to `restartMaxWait` (an hour) for
+the open stages to end. At the deadline it now becomes a hold with the reason
+`restart waiting for long stage` and `restart: true` instead of forgetting the paused
+projects: nothing new starts while the last stage finishes, and when it does the restart
+finishes as before (`service.restart`, then the next process starts the paused projects).
+Lifting the hold abandons that restart and resumes the paused projects; `DELETE
+/api/service/restart` does the same. `POST /api/service/restart {"wait": "hold"}` drains with
+no deadline at all, for work known to take longer than an hour, and so never becomes a hold.
+
+Tests: `TestAF10_HoldStopsDispatchAndRunStart` (engine),
+`TestAF10_HoldPausesAndLiftsExactlyThePausedProjects`, `TestAF10_DrainTimeoutBecomesAHold`,
+`TestAF10_HeldRestartFinishesWhenTheLastStageEnds` and `TestAF10_WaitHoldRestartNeverTimesOut`
+(API), `TestServiceHoldSurvivesReopen` (store).
+
 ## BotChat seats (`botchat_seat`)
 
 A backend may have api type `botchat_seat`: it has no model behind it, and each instance is a

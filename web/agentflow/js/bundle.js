@@ -1,8 +1,8 @@
 // web/agentflow/js/main.ts
-import { ThemeManager, HamburgerMenu } from "/shared/dist/shared.mjs";
+import { ThemeManager, HamburgerMenu } from "@shared";
 
 // web/agentflow/js/api.ts
-import { alertDialog } from "/shared/dist/shared.mjs";
+import { alertDialog } from "@shared";
 var ApiError = class extends Error {
   constructor(status, message, field) {
     super(message);
@@ -60,6 +60,9 @@ var api = {
   restartStatus: (o) => get("/api/service/restart", o),
   restartService: (cancelRunning) => send("POST", "/api/service/restart", { cancel_running: cancelRunning }),
   cancelRestart: () => send("DELETE", "/api/service/restart"),
+  serviceHold: (o) => get("/api/service/hold", o),
+  holdService: (reason) => send("POST", "/api/service/hold", { reason }),
+  liftHold: () => send("DELETE", "/api/service/hold"),
   fsDirs: (path2 = "") => get(`/api/fs/dirs${path2 ? `?path=${encodeURIComponent(path2)}` : ""}`, { quiet: true }),
   // Projects
   projects: () => get("/api/projects"),
@@ -385,7 +388,7 @@ function startPoll(active2, fn) {
 }
 
 // web/agentflow/js/attention.ts
-import { showToast } from "/shared/dist/shared.mjs";
+import { showToast } from "@shared";
 function itemKey(i) {
   return `${i.project}/${i.effort}/${i.task ?? ""}/${i.kind}/${i.since}`;
 }
@@ -514,10 +517,10 @@ var HealthBanner = class {
 };
 
 // web/agentflow/js/overview.ts
-import { confirmDialog as confirmDialog3, copyText as copyText2 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog3, copyText as copyText2 } from "@shared";
 
 // web/agentflow/js/forms.ts
-import { createToggle } from "/shared/dist/shared.mjs";
+import { createToggle } from "@shared";
 
 // web/agentflow/js/icons.ts
 var SVG_NS = "http://www.w3.org/2000/svg";
@@ -707,7 +710,7 @@ var RowsEditor = class {
 };
 
 // web/agentflow/js/yolo.ts
-import { confirmDialog, showToast as showToast2 } from "/shared/dist/shared.mjs";
+import { confirmDialog, showToast as showToast2 } from "@shared";
 var defaultYoloDeps = () => ({
   setYOLO: api.setYOLO,
   yoloInvariants: api.yoloInvariants,
@@ -857,7 +860,7 @@ function mergeCard(ef, git, copy) {
 }
 
 // web/agentflow/js/unregister.ts
-import { confirmDialog as confirmDialog2, copyText, openModal, showToast as showToast3 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog2, copyText, openModal, showToast as showToast3 } from "@shared";
 var defaultUnregisterDeps = () => ({
   deleteProject: api.deleteProject,
   confirm: (m, label = "Confirm") => confirmDialog2(m, { confirmLabel: label }),
@@ -1164,7 +1167,7 @@ var Overview = class {
 };
 
 // web/agentflow/js/backends.ts
-import { confirmDialog as confirmDialog4, showToast as showToast5 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog4, showToast as showToast5 } from "@shared";
 
 // web/agentflow/js/installs.ts
 var defaultInstallDeps = () => ({
@@ -1542,10 +1545,10 @@ var ConfigPanel = class {
 };
 
 // web/agentflow/js/settings.ts
-import { showToast as showToast4 } from "/shared/dist/shared.mjs";
+import { showToast as showToast4 } from "@shared";
 
 // web/agentflow/js/dirpicker.ts
-import { openModal as openModal2 } from "/shared/dist/shared.mjs";
+import { openModal as openModal2 } from "@shared";
 var DirPicker = class {
   constructor(fsDirs, start, onChoose, onCancel) {
     this.fsDirs = fsDirs;
@@ -1652,6 +1655,9 @@ var defaultSettingsDeps = () => ({
   restartStatus: api.restartStatus,
   restartService: api.restartService,
   cancelRestart: api.cancelRestart,
+  serviceHold: api.serviceHold,
+  holdService: api.holdService,
+  liftHold: api.liftHold,
   pickDir: (start) => pickDirectory(start),
   notify: (m) => void showToast4(m, "success")
 });
@@ -1669,6 +1675,7 @@ var SettingsView = class {
     this.ocHost = h("div");
     this.roots = [];
     this.svc = null;
+    this.hold = null;
     this.svcHost = h("div", { attrs: { "data-role": "service" } });
     this.svcTimer = null;
     this.rootsHost = h("div", { class: "wizard-list", attrs: { "data-role": "browse-roots" } });
@@ -1697,6 +1704,7 @@ var SettingsView = class {
       this.values = settings;
       this.oc = oc;
       this.svc = await this.deps.restartStatus({ quiet: true }).catch(() => null);
+      this.hold = await this.deps.serviceHold({ quiet: true }).catch(() => null);
       if (same) return;
       this.roots = Array.isArray(settings.browse_roots) ? [...settings.browse_roots] : [];
     } catch {
@@ -1730,13 +1738,27 @@ var SettingsView = class {
       )
     );
   }
-  /** The Service section: restart the whole service once running work has ended (H25). */
+  /**
+   * The Service section: hold the whole service so it starts nothing new
+   * (AF-10), and restart it once running work has ended (H25).
+   */
   renderService() {
     const svc = this.svc;
+    const hold = this.hold;
     const cancel = checkbox("cancel_running", false);
+    const stages = (n) => `${n} running stage${n === 1 ? "" : "s"}`;
     const run = async (call, said) => {
       try {
         this.svc = await call();
+      } catch {
+        return;
+      }
+      this.deps.notify(said);
+      this.renderService();
+    };
+    const runHold = async (call, said) => {
+      try {
+        this.hold = await call();
       } catch {
         return;
       }
@@ -1753,23 +1775,49 @@ var SettingsView = class {
         }, () => void 0);
       }, 5e3);
     }
-    replace(
-      this.svcHost,
-      svc?.state === "draining" ? h(
-        "div",
-        { class: "warn-box" },
-        h("p", { text: `Restarting when the ${svc.open_stages} running stage${svc.open_stages === 1 ? "" : "s"} end${svc.open_stages === 1 ? "s" : ""}. ${svc.plan?.cancel_running ? "Running stages were cancelled." : "Nothing new starts meanwhile."}` }),
-        button("Cancel restart", () => void run(() => this.deps.cancelRestart(), "Restart cancelled"), { field: "cancel-restart", icon: "cancel", word: true })
-      ) : h(
-        "div",
-        {},
-        h("span", { class: "inline-check" }, cancel, "Cancel running stages instead of waiting for them"),
+    if (hold?.active) {
+      replace(
+        this.svcHost,
         h(
           "div",
-          { class: "row-actions" },
-          button("Restart service", () => void run(() => this.deps.restartService(cancel.checked), "Restart requested"), { field: "restart-service", icon: "refresh", word: true }),
-          h("span", { class: "field-hint", text: svc ? `running since ${new Date(svc.started).toLocaleString()}` : "" })
+          { class: "warn-box", attrs: { "data-role": "service-hold" } },
+          h("p", { text: `Service held: ${hold.reason ?? ""}` }),
+          h("p", { class: "field-hint", text: hold.restart ? `A restart waits for the ${stages(hold.open_stages)} to end, and nothing new starts until it does.` : `${stages(hold.open_stages)} still finishing; no project starts anything new.` }),
+          h(
+            "div",
+            { class: "row-actions" },
+            button(hold.restart ? "Lift hold and cancel restart" : "Lift hold", () => void runHold(() => this.deps.liftHold(), "Hold lifted"), { field: "lift-hold", icon: "cancel", word: true })
+          )
         )
+      );
+      return;
+    }
+    const reason = textInput("hold_reason", "", { placeholder: "why the service should start nothing" });
+    const restartBox = svc?.state === "draining" ? h(
+      "div",
+      { class: "warn-box" },
+      h("p", { text: `Restarting when the ${stages(svc.open_stages)} end. ${svc.plan?.cancel_running ? "Running stages were cancelled." : "Nothing new starts meanwhile."}` }),
+      button("Cancel restart", () => void run(() => this.deps.cancelRestart(), "Restart cancelled"), { field: "cancel-restart", icon: "cancel", word: true })
+    ) : h(
+      "div",
+      {},
+      h("span", { class: "inline-check" }, cancel, "Cancel running stages instead of waiting for them"),
+      h(
+        "div",
+        { class: "row-actions" },
+        button("Restart service", () => void run(() => this.deps.restartService(cancel.checked), "Restart requested"), { field: "restart-service", icon: "refresh", word: true }),
+        h("span", { class: "field-hint", text: svc ? `running since ${new Date(svc.started).toLocaleString()}` : "" })
+      )
+    );
+    replace(
+      this.svcHost,
+      restartBox,
+      h("p", { class: "field-hint", text: "A hold pauses every running project and lets nothing new start, for a change you make by hand." }),
+      h(
+        "div",
+        { class: "inline-row" },
+        reason,
+        button("Hold service", () => void runHold(() => this.deps.holdService(reason.value.trim()), "Service held"), { field: "hold-service", icon: "pause", word: true })
       )
     );
   }
@@ -2858,7 +2906,7 @@ var Activity = class {
 };
 
 // web/agentflow/js/board.ts
-import { confirmDialog as confirmDialog5, copyText as copyText3, showToast as showToast6 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog5, copyText as copyText3, showToast as showToast6 } from "@shared";
 
 // web/agentflow/js/stream.ts
 var defaultStreamDeps = () => ({ open: (url) => new EventSource(url) });
@@ -3401,7 +3449,7 @@ function mountBoard(host, slug) {
 }
 
 // web/agentflow/js/history.ts
-import { showToast as showToast7 } from "/shared/dist/shared.mjs";
+import { showToast as showToast7 } from "@shared";
 var defaultHistoryDeps = () => ({
   efforts: api.efforts,
   importFRD: api.importFRD,
@@ -3523,10 +3571,10 @@ function mountHistory(host, slug) {
 }
 
 // web/agentflow/js/frd-editor.ts
-import { alertDialog as alertDialog2, showToast as showToast9 } from "/shared/dist/shared.mjs";
+import { alertDialog as alertDialog2, showToast as showToast9 } from "@shared";
 
 // web/agentflow/js/plan-view.ts
-import { confirmDialog as confirmDialog6, showToast as showToast8 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog6, showToast as showToast8 } from "@shared";
 var defaultPlanDeps = () => ({
   efforts: api.efforts,
   plan: api.plan,
@@ -4570,7 +4618,7 @@ function mountFrd(host, slug) {
 }
 
 // web/agentflow/js/queue.ts
-import { confirmDialog as confirmDialog7, showToast as showToast10 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog7, showToast as showToast10 } from "@shared";
 var defaultQueueDeps = () => ({
   efforts: api.efforts,
   queue: api.queue,
@@ -4746,7 +4794,7 @@ function mountQueue(host, slug) {
 }
 
 // web/agentflow/js/projects.ts
-import { confirmDialog as confirmDialog8, showToast as showToast11 } from "/shared/dist/shared.mjs";
+import { confirmDialog as confirmDialog8, showToast as showToast11 } from "@shared";
 var defaultProjectDeps = () => ({
   createProject: api.createProject,
   patchProject: api.patchProject,
@@ -4776,6 +4824,7 @@ function isNotARepo(err) {
   return err instanceof ApiError && err.field === "repo_path" && /not a git repository/.test(err.message);
 }
 var SCOPES = [["local", "local (only local backends)"], ["any", "any (hosted backends allowed)"]];
+var TOOLCHAINS = [["dotnet", ".NET SDK and the host NuGet cache, read-only and offline"]];
 var ProjectForm = class {
   constructor(host, deps, mode, done) {
     this.host = host;
@@ -4783,6 +4832,7 @@ var ProjectForm = class {
     this.mode = mode;
     this.done = done;
     this.errors = new FormErrors();
+    this.toolchains = /* @__PURE__ */ new Map();
     this.backends = [];
     this.cands = [];
     this.drafts = /* @__PURE__ */ new Map();
@@ -4806,6 +4856,8 @@ var ProjectForm = class {
     this.drawRepo();
     this.scope = selectInput("model_scope", SCOPES, p?.model_scope ?? "local");
     this.cleanup = checkbox("cleanup_enabled", p?.cleanup_enabled ?? false);
+    for (const [name] of TOOLCHAINS) this.toolchains.set(name, checkbox(`toolchain_${name}`, (p?.toolchains ?? []).includes(name)));
+    this.verifyInCopy = checkbox("verify_in_copy", p?.verify_in_copy ?? false);
     this.cmds = new RowsEditor((c) => {
       const input = textInput("feedback_cmd", c, { placeholder: "go test ./..." });
       const preview = h("code", { class: "field-hint", attrs: { "data-role": "argv" } });
@@ -4822,6 +4874,11 @@ var ProjectForm = class {
       sync();
       return { el: h("div", { class: "wizard-field" }, input, preview, warn), read: () => joinArgv(splitArgv(input.value)) };
     }, p?.feedback_cmds ?? [], () => "", "Add command", () => this.bump());
+    this.env = new RowsEditor((row) => {
+      const key = textInput("feedback_env_key", row.key, { placeholder: "CIV3_PATH" });
+      const value = textInput("feedback_env_value", row.value, { placeholder: "/path/to/civ3" });
+      return { el: h("div", { class: "row-actions" }, key, value), read: () => ({ key: key.value.trim(), value: value.value }) };
+    }, Object.entries(p?.feedback_env ?? {}).map(([key, value]) => ({ key, value })), () => ({ key: "", value: "" }), "Add variable", () => this.bump());
     this.plugins = new RowsEditor((pl) => {
       const name = textInput("plugin_name", pl.name, { placeholder: "package-name" });
       const version = textInput("plugin_version", pl.version, { placeholder: "1.2.3" });
@@ -4861,14 +4918,17 @@ var ProjectForm = class {
       model_scope: this.scope.value,
       feedback_cmds: this.cmds.read().filter((c) => c !== ""),
       cleanup_enabled: this.cleanup.checked,
-      plugins: this.plugins.read().filter((pl) => pl.name !== "" || pl.version !== "")
+      plugins: this.plugins.read().filter((pl) => pl.name !== "" || pl.version !== ""),
+      toolchains: TOOLCHAINS.map(([name]) => name).filter((name) => this.toolchains.get(name)?.checked),
+      feedback_env: Object.fromEntries(this.env.read().filter((r) => r.key !== "").map((r) => [r.key, r.value])),
+      verify_in_copy: this.verifyInCopy.checked
     };
   }
   /** save creates or updates the project; a repo path that is not yet a repository offers git init (PJ1). */
   async save() {
     this.errors.clear();
     const body = this.body();
-    const attempt = () => this.mode.project ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, feedback_cmds: body.feedback_cmds, cleanup_enabled: body.cleanup_enabled, plugins: body.plugins, ...this.dodPatch() }, { quiet: true }) : this.deps.createProject(body, { quiet: true });
+    const attempt = () => this.mode.project ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, feedback_cmds: body.feedback_cmds, cleanup_enabled: body.cleanup_enabled, plugins: body.plugins, toolchains: body.toolchains, feedback_env: body.feedback_env, verify_in_copy: body.verify_in_copy, ...this.dodPatch() }, { quiet: true }) : this.deps.createProject(body, { quiet: true });
     let saved;
     try {
       saved = await attempt();
@@ -4899,7 +4959,7 @@ var ProjectForm = class {
     this.errors.clear();
     const b = this.body();
     try {
-      await this.deps.patchProject(p.slug, { repo_path: b.repo_path, model_scope: b.model_scope, feedback_cmds: b.feedback_cmds, cleanup_enabled: b.cleanup_enabled, plugins: b.plugins, ...this.dodPatch() }, { quiet: true });
+      await this.deps.patchProject(p.slug, { repo_path: b.repo_path, model_scope: b.model_scope, feedback_cmds: b.feedback_cmds, cleanup_enabled: b.cleanup_enabled, plugins: b.plugins, toolchains: b.toolchains, feedback_env: b.feedback_env, verify_in_copy: b.verify_in_copy, ...this.dodPatch() }, { quiet: true });
     } catch (err) {
       this.errors.show(err);
       return false;
@@ -5002,6 +5062,13 @@ var ProjectForm = class {
     }
     return b;
   }
+  /** drawToolchains is one checkbox per known toolchain, with what it mounts. */
+  drawToolchains() {
+    return h("div", {}, ...TOOLCHAINS.map(([name, hint]) => {
+      const box = this.toolchains.get(name);
+      return h("div", { class: "field-hint" }, box ?? h("span"), " " + hint);
+    }));
+  }
   render() {
     const p = this.mode.project;
     const e = this.errors;
@@ -5026,6 +5093,21 @@ var ProjectForm = class {
             "After a task passes review, run a cleanup agent and verify again; if that breaks verification the cleanup is rolled back"
           )).el
         ),
+        e.add("feedback_env", fieldRow(
+          "Feedback environment",
+          this.env.el,
+          "Set for every feedback command, for values such as an install path; never a secret"
+        )).el,
+        e.add("toolchains", fieldRow(
+          "Toolchains",
+          this.drawToolchains(),
+          "Mounted read-only in every sandbox for this project; dotnet brings the SDK and the host NuGet cache, so build and test run offline"
+        )).el,
+        e.add("verify_in_copy", fieldRow(
+          "Verify in a copy",
+          this.verifyInCopy,
+          "Run feedback commands on a throwaway copy of the worktree, without .git, bin or obj; needed when the toolchain writes build output"
+        )).el,
         e.add("feedback_cmds", fieldRow(
           "Feedback commands",
           this.cmds.el,
@@ -5440,6 +5522,29 @@ function initHamburger() {
     mountTrigger: trigger
   });
 }
+function initServiceHold() {
+  const right = document.querySelector("#nav .nav-right");
+  if (!right) return;
+  const chip2 = h("span", { class: "nav-hold", attrs: { "data-role": "service-hold", hidden: "", role: "status" } });
+  right.prepend(chip2);
+  const load = async () => {
+    let hold;
+    try {
+      hold = await api.serviceHold({ quiet: true });
+    } catch {
+      return;
+    }
+    if (!hold?.active) {
+      chip2.setAttribute("hidden", "");
+      return;
+    }
+    chip2.textContent = `Service held: ${hold.reason ?? ""}`;
+    chip2.title = hold.restart ? "A restart waits for a long stage to end" : "Nothing new starts until the hold is lifted";
+    chip2.removeAttribute("hidden");
+  };
+  startPoll(() => true, load);
+  void load();
+}
 function initSaveMark() {
   const right = document.querySelector("#nav .nav-right");
   if (!right) return;
@@ -5449,6 +5554,7 @@ function initSaveMark() {
 }
 initHamburger();
 initSaveMark();
+initServiceHold();
 startEvents();
 var attn = document.getElementById("attention-banner");
 if (attn) new AttentionBanner(attn, api, (slug) => showTab("project", slug)).mount();

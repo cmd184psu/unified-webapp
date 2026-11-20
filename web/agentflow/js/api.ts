@@ -282,11 +282,25 @@ export interface Backend {
 
 /** GET /api/service/restart: a restart waits for running work to end, then the service starts again (H25). */
 export interface RestartView {
-  state: 'idle' | 'draining';
-  plan?: { requested: string; cancel_running: boolean; paused: string[] };
+  /** 'held': the deadline passed and the restart waits in a service hold (AF-10). */
+  state: 'idle' | 'draining' | 'held';
+  plan?: { requested: string; cancel_running: boolean; paused: string[]; wait?: 'hold'; held?: boolean };
   open_stages: number;
   pid: number;
   started: number;
+}
+
+/** GET /api/service/hold: the whole service starts nothing new until the hold is lifted (AF-10). */
+export interface ServiceHoldView {
+  active: boolean;
+  reason?: string;
+  /** Unix ms when the hold was placed. */
+  since?: number;
+  /** The projects the hold paused, started again when it is lifted. */
+  paused?: string[];
+  /** Set when a drain restart ran out of time and became this hold. */
+  restart?: boolean;
+  open_stages: number;
 }
 
 export interface BackendInput {
@@ -715,6 +729,9 @@ export const api = {
   restartStatus: (o?: FetchOptions): Promise<RestartView> => get('/api/service/restart', o),
   restartService: (cancelRunning: boolean): Promise<RestartView> => send('POST', '/api/service/restart', { cancel_running: cancelRunning }),
   cancelRestart: (): Promise<RestartView> => send('DELETE', '/api/service/restart'),
+  serviceHold: (o?: FetchOptions): Promise<ServiceHoldView> => get('/api/service/hold', o),
+  holdService: (reason: string): Promise<ServiceHoldView> => send('POST', '/api/service/hold', { reason }),
+  liftHold: (): Promise<ServiceHoldView> => send('DELETE', '/api/service/hold'),
 
   fsDirs: (path = ''): Promise<FsDirs> => get(`/api/fs/dirs${path ? `?path=${encodeURIComponent(path)}` : ''}`, { quiet: true }),
 

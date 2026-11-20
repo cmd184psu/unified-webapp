@@ -8,7 +8,7 @@
 
 import { autosave, type Autosave } from './autosave.js';
 import { showToast } from '@shared';
-import { api, type OpenCodeStatus, type RestartView, type Settings } from './api.js';
+import { api, type OpenCodeStatus, type RestartView, type ServiceHoldView, type Settings } from './api.js';
 import { h, replace } from './dom.js';
 import { subscribe, type AgentflowEvent } from './events.js';
 import { pickDirectory } from './dirpicker.js';
@@ -41,7 +41,7 @@ const EXECUTION_FIELDS: LimitField[] = [
   { key: 'backend_cooldown', label: 'Backend cooldown', hint: 'How long an unreachable backend is skipped, such as 2m' },
 ];
 
-export type SettingsDeps = Pick<typeof api, 'settings' | 'putSettings' | 'opencodeVersion' | 'restartStatus' | 'restartService' | 'cancelRestart'> & {
+export type SettingsDeps = Pick<typeof api, 'settings' | 'putSettings' | 'opencodeVersion' | 'restartStatus' | 'restartService' | 'cancelRestart' | 'serviceHold' | 'holdService' | 'liftHold'> & {
   /** Opens the directory picker at start; the chosen path, or null when cancelled. */
   pickDir(start: string): Promise<string | null>;
   notify(message: string): void;
@@ -54,6 +54,9 @@ export const defaultSettingsDeps = (): SettingsDeps => ({
   restartStatus: api.restartStatus,
   restartService: api.restartService,
   cancelRestart: api.cancelRestart,
+  serviceHold: api.serviceHold,
+  holdService: api.holdService,
+  liftHold: api.liftHold,
   pickDir: (start) => pickDirectory(start),
   notify: (m) => void showToast(m, 'success'),
 });
@@ -70,6 +73,7 @@ export class SettingsView {
   private ocHost = h('div');
   private roots: string[] = [];
   private svc: RestartView | null = null;
+  private hold: ServiceHoldView | null = null;
   private svcHost = h('div', { attrs: { 'data-role': 'service' } });
   private svcTimer: ReturnType<typeof setInterval> | null = null;
   private rootsHost = h('div', { class: 'wizard-list', attrs: { 'data-role': 'browse-roots' } });
@@ -102,6 +106,7 @@ export class SettingsView {
       this.values = settings;
       this.oc = oc;
       this.svc = await this.deps.restartStatus({ quiet: true }).catch(() => null);
+      this.hold = await this.deps.serviceHold({ quiet: true }).catch(() => null);
       if (same) return;
       this.roots = Array.isArray(settings.browse_roots) ? [...settings.browse_roots] : [];
     } catch {
@@ -129,13 +134,27 @@ export class SettingsView {
         button('Refresh', () => void this.refreshVersion(), { field: 'oc-refresh', icon: 'refresh' })));
   }
 
-  /** The Service section: restart the whole service once running work has ended (H25). */
+  /**
+   * The Service section: hold the whole service so it starts nothing new
+   * (AF-10), and restart it once running work has ended (H25).
+   */
   private renderService(): void {
     const svc = this.svc;
+    const hold = this.hold;
     const cancel = checkbox('cancel_running', false);
+    const stages = (n: number): string => `${n} running stage${n === 1 ? '' : 's'}`;
     const run = async (call: () => Promise<RestartView>, said: string): Promise<void> => {
       try {
         this.svc = await call();
+      } catch {
+        return;
+      }
+      this.deps.notify(said);
+      this.renderService();
+    };
+    const runHold = async (call: () => Promise<ServiceHoldView>, said: string): Promise<void> => {
+      try {
+        this.hold = await call();
       } catch {
         return;
       }
@@ -150,16 +169,34 @@ export class SettingsView {
         void this.deps.restartStatus({ quiet: true }).then((v) => { this.svc = v; this.renderService(); }, () => undefined);
       }, 5000);
     }
+    if (hold?.active) {
+      // Nothing new starts, so there is nothing else to offer but lifting it.
+      replace(this.svcHost,
+        h('div', { class: 'warn-box', attrs: { 'data-role': 'service-hold' } },
+          h('p', { text: `Service held: ${hold.reason ?? ''}` }),
+          h('p', { class: 'field-hint', text: hold.restart
+            ? `A restart waits for the ${stages(hold.open_stages)} to end, and nothing new starts until it does.`
+            : `${stages(hold.open_stages)} still finishing; no project starts anything new.` }),
+          h('div', { class: 'row-actions' },
+            button(hold.restart ? 'Lift hold and cancel restart' : 'Lift hold', () => void runHold(() => this.deps.liftHold(), 'Hold lifted'), { field: 'lift-hold', icon: 'cancel', word: true }))));
+      return;
+    }
+    const reason = textInput('hold_reason', '', { placeholder: 'why the service should start nothing' });
+    const restartBox = svc?.state === 'draining'
+      ? h('div', { class: 'warn-box' },
+          h('p', { text: `Restarting when the ${stages(svc.open_stages)} end. ${svc.plan?.cancel_running ? 'Running stages were cancelled.' : 'Nothing new starts meanwhile.'}` }),
+          button('Cancel restart', () => void run(() => this.deps.cancelRestart(), 'Restart cancelled'), { field: 'cancel-restart', icon: 'cancel', word: true }))
+      : h('div', {},
+          h('span', { class: 'inline-check' }, cancel, 'Cancel running stages instead of waiting for them'),
+          h('div', { class: 'row-actions' },
+            button('Restart service', () => void run(() => this.deps.restartService(cancel.checked), 'Restart requested'), { field: 'restart-service', icon: 'refresh', word: true }),
+            h('span', { class: 'field-hint', text: svc ? `running since ${new Date(svc.started).toLocaleString()}` : '' })));
     replace(this.svcHost,
-      svc?.state === 'draining'
-        ? h('div', { class: 'warn-box' },
-            h('p', { text: `Restarting when the ${svc.open_stages} running stage${svc.open_stages === 1 ? '' : 's'} end${svc.open_stages === 1 ? 's' : ''}. ${svc.plan?.cancel_running ? 'Running stages were cancelled.' : 'Nothing new starts meanwhile.'}` }),
-            button('Cancel restart', () => void run(() => this.deps.cancelRestart(), 'Restart cancelled'), { field: 'cancel-restart', icon: 'cancel', word: true }))
-        : h('div', {},
-            h('span', { class: 'inline-check' }, cancel, 'Cancel running stages instead of waiting for them'),
-            h('div', { class: 'row-actions' },
-              button('Restart service', () => void run(() => this.deps.restartService(cancel.checked), 'Restart requested'), { field: 'restart-service', icon: 'refresh', word: true }),
-              h('span', { class: 'field-hint', text: svc ? `running since ${new Date(svc.started).toLocaleString()}` : '' }))));
+      restartBox,
+      h('p', { class: 'field-hint', text: 'A hold pauses every running project and lets nothing new start, for a change you make by hand.' }),
+      h('div', { class: 'inline-row' },
+        reason,
+        button('Hold service', () => void runHold(() => this.deps.holdService(reason.value.trim()), 'Service held'), { field: 'hold-service', icon: 'pause', word: true })));
   }
 
   private renderRoots(): void {

@@ -28,6 +28,7 @@ type migration struct {
 //	26     backends.api_type may be 'grok' (the Grok CLI)
 //	27     backends.api_type may be 'codex' (the Codex CLI)
 //	34 AF-6 projects.toolchains_json, projects.feedback_env_json, projects.verify_in_copy
+//	35 AF-10 service_hold
 //
 // Later stories append the next integer; they never edit an earlier entry.
 var migrations = []migration{
@@ -65,7 +66,23 @@ var migrations = []migration{
 	{32, migration32SQL},
 	{33, migration33SQL},
 	{34, migration34SQL},
+	{35, migration35SQL},
 }
+
+// migration35SQL (AF-10) keeps a hold on the whole service: while it is set,
+// nothing new is dispatched in any project and a run/start is refused. It keeps
+// the projects it paused, so lifting it starts them again, and it survives a
+// restart. restart is set when a drain restart ran out of time and became a
+// hold: the last open stage closing finishes that restart.
+const migration35SQL = `
+CREATE TABLE service_hold (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  reason TEXT NOT NULL DEFAULT '',
+  since INTEGER NOT NULL,
+  paused TEXT NOT NULL DEFAULT '[]',
+  restart INTEGER NOT NULL DEFAULT 0 CHECK (restart IN (0, 1))
+);
+`
 
 // migration32SQL adds the BotChat mode: 'mirror' posts what happens, 'dispatch' also hands each
 // stage to an agent through BotChat.
