@@ -37,6 +37,7 @@ const SessionPrefix = "af-"
 const (
 	tagInstance = "agentflow_instance"
 	tagStage    = "agentflow_stage"
+	tagStageDir = "agentflow_stage_dir"
 )
 
 // Files in the stage home.
@@ -287,6 +288,17 @@ func failed(class runner.ErrClass, msg string, cause error) (runner.Result, erro
 
 // Run starts or adopts the stage's session and waits for the seat's report.
 func (a *Adapter) Run(ctx context.Context, req runner.Request) (runner.Result, error) {
+	res, err := a.run(ctx, req)
+	var re *runner.Error
+	if req.StageDir != "" && !(errors.As(err, &re) && re.Class == runner.ErrDetached) {
+		// The call is over unless it detached (the next process adopts the session and still
+		// needs the login): the stage's copy of the login goes, whatever ended it.
+		a.forgetLogin(ctx, state{Profile: req.Model}, HomeDir(req.StageDir))
+	}
+	return res, err
+}
+
+func (a *Adapter) run(ctx context.Context, req runner.Request) (runner.Result, error) {
 	if req.StageDir == "" || req.Job.Stage == 0 {
 		return failed(runner.ErrCrash, "seat: a seat runs only as a stage", nil)
 	}
@@ -402,7 +414,7 @@ func (a *Adapter) start(ctx context.Context, m mux.Multiplexer, name string, req
 		return state{}, err
 	}
 	if err := m.Create(ctx, mux.Spec{Name: name, Dir: l.Dir, Argv: l.Argv, Env: l.Env, ScriptDir: req.StageDir,
-		Tags: map[string]string{tagInstance: a.Instance, tagStage: strconv.FormatInt(req.Job.Stage, 10)}}); err != nil {
+		Tags: map[string]string{tagInstance: a.Instance, tagStage: strconv.FormatInt(req.Job.Stage, 10), tagStageDir: req.StageDir}}); err != nil {
 		return state{}, err
 	}
 	st := state{Session: name, Created: a.now(), Home: l.Home, Profile: req.Model}
@@ -764,8 +776,12 @@ func (a *Adapter) Sweep(ctx context.Context, open func(stage int64) bool) ([]str
 		if open(id) {
 			continue
 		}
+		dir, _ := m.Tag(ctx, n, tagStageDir)
 		if err := m.Kill(ctx, n); err == nil {
 			killed = append(killed, n)
+			if st, ok := readState(dir); ok && dir != "" {
+				a.forgetLogin(ctx, st, HomeDir(dir))
+			}
 			if a.Board != nil {
 				a.Board.Clear(id)
 			}

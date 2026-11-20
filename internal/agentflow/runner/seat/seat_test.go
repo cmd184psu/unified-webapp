@@ -376,3 +376,80 @@ func TestHaltTextStopsAllTyping(t *testing.T) {
 		t.Fatalf("after the halt: %s %v", o.res.Final, o.err)
 	}
 }
+
+// loginSeat is fakeSeat with a login to copy from a fake home directory.
+func loginSeat(t *testing.T, fm *mux.Fake, mode string) *Adapter {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg := filepath.Join(home, ".config", "seatcfg")
+	if err := os.MkdirAll(cfg, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg, "credentials.json"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := fakeSeat(t, fm, mode, nil)
+	base := a.Profiles
+	a.Profiles = func(ctx context.Context) map[string]Profile {
+		ps := base(ctx)
+		p := ps["fake"]
+		p.ConfigDir, p.CopyFiles = "~/.config/seatcfg", []string{"credentials.json"}
+		ps["fake"] = p
+		return ps
+	}
+	return a
+}
+
+func loginCopy(req runner.Request) string {
+	return filepath.Join(HomeDir(req.StageDir), ".config", "seatcfg", "credentials.json")
+}
+
+// Found on dev: a cancelled or stopped stage kept its copy of the login.
+func TestACancelledSeatDropsItsLoginCopy(t *testing.T) {
+	fm := &mux.Fake{}
+	t.Cleanup(fm.KillAll)
+	a := loginSeat(t, fm, "silent")
+	req := seatReq(t, "worker")
+	ctx, cancel := context.WithCancel(context.Background())
+	ch := runAsync(a, ctx, req)
+	waitFor(t, "the session", func() bool { return len(fm.TypedInto(SessionName(req.Job))) == 2 })
+	if _, err := os.Stat(loginCopy(req)); err != nil {
+		t.Fatalf("the running seat needs its login copy: %v", err)
+	}
+	if err := a.Kill(context.Background(), 42); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	get(t, ch)
+	if _, err := os.Stat(loginCopy(req)); err == nil {
+		t.Fatal("a cancelled stage must not keep the login copy")
+	}
+}
+
+// A detached seat keeps its login (the next process adopts it); sweeping its session once the
+// stage is closed removes the copy.
+func TestADetachedSeatKeepsItsLoginUntilSwept(t *testing.T) {
+	fm := &mux.Fake{}
+	t.Cleanup(fm.KillAll)
+	a := loginSeat(t, fm, "silent")
+	req := seatReq(t, "worker")
+	ctx, cancel := context.WithCancel(context.Background())
+	ch := runAsync(a, ctx, req)
+	waitFor(t, "the session", func() bool { return len(fm.TypedInto(SessionName(req.Job))) == 2 })
+	cancel()
+	var re *runner.Error
+	if o := get(t, ch); !errors.As(o.err, &re) || re.Class != runner.ErrDetached {
+		t.Fatalf("err = %v, want detached", o.err)
+	}
+	if _, err := os.Stat(loginCopy(req)); err != nil {
+		t.Fatalf("a detached seat still needs its login: %v", err)
+	}
+	killed, err := a.Sweep(context.Background(), func(int64) bool { return false })
+	if err != nil || len(killed) != 1 {
+		t.Fatalf("swept %v %v", killed, err)
+	}
+	if _, err := os.Stat(loginCopy(req)); err == nil {
+		t.Fatal("a swept session's stage must not keep the login copy")
+	}
+}
