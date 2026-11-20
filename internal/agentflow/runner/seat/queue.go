@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
@@ -59,6 +60,19 @@ func readQueueState(stageDir string) (queueState, bool) {
 		return s, false
 	}
 	return s, true
+}
+
+// queueMu serializes queue state writes: the run loop and a cancel both write the file.
+var queueMu sync.Mutex
+
+// saveQueueState writes the run loop's state, keeping a cancel written meanwhile.
+func saveQueueState(stageDir string, s *queueState) error {
+	queueMu.Lock()
+	defer queueMu.Unlock()
+	if cur, ok := readQueueState(stageDir); ok && cur.Cancelled {
+		s.Cancelled = true
+	}
+	return writeQueueState(stageDir, *s)
 }
 
 func writeQueueState(stageDir string, s queueState) error {
@@ -252,7 +266,7 @@ func (a *Adapter) runQueue(ctx context.Context, m mux.Multiplexer, req runner.Re
 		if err := putBlock(file, stage, body); err != nil {
 			return failed(runner.ErrCrash, "seat: write the queue file: "+err.Error(), err)
 		}
-		if err := writeQueueState(req.StageDir, st); err != nil {
+		if err := saveQueueState(req.StageDir, &st); err != nil {
 			_ = dropBlock(file, stage)
 			return failed(runner.ErrCrash, "seat: "+err.Error(), err)
 		}
@@ -295,7 +309,7 @@ func (a *Adapter) runQueue(ctx context.Context, m mux.Multiplexer, req runner.Re
 				st.Questions++
 				_ = os.Rename(st.Result, filepath.Join(resDir, fmt.Sprintf("QUESTION.%d.json", st.Questions)))
 				_ = os.WriteFile(filepath.Join(resDir, "QUESTION.open"), []byte(rep.Question), 0o600)
-				_ = writeQueueState(req.StageDir, st)
+				_ = saveQueueState(req.StageDir, &st)
 			default:
 				final, ferr := seatkit.Final(req.Role, rep)
 				if ferr != nil {
@@ -330,7 +344,7 @@ func (a *Adapter) runQueue(ctx context.Context, m mux.Multiplexer, req runner.Re
 			if view != lastScreen {
 				if lastScreen != "" && st.Nudges > 0 && !st.Engaged {
 					st.Engaged = true
-					_ = writeQueueState(req.StageDir, st)
+					_ = saveQueueState(req.StageDir, &st)
 					clearOwn("nudged")
 				}
 				lastScreen, lastChange = view, a.now()
@@ -363,7 +377,7 @@ func (a *Adapter) runQueue(ctx context.Context, m mux.Multiplexer, req runner.Re
 			}
 			st.Nudges++
 			st.LastNudge = a.now()
-			_ = writeQueueState(req.StageDir, st)
+			_ = saveQueueState(req.StageDir, &st)
 			if req.OnEvent != nil {
 				req.OnEvent(runner.Event{Type: "seat.nudged", Text: fmt.Sprintf("nudged %s (%d of %d)", st.Session, st.Nudges, maxNudges)})
 			}
@@ -392,12 +406,16 @@ func (a *Adapter) queueStopped(ctx context.Context, stageDir string) (runner.Res
 // cancelQueue removes the stage's task from the queue file and does nothing else: the
 // owner's session is never touched.
 func (a *Adapter) cancelQueue(stage int64, stageDir string) error {
+	queueMu.Lock()
 	st, ok := readQueueState(stageDir)
 	if !ok {
+		queueMu.Unlock()
 		return nil
 	}
 	st.Cancelled = true
-	if err := writeQueueState(stageDir, st); err != nil {
+	err := writeQueueState(stageDir, st)
+	queueMu.Unlock()
+	if err != nil {
 		return err
 	}
 	if a.Board != nil {
