@@ -105,6 +105,9 @@ func writeFRD(b *strings.Builder, f FRD, level int) {
 		}
 	}
 	bullets(b, meta)
+	if len(f.Toolchains) > 0 {
+		fmt.Fprintf(b, "Toolchains: %s\n\n", esc(strings.Join(f.Toolchains, ", ")))
+	}
 	heading(b, level+1, "Objective")
 	para(b, f.Objective)
 	if f.Context != "" {

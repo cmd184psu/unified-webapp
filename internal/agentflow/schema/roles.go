@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"cmd184psu/unified-webapp/internal/agentflow/model"
 )
 
 // Issue is a defect reported by a reviewer, critic or architect.
@@ -48,6 +50,9 @@ type PlanPhase struct {
 	Name             string   `json:"name"`
 	TasksDescription string   `json:"tasks_description"`
 	DependsOn        []string `json:"depends_on,omitempty"`
+	// Toolchains are the host toolchains the phase's files need, carried from
+	// the FRD's "Toolchains:" line (AF-6b).
+	Toolchains []string `json:"toolchains,omitempty"`
 }
 
 // ADR is the architecture decision record of a plan.
@@ -109,6 +114,10 @@ type CompileTask struct {
 	Prompt       string   `json:"prompt"`
 	Acceptance   []string `json:"acceptance"`
 	FilesTouched []string `json:"files_touched"`
+	// Toolchains names the host toolchains the task needs, for example
+	// "dotnet". The engine infers them from files_touched as well and acts on
+	// the union (AF-6b).
+	Toolchains []string `json:"toolchains,omitempty"`
 }
 
 // CompileOut is the compiler's final message.
@@ -132,6 +141,23 @@ func oneOf(field, got string, allowed ...string) error {
 func nonEmpty(field, s string) error {
 	if s == "" {
 		return bad(field, "is required")
+	}
+	return nil
+}
+
+// validateToolchains rejects a toolchain agentflow cannot mount, so a
+// misconfigured task fails at compile time with a reason instead of at its
+// first verify command.
+func validateToolchains(field string, names []string) error {
+	seen := map[string]bool{}
+	for i, n := range names {
+		if !model.ValidToolchain(n) {
+			return bad(fmt.Sprintf("%s[%d]", field, i), "unknown toolchain %q (known: %s)", n, strings.Join(model.Toolchains, ", "))
+		}
+		if seen[n] {
+			return bad(field, "lists toolchain %q twice", n)
+		}
+		seen[n] = true
 	}
 	return nil
 }
@@ -218,6 +244,9 @@ func (p *PlanOut) Validate() error {
 		if err := nonEmpty(fmt.Sprintf("phases[%d].tasks_description", i), ph.TasksDescription); err != nil {
 			return err
 		}
+		if err := validateToolchains(fmt.Sprintf("phases[%d].toolchains", i), ph.Toolchains); err != nil {
+			return err
+		}
 	}
 	return p.ADR.validate()
 }
@@ -277,6 +306,9 @@ func (c *CompileOut) Validate() error {
 			return err
 		}
 		if err := nonEmptyList(f+"files_touched", t.FilesTouched); err != nil {
+			return err
+		}
+		if err := validateToolchains(f+"toolchains", t.Toolchains); err != nil {
 			return err
 		}
 		if verifyOnlyTitle.MatchString(t.Title) {

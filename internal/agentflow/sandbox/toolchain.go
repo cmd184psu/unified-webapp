@@ -4,13 +4,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"cmd184psu/unified-webapp/internal/agentflow/model"
 )
 
-// Toolchains are the host toolchains a project may bring into its sandbox
-// (AF-6). "dotnet" is the first: a C# project's verify commands need the SDK
-// and its offline NuGet cache, which live under the server user's HOME and are
-// otherwise outside the sandbox.
-var Toolchains = []string{"dotnet"}
+// Toolchains are the host toolchains a project or task may bring into its
+// sandbox (AF-6). "dotnet" is the first: a C# project's verify commands need
+// the SDK and its offline NuGet cache, which live under the server user's HOME
+// and are otherwise outside the sandbox. The names live in model so a task
+// definition and its sandbox cannot disagree about them.
+var Toolchains = model.Toolchains
 
 // The sandbox destinations a toolchain is mounted at. bwrap never binds the
 // host HOME (the stage home replaces it), so each toolchain gets its own
@@ -22,14 +25,7 @@ const (
 )
 
 // ValidToolchain reports whether name is a toolchain agentflow can mount.
-func ValidToolchain(name string) bool {
-	for _, t := range Toolchains {
-		if t == name {
-			return true
-		}
-	}
-	return false
-}
+func ValidToolchain(name string) bool { return model.ValidToolchain(name) }
 
 // ApplyToolchains adds the mounts, PATH entries and environment of every named
 // toolchain to spec. Nothing on the host is made writable: the mounts are
@@ -39,7 +35,7 @@ func ValidToolchain(name string) bool {
 func ApplyToolchains(spec *Spec, names []string) error {
 	for _, name := range names {
 		switch name {
-		case "dotnet":
+		case model.ToolchainDotnet:
 			if err := applyDotnet(spec); err != nil {
 				return err
 			}

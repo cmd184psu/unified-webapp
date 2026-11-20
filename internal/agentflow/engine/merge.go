@@ -163,7 +163,9 @@ func (x mergeExecutor) verifyMerged(ctx context.Context, rc golane.RunContext, c
 		return verify.VerifyReport{}, nil, err
 	}
 	rep := verify.VerifyReport{Checks: []verify.Check{}, Warnings: []string{}, NewFailures: []string{}, BaselineFailures: []string{}}
-	results, err := e.feedback(ctx, c, &rep, intWT, admin, filepath.Join(e.StageDir(st.ID), "home"), st.ID, set, c.touchedFiles())
+	toolchains := model.MergeToolchains(c.proj.Toolchains, model.TaskToolchains(c.task.TaskDef))
+	dotnet := model.HasToolchain(c.task.TaskDef, model.ToolchainDotnet)
+	results, err := e.feedback(ctx, c, &rep, intWT, admin, filepath.Join(e.StageDir(st.ID), "home"), st.ID, set, c.touchedFiles(), toolchains, dotnet)
 	return rep, results, err
 }
 

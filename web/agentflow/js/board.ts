@@ -347,6 +347,7 @@ export class Board {
       h('div', { class: 'wizard-list' }, ...a.stages.map((s) =>
         h('div', { class: 'inline-row', attrs: { 'data-stage': s.id } },
           h('span', { text: `${s.role} · ${s.backend ? `${s.backend}/${s.model}` : 'engine'} · ${s.outcome || s.state}` }),
+          s.relaxations?.length ? badge(`relaxed: ${s.relaxations.join(', ')}`, 'warn') : null,
           button('Output', () => this.stream.open(s), { field: 'open-stream', icon: 'view' })))),
       worker?.parsed ? block('Worker summary', h('p', { text: String(rec(worker.parsed).summary ?? '') })) : null,
       verify?.parsed ? block('VerifyReport', renderVerify(verify.parsed)) : null,

@@ -273,9 +273,9 @@ func (e *Engine) haltInfra(ctx context.Context, c *chain, last model.Stage, stri
 func (e *Engine) resubmit(ctx context.Context, c *chain, last model.Stage) error {
 	switch last.Role {
 	case "verify":
-		return e.submit(ctx, c, VerifyLane, "verify", verifyBackend, "", last.QueueHash)
+		return e.submitVerify(ctx, c, last)
 	case "merge":
-		return e.submit(ctx, c, MergeLane, "merge", mergeBackend, "", last.QueueHash)
+		return e.submitMerge(ctx, c, last)
 	}
 	pick := func(avoid string, skipModel bool) (Pick, string, error) {
 		v, err := e.newView(ctx)
@@ -309,7 +309,7 @@ func (e *Engine) resubmit(ctx context.Context, c *chain, last model.Stage) error
 			return pk, why, nil
 		}
 		e.needFor(v, c.proj, c.task)
-		pk, why := pickWorker(v, c.proj, sticky, nil, 0)
+		pk, why := pickWorker(v, c.proj, sticky, nil, 0, dotnetTask(c.task))
 		return pk, why, nil
 	}
 	pk, why, err := pick(last.Backend, true)

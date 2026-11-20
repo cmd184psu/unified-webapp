@@ -32,7 +32,11 @@ func compiledTasks(out schema.CompileOut) ([]model.TaskDef, error) {
 		defs[i] = model.TaskDef{
 			Key: t.ID, Phase: t.Phase, Title: t.Title, Prompt: t.Prompt,
 			Acceptance: t.Acceptance, FilesTouched: t.FilesTouched, DependsOn: t.DependsOn,
+			Toolchains: t.Toolchains,
 		}
+		// The compiler's hint can add a toolchain, never remove the one the
+		// files imply: the engine stores and runs the union (AF-6b).
+		defs[i].Toolchains = model.TaskToolchains(defs[i])
 		for _, f := range append([]string{t.Prompt}, t.FilesTouched...) {
 			if strings.HasPrefix(f, "/") {
 				return nil, fmt.Errorf("task %s contains absolute path %q: use paths relative to the project", t.ID, f)

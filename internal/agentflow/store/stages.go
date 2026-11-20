@@ -23,16 +23,25 @@ type StageSpec struct {
 	Model     string
 	QueueHash string
 	PromptRef string
+	// Relaxations are the sandbox protections this stage may relax, for
+	// example loopback for a .NET verify or unconfined_runner for a worker
+	// outside the sandbox (AF-6b). Recorded so every relaxation is auditable.
+	Relaxations []string
 }
 
-const stageCols = `id, COALESCE(attempt, 0), COALESCE(effort, 0), role, backend, model, lane_job_id, queue_hash, state, outcome, raw_output, parsed_json, prompt_path, started, finished, tokens`
+const stageCols = `id, COALESCE(attempt, 0), COALESCE(effort, 0), role, backend, model, lane_job_id, queue_hash, state, outcome, raw_output, parsed_json, prompt_path, started, finished, tokens, relaxations_json`
 
 func scanStage(r interface{ Scan(...any) error }) (model.Stage, error) {
 	var st model.Stage
-	var parsed string
-	err := r.Scan(&st.ID, &st.Attempt, &st.Effort, &st.Role, &st.Backend, &st.Model, &st.LaneJobID, &st.QueueHash, &st.State, &st.Outcome, &st.RawOutput, &parsed, &st.PromptRef, &st.Started, &st.Finished, &st.Tokens)
+	var parsed, relaxations string
+	err := r.Scan(&st.ID, &st.Attempt, &st.Effort, &st.Role, &st.Backend, &st.Model, &st.LaneJobID, &st.QueueHash, &st.State, &st.Outcome, &st.RawOutput, &parsed, &st.PromptRef, &st.Started, &st.Finished, &st.Tokens, &relaxations)
 	if parsed != "" {
 		st.Parsed = json.RawMessage(parsed)
+	}
+	if relaxations != "" {
+		if err := json.Unmarshal([]byte(relaxations), &st.Relaxations); err != nil {
+			return st, err
+		}
 	}
 	return st, err
 }
@@ -53,8 +62,8 @@ func (s *Store) CreateStage(ctx context.Context, sp StageSpec) (model.Stage, err
 	}
 	var out model.Stage
 	err := s.WithTx(ctx, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `INSERT INTO stages (attempt, effort, role, backend, model, queue_hash, prompt_path, state)
-			VALUES (?, ?, ?, ?, ?, ?, ?, 'queued')`, att, eff, sp.Role, sp.Backend, sp.Model, sp.QueueHash, sp.PromptRef)
+		res, err := tx.ExecContext(ctx, `INSERT INTO stages (attempt, effort, role, backend, model, queue_hash, prompt_path, relaxations_json, state)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued')`, att, eff, sp.Role, sp.Backend, sp.Model, sp.QueueHash, sp.PromptRef, jsonList(sp.Relaxations))
 		if err != nil {
 			return err
 		}

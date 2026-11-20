@@ -30,6 +30,11 @@ type Spec struct {
 	StageHome string
 	// Net shares the host network namespace; false unshares it.
 	Net bool
+	// LoopbackNet keeps loopback reachable when Net is false: the stage may
+	// connect to and listen on 127.0.0.1 and ::1, and nothing else. It is what
+	// a .NET verify needs (the vstest testhost handshake) without opening the
+	// internet; it is a no-op when Net is true and an error on its own.
+	LoopbackNet bool
 	// ExtraROBinds are additional read-only mounts, for example the resolved
 	// real runner binary or a Go module cache. Never bind a HOME shim.
 	ExtraROBinds []Bind
@@ -115,6 +120,9 @@ func (s Spec) validate() error {
 		if err := s.Docker.validate(s); err != nil {
 			return err
 		}
+	}
+	if s.Net && s.LoopbackNet {
+		return errors.New("sandbox: LoopbackNet needs Net false; a shared network namespace already reaches loopback and the internet")
 	}
 	if len(s.Argv) == 0 {
 		return errors.New("sandbox: empty Argv")

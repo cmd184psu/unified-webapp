@@ -67,7 +67,7 @@ export function blankFRD(slug: string, effort: EffortView): FRD {
 export class FrdForm {
   readonly el: HTMLElement;
   readonly errors = new FormErrors();
-  private f: Record<'id' | 'title' | 'status' | 'objective' | 'context' | 'constraints' | 'out_of_scope', HTMLInputElement | HTMLTextAreaElement>;
+  private f: Record<'id' | 'title' | 'status' | 'objective' | 'context' | 'constraints' | 'toolchains' | 'out_of_scope', HTMLInputElement | HTMLTextAreaElement>;
   private groups: RowsEditor<FRDGroup>;
   private reqs: RowsEditor<FRDRequirement>;
   private acs: RowsEditor<FRDAC>;
@@ -81,6 +81,7 @@ export class FrdForm {
       objective: textArea('objective', base.objective ?? '', 3),
       context: textArea('context', base.context ?? '', 3),
       constraints: textArea('constraints', (base.constraints ?? []).join('\n'), 3),
+      toolchains: textInput('toolchains', (base.toolchains ?? []).join(', '), { placeholder: 'dotnet' }),
       out_of_scope: textArea('out_of_scope', (base.out_of_scope ?? []).join('\n'), 3),
     };
     for (const c of Object.values(this.f)) c.addEventListener('input', onChange);
@@ -121,6 +122,7 @@ export class FrdForm {
       e.add('objective', fieldRow('Objective', this.f.objective)).el,
       e.add('context', fieldRow('Context', this.f.context)).el,
       e.add('constraints', fieldRow('Constraints', this.f.constraints, 'One per line')).el,
+      e.add('toolchains', fieldRow('Toolchains', this.f.toolchains, 'Comma-separated, for example dotnet')).el,
       e.add('groups', fieldRow('Groups', this.groups.el)).el,
       e.add('requirements', fieldRow('Requirements', this.reqs.el)).el,
       e.add('acceptance_criteria', fieldRow('Acceptance criteria', this.acs.el)).el,
@@ -147,6 +149,7 @@ export class FrdForm {
       objective: v('objective'),
       context: v('context') || undefined,
       constraints: some(lines(this.f.constraints.value)),
+      toolchains: some(commaList(this.f.toolchains.value)),
       groups: some(this.groups.read().filter((g) => g.id || g.title)),
       requirements,
       acceptance_criteria: acs,

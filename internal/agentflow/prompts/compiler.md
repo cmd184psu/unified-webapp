@@ -23,12 +23,13 @@ Your final message must be exactly one JSON object and nothing else: no markdown
       "depends_on": [],
       "prompt": "Short plain-English worker instruction naming relative file paths.",
       "acceptance": ["R2: project root with .agentflow/ validates as ok"],
-      "files_touched": ["relative/path.ext"]
+      "files_touched": ["relative/path.ext"],
+      "toolchains": ["dotnet"]
     }
   ]
 }
 
-Emit only these fields. Any other field makes the queue invalid.
+Emit only these fields, and `toolchains` only for a .NET task (see rule 17). Any other field makes the queue invalid.
 
 ## Rules
 
@@ -48,5 +49,7 @@ Emit only these fields. Any other field makes the queue invalid.
 14. A Go program builds after every task, so the first task that writes Go code in the module root also writes `main.go` with a minimal `main` function; later tasks extend it and list it again. Never leave `main.go` to a later task while an earlier one writes `package main`.
 15. A worker holds only a limited context window (often 16K tokens), and every file it writes passes through that window several times. Keep each task small: one source file and its test file, or one page file. A task that writes three or more files is split. The runner measures this and rejects a task that is too big for every available model.
 16. A task must be finishable with the files in its own `files_touched`. When a later task wires its output in (registers a handler in `main.go`, adds a `<script>` or stylesheet reference to a page, serves a static file), the earlier task must not name that file and must not state acceptance as something only the wired-in application shows. For a handler, tell the worker to test the handler function directly with in-process `httptest` requests; for a script or stylesheet, to check its own content (it parses, it defines the functions and element ids it uses) and not that a page loads it. Say that a later task does the wiring. The criterion that it is reachable belongs to the task that wires it in.
+
+17. A task whose `files_touched` includes a `*.cs`, `*.csproj` or `*.sln` file emits `"toolchains": ["dotnet"]`; any other task omits the field. Carry the plan phase's toolchain into every task of that phase. The engine also infers `dotnet` from those file extensions, so a missing hint is not an error, but the hint keeps the queue and its approve screen readable.
 
 Produce the full queue now.

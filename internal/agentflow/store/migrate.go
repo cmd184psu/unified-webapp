@@ -69,6 +69,7 @@ var migrations = []migration{
 	{34, migration34SQL},
 	{35, migration35SQL},
 	{36, migration36SQL},
+	{37, migration37SQL},
 }
 
 // migration35SQL (AF-9, AF-11) lets a backend be a seat: 'botchat_seat' (a BotChat callsign)
@@ -117,6 +118,14 @@ ALTER TABLE projects ADD COLUMN docker_selinux INTEGER NOT NULL DEFAULT 0 CHECK 
 // projects table is rebuilt without the UNIQUE on repo_path. Each project still
 // has its own worktrees, integration branches and active effort; gitsvc already
 // serialises git operations per repository.
+// migration37SQL (AF-6b, numbered 35 on its branch) lets a task name the host toolchains its verify
+// stage needs, so the engine can relax the sandbox for exactly those files,
+// and records on a stage which protections were relaxed for it.
+const migration37SQL = `
+ALTER TABLE tasks ADD COLUMN toolchains_json TEXT NOT NULL DEFAULT '';
+ALTER TABLE stages ADD COLUMN relaxations_json TEXT NOT NULL DEFAULT '';
+`
+
 // migration34SQL (AF-6) gives a project host toolchains to mount in its
 // sandbox ('dotnet' first), extra environment for its feedback commands, and
 // the switch that runs those commands on a copy of the worktree because the

@@ -3362,6 +3362,7 @@ var Board = class {
         "div",
         { class: "inline-row", attrs: { "data-stage": s.id } },
         h("span", { text: `${s.role} \xB7 ${s.backend ? `${s.backend}/${s.model}` : "engine"} \xB7 ${s.outcome || s.state}` }),
+        s.relaxations?.length ? badge(`relaxed: ${s.relaxations.join(", ")}`, "warn") : null,
         button("Output", () => this.stream.open(s), { field: "open-stream", icon: "view" })
       ))),
       worker?.parsed ? block("Worker summary", h("p", { text: String(rec(worker.parsed).summary ?? "") })) : null,
@@ -4019,6 +4020,7 @@ var defaultFrdDeps = () => ({
 });
 var PRIORITIES = [["", "(none)"], ["must", "must"], ["should", "should"], ["could", "could"], ["wont", "won't"]];
 var lines = (s) => s.split("\n").map((l) => l.trim()).filter((l) => l !== "");
+var commaList = (s) => s.split(",").map((l) => l.trim()).filter((l) => l !== "");
 var when2 = (ms) => ms ? new Date(ms).toLocaleString() : "";
 function blankFRD(slug, effort) {
   return {
@@ -4040,6 +4042,7 @@ var FrdForm = class {
       objective: textArea("objective", base.objective ?? "", 3),
       context: textArea("context", base.context ?? "", 3),
       constraints: textArea("constraints", (base.constraints ?? []).join("\n"), 3),
+      toolchains: textInput("toolchains", (base.toolchains ?? []).join(", "), { placeholder: "dotnet" }),
       out_of_scope: textArea("out_of_scope", (base.out_of_scope ?? []).join("\n"), 3)
     };
     for (const c of Object.values(this.f)) c.addEventListener("input", onChange);
@@ -4083,6 +4086,7 @@ var FrdForm = class {
       e.add("objective", fieldRow("Objective", this.f.objective)).el,
       e.add("context", fieldRow("Context", this.f.context)).el,
       e.add("constraints", fieldRow("Constraints", this.f.constraints, "One per line")).el,
+      e.add("toolchains", fieldRow("Toolchains", this.f.toolchains, "Comma-separated, for example dotnet")).el,
       e.add("groups", fieldRow("Groups", this.groups.el)).el,
       e.add("requirements", fieldRow("Requirements", this.reqs.el)).el,
       e.add("acceptance_criteria", fieldRow("Acceptance criteria", this.acs.el)).el,
@@ -4107,6 +4111,7 @@ var FrdForm = class {
       objective: v("objective"),
       context: v("context") || void 0,
       constraints: some(lines(this.f.constraints.value)),
+      toolchains: some(commaList(this.f.toolchains.value)),
       groups: some(this.groups.read().filter((g) => g.id || g.title)),
       requirements,
       acceptance_criteria: acs,
