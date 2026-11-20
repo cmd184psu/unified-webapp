@@ -42,16 +42,20 @@ func TestDockerSpecRefusesUnsharedPathsBeforeStartingTheVM(t *testing.T) {
 	vm := &countingVM{shared: []string{t.TempDir()}}
 	e := &Engine{deps: Deps{Containers: dockervm.NewWithDriver(vm, dockervm.Config{Instance: "i1"})}}
 	p := store.Project{Slug: "p", Sandbox: "docker"}
-	if _, err := e.dockerSpec(context.Background(), p, "af-p-1-2-3", spec); err == nil || !strings.Contains(err.Error(), "not shared") {
+	spec.ExtraROBinds = []sandbox.Bind{{Src: t.TempDir(), Dst: "/opt/host-go-mod"}} // the host template's
+	if err := e.dockerSpec(context.Background(), p, "af-p-1-2-3", &spec); err == nil || !strings.Contains(err.Error(), "not shared") {
 		t.Fatalf("an unshared worktree must be refused: %v", err)
 	}
 	if vm.starts != 0 {
 		t.Fatal("the VM was started for a stage that cannot run")
 	}
 	vm.shared = []string{root}
-	d, err := e.dockerSpec(context.Background(), p, "af-p-1-2-3", spec)
-	if err != nil || d == nil || d.Instance != "i1" {
-		t.Fatalf("a shared tree runs: %+v %v", d, err)
+	spec.ExtraROBinds = []sandbox.Bind{{Src: t.TempDir(), Dst: "/opt/host-go-mod"}} // not shared, and dropped
+	if err := e.dockerSpec(context.Background(), p, "af-p-1-2-3", &spec); err != nil || spec.Docker == nil || spec.Docker.Instance != "i1" {
+		t.Fatalf("a shared tree runs: %+v %v", spec.Docker, err)
+	}
+	if len(spec.ExtraROBinds) != 0 {
+		t.Fatalf("the host template's binds must not reach a container: %v", spec.ExtraROBinds)
 	}
 	if vm.starts != 1 {
 		t.Fatalf("starts = %d, want 1", vm.starts)

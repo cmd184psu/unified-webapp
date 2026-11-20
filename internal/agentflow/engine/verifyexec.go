@@ -128,27 +128,34 @@ func failingChecks(rep verify.VerifyReport) string {
 // a host project. It checks spec's mounts first (a path the VM does not share is
 // refused without booting it), then starts the runtime, so a Docker that cannot
 // come up fails with the reason rather than at the first command (AF-12).
-func (e *Engine) dockerSpec(ctx context.Context, p store.Project, name string, spec sandbox.Spec) (*sandbox.Docker, error) {
+//
+// The host sandbox template's extra binds and PATH dirs (the host's Go module cache, host
+// toolchains) are dropped: a container has the image's toolchains, and the project's
+// docker_mounts are its only extra binds. A host path there would be a Mac binary or a
+// directory the VM does not share.
+func (e *Engine) dockerSpec(ctx context.Context, p store.Project, name string, spec *sandbox.Spec) error {
 	if p.Sandbox != "docker" {
-		return nil, nil
+		return nil
 	}
 	d, err := sandbox.NewDocker(p.DockerImage, p.DockerNetwork, p.DockerSELinux, e.deps.DockerProxy, name, sandbox.HostUser(), p.DockerMounts)
 	if err != nil {
-		return nil, fmt.Errorf("project %s: %w", p.Slug, err)
+		return fmt.Errorf("project %s: %w", p.Slug, err)
 	}
 	if e.deps.Containers == nil {
-		return nil, fmt.Errorf("project %s: docker sandbox is not configured", p.Slug)
+		return fmt.Errorf("project %s: docker sandbox is not configured", p.Slug)
 	}
 	d.Shared = e.deps.Containers.SharedPaths()
 	d.Instance = e.deps.Containers.Instance()
-	spec.Docker = d
-	if err := sandbox.CheckDockerMounts(spec); err != nil {
-		return nil, fmt.Errorf("project %s: %w", p.Slug, err)
+	spec.Docker, spec.ExtraROBinds, spec.PathDirs = d, nil, nil
+	if err := sandbox.CheckDockerMounts(*spec); err != nil {
+		spec.Docker = nil
+		return fmt.Errorf("project %s: %w", p.Slug, err)
 	}
 	if err := e.deps.Containers.Ensure(ctx); err != nil {
-		return nil, err
+		spec.Docker = nil
+		return err
 	}
-	return d, nil
+	return nil
 }
 
 // feedbackSpec is the sandbox for feedback commands run on wt: the configured
@@ -211,7 +218,7 @@ func (e *Engine) feedback(ctx context.Context, c *chain, rep *verify.VerifyRepor
 	if err != nil {
 		return nil, err
 	}
-	if spec.Docker, err = e.dockerSpec(ctx, c.proj, sandbox.ContainerName(c.proj.Slug, c.eff.ID, c.task.ID, strconv.FormatInt(stage, 10)), spec); err != nil {
+	if err = e.dockerSpec(ctx, c.proj, sandbox.ContainerName(c.proj.Slug, c.eff.ID, c.task.ID, strconv.FormatInt(stage, 10)), &spec); err != nil {
 		return nil, err
 	}
 	if spec.Docker != nil {
@@ -299,7 +306,7 @@ func (e *Engine) ensureBaseline(ctx context.Context, proj store.Project, effort 
 		if err != nil {
 			return err
 		}
-		if spec.Docker, err = e.dockerSpec(ctx, proj, sandbox.ContainerName(proj.Slug, effort, 0, "baseline"), spec); err != nil {
+		if err = e.dockerSpec(ctx, proj, sandbox.ContainerName(proj.Slug, effort, 0, "baseline"), &spec); err != nil {
 			return err
 		}
 		if spec.Docker != nil {
