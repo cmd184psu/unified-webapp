@@ -414,12 +414,19 @@ func (s *smoke) newProject(p *scenarioProject, reviewer [2]string) error {
 func (s *smoke) seed(effort int64, defs []model.TaskDef) error {
 	var err error
 	for try := 0; try < 10; try++ {
-		if err = s.seedOnce(effort, defs); err == nil || !strings.Contains(err.Error(), "SQLITE_BUSY") {
+		if err = s.seedOnce(effort, defs); err == nil || !busy(err) {
 			return err
 		}
 		time.Sleep(time.Duration(200*(try+1)) * time.Millisecond)
 	}
 	return err
+}
+
+// busy is SQLite's lock contention with the running server (SQLITE_BUSY and its
+// extended codes, such as 517 BUSY_SNAPSHOT): worth another try.
+func busy(err error) bool {
+	m := err.Error()
+	return strings.Contains(m, "SQLITE_BUSY") || strings.Contains(m, "database is locked")
 }
 
 func (s *smoke) seedOnce(effort int64, defs []model.TaskDef) error {
