@@ -130,6 +130,15 @@ func NewWithDriver(drv Driver, cfg Config) *Manager {
 	return &Manager{cfg: cfg, drv: drv, now: time.Now}
 }
 
+// SharedPaths are the host directories the runtime's containers can see, or nil when
+// every path is visible (a native daemon). A docker sandbox refuses a bind outside them.
+func (m *Manager) SharedPaths() []string {
+	if s, ok := m.drv.(interface{ Shared() []string }); ok {
+		return s.Shared()
+	}
+	return nil
+}
+
 // DriverName is the runtime's name (colima or docker).
 func (m *Manager) DriverName() string { return m.drv.Name() }
 

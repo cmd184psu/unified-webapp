@@ -69,6 +69,10 @@ type Docker struct {
 	Mounts []Mount
 	// Proxy is the host proxy a provider stage uses. Required for NetworkProvider.
 	Proxy string
+	// Shared are the host directories the runtime can see (a Colima VM's mounts). A bind
+	// source outside them would be an empty directory in the VM, so it is refused before
+	// anything runs. Nil means every path is visible (a native Linux daemon).
+	Shared []string
 }
 
 var (
@@ -219,6 +223,9 @@ func dockerMounts(spec Spec) ([]string, error) {
 		if err != nil {
 			return fmt.Errorf("sandbox: docker mount %s: %w", src, err)
 		}
+		if !sharedWith(resolved, d.Shared) {
+			return fmt.Errorf("sandbox: %s is not shared with the docker VM (shared: %s); it would be an empty directory in the container: add it to the VM's mounts (~/.colima/default/colima.yaml) and restart the VM", resolved, strings.Join(d.Shared, ", "))
+		}
 		if strings.ContainsAny(resolved+dst, ":,") {
 			return fmt.Errorf("sandbox: docker mount paths may not contain ':' or ',': %q -> %q", resolved, dst)
 		}
@@ -260,6 +267,23 @@ func dockerMounts(spec Spec) ([]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// sharedWith says the runtime can see path: it is under one of the shared roots, or there is
+// no VM between the host and the containers (shared is nil).
+func sharedWith(path string, shared []string) bool {
+	if shared == nil {
+		return true
+	}
+	for _, root := range shared {
+		if r, err := filepath.EvalSymlinks(root); err == nil {
+			root = r
+		}
+		if within(filepath.Clean(root), path) {
+			return true
+		}
+	}
+	return false
 }
 
 // dockerArgs renders the argv of `docker run` for spec, including the leading

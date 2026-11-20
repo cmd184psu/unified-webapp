@@ -254,3 +254,21 @@ func TestDockerSecretsNeverInArgv(t *testing.T) {
 		t.Fatal("the docker CLI must carry the value in its environment")
 	}
 }
+
+// TestDockerRefusesUnsharedPaths: on Colima a bind source the VM does not share is an empty
+// directory in the container; it is refused before anything runs (AF-12 review finding 2).
+func TestDockerRefusesUnsharedPaths(t *testing.T) {
+	spec := containerSpec(t, &Docker{Image: "agentflow-worker:0.1", Name: "af-oc3-1-2-verify", Network: NetworkNone}, true)
+	spec.Docker.Shared = []string{t.TempDir()} // somewhere else
+	if _, err := dockerArgs(spec); err == nil || !strings.Contains(err.Error(), "not shared with the docker VM") {
+		t.Fatalf("an unshared worktree must be refused: %v", err)
+	}
+	spec.Docker.Shared = []string{filepath.Dir(filepath.Dir(spec.Worktree))} // covers the test root
+	if _, err := dockerArgs(spec); err != nil {
+		t.Fatalf("a shared tree is fine: %v", err)
+	}
+	spec.Docker.Shared = nil // a native daemon sees every path
+	if _, err := dockerArgs(spec); err != nil {
+		t.Fatal(err)
+	}
+}

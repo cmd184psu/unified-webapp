@@ -6,7 +6,9 @@ package dockervm
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -16,9 +18,71 @@ import (
 type colimaDriver struct {
 	docker, colima string
 	timeout        time.Duration
+	// config overrides the colima.yaml read by Shared (tests).
+	config string
 }
 
 func (d *colimaDriver) Name() string { return "colima" }
+
+// Shared lists the host directories the VM mounts, from the default profile's
+// colima.yaml ($COLIMA_HOME, else ~/.colima). Colima shares the home directory and
+// /tmp/colima when the file names no mounts. Nil when the file cannot be read: the
+// sandbox then cannot check and lets docker decide.
+func (d *colimaDriver) Shared() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	dir := os.Getenv("COLIMA_HOME")
+	if dir == "" {
+		dir = filepath.Join(home, ".colima")
+	}
+	path := d.config
+	if path == "" {
+		path = filepath.Join(dir, "default", "colima.yaml")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	return colimaMounts(string(b), home)
+}
+
+// colimaMounts reads the mounts list of a colima.yaml: the "location:" of each entry under
+// the top-level "mounts:" key. An empty or absent list is Colima's default share.
+func colimaMounts(yaml, home string) []string {
+	var out []string
+	in := false
+	for _, line := range strings.Split(yaml, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "-") {
+			in = strings.HasPrefix(line, "mounts:")
+			continue
+		}
+		if !in {
+			continue
+		}
+		trimmed = strings.TrimPrefix(trimmed, "- ")
+		if loc, ok := strings.CutPrefix(trimmed, "location:"); ok {
+			loc = strings.Trim(strings.TrimSpace(loc), `"'`)
+			if strings.HasPrefix(loc, "~/") {
+				loc = filepath.Join(home, loc[2:])
+			} else if loc == "~" {
+				loc = home
+			}
+			if filepath.IsAbs(loc) {
+				out = append(out, filepath.Clean(loc))
+			}
+		}
+	}
+	if len(out) == 0 {
+		return []string{home, "/tmp/colima"}
+	}
+	return out
+}
 
 // Start brings the VM up. It first asks docker whether the runtime already
 // answers, so a running VM costs one `docker info` and no `colima start`.

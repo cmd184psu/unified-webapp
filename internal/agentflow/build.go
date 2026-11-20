@@ -280,6 +280,7 @@ func dockerFor(git *gitsvc.Service, st *store.Store, containers *dockervm.Manage
 		// image must carry one and name it here.
 		d.Runner = os.Getenv("AGENTFLOW_DOCKER_RUNNER")
 		if containers != nil {
+			d.Shared = containers.SharedPaths()
 			if err := containers.Ensure(ctx); err != nil {
 				return nil, err
 			}

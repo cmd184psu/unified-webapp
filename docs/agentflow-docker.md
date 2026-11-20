@@ -54,6 +54,13 @@ Containers are named `af-<project>-<effort>-<task>-<stage>` and labelled
 find leftovers. A model stage, which the engine does not tie to a task, is named
 `af-<project>-0-0-stage-<id>`.
 
+Every bind source (the worktree, the stage home, the repository's `.git`, extra
+mounts) must be inside a directory the Colima VM shares, or it would be an empty
+directory in the container. The sandbox reads the `mounts:` of
+`~/.colima/default/colima.yaml` and refuses a stage whose paths are not shared,
+naming the path. For an instance that means its data directory and its projects'
+repositories. A native Linux daemon sees every path, so there is no check there.
+
 ## Network modes
 
 - **none** — `--network none`. A Ghidra report task or anything that only reads
