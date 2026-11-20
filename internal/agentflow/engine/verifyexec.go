@@ -139,6 +139,7 @@ func (e *Engine) dockerSpec(ctx context.Context, p store.Project, name string) (
 		return nil, fmt.Errorf("project %s: docker sandbox is not configured", p.Slug)
 	}
 	d.Shared = e.deps.Containers.SharedPaths()
+	d.Instance = e.deps.Containers.Instance()
 	if err := e.deps.Containers.Ensure(ctx); err != nil {
 		return nil, err
 	}

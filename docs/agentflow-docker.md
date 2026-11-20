@@ -92,9 +92,13 @@ daemon reports how to start it (`docker.socket`, or `DOCKER_HOST` for rootless
 docker/podman) and fails the stage.
 
 Containers are not children of the server. A cancel calls `docker kill` by name,
-and `--rm` removes the container when it exits. A stage whose name a crashed run
-left behind is replaced, not duplicated: the deterministic name is the adoption
-key.
+and `--rm` removes the container when it exits. Each container is also labelled
+`agentflow.instance=<id>` (from the data directory: dev and production share
+one VM). A container a crashed run left under a stage's name is removed before
+that name is used again, and at startup, when the runtime already answers, the
+instance removes all of its own leftovers. A docker stage is not adopted across
+a restart, so none of them can belong to a live stage. The VM is never started
+for this.
 
 ## Model stages in containers
 

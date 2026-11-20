@@ -69,6 +69,10 @@ type Docker struct {
 	Mounts []Mount
 	// Proxy is the host proxy a provider stage uses. Required for NetworkProvider.
 	Proxy string
+	// Instance labels the container with the agentflow instance that runs it
+	// (agentflow.instance=<id>), so startup cleanup removes only its own leftovers: dev
+	// and production share one VM.
+	Instance string
 	// Shared are the host directories the runtime can see (a Colima VM's mounts). A bind
 	// source outside them would be an empty directory in the VM, so it is refused before
 	// anything runs. Nil means every path is visible (a native Linux daemon).
@@ -295,6 +299,9 @@ func dockerArgs(spec Spec) ([]string, error) {
 	d := spec.Docker
 	args := []string{"run", "--rm", "--init", "--hostname", "localhost", "--name", d.Name,
 		"--label", "agentflow=1", "--label", "agentflow.container=" + d.Name}
+	if d.Instance != "" {
+		args = append(args, "--label", "agentflow.instance="+d.Instance)
+	}
 	switch d.Network {
 	case "", NetworkNone:
 		args = append(args, "--network", "none")
@@ -384,6 +391,35 @@ func DockerRemove(ctx context.Context, name string) error {
 	return runDocker(ctx, "rm", "-f", "-v", name)
 }
 
+// DockerSweep removes every container, running or not, labelled with this agentflow
+// instance. It is for startup, when none of them can belong to a live stage (docker stages
+// are not adopted across a restart). A runtime that does not answer is left alone: this
+// never starts a VM.
+func DockerSweep(ctx context.Context, instance string) ([]string, error) {
+	if instance == "" {
+		return nil, nil
+	}
+	bin, err := exec.LookPath("docker")
+	if err != nil {
+		return nil, nil // no docker on this host: nothing of ours can exist
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "ps", "-a", "--filter", "label=agentflow.instance="+instance, "--format", "{{.Names}}")
+	cmd.Env = dockerShellEnv()
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, nil // the runtime is down: nothing runs, and it is not ours to start
+	}
+	var removed []string
+	for _, n := range strings.Fields(string(out)) {
+		if err := DockerRemove(ctx, n); err == nil {
+			removed = append(removed, n)
+		}
+	}
+	return removed, nil
+}
+
 // DockerRunning lists this instance's containers by label.
 func DockerRunning(ctx context.Context) ([]string, error) {
 	bin, err := exec.LookPath("docker")
@@ -433,6 +469,11 @@ func dockerCommand(ctx context.Context, spec Spec) (*exec.Cmd, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A container a crashed run left under this name would make `docker run --name` fail
+	// (exit 125, a hard "could not start"): replace it. Names are per stage, so it is ours.
+	rmCtx, rmCancel := context.WithTimeout(ctx, 30*time.Second)
+	_ = DockerRemove(rmCtx, spec.Docker.Name)
+	rmCancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = dockerShellEnv()
 	for _, k := range stageEnvKeys(spec) {

@@ -52,6 +52,8 @@ type Config struct {
 	// Attention receives a human-readable line when the runtime cannot start or
 	// stop. Nil discards it.
 	Attention func(message string)
+	// Instance labels this agentflow's containers (agentflow.instance=<id>).
+	Instance string
 	// DockerBin and ColimaBin are for tests; nil uses PATH.
 	DockerBin string
 	ColimaBin string
@@ -129,6 +131,9 @@ func New(cfg Config) *Manager {
 func NewWithDriver(drv Driver, cfg Config) *Manager {
 	return &Manager{cfg: cfg, drv: drv, now: time.Now}
 }
+
+// Instance is the label value of this agentflow's containers.
+func (m *Manager) Instance() string { return m.cfg.Instance }
 
 // SharedPaths are the host directories the runtime's containers can see, or nil when
 // every path is visible (a native daemon). A docker sandbox refuses a bind outside them.

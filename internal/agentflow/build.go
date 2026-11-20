@@ -96,8 +96,9 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 	// A docker project needs a container runtime that is up only while work
 	// runs: Colima on macOS, the native daemon on Linux (AF-12).
 	containers := dockervm.New(dockervm.Config{
-		Idle: envDuration("AGENTFLOW_DOCKER_IDLE", dockervm.DefaultIdle),
-		Logf: func(format string, args ...any) { log.Printf(format, args...) },
+		Instance: seat.InstanceID(dataDir),
+		Idle:     envDuration("AGENTFLOW_DOCKER_IDLE", dockervm.DefaultIdle),
+		Logf:     func(format string, args ...any) { log.Printf(format, args...) },
 		Attention: func(msg string) {
 			log.Printf("ATTENTION: %s", msg)
 		},
@@ -105,6 +106,11 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 	var dispatcher *botchat.Dispatcher
 	var seatCtl engine.SeatControl
 	if rn == nil {
+		// Containers a previous process left (a crash, or a kill mid-stage) cannot be adopted:
+		// remove this instance's before anything runs. Never starts the VM.
+		if removed, _ := sandbox.DockerSweep(context.Background(), containers.Instance()); len(removed) > 0 {
+			log.Printf("agentflow: removed %d leftover container(s): %s", len(removed), strings.Join(removed, ", "))
+		}
 		ss := newSeats(dataDir, git, st)
 		seatCtl = ss
 		dispatcher = &botchat.Dispatcher{Inner: newRunner(git, st, ss, containers), Store: st, Relay: relay}
@@ -281,6 +287,7 @@ func dockerFor(git *gitsvc.Service, st *store.Store, containers *dockervm.Manage
 		d.Runner = os.Getenv("AGENTFLOW_DOCKER_RUNNER")
 		if containers != nil {
 			d.Shared = containers.SharedPaths()
+			d.Instance = containers.Instance()
 			if err := containers.Ensure(ctx); err != nil {
 				return nil, err
 			}

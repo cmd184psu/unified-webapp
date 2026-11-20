@@ -272,3 +272,63 @@ func TestDockerRefusesUnsharedPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// fakeDocker puts a docker on PATH that logs its arguments and prints psOut for `ps`.
+func fakeDocker(t *testing.T, psOut string, psFails bool) string {
+	t.Helper()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "calls")
+	ps := "printf '%s' " + shellQuote(psOut)
+	if psFails {
+		ps = "echo 'Cannot connect to the Docker daemon' >&2; exit 1"
+	}
+	script := "#!/bin/sh\necho \"$*\" >> " + shellQuote(log) + "\ncase \"$1\" in ps) " + ps + " ;; esac\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return log
+}
+
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+func calls(t *testing.T, log string) string {
+	b, _ := os.ReadFile(log)
+	return string(b)
+}
+
+// TestDockerLeftoversAreReplacedAndSwept: a container a crashed run left under a stage's
+// name is removed before docker run, and startup removes this instance's leftovers only
+// (AF-12 review finding 3).
+func TestDockerLeftoversAreReplacedAndSwept(t *testing.T) {
+	log := fakeDocker(t, "af-oc3-1-2-7\naf-oc3-1-2-8\n", false)
+	spec := containerSpec(t, &Docker{Image: "agentflow-worker:0.1", Name: "af-oc3-1-2-7", Network: NetworkNone, Instance: "abc123"}, true)
+	cmd, err := dockerCommand(context.Background(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(calls(t, log), "rm -f -v af-oc3-1-2-7") {
+		t.Fatalf("a leftover under the stage's name is not removed first: %q", calls(t, log))
+	}
+	if !hasPair(cmd.Args, "--label", "agentflow.instance=abc123") || !hasPair(cmd.Args, "--label", "agentflow=1") {
+		t.Fatalf("labels: %v", cmd.Args)
+	}
+	removed, err := DockerSweep(context.Background(), "abc123")
+	if err != nil || strings.Join(removed, ",") != "af-oc3-1-2-7,af-oc3-1-2-8" {
+		t.Fatalf("swept %v %v", removed, err)
+	}
+	if !strings.Contains(calls(t, log), "ps -a --filter label=agentflow.instance=abc123") {
+		t.Fatalf("the sweep must filter on this instance: %q", calls(t, log))
+	}
+}
+
+func TestDockerSweepLeavesADownRuntimeAlone(t *testing.T) {
+	log := fakeDocker(t, "", true)
+	removed, err := DockerSweep(context.Background(), "abc123")
+	if err != nil || len(removed) != 0 {
+		t.Fatalf("%v %v", removed, err)
+	}
+	if strings.Contains(calls(t, log), "rm -f") || strings.Contains(calls(t, log), "colima") {
+		t.Fatalf("calls %q", calls(t, log))
+	}
+}
