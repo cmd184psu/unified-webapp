@@ -36,6 +36,7 @@ var stateWriters = map[string]string{
 	"runner/mux/tmux.go:Create":                    "<stage dir>/<session>.launch.sh: a command too long for tmux's command line",
 	"coord/feed.go:feed":                           "the hand-run seats' queue files (queues/<callsign>.md), which the seats read (AF-13)",
 	"coord/feed.go:queueText":                      "queues/review-TASK-n.md: a review verdict copied next to the queue for a reworking seat",
+	"coord/git.go:union":                           "a union file (MANIFEST.md) resolved in the coordinator's scratch merge worktree",
 	"coord/state.go:Save":                          "coordinator.py's state.json, shared with the Python coordinator during the switch-over",
 }
 
