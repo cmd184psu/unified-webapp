@@ -367,6 +367,9 @@ func TestPushInstructions(t *testing.T) {
 // TestPushOnlyInInstructions enforces the plan's grep: no non-test Go source
 // under internal/agentflow has a "push" string literal (a git argv word). The
 // push command text lives only in gitsvc/instructions.go, as one longer string.
+// The one exception is the coordinator module for the hand-run seats (AF-13):
+// like coordinator.py it pushes a merge that passed its gates to the repository's
+// base branch, and only when coord.json sets push for that repository.
 func TestPushOnlyInInstructions(t *testing.T) {
 	root := filepath.Join("..")
 	fset := token.NewFileSet()
@@ -383,7 +386,7 @@ func TestPushOnlyInInstructions(t *testing.T) {
 			if !ok || lit.Kind != token.STRING {
 				return true
 			}
-			if lit.Value == `"push"` {
+			if lit.Value == `"push"` && filepath.ToSlash(p) != "../coord/git.go" {
 				t.Errorf("%s: push literal: %s", fset.Position(lit.Pos()), lit.Value)
 			}
 			return true

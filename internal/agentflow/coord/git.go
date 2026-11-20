@@ -119,6 +119,9 @@ func (g ExecGit) Merge(ctx context.Context, r Repo, base, branch, tid string, ap
 			return fmt.Errorf("%s gate failed (%s): %s", r.Name, clipStr(gate, 40), clip200(out))
 		}
 	}
+	if !r.Push {
+		return fmt.Errorf("%s: the merge passed its gates, but pushing is off for this repository (coord.json push)", r.Name)
+	}
 	if out, err := g.git(ctx, wt, "push", "-q", "origin", "HEAD:"+base); err != nil {
 		return fmt.Errorf("%s push failed: %s", r.Name, clip200(out))
 	}

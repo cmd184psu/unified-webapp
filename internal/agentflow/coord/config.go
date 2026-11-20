@@ -50,6 +50,10 @@ type Repo struct {
 	// ApprovedEnv is set to the task id for a merge whose review approved a visual change
 	// (UIDIFF_APPROVED).
 	ApprovedEnv string `json:"approved_env,omitempty"`
+	// Push lets the coordinator push a gated merge to origin's base branch, as
+	// coordinator.py does. It is the one place agentflow pushes, so it is off unless the
+	// owner sets it; without it a passed merge stops with an alert after its gates.
+	Push bool `json:"push,omitempty"`
 }
 
 // Seat is a hand-run seat: a BotChat callsign working in the owner's tmux session.
