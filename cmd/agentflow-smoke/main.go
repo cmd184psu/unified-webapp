@@ -381,7 +381,9 @@ func (s *smoke) newProject(p *scenarioProject, reviewer [2]string) error {
 	if err := s.do("POST", "/api/projects", body, nil); err != nil {
 		return err
 	}
+	s.mu.Lock() // scenarios run in parallel
 	s.projects = append(s.projects, p.slug)
+	s.mu.Unlock()
 	if len(p.limits) > 0 {
 		if err := s.do("PUT", "/api/projects/"+p.slug+"/limits", map[string]any{"limits": p.limits}, nil); err != nil {
 			return err
@@ -834,7 +836,9 @@ func (s *smoke) scenarioQueue(p *scenarioProject, rev [2]string) error {
 	if out, err := exec.Command("tmux", "new-session", "-d", "-s", owner, "-x", "200", "-y", "50", cmd).CombinedOutput(); err != nil {
 		return fmt.Errorf("start the stand-in owner session: %v %s", err, out)
 	}
+	s.mu.Lock()
 	s.sessions = append(s.sessions, owner)
+	s.mu.Unlock()
 	if err := s.newProject(p, rev); err != nil {
 		return err
 	}
