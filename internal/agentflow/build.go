@@ -165,15 +165,16 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 
 	mux := http.NewServeMux()
 	a := api.New(api.Deps{
-		Coord:             coordSvc,
-		Store:             st,
-		Engine:            eng,
-		Git:               git,
-		Version:           rn.Version,
-		BuiltinModels:     builtinModels(rn),
-		BuiltinModelsFor:  builtinModelsFor(rn),
-		Terminate:         terminateHook,
-		SSEMaxSubscribers: cfg.SSEMaxSubscribers,
+		Coord:                coordSvc,
+		Store:                st,
+		Engine:               eng,
+		Git:                  git,
+		Version:              rn.Version,
+		BuiltinModels:        builtinModels(rn),
+		BuiltinModelsFor:     builtinModelsFor(rn),
+		BuiltinModelsForPath: builtinModelsForPath(rn),
+		Terminate:            terminateHook,
+		SSEMaxSubscribers:    cfg.SSEMaxSubscribers,
 	})
 	a.Register(mux)
 	events.Store(a)
@@ -230,12 +231,13 @@ func freezeConfig(b engine.FrozenBackend, stageDir string) (string, error) {
 func newOpencode(git *gitsvc.Service, st *store.Store, containers *dockervm.Manager) *opencode.Adapter {
 	return &opencode.Adapter{
 		PathFunc: func() string { return resolveOpencode(st) },
+		KiloPath: kiloPath,
 		Command:  opencode.SandboxCommand(gitDirs(git, st), dockerFor(git, st, containers)),
 	}
 }
 
 // newRunner routes backends of api type "grok", "codex", "claude", "muse" and "agy" to their CLI runners and
-// every other backend to opencode.
+// every other backend to opencode; api type "kilo" is an opencode fork that the same adapter runs with its own binary.
 func newRunner(git *gitsvc.Service, st *store.Store, ss *seats, containers *dockervm.Manager) runner.Runner {
 	return &runner.Mux{
 		Default: newOpencode(git, st, containers),
@@ -333,6 +335,20 @@ func resolveOpencode(st *store.Store) string {
 // defaultOpencodePath is the seeded opencode_path: not a path to use but the
 // request to find the binary.
 const defaultOpencodePath = "opencode"
+
+// kiloPath finds the Kilo CLI: the Homebrew install first, then PATH. The
+// adapter only uses it for a backend whose api type is kilo and whose own
+// cli_path is empty.
+func kiloPath() string {
+	def := "/opt/homebrew/bin/kilo"
+	if isExecutable(def) {
+		return def
+	}
+	if p, err := exec.LookPath("kilo"); err == nil {
+		return p
+	}
+	return def
+}
 
 // opencodePath finds the real opencode binary (spike S0): ~/.opencode/bin, then
 // PATH. The HOME-relative shim under ~/.agents fails once HOME is replaced, so
@@ -433,6 +449,17 @@ func builtinModelsFor(rn runner.Runner) func(context.Context, string) ([]string,
 		BuiltinModelsFor(context.Context, string) ([]string, error)
 	}); ok {
 		return m.BuiltinModelsFor
+	}
+	return nil
+}
+
+// builtinModelsForPath lists a runner's own models with a backend's CLI path,
+// when the runner can use one.
+func builtinModelsForPath(rn runner.Runner) func(context.Context, string, string) ([]string, error) {
+	if m, ok := rn.(interface {
+		BuiltinModelsForPath(context.Context, string, string) ([]string, error)
+	}); ok {
+		return m.BuiltinModelsForPath
 	}
 	return nil
 }

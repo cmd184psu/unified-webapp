@@ -52,11 +52,19 @@ func ModelRef(backend, model string) string { return backend + "/" + model }
 // addressed as opencode/<model>.
 const BuiltinProvider = "opencode"
 
+// KiloAPIType is the Kilo CLI, an opencode fork. Its models already carry the
+// kilo/ provider prefix and it reads its own login, so it uses the opencode
+// adapter but neither the generated config nor an opencode/ model prefix.
+const KiloAPIType = "kilo"
+
 // RefFor is ModelRef for a backend spec: the built-in provider is addressed by
 // its own id, whatever the backend is called.
 func RefFor(b runner.Backend, model string) string {
 	if b.APIType == "opencode" {
 		return BuiltinProvider + "/" + model
+	}
+	if b.APIType == KiloAPIType {
+		return model // Kilo model ids already name their provider (kilo/...)
 	}
 	return ModelRef(b.Name, model)
 }
@@ -126,8 +134,8 @@ func RenderConfig(backends []BackendSpec, plugins ...runner.Plugin) ([]byte, err
 	}
 	keys := map[string]string{}
 	for _, b := range backends {
-		if b.APIType == "opencode" {
-			continue // opencode's own provider needs no entry and no key
+		if b.APIType == "opencode" || b.APIType == KiloAPIType {
+			continue // their own providers need no entry and no key
 		}
 		if other, clash := keys[KeyEnv(b.Name)]; clash {
 			return nil, fmt.Errorf("opencode: backends %q and %q map to the same key variable %s", other, b.Name, KeyEnv(b.Name))

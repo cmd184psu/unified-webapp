@@ -139,7 +139,7 @@ func (e *Engine) checkOne(ctx context.Context, b store.Backend, mdl string) stor
 	if err := os.WriteFile(promptPath, []byte(checkPrompt), 0o600); err != nil {
 		return finish(false, "failing", err.Error())
 	}
-	be := runner.Backend{Name: b.Name, Host: b.Host, APIType: b.APIType}
+	be := runner.Backend{Name: b.Name, Host: b.Host, APIType: b.APIType, CLIPath: b.CLIPath}
 	if d.FreezeConfig != nil {
 		fb := FrozenBackend{Backend: be}
 		for _, m := range b.Models {

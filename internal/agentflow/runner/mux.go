@@ -39,10 +39,27 @@ func (m *Mux) BuiltinModels(ctx context.Context) ([]string, error) {
 
 // BuiltinModelsFor lists the own models of the runner that serves apiType.
 func (m *Mux) BuiltinModelsFor(ctx context.Context, apiType string) ([]string, error) {
-	if b, ok := m.pick(apiType).(interface {
-		BuiltinModels(context.Context) ([]string, error)
+	r := m.pick(apiType)
+	if b, ok := r.(interface {
+		BuiltinModelsFor(context.Context, string) ([]string, error)
+	}); ok {
+		return b.BuiltinModelsFor(ctx, apiType)
+	}
+	if b, ok := r.(interface {
+		BuiltinModels(ctx context.Context) ([]string, error)
 	}); ok {
 		return b.BuiltinModels(ctx)
 	}
 	return nil, nil
+}
+
+// BuiltinModelsForPath lists the own models of the runner that serves apiType,
+// using the backend's own CLI path when the runner supports one.
+func (m *Mux) BuiltinModelsForPath(ctx context.Context, apiType, cliPath string) ([]string, error) {
+	if b, ok := m.pick(apiType).(interface {
+		BuiltinModelsForPath(context.Context, string, string) ([]string, error)
+	}); ok {
+		return b.BuiltinModelsForPath(ctx, apiType, cliPath)
+	}
+	return m.BuiltinModelsFor(ctx, apiType)
 }

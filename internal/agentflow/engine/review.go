@@ -104,7 +104,7 @@ func (e *Engine) RunReview(ctx context.Context, id int64) (model.Review, error) 
 	if err := os.WriteFile(promptPath, []byte(prompt), 0o600); err != nil {
 		return fail(err)
 	}
-	be := runner.Backend{Name: backend.Name, Host: backend.Host, APIType: backend.APIType, Slots: backend.Slots}
+	be := runner.Backend{Name: backend.Name, Host: backend.Host, APIType: backend.APIType, CLIPath: backend.CLIPath, Slots: backend.Slots}
 	if e.deps.FreezeConfig != nil {
 		fb := FrozenBackend{Backend: be, Plugins: p.Plugins}
 		for _, m := range backend.Models {

@@ -443,7 +443,7 @@ func (e *Engine) evalCall(ctx context.Context, b store.Backend, mdl string, file
 	if err := os.WriteFile(promptPath, []byte(prompt), 0o600); err != nil {
 		return "", err
 	}
-	be := runner.Backend{Name: b.Name, Host: b.Host, APIType: b.APIType}
+	be := runner.Backend{Name: b.Name, Host: b.Host, APIType: b.APIType, CLIPath: b.CLIPath}
 	if d.FreezeConfig != nil {
 		fb := FrozenBackend{Backend: be}
 		for _, m := range b.Models {

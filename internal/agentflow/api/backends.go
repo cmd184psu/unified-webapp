@@ -62,6 +62,9 @@ type BackendView struct {
 	Name    string `json:"name"`
 	Host    string `json:"host"`
 	APIType string `json:"api_type"`
+	// CLIPath overrides the program an opencode-type backend runs; empty keeps
+	// the global opencode_path (or finds kilo on PATH for api_type kilo).
+	CLIPath string `json:"cli_path,omitempty"`
 	Hosted  bool   `json:"hosted"`
 	Paid    bool   `json:"paid"`
 	Slots   int    `json:"slots"`
@@ -90,7 +93,7 @@ func dutyShown(d int) int {
 }
 
 func (a *API) backendView(b store.Backend) BackendView {
-	v := BackendView{Name: b.Name, Host: b.Host, APIType: b.APIType, Hosted: b.Hosted, Paid: b.Paid,
+	v := BackendView{Name: b.Name, Host: b.Host, APIType: b.APIType, CLIPath: b.CLIPath, Hosted: b.Hosted, Paid: b.Paid,
 		Slots: b.Slots, MemoryBudgetMB: b.MemoryBudgetMB, WindowCapTokens: b.WindowCapTokens, DutyPercent: dutyShown(b.DutyPercent), Retired: b.Retired, HasKey: b.HasKey, Models: []BackendModelView{}}
 	for _, m := range b.Models {
 		v.Models = append(v.Models, BackendModelView{Model: m.Model, Paid: m.Paid, MaxConcurrent: m.MaxConcurrent, ContextTokens: m.ContextTokens, WindowTokens: m.WindowTokens, WindowSource: m.WindowSource, Tier: m.Tier, Tools: m.Tools, TooBig: m.TooBig})
@@ -144,6 +147,7 @@ type backendBody struct {
 	Name            *string             `json:"name"`
 	Host            *string             `json:"host"`
 	APIType         *string             `json:"api_type"`
+	CLIPath         *string             `json:"cli_path"`
 	Hosted          *bool               `json:"hosted"`
 	Paid            *bool               `json:"paid"`
 	Slots           *int                `json:"slots"`
@@ -164,6 +168,9 @@ func (bb backendBody) apply(b *store.Backend) {
 	}
 	if bb.APIType != nil {
 		b.APIType = *bb.APIType
+	}
+	if bb.CLIPath != nil {
+		b.CLIPath = strings.TrimSpace(*bb.CLIPath)
 	}
 	if bb.Hosted != nil {
 		b.Hosted = *bb.Hosted

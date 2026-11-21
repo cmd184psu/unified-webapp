@@ -33,6 +33,9 @@ type Adapter struct {
 	// version probe and replaces Path, so a changed setting applies to the
 	// next stage without rebuilding the adapter.
 	PathFunc func() string
+	// KiloPath, when set, is asked for the Kilo binary on every Kilo run. Nil
+	// falls back to "kilo" on PATH.
+	KiloPath func() string
 	// Command builds the process; nil runs it directly without a sandbox.
 	Command CommandFactory
 	// ParentEnv is where PATH, LANG and key variables are taken from; nil means
@@ -47,9 +50,30 @@ var _ runner.Runner = (*Adapter)(nil)
 const stderrTail = 4 << 10
 
 func (a *Adapter) path() (string, error) {
-	p := a.Path
-	if a.PathFunc != nil {
-		p = a.PathFunc()
+	return a.resolvePath(a.Path, a.PathFunc)
+}
+
+// pathFor resolves the binary for one request. A backend's cli_path wins; a
+// Kilo backend otherwise looks for kilo, and every other backend keeps the
+// adapter-wide opencode path (the opencode_path setting).
+func (a *Adapter) pathFor(b runner.Backend) (string, error) {
+	if b.CLIPath != "" {
+		return a.resolvePath(b.CLIPath, nil)
+	}
+	if b.APIType == KiloAPIType {
+		p := "kilo"
+		if a.KiloPath != nil {
+			p = a.KiloPath()
+		}
+		return a.resolvePath(p, nil)
+	}
+	return a.path()
+}
+
+// resolvePath looks p up on PATH, after asking fn when p is empty.
+func (a *Adapter) resolvePath(p string, fn func() string) (string, error) {
+	if p == "" && fn != nil {
+		p = fn()
 	}
 	if p == "" {
 		p = "opencode"
@@ -96,14 +120,24 @@ func Argv(path string, req runner.Request) []string {
 // sandbox; --standalone keeps the server inside the stage.
 func ArgvFor(path string, req runner.Request, major int) []string {
 	argv := []string{path, "run"}
-	if major >= 2 {
+	kilo := req.Backend.APIType == KiloAPIType
+	if kilo {
+		// Kilo is an opencode fork but has no --standalone: its run command
+		// owns the process, and --pure is the only flag it shares with 1.x.
+		if len(req.Plugins) == 0 {
+			argv = append(argv, "--pure")
+		}
+	} else if major >= 2 {
 		argv = append(argv, "--standalone")
 	} else if len(req.Plugins) == 0 {
 		argv = append(argv, "--pure")
 	}
-	argv = append(argv, "--format", "json", "--auto",
-		"--agent", AgentName(req.Role),
-		"--model", RefFor(req.Backend, req.Model))
+	argv = append(argv, "--format", "json", "--auto")
+	if !kilo {
+		// Kilo keeps its own agents; the role prompt is in the prompt file.
+		argv = append(argv, "--agent", AgentName(req.Role))
+	}
+	argv = append(argv, "--model", RefFor(req.Backend, req.Model))
 	if req.SessionID != "" {
 		argv = append(argv, "--session", req.SessionID)
 	}
@@ -151,7 +185,7 @@ func (a *Adapter) Run(ctx context.Context, req runner.Request) (runner.Result, e
 	if req.PromptPath == "" || req.StageDir == "" || req.Workdir == "" || req.Role == "" {
 		return res, errors.New("opencode: Role, Workdir, StageDir and PromptPath are required")
 	}
-	path, err := a.path()
+	path, err := a.pathFor(req.Backend)
 	if err != nil {
 		return res, &runner.Error{Class: runner.ErrCrash, Msg: err.Error(), Cause: err}
 	}
@@ -301,8 +335,10 @@ func SandboxCommand(gitDirs GitDirs, dockerFor DockerFor) CommandFactory {
 		if err != nil {
 			return nil, err
 		}
-		if err := installSandboxConfig(req.StageDir); err != nil {
-			return nil, err
+		if req.Backend.APIType != KiloAPIType {
+			if err := installSandboxConfig(req.StageDir); err != nil {
+				return nil, err
+			}
 		}
 		bin, rest := argv[0], argv[1:]
 		sbEnv := map[string]string{}
@@ -315,6 +351,17 @@ func SandboxCommand(gitDirs GitDirs, dockerFor DockerFor) CommandFactory {
 			}
 			sbEnv[k] = v
 		}
+		extraBinds := []sandbox.Bind{{Src: bin, Dst: sandboxBin}}
+		if req.Backend.APIType == KiloAPIType {
+			kiloBinds, kiloEnv, err := kiloDirs(req.StageDir)
+			if err != nil {
+				return nil, err
+			}
+			extraBinds = append(extraBinds, kiloBinds...)
+			for k, v := range kiloEnv {
+				sbEnv[k] = v
+			}
+		}
 		spec := sandbox.Spec{
 			Worktree:         req.Workdir,
 			ReadOnlyWorktree: !writesWorktree(req.Role),
@@ -322,7 +369,7 @@ func SandboxCommand(gitDirs GitDirs, dockerFor DockerFor) CommandFactory {
 			WorktreeGitDir:   wt,
 			StageHome:        HomeDir(req.StageDir),
 			Net:              true,
-			ExtraROBinds:     []sandbox.Bind{{Src: bin, Dst: sandboxBin}},
+			ExtraROBinds:     extraBinds,
 			Env:              sbEnv,
 			Argv:             append([]string{sandboxBin}, rest...),
 		}

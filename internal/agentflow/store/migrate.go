@@ -36,6 +36,7 @@ type migration struct {
 //	40 AF-13 resolver_mode setting (off | advise | auto), default advise
 //	41 AF-14 reviews (a branch checked by verify and one independent reviewer)
 //	42 AF-14 projects.worker_env_json (environment for worker stages)
+//	43 AF-14b backends.cli_path, backends.api_type may be 'kilo' (opencode fork)
 //
 // Later stories append the next integer; they never edit an earlier entry.
 var migrations = []migration{
@@ -81,6 +82,7 @@ var migrations = []migration{
 	{40, migration40SQL},
 	{41, migration41SQL},
 	{42, migration42SQL},
+	{43, migration43SQL},
 }
 
 // migration41SQL (AF-14) stores review requests: the branch and base, the task
@@ -122,6 +124,32 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('review_callsign', 'agentflo
 // feedback_env because a worker needs a path that verify must not inherit.
 const migration42SQL = `
 ALTER TABLE projects ADD COLUMN worker_env_json TEXT NOT NULL DEFAULT '{}';
+`
+
+// migration43SQL (AF-14b) lets an opencode-type backend name its own CLI, and
+// lets the Kilo CLI (an opencode fork) be a backend type. Existing backends
+// keep an empty path and therefore today's global opencode_path behaviour.
+const migration43SQL = `
+CREATE TABLE backends_new (
+  name TEXT PRIMARY KEY,
+  host TEXT NOT NULL,
+  api_type TEXT NOT NULL CHECK (api_type IN ('ollama', 'openai_compatible', 'anthropic', 'opencode', 'kilo', 'grok', 'codex', 'claude', 'muse', 'agy', 'botchat_seat', 'freebuff_seat')),
+  cli_path TEXT NOT NULL DEFAULT '',
+  hosted INTEGER NOT NULL DEFAULT 0 CHECK (hosted IN (0, 1)),
+  paid INTEGER NOT NULL DEFAULT 0 CHECK (paid IN (0, 1)),
+  slots INTEGER NOT NULL CHECK (slots >= 1),
+  retired INTEGER NOT NULL DEFAULT 0 CHECK (retired IN (0, 1)),
+  created INTEGER NOT NULL,
+  updated INTEGER NOT NULL,
+  api_key TEXT NOT NULL DEFAULT '',
+  memory_budget_mb INTEGER NOT NULL DEFAULT 0 CHECK (memory_budget_mb >= 0),
+  window_cap_tokens INTEGER NOT NULL DEFAULT 0 CHECK (window_cap_tokens >= 0),
+  duty_percent INTEGER NOT NULL DEFAULT 0 CHECK (duty_percent = 0 OR duty_percent BETWEEN 10 AND 99)
+);
+INSERT INTO backends_new (name, host, api_type, cli_path, hosted, paid, slots, retired, created, updated, api_key, memory_budget_mb, window_cap_tokens, duty_percent)
+  SELECT name, host, api_type, '', hosted, paid, slots, retired, created, updated, api_key, memory_budget_mb, window_cap_tokens, duty_percent FROM backends;
+DROP TABLE backends;
+ALTER TABLE backends_new RENAME TO backends;
 `
 
 // migration40SQL (AF-13 item 6) makes the resolver advise-only unless the owner chooses
@@ -588,7 +616,7 @@ ALTER TABLE efforts ADD COLUMN budget_seconds INTEGER NOT NULL DEFAULT 0 CHECK (
 // table with foreign keys on would fire the referencing rows' ON DELETE
 // actions, so these run with foreign keys off (the documented procedure) and
 // are checked with foreign_key_check before they commit.
-var rebuildsTables = map[int]bool{6: true, 11: true, 26: true, 27: true, 29: true, 31: true, 33: true, 35: true}
+var rebuildsTables = map[int]bool{6: true, 11: true, 26: true, 27: true, 29: true, 31: true, 33: true, 35: true, 43: true}
 
 // migration6SQL (F2) lets a stage have the cleanup role (AT11) and adds the
 // per-project cleanup switch. stages is rebuilt with the same columns, so rows

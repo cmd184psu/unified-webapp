@@ -402,7 +402,7 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 	if err := os.WriteFile(promptPath, []byte(prompt), 0o600); err != nil {
 		return fail(err)
 	}
-	be := runner.Backend{Name: b.Name, Host: b.Host, APIType: b.APIType, Slots: b.Slots}
+	be := runner.Backend{Name: b.Name, Host: b.Host, APIType: b.APIType, CLIPath: b.CLIPath, Slots: b.Slots}
 	// A seat keeps its own clock: no deadline and no stall watch on the call, the role's
 	// timeout goes to the runner as a budget, and a seat past it is reported as needing
 	// attention instead of being failed and retried (AF-9 review finding 1).

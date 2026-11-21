@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+
+	"cmd184psu/unified-webapp/internal/agentflow/runner"
 )
 
 var versionRe = regexp.MustCompile(`^v?\d+\.\d+\.\d+\S*$`)
@@ -53,6 +55,29 @@ func (a *Adapter) BuiltinModels(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return a.models(ctx, path, BuiltinProvider, false)
+}
+
+// BuiltinModelsFor lists the models of the runner serving apiType. Kilo's own
+// list already carries the kilo/ prefix, which is also the --model value, so
+// its names are kept whole.
+func (a *Adapter) BuiltinModelsFor(ctx context.Context, apiType string) ([]string, error) {
+	return a.BuiltinModelsForPath(ctx, apiType, "")
+}
+
+// BuiltinModelsForPath is BuiltinModelsFor with the backend's own CLI path.
+func (a *Adapter) BuiltinModelsForPath(ctx context.Context, apiType, cliPath string) ([]string, error) {
+	path, err := a.pathFor(runner.Backend{APIType: apiType, CLIPath: cliPath})
+	if err != nil {
+		return nil, err
+	}
+	if apiType == KiloAPIType {
+		return a.models(ctx, path, KiloAPIType, true)
+	}
+	return a.models(ctx, path, BuiltinProvider, false)
+}
+
+func (a *Adapter) models(ctx context.Context, path, provider string, keepPrefix bool) ([]string, error) {
 	cmd := exec.CommandContext(ctx, path, "models")
 	cmd.Env = a.versionEnv()
 	out, err := cmd.Output()
@@ -62,10 +87,14 @@ func (a *Adapter) BuiltinModels(ctx context.Context) ([]string, error) {
 	var names []string
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, BuiltinProvider+"/") {
+		if !strings.HasPrefix(line, provider+"/") {
 			continue
 		}
-		if n := strings.TrimPrefix(line, BuiltinProvider+"/"); n != "" && !strings.ContainsAny(n, " \t") {
+		n := line
+		if !keepPrefix {
+			n = strings.TrimPrefix(line, provider+"/")
+		}
+		if n != "" && !strings.ContainsAny(n, " \t") {
 			names = append(names, n)
 		}
 	}

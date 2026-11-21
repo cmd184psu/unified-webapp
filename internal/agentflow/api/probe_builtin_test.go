@@ -5,6 +5,21 @@ import (
 	"testing"
 )
 
+func TestProbeBuiltinUsesTheTypedCLIPath(t *testing.T) {
+	e := newEnv(t, envOpt{})
+	var gotType, gotPath string
+	e.api.deps.BuiltinModelsForPath = func(_ context.Context, apiType, cliPath string) ([]string, error) {
+		gotType, gotPath = apiType, cliPath
+		return []string{"kilo/liquid/lfm-3-1.7b:free"}, nil
+	}
+	out := decode[struct {
+		Models []string `json:"models"`
+	}](t, e.ok("POST", "/api/backends/probe", map[string]any{"api_type": "kilo", "cli_path": "/opt/homebrew/bin/kilo"}, 200))
+	if gotType != "kilo" || gotPath != "/opt/homebrew/bin/kilo" || len(out.Models) != 1 {
+		t.Fatalf("probe type=%q path=%q models=%v", gotType, gotPath, out.Models)
+	}
+}
+
 func TestProbeBuiltinListsOpencodeModelsWithoutAHost(t *testing.T) {
 	e := newEnv(t, envOpt{})
 	e.api.deps.BuiltinModels = func(context.Context) ([]string, error) { return []string{"big-pickle", "cat-jam-free"}, nil }

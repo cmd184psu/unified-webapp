@@ -88,7 +88,7 @@ var api = {
   // Backends, candidates, settings
   backends: () => get("/api/backends"),
   createBackend: (b, o) => send("POST", "/api/backends", b, o),
-  probeBackend: (host, apiType, key = "", backend = "") => send("POST", "/api/backends/probe", { host, api_type: apiType, api_key: key, backend }, { quiet: true }),
+  probeBackend: (host, apiType, key = "", backend = "", cliPath = "") => send("POST", "/api/backends/probe", { host, api_type: apiType, api_key: key, backend, cli_path: cliPath }, { quiet: true }),
   patchBackend: (name, b, o) => send("PATCH", `/api/backends/${enc(name)}`, b, o),
   retireBackend: (name, cancelRunning) => send("POST", `/api/backends/${enc(name)}/retire`, { cancel_running: cancelRunning }),
   extendWindows: (name, apply = true) => send("POST", `/api/backends/${enc(name)}/extend-windows`, { apply }),
@@ -2166,13 +2166,15 @@ var API_TYPES = [
   ["openai_compatible", "openai compatible"],
   ["anthropic", "anthropic"],
   ["opencode", "opencode built-in"],
+  ["kilo", "Kilo CLI (free Kilo models)"],
   ["grok", "Grok CLI (your Grok plan)"],
   ["codex", "Codex CLI (your ChatGPT plan)"],
   ["claude", "Claude Code CLI (your Claude login)"],
   ["muse", "Muse Code CLI (your Muse login)"],
   ["agy", "Antigravity CLI (your Google login)"]
 ];
-var cliTypes = /* @__PURE__ */ new Set(["opencode", "grok", "codex", "claude", "muse", "agy"]);
+var cliTypes = /* @__PURE__ */ new Set(["opencode", "kilo", "grok", "codex", "claude", "muse", "agy"]);
+var opencodeLike = /* @__PURE__ */ new Set(["opencode", "kilo"]);
 var checkPollMs = 3e3;
 var defaultBackendsDeps = () => ({
   backends: api.backends,
@@ -2317,6 +2319,7 @@ var BackendsView = class {
     const name = textInput("name", initial?.name ?? "", { readOnly: !!initial });
     const host = textInput("host", initial?.host ?? "", { placeholder: "http://host:port" });
     const apiType = selectInput("api_type", API_TYPES, initial?.api_type ?? "ollama");
+    const cliPath = textInput("cli_path", initial?.cli_path ?? "", { placeholder: "blank: auto-detect" });
     const slots = textInput("slots", String(initial?.slots ?? 1), { type: "number" });
     const budget = textInput("memory_budget_gb", initial?.memory_budget_mb ? String(Math.round(initial.memory_budget_mb / 1024)) : "", { type: "number", placeholder: "not set" });
     const cap = textInput("window_cap_tokens", initial?.window_cap_tokens ? String(initial.window_cap_tokens) : "", { type: "number", placeholder: "no cap" });
@@ -2342,12 +2345,16 @@ var BackendsView = class {
       "Sent to the server as its bearer credential, for a hosted service or a local one that asks for a key. Stored write-only; leave blank to keep the stored key"
     ));
     const hostField = errors.add("host", fieldRow("Host", host, "An http or https URL"));
+    const cliField = errors.add("cli_path", fieldRow("CLI path", cliPath, "Program an opencode or Kilo backend runs; blank auto-detects (opencode for opencode, kilo for Kilo)"));
     const builtin = () => cliTypes.has(apiType.value);
+    const canPickBinary = () => opencodeLike.has(apiType.value);
     const syncKey = () => {
       if (!builtin()) keyField.el.removeAttribute("hidden");
       else keyField.el.setAttribute("hidden", "");
       if (builtin()) hostField.el.setAttribute("hidden", "");
       else hostField.el.removeAttribute("hidden");
+      if (canPickBinary()) cliField.el.removeAttribute("hidden");
+      else cliField.el.setAttribute("hidden", "");
     };
     hosted.firstChild.addEventListener("change", syncKey);
     apiType.addEventListener("change", syncKey);
@@ -2404,7 +2411,7 @@ var BackendsView = class {
     const probe = async () => {
       errors.clear();
       try {
-        const res = await this.deps.probeBackend(builtin() ? "" : host.value.trim(), apiType.value, apiKey.value, initial?.name ?? "");
+        const res = await this.deps.probeBackend(builtin() ? "" : host.value.trim(), apiType.value, apiKey.value, initial?.name ?? "", canPickBinary() ? cliPath.value.trim() : "");
         probed = res.models;
         contexts = res.contexts ?? {};
         tools = res.tools ?? {};
@@ -2441,6 +2448,7 @@ var BackendsView = class {
         window_cap_tokens: Math.max(0, Math.round(Number(cap.value) || 0)),
         models: models.map((m) => ({ model: m.model.value.trim(), paid: m.paid.checked, max_concurrent: Number(m.max.value) || 0, context_tokens: contexts[m.model.value.trim()] ?? 0, window_tokens: Math.max(0, Math.round(Number(m.ctx.value) || 0)), tier: Number(m.tier.value) || 0 })).filter((m) => m.model !== "")
       };
+      if (canPickBinary()) body.cli_path = cliPath.value.trim();
       if (!builtin() && apiKey.value !== "") body.api_key = apiKey.value;
       else if (clearKey) body.api_key = "";
       return body;
@@ -2468,6 +2476,7 @@ var BackendsView = class {
         errors.add("name", fieldRow("Name", name, "Letters, digits and dashes; fixed once added")).el,
         hostField.el,
         errors.add("api_type", fieldRow("API type", apiType)).el,
+        cliField.el,
         errors.add("slots", fieldRow("Slots", slots, "Stages this backend runs at once")).el,
         errors.add("memory_budget_mb", fieldRow("Memory budget (GB)", budget, "What one loaded model may use on the host, weights and context together. Needed to extend windows")).el,
         errors.add("window_cap_tokens", fieldRow("Window cap (tokens)", cap, "Never extend a window past this, for a host where a long context is too slow")).el,

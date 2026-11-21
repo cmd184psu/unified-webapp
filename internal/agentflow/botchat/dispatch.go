@@ -97,6 +97,15 @@ func (d *Dispatcher) BuiltinModelsFor(ctx context.Context, apiType string) ([]st
 	return d.BuiltinModels(ctx)
 }
 
+func (d *Dispatcher) BuiltinModelsForPath(ctx context.Context, apiType, cliPath string) ([]string, error) {
+	if b, ok := d.Inner.(interface {
+		BuiltinModelsForPath(context.Context, string, string) ([]string, error)
+	}); ok {
+		return b.BuiltinModelsForPath(ctx, apiType, cliPath)
+	}
+	return d.BuiltinModelsFor(ctx, apiType)
+}
+
 var seatSlug = regexp.MustCompile(`[^a-z0-9]+`)
 
 // SeatCallsign is the identity of the agent that serves a role on a model: af-<role>-<backend>-<model>.

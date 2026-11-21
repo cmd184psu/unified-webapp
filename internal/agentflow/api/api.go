@@ -32,6 +32,9 @@ type Deps struct {
 	// BuiltinModelsFor lists the own models of the runner serving an api type
 	// ("grok" asks the Grok CLI); when nil BuiltinModels answers for every type.
 	BuiltinModelsFor func(ctx context.Context, apiType string) ([]string, error)
+	// BuiltinModelsForPath is BuiltinModelsFor with the backend's CLI path, so a
+	// probe uses the same binary the backend runs.
+	BuiltinModelsForPath func(ctx context.Context, apiType, cliPath string) ([]string, error)
 	// Terminate ends the process for a restart; nil sends SIGTERM to this process
 	// (the supervisor starts the service again). Tests set it.
 	Terminate func()

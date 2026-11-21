@@ -43,6 +43,10 @@ type Backend struct {
 	Name    string
 	Host    string
 	APIType string
+	// CLIPath overrides the program an adapter with swappable binaries runs;
+	// empty keeps its global path. It is per backend so two such CLIs can share
+	// one adapter without one binary replacing the other.
+	CLIPath string
 	// Slots is how many stages the backend runs at once; for a seat it is how many
 	// open tasks the seat may hold.
 	Slots int

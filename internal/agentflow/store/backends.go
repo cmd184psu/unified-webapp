@@ -45,6 +45,10 @@ type Backend struct {
 	Name    string
 	Host    string
 	APIType string
+	// CLIPath overrides the program an opencode-type backend runs: the opencode
+	// adapter uses it for this backend only. Empty keeps the global opencode_path
+	// (or finds Kilo on PATH for the kilo api type).
+	CLIPath string
 	Hosted  bool
 	Paid    bool
 	Slots   int
@@ -78,7 +82,7 @@ func dutyStored(d int) int {
 // HostlessAPIType says the api type is a CLI or built-in provider that has no host of its own.
 func HostlessAPIType(t string) bool {
 	switch t {
-	case "opencode", "grok", "codex", "claude", "muse", "agy", "botchat_seat", "freebuff_seat":
+	case "opencode", "kilo", "grok", "codex", "claude", "muse", "agy", "botchat_seat", "freebuff_seat":
 		return true
 	}
 	return false
@@ -89,13 +93,16 @@ func validateBackend(b Backend) error {
 		return err
 	}
 	if !apiTypes[b.APIType] {
-		return Invalid("api_type", "must be ollama, openai_compatible, anthropic, opencode, grok, codex, claude, muse, agy, botchat_seat or freebuff_seat")
+		return Invalid("api_type", "must be ollama, openai_compatible, anthropic, opencode, kilo, grok, codex, claude, muse, agy, botchat_seat or freebuff_seat")
 	}
 	// opencode's own provider and the Grok and Codex CLIs have no host of their own.
 	if !HostlessAPIType(b.APIType) {
 		if err := validateHostURL("host", b.Host); err != nil {
 			return err
 		}
+	}
+	if b.CLIPath != strings.TrimSpace(b.CLIPath) || strings.ContainsAny(b.CLIPath, "\x00\r\n") {
+		return Invalid("cli_path", "must be a single line without leading or trailing whitespace")
 	}
 	if b.MemoryBudgetMB < 0 || b.WindowCapTokens < 0 {
 		return Invalid("memory_budget_mb", "memory budget and window cap must be 0 (not set) or more")
@@ -142,7 +149,7 @@ func validateBackend(b Backend) error {
 // backendDetail is the audit detail for a backend write: the validated fields.
 func backendDetail(b Backend) map[string]any {
 	return map[string]any{
-		"host": b.Host, "api_type": b.APIType, "hosted": b.Hosted, "paid": b.Paid,
+		"host": b.Host, "api_type": b.APIType, "cli_path": b.CLIPath, "hosted": b.Hosted, "paid": b.Paid,
 		"slots": b.Slots, "models": b.Models,
 	}
 }
@@ -180,9 +187,9 @@ func (s *Store) CreateBackend(ctx context.Context, actor string, b Backend) erro
 		}
 		now := time.Now().UnixMilli()
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO backends (name, host, api_type, hosted, paid, slots, memory_budget_mb, window_cap_tokens, duty_percent, retired, created, updated)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-			b.Name, b.Host, b.APIType, b2i(b.Hosted), b2i(b.Paid), b.Slots, b.MemoryBudgetMB, b.WindowCapTokens, dutyStored(b.DutyPercent), now, now); err != nil {
+			INSERT INTO backends (name, host, api_type, cli_path, hosted, paid, slots, memory_budget_mb, window_cap_tokens, duty_percent, retired, created, updated)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+			b.Name, b.Host, b.APIType, b.CLIPath, b2i(b.Hosted), b2i(b.Paid), b.Slots, b.MemoryBudgetMB, b.WindowCapTokens, dutyStored(b.DutyPercent), now, now); err != nil {
 			return err
 		}
 		if err := insertModels(ctx, tx, b); err != nil {
@@ -203,9 +210,9 @@ func (s *Store) UpdateBackend(ctx context.Context, actor string, b Backend) erro
 	}
 	return s.WithTx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `
-			UPDATE backends SET host = ?, api_type = ?, hosted = ?, paid = ?, slots = ?, memory_budget_mb = ?, window_cap_tokens = ?, duty_percent = ?, updated = ?
+			UPDATE backends SET host = ?, api_type = ?, cli_path = ?, hosted = ?, paid = ?, slots = ?, memory_budget_mb = ?, window_cap_tokens = ?, duty_percent = ?, updated = ?
 			WHERE name = ?`,
-			b.Host, b.APIType, b2i(b.Hosted), b2i(b.Paid), b.Slots, b.MemoryBudgetMB, b.WindowCapTokens, dutyStored(b.DutyPercent), time.Now().UnixMilli(), b.Name)
+			b.Host, b.APIType, b.CLIPath, b2i(b.Hosted), b2i(b.Paid), b.Slots, b.MemoryBudgetMB, b.WindowCapTokens, dutyStored(b.DutyPercent), time.Now().UnixMilli(), b.Name)
 		if err != nil {
 			return err
 		}
@@ -339,7 +346,7 @@ func (s *Store) EnableBackend(ctx context.Context, actor, name string) error {
 }
 
 func loadBackends(ctx context.Context, q querier, name string) ([]Backend, error) {
-	query := `SELECT name, host, api_type, hosted, paid, slots, memory_budget_mb, window_cap_tokens, duty_percent, retired, api_key <> '', created, updated FROM backends`
+	query := `SELECT name, host, api_type, cli_path, hosted, paid, slots, memory_budget_mb, window_cap_tokens, duty_percent, retired, api_key <> '', created, updated FROM backends`
 	var args []any
 	if name != "" {
 		query += ` WHERE name = ?`
@@ -354,7 +361,7 @@ func loadBackends(ctx context.Context, q querier, name string) ([]Backend, error
 		var b Backend
 		var hosted, paid, retired, hasKey int
 		var created, updated int64
-		if err := rows.Scan(&b.Name, &b.Host, &b.APIType, &hosted, &paid, &b.Slots, &b.MemoryBudgetMB, &b.WindowCapTokens, &b.DutyPercent, &retired, &hasKey, &created, &updated); err != nil {
+		if err := rows.Scan(&b.Name, &b.Host, &b.APIType, &b.CLIPath, &hosted, &paid, &b.Slots, &b.MemoryBudgetMB, &b.WindowCapTokens, &b.DutyPercent, &retired, &hasKey, &created, &updated); err != nil {
 			rows.Close()
 			return nil, err
 		}

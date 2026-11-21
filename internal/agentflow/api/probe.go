@@ -26,6 +26,9 @@ type probeBody struct {
 	// answer 401 without one.
 	APIKey  string `json:"api_key"`
 	Backend string `json:"backend"`
+	// CLIPath is the Kilo/opencode binary typed into the form; empty keeps the
+	// runner's default path.
+	CLIPath string `json:"cli_path"`
 }
 
 // probeBackend asks a host which models it serves, so the form can offer an
@@ -36,7 +39,7 @@ func (a *API) probeBackend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if store.HostlessAPIType(body.APIType) {
-		a.probeBuiltin(w, r, body.APIType)
+		a.probeBuiltin(w, r, body.APIType, body.CLIPath)
 		return
 	}
 	key := body.APIKey
@@ -214,9 +217,11 @@ func probeModels(ctx context.Context, c *http.Client, host, apiType, key string)
 }
 
 // probeBuiltin lists the own models of opencode or the Grok CLI; there is no host to ask.
-func (a *API) probeBuiltin(w http.ResponseWriter, r *http.Request, apiType string) {
+func (a *API) probeBuiltin(w http.ResponseWriter, r *http.Request, apiType, cliPath string) {
 	list := a.deps.BuiltinModels
-	if a.deps.BuiltinModelsFor != nil {
+	if cliPath != "" && a.deps.BuiltinModelsForPath != nil {
+		list = func(ctx context.Context) ([]string, error) { return a.deps.BuiltinModelsForPath(ctx, apiType, cliPath) }
+	} else if a.deps.BuiltinModelsFor != nil {
 		list = func(ctx context.Context) ([]string, error) { return a.deps.BuiltinModelsFor(ctx, apiType) }
 	}
 	if list == nil {

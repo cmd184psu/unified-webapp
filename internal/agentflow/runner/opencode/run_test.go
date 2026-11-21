@@ -393,6 +393,38 @@ func TestFullContextWindowIsItsOwnClass(t *testing.T) {
 	}
 }
 
+func TestKiloModelsKeepTheirProviderPrefix(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "kilo")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf 'kilo/a/b:free\\nkilo/c/d:free\\nother/x\\n'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := &Adapter{ParentEnv: []string{"PATH=/usr/bin:/bin", "LANG=C"}}
+	got, err := a.BuiltinModelsForPath(runCtx(t), KiloAPIType, bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"kilo/a/b:free", "kilo/c/d:free"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("kilo models = %v, want %v", got, want)
+	}
+}
+
+func TestKiloArgvUsesKiloModelAndNoStandalone(t *testing.T) {
+	req := runner.Request{Role: "worker", Backend: runner.Backend{Name: "kilo", APIType: KiloAPIType}, Model: "kilo/liquid/lfm-3-1.7b:free"}
+	got := strings.Join(ArgvFor("/bin/kilo", req, 7), " ")
+	for _, want := range []string{"/bin/kilo run --pure ", "--format json", "--auto", "--model kilo/liquid/lfm-3-1.7b:free"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("kilo argv = %q, want %q", got, want)
+		}
+	}
+	for _, bad := range []string{"--standalone", "--agent"} {
+		if strings.Contains(got, bad) {
+			t.Errorf("kilo argv = %q must not contain %q", got, bad)
+		}
+	}
+}
+
 // opencode 2.x: no --pure (the env backup stays), --standalone keeps the
 // server inside the stage instead of the host's background service.
 func TestArgvForOpencode2(t *testing.T) {

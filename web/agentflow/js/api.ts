@@ -300,6 +300,8 @@ export interface Backend {
   name: string;
   host: string;
   api_type: string;
+  /** Program an opencode-type backend runs; empty keeps the global opencode path. */
+  cli_path?: string;
   hosted: boolean;
   paid: boolean;
   slots: number;
@@ -347,6 +349,8 @@ export interface BackendInput {
   name: string;
   host: string;
   api_type: string;
+  /** Program an opencode-type backend runs; empty keeps the global opencode path. */
+  cli_path?: string;
   hosted: boolean;
   paid: boolean;
   slots: number;
@@ -891,8 +895,8 @@ export const api = {
   // Backends, candidates, settings
   backends: (): Promise<Backend[]> => get('/api/backends'),
   createBackend: (b: BackendInput, o?: FetchOptions): Promise<BackendResult> => send('POST', '/api/backends', b, o),
-  probeBackend: (host: string, apiType: string, key = '', backend = ''): Promise<{ models: string[]; contexts?: Record<string, number>; tools?: Record<string, string> }> =>
-    send('POST', '/api/backends/probe', { host, api_type: apiType, api_key: key, backend }, { quiet: true }),
+  probeBackend: (host: string, apiType: string, key = '', backend = '', cliPath = ''): Promise<{ models: string[]; contexts?: Record<string, number>; tools?: Record<string, string> }> =>
+    send('POST', '/api/backends/probe', { host, api_type: apiType, api_key: key, backend, cli_path: cliPath }, { quiet: true }),
   patchBackend: (name: string, b: Partial<BackendInput>, o?: FetchOptions): Promise<BackendResult> =>
     send('PATCH', `/api/backends/${enc(name)}`, b, o),
   retireBackend: (name: string, cancelRunning: boolean): Promise<BackendResult> =>

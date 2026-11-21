@@ -535,11 +535,34 @@ test('H4a: Probe sends the typed key and the saved backend name so a host that w
   button(t.host, 'Edit').click();
   button(t.host, 'Probe host for models').click();
   await flush();
-  eq(seen[0].slice(2), ['', 'kimi']);
+  eq(seen[0].slice(2, 4), ['', 'kimi']);
   field(t.host, 'api_key').value = 'typed-key';
   button(t.host, 'Probe host for models').click();
   await flush();
-  eq(seen[1].slice(2), ['typed-key', 'kimi']);
+  eq(seen[1].slice(2, 4), ['typed-key', 'kimi']);
+  stop();
+});
+
+test('AF-14b: Kilo is a hostless backend with its own CLI path and full model ids', async () => {
+  let probed: string[] = [];
+  const t = harness({}, { probeBackend: async (host, type, _key, _backend, path) => { probed = [host, type, path]; return { models: ['kilo/liquid/lfm-3-1.7b:free'] }; } });
+  const stop = t.view.mount();
+  await flush();
+  button(t.host, 'Add backend').click();
+  field(t.host, 'name').value = 'kilo';
+  field(t.host, 'api_type').value = 'kilo';
+  field(t.host, 'api_type').fire('change');
+  ok((field(t.host, 'host').parentNode as FakeEl).hasAttribute('hidden'), 'host hidden');
+  ok(keyRow(t.host).hasAttribute('hidden'), 'key hidden');
+  ok(!(field(t.host, 'cli_path').parentNode as FakeEl).hasAttribute('hidden'), 'CLI path shown');
+  field(t.host, 'cli_path').value = '/opt/homebrew/bin/kilo';
+  button(t.host, 'Probe host for models').click();
+  await flush();
+  eq(probed, ['', 'kilo', '/opt/homebrew/bin/kilo']);
+  button(t.host, 'Add backend').click();
+  await flush();
+  const body = t.bodies.create as BackendInput;
+  eq([body.host, body.api_type, body.cli_path, body.models[0].model], ['', 'kilo', '/opt/homebrew/bin/kilo', 'kilo/liquid/lfm-3-1.7b:free']);
   stop();
 });
 
