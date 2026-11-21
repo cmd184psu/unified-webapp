@@ -40,6 +40,9 @@ type Settings struct {
 	// API key every agent shares; both empty means the relay is off.
 	BotchatURL     string
 	BotchatKeyFile string
+	// ReviewCallsign is the BotChat callsign the review API posts verdicts as
+	// (AF-14); default agentflow-review.
+	ReviewCallsign string
 	// BotchatMode is "mirror" (post what happens) or "dispatch" (also hand each stage to an
 	// agent through BotChat).
 	BotchatMode string
@@ -168,6 +171,10 @@ func parseSettings(m map[string]string) (Settings, error) {
 	s.BotchatKeyFile = strings.TrimSpace(m["botchat_key_file"])
 	if s.BotchatKeyFile != "" && !filepath.IsAbs(s.BotchatKeyFile) && !strings.HasPrefix(s.BotchatKeyFile, "~/") {
 		return s, Invalid("botchat_key_file", "must be an absolute path or start with ~/")
+	}
+	s.ReviewCallsign = strings.TrimSpace(m["review_callsign"])
+	if s.ReviewCallsign == "" {
+		s.ReviewCallsign = "agentflow-review"
 	}
 	s.BotchatMode = strings.TrimSpace(m["botchat_mode"])
 	if s.BotchatMode == "" {

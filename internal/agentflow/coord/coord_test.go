@@ -41,7 +41,9 @@ func (f *fakeBus) Post(_ context.Context, room, from, to, content string) error 
 type fakeGit struct{ merged []string }
 
 func (g *fakeGit) RemoteHas(_ context.Context, r Repo, b string) bool { return r.Name == "web" }
-func (g *fakeGit) Merged(context.Context, Repo, string, string) bool  { return false }
+
+func (g *fakeGit) Deliver(_ context.Context, _ Repo, _, _ string) error { return nil }
+func (g *fakeGit) Merged(context.Context, Repo, string, string) bool    { return false }
 func (g *fakeGit) Merge(_ context.Context, r Repo, base, b, tid string, _ bool) error {
 	g.merged = append(g.merged, r.Name+":"+b+"->"+base)
 	return nil

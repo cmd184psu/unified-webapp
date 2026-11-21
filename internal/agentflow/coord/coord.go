@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"cmd184psu/unified-webapp/internal/agentflow/store"
 )
 
 // Decision is one thing a run decided to do. In a dry run it is all that happens.
@@ -38,6 +40,8 @@ type Git interface {
 	// RemoteHas reports whether origin has the branch; Merged whether it is already in base.
 	RemoteHas(ctx context.Context, r Repo, branch string) bool
 	Merged(ctx context.Context, r Repo, branch, base string) bool
+	// Deliver pushes a local agentflow branch as a target branch on origin (AF-14).
+	Deliver(ctx context.Context, r Repo, source, target string) error
 	// Merge merges origin/branch into base in a scratch worktree, runs the gates and pushes
 	// base. It returns why it did not, leaving origin untouched.
 	Merge(ctx context.Context, r Repo, base, branch, tid string, approved bool) error
@@ -50,7 +54,11 @@ type Coordinator struct {
 	Cfg *Config
 	Bus Bus
 	Git Git
-	Now func() time.Time
+	// Reviews is the review API client when review_mode is "agentflow".
+	Reviews ReviewClient
+	// Store reads agentflow's completed efforts for af_deliver (AF-14).
+	Store *store.Store
+	Now   func() time.Time
 
 	mu   sync.Mutex // one run at a time
 	last *Report
@@ -182,6 +190,9 @@ func (r *run) do(ctx context.Context) error {
 	}
 	if err := r.feed(ctx); err != nil {
 		r.alert("", "feed failed: %v", err)
+	}
+	if !r.dry {
+		r.afDeliver(ctx)
 	}
 	if r.dry {
 		return nil
@@ -358,7 +369,9 @@ func (r *run) devTasks(ctx context.Context, reworked map[string]bool, open map[s
 				merges++
 			}
 		case get(d, "review") == "" && get(d, "status") == "done":
-			if rv := r.pickReviewer(t, open); rv != "" {
+			if r.cfg.ReviewMode == "agentflow" && r.c.Reviews != nil {
+				r.agentflowReview(ctx, t, d, all)
+			} else if rv := r.pickReviewer(t, open); rv != "" {
 				id := r.createReview(ctx, t, rv)
 				set(d, "review", id)
 				open[rv]++

@@ -81,6 +81,8 @@ type ProjectView struct {
 	Toolchains []string `json:"toolchains"`
 	// FeedbackEnv is set for every feedback command.
 	FeedbackEnv map[string]string `json:"feedback_env"`
+	// WorkerEnv is set for every worker model stage (AF-14).
+	WorkerEnv map[string]string `json:"worker_env"`
 	// VerifyInCopy runs feedback commands on a copy of the worktree.
 	VerifyInCopy bool `json:"verify_in_copy"`
 	// Sandbox is host or docker (AF-12).
@@ -105,7 +107,7 @@ type ProjectView struct {
 func (a *API) projectView(ctx context.Context, p store.Project) (ProjectView, error) {
 	v := ProjectView{
 		Slug: p.Slug, RepoPath: p.RepoPath, ModelScope: p.ModelScope, FeedbackCmds: p.FeedbackCmds, DefinitionOfDone: p.DefinitionOfDone, Limits: p.Limits, Cleanup: p.CleanupEnabled,
-		Toolchains: p.Toolchains, FeedbackEnv: p.FeedbackEnv, VerifyInCopy: p.VerifyInCopy,
+		Toolchains: p.Toolchains, FeedbackEnv: p.FeedbackEnv, WorkerEnv: p.WorkerEnv, VerifyInCopy: p.VerifyInCopy,
 		Sandbox: p.Sandbox, DockerImage: p.DockerImage, DockerNetwork: p.DockerNetwork, DockerMounts: p.DockerMounts, DockerSELinux: p.DockerSELinux,
 		Created: p.Created.UnixMilli(), Updated: p.Updated.UnixMilli(),
 		RunState: a.deps.Engine.Runs().State(p.Slug), Remembered: model.RunStopped,
@@ -123,6 +125,9 @@ func (a *API) projectView(ctx context.Context, p store.Project) (ProjectView, er
 	}
 	if v.FeedbackEnv == nil {
 		v.FeedbackEnv = map[string]string{}
+	}
+	if v.WorkerEnv == nil {
+		v.WorkerEnv = map[string]string{}
 	}
 	if v.Sandbox == "" {
 		v.Sandbox = "host"
@@ -241,6 +246,7 @@ type projectBody struct {
 	Plugins       *[]PluginView      `json:"plugins"`
 	Toolchains    *[]string          `json:"toolchains"`
 	FeedbackEnv   *map[string]string `json:"feedback_env"`
+	WorkerEnv     *map[string]string `json:"worker_env"`
 	VerifyInCopy  *bool              `json:"verify_in_copy"`
 	Sandbox       *string            `json:"sandbox"`
 	DockerImage   *string            `json:"docker_image"`
@@ -275,6 +281,9 @@ func (b projectBody) apply(p *store.Project) error {
 	}
 	if b.FeedbackEnv != nil {
 		p.FeedbackEnv = *b.FeedbackEnv
+	}
+	if b.WorkerEnv != nil {
+		p.WorkerEnv = *b.WorkerEnv
 	}
 	if b.VerifyInCopy != nil {
 		p.VerifyInCopy = *b.VerifyInCopy

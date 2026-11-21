@@ -98,6 +98,10 @@ type Config struct {
 	// never shares the author's).
 	Reviewers []string          `json:"reviewers"`
 	Family    map[string]string `json:"family"`
+	// ReviewMode chooses how seat work is reviewed: "seat" (the default) creates a BotChat
+	// review task, "agentflow" asks the review API at AgentflowURL instead.
+	ReviewMode   string `json:"review_mode,omitempty"`
+	AgentflowURL string `json:"agentflow_url,omitempty"`
 	// StrongReviewers may review engine work (EnginePlan, or titles matching EngineTitles).
 	StrongReviewers []string `json:"strong_reviewers,omitempty"`
 	EngineTitles    string   `json:"engine_titles,omitempty"`

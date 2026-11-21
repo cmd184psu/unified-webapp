@@ -16,12 +16,13 @@ import { mountBackends } from './backends.js';
 import { mountProjectTab } from './projecttab.js';
 import { mountStats } from './stats.js';
 import { mountSeatsPage } from './seatspage.js';
+import { mountReviewsPage } from './reviewpage.js';
 import { SettingsView, defaultSettingsDeps } from './settings.js';
 
 const themes = new ThemeManager({ module: 'agentflow', default: 'dark' });
 themes.apply();
 
-type TabId = 'overview' | 'project' | 'backends' | 'stats' | 'seats';
+type TabId = 'overview' | 'project' | 'backends' | 'stats' | 'seats' | 'reviews';
 
 interface Tab {
   id: TabId;
@@ -39,6 +40,7 @@ const TABS: Tab[] = [
   { id: 'backends', label: 'Backends', mount: mountBackends },
   { id: 'stats', label: 'Stats', mount: mountStats },
   { id: 'seats', label: 'Seats', mount: mountSeatsPage },
+  { id: 'reviews', label: 'Reviews', mount: mountReviewsPage },
 ];
 
 let active: TabId = 'overview';

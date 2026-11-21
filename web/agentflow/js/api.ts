@@ -90,6 +90,8 @@ export interface ProjectView {
   toolchains?: string[];
   /** Extra environment for the project's feedback commands (AF-6). */
   feedback_env?: Record<string, string>;
+  /** Extra environment for worker stages, such as FS3_SAVE (AF-14). */
+  worker_env?: Record<string, string>;
   /** Run feedback commands on a copy of the worktree (AF-6). */
   verify_in_copy?: boolean;
   created: number;
@@ -133,6 +135,7 @@ export interface ProjectInput {
   plugins?: PluginPin[];
   toolchains?: string[];
   feedback_env?: Record<string, string>;
+  worker_env?: Record<string, string>;
   verify_in_copy?: boolean;
 }
 
@@ -707,6 +710,34 @@ export interface CoordReport {
   error?: string;
 }
 
+/** Review is one branch review requested through POST /api/reviews (AF-14). */
+export interface Review {
+  id: number;
+  project: string;
+  repo_path?: string;
+  branch: string;
+  base?: string;
+  commit?: string;
+  task_id: string;
+  title?: string;
+  objective?: string;
+  acceptance?: string;
+  exclusions?: string;
+  author_model?: string;
+  author_family?: string;
+  state: 'queued' | 'running' | 'done' | 'failed';
+  verify?: unknown;
+  verdict?: 'PASS' | 'CHANGES-REQUESTED' | '';
+  findings?: string;
+  reviewer_backend?: string;
+  reviewer_model?: string;
+  notify_room?: string;
+  notify_prefix?: string;
+  error?: string;
+  created: number;
+  finished?: number;
+}
+
 /** CoordStatus is GET /api/coord. */
 export interface CoordStatus {
   enabled: boolean;
@@ -822,6 +853,8 @@ export const api = {
   health: (o?: FetchOptions): Promise<Health> => get('/api/health', o),
   attention: (o?: FetchOptions): Promise<AttentionItem[]> => get('/api/attention', o),
   coordStatus: (o?: FetchOptions): Promise<CoordStatus> => get('/api/coord', o),
+  reviews: (project = '', o?: FetchOptions): Promise<Review[]> => get(`/api/reviews${project ? `?project=${enc(project)}` : ''}`, o),
+  review: (id: number, o?: FetchOptions): Promise<Review> => get(`/api/reviews/${id}`, o),
   coordRun: (dry: boolean): Promise<CoordReport> => send('POST', '/api/coord/run', { dry }),
   externalSeats: (o?: FetchOptions): Promise<ExternalSeat[]> => get('/api/seats/external', o),
   seatQueue: (callsign: string): Promise<{ callsign: string; text: string }> => get(`/api/seats/${encodeURIComponent(callsign)}/queue`),

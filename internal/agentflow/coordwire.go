@@ -22,9 +22,13 @@ func newCoord(dataDir string, ss *seats, st *store.Store) *coord.Service {
 		return nil
 	}
 	client := &botchat.Client{BaseURL: cfg.BotChatURL, KeyFile: cfg.KeyFile}
+	c := &coord.Coordinator{Cfg: cfg, Bus: coord.HTTPBus{C: client}, Git: coord.ExecGit{Repos: cfg.Repos, MergeDir: cfg.MergeDir}, Store: st}
+	if cfg.ReviewMode == "agentflow" && cfg.AgentflowURL != "" {
+		c.Reviews = &coord.HTTPReviewClient{BaseURL: cfg.AgentflowURL}
+	}
 	svc := &coord.Service{
 		Cfg:   cfg,
-		Coord: &coord.Coordinator{Cfg: cfg, Bus: coord.HTTPBus{C: client}, Git: coord.ExecGit{Repos: cfg.Repos, MergeDir: cfg.MergeDir}},
+		Coord: c,
 		Watch: &coord.Watcher{Cfg: cfg, Screens: ss.term, Notify: func(ctx context.Context, text string) {
 			set, err := st.GetSettings(ctx)
 			if err != nil {

@@ -175,6 +175,37 @@ type Attempt struct {
 	Finished           int64  `json:"finished"`
 }
 
+// Review is a branch review requested through the API (AF-14). It is
+// independent of an effort: verify runs on a checkout of the branch, then one
+// reviewer model from another family than the author gives the verdict.
+// State is queued, running, done or failed.
+type Review struct {
+	ID              int64           `json:"id"`
+	Project         string          `json:"project"`
+	RepoPath        string          `json:"repo_path,omitempty"`
+	Branch          string          `json:"branch"`
+	Base            string          `json:"base,omitempty"`
+	Commit          string          `json:"commit,omitempty"`
+	TaskID          string          `json:"task_id"`
+	Title           string          `json:"title,omitempty"`
+	Objective       string          `json:"objective,omitempty"`
+	Acceptance      string          `json:"acceptance,omitempty"`
+	Exclusions      string          `json:"exclusions,omitempty"`
+	AuthorModel     string          `json:"author_model,omitempty"`
+	AuthorFamily    string          `json:"author_family,omitempty"`
+	State           string          `json:"state"`
+	Verify          json.RawMessage `json:"verify,omitempty"`
+	Verdict         string          `json:"verdict,omitempty"`
+	Findings        string          `json:"findings,omitempty"`
+	ReviewerBackend string          `json:"reviewer_backend,omitempty"`
+	ReviewerModel   string          `json:"reviewer_model,omitempty"`
+	NotifyRoom      string          `json:"notify_room,omitempty"`
+	NotifyPrefix    string          `json:"notify_prefix,omitempty"`
+	Error           string          `json:"error,omitempty"`
+	Created         int64           `json:"created"`
+	Finished        int64           `json:"finished,omitempty"`
+}
+
 // Stage is one runner or engine step. It belongs to an attempt, or to an
 // effort (plan, review and compile stages), never both.
 type Stage struct {

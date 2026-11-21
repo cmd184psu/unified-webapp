@@ -13,6 +13,7 @@ import (
 
 	"cmd184psu/unified-webapp/internal/agentflow/engine"
 	"cmd184psu/unified-webapp/internal/agentflow/gitsvc"
+	"cmd184psu/unified-webapp/internal/agentflow/model"
 	"cmd184psu/unified-webapp/internal/agentflow/store"
 	"cmd184psu/unified-webapp/internal/platform/broker"
 )
@@ -38,6 +39,13 @@ type Deps struct {
 	SSEMaxSubscribers int
 	// Coord is the external seats module (AF-13); nil when it is off (no coord.json).
 	Coord *coord.Service
+	// ReviewRunner runs a stored review (AF-14). Nil uses Engine. Tests replace it.
+	ReviewRunner ReviewRunner
+}
+
+// ReviewRunner is the engine method the review API calls.
+type ReviewRunner interface {
+	RunReview(ctx context.Context, id int64) (model.Review, error)
 }
 
 // API serves the agentflow routes.
@@ -149,6 +157,7 @@ func (a *API) Register(mux muxer) {
 	a.registerExport(mux)
 	a.registerSeats(mux)
 	a.registerCoord(mux)
+	a.registerReviews(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	})

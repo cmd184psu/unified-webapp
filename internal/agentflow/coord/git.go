@@ -45,6 +45,19 @@ func (g ExecGit) Merged(ctx context.Context, r Repo, branch, base string) bool {
 	return err == nil
 }
 
+// Deliver pushes a local agentflow integration branch to origin under the
+// delivery name, as coordinator.py's af_deliver did. It never deletes or
+// force-pushes anything.
+func (g ExecGit) Deliver(ctx context.Context, r Repo, source, target string) error {
+	if out, err := g.git(ctx, r.Path, "rev-parse", "--verify", source); err != nil {
+		return fmt.Errorf("%s: no local branch %s: %s", r.Name, source, clip200(out))
+	}
+	if out, err := g.git(ctx, r.Path, "push", "-q", "origin", source+":refs/heads/"+target); err != nil {
+		return fmt.Errorf("%s: push %s failed: %s", r.Name, target, clip200(out))
+	}
+	return nil
+}
+
 func (g ExecGit) Contains(ctx context.Context, sha string) []string {
 	seen := map[string]bool{}
 	var out []string

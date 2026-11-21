@@ -111,6 +111,7 @@ func (e *Engine) WorkerContext(ctx context.Context, project string, attemptID in
 		switch {
 		case st.Role == "verify" && len(st.Parsed) > 0:
 			b.WriteString("\n### Verify report\n\n```json\n" + string(st.Parsed) + "\n```\n")
+			writeVerifyEvidence(&b, st.Parsed)
 		case st.Role == "merge" && len(st.Parsed) > 0 && st.Outcome != OutcomePass:
 			b.WriteString("\n### Merge result (the integration branch was left unchanged)\n\n```json\n" + string(st.Parsed) + "\n```\n")
 			var m mergeReport
@@ -132,6 +133,33 @@ func (e *Engine) WorkerContext(ctx context.Context, project string, attemptID in
 		return "", err
 	}
 	return b.String(), nil
+}
+
+// writeVerifyEvidence puts the failing test output where a repair worker
+// reads it without having to parse the report JSON (AF-14 item 3). It is
+// already bounded by verify's evidence cap; this trims it again for the
+// prompt.
+func writeVerifyEvidence(b *strings.Builder, raw json.RawMessage) {
+	var rep struct {
+		Evidence []struct {
+			Sig  string `json:"sig"`
+			Text string `json:"text"`
+		} `json:"evidence"`
+	}
+	if json.Unmarshal(raw, &rep) != nil || len(rep.Evidence) == 0 {
+		return
+	}
+	b.WriteString("\n### Failing test output\n\n")
+	for _, ev := range rep.Evidence {
+		text := strings.TrimSpace(ev.Text)
+		if text == "" {
+			continue
+		}
+		if ev.Sig != "" {
+			fmt.Fprintf(b, "%s:\n", ev.Sig)
+		}
+		b.WriteString("```\n" + clip(text, 4000) + "\n```\n")
+	}
 }
 
 func writeReview(b *strings.Builder, r schema.ReviewOut) {

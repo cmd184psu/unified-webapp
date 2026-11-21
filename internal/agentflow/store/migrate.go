@@ -34,6 +34,8 @@ type migration struct {
 //	38 AF-10 service_hold
 //	39 AF-13 role_candidates.role may be 'resolver'; stuck_threshold default 3 -> 2
 //	40 AF-13 resolver_mode setting (off | advise | auto), default advise
+//	41 AF-14 reviews (a branch checked by verify and one independent reviewer)
+//	42 AF-14 projects.worker_env_json (environment for worker stages)
 //
 // Later stories append the next integer; they never edit an earlier entry.
 var migrations = []migration{
@@ -77,7 +79,50 @@ var migrations = []migration{
 	{38, migration38SQL},
 	{39, migration39SQL},
 	{40, migration40SQL},
+	{41, migration41SQL},
+	{42, migration42SQL},
 }
+
+// migration41SQL (AF-14) stores review requests: the branch and base, the task
+// text the reviewer reads, the verify report, the chosen reviewer and the
+// verdict. A review is independent of an effort and its tasks.
+const migration41SQL = `
+CREATE TABLE reviews (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project TEXT NOT NULL,
+  repo_path TEXT NOT NULL DEFAULT '',
+  branch TEXT NOT NULL,
+  base TEXT NOT NULL DEFAULT '',
+  commit_sha TEXT NOT NULL DEFAULT '',
+  task_id TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',
+  objective TEXT NOT NULL DEFAULT '',
+  acceptance TEXT NOT NULL DEFAULT '',
+  exclusions TEXT NOT NULL DEFAULT '',
+  author_model TEXT NOT NULL DEFAULT '',
+  author_family TEXT NOT NULL DEFAULT '',
+  state TEXT NOT NULL DEFAULT 'queued' CHECK (state IN ('queued', 'running', 'done', 'failed')),
+  verify_json TEXT NOT NULL DEFAULT '',
+  verdict TEXT NOT NULL DEFAULT '' CHECK (verdict IN ('', 'PASS', 'CHANGES-REQUESTED')),
+  findings TEXT NOT NULL DEFAULT '',
+  reviewer_backend TEXT NOT NULL DEFAULT '',
+  reviewer_model TEXT NOT NULL DEFAULT '',
+  notify_room TEXT NOT NULL DEFAULT '',
+  notify_prefix TEXT NOT NULL DEFAULT '',
+  error TEXT NOT NULL DEFAULT '',
+  created INTEGER NOT NULL,
+  finished INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_reviews_project ON reviews(project, id DESC);
+INSERT OR IGNORE INTO settings (key, value) VALUES ('review_callsign', 'agentflow-review');
+`
+
+// migration42SQL (AF-14) gives a project an environment for worker stages, for
+// values the oracle tests read such as FS3_SAVE. It is separate from
+// feedback_env because a worker needs a path that verify must not inherit.
+const migration42SQL = `
+ALTER TABLE projects ADD COLUMN worker_env_json TEXT NOT NULL DEFAULT '{}';
+`
 
 // migration40SQL (AF-13 item 6) makes the resolver advise-only unless the owner chooses
 // otherwise: its decision is recorded and the owner applies it.

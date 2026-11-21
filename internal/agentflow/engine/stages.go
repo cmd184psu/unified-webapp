@@ -453,6 +453,31 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 			req.Env = append(req.Env, name+"="+key)
 		}
 	}
+	// A worker may need files the project names in worker_env, such as an
+	// oracle save (AF-14). A regular file is copied into the stage directory,
+	// which the sandbox already allows, and the variable points at the copy;
+	// other values pass through unchanged.
+	if st.Role == "worker" {
+		for k, v := range proj.WorkerEnv {
+			if filepath.IsAbs(v) {
+				if fi, err := os.Stat(v); err == nil && fi.Mode().IsRegular() {
+					dst := filepath.Join(dir, "worker-env", k, filepath.Base(v))
+					if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+						return fail(err)
+					}
+					data, err := os.ReadFile(v)
+					if err != nil {
+						return fail(fmt.Errorf("worker_env %s: %w", k, err))
+					}
+					if err := os.WriteFile(dst, data, 0o600); err != nil {
+						return fail(fmt.Errorf("worker_env %s: %w", k, err))
+					}
+					v = dst
+				}
+			}
+			req.Env = append(req.Env, k+"="+v)
+		}
+	}
 	if seat {
 		req.Budget = timeout
 	}

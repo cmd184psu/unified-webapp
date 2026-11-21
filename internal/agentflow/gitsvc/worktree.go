@@ -12,6 +12,8 @@ import (
 type Worktree struct {
 	Path   string
 	Branch string
+	// Commit is the checked-out commit for a detached review worktree (AF-14).
+	Commit string
 }
 
 // worktreeEntry is one record of `git worktree list --porcelain`.
@@ -146,6 +148,35 @@ func (s *Service) AddIntegrationWorktree(ctx context.Context, repo, project, eff
 		return Worktree{}, err
 	}
 	return Worktree{Path: path, Branch: branch}, nil
+}
+
+// AddReviewWorktree checks rev (a branch, tag or sha) out detached under
+// <data_dir>/worktrees/<project>/_reviews/<name>. The API uses it so a review
+// reads exactly the branch it was asked about and writes nothing back.
+func (s *Service) AddReviewWorktree(ctx context.Context, repo, project, name, rev string) (Worktree, error) {
+	if err := validName("project", project); err != nil {
+		return Worktree{}, err
+	}
+	if err := validName("review", name); err != nil {
+		return Worktree{}, err
+	}
+	if strings.TrimSpace(rev) == "" {
+		return Worktree{}, fmt.Errorf("gitsvc: a review needs a branch or commit")
+	}
+	path := filepath.Join(s.WorktreeRoot(), project, "_reviews", name)
+	unlock := s.lockRepo(ctx, repo)
+	defer unlock()
+	commit, err := s.resolveCommit(ctx, repo, rev)
+	if err != nil {
+		return Worktree{}, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return Worktree{}, err
+	}
+	if _, err := s.run(ctx, repo, "worktree", "add", "--detach", "--end-of-options", path, commit); err != nil {
+		return Worktree{}, err
+	}
+	return Worktree{Path: path, Commit: commit}, nil
 }
 
 // ReuseWorktree returns the existing worktree of a task for a repair attempt

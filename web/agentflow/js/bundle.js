@@ -57,6 +57,8 @@ var api = {
   health: (o) => get("/api/health", o),
   attention: (o) => get("/api/attention", o),
   coordStatus: (o) => get("/api/coord", o),
+  reviews: (project = "", o) => get(`/api/reviews${project ? `?project=${enc(project)}` : ""}`, o),
+  review: (id, o) => get(`/api/reviews/${id}`, o),
   coordRun: (dry) => send("POST", "/api/coord/run", { dry }),
   externalSeats: (o) => get("/api/seats/external", o),
   seatQueue: (callsign) => get(`/api/seats/${encodeURIComponent(callsign)}/queue`),
@@ -5709,6 +5711,52 @@ function mountSeatsPage(host) {
   return new SeatsPage(host, api).mount();
 }
 
+// web/agentflow/js/reviewpage.ts
+function stateText(r) {
+  if (r.state === "failed") return `failed: ${r.error ?? "unknown error"}`;
+  if (r.state !== "done") return r.state;
+  return `${r.verdict || "no verdict"}${r.reviewer_model ? ` by ${r.reviewer_model}` : ""}`;
+}
+var ReviewsPage = class {
+  constructor(host, deps) {
+    this.host = host;
+    this.deps = deps;
+    this.msg = "";
+  }
+  mount() {
+    void this.load();
+    return () => {
+    };
+  }
+  async load() {
+    try {
+      const list3 = await this.deps.reviews("", { quiet: true });
+      this.render(list3);
+    } catch (err) {
+      replace(this.host, h("p", { class: "field-hint", text: `Reviews are unavailable: ${err instanceof Error ? err.message : String(err)}` }));
+    }
+  }
+  render(list3) {
+    replace(
+      this.host,
+      h("h2", { text: "Reviews" }),
+      h("p", { class: "field-hint", text: "Independent verify + reviewer runs requested through the review API." }),
+      this.msg ? h("p", { class: "field-hint", attrs: { "data-role": "reviews-msg" }, text: this.msg }) : null,
+      h("button", { text: "Refresh", attrs: { type: "button", "data-role": "reviews-refresh" }, on: { click: () => void this.load() } }),
+      list3.length === 0 ? h("p", { class: "field-hint", text: "No reviews yet." }) : h("ul", { class: "review-list" }, ...list3.map((r) => h(
+        "li",
+        { attrs: { "data-review": String(r.id) } },
+        h("strong", { text: `${r.task_id} \u2014 ${r.branch}` }),
+        h("span", { text: ` (${r.project}) \u2014 ${stateText(r)}` }),
+        r.findings ? h("pre", { class: "mono", text: r.findings }) : null
+      )))
+    );
+  }
+};
+function mountReviewsPage(host) {
+  return new ReviewsPage(host, api).mount();
+}
+
 // web/agentflow/js/main.ts
 var themes = new ThemeManager({ module: "agentflow", default: "dark" });
 themes.apply();
@@ -5721,7 +5769,8 @@ var TABS = [
   { id: "project", label: "Project", mount: mountProjectTab },
   { id: "backends", label: "Backends", mount: mountBackends },
   { id: "stats", label: "Stats", mount: mountStats },
-  { id: "seats", label: "Seats", mount: mountSeatsPage }
+  { id: "seats", label: "Seats", mount: mountSeatsPage },
+  { id: "reviews", label: "Reviews", mount: mountReviewsPage }
 ];
 var active = "overview";
 var dispose;

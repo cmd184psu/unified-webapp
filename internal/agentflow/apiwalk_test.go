@@ -312,6 +312,21 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	ok("POST", "/api/service/restart", ``, 409)
 	ok("DELETE", "/api/service/restart", "", 200)
 
+	// Review API (AF-14): one branch reviewed through verify and one reviewer.
+	fake.Script("reviewer", runner.Step{Reply: e2eReview})
+	var rv struct {
+		ID      int64  `json:"id"`
+		Verdict string `json:"verdict"`
+	}
+	if err := json.Unmarshal(ok("POST", "/api/reviews", `{"project":"demo","branch":"main","task":{"id":"TASK-REVIEW","title":"walk","acceptance":["it works"]}}`, 201), &rv); err != nil {
+		t.Fatal(err)
+	}
+	if rv.ID == 0 || rv.Verdict != "PASS" {
+		t.Fatalf("review = %+v", rv)
+	}
+	ok("GET", "/api/reviews", "", 200)
+	ok("GET", "/api/reviews/"+strconv.FormatInt(rv.ID, 10), "", 200)
+
 	// Run controls.
 	ok("POST", "/api/projects/demo/run/pause", ``, 409) // not running
 	ok("POST", "/api/projects/demo/run/stop", ``, 0)

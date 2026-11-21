@@ -15,6 +15,8 @@ import (
 // Everything else lives in SQLite (DBS1). Keys are "<slash path>:<function>".
 var stateWriters = map[string]string{
 	"engine/stages.go:modelCall":                  "prompt.md and corrective.md of a stage",
+	"engine/review.go:RunReview":                  "prompt.md of a review",
+	"engine/review.go:reviewPrompt":               "the verify report embedded in the review prompt",
 	"engine/checks.go:checkOne":                   "the one-word prompt of a model check, in its own scratch directory",
 	"engine/evals.go:evalCall":                    "the case files and prompt of a reviewer check, in its own scratch directory",
 	"engine/cleanup.go:checkpoint":                "<data>/tasks/<id>/cleanup_checkpoint_<attempt> marker",
