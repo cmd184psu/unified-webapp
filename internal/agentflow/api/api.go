@@ -158,6 +158,7 @@ func (a *API) Register(mux muxer) {
 	a.registerService(mux)
 	a.registerHold(mux)
 	a.registerEvents(mux)
+	a.registerStageHome(mux)
 	a.registerExport(mux)
 	a.registerSeats(mux)
 	a.registerCoord(mux)

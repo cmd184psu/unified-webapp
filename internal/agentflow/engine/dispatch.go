@@ -228,6 +228,11 @@ func (d *dispatcher) pass(ctx context.Context) error {
 		// project starts a new one until the hold is lifted.
 		return nil
 	}
+	if d.e.DiskLow(ctx) {
+		// AF-15b: free space is below the threshold, so no new stage starts;
+		// running stages finish and the watchdog raises an attention item.
+		return nil
+	}
 	var running []store.Project
 	var errs []error
 	for _, p := range v.snap.Projects {

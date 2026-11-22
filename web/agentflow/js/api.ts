@@ -885,6 +885,7 @@ export const api = {
   serviceHold: (o?: FetchOptions): Promise<ServiceHoldView> => get('/api/service/hold', o),
   holdService: (reason: string): Promise<ServiceHoldView> => send('POST', '/api/service/hold', { reason }),
   liftHold: (): Promise<ServiceHoldView> => send('DELETE', '/api/service/hold'),
+  pruneStageHomes: (): Promise<{ pruned: number }> => send('POST', '/api/stages/prune', {}),
 
   fsDirs: (path = ''): Promise<FsDirs> => get(`/api/fs/dirs${path ? `?path=${encodeURIComponent(path)}` : ''}`, { quiet: true }),
 

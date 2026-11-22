@@ -43,6 +43,8 @@ export const LIMIT_FIELDS: LimitField[] = [
 const BACKLOG_FIELDS: LimitField[] = [
   { key: 'min_running_efforts', label: 'Minimum running efforts', hint: 'Auto-start ready efforts until this many run across all projects; 0 turns auto-start off' },
   { key: 'plan_revise_limit', label: 'Plan revise limit', hint: 'After this many revise rounds on the same FRD, stop and ask a person; 3 by default' },
+  { key: 'stage_home_keep_days', label: 'Stage home keep days', hint: 'Days a finished stage home is kept before pruning; 0 deletes it at once' },
+  { key: 'min_free_space_gb', label: 'Minimum free space (GB)', hint: 'Below this, agentflow pauses new stages and asks for attention; 20 by default' },
 ];
 
 const EXECUTION_FIELDS: LimitField[] = [
@@ -51,7 +53,7 @@ const EXECUTION_FIELDS: LimitField[] = [
   { key: 'backend_cooldown', label: 'Backend cooldown', hint: 'How long an unreachable backend is skipped, such as 2m' },
 ];
 
-export type SettingsDeps = Pick<typeof api, 'settings' | 'putSettings' | 'opencodeVersion' | 'restartStatus' | 'restartService' | 'cancelRestart' | 'serviceHold' | 'holdService' | 'liftHold'> & {
+export type SettingsDeps = Pick<typeof api, 'settings' | 'putSettings' | 'opencodeVersion' | 'restartStatus' | 'restartService' | 'cancelRestart' | 'serviceHold' | 'holdService' | 'liftHold' | 'pruneStageHomes'> & {
   /** Opens the directory picker at start; the chosen path, or null when cancelled. */
   pickDir(start: string): Promise<string | null>;
   notify(message: string): void;
@@ -67,6 +69,7 @@ export const defaultSettingsDeps = (): SettingsDeps => ({
   serviceHold: api.serviceHold,
   holdService: api.holdService,
   liftHold: api.liftHold,
+  pruneStageHomes: api.pruneStageHomes,
   pickDir: (start) => pickDirectory(start),
   notify: (m) => void showToast(m, 'success'),
 });
@@ -238,6 +241,15 @@ export class SettingsView {
     return this.auto?.flush() ?? Promise.resolve();
   }
 
+  private async pruneStageHomes(): Promise<void> {
+    try {
+      const r = await this.deps.pruneStageHomes();
+      this.deps.notify(`Pruned ${r.pruned} stage homes`);
+    } catch (err) {
+      this.deps.notify(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   private body(): Settings {
     const body: Settings = {};
     for (const [key, input] of this.inputs) body[key] = input.value.trim();
@@ -283,6 +295,7 @@ export class SettingsView {
         section('BotChat', bcUrl, bcKey, bcMode.el),
         section('Service', this.svcHost),
         section('Browse limit', this.rootsHost),
+        section('Stage homes', h('div', { class: 'row-actions' }, button('Prune stage homes now', () => void this.pruneStageHomes(), { field: 'prune-stage-homes', icon: 'remove', word: true }))),
         this.errors.general,
         h('div', { class: 'settings-actions' }, this.auto.status));
     replace(this.host, root);

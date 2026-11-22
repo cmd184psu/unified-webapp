@@ -24,6 +24,12 @@ type Settings struct {
 	// PlanReviseLimit stops a planning loop after this many revise rounds on
 	// the same FRD (AF-15); 3 by default.
 	PlanReviseLimit int
+	// StageHomeKeepDays is how many days a finished stage's home directory is
+	// kept before pruning; 0 deletes it as soon as the stage is done (AF-15b).
+	StageHomeKeepDays int
+	// MinFreeSpaceGB is the free-disk threshold below which agentflow stops
+	// starting new stages (AF-15b); 20 by default.
+	MinFreeSpaceGB int
 	// MinRunningEfforts is how many efforts auto-start keeps running across
 	// projects (AF-15); 0 turns auto-start off.
 	MinRunningEfforts int
@@ -164,6 +170,12 @@ func parseSettings(m map[string]string) (Settings, error) {
 		return s, err
 	}
 	if s.PlanReviseLimit, err = validateInt("plan_revise_limit", m["plan_revise_limit"], 1, 50); err != nil {
+		return s, err
+	}
+	if s.StageHomeKeepDays, err = validateInt("stage_home_keep_days", m["stage_home_keep_days"], 0, 365); err != nil {
+		return s, err
+	}
+	if s.MinFreeSpaceGB, err = validateInt("min_free_space_gb", m["min_free_space_gb"], 1, 10000); err != nil {
 		return s, err
 	}
 	if s.MinRunningEfforts, err = validateInt("min_running_efforts", m["min_running_efforts"], 0, 64); err != nil {

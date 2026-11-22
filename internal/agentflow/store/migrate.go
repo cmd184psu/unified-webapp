@@ -87,6 +87,7 @@ var migrations = []migration{
 	{44, migration44SQL},
 	{45, migration45SQL},
 	{46, migration46SQL},
+	{47, migration47SQL},
 }
 
 // migration41SQL (AF-14) stores review requests: the branch and base, the task
@@ -1039,4 +1040,10 @@ CREATE INDEX idx_stages_attempt ON stages(attempt);
 CREATE INDEX idx_stages_effort ON stages(effort);
 CREATE INDEX idx_stages_open ON stages(state) WHERE state <> 'done';
 INSERT OR IGNORE INTO settings (key, value) VALUES ('merger_timeout', '30m0s');
+`
+
+// migration47SQL (AF-15b) adds stage-home pruning and disk-watchdog settings.
+const migration47SQL = `
+INSERT OR IGNORE INTO settings (key, value) VALUES ('stage_home_keep_days', '1');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('min_free_space_gb', '20');
 `

@@ -49,6 +49,8 @@ func settingsView(s store.Settings) map[string]any {
 		"max_infra_retries":    s.MaxInfraRetries,
 		"plan_max_rounds":      s.PlanMaxRounds,
 		"plan_revise_limit":    s.PlanReviseLimit,
+		"stage_home_keep_days": s.StageHomeKeepDays,
+		"min_free_space_gb":    s.MinFreeSpaceGB,
 		"min_running_efforts":  s.MinRunningEfforts,
 		"stall_minutes":        s.StallMinutes,
 		"acceptance_rounds":    s.AcceptanceRounds,

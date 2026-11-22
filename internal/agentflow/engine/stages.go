@@ -73,6 +73,9 @@ func (e *Engine) runStage(ctx context.Context, rc golane.RunContext, p StagePayl
 	if err := e.noteRest(context.WithoutCancel(ctx), p.Stage, res.Outcome); err != nil {
 		fmt.Fprintf(rc.Log(), "rest model: %v\n", err)
 	}
+	// AF-15b: drop the stage's home directory once it is decided, when the
+	// keep window is zero; larger windows are swept by the retention pruner.
+	e.pruneAfterStage(context.WithoutCancel(ctx), p.Stage)
 	if e.deps.Kick != nil {
 		e.deps.Kick()
 	}
