@@ -518,14 +518,14 @@ func (e *Engine) advancePlan(ctx context.Context, p store.Project, ef model.Effo
 	arch, _ := sess.review("architect", round)
 	crit, _ := sess.review("critic", round)
 	if arch.Verdict == "approve" && crit.Verdict == "approve" {
-		return e.finishPlan(ctx, ef, true)
+		return e.finishPlan(ctx, ef, true, false)
 	}
 	set, err := e.deps.Store.EffectiveSettings(ctx, p.Slug)
 	if err != nil {
 		return err
 	}
 	if round >= set.PlanMaxRounds {
-		return e.finishPlan(ctx, ef, false)
+		return e.finishPlan(ctx, ef, false, true)
 	}
 	// AF-15: a plan that keeps coming back for the same questions burns a
 	// planner/architect/critic round per loop. Hand it to a person instead.
@@ -613,14 +613,21 @@ func (e *Engine) recordPlanStage(ctx context.Context, sess *planSession, st mode
 // finishPlan ends the loop: the effort is plan_ready, waiting for a human
 // (RP3). Only YOLO, and only for a plan both reviewers approved, approves it
 // here (YO2).
-func (e *Engine) finishPlan(ctx context.Context, ef model.Effort, approved bool) error {
+func (e *Engine) finishPlan(ctx context.Context, ef model.Effort, approved, escalated bool) error {
 	ready := model.EffortPlanReady
 	if _, err := e.deps.Store.UpdateEffort(ctx, SystemActor, ef.ID, store.EffortPatch{Status: &ready}); err != nil {
 		return err
 	}
 	e.changed()
 	e.setPlanWaiting(ef.ID, "")
-	if approved && e.yoloGate(ctx, ef.ID) {
+	set, _ := e.deps.Store.EffectiveSettings(ctx, ef.Project) // project? ef.Project is slug? yes
+	auto := set.AutoApprove
+	if approved && (e.yoloGate(ctx, ef.ID) || auto) {
+		_ = e.noteEffort(ctx, SystemActor, "auto_approve", ef.ID, map[string]any{"stage": "plan", "approved": true})
+		return e.approvePlanLocked(ctx, yoloActor, ef.ID)
+	}
+	if !approved && escalated && auto {
+		_ = e.noteEffort(ctx, SystemActor, "auto_approve", ef.ID, map[string]any{"stage": "plan", "escalated": true})
 		return e.approvePlanLocked(ctx, yoloActor, ef.ID)
 	}
 	return nil

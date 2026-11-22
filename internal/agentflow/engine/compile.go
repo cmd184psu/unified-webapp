@@ -232,7 +232,14 @@ func (e *Engine) advanceCompile(ctx context.Context, p store.Project, ef model.E
 	}
 	e.changed()
 	e.setPlanWaiting(ef.ID, "")
-	if e.yoloGate(ctx, ef.ID) {
+	auto := false
+	if set, err := e.deps.Store.EffectiveSettings(ctx, ef.Project); err == nil {
+		auto = set.AutoApprove
+	}
+	if e.yoloGate(ctx, ef.ID) || auto {
+		if auto && !e.yoloGate(ctx, ef.ID) {
+			_ = e.noteEffort(ctx, SystemActor, "auto_approve", ef.ID, map[string]any{"stage": "queue"})
+		}
 		_, err := e.approveQueue(ctx, yoloActor, ef.ID, q.Hash)
 		return err
 	}

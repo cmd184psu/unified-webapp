@@ -70,6 +70,13 @@ func settingsView(s store.Settings) map[string]any {
 		"notify_command":       s.NotifyCommand,
 		"notify_url":           s.NotifyURL,
 		"resolver_mode":        s.ResolverMode,
+		"auto_allow_files":     onOff(s.AutoAllowFiles),
+		"auto_budget":          onOff(s.AutoBudget),
+		"auto_retry":           onOff(s.AutoRetry),
+		"auto_approve":         onOff(s.AutoApprove),
+		"auto_replan":          onOff(s.AutoReplan),
+		"budget_raise_percent": s.BudgetRaisePercent,
+		"budget_raise_cap":     s.BudgetRaiseCap,
 	}
 }
 

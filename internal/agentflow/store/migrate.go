@@ -84,6 +84,7 @@ var migrations = []migration{
 	{42, migration42SQL},
 	{43, migration43SQL},
 	{44, migration44SQL},
+	{45, migration45SQL},
 }
 
 // migration41SQL (AF-14) stores review requests: the branch and base, the task
@@ -977,3 +978,14 @@ func applyMigrationTx(db *sql.DB, m migration) error {
 	}
 	return nil
 }
+
+// migration45SQL (AF-17) adds self-driving settings keys.
+const migration45SQL = `
+INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_allow_files', 'off');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_budget', 'off');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_retry', 'on');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_approve', 'off');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_replan', 'off');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('budget_raise_percent', '50');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('budget_raise_cap', '3');
+`

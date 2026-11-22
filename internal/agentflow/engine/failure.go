@@ -97,6 +97,17 @@ func (e *Engine) failAttempt(ctx context.Context, c *chain, f Failure) error {
 		}
 		return err
 	}
+	// AF-17 auto-allow files: if the task stopped on needs_files and every
+	// requested path is safe, allow them and retry in the same worktree.
+	if outcome == model.OutcomeBlocked {
+		if nf := neededFiles(f.Stage, c.task); len(nf) > 0 && e.autoAllowFiles(ctx, c.proj.Slug) && e.safeNeededFiles(ctx, c.eff.ID, c.task, nf) {
+			allowed, err := e.AllowFiles(ctx, SystemActor, c.task.ID, nil)
+			if err == nil {
+				_ = e.noteEffort(ctx, SystemActor, "auto_allow_files", c.eff.ID, map[string]any{"task": c.task.Key, "files": allowed})
+				return nil
+			}
+		}
+	}
 	return e.explainHalt(ctx, c)
 }
 

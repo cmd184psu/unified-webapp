@@ -76,6 +76,21 @@ type Settings struct {
 	// task goes to the owner as before), advise (its decision is recorded and shown, and the
 	// owner applies it) or auto (the engine applies it and retries). A project may override it.
 	ResolverMode string
+	// AutoAllowFiles allows a task stopped on needs_files to proceed when every requested
+	// path is safe (AF-17).
+	AutoAllowFiles bool
+	// AutoBudget raises an effort's budget automatically when it runs dry with progress (AF-17).
+	AutoBudget bool
+	// AutoRetry allows infrastructure failures to retry on the next candidate model (AF-17).
+	AutoRetry bool
+	// AutoApprove approves FRDs/plans/queues automatically under the configured conditions (AF-17).
+	AutoApprove bool
+	// AutoReplan turns a quoted FRD contradiction into a single attention item (AF-17).
+	AutoReplan bool
+	// BudgetRaisePercent is how much a budget is raised at once (AF-17); default 50.
+	BudgetRaisePercent int
+	// BudgetRaiseCap is how many automatic raises an effort may receive (AF-17); default 3.
+	BudgetRaiseCap int
 }
 
 // Resolver modes.
@@ -201,6 +216,49 @@ func parseSettings(m map[string]string) (Settings, error) {
 	}
 	if s.ResolverMode != ResolverOff && s.ResolverMode != ResolverAdvise && s.ResolverMode != ResolverAuto {
 		return s, Invalid("resolver_mode", "must be off, advise or auto")
+	}
+
+	// AF-17 auto rules: booleans stored as on/off, default off except retry.
+	for key, dst := range map[string]*bool{
+		"auto_allow_files": &s.AutoAllowFiles,
+		"auto_budget":      &s.AutoBudget,
+		"auto_retry":       &s.AutoRetry,
+		"auto_approve":     &s.AutoApprove,
+		"auto_replan":      &s.AutoReplan,
+	} {
+		switch strings.ToLower(strings.TrimSpace(m[key])) {
+		case "", "off", "false", "0", "no":
+			*dst = false
+		case "on", "true", "1", "yes":
+			*dst = true
+		default:
+			return s, Invalid(key, "must be on or off")
+		}
+	}
+	// Default auto_retry on when unset.
+	if strings.TrimSpace(m["auto_retry"]) == "" {
+		s.AutoRetry = true
+	}
+	if s.BudgetRaisePercent, err = validateInt("budget_raise_percent", m["budget_raise_percent"], 1, 500); err != nil {
+		// allow unset -> default 50
+		if strings.TrimSpace(m["budget_raise_percent"]) == "" {
+			s.BudgetRaisePercent = 50
+		} else {
+			return s, err
+		}
+	}
+	if strings.TrimSpace(m["budget_raise_percent"]) == "" {
+		s.BudgetRaisePercent = 50
+	}
+	if s.BudgetRaiseCap, err = validateInt("budget_raise_cap", m["budget_raise_cap"], 0, 100); err != nil {
+		if strings.TrimSpace(m["budget_raise_cap"]) == "" {
+			s.BudgetRaiseCap = 3
+		} else {
+			return s, err
+		}
+	}
+	if strings.TrimSpace(m["budget_raise_cap"]) == "" {
+		s.BudgetRaiseCap = 3
 	}
 	if s.VerifySlots, err = validateInt("verify_slots", m["verify_slots"], 1, 64); err != nil {
 		return s, err

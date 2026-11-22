@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -241,6 +242,13 @@ func (a *API) approveFRD(w http.ResponseWriter, r *http.Request) {
 	if _, err := a.deps.Store.ApproveDoc(r.Context(), actorOf(r), ef.ID, model.DocFRD, body.Revision); err != nil {
 		writeErr(w, err)
 		return
+	}
+	if set, err := a.deps.Store.EffectiveSettings(r.Context(), ef.Project); err == nil && set.AutoApprove && a.deps.Engine != nil {
+		_ = a.deps.Engine.GeneratePlan(r.Context(), "auto_approve", ef.ID)
+		_ = a.deps.Store.WithTx(r.Context(), func(tx *sql.Tx) error {
+			_, err := store.AppendEvent(tx, "auto_approve", "auto_approve", "effort", strconv.FormatInt(ef.ID, 10), map[string]any{"stage": "frd"})
+			return err
+		})
 	}
 	a.emit("effort.update", map[string]any{"project": ef.Project, "effort": ef.ID})
 	a.respondEffort(w, r, ef.ID, http.StatusOK)

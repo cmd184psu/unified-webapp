@@ -179,6 +179,7 @@ func New(d Deps) (*Engine, error) {
 	e := &Engine{deps: d, handles: map[string]golane.Lane{}, holding: true, retryTimers: map[int64]*time.Timer{}, planWaiting: map[int64]string{}}
 	e.runs = newRunControl(e)
 	e.tickHooks = append(e.tickHooks, func(ctx context.Context) { _ = e.AutoStartBacklog(ctx) })
+	e.tickHooks = append(e.tickHooks, func(ctx context.Context) { _ = e.AutoBudget(ctx) })
 	e.disp = newDispatcher(e)
 	// Every kick, including the caller's own hook, wakes the dispatcher.
 	userKick := d.Kick

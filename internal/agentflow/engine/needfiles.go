@@ -123,3 +123,91 @@ func (e *Engine) AllowFiles(ctx context.Context, actor string, task int64, files
 	}
 	return allow, e.Retry(ctx, actor, task, false)
 }
+
+// autoAllowFiles reports whether the project has the AF-17 auto-allow-files rule
+// enabled.
+func (e *Engine) autoAllowFiles(ctx context.Context, proj string) bool {
+	set, err := e.deps.Store.EffectiveSettings(ctx, proj)
+	if err != nil {
+		return false
+	}
+	return set.AutoAllowFiles
+}
+
+// safeNeededFiles reports whether every requested file may be allowed without a
+// human, per AF-17: inside the FRD's MAY-touch list, a test file beside code
+// the task already edits, or a docs/ gaps table the acceptance names. A path in
+// a MUST-NOT list makes the whole request unsafe.
+func (e *Engine) safeNeededFiles(ctx context.Context, effort int64, t model.Task, nf []schema.NeededFile) bool {
+	f, _, err := e.effortFRD(ctx, effort)
+	if err != nil {
+		return false
+	}
+	acceptsGaps := false
+	for _, a := range t.Acceptance {
+		if strings.Contains(strings.ToLower(a), "gap") {
+			acceptsGaps = true
+		}
+	}
+	for _, n := range nf {
+		p := n.Path
+		if !safeNeededPath(f, t, p, acceptsGaps) {
+			return false
+		}
+	}
+	return len(nf) > 0
+}
+
+func safeNeededPath(f model.FRD, t model.Task, p string, acceptsGaps bool) bool {
+	pl := strings.ToLower(p)
+	// MUST NOT touch: any FRD constraint or out-of-scope entry naming the path.
+	for _, c := range f.Constraints {
+		cl := strings.ToLower(c)
+		if strings.Contains(cl, pl) && (strings.Contains(cl, "must not") || strings.Contains(cl, "mustn't")) {
+			return false
+		}
+	}
+	for _, o := range f.OutOfScope {
+		if strings.Contains(strings.ToLower(o), pl) {
+			return false
+		}
+	}
+	// test file beside code the task already edits
+	if strings.HasSuffix(p, "_test.go") {
+		dir := path.Dir(p)
+		base := strings.TrimSuffix(path.Base(p), "_test.go")
+		for _, f0 := range t.FilesTouched {
+			if path.Dir(f0) == dir && strings.TrimSuffix(path.Base(f0), ".go") == base {
+				return true
+			}
+		}
+		// any test file next to an edited file in same dir
+		for _, f0 := range t.FilesTouched {
+			if path.Dir(f0) == dir {
+				return true
+			}
+		}
+	}
+	// docs/ gaps table
+	if strings.HasPrefix(p, "docs/") && acceptsGaps {
+		return true
+	}
+	// MAY touch list in FRD constraints
+	for _, c := range f.Constraints {
+		cl := strings.ToLower(c)
+		if strings.Contains(cl, "may touch") || strings.Contains(cl, "may edit") || strings.Contains(cl, "may change") {
+			if strings.Contains(cl, pl) {
+				return true
+			}
+		}
+	}
+	// any constraint mentioning the path without must-not
+	for _, c := range f.Constraints {
+		cl := strings.ToLower(c)
+		if strings.Contains(cl, pl) && !strings.Contains(cl, "must not") {
+			return true
+		}
+	}
+	// If FRD has no constraints at all, be conservative: stop for human.
+	return false
+}
