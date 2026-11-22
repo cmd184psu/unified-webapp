@@ -231,7 +231,8 @@ func (e *Engine) resolveTask(ctx context.Context, proj store.Project, ef model.E
 	if err != nil {
 		return escalate("the resolver's reply could not be read: " + err.Error())
 	}
-	if e.resolverMode(ctx, proj) != store.ResolverAuto && out.Decision != "escalate" {
+	autoApplyAllow := out.Decision == "allow_files" && e.autoAllowFiles(ctx, proj.Slug)
+	if e.resolverMode(ctx, proj) != store.ResolverAuto && out.Decision != "escalate" && !(out.Decision == "allow_files" && autoApplyAllow) {
 		// advise (the default): record the decision for the owner; the task stays halted
 		// until it is applied (POST .../tasks/{key}/resolution/apply).
 		by := st.Model + " on " + st.Backend

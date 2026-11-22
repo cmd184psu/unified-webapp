@@ -108,6 +108,19 @@ func (e *Engine) failAttempt(ctx context.Context, c *chain, f Failure) error {
 			}
 		}
 	}
+	// AF-17 auto-replan: a blocked task whose reason quotes an FRD constraint it
+	// cannot satisfy becomes one attention item instead of retrying.
+	if outcome == model.OutcomeBlocked && e.autoReplan(ctx, c.proj.Slug) {
+		reason := blockedReason(f.Stage)
+		if nf := neededFiles(f.Stage, c.task); len(nf) > 0 {
+			reason = needsFilesReason(nf)
+		}
+		if frd, _, err := e.effortFRD(ctx, c.eff.ID); err == nil {
+			if q := contradictionQuote(reason, frd); q != "" {
+				_ = e.noteEffort(ctx, SystemActor, "auto_replan", c.eff.ID, map[string]any{"task": c.task.Key, "quote": q})
+			}
+		}
+	}
 	return e.explainHalt(ctx, c)
 }
 
@@ -169,6 +182,9 @@ func (e *Engine) explainHalt(ctx context.Context, c *chain) error {
 // attempt. A stage rerouted off a retired backend (infra:rerouted) counts
 // nothing either and is submitted again at once. It reports whether it changed anything.
 func (e *Engine) handleInfra(ctx context.Context, c *chain, last model.Stage) (bool, error) {
+	if !e.autoRetry(ctx, c.proj.Slug) {
+		return true, e.haltInfra(ctx, c, last, 0, 0)
+	}
 	if last.Outcome == OutcomeInfraCancel || last.Outcome == OutcomeInfraLost {
 		return false, nil
 	}

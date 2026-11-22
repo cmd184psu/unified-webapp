@@ -49,6 +49,10 @@ func (e *Engine) AutoBudget(ctx context.Context) error {
 			if raises >= set.BudgetRaiseCap {
 				continue
 			}
+			// progress check: only raise if some task made progress
+			if !e.budgetHasProgress(ctx, ef, set) {
+				continue
+			}
 			// progress check: last tasks not all failures (best-effort, skip if unknown)
 			newTokens := ef.BudgetTokens
 			newSeconds := ef.BudgetSeconds
@@ -72,4 +76,18 @@ func (e *Engine) AutoBudget(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (e *Engine) budgetHasProgress(ctx context.Context, ef model.Effort, set store.Settings) bool {
+	lim := e.limitsFor(set)
+	status, err := e.deps.Store.TaskStatuses(ctx, ef.ID, lim)
+	if err != nil || len(status) == 0 {
+		return true
+	}
+	for _, st := range status {
+		if st == model.StatusPassed || st == model.StatusOverridden || st == model.StatusRunning {
+			return true
+		}
+	}
+	return false
 }

@@ -171,6 +171,17 @@ func (e *Engine) effortAttention(ctx context.Context, project string, ef model.E
 				add("task_unassignable", t.Key, fmt.Sprintf("%s %q is waiting: %s", t.Key, t.Title, t.WaitingReason), time.Time{})
 			}
 		}
+		if ev, ok := last["auto_replan"]; ok {
+			var d struct {
+				Quote string `json:"quote"`
+			}
+			_ = json.Unmarshal([]byte(ev.DetailJSON), &d)
+			msg := "FRD contradiction"
+			if d.Quote != "" {
+				msg += ": " + d.Quote
+			}
+			add("frd_contradiction", "", msg, ev.TS)
+		}
 	}
 	return out, nil
 }

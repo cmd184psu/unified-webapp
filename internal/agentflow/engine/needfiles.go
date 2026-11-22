@@ -134,6 +134,49 @@ func (e *Engine) autoAllowFiles(ctx context.Context, proj string) bool {
 	return set.AutoAllowFiles
 }
 
+// autoRetry reports whether the project has the AF-17 auto-retry rule enabled.
+func (e *Engine) autoRetry(ctx context.Context, proj string) bool {
+	set, err := e.deps.Store.EffectiveSettings(ctx, proj)
+	if err != nil {
+		return true
+	}
+	return set.AutoRetry
+}
+
+// autoReplan reports whether the project has the AF-17 auto-replan rule enabled.
+func (e *Engine) autoReplan(ctx context.Context, proj string) bool {
+	set, err := e.deps.Store.EffectiveSettings(ctx, proj)
+	if err != nil {
+		return false
+	}
+	return set.AutoReplan
+}
+
+// contradictionQuote returns the quoted FRD constraint the blocked reason
+// references, or "" when none.
+func contradictionQuote(reason string, f model.FRD) string {
+	// find the first quoted substring in the reason
+	start := strings.IndexByte(reason, '"')
+	if start < 0 {
+		return ""
+	}
+	end := strings.IndexByte(reason[start+1:], '"')
+	if end < 0 {
+		return ""
+	}
+	q := strings.TrimSpace(reason[start+1 : start+1+end])
+	if q == "" {
+		return ""
+	}
+	ql := strings.ToLower(q)
+	for _, c := range f.Constraints {
+		if strings.Contains(strings.ToLower(c), ql) {
+			return q
+		}
+	}
+	return ""
+}
+
 // safeNeededFiles reports whether every requested file may be allowed without a
 // human, per AF-17: inside the FRD's MAY-touch list, a test file beside code
 // the task already edits, or a docs/ gaps table the acceptance names. A path in
