@@ -410,6 +410,14 @@ func (e *Engine) AdvancePlans(ctx context.Context) error {
 	e.planMu.Lock()
 	defer e.planMu.Unlock()
 	s := e.deps.Store
+	// A service drain (AF-10) lets running effort-level stages finish but starts
+	// none: before AF-15 a planner/architect/critic/compiler could keep a drain
+	// alive for as long as planning took.
+	if h, err := s.ServiceHold(ctx); err != nil {
+		return err
+	} else if h.Active {
+		return nil
+	}
 	projects, err := s.ListProjects(ctx)
 	if err != nil {
 		return err
@@ -519,7 +527,34 @@ func (e *Engine) advancePlan(ctx context.Context, p store.Project, ef model.Effo
 	if round >= set.PlanMaxRounds {
 		return e.finishPlan(ctx, ef, false)
 	}
+	// AF-15: a plan that keeps coming back for the same questions burns a
+	// planner/architect/critic round per loop. Hand it to a person instead.
+	if round > set.PlanReviseLimit {
+		reason := "plan does not converge after " + fmt.Sprint(round-1) + " revise rounds"
+		if issues := repeatedIssues(arch, crit); issues != "" {
+			reason += ": " + issues
+		}
+		return e.haltPlan(ctx, ef, last, reason)
+	}
 	return e.startEffortStage(ctx, p, ef.ID, "planner", sess.others("planner"), "")
+}
+
+// repeatedIssues lists the round's reviewer findings, de-duplicated, for the
+// non-convergence attention message.
+func repeatedIssues(arch, crit PlanReview) string {
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range []PlanReview{arch, crit} {
+		for _, issue := range r.Issues {
+			d := strings.TrimSpace(issue.Description)
+			if d == "" || seen[d] {
+				continue
+			}
+			seen[d] = true
+			out = append(out, d)
+		}
+	}
+	return strings.Join(out, "; ")
 }
 
 // recordPlanStage saves the plan or review a passed stage produced as a
@@ -880,6 +915,11 @@ func (e *Engine) startEffortStage(ctx context.Context, p store.Project, effort i
 // reference, which says what the stage is for (an FRD draft, an acceptance
 // check).
 func (e *Engine) startEffortStageRef(ctx context.Context, p store.Project, effort int64, role string, others map[string]string, avoid, ref string) error {
+	if h, err := e.deps.Store.ServiceHold(ctx); err != nil {
+		return err
+	} else if h.Active {
+		return fmt.Errorf("the service is held: %s: %w", h.Reason, store.ErrConflict)
+	}
 	pk, warn, reason, err := e.pickEffortStage(ctx, p, role, others, avoid)
 	if err == nil && reason != "" && avoid != "" {
 		pk, warn, reason, err = e.pickEffortStage(ctx, p, role, others, "") // nowhere else: the same model again

@@ -56,7 +56,7 @@ func (g *fakeGit) Contains(_ context.Context, sha string) []string {
 }
 
 const (
-	engineRoom = "room_engine"
+	engineRoom = "engineRoom"
 	reviewRoom = "room_review"
 )
 
@@ -182,5 +182,60 @@ func TestFinishActions(t *testing.T) {
 		if got := strings.Join(finishActions(st), ","); got != want {
 			t.Errorf("%s: %s, want %s", st, got, want)
 		}
+	}
+}
+
+// cursorBus serves room history after a seq, the way the real BotChat does.
+type cursorBus struct {
+	*fakeBus
+	after map[string]int64
+	msgs  map[string][]Msg
+}
+
+func (b *cursorBus) MessagesAfter(_ context.Context, room string, after int64, _ int) ([]Msg, error) {
+	b.after[room] = after
+	var out []Msg
+	for _, m := range b.msgs[room] {
+		if m.Seq > after {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
+// TestAF15_RoomCursorOnlyMovesForward checks that a stored cursor turns room
+// reads into after= requests and that the cursor never moves backwards.
+func TestAF15_RoomCursorOnlyMovesForward(t *testing.T) {
+	cfg := testConfig(t)
+	writeState(t, cfg.StateFile, `{"room_seqs":{"engineRoom":10}}`)
+	bus := &cursorBus{
+		fakeBus: &fakeBus{rooms: map[string][]Msg{
+			engineRoom: {{ID: "m11", Seq: 11, Callsign: "deepseek4", Content: "hello"}},
+		}},
+		after: map[string]int64{},
+		msgs: map[string][]Msg{engineRoom: {
+			{ID: "m11", Seq: 11, Callsign: "deepseek4", Content: "hello"},
+			{ID: "m12", Seq: 12, Callsign: "deepseek4", Content: "again"},
+		}},
+	}
+	c := &Coordinator{Cfg: cfg, Bus: bus, Git: &fakeGit{}, Now: func() time.Time { return time.Unix(0, 0) }}
+	if rep := c.Run(context.Background(), false); rep.Error != "" {
+		t.Fatal(rep.Error)
+	}
+	if got := bus.after[engineRoom]; got != 10 {
+		t.Fatalf("first pass asked after %d, want 10", got)
+	}
+	st, err := LoadState(cfg.StateFile)
+	if err != nil || st.RoomSeqs[engineRoom] != 12 {
+		t.Fatalf("cursor after the pass = %+v, %v", st.RoomSeqs, err)
+	}
+	if rep := c.Run(context.Background(), false); rep.Error != "" {
+		t.Fatal(rep.Error)
+	}
+	if got := bus.after[engineRoom]; got != 12 {
+		t.Fatalf("second pass asked after %d, want 12", got)
+	}
+	if st, _ = LoadState(cfg.StateFile); st.RoomSeqs[engineRoom] != 12 {
+		t.Fatalf("cursor moved to %d", st.RoomSeqs[engineRoom])
 	}
 }

@@ -19,11 +19,14 @@ export interface Effort {
   integration_branch: string;
   base_commit: string;
   yolo: boolean;
-  deliberate: boolean;
-  /** Token and stage-time budgets (AT12); 0 or absent means no limit. */
-  budget_tokens?: number;
-  budget_seconds?: number;
-  created: number;
+  deliberate: boolean;	/** Token and stage-time budgets (AT12); 0 or absent means no limit. */
+	budget_tokens?: number;
+	budget_seconds?: number;
+	/** Backlog order; higher starts first (AF-15). */
+	priority?: number;
+	/** Optional git condition such as "branch feature/x contains feature/y" (AF-15). */
+	start_condition?: string;
+	created: number;
   updated: number;
 }
 
@@ -44,6 +47,8 @@ export interface EffortBudgetInput {
 
 export interface EffortPatch extends EffortBudgetInput {
   deliberate?: boolean;
+  priority?: number;
+  start_condition?: string;
 }
 
 export interface DocInfo {
@@ -94,6 +99,10 @@ export interface ProjectView {
   worker_env?: Record<string, string>;
   /** Run feedback commands on a copy of the worktree (AF-6). */
   verify_in_copy?: boolean;
+  /** Branch a new effort starts from (AF-15); empty uses the clone HEAD. */
+  base_branch?: string;
+  /** How many efforts of this project may run at once (AF-15). */
+  max_running_efforts?: number;
   created: number;
   updated: number;
   run_state: string;
@@ -137,6 +146,8 @@ export interface ProjectInput {
   feedback_env?: Record<string, string>;
   worker_env?: Record<string, string>;
   verify_in_copy?: boolean;
+  base_branch?: string;
+  max_running_efforts?: number;
 }
 
 /** ProjectPatch: definition_of_done replaces the detected list; null clears the override. */
@@ -934,6 +945,10 @@ export const api = {
 
   // Efforts
   efforts: (slug: string): Promise<EffortView[]> => get(`${proj(slug)}/efforts`),
+  backlog: (o?: FetchOptions): Promise<EffortView[]> => get('/api/backlog', o),
+  parkEffort: (slug: string, id: number, priority?: number, startCondition?: string): Promise<EffortView> =>
+    send('POST', `${eff(slug, id)}/park`, { priority, start_condition: startCondition }),
+  unparkEffort: (slug: string, id: number): Promise<EffortView> => send('POST', `${eff(slug, id)}/unpark`),
   effort: (slug: string, id: number): Promise<EffortView> => get(eff(slug, id)),
   createEffort: (slug: string, title: string, deliberate: boolean, o?: FetchOptions, budget?: EffortBudgetInput): Promise<EffortView> =>
     send('POST', `${proj(slug)}/efforts`, { title, deliberate, ...budget }, o),

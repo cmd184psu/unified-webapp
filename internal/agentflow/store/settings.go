@@ -21,6 +21,12 @@ type Settings struct {
 	StuckThreshold  int
 	MaxInfraRetries int
 	PlanMaxRounds   int
+	// PlanReviseLimit stops a planning loop after this many revise rounds on
+	// the same FRD (AF-15); 3 by default.
+	PlanReviseLimit int
+	// MinRunningEfforts is how many efforts auto-start keeps running across
+	// projects (AF-15); 0 turns auto-start off.
+	MinRunningEfforts int
 	// StallMinutes is how long a stage may say nothing, and how long a running
 	// effort may sit with nothing in flight, before it counts as stalled (H30).
 	StallMinutes int
@@ -138,6 +144,12 @@ func parseSettings(m map[string]string) (Settings, error) {
 		return s, err
 	}
 	if s.PlanMaxRounds, err = validateInt("plan_max_rounds", m["plan_max_rounds"], 1, 50); err != nil {
+		return s, err
+	}
+	if s.PlanReviseLimit, err = validateInt("plan_revise_limit", m["plan_revise_limit"], 1, 50); err != nil {
+		return s, err
+	}
+	if s.MinRunningEfforts, err = validateInt("min_running_efforts", m["min_running_efforts"], 0, 64); err != nil {
 		return s, err
 	}
 	if s.StallMinutes, err = validateInt("stall_minutes", m["stall_minutes"], 1, 100); err != nil {

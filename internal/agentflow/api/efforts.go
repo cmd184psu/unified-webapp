@@ -15,6 +15,9 @@ func (a *API) registerEfforts(mux muxer) {
 	mux.HandleFunc("POST /api/projects/{slug}/efforts", a.createEffort)
 	mux.HandleFunc("GET /api/projects/{slug}/efforts/{id}", a.getEffort)
 	mux.HandleFunc("PATCH /api/projects/{slug}/efforts/{id}", a.patchEffort)
+	mux.HandleFunc("POST /api/projects/{slug}/efforts/{id}/park", a.parkEffort)
+	mux.HandleFunc("POST /api/projects/{slug}/efforts/{id}/unpark", a.unparkEffort)
+	mux.HandleFunc("GET /api/backlog", a.listBacklog)
 }
 
 // DocInfo says which revisions of a document exist: the latest, and the
@@ -180,6 +183,9 @@ func (a *API) createEffort(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// AF-15: start from the configured base branch's fetched tip, not from a
+	// clone HEAD that may be months behind.
+	_, _ = a.deps.Engine.SetFreshBase(r.Context(), ef.ID)
 	a.emit("effort.update", map[string]any{"project": slug, "effort": ef.ID})
 	a.respondEffort(w, r, ef.ID, http.StatusCreated)
 }
@@ -201,18 +207,82 @@ func (a *API) patchEffort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Deliberate    *bool  `json:"deliberate"`
-		BudgetTokens  *int64 `json:"budget_tokens"`
-		BudgetSeconds *int64 `json:"budget_seconds"`
+		Deliberate     *bool   `json:"deliberate"`
+		BudgetTokens   *int64  `json:"budget_tokens"`
+		BudgetSeconds  *int64  `json:"budget_seconds"`
+		Priority       *int64  `json:"priority"`
+		StartCondition *string `json:"start_condition"`
 	}
 	if !decodeBody(w, r, &body, false) {
 		return
 	}
+	if body.StartCondition != nil {
+		if _, err := engine.ParseStartCondition(*body.StartCondition); err != nil {
+			badRequest(w, "start_condition", err.Error())
+			return
+		}
+	}
 	if _, err := a.deps.Store.UpdateEffort(r.Context(), actorOf(r), ef.ID,
-		store.EffortPatch{Deliberate: body.Deliberate, BudgetTokens: body.BudgetTokens, BudgetSeconds: body.BudgetSeconds}); err != nil {
+		store.EffortPatch{Deliberate: body.Deliberate, BudgetTokens: body.BudgetTokens, BudgetSeconds: body.BudgetSeconds,
+			Priority: body.Priority, StartCondition: body.StartCondition}); err != nil {
 		writeErr(w, err)
 		return
 	}
 	a.emit("effort.update", map[string]any{"project": ef.Project, "effort": ef.ID})
 	a.respondEffort(w, r, ef.ID, http.StatusOK)
+}
+
+// parkEffort puts a prepared effort in the backlog. The body may carry a
+// priority (higher starts first) and a git start condition.
+func (a *API) parkEffort(w http.ResponseWriter, r *http.Request) {
+	ef, ok := a.loadEffort(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Priority       *int64  `json:"priority"`
+		StartCondition *string `json:"start_condition"`
+	}
+	if !decodeBody(w, r, &body, false) {
+		return
+	}
+	if _, err := a.deps.Engine.Park(r.Context(), actorOf(r), ef.ID, body.Priority, body.StartCondition); err != nil {
+		writeErr(w, err)
+		return
+	}
+	a.emit("effort.update", map[string]any{"project": ef.Project, "effort": ef.ID})
+	a.respondEffort(w, r, ef.ID, http.StatusOK)
+}
+
+// unparkEffort returns a parked effort to queue_approved without starting it.
+func (a *API) unparkEffort(w http.ResponseWriter, r *http.Request) {
+	ef, ok := a.loadEffort(w, r)
+	if !ok {
+		return
+	}
+	if _, err := a.deps.Engine.Unpark(r.Context(), actorOf(r), ef.ID); err != nil {
+		writeErr(w, err)
+		return
+	}
+	a.emit("effort.update", map[string]any{"project": ef.Project, "effort": ef.ID})
+	a.respondEffort(w, r, ef.ID, http.StatusOK)
+}
+
+// BacklogItem is one ready effort in GET /api/backlog (AF-15).
+func (a *API) listBacklog(w http.ResponseWriter, r *http.Request) {
+	efs, err := a.deps.Store.ListReadyEfforts(r.Context())
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	out := make([]EffortView, 0, len(efs))
+	for _, ef := range efs {
+		v, err := a.effortView(r.Context(), ef)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		out = append(out, v)
+	}
+	writeJSON(w, http.StatusOK, out)
 }

@@ -78,7 +78,7 @@ func (c *HTTPReviewClient) do(ctx context.Context, method, path string, body, ou
 		return fmt.Errorf("review api: %w", err)
 	}
 	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if resp.StatusCode/100 != 2 {
 		return fmt.Errorf("review api: %s %s: %s: %s", method, path, resp.Status, strings.TrimSpace(string(data)))
 	}

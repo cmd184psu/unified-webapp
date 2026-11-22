@@ -21,18 +21,20 @@ func (a *API) registerSettings(mux muxer) {
 func limitMap(s store.Settings) map[string]string {
 	dur := func(d time.Duration) string { return d.String() }
 	return map[string]string{
-		"max_attempts":      strconv.Itoa(s.MaxAttempts),
-		"stuck_threshold":   strconv.Itoa(s.StuckThreshold),
-		"max_infra_retries": strconv.Itoa(s.MaxInfraRetries),
-		"plan_max_rounds":   strconv.Itoa(s.PlanMaxRounds),
-		"stall_minutes":     strconv.Itoa(s.StallMinutes),
-		"acceptance_rounds": strconv.Itoa(s.AcceptanceRounds),
-		"review_panel":      strconv.Itoa(s.ReviewPanel),
-		"worker_timeout":    dur(s.WorkerTimeout),
-		"review_timeout":    dur(s.ReviewTimeout),
-		"plan_timeout":      dur(s.PlanTimeout),
-		"verify_timeout":    dur(s.VerifyTimeout),
-		"resolver_mode":     s.ResolverMode,
+		"max_attempts":        strconv.Itoa(s.MaxAttempts),
+		"stuck_threshold":     strconv.Itoa(s.StuckThreshold),
+		"max_infra_retries":   strconv.Itoa(s.MaxInfraRetries),
+		"plan_max_rounds":     strconv.Itoa(s.PlanMaxRounds),
+		"plan_revise_limit":   strconv.Itoa(s.PlanReviseLimit),
+		"min_running_efforts": strconv.Itoa(s.MinRunningEfforts),
+		"stall_minutes":       strconv.Itoa(s.StallMinutes),
+		"acceptance_rounds":   strconv.Itoa(s.AcceptanceRounds),
+		"review_panel":        strconv.Itoa(s.ReviewPanel),
+		"worker_timeout":      dur(s.WorkerTimeout),
+		"review_timeout":      dur(s.ReviewTimeout),
+		"plan_timeout":        dur(s.PlanTimeout),
+		"verify_timeout":      dur(s.VerifyTimeout),
+		"resolver_mode":       s.ResolverMode,
 	}
 }
 
@@ -45,6 +47,8 @@ func settingsView(s store.Settings) map[string]any {
 		"stuck_threshold":      s.StuckThreshold,
 		"max_infra_retries":    s.MaxInfraRetries,
 		"plan_max_rounds":      s.PlanMaxRounds,
+		"plan_revise_limit":    s.PlanReviseLimit,
+		"min_running_efforts":  s.MinRunningEfforts,
 		"stall_minutes":        s.StallMinutes,
 		"acceptance_rounds":    s.AcceptanceRounds,
 		"review_panel":         s.ReviewPanel,

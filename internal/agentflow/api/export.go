@@ -3,12 +3,15 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 
+	"cmd184psu/unified-webapp/internal/agentflow/engine"
 	"cmd184psu/unified-webapp/internal/agentflow/model"
 	"cmd184psu/unified-webapp/internal/agentflow/store"
 )
@@ -18,16 +21,51 @@ func (a *API) registerExport(mux muxer) {
 	mux.HandleFunc("GET /api/efforts/{id}/frd/export", a.exportDoc(model.DocFRD))
 	mux.HandleFunc("GET /api/efforts/{id}/plan/export", a.exportDoc(model.DocPlan))
 	mux.HandleFunc("POST /api/projects/{slug}/efforts/import", a.importFRD)
+	mux.HandleFunc("POST /api/import", a.importBundle)
 }
 
-// EffortExport is the JSON export of a whole effort (DBS6): the effort, the
-// latest FRD and plan, and the queue with each task's derived status.
+// EffortExport is the JSON bundle of a whole effort (DBS6, AF-15): the
+// effort's approved FRD and plan, its compiled queue with every task
+// definition, its budget, priority and start condition, and the project's role
+// candidates at export time. It carries no API keys and no run history.
 type EffortExport struct {
-	Effort   model.Effort            `json:"effort"`
-	FRD      *DocView                `json:"frd,omitempty"`
-	Plan     *DocView                `json:"plan,omitempty"`
-	Queue    *model.Queue            `json:"queue,omitempty"`
-	Statuses map[string]model.Status `json:"task_statuses,omitempty"`
+	Format  string `json:"format,omitempty"`
+	Version int    `json:"version,omitempty"`
+	Project string `json:"project,omitempty"`
+	// ContentHash covers the FRD, plan and queue; import keeps approvals only
+	// when it still matches.
+	ContentHash string          `json:"content_hash,omitempty"`
+	Approvals   BundleApprovals `json:"approvals"`
+	Effort      model.Effort    `json:"effort"`
+	FRD         *DocView        `json:"frd,omitempty"`
+	Plan        *DocView        `json:"plan,omitempty"`
+	Queue       *model.Queue    `json:"queue,omitempty"`
+	// Candidates is informational: the project's and global role candidate
+	// lists at export time. Import never changes the receiving installation.
+	Candidates []store.Candidate       `json:"role_candidates,omitempty"`
+	Statuses   map[string]model.Status `json:"task_statuses,omitempty"`
+}
+
+// BundleApprovals says which parts of an exported effort were approved.
+type BundleApprovals struct {
+	FRD   bool `json:"frd"`
+	Plan  bool `json:"plan"`
+	Queue bool `json:"queue"`
+}
+
+const bundleFormat = "agentflow-effort"
+const bundleVersion = 1
+
+// bundleHash is the content fingerprint an import compares before keeping
+// approvals. Only the content, not the IDs or timestamps, is covered.
+func bundleHash(frd, plan json.RawMessage, queueHash string) string {
+	sum := sha256.New()
+	sum.Write(frd)
+	sum.Write([]byte("\n"))
+	sum.Write(plan)
+	sum.Write([]byte("\n"))
+	sum.Write([]byte(queueHash))
+	return hex.EncodeToString(sum.Sum(nil))
 }
 
 // exportFormat reads ?format=json|md (json by default).
@@ -106,7 +144,7 @@ func (a *API) exportEffort(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	ex := EffortExport{Effort: ef}
+	ex := EffortExport{Format: bundleFormat, Version: bundleVersion, Project: ef.Project, Effort: ef}
 	report := model.EffortReport{Effort: ef}
 	for _, kind := range []string{model.DocFRD, model.DocPlan} {
 		d, err := a.latestDoc(r, ef.ID, kind, 0)
@@ -129,13 +167,16 @@ func (a *API) exportEffort(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			ex.FRD, report.FRD, report.FRDRevision = &v, &f, d.Revision
+			ex.Approvals.FRD = v.Approved
 		} else {
 			ex.Plan, report.Plan, report.PlanRevision = &v, d.JSON, d.Revision
+			ex.Approvals.Plan = v.Approved
 		}
 	}
 	switch q, err := a.deps.Store.GetQueue(r.Context(), ef.ID); {
 	case err == nil:
 		ex.Queue, report.Queue = &q, &q
+		ex.Approvals.Queue = q.Status == model.QueueApproved
 		if ex.Statuses, err = a.deps.Engine.TaskStatuses(r.Context(), ef.Project, ef.ID); err != nil {
 			writeErr(w, err)
 			return
@@ -144,6 +185,16 @@ func (a *API) exportEffort(w http.ResponseWriter, r *http.Request) {
 	case !errors.Is(err, store.ErrNotFound):
 		writeErr(w, err)
 		return
+	}
+	if ex.FRD != nil && ex.Plan != nil && ex.Queue != nil {
+		ex.ContentHash = bundleHash(ex.FRD.JSON, ex.Plan.JSON, ex.Queue.Hash)
+	}
+	if snap, err := a.deps.Store.Snapshot(r.Context()); err == nil {
+		for _, c := range snap.Candidates {
+			if c.Scope == "global" || c.ProjectID == ef.Project {
+				ex.Candidates = append(ex.Candidates, c)
+			}
+		}
 	}
 	name := "effort-" + strconv.FormatInt(ef.ID, 10)
 	if format == "md" {
@@ -231,6 +282,123 @@ func (a *API) importFRD(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	a.emit("effort.update", map[string]any{"project": slug, "effort": ef.ID})
+	a.respondEffort(w, r, ef.ID, http.StatusCreated)
+}
+
+// importBundle creates a parked effort from an exported bundle. It keeps the
+// FRD, plan and queue approvals only when the bundle's content hash still
+// matches the content; otherwise the new effort lands in draft for a human to
+// re-approve. A project query parameter overrides the bundle's project.
+func (a *API) importBundle(w http.ResponseWriter, r *http.Request) {
+	var b EffortExport
+	if !decodeBody(w, r, &b, false) {
+		return
+	}
+	if b.Format != bundleFormat || b.Version != bundleVersion {
+		badRequest(w, "format", fmt.Sprintf("must be %s version %d", bundleFormat, bundleVersion))
+		return
+	}
+	slug := r.URL.Query().Get("project")
+	if slug == "" {
+		slug = b.Project
+	}
+	if slug == "" {
+		badRequest(w, "project", "a bundle must name its project, or the request must give one")
+		return
+	}
+	if b.FRD == nil || b.Plan == nil || b.Queue == nil || len(b.Queue.Tasks) == 0 {
+		badRequest(w, "bundle", "must carry an FRD, a plan and a queue with tasks")
+		return
+	}
+	if len(b.FRD.JSON) == 0 || len(b.Plan.JSON) == 0 {
+		badRequest(w, "bundle", "must carry the FRD and plan documents")
+		return
+	}
+	f, err := model.ParseFilledFRD(b.FRD.JSON)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	qhash := model.QueueHash(b.Queue.Tasks)
+	if b.Queue.Hash != "" && b.Queue.Hash != qhash {
+		badRequest(w, "queue", "its task hash does not match the task definitions")
+		return
+	}
+	keep := b.Approvals.FRD && b.Approvals.Plan && b.Approvals.Queue &&
+		b.ContentHash != "" && b.ContentHash == bundleHash(b.FRD.JSON, b.Plan.JSON, qhash)
+	if b.Effort.StartCondition != "" {
+		if _, err := engine.ParseStartCondition(b.Effort.StartCondition); err != nil {
+			badRequest(w, "start_condition", err.Error())
+			return
+		}
+	}
+	ef, err := a.deps.Store.CreateEffort(r.Context(), actorOf(r), slug, f.Title, b.Effort.Deliberate)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	abandon := func() {
+		st := model.EffortAbandoned
+		_, _ = a.deps.Store.UpdateEffort(context.WithoutCancel(r.Context()), actorOf(r), ef.ID, store.EffortPatch{Status: &st})
+	}
+	docFRD, err := a.deps.Store.SaveDoc(r.Context(), actorOf(r), ef.ID, model.DocFRD, b.FRD.JSON)
+	if err != nil {
+		abandon()
+		writeErr(w, err)
+		return
+	}
+	docPlan, err := a.deps.Store.SaveDoc(r.Context(), actorOf(r), ef.ID, model.DocPlan, b.Plan.JSON)
+	if err != nil {
+		abandon()
+		writeErr(w, err)
+		return
+	}
+	q, err := a.deps.Store.SaveQueue(r.Context(), actorOf(r), ef.ID, b.Queue.Tasks)
+	if err != nil {
+		abandon()
+		writeErr(w, err)
+		return
+	}
+	patch := store.EffortPatch{StartCondition: &b.Effort.StartCondition}
+	if b.Effort.Priority != 0 {
+		patch.Priority = &b.Effort.Priority
+	}
+	if b.Effort.BudgetTokens > 0 {
+		patch.BudgetTokens = &b.Effort.BudgetTokens
+	}
+	if b.Effort.BudgetSeconds > 0 {
+		patch.BudgetSeconds = &b.Effort.BudgetSeconds
+	}
+	if _, err := a.deps.Store.UpdateEffort(r.Context(), actorOf(r), ef.ID, patch); err != nil {
+		abandon()
+		writeErr(w, err)
+		return
+	}
+	if keep {
+		if _, err := a.deps.Store.ApproveDoc(r.Context(), actorOf(r), ef.ID, model.DocFRD, docFRD.Revision); err != nil {
+			abandon()
+			writeErr(w, err)
+			return
+		}
+		if _, err := a.deps.Store.ApproveDoc(r.Context(), actorOf(r), ef.ID, model.DocPlan, docPlan.Revision); err != nil {
+			abandon()
+			writeErr(w, err)
+			return
+		}
+		if _, err := a.deps.Store.ApproveQueue(r.Context(), actorOf(r), ef.ID, q.Hash); err != nil {
+			abandon()
+			writeErr(w, err)
+			return
+		}
+		ready := model.EffortReady
+		if _, err := a.deps.Store.UpdateEffort(r.Context(), actorOf(r), ef.ID, store.EffortPatch{Status: &ready}); err != nil {
+			abandon()
+			writeErr(w, err)
+			return
+		}
+	}
+	_, _ = a.deps.Engine.SetFreshBase(r.Context(), ef.ID)
 	a.emit("effort.update", map[string]any{"project": slug, "effort": ef.ID})
 	a.respondEffort(w, r, ef.ID, http.StatusCreated)
 }

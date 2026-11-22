@@ -18,11 +18,12 @@ import { mountStats } from './stats.js';
 import { mountSeatsPage } from './seatspage.js';
 import { mountReviewsPage } from './reviewpage.js';
 import { SettingsView, defaultSettingsDeps } from './settings.js';
+import { Backlog, defaultBacklogDeps } from './backlog.js';
 
 const themes = new ThemeManager({ module: 'agentflow', default: 'dark' });
 themes.apply();
 
-type TabId = 'overview' | 'project' | 'backends' | 'stats' | 'seats' | 'reviews';
+type TabId = 'overview' | 'project' | 'backlog' | 'backends' | 'stats' | 'seats' | 'reviews';
 
 interface Tab {
   id: TabId;
@@ -35,8 +36,8 @@ const TABS: Tab[] = [
     id: 'overview',
     label: 'Overview',
     mount: (host) => new Overview(host, defaultDeps((slug) => showTab('project', slug))).mount(),
-  },
-  { id: 'project', label: 'Project', mount: mountProjectTab },
+  },	{ id: 'project', label: 'Project', mount: mountProjectTab },
+	{ id: 'backlog', label: 'Backlog', mount: (host) => new Backlog(host, defaultBacklogDeps((slug) => showTab('project', slug))).mount() },
   { id: 'backends', label: 'Backends', mount: mountBackends },
   { id: 'stats', label: 'Stats', mount: mountStats },
   { id: 'seats', label: 'Seats', mount: mountSeatsPage },

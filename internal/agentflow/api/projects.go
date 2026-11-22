@@ -89,18 +89,22 @@ type ProjectView struct {
 	Sandbox string `json:"sandbox"`
 	// DockerImage, DockerNetwork, DockerMounts and DockerSELinux describe the
 	// container a docker project's stages run in.
-	DockerImage   string         `json:"docker_image"`
-	DockerNetwork string         `json:"docker_network"`
-	DockerMounts  []string       `json:"docker_mounts"`
-	DockerSELinux bool           `json:"docker_selinux"`
-	Created       int64          `json:"created"`
-	Updated       int64          `json:"updated"`
-	RunState      string         `json:"run_state"`
-	Remembered    string         `json:"remembered_run_state"`
-	StopReason    string         `json:"stop_reason"`
-	Effort        *model.Effort  `json:"effort"`
-	Progress      map[string]int `json:"progress"`
-	Current       []WorkItem     `json:"current"`
+	DockerImage   string   `json:"docker_image"`
+	DockerNetwork string   `json:"docker_network"`
+	DockerMounts  []string `json:"docker_mounts"`
+	DockerSELinux bool     `json:"docker_selinux"`
+	// BaseBranch is the branch a new effort starts from (AF-15); empty uses HEAD.
+	BaseBranch string `json:"base_branch"`
+	// MaxRunningEfforts caps concurrently running efforts (AF-15).
+	MaxRunningEfforts int            `json:"max_running_efforts"`
+	Created           int64          `json:"created"`
+	Updated           int64          `json:"updated"`
+	RunState          string         `json:"run_state"`
+	Remembered        string         `json:"remembered_run_state"`
+	StopReason        string         `json:"stop_reason"`
+	Effort            *model.Effort  `json:"effort"`
+	Progress          map[string]int `json:"progress"`
+	Current           []WorkItem     `json:"current"`
 }
 
 // projectView assembles the overview of one project.
@@ -109,6 +113,7 @@ func (a *API) projectView(ctx context.Context, p store.Project) (ProjectView, er
 		Slug: p.Slug, RepoPath: p.RepoPath, ModelScope: p.ModelScope, FeedbackCmds: p.FeedbackCmds, DefinitionOfDone: p.DefinitionOfDone, Limits: p.Limits, Cleanup: p.CleanupEnabled,
 		Toolchains: p.Toolchains, FeedbackEnv: p.FeedbackEnv, WorkerEnv: p.WorkerEnv, VerifyInCopy: p.VerifyInCopy,
 		Sandbox: p.Sandbox, DockerImage: p.DockerImage, DockerNetwork: p.DockerNetwork, DockerMounts: p.DockerMounts, DockerSELinux: p.DockerSELinux,
+		BaseBranch: p.BaseBranch, MaxRunningEfforts: p.MaxRunningEfforts,
 		Created: p.Created.UnixMilli(), Updated: p.Updated.UnixMilli(),
 		RunState: a.deps.Engine.Runs().State(p.Slug), Remembered: model.RunStopped,
 		StopReason: a.deps.Engine.Runs().StopReason(p.Slug),
@@ -137,6 +142,9 @@ func (a *API) projectView(ctx context.Context, p store.Project) (ProjectView, er
 	}
 	if v.DockerNetwork == "" {
 		v.DockerNetwork = "none"
+	}
+	if v.MaxRunningEfforts < 1 {
+		v.MaxRunningEfforts = 1
 	}
 	v.Plugins = []PluginView{}
 	for _, pl := range p.Plugins {
@@ -253,6 +261,8 @@ type projectBody struct {
 	DockerNet     *string            `json:"docker_network"`
 	DockerMounts  *[]string          `json:"docker_mounts"`
 	DockerSELinux *bool              `json:"docker_selinux"`
+	BaseBranch    *string            `json:"base_branch"`
+	MaxRunning    *int               `json:"max_running_efforts"`
 	// DefinitionOfDone is a list, or null to go back to the derived one.
 	DefinitionOfDone json.RawMessage `json:"definition_of_done"`
 }
@@ -302,6 +312,12 @@ func (b projectBody) apply(p *store.Project) error {
 	}
 	if b.DockerSELinux != nil {
 		p.DockerSELinux = *b.DockerSELinux
+	}
+	if b.BaseBranch != nil {
+		p.BaseBranch = strings.TrimSpace(*b.BaseBranch)
+	}
+	if b.MaxRunning != nil {
+		p.MaxRunningEfforts = *b.MaxRunning
 	}
 	if b.Plugins != nil {
 		p.Plugins = make([]runner.Plugin, 0, len(*b.Plugins))

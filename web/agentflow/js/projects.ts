@@ -86,6 +86,8 @@ export class ProjectForm {
   private repoPath: string;
   private repoBtn: HTMLElement;
   private scope: HTMLSelectElement;
+  private baseBranch: HTMLInputElement;
+  private maxRunning: HTMLInputElement;
   private cleanup: ToggleEl;
   private toolchains = new Map<string, ToggleEl>();
   private env: RowsEditor<EnvRow>;
@@ -114,6 +116,10 @@ export class ProjectForm {
     });
     this.drawRepo();
     this.scope = selectInput('model_scope', SCOPES, p?.model_scope ?? 'local');
+    this.baseBranch = textInput('base_branch', p?.base_branch ?? '', { placeholder: 'feature/diplomacy-screen' });
+    this.baseBranch.addEventListener('input', () => this.bump());
+    this.maxRunning = textInput('max_running_efforts', String(p?.max_running_efforts ?? 1), { type: 'number', placeholder: '1' });
+    this.maxRunning.addEventListener('input', () => this.bump());
     this.cleanup = checkbox('cleanup_enabled', p?.cleanup_enabled ?? false);
     for (const [name] of TOOLCHAINS) this.toolchains.set(name, checkbox(`toolchain_${name}`, (p?.toolchains ?? []).includes(name)));
     this.verifyInCopy = checkbox('verify_in_copy', p?.verify_in_copy ?? false);
@@ -181,6 +187,8 @@ export class ProjectForm {
       slug: this.slug.value.trim(),
       repo_path: this.repoPath,
       model_scope: this.scope.value,
+      base_branch: this.baseBranch.value.trim(),
+      max_running_efforts: Number(this.maxRunning.value) || 1,
       feedback_cmds: this.cmds.read().filter((c) => c !== ''),
       cleanup_enabled: this.cleanup.checked,
       plugins: this.plugins.read().filter((pl) => pl.name !== '' || pl.version !== ''),
@@ -195,7 +203,7 @@ export class ProjectForm {
     this.errors.clear();
     const body = this.body();
     const attempt = (): Promise<ProjectView> => this.mode.project
-      ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, feedback_cmds: body.feedback_cmds, cleanup_enabled: body.cleanup_enabled, plugins: body.plugins, toolchains: body.toolchains, feedback_env: body.feedback_env, verify_in_copy: body.verify_in_copy, ...this.dodPatch() }, { quiet: true })
+      ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, base_branch: body.base_branch, max_running_efforts: body.max_running_efforts, feedback_cmds: body.feedback_cmds, cleanup_enabled: body.cleanup_enabled, plugins: body.plugins, toolchains: body.toolchains, feedback_env: body.feedback_env, verify_in_copy: body.verify_in_copy, ...this.dodPatch() }, { quiet: true })
       : this.deps.createProject(body, { quiet: true });
     let saved: ProjectView;
     try {
@@ -228,7 +236,7 @@ export class ProjectForm {
     this.errors.clear();
     const b = this.body();
     try {
-      await this.deps.patchProject(p.slug, { repo_path: b.repo_path, model_scope: b.model_scope, feedback_cmds: b.feedback_cmds, cleanup_enabled: b.cleanup_enabled, plugins: b.plugins, toolchains: b.toolchains, feedback_env: b.feedback_env, verify_in_copy: b.verify_in_copy, ...this.dodPatch() }, { quiet: true });
+      await this.deps.patchProject(p.slug, { repo_path: b.repo_path, model_scope: b.model_scope, base_branch: b.base_branch, max_running_efforts: b.max_running_efforts, feedback_cmds: b.feedback_cmds, cleanup_enabled: b.cleanup_enabled, plugins: b.plugins, toolchains: b.toolchains, feedback_env: b.feedback_env, verify_in_copy: b.verify_in_copy, ...this.dodPatch() }, { quiet: true });
     } catch (err) {
       this.errors.show(err);
       return false;
@@ -350,6 +358,8 @@ export class ProjectForm {
             e.add('slug', fieldRow('Slug', this.slug, 'Lowercase letters, digits and dashes; fixed once created')).el,
             e.add('repo_path', fieldRow('Repository', this.repoBtn, 'A git repository on this machine; if the folder is not one you are offered git init')).el,
             e.add('model_scope', fieldRow('Model scope', this.scope, 'local keeps this project off hosted backends')).el,
+            e.add('base_branch', fieldRow('Base branch', this.baseBranch, 'A new effort fetches and starts from this branch tip (AF-15); empty uses the clone HEAD')).el,
+            e.add('max_running_efforts', fieldRow('Max running efforts', this.maxRunning, 'How many efforts of this project may run at once; auto-start uses it as the per-project cap (AF-15)')).el,
             e.add('cleanup_enabled', fieldRow('Cleanup pass', this.cleanup,
               'After a task passes review, run a cleanup agent and verify again; if that breaks verification the cleanup is rolled back')).el),
           e.add('feedback_env', fieldRow('Feedback environment', this.env.el,

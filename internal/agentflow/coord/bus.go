@@ -3,6 +3,7 @@ package coord
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -56,6 +57,26 @@ type Bus interface {
 	Post(ctx context.Context, room, from, to, content string) error
 }
 
+// CursorBus is the optional read API that avoids downloading a room's whole
+// history each pass. The coordinator stores each room's newest seq and asks
+// only for messages after it (AF-15).
+type CursorBus interface {
+	MessagesAfter(ctx context.Context, room string, after int64, limit int) ([]Msg, error)
+}
+
+// PlannedBus is the optional task API that reads only the coordinator's own
+// plans, rather than every task on the board.
+type PlannedBus interface {
+	TasksForPlans(ctx context.Context, plans []string) ([]Task, error)
+}
+
+// PullBus is the optional queue API an idle seat uses to claim its next task
+// itself (AF-15 item 9). A plan's claim is atomic.
+type PullBus interface {
+	PlanEligible(ctx context.Context, plan, callsign string, capabilities []string) ([]Task, error)
+	ClaimNext(ctx context.Context, plan, callsign string, capabilities []string) (Task, bool, error)
+}
+
 // HTTPBus is the real BotChat.
 type HTTPBus struct{ C *botchat.Client }
 
@@ -80,6 +101,71 @@ func (b HTTPBus) Task(ctx context.Context, id string) (Task, error) {
 	}
 	var t Task
 	return t, json.Unmarshal(raw, &t)
+}
+
+func (b HTTPBus) TasksForPlans(ctx context.Context, plans []string) ([]Task, error) {
+	seen := map[string]bool{}
+	var out []Task
+	for _, id := range plans {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ts, err := b.C.PlanTasks(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range ts {
+			out = append(out, Task{ID: t.ID, Num: t.Num, Title: t.Title, Objective: t.Objective, AcceptanceCriteria: t.AcceptanceCriteria,
+				Exclusions: t.Exclusions, State: t.State, Assignee: t.Assignee, ClaimedBy: t.ClaimedBy, PlanID: t.PlanID,
+				RoomID: t.RoomID, Capabilities: t.Capabilities, Creator: t.Creator})
+		}
+	}
+	return out, nil
+}
+
+func taskFromInfo(t botchat.TaskInfo) Task {
+	return Task{ID: t.ID, Num: t.Num, Title: t.Title, Objective: t.Objective, AcceptanceCriteria: t.AcceptanceCriteria,
+		Exclusions: t.Exclusions, State: t.State, Assignee: t.Assignee, ClaimedBy: t.ClaimedBy, PlanID: t.PlanID,
+		RoomID: t.RoomID, Capabilities: t.Capabilities, Creator: t.Creator}
+}
+
+func (b HTTPBus) PlanEligible(ctx context.Context, plan, callsign string, capabilities []string) ([]Task, error) {
+	ts, err := b.C.Eligible(ctx, plan, callsign, capabilities)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Task, 0, len(ts))
+	for _, t := range ts {
+		out = append(out, taskFromInfo(t))
+	}
+	return out, nil
+}
+
+func (b HTTPBus) ClaimNext(ctx context.Context, plan, callsign string, capabilities []string) (Task, bool, error) {
+	t, err := b.C.Claim(ctx, plan, callsign, capabilities)
+	if errors.Is(err, botchat.ErrNotFound) {
+		return Task{}, false, nil
+	}
+	if err != nil {
+		return Task{}, false, err
+	}
+	if t.ID == "" {
+		return Task{}, false, nil
+	}
+	return taskFromInfo(t), true, nil
+}
+
+func (b HTTPBus) MessagesAfter(ctx context.Context, room string, after int64, limit int) ([]Msg, error) {
+	ms, err := b.C.MessagesAfter(ctx, room, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Msg, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, Msg{Seq: m.Seq, From: m.From, Callsign: m.Callsign, Content: m.Content})
+	}
+	return out, nil
 }
 
 func (b HTTPBus) Messages(ctx context.Context, room string) ([]Msg, error) {
@@ -139,6 +225,62 @@ func (d *DryBus) Tasks(ctx context.Context) ([]Task, error)         { return d.B
 func (d *DryBus) Task(ctx context.Context, id string) (Task, error) { return d.Bus.Task(ctx, id) }
 func (d *DryBus) Messages(ctx context.Context, room string) ([]Msg, error) {
 	return d.Bus.Messages(ctx, room)
+}
+
+func (d *DryBus) TasksForPlans(ctx context.Context, plans []string) ([]Task, error) {
+	if p, ok := d.Bus.(PlannedBus); ok {
+		return p.TasksForPlans(ctx, plans)
+	}
+	ts, err := d.Bus.Tasks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	want := map[string]bool{}
+	for _, id := range plans {
+		want[id] = true
+	}
+	out := ts[:0]
+	for _, t := range ts {
+		if want[t.PlanID] {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
+func (d *DryBus) MessagesAfter(ctx context.Context, room string, after int64, limit int) ([]Msg, error) {
+	if c, ok := d.Bus.(CursorBus); ok {
+		return c.MessagesAfter(ctx, room, after, limit)
+	}
+	ms, err := d.Bus.Messages(ctx, room)
+	if err != nil {
+		return nil, err
+	}
+	out := ms[:0]
+	for _, m := range ms {
+		if m.Seq > after {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
+func (d *DryBus) PlanEligible(ctx context.Context, plan, callsign string, capabilities []string) ([]Task, error) {
+	if p, ok := d.Bus.(PullBus); ok {
+		return p.PlanEligible(ctx, plan, callsign, capabilities)
+	}
+	return nil, nil
+}
+
+func (d *DryBus) ClaimNext(ctx context.Context, plan, callsign string, capabilities []string) (Task, bool, error) {
+	if p, ok := d.Bus.(PullBus); ok {
+		t, ok, err := p.ClaimNext(ctx, plan, callsign, capabilities)
+		if ok {
+			d.record(fmt.Sprintf("claim next in %s as %s", plan, callsign))
+		}
+		return t, ok, err
+	}
+	return Task{}, false, nil
 }
 
 func (d *DryBus) Transition(_ context.Context, id, from, action, _ string) error {

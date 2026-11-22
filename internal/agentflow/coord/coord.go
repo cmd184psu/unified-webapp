@@ -157,19 +157,19 @@ func (r *run) do(ctx context.Context) error {
 		return err
 	}
 	r.st = st
-	if r.tasks, err = r.bus.Tasks(ctx); err != nil {
+	if r.tasks, err = r.loadTasks(ctx); err != nil {
 		return err
 	}
 	r.byID = map[string]Task{}
 	for _, t := range r.tasks {
 		r.byID[t.ID] = t
 	}
-	if r.reviews, err = r.bus.Messages(ctx, r.cfg.ReviewRoom); err != nil {
+	if r.reviews, err = r.loadMessages(ctx, r.cfg.ReviewRoom); err != nil {
 		return err
 	}
 	r.rooms = map[string][]Msg{}
 	for _, room := range r.cfg.Rooms {
-		if r.rooms[room], err = r.bus.Messages(ctx, room); err != nil {
+		if r.rooms[room], err = r.loadMessages(ctx, room); err != nil {
 			return err
 		}
 	}
@@ -181,7 +181,7 @@ func (r *run) do(ctx context.Context) error {
 	}
 	reworked := r.recordReviews(ctx)
 	r.devTasks(ctx, reworked, open)
-	tasks, err := r.bus.Tasks(ctx) // the reviews and merges above changed the board
+	tasks, err := r.loadTasks(ctx) // the reviews and merges above changed the board
 	if err != nil {
 		return err
 	}
@@ -198,6 +198,53 @@ func (r *run) do(ctx context.Context) error {
 		return nil
 	}
 	return r.st.Save(r.cfg.StateFile)
+}
+
+// loadTasks reads the coordinator's own plans when the service supports the
+// per-plan call, so a board of many unrelated tasks never has to fit in one
+// answer (AF-15). Tests' Bus implementations keep the simple path.
+func (r *run) loadTasks(ctx context.Context) ([]Task, error) {
+	if pb, ok := r.bus.(PlannedBus); ok {
+		plans := append([]string{}, r.cfg.OurPlans...)
+		plans = append(plans, r.cfg.ReviewPlan)
+		if len(plans) > 0 {
+			return pb.TasksForPlans(ctx, plans)
+		}
+	}
+	return r.bus.Tasks(ctx)
+}
+
+// loadMessages reads only what a room gained since the stored cursor. On the
+// first pass it reads the newest page and stores its highest seq.
+func (r *run) loadMessages(ctx context.Context, room string) ([]Msg, error) {
+	cb, ok := r.bus.(CursorBus)
+	if !ok {
+		return r.bus.Messages(ctx, room)
+	}
+	if after, seen := r.st.RoomSeqs[room]; seen {
+		ms, err := cb.MessagesAfter(ctx, room, after, 500)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range ms {
+			if m.Seq > r.st.RoomSeqs[room] {
+				r.st.RoomSeqs[room] = m.Seq
+			}
+		}
+		return ms, nil
+	}
+	ms, err := r.bus.Messages(ctx, room)
+	if err != nil {
+		return nil, err
+	}
+	var max int64
+	for _, m := range ms {
+		if m.Seq > max {
+			max = m.Seq
+		}
+	}
+	r.st.RoomSeqs[room] = max
+	return ms, nil
 }
 
 func in(s string, set ...string) bool {

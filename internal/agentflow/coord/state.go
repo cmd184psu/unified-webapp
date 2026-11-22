@@ -18,13 +18,16 @@ type State struct {
 	FedSeen   map[string][]string           `json:"fed_seen"`
 	FedEmpty  map[string]bool               `json:"fed_empty"`
 	FeedSkip  []string                      `json:"feed_skip"`
+	// RoomSeqs is the newest message seq read per room, so a pass asks only for
+	// what is new (AF-15).
+	RoomSeqs map[string]int64 `json:"room_seqs"`
 	// AFDelivered maps a delivered agentflow effort id to merged, blocked or "merge-task TASK-n".
 	AFDelivered map[string]string `json:"af_delivered"`
 
 	extra map[string]json.RawMessage
 }
 
-var stateKeys = []string{"dev", "seat_order", "fed", "fed_seen", "fed_empty", "feed_skip", "af_delivered"}
+var stateKeys = []string{"dev", "seat_order", "fed", "fed_seen", "fed_empty", "feed_skip", "af_delivered", "room_seqs"}
 
 func (s *State) UnmarshalJSON(b []byte) error {
 	type plain State
@@ -77,6 +80,9 @@ func (s *State) init() {
 	}
 	if s.AFDelivered == nil {
 		s.AFDelivered = map[string]string{}
+	}
+	if s.RoomSeqs == nil {
+		s.RoomSeqs = map[string]int64{}
 	}
 }
 

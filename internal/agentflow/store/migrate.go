@@ -83,6 +83,7 @@ var migrations = []migration{
 	{41, migration41SQL},
 	{42, migration42SQL},
 	{43, migration43SQL},
+	{44, migration44SQL},
 }
 
 // migration41SQL (AF-14) stores review requests: the branch and base, the task
@@ -150,6 +151,39 @@ INSERT INTO backends_new (name, host, api_type, cli_path, hosted, paid, slots, r
   SELECT name, host, api_type, '', hosted, paid, slots, retired, created, updated, api_key, memory_budget_mb, window_cap_tokens, duty_percent FROM backends;
 DROP TABLE backends;
 ALTER TABLE backends_new RENAME TO backends;
+`
+
+// migration44SQL (AF-15) adds the ready backlog: a parked effort status, its
+// priority and optional git start condition, and a project's base branch and
+// cap on concurrently running efforts. SQLite cannot widen the status CHECK in
+// place, so efforts is rebuilt (foreign keys off, checked before commit).
+const migration44SQL = `
+CREATE TABLE efforts_new (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project TEXT NOT NULL REFERENCES projects(slug),
+  title TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('draft', 'planning', 'plan_ready', 'plan_approved', 'compiling', 'queue_draft', 'queue_approved', 'ready', 'running', 'paused', 'complete', 'abandoned')),
+  run_state TEXT NOT NULL DEFAULT 'stopped' CHECK (run_state IN ('stopped', 'running', 'pausing', 'paused')),
+  integration_branch TEXT NOT NULL DEFAULT '',
+  base_commit TEXT NOT NULL DEFAULT '',
+  yolo INTEGER NOT NULL DEFAULT 0 CHECK (yolo IN (0, 1)),
+  deliberate INTEGER NOT NULL DEFAULT 0 CHECK (deliberate IN (0, 1)),
+  budget_tokens INTEGER NOT NULL DEFAULT 0 CHECK (budget_tokens >= 0),
+  budget_seconds INTEGER NOT NULL DEFAULT 0 CHECK (budget_seconds >= 0),
+  priority INTEGER NOT NULL DEFAULT 0,
+  start_condition TEXT NOT NULL DEFAULT '',
+  created INTEGER NOT NULL,
+  updated INTEGER NOT NULL
+);
+INSERT INTO efforts_new (id, project, title, status, run_state, integration_branch, base_commit, yolo, deliberate, budget_tokens, budget_seconds, priority, start_condition, created, updated)
+  SELECT id, project, title, status, run_state, integration_branch, base_commit, yolo, deliberate, budget_tokens, budget_seconds, 0, '', created, updated FROM efforts;
+DROP TABLE efforts;
+ALTER TABLE efforts_new RENAME TO efforts;
+CREATE UNIQUE INDEX idx_efforts_one_active ON efforts(project) WHERE status NOT IN ('complete', 'abandoned');
+ALTER TABLE projects ADD COLUMN base_branch TEXT NOT NULL DEFAULT '';
+ALTER TABLE projects ADD COLUMN max_running_efforts INTEGER NOT NULL DEFAULT 1 CHECK (max_running_efforts >= 1);
+INSERT OR IGNORE INTO settings (key, value) VALUES ('min_running_efforts', '0');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('plan_revise_limit', '3');
 `
 
 // migration40SQL (AF-13 item 6) makes the resolver advise-only unless the owner chooses
@@ -616,7 +650,7 @@ ALTER TABLE efforts ADD COLUMN budget_seconds INTEGER NOT NULL DEFAULT 0 CHECK (
 // table with foreign keys on would fire the referencing rows' ON DELETE
 // actions, so these run with foreign keys off (the documented procedure) and
 // are checked with foreign_key_check before they commit.
-var rebuildsTables = map[int]bool{6: true, 11: true, 26: true, 27: true, 29: true, 31: true, 33: true, 35: true, 43: true}
+var rebuildsTables = map[int]bool{6: true, 11: true, 26: true, 27: true, 29: true, 31: true, 33: true, 35: true, 43: true, 44: true}
 
 // migration6SQL (F2) lets a stage have the cleanup role (AT11) and adds the
 // per-project cleanup switch. stages is rebuilt with the same columns, so rows

@@ -103,6 +103,15 @@ func (r *run) feed(ctx context.Context) error {
 			r.st.FedSeen[cs] = seen
 			_ = r.bus.Post(ctx, r.cfg.EngineRoom, r.cfg.Me, cs, fmt.Sprintf("@%s new task in your queue file %s (%s). Read that file and do only that task.", cs, r.queuePath(cs), nxt.ID))
 		}
+		if cur == nil && len(queue) == 0 {
+			// AF-15 item 9: an idle seat pulls the next eligible task itself. A
+			// seat_order entry or a rework still wins because they filled queue
+			// above; this only runs when both are empty.
+			if t, ok := r.pullTask(ctx, seat); ok {
+				cur = t
+				queue = nil
+			}
+		}
 		if cur == nil && len(queue) == 0 && !r.st.FedEmpty[cs] {
 			r.alert("", "SPOON: %s has an empty queue and no open task in its plans", cs)
 		}
@@ -126,6 +135,41 @@ func (r *run) feed(ctx context.Context) error {
 }
 
 func (r *run) queuePath(cs string) string { return filepath.Join(r.cfg.QueueDir, cs+".md") }
+
+// pullTask claims the next eligible task in one of our plans for an idle
+// seat, filtered by the seat's capability tags. The claim is atomic on the
+// service; only a plan with an eligible task is asked to claim.
+func (r *run) pullTask(ctx context.Context, seat Seat) (*Task, bool) {
+	pb, ok := r.bus.(PullBus)
+	if !ok {
+		return nil, false
+	}
+	for _, plan := range r.cfg.OurPlans {
+		elig, err := pb.PlanEligible(ctx, plan, seat.Callsign, seat.Capabilities)
+		if err != nil || len(elig) == 0 {
+			continue
+		}
+		t, claimed, err := pb.ClaimNext(ctx, plan, seat.Callsign, seat.Capabilities)
+		if err != nil || !claimed {
+			continue
+		}
+		r.tasks = append(r.tasks, t)
+		r.byID[t.ID] = t
+		r.decide("claimed", t.ID, seat.Callsign, "%s", clipStr(t.Title, 90))
+		r.st.Fed[seat.Callsign] = t.ID
+		var seen []string
+		for _, m := range r.rooms[r.cfg.EngineRoom] {
+			if m.Sender() == seat.Callsign {
+				seen = append(seen, m.ID)
+			}
+		}
+		r.st.FedSeen[seat.Callsign] = seen
+		_ = r.bus.Post(ctx, r.cfg.EngineRoom, r.cfg.Me, seat.Callsign,
+			fmt.Sprintf("@%s claimed %s from the plan queue. Read your queue file %s and do only that task.", seat.Callsign, t.ID, r.queuePath(seat.Callsign)))
+		return &t, true
+	}
+	return nil, false
+}
 
 // finished: the seat posted DONE for its task (or the verdict of a review task) since the task
 // was fed; reports that existed then (a reworked task's old DONE) do not count.

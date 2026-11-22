@@ -281,6 +281,11 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	ok("POST", base+"/queue/seed", `{"tasks":[]}`, 403) // not a smoke-* project
 	ok("POST", base+"/queue/approve", `{"hash":`+strconv.Quote(q.Hash)+`}`, 200)
 
+	// AF-15: park the prepared effort, list the backlog, and return it.
+	ok("POST", base+"/park", `{"priority":4}`, 200)
+	ok("GET", "/api/backlog", "", 200)
+	ok("POST", base+"/unpark", ``, 200)
+
 	// Live streams: the event stream and one stage's output.
 	for _, path := range []string{"/api/events", "/api/stages/1/stream"} {
 		visited[pattern("GET", path)] = true
@@ -334,7 +339,13 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	e.waitEffort("demo", ef.ID, model.EffortComplete)
 	ok("POST", "/api/projects/demo/run/run-one", ``, 409) // nothing left to run
 	ok("GET", base+"/git-commands", "", 200)
-	ok("GET", "/api/efforts/"+id+"/export", "", 200)
+	var bundle []byte
+	bundle = ok("GET", "/api/efforts/"+id+"/export", "", 200)
+	var importedBundle struct{ ID int64 }
+	if err := json.Unmarshal(ok("POST", "/api/import?project=other", string(bundle), 201), &importedBundle); err != nil || importedBundle.ID == 0 {
+		t.Fatalf("bundle import: %v", err)
+	}
+	ok("POST", "/api/projects/other/efforts/"+strconv.FormatInt(importedBundle.ID, 10)+"/abandon", `{"confirm":true}`, 0)
 
 	// The second half of the split FRD becomes an effort of its own.
 	var part struct{ ID int64 }

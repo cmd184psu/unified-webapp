@@ -23,7 +23,7 @@ type AttentionItem struct {
 	Effort  int64  `json:"effort"`
 	// Task is the task key, empty for an item about the whole effort.
 	Task string `json:"task,omitempty"`
-	// Kind is stalled, draft_failed, plan_halted, compile_halted, task_halted,
+	// Kind is started_from_backlog, stalled, draft_failed, plan_halted, compile_halted, task_halted,
 	// task_needs_files, task_resolved, task_unassignable, seat_question, seat_silent, or service_hold (Project
 	// and Effort are then zero).
 	Kind    string `json:"kind"`
@@ -108,6 +108,10 @@ func (e *Engine) effortAttention(ctx context.Context, project string, ef model.E
 			}
 			add("stalled", "", msg, at)
 		}
+	}
+	if ev, ok := last[eventBacklogStart]; ok && ef.Status == model.EffortRunning {
+		// AF-15: say plainly that this run was not asked for by a person.
+		add("started_from_backlog", "", "started from backlog", ev.TS)
 	}
 	switch ef.Status {
 	case model.EffortDraft:

@@ -343,9 +343,9 @@ func (e *Engine) dispatchOne(ctx context.Context, v *view, p store.Project) (boo
 			errs = append(errs, err)
 			continue
 		}
-		if ef.Status == model.EffortQueueAppr {
+		if ef.Status == model.EffortQueueAppr || ef.Status == model.EffortReady {
 			st := model.EffortRunning
-			if _, err := s.UpdateEffortStatusIf(ctx, SystemActor, ef.ID, model.EffortQueueAppr, st); err != nil {
+			if _, err := s.UpdateEffortStatusIf(ctx, SystemActor, ef.ID, ef.Status, st); err != nil {
 				errs = append(errs, err)
 			}
 		}

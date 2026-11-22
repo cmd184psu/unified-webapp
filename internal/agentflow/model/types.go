@@ -22,16 +22,19 @@ const (
 	EffortCompiling    = "compiling"
 	EffortQueueDraft   = "queue_draft"
 	EffortQueueAppr    = "queue_approved"
-	EffortRunning      = "running"
-	EffortPaused       = "paused"
-	EffortComplete     = "complete"
-	EffortAbandoned    = "abandoned"
+	// EffortReady is a prepared effort parked in the backlog: its FRD, plan and
+	// compiled queue are approved, but it is not running yet (AF-15).
+	EffortReady     = "ready"
+	EffortRunning   = "running"
+	EffortPaused    = "paused"
+	EffortComplete  = "complete"
+	EffortAbandoned = "abandoned"
 )
 
 // EffortStatuses lists every effort status in lifecycle order.
 var EffortStatuses = []string{
 	EffortDraft, EffortPlanning, EffortPlanReady, EffortPlanApproved, EffortCompiling,
-	EffortQueueDraft, EffortQueueAppr, EffortRunning, EffortPaused, EffortComplete, EffortAbandoned,
+	EffortQueueDraft, EffortQueueAppr, EffortReady, EffortRunning, EffortPaused, EffortComplete, EffortAbandoned,
 }
 
 // Run states (state_model.run_states). Persisted on an effort for display only.
@@ -101,8 +104,13 @@ type Effort struct {
 	// run time (AT12); 0 means no limit.
 	BudgetTokens  int64 `json:"budget_tokens"`
 	BudgetSeconds int64 `json:"budget_seconds"`
-	Created       int64 `json:"created"`
-	Updated       int64 `json:"updated"`
+	// Priority orders ready efforts in the backlog; higher starts first (AF-15).
+	Priority int64 `json:"priority"`
+	// StartCondition optionally holds a ready effort back until a git condition
+	// holds, for example "branch feature/turn-loop contains feature/fs3-engine-10".
+	StartCondition string `json:"start_condition,omitempty"`
+	Created        int64  `json:"created"`
+	Updated        int64  `json:"updated"`
 }
 
 // Doc is one immutable revision of an effort's FRD, plan or review.

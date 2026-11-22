@@ -58,8 +58,22 @@ type Project struct {
 	DockerMounts []string
 	// DockerSELinux relabels the bind mounts (:z) for hosts that need it.
 	DockerSELinux bool
-	Created       time.Time
-	Updated       time.Time
+	// BaseBranch is the branch a new effort starts from (AF-15); empty uses
+	// the clone's HEAD.
+	BaseBranch string
+	// MaxRunningEfforts caps how many efforts of this project may run at once
+	// (AF-15); at least 1.
+	MaxRunningEfforts int
+	Created           time.Time
+	Updated           time.Time
+}
+
+// maxRunning is the stored cap, treating the zero value as the default of 1.
+func maxRunning(n int) int {
+	if n < 1 {
+		return 1
+	}
+	return n
 }
 
 func projectSlugs(ctx context.Context, q querier) ([]string, error) {
@@ -96,6 +110,12 @@ func (s *Store) validateProject(p Project) (resolved string, err error) {
 	}
 	if p.ModelScope != "local" && p.ModelScope != "any" {
 		return "", Invalid("model_scope", "must be local or any")
+	}
+	if p.MaxRunningEfforts < 0 {
+		return "", Invalid("max_running_efforts", "must be 1 or more")
+	}
+	if strings.HasPrefix(strings.TrimSpace(p.BaseBranch), "-") {
+		return "", Invalid("base_branch", "must be a branch name, not an option")
 	}
 	for i, c := range p.FeedbackCmds {
 		if strings.TrimSpace(c) == "" {
@@ -400,8 +420,8 @@ func (s *Store) CreateProject(ctx context.Context, actor string, p Project) erro
 		}
 		now := time.Now().UnixMilli()
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO projects (slug, repo_path, model_scope, feedback_cmds_json, definition_of_done_json, cleanup_enabled, toolchains_json, feedback_env_json, worker_env_json, verify_in_copy, sandbox, docker_image, docker_network, docker_mounts_json, docker_selinux, created, updated)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, p.Slug, repo, p.ModelScope, fb, dod, b2i(p.CleanupEnabled), tl, env, wenv, b2i(p.VerifyInCopy), sandboxMode(p), p.DockerImage, dockerNetwork(p), dm, b2i(p.DockerSELinux), now, now); err != nil {
+			INSERT INTO projects (slug, repo_path, model_scope, feedback_cmds_json, definition_of_done_json, cleanup_enabled, toolchains_json, feedback_env_json, worker_env_json, verify_in_copy, sandbox, docker_image, docker_network, docker_mounts_json, docker_selinux, base_branch, max_running_efforts, created, updated)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, p.Slug, repo, p.ModelScope, fb, dod, b2i(p.CleanupEnabled), tl, env, wenv, b2i(p.VerifyInCopy), sandboxMode(p), p.DockerImage, dockerNetwork(p), dm, b2i(p.DockerSELinux), p.BaseBranch, maxRunning(p.MaxRunningEfforts), now, now); err != nil {
 			return err
 		}
 		if err := writeProjectBody(ctx, tx, p); err != nil {
@@ -451,8 +471,8 @@ func (s *Store) UpdateProject(ctx context.Context, actor string, p Project) erro
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE projects SET repo_path = ?, model_scope = ?, feedback_cmds_json = ?, definition_of_done_json = ?, cleanup_enabled = ?, toolchains_json = ?, feedback_env_json = ?, worker_env_json = ?, verify_in_copy = ?, sandbox = ?, docker_image = ?, docker_network = ?, docker_mounts_json = ?, docker_selinux = ?, updated = ?
-			WHERE slug = ?`, repo, p.ModelScope, fb, dod, b2i(p.CleanupEnabled), tl, env, wenv, b2i(p.VerifyInCopy), sandboxMode(p), p.DockerImage, dockerNetwork(p), dm, b2i(p.DockerSELinux), time.Now().UnixMilli(), p.Slug); err != nil {
+			UPDATE projects SET repo_path = ?, model_scope = ?, feedback_cmds_json = ?, definition_of_done_json = ?, cleanup_enabled = ?, toolchains_json = ?, feedback_env_json = ?, worker_env_json = ?, verify_in_copy = ?, sandbox = ?, docker_image = ?, docker_network = ?, docker_mounts_json = ?, docker_selinux = ?, base_branch = ?, max_running_efforts = ?, updated = ?
+			WHERE slug = ?`, repo, p.ModelScope, fb, dod, b2i(p.CleanupEnabled), tl, env, wenv, b2i(p.VerifyInCopy), sandboxMode(p), p.DockerImage, dockerNetwork(p), dm, b2i(p.DockerSELinux), p.BaseBranch, maxRunning(p.MaxRunningEfforts), time.Now().UnixMilli(), p.Slug); err != nil {
 			return err
 		}
 		if err := writeProjectBody(ctx, tx, p); err != nil {
@@ -464,7 +484,7 @@ func (s *Store) UpdateProject(ctx context.Context, actor string, p Project) erro
 }
 
 func loadProjects(ctx context.Context, q querier, slug string) ([]Project, error) {
-	query := `SELECT slug, repo_path, model_scope, feedback_cmds_json, definition_of_done_json, cleanup_enabled, toolchains_json, feedback_env_json, worker_env_json, verify_in_copy, sandbox, docker_image, docker_network, docker_mounts_json, docker_selinux, created, updated FROM projects`
+	query := `SELECT slug, repo_path, model_scope, feedback_cmds_json, definition_of_done_json, cleanup_enabled, toolchains_json, feedback_env_json, worker_env_json, verify_in_copy, sandbox, docker_image, docker_network, docker_mounts_json, docker_selinux, base_branch, max_running_efforts, created, updated FROM projects`
 	var args []any
 	if slug != "" {
 		query += ` WHERE slug = ?`
@@ -480,7 +500,7 @@ func loadProjects(ctx context.Context, q querier, slug string) ([]Project, error
 		var fb, dod, tl, env, wenv, dm string
 		var cleanup, inCopy, selinux int
 		var created, updated int64
-		if err := rows.Scan(&p.Slug, &p.RepoPath, &p.ModelScope, &fb, &dod, &cleanup, &tl, &env, &wenv, &inCopy, &p.Sandbox, &p.DockerImage, &p.DockerNetwork, &dm, &selinux, &created, &updated); err != nil {
+		if err := rows.Scan(&p.Slug, &p.RepoPath, &p.ModelScope, &fb, &dod, &cleanup, &tl, &env, &wenv, &inCopy, &p.Sandbox, &p.DockerImage, &p.DockerNetwork, &dm, &selinux, &p.BaseBranch, &p.MaxRunningEfforts, &created, &updated); err != nil {
 			rows.Close()
 			return nil, err
 		}

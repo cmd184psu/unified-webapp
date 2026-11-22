@@ -31,6 +31,7 @@ var (
 	ErrTamperedWorktree = errors.New("gitsvc: worktree .git entry was tampered with")
 	ErrGitlink          = errors.New("gitsvc: worktree contains a nested repository (gitlink)")
 	ErrForeignBranch    = errors.New("gitsvc: branch exists and was not created by agentflow")
+	ErrNotFound         = errors.New("gitsvc: revision or branch not found")
 )
 
 // GitError is a failed git invocation.
@@ -299,6 +300,74 @@ func (s *Service) Head(ctx context.Context, repo string) (HeadInfo, error) {
 		return HeadInfo{}, err
 	}
 	return HeadInfo{Commit: commit, Branch: branch}, nil
+}
+
+// Fetch updates the repository's remote-tracking branches. A repository
+// without a remote is left alone, so a local-only project still gets a base.
+func (s *Service) Fetch(ctx context.Context, repo string) error {
+	if _, err := s.run(ctx, repo, "remote", "get-url", "origin"); err != nil {
+		return nil
+	}
+	_, err := s.run(ctx, repo, "fetch", "--prune", "origin")
+	return err
+}
+
+// BranchTip returns the commit a branch names, preferring the freshly fetched
+// origin copy and falling back to the local branch. base is a plain branch
+// name such as feature/diplomacy-screen; empty means HEAD.
+func (s *Service) BranchTip(ctx context.Context, repo, base string) (string, error) {
+	if base == "" {
+		h, err := s.Head(ctx, repo)
+		return h.Commit, err
+	}
+	for _, ref := range []string{"refs/remotes/origin/" + base, "refs/heads/" + base} {
+		if !strings.HasPrefix(base, "-") {
+			if sha, err := s.resolveCommit(ctx, repo, ref); err == nil {
+				return sha, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("branch %q: %w", base, ErrNotFound)
+}
+
+// BranchContains reports whether branch's history contains ref (a commit or
+// another branch), trying the remote copy first. It never modifies the repo.
+func (s *Service) BranchContains(ctx context.Context, repo, branch, ref string) (bool, error) {
+	if strings.HasPrefix(branch, "-") || strings.HasPrefix(ref, "-") {
+		return false, ErrInvalidName
+	}
+	branchRef := refsTry(ctx, s, repo, branch)
+	if branchRef == "" {
+		return false, fmt.Errorf("branch %q: %w", branch, ErrNotFound)
+	}
+	refCommit := ""
+	for _, cand := range []string{ref, "refs/remotes/origin/" + ref, "refs/heads/" + ref} {
+		if c, err := s.resolveCommit(ctx, repo, cand); err == nil {
+			refCommit = c
+			break
+		}
+	}
+	if refCommit == "" {
+		return false, fmt.Errorf("revision %q: %w", ref, ErrNotFound)
+	}
+	if _, err := s.run(ctx, repo, "merge-base", "--is-ancestor", refCommit, branchRef); err != nil {
+		var ge *GitError
+		var ee *exec.ExitError
+		if (errors.As(err, &ge) && errors.As(ge.Err, &ee) && ee.ExitCode() == 1) || errors.As(err, &ee) && ee.ExitCode() == 1 {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func refsTry(ctx context.Context, s *Service, repo, branch string) string {
+	for _, ref := range []string{"refs/remotes/origin/" + branch, "refs/heads/" + branch} {
+		if _, err := s.resolveCommit(ctx, repo, ref); err == nil {
+			return ref
+		}
+	}
+	return ""
 }
 
 // resolveCommit verifies rev names a commit and returns its full hash.

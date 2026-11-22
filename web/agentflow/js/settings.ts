@@ -36,6 +36,14 @@ export const LIMIT_FIELDS: LimitField[] = [
   { key: 'resolver_mode', label: 'Resolver mode', hint: 'What the resolver may do with a stuck task: off, advise (its decision waits for you to apply it; the default) or auto (applied at once)' },
 ];
 
+// BACKLOG_FIELDS controls AF-15's ready backlog: how many efforts auto-start
+// keeps running, and how many revise rounds a plan gets before a person is
+// asked to settle it.
+const BACKLOG_FIELDS: LimitField[] = [
+  { key: 'min_running_efforts', label: 'Minimum running efforts', hint: 'Auto-start ready efforts until this many run across all projects; 0 turns auto-start off' },
+  { key: 'plan_revise_limit', label: 'Plan revise limit', hint: 'After this many revise rounds on the same FRD, stop and ask a person; 3 by default' },
+];
+
 const EXECUTION_FIELDS: LimitField[] = [
   { key: 'verify_slots', label: 'Verify slots', hint: 'Verify and merge stages that run at once, 1 to 64' },
   { key: 'context_floor_tokens', label: 'Context floor', hint: 'Tokens of context assumed for a model whose served window is not known, 2048 or more' },
@@ -253,8 +261,8 @@ export class SettingsView {
   render(): void {
     this.inputs.clear();
     this.errors = new FormErrors();
-    const limits = h('div', { class: 'profile-fields' }, ...LIMIT_FIELDS.map((f) => this.row(f)));
-    const exec = h('div', { class: 'profile-fields' }, ...EXECUTION_FIELDS.map((f) => this.row(f)));
+    const limits = h('div', { class: 'profile-fields' }, ...LIMIT_FIELDS.map((f) => this.row(f)));		const exec = h('div', { class: 'profile-fields' }, ...EXECUTION_FIELDS.map((f) => this.row(f)));
+		const backlog = h('div', { class: 'profile-fields' }, ...BACKLOG_FIELDS.map((f) => this.row(f)));
     const path = this.row({ key: 'opencode_path', label: 'opencode path', hint: 'Program to run' });
     const bcUrl = this.row({ key: 'botchat_url', label: 'BotChat address', hint: 'e.g. https://botchat.example.net; empty turns the relay off' });
     const dispatch = checkbox('botchat_dispatch', str(this.values.botchat_mode) === 'dispatch');
@@ -268,8 +276,8 @@ export class SettingsView {
     this.auto?.stop();
     this.auto = autosave({ snapshot: () => JSON.stringify(this.body()), save: () => this.save() });
     const root = h('div', { class: 'settings-host settings-host-drawer' },
-        section('Limits', limits),
-        section('Execution', exec),
+        section('Limits', limits),				section('Execution', exec),
+				section('Backlog', backlog),
         section('opencode', path, this.ocHost),
         section('BotChat', bcUrl, bcKey, bcMode.el),
         section('Service', this.svcHost),

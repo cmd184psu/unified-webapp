@@ -125,6 +125,11 @@ func (f *planFix) effortStages(role string) []model.Stage {
 func TestC10_CriticNeverSeesTheArchitectAndTheLoopStopsAtMaxRounds(t *testing.T) {
 	f := newPlanFix(t, false)
 	f.standardPool()
+	// This test is about plan_max_rounds (5); keep AF-15's default revise cap
+	// (3) out of the way so the older stop is the one observed.
+	if err := f.st.UpdateSettings(context.Background(), "test", map[string]string{"plan_revise_limit": "10"}); err != nil {
+		t.Fatal(err)
+	}
 	for i := 0; i < 5; i++ {
 		f.fake.Script("planner", runner.Step{Reply: planReply})
 		f.fake.Script("architect", runner.Step{Reply: archRevise})

@@ -117,6 +117,9 @@ var api = {
   clearStrikes: (backend, model, role) => send("POST", "/api/strikes/clear", { backend, model, role }),
   // Efforts
   efforts: (slug) => get(`${proj(slug)}/efforts`),
+  backlog: (o) => get("/api/backlog", o),
+  parkEffort: (slug, id, priority, startCondition) => send("POST", `${eff(slug, id)}/park`, { priority, start_condition: startCondition }),
+  unparkEffort: (slug, id) => send("POST", `${eff(slug, id)}/unpark`),
   effort: (slug, id) => get(eff(slug, id)),
   createEffort: (slug, title, deliberate, o, budget) => send("POST", `${proj(slug)}/efforts`, { title, deliberate, ...budget }, o),
   patchEffort: (slug, id, patch, o) => send("PATCH", eff(slug, id), patch, o),
@@ -677,6 +680,7 @@ var SHAPES = {
   refresh: [poly("23 4 23 10 17 10"), poly("1 20 1 14 7 14"), path("M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15")],
   copy: [["rect", { x: "9", y: "9", width: "13", height: "13", rx: "2" }], path("M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1")],
   up: [line(12, 19, 12, 5), poly("5 12 12 5 19 12")],
+  down: [line(12, 5, 12, 19), poly("19 12 12 19 5 12")],
   folder: [path("M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z")],
   probe: [["circle", { cx: "11", cy: "11", r: "8" }], line(21, 21, 16.65, 16.65)],
   view: [path("M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"), ["circle", { cx: "12", cy: "12", r: "3" }]],
@@ -1779,6 +1783,10 @@ var LIMIT_FIELDS = [
   { key: "verify_timeout", label: "Verify timeout", hint: "A duration such as 20m" },
   { key: "resolver_mode", label: "Resolver mode", hint: "What the resolver may do with a stuck task: off, advise (its decision waits for you to apply it; the default) or auto (applied at once)" }
 ];
+var BACKLOG_FIELDS = [
+  { key: "min_running_efforts", label: "Minimum running efforts", hint: "Auto-start ready efforts until this many run across all projects; 0 turns auto-start off" },
+  { key: "plan_revise_limit", label: "Plan revise limit", hint: "After this many revise rounds on the same FRD, stop and ask a person; 3 by default" }
+];
 var EXECUTION_FIELDS = [
   { key: "verify_slots", label: "Verify slots", hint: "Verify and merge stages that run at once, 1 to 64" },
   { key: "context_floor_tokens", label: "Context floor", hint: "Tokens of context assumed for a model whose served window is not known, 2048 or more" },
@@ -2016,6 +2024,7 @@ var SettingsView = class {
     this.errors = new FormErrors();
     const limits = h("div", { class: "profile-fields" }, ...LIMIT_FIELDS.map((f) => this.row(f)));
     const exec = h("div", { class: "profile-fields" }, ...EXECUTION_FIELDS.map((f) => this.row(f)));
+    const backlog = h("div", { class: "profile-fields" }, ...BACKLOG_FIELDS.map((f) => this.row(f)));
     const path2 = this.row({ key: "opencode_path", label: "opencode path", hint: "Program to run" });
     const bcUrl = this.row({ key: "botchat_url", label: "BotChat address", hint: "e.g. https://botchat.example.net; empty turns the relay off" });
     const dispatch2 = checkbox("botchat_dispatch", str(this.values.botchat_mode) === "dispatch");
@@ -2036,6 +2045,7 @@ var SettingsView = class {
       { class: "settings-host settings-host-drawer" },
       section("Limits", limits),
       section("Execution", exec),
+      section("Backlog", backlog),
       section("opencode", path2, this.ocHost),
       section("BotChat", bcUrl, bcKey, bcMode.el),
       section("Service", this.svcHost),
@@ -5024,6 +5034,10 @@ var ProjectForm = class {
     });
     this.drawRepo();
     this.scope = selectInput("model_scope", SCOPES, p?.model_scope ?? "local");
+    this.baseBranch = textInput("base_branch", p?.base_branch ?? "", { placeholder: "feature/diplomacy-screen" });
+    this.baseBranch.addEventListener("input", () => this.bump());
+    this.maxRunning = textInput("max_running_efforts", String(p?.max_running_efforts ?? 1), { type: "number", placeholder: "1" });
+    this.maxRunning.addEventListener("input", () => this.bump());
     this.cleanup = checkbox("cleanup_enabled", p?.cleanup_enabled ?? false);
     for (const [name] of TOOLCHAINS) this.toolchains.set(name, checkbox(`toolchain_${name}`, (p?.toolchains ?? []).includes(name)));
     this.verifyInCopy = checkbox("verify_in_copy", p?.verify_in_copy ?? false);
@@ -5085,6 +5099,8 @@ var ProjectForm = class {
       slug: this.slug.value.trim(),
       repo_path: this.repoPath,
       model_scope: this.scope.value,
+      base_branch: this.baseBranch.value.trim(),
+      max_running_efforts: Number(this.maxRunning.value) || 1,
       feedback_cmds: this.cmds.read().filter((c) => c !== ""),
       cleanup_enabled: this.cleanup.checked,
       plugins: this.plugins.read().filter((pl) => pl.name !== "" || pl.version !== ""),
@@ -5097,7 +5113,7 @@ var ProjectForm = class {
   async save() {
     this.errors.clear();
     const body = this.body();
-    const attempt = () => this.mode.project ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, feedback_cmds: body.feedback_cmds, cleanup_enabled: body.cleanup_enabled, plugins: body.plugins, toolchains: body.toolchains, feedback_env: body.feedback_env, verify_in_copy: body.verify_in_copy, ...this.dodPatch() }, { quiet: true }) : this.deps.createProject(body, { quiet: true });
+    const attempt = () => this.mode.project ? this.deps.patchProject(this.mode.project.slug, { repo_path: body.repo_path, model_scope: body.model_scope, base_branch: body.base_branch, max_running_efforts: body.max_running_efforts, feedback_cmds: body.feedback_cmds, cleanup_enabled: body.cleanup_enabled, plugins: body.plugins, toolchains: body.toolchains, feedback_env: body.feedback_env, verify_in_copy: body.verify_in_copy, ...this.dodPatch() }, { quiet: true }) : this.deps.createProject(body, { quiet: true });
     let saved;
     try {
       saved = await attempt();
@@ -5128,7 +5144,7 @@ var ProjectForm = class {
     this.errors.clear();
     const b = this.body();
     try {
-      await this.deps.patchProject(p.slug, { repo_path: b.repo_path, model_scope: b.model_scope, feedback_cmds: b.feedback_cmds, cleanup_enabled: b.cleanup_enabled, plugins: b.plugins, toolchains: b.toolchains, feedback_env: b.feedback_env, verify_in_copy: b.verify_in_copy, ...this.dodPatch() }, { quiet: true });
+      await this.deps.patchProject(p.slug, { repo_path: b.repo_path, model_scope: b.model_scope, base_branch: b.base_branch, max_running_efforts: b.max_running_efforts, feedback_cmds: b.feedback_cmds, cleanup_enabled: b.cleanup_enabled, plugins: b.plugins, toolchains: b.toolchains, feedback_env: b.feedback_env, verify_in_copy: b.verify_in_copy, ...this.dodPatch() }, { quiet: true });
     } catch (err) {
       this.errors.show(err);
       return false;
@@ -5256,6 +5272,8 @@ var ProjectForm = class {
           e.add("slug", fieldRow("Slug", this.slug, "Lowercase letters, digits and dashes; fixed once created")).el,
           e.add("repo_path", fieldRow("Repository", this.repoBtn, "A git repository on this machine; if the folder is not one you are offered git init")).el,
           e.add("model_scope", fieldRow("Model scope", this.scope, "local keeps this project off hosted backends")).el,
+          e.add("base_branch", fieldRow("Base branch", this.baseBranch, "A new effort fetches and starts from this branch tip (AF-15); empty uses the clone HEAD")).el,
+          e.add("max_running_efforts", fieldRow("Max running efforts", this.maxRunning, "How many efforts of this project may run at once; auto-start uses it as the per-project cap (AF-15)")).el,
           e.add("cleanup_enabled", fieldRow(
             "Cleanup pass",
             this.cleanup,
@@ -5766,6 +5784,128 @@ function mountReviewsPage(host) {
   return new ReviewsPage(host, api).mount();
 }
 
+// web/agentflow/js/backlog.ts
+import { showToast as showToast12 } from "/shared/dist/shared.mjs";
+var defaultBacklogDeps = (openProject) => ({
+  backlog: api.backlog,
+  projects: api.projects,
+  efforts: api.efforts,
+  patchEffort: api.patchEffort,
+  park: api.parkEffort,
+  unpark: api.unparkEffort,
+  openProject,
+  notify: (m) => void showToast12(m, "success")
+});
+var Backlog = class {
+  constructor(root, deps) {
+    this.root = root;
+    this.deps = deps;
+    this.ready = [];
+    this.prepared = [];
+    this.host = h("div", { class: "backlog-host", attrs: { "data-role": "backlog" } });
+    this.error = h("p", { class: "field-error", attrs: { hidden: "", "data-role": "backlog-error" } });
+    this.busy = false;
+  }
+  mount() {
+    replace(this.root, this.host);
+    void this.load();
+    return () => void 0;
+  }
+  async load() {
+    try {
+      this.ready = await this.deps.backlog();
+      const projects = await this.deps.projects();
+      const prepared = [];
+      for (const p of projects) {
+        const list3 = await this.deps.efforts(p.slug);
+        prepared.push(...list3.filter((e) => e.status === "queue_approved"));
+      }
+      this.prepared = prepared;
+      this.error.setAttribute("hidden", "");
+      this.render();
+    } catch {
+    }
+  }
+  priority(e) {
+    return Number(e.priority ?? 0);
+  }
+  async run(action, said) {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      await action();
+      this.deps.notify(said);
+      await this.load();
+    } catch {
+    } finally {
+      this.busy = false;
+    }
+  }
+  move(e, delta) {
+    const next = this.priority(e) + delta;
+    void this.run(() => this.deps.patchEffort(e.project, e.id, { priority: next }), `Priority ${next}`);
+  }
+  condition(e) {
+    const input = h("input", {
+      class: "ui-input",
+      attrs: { type: "text", value: e.start_condition ?? "", placeholder: "branch main contains feature/turn-loop", "data-field": "start_condition" }
+    });
+    const save = button("Save condition", () => {
+      void this.run(() => this.deps.patchEffort(e.project, e.id, { start_condition: input.value.trim() }), "Start condition saved");
+    }, { field: "save-condition", icon: "save" });
+    return h("div", { class: "inline-row" }, input, save);
+  }
+  row(e, prepared) {
+    return h(
+      "div",
+      { class: "backlog-row", attrs: { "data-effort": e.id, "data-project": e.project } },
+      h(
+        "div",
+        { class: "backlog-main" },
+        h(
+          "div",
+          { class: "backlog-title" },
+          h("strong", { text: e.title }),
+          badge(e.status, e.status === "ready" ? "ok" : "warn"),
+          h("span", { class: "field-hint", text: `${e.project} \xB7 #${e.id} \xB7 priority ${this.priority(e)}` })
+        ),
+        h(
+          "div",
+          { class: "backlog-meta" },
+          h("span", { text: `base ${e.base_commit ? e.base_commit.slice(0, 10) : "not set"}` }),
+          h("span", { text: e.budget_tokens || e.budget_seconds ? "budget set" : "no budget: auto-start skips it" })
+        ),
+        prepared ? null : this.condition(e)
+      ),
+      h(
+        "div",
+        { class: "backlog-actions" },
+        button("Up", () => this.move(e, 1), { field: "priority-up", icon: "up", word: true }),
+        button("Down", () => this.move(e, -1), { field: "priority-down", icon: "down", word: true }),
+        prepared ? button("Park", () => void this.run(() => this.deps.park(e.project, e.id, this.priority(e), e.start_condition), "Parked in the backlog"), { field: "park", icon: "pause", word: true }) : button("Unpark", () => void this.run(() => this.deps.unpark(e.project, e.id), "Unparked"), { field: "unpark", icon: "start", word: true }),
+        button("Open", () => this.deps.openProject(e.project), { field: "open-project", icon: "view", word: true })
+      )
+    );
+  }
+  render() {
+    replace(
+      this.host,
+      h(
+        "div",
+        { class: "section-head" },
+        h("h2", { text: "Backlog" }),
+        button("Refresh", () => void this.load(), { field: "backlog-refresh", icon: "refresh", word: true }),
+        h("p", { class: "field-hint", text: "Ready efforts start by themselves when fewer than the setting minimum are running, best priority first, with a budget set and their git condition met." })
+      ),
+      this.error,
+      h("h3", { text: `Ready (${this.ready.length})` }),
+      ...this.ready.length ? this.ready.map((e) => this.row(e, false)) : [h("p", { class: "field-hint", text: "No parked efforts." })],
+      h("h3", { text: `Prepared, not parked (${this.prepared.length})` }),
+      ...this.prepared.length ? this.prepared.map((e) => this.row(e, true)) : [h("p", { class: "field-hint", text: "No queue-approved efforts waiting to be parked." })]
+    );
+  }
+};
+
 // web/agentflow/js/main.ts
 var themes = new ThemeManager({ module: "agentflow", default: "dark" });
 themes.apply();
@@ -5776,6 +5916,7 @@ var TABS = [
     mount: (host) => new Overview(host, defaultDeps((slug) => showTab("project", slug))).mount()
   },
   { id: "project", label: "Project", mount: mountProjectTab },
+  { id: "backlog", label: "Backlog", mount: (host) => new Backlog(host, defaultBacklogDeps((slug) => showTab("project", slug))).mount() },
   { id: "backends", label: "Backends", mount: mountBackends },
   { id: "stats", label: "Stats", mount: mountStats },
   { id: "seats", label: "Seats", mount: mountSeatsPage },

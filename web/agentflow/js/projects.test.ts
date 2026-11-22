@@ -72,7 +72,7 @@ test('PJ1: create sends slug, repo_path, scope and the feedback commands as argv
   allByField(t.host, 'feedback_cmd')[1].value = '   ';
   button(t.host, 'Create project').click();
   await flush();
-  eq(t.bodies.create, { slug: 'demo', repo_path: '/srv/demo', model_scope: 'any', feedback_cmds: ['go test ./...'], cleanup_enabled: true, plugins: [], toolchains: [], feedback_env: {}, verify_in_copy: false });
+  eq(t.bodies.create, { slug: 'demo', repo_path: '/srv/demo', model_scope: 'any', base_branch: '', max_running_efforts: 1, feedback_cmds: ['go test ./...'], cleanup_enabled: true, plugins: [], toolchains: [], feedback_env: {}, verify_in_copy: false });
   eq(t.done, ['demo']);
 });
 
@@ -180,7 +180,7 @@ test('edit: the slug is fixed, the save patches, and the role editor shows the g
   ok(worker.textContent.includes('Uses the global list: b1/m1'), 'fallback note: ' + worker.textContent);
   await pick(t, '/r/moved');
   await settle();
-  eq(t.bodies.patch, { repo_path: '/r/moved', model_scope: 'local', feedback_cmds: ['go vet ./...'], cleanup_enabled: false, plugins: [], toolchains: [], feedback_env: {}, verify_in_copy: false });
+  eq(t.bodies.patch, { repo_path: '/r/moved', model_scope: 'local', base_branch: '', max_running_efforts: 1, feedback_cmds: ['go vet ./...'], cleanup_enabled: false, plugins: [], toolchains: [], feedback_env: {}, verify_in_copy: false });
   eq(t.done, []);
   button(t.host, 'Done').click();
   await flush();

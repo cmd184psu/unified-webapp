@@ -14,12 +14,12 @@ import (
 
 func nowMS() int64 { return time.Now().UnixMilli() }
 
-const effortCols = `id, project, title, status, run_state, integration_branch, base_commit, yolo, deliberate, budget_tokens, budget_seconds, created, updated`
+const effortCols = `id, project, title, status, run_state, integration_branch, base_commit, yolo, deliberate, budget_tokens, budget_seconds, priority, start_condition, created, updated`
 
 func scanEffort(r interface{ Scan(...any) error }) (model.Effort, error) {
 	var e model.Effort
 	var yolo, delib int
-	err := r.Scan(&e.ID, &e.Project, &e.Title, &e.Status, &e.RunState, &e.IntegrationBranch, &e.BaseCommit, &yolo, &delib, &e.BudgetTokens, &e.BudgetSeconds, &e.Created, &e.Updated)
+	err := r.Scan(&e.ID, &e.Project, &e.Title, &e.Status, &e.RunState, &e.IntegrationBranch, &e.BaseCommit, &yolo, &delib, &e.BudgetTokens, &e.BudgetSeconds, &e.Priority, &e.StartCondition, &e.Created, &e.Updated)
 	e.YOLO, e.Deliberate = yolo == 1, delib == 1
 	return e, err
 }
@@ -92,6 +92,40 @@ func (s *Store) ActiveEffort(ctx context.Context, project string) (model.Effort,
 	return requireEffort(ctx, s.db, id)
 }
 
+// ListReadyEfforts returns every parked effort across projects, highest
+// priority first and then oldest first, so the backlog and auto-start see the
+// same order (AF-15).
+func (s *Store) ListReadyEfforts(ctx context.Context) ([]model.Effort, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+effortCols+` FROM efforts WHERE status = 'ready'
+		ORDER BY priority DESC, created ASC, id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.Effort
+	for rows.Next() {
+		e, err := scanEffort(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// CountEffortsByStatus counts efforts in one status; project is empty for all.
+func (s *Store) CountEffortsByStatus(ctx context.Context, project, status string) (int, error) {
+	q := `SELECT COUNT(*) FROM efforts WHERE status = ?`
+	args := []any{status}
+	if project != "" {
+		q += ` AND project = ?`
+		args = append(args, project)
+	}
+	var n int
+	err := s.db.QueryRowContext(ctx, q, args...).Scan(&n)
+	return n, err
+}
+
 // ListEfforts returns a project's efforts, newest first.
 func (s *Store) ListEfforts(ctx context.Context, project string) ([]model.Effort, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+effortCols+` FROM efforts WHERE project = ? ORDER BY id DESC`, project)
@@ -120,6 +154,8 @@ type EffortPatch struct {
 	Deliberate        *bool
 	BudgetTokens      *int64
 	BudgetSeconds     *int64
+	Priority          *int64
+	StartCondition    *string
 }
 
 // UpdateEffort applies patch. Status and run state must be known values, and a
@@ -170,13 +206,19 @@ func (s *Store) UpdateEffort(ctx context.Context, actor string, id int64, p Effo
 		if p.BudgetSeconds != nil {
 			e.BudgetSeconds = *p.BudgetSeconds
 		}
+		if p.Priority != nil {
+			e.Priority = *p.Priority
+		}
+		if p.StartCondition != nil {
+			e.StartCondition = strings.TrimSpace(*p.StartCondition)
+		}
 		if _, err := tx.ExecContext(ctx, `UPDATE efforts SET status = ?, run_state = ?, integration_branch = ?,
-			base_commit = ?, yolo = ?, deliberate = ?, budget_tokens = ?, budget_seconds = ?, updated = ? WHERE id = ?`,
-			e.Status, e.RunState, e.IntegrationBranch, e.BaseCommit, b2i(e.YOLO), b2i(e.Deliberate), e.BudgetTokens, e.BudgetSeconds, nowMS(), id); err != nil {
+			base_commit = ?, yolo = ?, deliberate = ?, budget_tokens = ?, budget_seconds = ?, priority = ?, start_condition = ?, updated = ? WHERE id = ?`,
+			e.Status, e.RunState, e.IntegrationBranch, e.BaseCommit, b2i(e.YOLO), b2i(e.Deliberate), e.BudgetTokens, e.BudgetSeconds, e.Priority, e.StartCondition, nowMS(), id); err != nil {
 			return err
 		}
 		if _, err := AppendEvent(tx, actor, "effort.update", "effort", fmt.Sprint(id), map[string]any{"status": e.Status, "run_state": e.RunState, "yolo": e.YOLO,
-			"deliberate": e.Deliberate, "budget_tokens": e.BudgetTokens, "budget_seconds": e.BudgetSeconds}); err != nil {
+			"deliberate": e.Deliberate, "budget_tokens": e.BudgetTokens, "budget_seconds": e.BudgetSeconds, "priority": e.Priority, "start_condition": e.StartCondition}); err != nil {
 			return err
 		}
 		out, err = requireEffort(ctx, tx, id)

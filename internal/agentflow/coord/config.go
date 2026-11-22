@@ -70,6 +70,9 @@ type Seat struct {
 	// Ready is a text the screen shows when the seat waits at its input box; the watcher
 	// types only then.
 	Ready []string `json:"ready,omitempty"`
+	// Capabilities are the seat's skill tags (go, csharp, re, agentflow, research).
+	// An idle seat claims only tasks whose required tags it covers (AF-15).
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 // Config is coord.json.

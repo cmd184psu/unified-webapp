@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,6 +20,11 @@ import (
 	"strings"
 	"time"
 )
+
+// maxRead is the safety net for one BotChat answer. The API is asked for the
+// pieces the coordinator needs, so a normal answer is far smaller; a larger
+// one is logged instead of silently cut into invalid JSON.
+const maxRead = 16 << 20
 
 // Client talks to one BotChat service.
 type Client struct {
@@ -82,7 +88,11 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		return fmt.Errorf("botchat: %w", err)
 	}
 	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxRead+1))
+	if len(data) > maxRead {
+		log.Printf("botchat: %s %s answer exceeded %d bytes; refusing to parse a truncated body", method, path, maxRead)
+		return fmt.Errorf("botchat: %s %s answer exceeds %d bytes", method, path, maxRead)
+	}
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
 		return ErrNotFound
@@ -266,12 +276,21 @@ func (c *Client) MessagesAfter(ctx context.Context, roomID string, after int64, 
 
 // TaskInfo is the part of a task the seat runner reads.
 type TaskInfo struct {
-	ID        string `json:"id"`
-	State     string `json:"state"`
-	Assignee  string `json:"assignee"`
-	RoomID    string `json:"roomId"`
-	Blocker   string `json:"blocker"`
-	WaitingOn string `json:"waitingOn"`
+	ID                 string   `json:"id"`
+	Num                int      `json:"num"`
+	Title              string   `json:"title"`
+	Objective          string   `json:"objective"`
+	AcceptanceCriteria string   `json:"acceptanceCriteria"`
+	Exclusions         string   `json:"exclusions"`
+	State              string   `json:"state"`
+	Assignee           string   `json:"assignee"`
+	ClaimedBy          string   `json:"claimedBy"`
+	PlanID             string   `json:"planId"`
+	RoomID             string   `json:"roomId"`
+	Capabilities       []string `json:"capabilities"`
+	Creator            string   `json:"creator"`
+	Blocker            string   `json:"blocker"`
+	WaitingOn          string   `json:"waitingOn"`
 }
 
 // Task reads one task.
@@ -283,8 +302,17 @@ func (c *Client) Task(ctx context.Context, taskID string) (TaskInfo, error) {
 
 // ListTasks lists a room's tasks assigned to a callsign.
 func (c *Client) ListTasks(ctx context.Context, roomID, assignee string) ([]TaskInfo, error) {
+	return c.QueryTasks(ctx, url.Values{"roomId": {roomID}, "assignee": {assignee}})
+}
+
+// QueryTasks lists tasks with the documented filters (roomId, assignee,
+// status), instead of downloading the whole board.
+func (c *Client) QueryTasks(ctx context.Context, q url.Values) ([]TaskInfo, error) {
 	var raw json.RawMessage
-	path := "/api/v1/tasks?roomId=" + url.QueryEscape(roomID) + "&assignee=" + url.QueryEscape(assignee)
+	path := "/api/v1/tasks"
+	if len(q) > 0 {
+		path += "?" + q.Encode()
+	}
 	if err := c.do(ctx, http.MethodGet, path, nil, &raw); err != nil {
 		return nil, err
 	}
@@ -297,6 +325,68 @@ func (c *Client) ListTasks(ctx context.Context, roomID, assignee string) ([]Task
 	}
 	if err := json.Unmarshal(raw, &wrap); err != nil {
 		return nil, fmt.Errorf("botchat: cannot read the task list: %w", err)
+	}
+	return wrap.Tasks, nil
+}
+
+// Eligible lists a plan's claimable tasks, narrowed to callsign and capability
+// tags when given.
+func (c *Client) Eligible(ctx context.Context, planID, callsign string, caps []string) ([]TaskInfo, error) {
+	q := url.Values{}
+	if callsign != "" {
+		q.Set("callsign", callsign)
+	}
+	if len(caps) > 0 {
+		q.Set("capabilities", strings.Join(caps, ","))
+	}
+	path := "/api/v1/plans/" + url.PathEscape(planID) + "/eligible"
+	if len(q) > 0 {
+		path += "?" + q.Encode()
+	}
+	var raw json.RawMessage
+	if err := c.do(ctx, http.MethodGet, path, nil, &raw); err != nil {
+		return nil, err
+	}
+	var ts []TaskInfo
+	if json.Unmarshal(raw, &ts) == nil {
+		return ts, nil
+	}
+	var wrap struct {
+		Tasks []TaskInfo `json:"tasks"`
+	}
+	if err := json.Unmarshal(raw, &wrap); err != nil {
+		return nil, fmt.Errorf("botchat: cannot read plan %s eligible tasks: %w", planID, err)
+	}
+	return wrap.Tasks, nil
+}
+
+// Claim atomically takes the next eligible task in a plan for callsign.
+func (c *Client) Claim(ctx context.Context, planID, callsign string, caps []string) (TaskInfo, error) {
+	body := map[string]any{"from": callsign}
+	if len(caps) > 0 {
+		body["capabilities"] = caps
+	}
+	var t TaskInfo
+	err := c.do(ctx, http.MethodPost, "/api/v1/plans/"+url.PathEscape(planID)+"/claim", body, &t)
+	return t, err
+}
+
+// PlanTasks lists one plan's tasks, the documented small answer for the
+// coordinator's own plans.
+func (c *Client) PlanTasks(ctx context.Context, planID string) ([]TaskInfo, error) {
+	var raw json.RawMessage
+	if err := c.do(ctx, http.MethodGet, "/api/v1/plans/"+url.PathEscape(planID)+"/tasks", nil, &raw); err != nil {
+		return nil, err
+	}
+	var ts []TaskInfo
+	if json.Unmarshal(raw, &ts) == nil {
+		return ts, nil
+	}
+	var wrap struct {
+		Tasks []TaskInfo `json:"tasks"`
+	}
+	if err := json.Unmarshal(raw, &wrap); err != nil {
+		return nil, fmt.Errorf("botchat: cannot read plan %s tasks: %w", planID, err)
 	}
 	return wrap.Tasks, nil
 }
