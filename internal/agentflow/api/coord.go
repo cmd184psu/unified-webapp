@@ -14,6 +14,10 @@ func (a *API) registerCoord(mux muxer) {
 	mux.HandleFunc("GET /api/coord", a.coordStatus)
 	mux.HandleFunc("POST /api/coord/run", a.coordRun)
 	mux.HandleFunc("GET /api/seats/external", a.externalSeats)
+	mux.HandleFunc("POST /api/seats/external", a.saveSeat)
+	mux.HandleFunc("PATCH /api/seats/external/{callsign}", a.saveSeat)
+	mux.HandleFunc("DELETE /api/seats/external/{callsign}", a.deleteSeat)
+	mux.HandleFunc("POST /api/seats/external/{callsign}/pause", a.pauseSeat)
 	mux.HandleFunc("GET /api/seats/{callsign}/queue", a.seatQueue)
 	mux.HandleFunc("POST /api/seats/{callsign}/nudge", a.seatNudge)
 	mux.HandleFunc("POST /api/handoffs/{task}/merge", a.handoffMerge)
@@ -69,6 +73,115 @@ func (a *API) externalSeats(w http.ResponseWriter, r *http.Request) {
 		list = []coord.ExternalSeat{}
 	}
 	writeJSON(w, http.StatusOK, list)
+}
+
+// seatBody is the registry entry the Seats page edits. On PATCH every field left out keeps
+// its stored value, so the pause and policy buttons send only what they change.
+type seatBody struct {
+	Callsign  string             `json:"callsign"`
+	Kind      string             `json:"kind"`
+	Where     string             `json:"where"`
+	QueueFile string             `json:"queue_file"`
+	Policy    *coord.NudgePolicy `json:"policy"`
+}
+
+// saveSeat is POST /api/seats/external (add or replace) and PATCH /api/seats/external/{callsign}
+// (edit): the owner registers hand-run seats with no code change, including their nudge policy.
+func (a *API) saveSeat(w http.ResponseWriter, r *http.Request) {
+	s, ok := a.coordOn(w)
+	if !ok {
+		return
+	}
+	var body seatBody
+	if !decodeBody(w, r, &body, false) {
+		return
+	}
+	patch := r.Method == http.MethodPatch
+	if patch {
+		cs := r.PathValue("callsign")
+		if body.Callsign != "" && body.Callsign != cs {
+			badRequest(w, "callsign", "the path callsign and the body callsign differ")
+			return
+		}
+		body.Callsign = cs
+		existing, found, err := s.Seat(cs)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		if !found {
+			writeJSON(w, http.StatusNotFound, errorBody{Error: "no such seat"})
+			return
+		}
+		if body.Kind == "" {
+			body.Kind = string(existing.Kind)
+		}
+		if body.Where == "" {
+			body.Where = existing.Where
+		}
+		if body.QueueFile == "" {
+			body.QueueFile = existing.QueueFile
+		}
+		if body.Policy == nil {
+			p := existing.Policy
+			body.Policy = &p
+		}
+	}
+	seat := coord.RegistrySeat{Callsign: body.Callsign, Kind: coord.SeatKind(body.Kind), Where: body.Where, QueueFile: body.QueueFile}
+	if body.Policy != nil {
+		seat.Policy = *body.Policy
+	}
+	saved, err := s.SaveSeat(seat)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	a.emit("seats.update", map[string]any{"seat": saved.Callsign})
+	writeJSON(w, http.StatusOK, saved)
+}
+
+// deleteSeat is DELETE /api/seats/external/{callsign}.
+func (a *API) deleteSeat(w http.ResponseWriter, r *http.Request) {
+	s, ok := a.coordOn(w)
+	if !ok {
+		return
+	}
+	if err := s.DeleteSeat(r.PathValue("callsign")); err != nil {
+		if errors.Is(err, coord.ErrUnknownSeat) {
+			writeJSON(w, http.StatusNotFound, errorBody{Error: "no such seat"})
+			return
+		}
+		writeErr(w, err)
+		return
+	}
+	a.emit("seats.update", map[string]any{"seat": r.PathValue("callsign")})
+	writeJSON(w, http.StatusOK, map[string]string{"deleted": r.PathValue("callsign")})
+}
+
+// pauseSeat is POST /api/seats/external/{callsign}/pause {"paused": bool}: stop or resume
+// nudges without losing the seat's Enabled choice.
+func (a *API) pauseSeat(w http.ResponseWriter, r *http.Request) {
+	s, ok := a.coordOn(w)
+	if !ok {
+		return
+	}
+	var body struct {
+		Paused bool `json:"paused"`
+	}
+	if !decodeBody(w, r, &body, false) {
+		return
+	}
+	seat, err := s.PauseSeat(r.PathValue("callsign"), body.Paused)
+	if errors.Is(err, coord.ErrUnknownSeat) {
+		writeJSON(w, http.StatusNotFound, errorBody{Error: "no such seat"})
+		return
+	}
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	a.emit("seats.update", map[string]any{"seat": seat.Callsign})
+	writeJSON(w, http.StatusOK, seat)
 }
 
 // seatQueue is GET /api/seats/{callsign}/queue: the seat's queue file as the seat reads it.

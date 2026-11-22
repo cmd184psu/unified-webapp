@@ -28,6 +28,7 @@ func newCoord(dataDir string, ss *seats, st *store.Store) *coord.Service {
 	}
 	svc := &coord.Service{
 		Cfg:   cfg,
+		Dir:   dataDir,
 		Coord: c,
 		Watch: &coord.Watcher{Cfg: cfg, Screens: ss.term, Notify: func(ctx context.Context, text string) {
 			set, err := st.GetSettings(ctx)

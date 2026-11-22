@@ -690,7 +690,33 @@ export interface TaskDetail extends TaskView {
   resolutions?: Resolution[];
 }
 
-/** ExternalSeat is a seat the owner runs by hand, as the coordinator module sees it (AF-13). */
+/** SeatPolicy is the owner's nudge rule for one hand-run seat (AF-16). */
+export interface SeatPolicy {
+  enabled: boolean;
+  trigger: 'idle' | 'queued' | 'both' | string;
+  idle_minutes: number;
+  min_gap_minutes: number;
+  max_per_hour: number;
+  quiet_hours?: string;
+  templates?: string[];
+  paused?: boolean;
+}
+
+/** SeatSuggestion is the exact message to paste into a seat, by pastes.py's rules. */
+export interface SeatSuggestion {
+  status: string;
+  message: string;
+}
+
+/** SeatNudgeLogEntry is one logged nudge. */
+export interface SeatNudgeLogEntry {
+  seat: string;
+  at: string;
+  message: string;
+  typed: boolean;
+}
+
+/** ExternalSeat is a seat the owner runs by hand, as the coordinator module sees it (AF-13, AF-16). */
 export interface ExternalSeat {
   callsign: string;
   session: string;
@@ -705,6 +731,20 @@ export interface ExternalSeat {
   nudge: boolean;
   current?: string;
   queue_file: string;
+  kind: string;
+  where: string;
+  policy: SeatPolicy;
+  suggested: SeatSuggestion;
+  nudge_log?: SeatNudgeLogEntry[];
+}
+
+/** SeatInput is what the Seats page sends to register or edit a seat. */
+export interface SeatInput {
+  callsign: string;
+  kind?: string;
+  where?: string;
+  queue_file?: string;
+  policy?: Partial<SeatPolicy>;
 }
 
 /** CoordDecision is one thing a coordinator pass decided. */
@@ -872,6 +912,16 @@ export const api = {
   review: (id: number, o?: FetchOptions): Promise<Review> => get(`/api/reviews/${id}`, o),
   coordRun: (dry: boolean): Promise<CoordReport> => send('POST', '/api/coord/run', { dry }),
   externalSeats: (o?: FetchOptions): Promise<ExternalSeat[]> => get('/api/seats/external', o),
+  /** saveSeat registers a seat (POST) with its nudge policy; the server keeps the file. */
+  saveSeat: (seat: SeatInput): Promise<ExternalSeat> => send('POST', '/api/seats/external', seat),
+  /** updateSeat edits a seat; fields left out keep their stored value. */
+  updateSeat: (callsign: string, patch: Partial<SeatInput>): Promise<ExternalSeat> =>
+    send('PATCH', `/api/seats/external/${encodeURIComponent(callsign)}`, patch),
+  deleteSeat: (callsign: string): Promise<{ deleted: string }> =>
+    send('DELETE', `/api/seats/external/${encodeURIComponent(callsign)}`),
+  /** pauseSeat stops or resumes nudges without losing the seat's enabled choice. */
+  pauseSeat: (callsign: string, paused: boolean): Promise<unknown> =>
+    send('POST', `/api/seats/external/${encodeURIComponent(callsign)}/pause`, { paused }),
   seatQueue: (callsign: string): Promise<{ callsign: string; text: string }> => get(`/api/seats/${encodeURIComponent(callsign)}/queue`),
   nudgeSeat: (callsign: string): Promise<{ nudged: string }> => send('POST', `/api/seats/${encodeURIComponent(callsign)}/nudge`, {}),
   seats: (o?: FetchOptions): Promise<SeatStage[]> => get('/api/seats', o),
