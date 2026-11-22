@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+
+	botchatconfig "cmd184psu/unified-webapp/internal/botchat/config"
 )
 
 const DefaultConfigPath = "~/.unified-webapp.json"
@@ -34,6 +36,7 @@ type Config struct {
 	Sampler      SamplerConfig      `json:"sampler"`
 	Haproxy      HaproxyConfig      `json:"haproxy"`
 	Agentflow    AgentflowConfig    `json:"agentflow"`
+	Botchat      botchatconfig.Config `json:"botchat"`
 
 	// configPath is the absolute path Load read this Config from (empty when
 	// built via DefaultConfig()/WriteDefault without going through Load, or
@@ -692,6 +695,10 @@ func DefaultConfig() *Config {
 			DataDir:           "./data/agentflow",
 			SSEMaxSubscribers: DefaultSSEMaxSubscribers,
 		},
+		Botchat: botchatconfig.Config{
+			DataDir: "/opt/unified-webapp/data/botchat",
+			Chat:    botchatconfig.ChatConfig{MessageRetentionDays: 7},
+		},
 		IssueTracker: IssueTrackerConfig{
 			StaticDir: "./web/issuetracker",
 			DBPath:    "./data/issuetracker/issues.db",
@@ -808,6 +815,12 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	if err := expandAgentflowPaths(&cfg.Agentflow); err != nil {
+		return nil, err
+	}
+	if cfg.Botchat.DataDir == "" {
+		cfg.Botchat.DataDir = "/opt/unified-webapp/data/botchat"
+	}
+	if err := botchatconfig.Finalize(&cfg.Botchat); err != nil {
 		return nil, err
 	}
 	if cfg.TLSCert != "" {
