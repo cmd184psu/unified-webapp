@@ -242,6 +242,16 @@ func (e *Engine) advanceAttempt(ctx context.Context, c *chain) (bool, error) {
 		handled, err := e.handleInfra(ctx, c, last)
 		return handled, err
 	}
+	// A merge conflict goes to a merger model when the project has one
+	// (AF-18); without one it fails as before.
+	if last.Role == "merge" && len(mergeConflictFiles(c)) > 0 {
+		if handled, err := e.handleMergeConflict(ctx, c, last); handled || err != nil {
+			return handled, err
+		}
+	}
+	if isMergeReview(last) && last.Outcome == OutcomeRepair {
+		return true, e.retryMerger(ctx, c, last, "the merge reviewer asked for repair")
+	}
 	if last.Outcome != OutcomePass {
 		return true, e.fail(ctx, c, failureOf(last))
 	}
@@ -253,9 +263,14 @@ func (e *Engine) advanceAttempt(ctx context.Context, c *chain) (bool, error) {
 	case "verify":
 		return e.submitReview(ctx, c, last)
 	case "reviewer":
+		if isMergeReview(last) {
+			return true, e.afterMergeReview(ctx, c, last)
+		}
 		return e.afterReview(ctx, c, last)
 	case "merge":
 		return true, e.completeAttempt(ctx, c)
+	case "merger":
+		return e.afterMerger(ctx, c, last)
 	}
 	return false, fmt.Errorf("stage %d: unexpected role %q in an attempt", last.ID, last.Role)
 }
@@ -437,6 +452,11 @@ func (e *Engine) policedStage(ctx context.Context, rc golane.RunContext, st mode
 	if st.Role == "worker" {
 		if err := e.prepareAttempt(ctx, proj, att, p); err != nil {
 			return fail(fmt.Errorf("prepare worktree: %w", err))
+		}
+	}
+	if isMerger(st) {
+		if err := e.prepareMergerConflict(ctx, proj, att, p.Effort); err != nil {
+			return fail(fmt.Errorf("prepare merger conflict: %w", err))
 		}
 	}
 	snap, err := g.Snapshot(ctx, proj.RepoPath, att.Worktree)

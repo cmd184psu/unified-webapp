@@ -34,6 +34,7 @@ func limitMap(s store.Settings) map[string]string {
 		"review_timeout":      dur(s.ReviewTimeout),
 		"plan_timeout":        dur(s.PlanTimeout),
 		"verify_timeout":      dur(s.VerifyTimeout),
+		"merger_timeout":      dur(s.MergerTimeout),
 		"resolver_mode":       s.ResolverMode,
 	}
 }
@@ -56,6 +57,7 @@ func settingsView(s store.Settings) map[string]any {
 		"review_timeout":       s.ReviewTimeout.String(),
 		"plan_timeout":         s.PlanTimeout.String(),
 		"verify_timeout":       s.VerifyTimeout.String(),
+		"merger_timeout":       s.MergerTimeout.String(),
 		"opencode_path":        s.OpencodePath,
 		"botchat_url":          s.BotchatURL,
 		"botchat_key_file":     s.BotchatKeyFile,
