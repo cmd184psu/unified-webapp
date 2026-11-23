@@ -167,6 +167,27 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	ok("POST", "/api/handoffs/TASK-1/merge", `{"dry":true}`, 404)
 	ok("POST", "/api/seats/999999/answer", `{"text":"go on"}`, 404)
 	ok("POST", "/api/seats/999999/cancel", "", 404)
+	// Seat tasks (AF-21): create one, list it, patch its state, import a batch.
+	var walkSeat struct{ ID int64 }
+	if err := json.Unmarshal(ok("POST", "/api/seat-tasks", `{"title":"walk seat task","objective":"walk the seats API","priority":1}`, 201), &walkSeat); err != nil || walkSeat.ID == 0 {
+		t.Fatalf("create seat task: %v", err)
+	}
+	if out := ok("GET", "/api/seat-tasks", "", 200); !strings.Contains(string(out), `"walk seat task"`) {
+		t.Fatalf("seat tasks list: %s", out)
+	}
+	ok("PATCH", "/api/seat-tasks/"+strconv.FormatInt(walkSeat.ID, 10), `{"state":"fed"}`, 200)
+	if out := ok("POST", "/api/seat-tasks/import", `[{"title":"imported one","objective":"o"},{"title":"imported two","objective":"o","priority":2}]`, 200); !strings.Contains(string(out), `"imported":2`) {
+		t.Fatalf("seat task import: %s", out)
+	}
+	// Remote seats without a bearer token: the routes exist and refuse (401)
+	// before the coordinator check. The ack carries a real branch@sha from the
+	// scratch repo, as it would against a shared remote with coord on.
+	ok("GET", "/api/seat/deepseek4/next", "", 401)
+	sha := e2eGit(t, repo, "rev-parse", "HEAD")
+	ok("POST", "/api/seat/deepseek4/ack", `{"task":"TASK-1","branch":"main","sha":`+strconv.Quote(sha)+`}`, 401)
+	ok("POST", "/api/seat/deepseek4/blocked", `{"task":"TASK-1","question":"walk: is this blocked?"}`, 401)
+	// Stage homes: nothing has completed yet, so the prune is a safe no-op.
+	ok("POST", "/api/stages/prune", `{}`, 200)
 	ok("GET", "/api/yolo/invariants", "", 200)
 
 	// Projects: git-init, create, list, get, patch, limits, project candidates.
