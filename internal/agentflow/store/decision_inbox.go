@@ -2,8 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"time"
 )
@@ -49,35 +47,29 @@ func (s *Store) ListPendingDecisionInbox(ctx context.Context, effort int64) ([]D
 	return out, rows.Err()
 }
 
-// ConfirmDecisionInbox marks a pending entry as confirmed (the ruling addition
-// is approved and may be written to the rulings file).
+// ConfirmDecisionInbox marks an entry as confirmed (the ruling addition is
+// approved and may be written to the rulings file). A second confirm of the
+// same id is idempotent: the row is still there, so the update matches it.
+// A missing id is ErrNotFound.
 func (s *Store) ConfirmDecisionInbox(ctx context.Context, id int64) error {
-	var n int
-	err := s.db.QueryRowContext(ctx, `UPDATE decision_inbox SET status = 'confirmed' WHERE id = ?`, id).Scan(&n)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("decision_inbox %d: not found: %w", id, ErrNotFound)
-		}
-		return err
-	}
-	if n == 0 {
-		return fmt.Errorf("decision_inbox %d: not found: %w", id, ErrNotFound)
-	}
-	return nil
+	return s.setDecisionInboxStatus(ctx, id, "confirmed")
 }
 
-// RejectDecisionInbox marks a pending entry as rejected (the proposed ruling
-// addition is discarded).
+// RejectDecisionInbox marks an entry as rejected (the proposed ruling
+// addition is discarded). A missing id is ErrNotFound.
 func (s *Store) RejectDecisionInbox(ctx context.Context, id int64) error {
-	var n int
-	err := s.db.QueryRowContext(ctx, `UPDATE decision_inbox SET status = 'rejected' WHERE id = ?`, id).Scan(&n)
+	return s.setDecisionInboxStatus(ctx, id, "rejected")
+}
+
+// setDecisionInboxStatus applies status to one inbox row. UPDATE returns no
+// row to scan, so this uses ExecContext and treats zero rows changed as a
+// missing id.
+func (s *Store) setDecisionInboxStatus(ctx context.Context, id int64, status string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE decision_inbox SET status = ? WHERE id = ?`, status, id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("decision_inbox %d: not found: %w", id, ErrNotFound)
-		}
 		return err
 	}
-	if n == 0 {
+	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("decision_inbox %d: not found: %w", id, ErrNotFound)
 	}
 	return nil
