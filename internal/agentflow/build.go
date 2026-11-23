@@ -202,12 +202,21 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 		defer close(notifyDone)
 		attentionWatcher(eng, st).Run(capCtx)
 	}()
+	// Paired nodes keep each other current: delegated work starts when the load
+	// gate opens, live status is polled, rest times are shared and a delegation
+	// whose peer stayed unreachable is re-queued here (AF-25).
+	peerDone := make(chan struct{})
+	go func() {
+		defer close(peerDone)
+		a.PeerLoop(capCtx)
+	}()
 
 	log.Printf("agentflow: data %s, static %s", dataDir, cfg.StaticDir)
 	return &handler{Handler: mux, stop: func() error {
 		stopCaps()
 		<-relayDone
 		<-notifyDone
+		<-peerDone
 		if dispatcher != nil {
 			dispatcher.Close()
 		}

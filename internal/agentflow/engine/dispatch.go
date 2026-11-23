@@ -257,9 +257,10 @@ func (d *dispatcher) pass(ctx context.Context) error {
 		// project starts a new one until the hold is lifted.
 		return nil
 	}
-	if d.e.DiskLow(ctx) {
-		// AF-15b: free space is below the threshold, so no new stage starts;
-		// running stages finish and the watchdog raises an attention item.
+	if !d.e.LoadGateOK(ctx) {
+		// AF-25 replaces the fixed cap with a load-aware gate: over the load
+		// cap or under a memory/disk floor, no new stage starts. Running
+		// stages finish and the next tick tries again.
 		return nil
 	}
 	var running []store.Project

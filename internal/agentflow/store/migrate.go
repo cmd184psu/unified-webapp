@@ -101,6 +101,7 @@ var migrations = []migration{
 	{54, migration54SQL},
 	{55, migration55SQL},
 	{56, migration56SQL},
+	{57, migration57SQL},
 }
 
 // migration51SQL (AF-22) adds the decision_inbox table: pending ruling additions
@@ -1237,4 +1238,16 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('load_cap_tenths', '15');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('min_free_mem_gb', '2');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('delegation_timeout_minutes', '30');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('account_group', '');
+`
+
+// migration57SQL (AF-25) records the direction and remote identity of a
+// delegation on both nodes, and marks a shadow effort with the node it was
+// delegated from.
+const migration57SQL = `
+ALTER TABLE delegations ADD COLUMN direction TEXT NOT NULL DEFAULT 'out';
+ALTER TABLE delegations ADD COLUMN source_effort INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE delegations ADD COLUMN last_contact INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE delegations ADD COLUMN detail TEXT NOT NULL DEFAULT '';
+ALTER TABLE delegations ADD COLUMN base_commit TEXT NOT NULL DEFAULT '';
+ALTER TABLE efforts ADD COLUMN delegated_from TEXT NOT NULL DEFAULT '';
 `

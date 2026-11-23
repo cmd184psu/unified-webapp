@@ -76,6 +76,8 @@ func newEnv(t *testing.T, opt envOpt) *env {
 	if e.eng, err = engine.New(engine.Deps{
 		Git:   engGit,
 		Store: e.st, Host: e.tm, Runner: e.fake, DataDir: e.dataDir, TestWidthZero: opt.widthZero,
+		// The start gate is tested on its own; a busy laptop must not decide these.
+		LoadGate: func(context.Context) bool { return true },
 		PublishRun: func(ev engine.RunEvent) {
 			if api != nil {
 				api.PublishRun(ev)

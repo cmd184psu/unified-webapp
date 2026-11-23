@@ -96,6 +96,10 @@ type Deps struct {
 	// TestWidthZero registers every agentflow lane at width 0 and never raises
 	// it, so no job runs unless a test sets a width itself.
 	TestWidthZero bool
+	// LoadGate, when set, replaces the machine-reading start gate (AF-25).
+	// Tests pin it open so a busy laptop does not decide their outcome; the
+	// gate itself is tested through GateOpen.
+	LoadGate func(ctx context.Context) bool
 }
 
 // StagePayload is what a lane job carries: IDs only (TM2).

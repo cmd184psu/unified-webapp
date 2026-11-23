@@ -127,8 +127,8 @@ func (a *API) exportedEffort(w http.ResponseWriter, r *http.Request) (model.Effo
 
 // latestDoc returns the effort's latest document of kind, or nil when it has
 // none.
-func (a *API) latestDoc(r *http.Request, effort int64, kind string, revision int) (*model.Doc, error) {
-	d, err := a.deps.Store.GetDoc(r.Context(), effort, kind, revision)
+func (a *API) latestDoc(ctx context.Context, effort int64, kind string, revision int) (*model.Doc, error) {
+	d, err := a.deps.Store.GetDoc(ctx, effort, kind, revision)
 	if errors.Is(err, store.ErrNotFound) && revision == 0 {
 		return nil, nil
 	}
@@ -147,27 +147,46 @@ func (a *API) exportEffort(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	ex, report, err := a.buildEffortExport(r.Context(), ef)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	name := "effort-" + strconv.FormatInt(ef.ID, 10)
+	if format == "md" {
+		writeExport(w, format, name, []byte(model.RenderEffort(report)))
+		return
+	}
+	body, err := indentJSON(ex)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeExport(w, format, name, body)
+}
+
+// buildEffortExport assembles the JSON bundle of an effort and the report the
+// markdown export renders. The peer delegation route (AF-25) ships the same
+// bundle, so an effort means the same thing on both nodes.
+func (a *API) buildEffortExport(ctx context.Context, ef model.Effort) (EffortExport, model.EffortReport, error) {
 	ex := EffortExport{Format: bundleFormat, Version: bundleVersion, Project: ef.Project, Effort: ef}
 	report := model.EffortReport{Effort: ef}
 	for _, kind := range []string{model.DocFRD, model.DocPlan} {
-		d, err := a.latestDoc(r, ef.ID, kind, 0)
+		d, err := a.latestDoc(ctx, ef.ID, kind, 0)
 		if err != nil {
-			writeErr(w, err)
-			return
+			return ex, report, err
 		}
 		if d == nil {
 			continue
 		}
-		v, err := a.docView(r, *d, true)
+		v, err := a.docView(ctx, *d, true)
 		if err != nil {
-			writeErr(w, err)
-			return
+			return ex, report, err
 		}
 		if kind == model.DocFRD {
 			f, err := model.ParseFRD(d.JSON)
 			if err != nil {
-				writeErr(w, err)
-				return
+				return ex, report, err
 			}
 			ex.FRD, report.FRD, report.FRDRevision = &v, &f, d.Revision
 			ex.Approvals.FRD = v.Approved
@@ -176,21 +195,19 @@ func (a *API) exportEffort(w http.ResponseWriter, r *http.Request) {
 			ex.Approvals.Plan = v.Approved
 		}
 	}
-	switch q, err := a.deps.Store.GetQueue(r.Context(), ef.ID); {
+	switch q, err := a.deps.Store.GetQueue(ctx, ef.ID); {
 	case err == nil:
 		ex.Queue, report.Queue = &q, &q
 		ex.Approvals.Queue = q.Status == model.QueueApproved
-		if ex.Statuses, err = a.deps.Engine.TaskStatuses(r.Context(), ef.Project, ef.ID); err != nil {
-			writeErr(w, err)
-			return
+		if ex.Statuses, err = a.deps.Engine.TaskStatuses(ctx, ex.Project, ef.ID); err != nil {
+			return ex, report, err
 		}
 		report.Statuses = ex.Statuses
 	case !errors.Is(err, store.ErrNotFound):
-		writeErr(w, err)
-		return
+		return ex, report, err
 	}
 	// AF-22: per-effort rulings display.
-	if set, err := a.deps.Store.EffectiveSettings(r.Context(), ef.Project); err == nil && set.RulingsFile != "" {
+	if set, err := a.deps.Store.EffectiveSettings(ctx, ef.Project); err == nil && set.RulingsFile != "" {
 		report.RulingsFile = set.RulingsFile
 		am := rulings.ParseAreaMap(set.RulingsFileAreaMap)
 		// Collect all files_touched across the effort's tasks.
@@ -200,7 +217,7 @@ func (a *API) exportEffort(w http.ResponseWriter, r *http.Request) {
 				allFiles = append(allFiles, t.FilesTouched...)
 			}
 		}
-		proj, err := a.deps.Store.GetProject(r.Context(), ef.Project)
+		proj, err := a.deps.Store.GetProject(ctx, ef.Project)
 		if err == nil {
 			if rf, err := rulings.Load(filepath.Join(proj.RepoPath, set.RulingsFile)); err == nil {
 				for _, r := range rulings.Selected(rf, allFiles, am) {
@@ -218,24 +235,14 @@ func (a *API) exportEffort(w http.ResponseWriter, r *http.Request) {
 	if ex.FRD != nil && ex.Plan != nil && ex.Queue != nil {
 		ex.ContentHash = bundleHash(ex.FRD.JSON, ex.Plan.JSON, ex.Queue.Hash)
 	}
-	if snap, err := a.deps.Store.Snapshot(r.Context()); err == nil {
+	if snap, err := a.deps.Store.Snapshot(ctx); err == nil {
 		for _, c := range snap.Candidates {
 			if c.Scope == "global" || c.ProjectID == ef.Project {
 				ex.Candidates = append(ex.Candidates, c)
 			}
 		}
 	}
-	name := "effort-" + strconv.FormatInt(ef.ID, 10)
-	if format == "md" {
-		writeExport(w, format, name, []byte(model.RenderEffort(report)))
-		return
-	}
-	body, err := indentJSON(ex)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	writeExport(w, format, name, body)
+	return ex, report, nil
 }
 
 // exportDoc exports one FRD or plan revision (?revision=, the latest by
@@ -344,8 +351,7 @@ func (a *API) importBundle(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "bundle", "must carry the FRD and plan documents")
 		return
 	}
-	f, err := model.ParseFilledFRD(b.FRD.JSON)
-	if err != nil {
+	if _, err := model.ParseFilledFRD(b.FRD.JSON); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -362,32 +368,47 @@ func (a *API) importBundle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	ef, err := a.deps.Store.CreateEffort(r.Context(), actorOf(r), slug, f.Title, b.Effort.Deliberate)
+	ef, err := a.applyEffortExport(r.Context(), actorOf(r), slug, b, keep)
 	if err != nil {
 		writeErr(w, err)
 		return
+	}
+	_, _ = a.deps.Engine.SetFreshBase(r.Context(), ef.ID)
+	a.emit("effort.update", map[string]any{"project": slug, "effort": ef.ID})
+	a.respondEffort(w, r, ef.ID, http.StatusCreated)
+}
+
+// applyEffortExport creates a parked effort from an export bundle and keeps the
+// FRD, plan and queue approvals only when keep is set (the caller compared the
+// content hash). Import and peer delegation share it, so a delegated effort is
+// the same object an import would create.
+func (a *API) applyEffortExport(ctx context.Context, actor, slug string, b EffortExport, keep bool) (model.Effort, error) {
+	f, err := model.ParseFilledFRD(b.FRD.JSON)
+	if err != nil {
+		return model.Effort{}, err
+	}
+	ef, err := a.deps.Store.CreateEffort(ctx, actor, slug, f.Title, b.Effort.Deliberate)
+	if err != nil {
+		return ef, err
 	}
 	abandon := func() {
 		st := model.EffortAbandoned
-		_, _ = a.deps.Store.UpdateEffort(context.WithoutCancel(r.Context()), actorOf(r), ef.ID, store.EffortPatch{Status: &st})
+		_, _ = a.deps.Store.UpdateEffort(context.WithoutCancel(ctx), actor, ef.ID, store.EffortPatch{Status: &st})
 	}
-	docFRD, err := a.deps.Store.SaveDoc(r.Context(), actorOf(r), ef.ID, model.DocFRD, b.FRD.JSON)
+	docFRD, err := a.deps.Store.SaveDoc(ctx, actor, ef.ID, model.DocFRD, b.FRD.JSON)
 	if err != nil {
 		abandon()
-		writeErr(w, err)
-		return
+		return ef, err
 	}
-	docPlan, err := a.deps.Store.SaveDoc(r.Context(), actorOf(r), ef.ID, model.DocPlan, b.Plan.JSON)
+	docPlan, err := a.deps.Store.SaveDoc(ctx, actor, ef.ID, model.DocPlan, b.Plan.JSON)
 	if err != nil {
 		abandon()
-		writeErr(w, err)
-		return
+		return ef, err
 	}
-	q, err := a.deps.Store.SaveQueue(r.Context(), actorOf(r), ef.ID, b.Queue.Tasks)
+	q, err := a.deps.Store.SaveQueue(ctx, actor, ef.ID, b.Queue.Tasks)
 	if err != nil {
 		abandon()
-		writeErr(w, err)
-		return
+		return ef, err
 	}
 	patch := store.EffortPatch{StartCondition: &b.Effort.StartCondition}
 	if b.Effort.Priority != 0 {
@@ -399,37 +420,30 @@ func (a *API) importBundle(w http.ResponseWriter, r *http.Request) {
 	if b.Effort.BudgetSeconds > 0 {
 		patch.BudgetSeconds = &b.Effort.BudgetSeconds
 	}
-	if _, err := a.deps.Store.UpdateEffort(r.Context(), actorOf(r), ef.ID, patch); err != nil {
+	if _, err := a.deps.Store.UpdateEffort(ctx, actor, ef.ID, patch); err != nil {
 		abandon()
-		writeErr(w, err)
-		return
+		return ef, err
 	}
 	if keep {
-		if _, err := a.deps.Store.ApproveDoc(r.Context(), actorOf(r), ef.ID, model.DocFRD, docFRD.Revision); err != nil {
+		if _, err := a.deps.Store.ApproveDoc(ctx, actor, ef.ID, model.DocFRD, docFRD.Revision); err != nil {
 			abandon()
-			writeErr(w, err)
-			return
+			return ef, err
 		}
-		if _, err := a.deps.Store.ApproveDoc(r.Context(), actorOf(r), ef.ID, model.DocPlan, docPlan.Revision); err != nil {
+		if _, err := a.deps.Store.ApproveDoc(ctx, actor, ef.ID, model.DocPlan, docPlan.Revision); err != nil {
 			abandon()
-			writeErr(w, err)
-			return
+			return ef, err
 		}
-		if _, err := a.deps.Store.ApproveQueue(r.Context(), actorOf(r), ef.ID, q.Hash); err != nil {
+		if _, err := a.deps.Store.ApproveQueue(ctx, actor, ef.ID, q.Hash); err != nil {
 			abandon()
-			writeErr(w, err)
-			return
+			return ef, err
 		}
 		ready := model.EffortReady
-		if _, err := a.deps.Store.UpdateEffort(r.Context(), actorOf(r), ef.ID, store.EffortPatch{Status: &ready}); err != nil {
+		if _, err := a.deps.Store.UpdateEffort(ctx, actor, ef.ID, store.EffortPatch{Status: &ready}); err != nil {
 			abandon()
-			writeErr(w, err)
-			return
+			return ef, err
 		}
 	}
-	_, _ = a.deps.Engine.SetFreshBase(r.Context(), ef.ID)
-	a.emit("effort.update", map[string]any{"project": slug, "effort": ef.ID})
-	a.respondEffort(w, r, ef.ID, http.StatusCreated)
+	return a.deps.Store.GetEffort(ctx, ef.ID)
 }
 
 // effortFromFRD creates an effort titled after the FRD and saves the FRD as

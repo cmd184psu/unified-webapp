@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -42,12 +43,12 @@ type DocView struct {
 	JSON      json.RawMessage `json:"json,omitempty"`
 }
 
-func (a *API) docView(r *http.Request, d model.Doc, withBody bool) (DocView, error) {
+func (a *API) docView(ctx context.Context, d model.Doc, withBody bool) (DocView, error) {
 	v := DocView{Revision: d.Revision, CreatedBy: d.CreatedBy, Created: d.Created}
 	if withBody {
 		v.JSON = d.JSON
 	}
-	ap, err := a.deps.Store.ApprovedRevision(r.Context(), d.Effort, d.Kind)
+	ap, err := a.deps.Store.ApprovedRevision(ctx, d.Effort, d.Kind)
 	switch {
 	case err == nil:
 		v.Approved = ap.Revision == d.Revision
@@ -76,7 +77,7 @@ func (a *API) getDoc(kind string, byRevision bool) http.HandlerFunc {
 			writeErr(w, err)
 			return
 		}
-		v, err := a.docView(r, d, true)
+		v, err := a.docView(r.Context(), d, true)
 		if err != nil {
 			writeErr(w, err)
 			return
@@ -114,7 +115,7 @@ func (a *API) listRevisions(kind string) http.HandlerFunc {
 				writeErr(w, derr)
 				return
 			}
-			v, verr := a.docView(r, d, false)
+			v, verr := a.docView(r.Context(), d, false)
 			if verr != nil {
 				writeErr(w, verr)
 				return
@@ -210,7 +211,7 @@ func (a *API) saveDoc(w http.ResponseWriter, r *http.Request, ef model.Effort, k
 		return
 	}
 	a.emit("effort.update", map[string]any{"project": ef.Project, "effort": ef.ID})
-	v, err := a.docView(r, d, true)
+	v, err := a.docView(r.Context(), d, true)
 	if err != nil {
 		writeErr(w, err)
 		return

@@ -58,16 +58,35 @@ func (c *Client) recordSuccess() {
 	c.failures = 0
 }
 
+// PeerBackend is one backend in a peer's status.
+type PeerBackend struct {
+	Name      string   `json:"name"`
+	Slots     int      `json:"slots"`
+	Running   int      `json:"running"`
+	RestUntil []any    `json:"rest_until"`
+	Models    []string `json:"models,omitempty"`
+}
+
 type PeerStatus struct {
-	Protocol  int      `json:"protocol"`
-	Node      string   `json:"node"`
-	Build     string   `json:"build"`
-	Schema    int      `json:"schema"`
-	Time      int64    `json:"time"`
-	Accepting bool     `json:"accepting"`
-	Backends  []any    `json:"backends"`
-	Projects  []any    `json:"projects"`
-	Delegable []string `json:"delegable"`
+	Protocol  int    `json:"protocol"`
+	Node      string `json:"node"`
+	Build     string `json:"build"`
+	Schema    int    `json:"schema"`
+	Time      int64  `json:"time"`
+	Accepting bool   `json:"accepting"`
+	Load      struct {
+		Load1m    float64 `json:"1m"`
+		Cores     int     `json:"cores"`
+		FreeGB    float64 `json:"free_gb"`
+		FreeMemGB float64 `json:"free_mem_gb"`
+	} `json:"load"`
+	Backends  []PeerBackend `json:"backends"`
+	Projects  []any         `json:"projects"`
+	Delegable []string      `json:"delegable"`
+	// RestUntil maps "backend\x00model" to the epoch millisecond the peer's
+	// last rate limit holds it until (AF-25). A node that uses the same
+	// account applies the later of the two rests.
+	RestUntil map[string]int64 `json:"rest_until,omitempty"`
 }
 
 func (c *Client) Do(ctx context.Context, method, url, key string, hostHeader string, body any, out any) error {

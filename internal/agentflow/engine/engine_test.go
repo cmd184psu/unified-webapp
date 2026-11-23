@@ -92,7 +92,10 @@ func (h *harness) closeAll() {
 // start builds the engine over the current taskmaster and store.
 func (h *harness) start() {
 	h.t.Helper()
-	d := Deps{Store: h.st, Host: h.tm, Runner: h.fake, DataDir: h.t.TempDir(), TestWidthZero: h.widthZ}
+	// A loaded developer machine must not decide these tests: the gate's own
+	// behaviour is covered by TestGateOpen and TestSubmitRefusesClosedGate.
+	d := Deps{Store: h.st, Host: h.tm, Runner: h.fake, DataDir: h.t.TempDir(), TestWidthZero: h.widthZ,
+		LoadGate: func(context.Context) bool { return true }}
 	if h.tweak != nil {
 		h.tweak(&d)
 	}

@@ -59,10 +59,14 @@ lockout).
 ## Versioned status
 
 `GET /api/peer/status` returns:
-`{protocol:1, node, build, schema, time, load:{1m,cores,free_gb},
+`{protocol:1, node, build, schema, time, load:{1m,cores,free_gb,free_mem_gb},
 accepting, backends:[{name,slots,running,rest_until}],
 projects:[{slug,run_state,running_stages,open_efforts}],
-delegable:[...]}`.
+delegable:[...], rest_until:{"<backend>\u0000<model>": until}}`.
+
+`accepting` is the load-aware start gate (AF-25), and the top-level
+`rest_until` map is how nodes share rate-limit rests; see
+`docs/agentflow/peers-delegation.md`.
 
 Unknown fields ignored by client. Protocol mismatch yields a clear "upgrade
 the older node" message, never a crash.
