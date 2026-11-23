@@ -87,6 +87,7 @@ var migrations = []migration{
 	{44, migration44SQL},
 	{45, migration45SQL},
 	{46, migration46SQL},
+	{47, migration47SQL},
 }
 
 // migration41SQL (AF-14) stores review requests: the branch and base, the task
@@ -653,7 +654,7 @@ ALTER TABLE efforts ADD COLUMN budget_seconds INTEGER NOT NULL DEFAULT 0 CHECK (
 // table with foreign keys on would fire the referencing rows' ON DELETE
 // actions, so these run with foreign keys off (the documented procedure) and
 // are checked with foreign_key_check before they commit.
-var rebuildsTables = map[int]bool{6: true, 11: true, 26: true, 27: true, 29: true, 31: true, 33: true, 35: true, 43: true, 44: true, 46: true}
+var rebuildsTables = map[int]bool{6: true, 11: true, 26: true, 27: true, 29: true, 31: true, 33: true, 35: true, 43: true, 44: true, 46: true, 47: true}
 
 // migration6SQL (F2) lets a stage have the cleanup role (AT11) and adds the
 // per-project cleanup switch. stages is rebuilt with the same columns, so rows
@@ -1039,4 +1040,56 @@ CREATE INDEX idx_stages_attempt ON stages(attempt);
 CREATE INDEX idx_stages_effort ON stages(effort);
 CREATE INDEX idx_stages_open ON stages(state) WHERE state <> 'done';
 INSERT OR IGNORE INTO settings (key, value) VALUES ('merger_timeout', '30m0s');
+`
+
+
+// migration47SQL (AF-19) adds the coordinator role: an agent that runs the
+// coordination self-check on a schedule. It has its own candidate list and
+// timeout, and stages may carry the role.
+const migration47SQL = `
+CREATE TABLE role_candidates_new (
+  scope TEXT NOT NULL CHECK (scope IN ('global', 'project')),
+  project_id TEXT NOT NULL DEFAULT '',
+  role TEXT NOT NULL CHECK (role IN ('worker', 'reviewer', 'planner', 'architect', 'critic', 'compiler', 'resolver', 'merger', 'coordinator')),
+  position INTEGER NOT NULL CHECK (position >= 0),
+  backend TEXT NOT NULL REFERENCES backends(name),
+  model TEXT NOT NULL,
+  PRIMARY KEY (scope, project_id, role, position),
+  CHECK ((scope = 'global') = (project_id = '')),
+  FOREIGN KEY (backend, model) REFERENCES backend_models(backend, model) DEFERRABLE INITIALLY DEFERRED
+);
+INSERT INTO role_candidates_new (scope, project_id, role, position, backend, model)
+  SELECT scope, project_id, role, position, backend, model FROM role_candidates;
+DROP TABLE role_candidates;
+ALTER TABLE role_candidates_new RENAME TO role_candidates;
+CREATE TABLE stages_new (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  attempt INTEGER REFERENCES attempts(id) ON DELETE CASCADE,
+  effort INTEGER REFERENCES efforts(id) ON DELETE CASCADE,
+  role TEXT NOT NULL CHECK (role IN ('worker', 'reviewer', 'planner', 'architect', 'critic', 'compiler', 'verify', 'merge', 'cleanup', 'merger', 'coordinator')),
+  backend TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  lane_job_id TEXT NOT NULL DEFAULT '',
+  queue_hash TEXT NOT NULL DEFAULT '',
+  state TEXT NOT NULL CHECK (state IN ('queued', 'running', 'done')),
+  outcome TEXT NOT NULL DEFAULT '',
+  raw_output TEXT NOT NULL DEFAULT '',
+  parsed_json TEXT NOT NULL DEFAULT '',
+  prompt_path TEXT NOT NULL DEFAULT '',
+  started INTEGER NOT NULL DEFAULT 0,
+  finished INTEGER NOT NULL DEFAULT 0,
+  tokens INTEGER NOT NULL DEFAULT 0 CHECK (tokens >= 0),
+  relaxations_json TEXT NOT NULL DEFAULT '',
+  CHECK ((attempt IS NULL) <> (effort IS NULL))
+);
+INSERT INTO stages_new (id, attempt, effort, role, backend, model, lane_job_id, queue_hash, state, outcome, raw_output, parsed_json, prompt_path, started, finished, tokens, relaxations_json)
+  SELECT id, attempt, effort, role, backend, model, lane_job_id, queue_hash, state, outcome, raw_output, parsed_json, prompt_path, started, finished, tokens, relaxations_json FROM stages;
+DROP TABLE stages;
+ALTER TABLE stages_new RENAME TO stages;
+CREATE INDEX idx_stages_attempt ON stages(attempt);
+CREATE INDEX idx_stages_effort ON stages(effort);
+CREATE INDEX idx_stages_open ON stages(state) WHERE state <> 'done';
+INSERT OR IGNORE INTO settings (key, value) VALUES ('coordinator_check_minutes', '60');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('coordinator_runs_per_day', '24');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('coordinator_timeout', '30m0s');
 `

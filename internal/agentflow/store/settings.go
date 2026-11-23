@@ -43,6 +43,12 @@ type Settings struct {
 	VerifyTimeout time.Duration
 	// MergerTimeout bounds one merger stage that resolves a conflicted merge (AF-18).
 	MergerTimeout time.Duration
+	// CoordinatorCheckMinutes is how often the coordinator self-check runs; 0 = off (AF-19).
+	CoordinatorCheckMinutes int
+	// CoordinatorRunsPerDay caps how many coordinator runs may start per day (AF-19).
+	CoordinatorRunsPerDay int
+	// CoordinatorTimeout bounds one coordinator stage (AF-19).
+	CoordinatorTimeout time.Duration
 	OpencodePath  string
 	// BotchatURL is the BotChat service address and BotchatKeyFile the file holding the
 	// API key every agent shares; both empty means the relay is off.
@@ -193,6 +199,27 @@ func parseSettings(m map[string]string) (Settings, error) {
 	if s.MergerTimeout, err = validateTimeout("merger_timeout", m["merger_timeout"]); err != nil {
 		if strings.TrimSpace(m["merger_timeout"]) == "" {
 			s.MergerTimeout = 30 * time.Minute
+		} else {
+			return s, err
+		}
+	}
+	if s.CoordinatorCheckMinutes, err = validateInt("coordinator_check_minutes", m["coordinator_check_minutes"], 0, 1440); err != nil {
+		if strings.TrimSpace(m["coordinator_check_minutes"]) == "" {
+			s.CoordinatorCheckMinutes = 60
+		} else {
+			return s, err
+		}
+	}
+	if s.CoordinatorRunsPerDay, err = validateInt("coordinator_runs_per_day", m["coordinator_runs_per_day"], 0, 1000); err != nil {
+		if strings.TrimSpace(m["coordinator_runs_per_day"]) == "" {
+			s.CoordinatorRunsPerDay = 24
+		} else {
+			return s, err
+		}
+	}
+	if s.CoordinatorTimeout, err = validateTimeout("coordinator_timeout", m["coordinator_timeout"]); err != nil {
+		if strings.TrimSpace(m["coordinator_timeout"]) == "" {
+			s.CoordinatorTimeout = 30 * time.Minute
 		} else {
 			return s, err
 		}
