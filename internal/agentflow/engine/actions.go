@@ -476,10 +476,10 @@ func (e *Engine) DropAllProjects(ctx context.Context, actor string) (Dropped, er
 }
 
 // AddRuling is the guarded action by which a coordinator or resolver stage
-// proposes a new ruling. It inserts a pending entry into the decision_inbox
-// (never writes the rulings file directly) and posts a notice to the effort's
-// BotChat room as the Coordinator callsign so the owner or coord-fs3 can
-// confirm or reject it.
+// proposes a new ruling. HTTP exposes it as POST /api/projects/{slug}/rulings.
+// It inserts a pending entry into the decision_inbox (never writes the rulings
+// file directly) and posts a notice to the effort's BotChat room as the
+// Coordinator callsign so the owner or coord-fs3 can confirm or reject it.
 func (e *Engine) AddRuling(ctx context.Context, actor, projectSlug string, effort, task int64, rulingID, proposedText string) error {
 	s := e.deps.Store
 	if err := s.InsertDecisionInbox(ctx, effort, task, rulingID, actor, proposedText); err != nil {

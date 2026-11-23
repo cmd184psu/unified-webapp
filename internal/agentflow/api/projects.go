@@ -25,6 +25,7 @@ func (a *API) registerProjects(mux muxer) {
 	mux.HandleFunc("GET /api/projects/{slug}/limits", a.getLimits)
 	mux.HandleFunc("PUT /api/projects/{slug}/limits", a.putLimits)
 	mux.HandleFunc("GET /api/projects/{slug}/definition-of-done", a.getDefinitionOfDone)
+	mux.HandleFunc("POST /api/projects/{slug}/rulings", a.addRuling)
 }
 
 // flexStrings converts a JSON object of numbers and strings to the text the
@@ -522,6 +523,30 @@ func (a *API) putLimits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
+}
+
+// rulingBody is POST /api/projects/{slug}/rulings. The fields are the ones
+// Engine.AddRuling already takes; this handler does not add checks of its own.
+type rulingBody struct {
+	Effort       int64  `json:"effort"`
+	Task         int64  `json:"task"`
+	RulingID     string `json:"ruling_id"`
+	ProposedText string `json:"proposed_text"`
+}
+
+// addRuling records a pending decision-inbox entry. It calls Engine.AddRuling
+// and does not write the rulings file. The slug is the project AddRuling uses
+// for the BotChat notice.
+func (a *API) addRuling(w http.ResponseWriter, r *http.Request) {
+	var body rulingBody
+	if !decodeBody(w, r, &body, false) {
+		return
+	}
+	if err := a.deps.Engine.AddRuling(r.Context(), actorOf(r), r.PathValue("slug"), body.Effort, body.Task, body.RulingID, body.ProposedText); err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"status": "pending"})
 }
 
 // getDefinitionOfDone shows the standard every task of the project is held to:

@@ -259,6 +259,7 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	e.waitEffort("demo", ef.ID, model.EffortQueueDraft)
 	ok("GET", base+"/tasks", "", 200)
 	var tk struct {
+		ID           int64    `json:"id"`
 		Key          string   `json:"key"`
 		Phase        string   `json:"phase"`
 		Title        string   `json:"title"`
@@ -267,9 +268,11 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 		FilesTouched []string `json:"files_touched"`
 		DependsOn    []string `json:"depends_on"`
 	}
-	if err := json.Unmarshal(ok("GET", base+"/tasks/T001", "", 200), &tk); err != nil {
-		t.Fatal(err)
+	if err := json.Unmarshal(ok("GET", base+"/tasks/T001", "", 200), &tk); err != nil || tk.ID == 0 {
+		t.Fatalf("task T001: %v id=%d", err, tk.ID)
 	}
+	// AF-22: add_ruling is a real route. It records a pending inbox entry.
+	ok("POST", "/api/projects/demo/rulings", `{"effort":`+id+`,"task":`+strconv.FormatInt(tk.ID, 10)+`,"ruling_id":"R-WALK","proposed_text":"a walk ruling"}`, 201)
 	edit, _ := json.Marshal(map[string]any{"key": tk.Key, "phase": tk.Phase, "title": tk.Title, "prompt": tk.Prompt,
 		"acceptance": tk.Acceptance, "files_touched": tk.FilesTouched, "depends_on": tk.DependsOn})
 	ok("PUT", base+"/tasks/T001", string(edit), 200)
