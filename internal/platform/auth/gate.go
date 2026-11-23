@@ -179,6 +179,29 @@ func (s *Service) Gate(module string, next http.Handler) http.Handler {
 			}
 		}
 
+		// Step 2d: agentflow's peer routes that authenticate with a peer key
+		// rather than a platform key (AF-24, AF-25). The gate lets them reach
+		// their handlers, which validate the inbound peer key themselves.
+		if module == "agentflow" {
+			allow := false
+			switch {
+			case r.Method == http.MethodPost && r.URL.Path == "/api/peer/pair":
+				allow = true
+			case r.Method == http.MethodPost && r.URL.Path == "/api/peer/delegate":
+				allow = true
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/peer/delegations/"):
+				allow = true
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/peer/delegations/") && strings.HasSuffix(r.URL.Path, "/cancel"):
+				allow = true
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/peer/result/"):
+				allow = true
+			}
+			if allow {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+
 		// Step 3: protected := module has a matrix entry, or is "admin".
 		// Admin is always protected when routed, with or without a matrix
 		// entry, evaluated fresh against this request's snapshot.

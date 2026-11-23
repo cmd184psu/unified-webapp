@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -28,6 +29,8 @@ import (
 // the same JSON bundle the export route produces plus a git bundle of its base
 // commit and branches, so nothing is ever fetched from GitHub. Results come
 // back as a git bundle the owner collects into its own branch names.
+
+var delegationIDRe = regexp.MustCompile(`^del-[0-9a-f]{24}$`)
 
 const (
 	delegationFormat  = "agentflow-delegation"
@@ -500,6 +503,10 @@ func (a *API) peerDelegationAccept(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "id", "id, project and export are required")
 		return
 	}
+	if !delegationIDRe.MatchString(req.ID) {
+		badRequest(w, "id", "must be del-<24 hex>")
+		return
+	}
 	if existing, err := a.deps.Store.GetDelegation(r.Context(), req.ID); err == nil {
 		writeJSON(w, http.StatusOK, delegationResponse{
 			ID:           existing.ID,
@@ -604,6 +611,34 @@ func (a *API) peerDelegationAccept(w http.ResponseWriter, r *http.Request) {
 			Detail: "the bundle's approvals did not survive its content hash",
 		})
 		return
+	}
+	// A delegation may name a subset of the effort's tasks. Filter the
+	// imported queue to those keys so the shadow runs only what was asked;
+	// an unknown key is rejected rather than silently dropped.
+	if len(req.Tasks) > 0 {
+		wanted := map[string]bool{}
+		for _, k := range req.Tasks {
+			wanted[k] = true
+		}
+		filtered := make([]model.TaskDef, 0, len(req.Tasks))
+		seen := map[string]bool{}
+		for _, t := range ex.Queue.Tasks {
+			if !wanted[t.Key] || seen[t.Key] {
+				continue
+			}
+			seen[t.Key] = true
+			filtered = append(filtered, t)
+		}
+		if len(filtered) == 0 {
+			badRequest(w, "tasks", "none of the requested tasks exist in the effort")
+			return
+		}
+		if len(filtered) != len(wanted) {
+			badRequest(w, "tasks", "one or more requested tasks are not in the effort")
+			return
+		}
+		ex.Queue.Tasks = filtered
+		ex.Queue.Hash = model.QueueHash(filtered)
 	}
 	actor := "peer:" + owner
 	ef, err := a.applyEffortExport(r.Context(), actor, req.Project, ex, keep)
@@ -737,6 +772,25 @@ func (a *API) abandonShadow(ctx context.Context, d store.Delegation) {
 		_, _ = a.deps.Store.UpdateEffort(ctx, actor, d.Effort, store.EffortPatch{Status: &abandoned})
 	}
 	_ = a.deps.Store.UpdateDelegation(ctx, d.ID, store.DelegationCancelled, 0)
+}
+
+// abandonPeerShadow tells a peer to stop a shadow effort after the owner has
+// fallen back to running it locally, so the effort never runs in two places.
+// It is idempotent: a peer that already abandoned reports success.
+func (a *API) abandonPeerShadow(ctx context.Context, d store.Delegation) {
+	if strings.Contains(d.Detail, "abandoned on peer") {
+		return
+	}
+	p, err := a.deps.Store.GetPeer(ctx, d.Peer)
+	if err != nil {
+		return
+	}
+	key, _ := a.readPeerKey(d.Peer)
+	client := &peerclient.Client{Timeout: 10 * time.Second, InsecureSkipVerify: p.InsecureSkipVerify}
+	url := strings.TrimRight(p.BaseURL, "/") + "/api/peer/delegations/" + d.ID + "/cancel"
+	if err := client.Do(ctx, http.MethodPost, url, key, p.HostHeader, nil, nil); err == nil {
+		_ = a.deps.Store.SetDelegationDetail(ctx, d.ID, d.Detail+" (abandoned on peer)")
+	}
 }
 
 // peerDelegationResult bundles a shadow effort's branches for the owner and
@@ -891,7 +945,11 @@ func (a *API) delegationCollect(w http.ResponseWriter, r *http.Request) {
 // live status, shares model rest times both ways, and re-queues a delegation
 // locally when its peer has been unreachable past the timeout.
 func (a *API) PeerLoop(ctx context.Context) {
-	tick := time.NewTicker(10 * time.Second)
+	interval := 10 * time.Second
+	if set, err := a.deps.Store.GetSettings(ctx); err == nil && set.PeerPollSeconds > 0 {
+		interval = time.Duration(set.PeerPollSeconds) * time.Second
+	}
+	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	for {
 		select {
@@ -935,6 +993,17 @@ func (a *API) PeerPass(ctx context.Context) error {
 				errs = append(errs, err)
 			}
 		}
+	}
+	// Once a delegation has fallen back, tell the peer to abandon its shadow
+	// when it is reachable again, so the effort never runs in two places.
+	for _, d := range ds {
+		if d.Direction != "out" || d.Status != store.DelegationFallback {
+			continue
+		}
+		if strings.Contains(d.Detail, "abandoned on peer") {
+			continue
+		}
+		a.abandonPeerShadow(ctx, d)
 	}
 	// Share rest times each way once per peer.
 	for _, p := range a.peerList(ctx) {
@@ -984,6 +1053,7 @@ func (a *API) fallbackDelegation(ctx context.Context, d store.Delegation) error 
 			return fmt.Errorf("delegation %s: re-queue locally: %w", d.ID, err)
 		}
 	}
+	a.abandonPeerShadow(ctx, d)
 	return nil
 }
 

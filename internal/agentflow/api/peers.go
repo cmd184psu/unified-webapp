@@ -115,7 +115,16 @@ func (a *API) writePeerKey(name, key string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(a.peerKeyPath(name), []byte(key), 0o600)
+	path := a.peerKeyPath(name)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.WriteString(key); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func (a *API) readPeerKey(name string) (string, error) {

@@ -67,15 +67,13 @@ type Settings struct {
 	NodeName string
 	// PeerPollSeconds is the peer status poll interval (AF-24).
 	PeerPollSeconds int
-	// AccountGroup groups nodes sharing the same provider account for slot budgeting (AF-25).
-	AccountGroup string
 	// LoadCapTenths is the 1-min load cap as tenths of a core multiple (15 = 1.5x cores).
 	LoadCapTenths int
 	// MinFreeMemGB is the free-memory floor in GB below which new stages are not started.
 	MinFreeMemGB int
 	// DelegationTimeoutMinutes is how long an owner waits for a peer before re-queuing locally.
 	DelegationTimeoutMinutes int
-	OpencodePath    string
+	OpencodePath             string
 	// BotchatURL is the BotChat service address and BotchatKeyFile the file holding the
 	// API key every agent shares; both empty means the relay is off.
 	BotchatURL     string
@@ -436,7 +434,6 @@ func parseSettings(m map[string]string) (Settings, error) {
 		return s, Invalid("peers_enabled", "must be on or off")
 	}
 	s.NodeName = strings.TrimSpace(m["node_name"])
-	s.AccountGroup = strings.TrimSpace(m["account_group"])
 	if s.PeerPollSeconds, err = validateInt("peer_poll_seconds", m["peer_poll_seconds"], 0, 3600); err != nil {
 		if strings.TrimSpace(m["peer_poll_seconds"]) == "" {
 			s.PeerPollSeconds = 60

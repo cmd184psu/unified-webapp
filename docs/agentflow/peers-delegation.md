@@ -73,8 +73,7 @@ which node holds it.
 Per-backend `rest_until` lists are exchanged through `/api/peer/status`, both
 directions, on every peer loop pass. A rest that ends later wins; a model this
 node does not have is ignored, so one node's 429 does not burn the other's
-tries. Per-node slot limits stay local; set `account_group` to share a slot
-budget across nodes that use the same account.
+tries. Per-node slot limits stay local; there is no cross-node slot sharing.
 
 ## Settings
 
@@ -84,7 +83,6 @@ budget across nodes that use the same account.
 | `min_free_mem_gb` | 2 | free-memory floor |
 | `min_free_space_gb` | 20 | free-disk floor |
 | `delegation_timeout_minutes` | 30 | peer silence before fallback |
-| `account_group` | empty | nodes sharing an account’s slots |
 
 ## Dev demo
 

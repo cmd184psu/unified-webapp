@@ -402,6 +402,39 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	ok("POST", "/api/peer/unpair", `{}`, 200)
 	ok("GET", "/api/peer/status", "", 401)
 
+	// Peer delegation (AF-25): owner-side rows are empty/peers-disabled,
+	// receiver-side rows need a peer key (401) without one.
+	ok("GET", "/api/delegations", "", 200)
+	ok("GET", "/api/delegations/walk-missing", "", 404)
+	ok("POST", "/api/delegations/walk-missing/collect", "", 404)
+	ok("POST", "/api/peers/foo/delegate", `{"project":"demo","effort":1}`, 404)
+	ok("POST", "/api/peers/foo/delegations/walk-missing/cancel", "", 404)
+	ok("GET", "/api/peer/delegations/walk-missing", "", 401)
+	ok("POST", "/api/peer/delegations/walk-missing/cancel", "", 401)
+	ok("GET", "/api/peer/result/walk-missing", "", 401)
+	ok("POST", "/api/peer/delegate", `{}`, 404)
+
+	// Seat tasks (AF-21): create one, list it, patch its state, import a batch.
+	var walkSeat struct{ ID int64 }
+	if err := json.Unmarshal(ok("POST", "/api/seat-tasks", `{"title":"walk seat task","objective":"walk the seats API","priority":1}`, 201), &walkSeat); err != nil || walkSeat.ID == 0 {
+		t.Fatalf("create seat task: %v", err)
+	}
+	if out := ok("GET", "/api/seat-tasks", "", 200); !strings.Contains(string(out), `"walk seat task"`) {
+		t.Fatalf("seat tasks list: %s", out)
+	}
+	seatID := strconv.FormatInt(walkSeat.ID, 10)
+	ok("PATCH", "/api/seat-tasks/"+seatID, `{"state":"fed"}`, 200)
+	if out := ok("POST", "/api/seat-tasks/import", `[{"title":"imported one","objective":"o"},{"title":"imported two","objective":"o","priority":2}]`, 200); !strings.Contains(string(out), `"imported":2`) {
+		t.Fatalf("seat task import: %s", out)
+	}
+	// Remote seats without a bearer token.
+	ok("GET", "/api/seat/deepseek4/next", "", 401)
+	sha := e2eGit(t, repo, "rev-parse", "HEAD")
+	ok("POST", "/api/seat/deepseek4/ack", `{"task":"TASK-1","branch":"main","sha":`+strconv.Quote(sha)+`}`, 401)
+	ok("POST", "/api/seat/deepseek4/blocked", `{"task":"TASK-1","question":"walk: is this blocked?"}`, 401)
+	// Stage homes prune.
+	ok("POST", "/api/stages/prune", `{}`, 200)
+
 	var missing []string
 	for _, p := range api.Patterns() {
 		if !visited[p] {
