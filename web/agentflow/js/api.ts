@@ -927,6 +927,25 @@ export interface FsDirs {
   dirs: Array<{ name: string; path: string; git: boolean }>;
 }
 
+/** Peer is one paired agentflow node (GET /api/peers); it never carries a key. */
+export interface Peer {
+  name: string;
+  base_url: string;
+  host_header: string;
+  enabled: boolean;
+  protocol: number;
+  remote_build?: string;
+  paired_at?: number;
+  last_seen?: number;
+  last_ok?: number;
+  last_error?: string;
+  delegable?: string[];
+}
+
+export interface PeersView {
+  peers: Peer[];
+}
+
 // ─── Typed endpoints ────────────────────────────────────────────────────────
 
 export const api = {
@@ -1010,6 +1029,11 @@ export const api = {
     send('DELETE', `${proj(slug)}/candidates/${enc(role)}`),
   settings: (): Promise<Settings> => get('/api/settings'),
   putSettings: (s: Settings, o?: FetchOptions): Promise<Settings> => send('PUT', '/api/settings', s, o),
+  peers: (o?: FetchOptions): Promise<PeersView> => get('/api/peers', o),
+  invitePeer: (name: string): Promise<{ code: string; a_url: string }> => send('POST', '/api/peers/invite', { name }),
+  acceptPeer: (p: { a_url: string; code: string; name: string; b_url?: string; host_header?: string }): Promise<unknown> =>
+    send('POST', '/api/peers/accept', p),
+  revokePeer: (name: string): Promise<unknown> => send('DELETE', `/api/peers/${enc(name)}`),
 
   modelStats: (project = ''): Promise<ModelStat[]> => get(`/api/stats/models${project ? `?project=${enc(project)}` : ''}`),
   strikeHistory: (project = '', limit = 50): Promise<StrikeHistory> =>
