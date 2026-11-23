@@ -54,8 +54,15 @@ func (e *Engine) mergerPick(ctx context.Context, p store.Project, tried []string
 // startMerger queues a merger stage for a conflicted merge. started is false
 // with an empty reason when the project cannot merge at all; a non-empty
 // reason means a candidate exists but none is eligible yet, so the attempt
-// waits.
+// waits. A chain without a real effort never starts a merger: it skips and
+// records the skip once, so a broken chain cannot flood the log by retrying.
 func (e *Engine) startMerger(ctx context.Context, c *chain, last model.Stage) (started, waiting bool, err error) {
+	if c.eff.ID == 0 {
+		if nerr := e.noteMergerSkipOnce(ctx, c, "no effort for merger"); nerr != nil {
+			return false, false, nerr
+		}
+		return false, false, nil
+	}
 	var tried []string
 	for _, st := range c.stages {
 		if isMerger(st) {
@@ -353,13 +360,55 @@ func dropped(file string, notes []string) bool {
 	return false
 }
 
+// mergerEffort resolves the effort a merger stage belongs to. Merger stages
+// are attempt stages, so st.Effort is always 0; the effort comes from the
+// stage's attempt through its task's queue. Reading st.Effort here crashed
+// every merger with "effort 0: not found".
+func (e *Engine) mergerEffort(ctx context.Context, st model.Stage) (model.Effort, error) {
+	if st.Effort != 0 {
+		return e.deps.Store.GetEffort(ctx, st.Effort)
+	}
+	att, err := e.deps.Store.GetAttempt(ctx, st.Attempt)
+	if err != nil {
+		return model.Effort{}, err
+	}
+	task, err := e.deps.Store.GetTask(ctx, att.Task)
+	if err != nil {
+		return model.Effort{}, err
+	}
+	effortID, err := e.deps.Store.QueueEffort(ctx, task.Queue)
+	if err != nil {
+		return model.Effort{}, err
+	}
+	if effortID == 0 {
+		return model.Effort{}, fmt.Errorf("merger stage %d: no effort", st.ID)
+	}
+	return e.deps.Store.GetEffort(ctx, effortID)
+}
+
+// noteMergerSkipOnce records why no merger started, the first time only.
+func (e *Engine) noteMergerSkipOnce(ctx context.Context, c *chain, reason string) error {
+	evs, err := e.effortEvents(ctx, c.eff.ID, "merge.merger.skip")
+	if err != nil {
+		return err
+	}
+	for _, ev := range evs {
+		if strings.Contains(ev.DetailJSON, reason) {
+			return nil
+		}
+	}
+	return e.noteEffort(ctx, SystemActor, "merge.merger.skip", c.eff.ID, map[string]any{
+		"task": c.task.Key, "attempt": c.att.N, "reason": reason, "verdict": "skipped",
+	})
+}
+
 // mergerPrompt fills the merger prompt with the branches, conflict and logs.
 func (e *Engine) mergerPrompt(ctx context.Context, project string, st model.Stage) (string, error) {
 	text, err := prompts.Load("merger")
 	if err != nil {
 		return "", err
 	}
-	ef, err := e.deps.Store.GetEffort(ctx, st.Effort)
+	ef, err := e.mergerEffort(ctx, st)
 	if err != nil {
 		return "", err
 	}
@@ -418,7 +467,7 @@ func (e *Engine) mergerReviewPrompt(ctx context.Context, project string, st mode
 	if err != nil {
 		return "", err
 	}
-	ef, err := e.deps.Store.GetEffort(ctx, st.Effort)
+	ef, err := e.mergerEffort(ctx, st)
 	if err != nil {
 		return "", err
 	}

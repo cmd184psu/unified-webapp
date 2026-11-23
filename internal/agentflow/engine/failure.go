@@ -317,6 +317,10 @@ func (e *Engine) resubmit(ctx context.Context, c *chain, last model.Stage) error
 		return e.submitVerify(ctx, c, last)
 	case "merge":
 		return e.submitMerge(ctx, c, last)
+	case "merger":
+		// A crashed merger is retried from the merger candidate list, never
+		// from the worker list the generic path below would pick.
+		return e.resubmitMerger(ctx, c, last)
 	}
 	pick := func(avoid string, skipModel bool) (Pick, string, error) {
 		v, err := e.newView(ctx)
@@ -378,6 +382,29 @@ func (e *Engine) resubmit(ctx context.Context, c *chain, last model.Stage) error
 		return e.deps.Store.SetWaitingReason(ctx, c.task.ID, "")
 	}
 	return nil
+}
+
+// resubmitMerger retries an infrastructure-failed merger with the next merger
+// candidate, bounded by mergerTryLimit like a semantically failed merger:
+// the generic resubmit below would pick from the worker list and retry
+// without bound, crashing every time on the same conflict. When no merger
+// candidate is left the task needs a human instead of another crash. The
+// caller (handleInfra) already waited out the backoff before calling.
+func (e *Engine) resubmitMerger(ctx context.Context, c *chain, last model.Stage) error {
+	if c.eff.ID == 0 {
+		return e.noteMergerSkipOnce(ctx, c, "no effort for merger")
+	}
+	started, waiting, err := e.startMerger(ctx, c, last)
+	if err != nil {
+		return err
+	}
+	if started || waiting {
+		return nil
+	}
+	if err := e.deps.Store.SetWaitingReason(ctx, c.task.ID, "merge conflict needs a human: no merger candidate left"); err != nil {
+		return err
+	}
+	return e.fail(ctx, c, Failure{Kind: FailMerge, Stage: last})
 }
 
 // advanceAfter schedules one Advance for when a backoff ends. The reconcile
