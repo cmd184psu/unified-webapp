@@ -102,13 +102,59 @@ func (e *Engine) Attention(ctx context.Context) ([]AttentionItem, error) {
 	out = append(out, e.peerAttention(ctx)...)
 	out = append(out, e.diskLowAttention(ctx)...)
 	out = append(out, e.coordinatorAttention(ctx)...)
+	out = capConflictingGuidance(out)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Since > out[j].Since })
 	return out, nil
 }
 
+// capConflictingGuidance enforces the owner-banner budget: at most
+// attentionMaxConflicts conflicting_guidance items are returned, plus a single
+// summary item ("N more conflicting-guidance items hidden") when more were
+// found. Note-vs-ruling items (guidance.conflict events, one per effort at
+// most) count toward the same budget.
+func capConflictingGuidance(out []AttentionItem) []AttentionItem {
+	total := 0
+	for _, it := range out {
+		if it.Kind == "conflicting_guidance" {
+			total++
+		}
+	}
+	if total <= attentionMaxConflicts {
+		return out
+	}
+	kept := make([]AttentionItem, 0, len(out))
+	seen := 0
+	for _, it := range out {
+		if it.Kind == "conflicting_guidance" {
+			seen++
+			if seen > attentionMaxConflicts {
+				continue
+			}
+		}
+		kept = append(kept, it)
+	}
+	return append(kept, AttentionItem{
+		Kind:    attentionConflictSummaryKind,
+		Message: fmt.Sprintf("%d more conflicting-guidance items hidden", total-attentionMaxConflicts),
+		Since:   time.Now().UnixMilli(),
+	})
+}
+
 // attentionNotesPerTask bounds the conflicting-notes scan: the newest this
-// many progress entries of each task take part in the pairwise comparison.
-const attentionNotesPerTask = 8
+// many progress entries of each task take part in the pairwise comparison,
+// within the task only (never across tasks).
+const attentionNotesPerTask = 10
+
+// attentionMaxConflicts caps the conflicting_guidance items returned: at most
+// this many are listed, plus a single summary item ("N more
+// conflicting-guidance items hidden") when more were found.
+const attentionMaxConflicts = 10
+
+// attentionConflictSummaryKind is the kind of the single overflow summary item
+// appended when more than attentionMaxConflicts conflicts are found. It is
+// distinct from conflicting_guidance so the banner budget ("at most 10
+// conflicting_guidance items") stays exact.
+const attentionConflictSummaryKind = "conflicting_guidance_summary"
 
 func (e *Engine) effortAttention(ctx context.Context, project string, ef model.Effort, lim model.Limits) ([]AttentionItem, error) {
 	evs, err := e.deps.Store.ListEvents(ctx, "effort", strconv.FormatInt(ef.ID, 10), 100000)
@@ -215,52 +261,34 @@ func (e *Engine) effortAttention(ctx context.Context, project string, ef model.E
 			add("frd_contradiction", "", msg, ev.TS)
 		}
 		// Two progress notes that contradict each other also raise
-		// conflicting_guidance (notes-vs-notes path via ContradictIssues). The
-		// pairwise scan is bounded: the newest few entries of each task are
-		// compared within the task, and the newest entry of each task across
-		// tasks. Comparing every entry ever written is quadratic in the history
-		// and stalls the endpoint on long-lived efforts.
+		// conflicting_guidance (notes-vs-notes path via ContradictIssues), but
+		// only when the two notes belong to the SAME task. Notes of two
+		// different tasks never conflict, even when they mention the same
+		// rule: pairing them is what spammed the banner with false positives.
+		// The pairwise scan is bounded: the newest attentionNotesPerTask
+		// entries of each task are compared within the task (at most 45 pairs
+		// per task), so the work is linear in the task count, never quadratic
+		// across tasks or over the whole history. The global item budget is
+		// enforced in Attention via capConflictingGuidance.
 		{
-			type note struct {
-				key  string
-				body string
-			}
-			var latest []note // newest entry of each task, for cross-task pairs
-			var perTask [][]note
 			tasks, tverr := e.deps.Store.ListTasks(ctx, ef.ID)
 			if tverr == nil {
 				for _, t := range tasks {
 					entries, err := e.deps.Store.ListProgress(ctx, t.ID, attentionNotesPerTask)
-					if err != nil || len(entries) == 0 {
+					if err != nil || len(entries) < 2 {
 						continue
 					}
-					// Use every fetched entry (oldest first), not just the last,
-					// so two notes on one task can clash with each other.
-					var ns []note
-					for _, body := range entries {
-						ns = append(ns, note{t.Key, body})
+					// Every fetched entry (oldest first), so two notes on one
+					// task can clash with each other.
+					for i := 0; i < len(entries); i++ {
+						for j := i + 1; j < len(entries); j++ {
+							ra := rulings.Issues{Issues: []rulings.SchemaIssue{{Description: entries[i]}}}
+							rb := rulings.Issues{Issues: []rulings.SchemaIssue{{Description: entries[j]}}}
+							if rulings.ContradictIssues(ra, rb) {
+								add("conflicting_guidance", t.Key, fmt.Sprintf("conflicting guidance between notes for %s and %s", t.Key, t.Key), time.Now())
+							}
+						}
 					}
-					perTask = append(perTask, ns)
-					latest = append(latest, ns[len(ns)-1])
-				}
-			}
-			check := func(a, b note) {
-				ra := rulings.Issues{Issues: []rulings.SchemaIssue{{Description: a.body}}}
-				rb := rulings.Issues{Issues: []rulings.SchemaIssue{{Description: b.body}}}
-				if rulings.ContradictIssues(ra, rb) {
-					add("conflicting_guidance", a.key, fmt.Sprintf("conflicting guidance between notes for %s and %s", a.key, b.key), time.Now())
-				}
-			}
-			for _, ns := range perTask {
-				for i := 0; i < len(ns); i++ {
-					for j := i + 1; j < len(ns); j++ {
-						check(ns[i], ns[j])
-					}
-				}
-			}
-			for i := 0; i < len(latest); i++ {
-				for j := i + 1; j < len(latest); j++ {
-					check(latest[i], latest[j])
 				}
 			}
 		}
