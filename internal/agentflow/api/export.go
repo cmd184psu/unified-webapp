@@ -195,8 +195,10 @@ func (a *API) exportEffort(w http.ResponseWriter, r *http.Request) {
 		am := rulings.ParseAreaMap(set.RulingsFileAreaMap)
 		// Collect all files_touched across the effort's tasks.
 		var allFiles []string
-		for _, t := range ex.Queue.Tasks {
-			allFiles = append(allFiles, t.FilesTouched...)
+		if ex.Queue != nil {
+			for _, t := range ex.Queue.Tasks {
+				allFiles = append(allFiles, t.FilesTouched...)
+			}
 		}
 		proj, err := a.deps.Store.GetProject(r.Context(), ef.Project)
 		if err == nil {
