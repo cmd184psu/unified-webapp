@@ -1194,6 +1194,7 @@ CREATE TABLE peers (
   enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
   protocol INTEGER NOT NULL DEFAULT 1,
   remote_build TEXT NOT NULL DEFAULT '',
+  remote_schema INTEGER NOT NULL DEFAULT 0,
   paired_at INTEGER NOT NULL,
   last_seen INTEGER NOT NULL DEFAULT 0,
   last_ok INTEGER NOT NULL DEFAULT 0,

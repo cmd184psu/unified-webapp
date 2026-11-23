@@ -14,6 +14,7 @@ import (
 	"cmd184psu/unified-webapp/internal/agentflow/engine"
 	"cmd184psu/unified-webapp/internal/agentflow/gitsvc"
 	"cmd184psu/unified-webapp/internal/agentflow/model"
+	"cmd184psu/unified-webapp/internal/agentflow/peerclient"
 	"cmd184psu/unified-webapp/internal/agentflow/store"
 	"cmd184psu/unified-webapp/internal/platform/broker"
 )
@@ -46,6 +47,12 @@ type Deps struct {
 	ReviewRunner ReviewRunner
 	// DataDir is agentflow's data directory (for peer key files).
 	DataDir string
+	// PeerKeySink mirrors an inbound peer key's hash into the platform auth
+	// config (auth.api_keys, module agentflow) and reloads the gate. Nil in
+	// tests; agentflow still validates against its own peer_inbound table.
+	PeerKeySink func(peerName, hash string) error
+	// PeerKeyDelete removes the mirror for peerName after revoke or rotation.
+	PeerKeyDelete func(peerName string) error
 }
 
 // ReviewRunner is the engine method the review API calls.
@@ -65,6 +72,9 @@ type API struct {
 	pulls map[int64]context.CancelFunc
 	// restart is the restart waiting for running work to end, if any.
 	restart restartState
+	// peerMu guards peerLast, the last /api/peer/status answer per peer (AF-24).
+	peerMu   sync.Mutex
+	peerLast map[string]peerclient.PeerStatus
 }
 
 // OpenCodeStatus is the result of the last opencode version probe.

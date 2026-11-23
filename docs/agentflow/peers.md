@@ -12,67 +12,108 @@ and versioned status are described here.
   from hostname.
 - `peer_poll_seconds` (default 60): background poll interval.
 
+The settings screen lists each peer with online/offline, its build, schema,
+load and last-seen time, plus Test and Rotate buttons, and says in plain words
+that pairing exchanges keys between the two machines.
+
 ## Storage
 
 Table `peers(name, base_url, host_header, enabled, protocol, remote_build,
-paired_at, last_seen, last_ok, last_error, insecure_skip_verify,
-delegable_json)`.
+remote_schema, paired_at, last_seen, last_ok, last_error,
+insecure_skip_verify, delegable_json)`.
+
+`remote_build` and `remote_schema` come from the peer's status and are shown
+in `GET /api/peers` next to the last status this node got, which is kept in
+memory (it is not persisted, so it is empty until the first poll after a
+restart).
 
 Outbound keys live ONLY in `0600` files `<data_dir>/peers/<name>.key` (never
 in the DB, never in backups, never in any API/log/event). Inbound keys are
-stored as sha256 hashes in the `peer_inbound` table (and, for the platform
-gate, in the config `auth.api_keys` as `peer:<name>`).
+stored as sha256 hashes in the `peer_inbound` table and mirrored into the
+config `auth.api_keys` as `peer:<name>` (scope `agentflow`). The mirror is
+written with the same admin writer `-gen-api-key` uses and the auth policy is
+swapped immediately, so the platform gate accepts the key on the next request
+with no restart.
 
 ## Routes
 
 Authenticated management (platform gate, module agentflow):
 
-- `GET /api/peers` - list peers (no key material).
+- `GET /api/peers` - list peers (no key material), each with `remote_build`,
+  `remote_schema` and, once this node has heard from it, the last `status`.
 - `POST /api/peers/invite {name}` -> `{code, a_url}` (one-time code, >=128
   bits, expires 10 min, single use, stored only as hash).
-- `POST /api/peers/accept {a_url, code, name, b_url}`.
-- `POST /api/peers/{name}/rotate` -> `{key}`.
+- `POST /api/peers/accept {a_url, code, name, b_url, host_header?}`.
+- `POST /api/peers/{name}/rotate` -> `{ok:true}`; swaps both halves with the
+  peer and never returns a key.
 - `DELETE /api/peers/{name}` -> revoke both halves (best-effort notify).
-- `GET /api/peers/{name}/status` -> test connection.
+- `GET /api/peers/{name}/status` -> test connection (protocol mismatch says
+  "upgrade the older node"). Like the pairing routes it returns 404 while
+  `peers_enabled` is off.
 
-Unauthenticated peer routes (allow-listed):
+Peer routes (peer key, same key as `auth.api_keys`):
 
-- `POST /api/peer/pair` (only unauthenticated peer route; accepts only a
-  valid unused code).
-- `POST /api/peer/unpair` (best-effort).
-- `GET /api/peer/status` (needs a peer key) -> versioned status.
+- `POST /api/peer/pair` is the ONLY unauthenticated peer route; it is
+  allow-listed at the platform gate for the agentflow module only and accepts
+  only a valid unused code.
+- `POST /api/peer/unpair` requires the presenting peer key and removes only
+  that peer. It never matches by `base_url`.
+- `POST /api/peer/rotate` requires the old peer key; takes
+  `{inbound_key, outbound_key}` and stores the new inbound hash and outbound
+  file for that peer.
+- `GET /api/peer/status` requires a peer key -> versioned status.
 
 ## Pairing handshake
 
 1. Node A: `POST /api/peers/invite {name:'builder'}` -> `{code, a_url}`.
 2. Node B: `POST /api/peers/accept {a_url, code, name:'laptop', b_url}`.
-   B mints K_B, POSTs to A's `/api/peer/pair` with `{code, node_name, base_url,
-   host_header, key:K_B, protocol, build}`. A verifies and burns the code,
-   stores K_B as its outbound credential for B, mints K_A, stores
-   sha256(K_A) as inbound `peer:<B>`, returns K_A. B stores K_A as its
-   outbound credential for A.
+   B mints K_B, stores sha256(K_B) as its inbound `peer:laptop` (and mirrors it
+   into `auth.api_keys`), then POSTs to A's `/api/peer/pair` with
+   `{code, node_name, base_url, host_header, key:K_B, protocol, build}`. The
+   Host header defaults to the request's own `Host` when `host_header` is
+   omitted, and the invite URL uses `X-Forwarded-Proto`/`X-Forwarded-Host`
+   when a proxy sets them. A checks the code without burning it, then checks
+   the target name, and only burns the code once both are accepted, so a
+   refused pairing leaves the code usable. A stores K_B as its outbound
+   credential for B, mints K_A, stores sha256(K_A) as inbound `peer:builder`,
+   mirrors it, and returns K_A. B stores K_A as its outbound credential for A.
 
-Pairing is refused if either node's name is taken or the code is
-wrong/expired/used (generic 403, rate-limited: 5 failures per 10 min then
-lockout).
+Names must match `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`; a separator is rejected
+before it can become a key-file path. Pairing is refused if either node's name
+is taken or the code is wrong/expired/used (generic 403, rate-limited: 5
+failures per 10 min per client address then lockout; the address is the host,
+not the connection, so a new source port does not reset the count).
 
 ## Versioned status
 
 `GET /api/peer/status` returns:
 `{protocol:1, node, build, schema, time, load:{1m,cores,free_gb},
 accepting, backends:[{name,slots,running,rest_until}],
-projects:[{slug,run_state,running_stages,open_efforts}],
+projects:[{slug,run_state,running_stages,open_efforts,open_tasks}],
 delegable:[...]}`.
 
-Unknown fields ignored by client. Protocol mismatch yields a clear "upgrade
-the older node" message, never a crash.
+`free_gb` is a real `statfs` reading of the data directory, `1m` is the host
+load average (on macOS read from the binary `vm.loadavg` sysctl, not from
+text), `running` counts running stages per backend, and `rest_until` lists
+resting model end times as a list (`[]` when nothing rests, never null).
+`build` is stamped by the Makefile (`dev` for a plain `go build`), `schema` is
+the node's migration version, and `accepting` is false while the service hold
+is active. Projects with no open effort are still listed, with
+`open_efforts: 0`. Unknown fields are ignored by the client. A protocol
+mismatch yields "upgrade the older node", never a crash.
+
+The background poller (every `peer_poll_seconds`, jittered by +/-20% so two
+nodes do not poll in lockstep) refreshes each enabled peer's `last_seen`,
+`last_ok`, `last_error`, `remote_build` and `remote_schema` through the same
+status call. A peer that has never answered counts as unreachable from
+`paired_at`, so it does not stay silent for ever.
 
 ## Security
 
 Keys never appear in any response other than the pairing exchange itself,
 never in logs, events, UI or errors. Keys exist only in 0600 files and as
-sha256 hashes. Pairing exchanges keys between the two machines; both must be
-trusted.
+sha256 hashes. Rotate never returns a key. Pairing exchanges keys between the
+two machines; both must be trusted.
 
 ## Pairing two nodes in 3 commands
 
@@ -91,16 +132,19 @@ curl -s -X DELETE $A/api/peers/builder
 
 ## Revoke / rotate
 
-Revoke removes the row, the outbound file and the inbound key on this side,
-and tells the other side best-effort (`POST /api/peer/unpair`) so it removes
-its half. Rotate mints a new key each way.
+Revoke removes the row, the outbound file, the inbound hash and its
+`auth.api_keys` mirror on this side, and tells the other side best-effort
+(`POST /api/peer/unpair`, authenticated with the key it still holds). Rotate
+mints a new outbound key and a new inbound key, stores all local halves
+(outbound file, inbound hash, `auth.api_keys` mirror) and then asks the peer
+to swap both with the old key. If the peer is unreachable or refuses, every
+local half is restored, so a failed rotate changes nothing here; the receiving
+side mirrors the new inbound before touching the row and rolls back on
+failure.
 
 ## Limitations
 
-Live reload of the platform auth gate's inbound key is not performed by
-agentflow (it does not own the auth service); the config file is written by
-the admin tooling. Agentflow validates peer keys against its own
-`peer_inbound` table, so pairing works without a restart. A drain-safe
-reload is used if the platform gate must learn the new key.
-EOF
-echo done
+Rotate requires the peer to be reachable: the management call is all-or-
+nothing, so an offline peer keeps the old pair until it is reachable again.
+The mirror write uses the admin config writer, which rewrites the `auth`
+member of the config file; every other byte of the file is preserved.

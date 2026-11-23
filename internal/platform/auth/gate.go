@@ -179,6 +179,16 @@ func (s *Service) Gate(module string, next http.Handler) http.Handler {
 			}
 		}
 
+		// Step 2d: agentflow's one unauthenticated peer route (AF-24). Node B
+		// pairs with A before either side has a key, so the gate must pass this
+		// exact request through; the handler accepts only a valid unused code.
+		// Every other peer route stays behind the gate (a peer key is an API key
+		// scoped to agentflow), and no other module is affected.
+		if module == "agentflow" && r.Method == http.MethodPost && r.URL.Path == "/api/peer/pair" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		// Step 3: protected := module has a matrix entry, or is "admin".
 		// Admin is always protected when routed, with or without a matrix
 		// entry, evaluated fresh against this request's snapshot.

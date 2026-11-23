@@ -927,6 +927,49 @@ export interface FsDirs {
   dirs: Array<{ name: string; path: string; git: boolean }>;
 }
 
+/** PeerStatus is one node's own GET /api/peer/status answer, as last seen (AF-24). */
+export interface PeerStatus {
+  protocol: number;
+  node: string;
+  build: string;
+  schema: number;
+  time: number;
+  accepting: boolean;
+  load: { '1m': number; cores: number; free_gb: number };
+  backends: Array<{ name: string; slots: number; running: number; rest_until: number[] }>;
+  projects: Array<{ slug: string; run_state: string; running_stages: number; open_efforts: number }>;
+  delegable: string[];
+}
+
+/** Peer is one paired agentflow node (GET /api/peers); it never carries a key. */
+export interface Peer {
+  name: string;
+  base_url: string;
+  host_header: string;
+  enabled: boolean;
+  protocol: number;
+  remote_build?: string;
+  remote_schema?: number;
+  paired_at?: number;
+  last_seen?: number;
+  last_ok?: number;
+  last_error?: string;
+  delegable?: string[];
+  /** The last status this node reported, held in memory by the server (AF-24). */
+  status?: PeerStatus;
+}
+
+export interface PeersView {
+  peers: Peer[];
+}
+
+/** PeerTest is POST /api/peers/{name}/status: the peer answered, or why not. */
+export interface PeerTest {
+  ok: boolean;
+  error?: string;
+  status?: PeerStatus;
+}
+
 // ─── Typed endpoints ────────────────────────────────────────────────────────
 
 export const api = {
@@ -1010,6 +1053,15 @@ export const api = {
     send('DELETE', `${proj(slug)}/candidates/${enc(role)}`),
   settings: (): Promise<Settings> => get('/api/settings'),
   putSettings: (s: Settings, o?: FetchOptions): Promise<Settings> => send('PUT', '/api/settings', s, o),
+  peers: (o?: FetchOptions): Promise<PeersView> => get('/api/peers', o),
+  invitePeer: (name: string): Promise<{ code: string; a_url: string }> => send('POST', '/api/peers/invite', { name }),
+  acceptPeer: (p: { a_url: string; code: string; name: string; b_url?: string; host_header?: string }): Promise<unknown> =>
+    send('POST', '/api/peers/accept', p),
+  revokePeer: (name: string): Promise<unknown> => send('DELETE', `/api/peers/${enc(name)}`),
+  /** rotatePeer mints a new key each way and swaps both halves atomically (AF-24). */
+  rotatePeer: (name: string): Promise<unknown> => send('POST', `/api/peers/${enc(name)}/rotate`, {}),
+  /** testPeer asks the peer for its status now and returns what it said (AF-24). */
+  testPeer: (name: string): Promise<PeerTest> => get(`/api/peers/${enc(name)}/status`, { quiet: true }),
 
   modelStats: (project = ''): Promise<ModelStat[]> => get(`/api/stats/models${project ? `?project=${enc(project)}` : ''}`),
   strikeHistory: (project = '', limit = 50): Promise<StrikeHistory> =>

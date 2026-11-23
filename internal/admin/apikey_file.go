@@ -66,6 +66,56 @@ func AddAPIKeyToConfigFile(configPath, name, hash string, modules []string) (rep
 	return replaced, nil
 }
 
+// RemoveAPIKeyFromConfigFile removes name from auth.api_keys of the config
+// file at configPath. It reports whether an entry was removed. Like
+// AddAPIKeyToConfigFile it rewrites only the top-level "auth" member and
+// restores the original bytes if the result does not load.
+func RemoveAPIKeyFromConfigFile(configPath, name string) (removed bool, err error) {
+	if strings.TrimSpace(name) == "" {
+		return false, errors.New("admin: API key name must not be empty")
+	}
+	st, err := os.Stat(configPath)
+	if err != nil {
+		return false, fmt.Errorf("admin: config file: %w", err)
+	}
+	orig, err := os.ReadFile(configPath)
+	if err != nil {
+		return false, fmt.Errorf("admin: reading config: %w", err)
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return false, err
+	}
+	auth := cfg.Auth
+	out := make([]config.NamedHash, 0, len(auth.APIKeys))
+	for _, e := range auth.APIKeys {
+		if e.Name == name {
+			removed = true
+			continue
+		}
+		out = append(out, e)
+	}
+	if !removed {
+		return false, nil
+	}
+	auth.APIKeys = out
+	if err := spliceAuthConfig(configPath, auth); err != nil {
+		return false, err
+	}
+	mode := st.Mode().Perm()
+	if err := os.Chmod(configPath, mode); err != nil {
+		restoreConfigFile(configPath, orig, mode)
+		return false, fmt.Errorf("admin: restoring config mode: %w", err)
+	}
+	if err := validateConfigFile(configPath); err != nil {
+		if rerr := restoreConfigFile(configPath, orig, mode); rerr != nil {
+			return false, fmt.Errorf("admin: updated config is invalid (%v) and restoring the original failed: %w", err, rerr)
+		}
+		return false, fmt.Errorf("admin: updated config is invalid, original restored: %w", err)
+	}
+	return true, nil
+}
+
 // restoreConfigFile atomically puts orig back at path with the given mode.
 func restoreConfigFile(path string, orig []byte, mode os.FileMode) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".auth-restore-*.tmp")

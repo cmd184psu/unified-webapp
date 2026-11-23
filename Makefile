@@ -6,8 +6,9 @@ CONFIG    := ~/.unified-webapp.json
 # GET /api/health — lets the UI (and `curl .../api/health`) show which build
 # is actually running, instead of guessing from file mtimes. `go run` and any
 # build not going through this Makefile leave BuildTime at its "dev" default.
+# agentflow's api.BuildTime rides along so /api/peer/status names this build.
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-LDFLAGS    := -X cmd184psu/unified-webapp/internal/taskmaster/coordinator.BuildTime=$(BUILD_TIME)
+LDFLAGS    := -X cmd184psu/unified-webapp/internal/taskmaster/coordinator.BuildTime=$(BUILD_TIME) -X cmd184psu/unified-webapp/internal/agentflow/api.BuildTime=$(BUILD_TIME)
 
 .PHONY: run build build-rpi test clean clean-local-test-db init-config web typecheck web-verify gates test-web check install
 

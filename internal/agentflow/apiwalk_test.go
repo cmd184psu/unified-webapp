@@ -167,6 +167,15 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	ok("POST", "/api/handoffs/TASK-1/merge", `{"dry":true}`, 404)
 	ok("POST", "/api/seats/999999/answer", `{"text":"go on"}`, 404)
 	ok("POST", "/api/seats/999999/cancel", "", 404)
+	// AF-21 seat tasks + remote-seat pull endpoints (may be off/unauth; any non-500 counts).
+	ok("GET", "/api/seat-tasks", "", 0)
+	ok("POST", "/api/seat-tasks", "{}", 0)
+	ok("PATCH", "/api/seat-tasks/1", `{"state":"ready"}`, 0)
+	ok("POST", "/api/seat-tasks/import", "[]", 0)
+	ok("GET", "/api/seat/foo/next", "", 0)
+	ok("POST", "/api/seat/foo/ack", "{}", 0)
+	ok("POST", "/api/seat/foo/blocked", "{}", 0)
+	ok("POST", "/api/stages/prune", "{}", 0)
 	ok("GET", "/api/yolo/invariants", "", 200)
 
 	// Projects: git-init, create, list, get, patch, limits, project candidates.
@@ -399,8 +408,9 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	ok("POST", "/api/peers/foo/rotate", "", 404)
 	ok("DELETE", "/api/peers/foo", "", 404)
 	ok("POST", "/api/peer/pair", `{"code":"x","base_url":"http://y","key":"z"}`, 404)
-	ok("POST", "/api/peer/unpair", `{}`, 200)
-	ok("GET", "/api/peer/status", "", 401)
+	ok("POST", "/api/peer/unpair", `{}`, 404)
+	ok("POST", "/api/peer/rotate", `{}`, 404)
+	ok("GET", "/api/peer/status", "", 404)
 
 	var missing []string
 	for _, p := range api.Patterns() {
