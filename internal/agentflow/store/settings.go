@@ -41,6 +41,8 @@ type Settings struct {
 	ReviewTimeout time.Duration
 	PlanTimeout   time.Duration
 	VerifyTimeout time.Duration
+	// MergerTimeout bounds one merger stage that resolves a conflicted merge (AF-18).
+	MergerTimeout time.Duration
 	OpencodePath  string
 	// BotchatURL is the BotChat service address and BotchatKeyFile the file holding the
 	// API key every agent shares; both empty means the relay is off.
@@ -103,7 +105,7 @@ const (
 // limitKeys are the settings a project may override.
 var limitKeys = []string{
 	"max_attempts", "stuck_threshold", "max_infra_retries", "plan_max_rounds", "stall_minutes", "acceptance_rounds", "review_panel",
-	"worker_timeout", "review_timeout", "plan_timeout", "verify_timeout", "resolver_mode",
+	"worker_timeout", "review_timeout", "plan_timeout", "verify_timeout", "merger_timeout", "resolver_mode",
 }
 
 func isLimitKey(k string) bool {
@@ -187,6 +189,13 @@ func parseSettings(m map[string]string) (Settings, error) {
 	}
 	if s.VerifyTimeout, err = validateTimeout("verify_timeout", m["verify_timeout"]); err != nil {
 		return s, err
+	}
+	if s.MergerTimeout, err = validateTimeout("merger_timeout", m["merger_timeout"]); err != nil {
+		if strings.TrimSpace(m["merger_timeout"]) == "" {
+			s.MergerTimeout = 30 * time.Minute
+		} else {
+			return s, err
+		}
 	}
 	s.OpencodePath = strings.TrimSpace(m["opencode_path"])
 	if s.OpencodePath == "" {

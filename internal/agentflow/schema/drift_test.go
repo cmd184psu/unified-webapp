@@ -30,6 +30,8 @@ func TestPromptContractsMatchGoTypes(t *testing.T) {
 		{"drafter", func() any { return new(FRDDraft) }},
 		{"acceptance", func() any { return new(AcceptanceOut) }},
 		{"resolver", func() any { return new(ResolverOut) }},
+		{"merger", func() any { return new(MergerOut) }},
+		{"merger-review", func() any { return new(ReviewOut) }},
 	}
 	if len(cases) != len(prompts.Roles) {
 		t.Fatalf("%d cases, %d roles", len(cases), len(prompts.Roles))

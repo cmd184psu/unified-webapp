@@ -380,6 +380,27 @@ func (a *AcceptanceOut) Validate() error {
 	return nil
 }
 
+// MergerOut is the merger's final message after resolving a conflicted merge
+// (AF-18). Notes name any incoming change the merger intentionally dropped and
+// why; the engine's no-loss check reads them.
+type MergerOut struct {
+	Summary string   `json:"summary"`
+	Files   []string `json:"files,omitempty"`
+	Notes   []string `json:"notes,omitempty"`
+	// Blocked is set when both sides cannot hold: the merger stops and says why.
+	Blocked string `json:"blocked,omitempty"`
+}
+
+func (m *MergerOut) Validate() error {
+	if err := nonEmpty("summary", m.Summary); err != nil {
+		return err
+	}
+	if m.Blocked != "" && len(m.Notes) == 0 {
+		return bad("notes", "a blocked merger must name what cannot hold")
+	}
+	return nil
+}
+
 // ResolverOut is the resolver's decision on a stuck task (AF-13 3b): one way through, with
 // the evidence (file:line) it rests on.
 type ResolverOut struct {

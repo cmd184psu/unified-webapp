@@ -64,10 +64,10 @@ type ConfigDoc struct {
 // picker's roots and the verify slots belong to the machine and stay as they
 // are on the machine that imports.
 var portableSettings = []string{"max_attempts", "stuck_threshold", "max_infra_retries", "plan_max_rounds", "stall_minutes", "acceptance_rounds", "review_panel",
-	"worker_timeout", "review_timeout", "plan_timeout", "verify_timeout", "backend_cooldown", "context_floor_tokens", "resolver_mode"}
+	"worker_timeout", "review_timeout", "plan_timeout", "verify_timeout", "merger_timeout", "backend_cooldown", "context_floor_tokens", "resolver_mode"}
 
 // configRoles are the roles that have a global candidate list.
-var configRoles = []string{"planner", "architect", "critic", "compiler", "worker", "reviewer", "resolver"}
+var configRoles = []string{"planner", "architect", "critic", "compiler", "worker", "reviewer", "resolver", "merger"}
 
 // exportConfig answers GET /api/config/export with the configuration as a download.
 func (a *API) exportConfig(w http.ResponseWriter, r *http.Request) {

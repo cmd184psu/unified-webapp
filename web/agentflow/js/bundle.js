@@ -1412,7 +1412,7 @@ var InstallPanel = class {
 };
 
 // web/agentflow/js/candidates.ts
-var ROLES = ["worker", "reviewer", "planner", "architect", "critic", "compiler", "resolver"];
+var ROLES = ["worker", "reviewer", "planner", "architect", "critic", "compiler", "resolver", "merger"];
 function isPaid(backends, backend, model) {
   const b = backends.find((x) => x.name === backend);
   return !!b && (b.paid || b.models.some((m) => m.model === model && m.paid));
@@ -1781,6 +1781,7 @@ var LIMIT_FIELDS = [
   { key: "review_timeout", label: "Review timeout", hint: "A duration such as 15m" },
   { key: "plan_timeout", label: "Plan timeout", hint: "A duration such as 20m" },
   { key: "verify_timeout", label: "Verify timeout", hint: "A duration such as 20m" },
+  { key: "merger_timeout", label: "Merger timeout", hint: "A duration such as 30m, for one merge-conflict resolution" },
   { key: "resolver_mode", label: "Resolver mode", hint: "What the resolver may do with a stuck task: off, advise (its decision waits for you to apply it; the default) or auto (applied at once)" }
 ];
 var BACKLOG_FIELDS = [
@@ -5511,7 +5512,7 @@ function tokensShort(n) {
   if (n < 1e6) return `${(n / 1e3).toFixed(1)}k`;
   return `${(n / 1e6).toFixed(1)}M`;
 }
-var ROLES2 = ["", "planner", "architect", "critic", "compiler", "worker", "reviewer"];
+var ROLES2 = ["", "planner", "architect", "critic", "compiler", "worker", "reviewer", "merger"];
 var StatsView = class {
   constructor(host, deps) {
     this.host = host;

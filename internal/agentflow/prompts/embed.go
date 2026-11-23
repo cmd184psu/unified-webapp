@@ -14,7 +14,7 @@ var files embed.FS
 // the prompt of the planner role's FRD draft, polish and split stages and
 // acceptance the prompt of the reviewer role's check of a finished effort
 // (H31); neither is a stage role of its own.
-var Roles = []string{"worker", "reviewer", "planner", "architect", "critic", "compiler", "cleanup", "drafter", "acceptance", "resolver"}
+var Roles = []string{"worker", "reviewer", "planner", "architect", "critic", "compiler", "cleanup", "drafter", "acceptance", "resolver", "merger", "merger-review"}
 
 // Load returns the prompt text for a role.
 func Load(role string) (string, error) {

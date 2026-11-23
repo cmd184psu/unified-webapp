@@ -199,6 +199,8 @@ func roleTimeout(set store.Settings, role string) time.Duration {
 		return set.ReviewTimeout
 	case "verify":
 		return set.VerifyTimeout
+	case "merger":
+		return set.MergerTimeout
 	}
 	return set.PlanTimeout
 }
@@ -213,6 +215,12 @@ func (e *Engine) buildPrompt(ctx context.Context, st model.Stage, project string
 	}
 	if st.Attempt == 0 {
 		return e.EffortPrompt(ctx, st)
+	}
+	if st.Role == "merger" {
+		return e.mergerPrompt(ctx, project, st)
+	}
+	if isMergeReview(st) {
+		return e.mergerReviewPrompt(ctx, project, st)
 	}
 	if st.Role == "reviewer" {
 		ev, err := e.reviewEvidence(ctx, st.Attempt)

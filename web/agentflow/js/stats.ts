@@ -41,7 +41,7 @@ export function tokensShort(n: number): string {
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
-const ROLES = ['', 'planner', 'architect', 'critic', 'compiler', 'worker', 'reviewer'];
+const ROLES = ['', 'planner', 'architect', 'critic', 'compiler', 'worker', 'reviewer', 'merger'];
 
 export class StatsView {
   rows: ModelStat[] = [];
