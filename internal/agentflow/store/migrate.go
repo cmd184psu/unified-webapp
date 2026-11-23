@@ -91,6 +91,7 @@ var migrations = []migration{
 	{46, migration46SQL},
 	{47, migration47SQL},
 	{48, migration48SQL},
+	{49, migration49SQL},
 }
 
 // migration41SQL (AF-14) stores review requests: the branch and base, the task
@@ -1100,4 +1101,22 @@ CREATE INDEX idx_stages_open ON stages(state) WHERE state <> 'done';
 INSERT OR IGNORE INTO settings (key, value) VALUES ('coordinator_check_minutes', '60');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('coordinator_runs_per_day', '24');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('coordinator_timeout', '30m0s');
+`
+
+
+// migration49SQL (AF-21) adds the seat task backlog.
+const migration49SQL = `
+CREATE TABLE seat_tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  objective TEXT NOT NULL DEFAULT '',
+  acceptance TEXT NOT NULL DEFAULT '',
+  exclusions TEXT NOT NULL DEFAULT '',
+  eligible_seats TEXT NOT NULL DEFAULT '[]',
+  eligible_kinds TEXT NOT NULL DEFAULT '[]',
+  priority INTEGER NOT NULL DEFAULT 0,
+  state TEXT NOT NULL DEFAULT 'ready' CHECK (state IN ('ready', 'fed', 'done')),
+  created INTEGER NOT NULL,
+  updated INTEGER NOT NULL
+);
 `
