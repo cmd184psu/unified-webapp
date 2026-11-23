@@ -8,7 +8,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"cmd184psu/unified-webapp/internal/agentflow/store"
 )
 
 func enablePeers(t *testing.T, e *env) {
@@ -323,7 +326,7 @@ func TestPeerUnpairRequiresKey(t *testing.T) {
 }
 
 func TestPeersAcceptSendsHostHeader(t *testing.T) {
-	ea, _, _, _, _, _ := pairPeers(t)
+	ea, eb, srvA, _, _, _ := pairPeers(t)
 	p, err := ea.st.GetPeer(t.Context(), "builder")
 	if err != nil {
 		t.Fatal(err)
@@ -331,6 +334,69 @@ func TestPeersAcceptSendsHostHeader(t *testing.T) {
 	if p.HostHeader != "b.example" {
 		t.Fatalf("A stored host_header %q, want b.example", p.HostHeader)
 	}
+	// B's row is for A, so it must carry A's Host header, not the header B
+	// sent describing itself.
+	bp, err := eb.st.GetPeer(t.Context(), "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantA := strings.TrimPrefix(strings.TrimPrefix(srvA.URL, "https://"), "http://")
+	if bp.HostHeader != wantA {
+		t.Fatalf("B stored host_header %q for A, want %q", bp.HostHeader, wantA)
+	}
+}
+
+func TestPeerStatusListsProjectWithoutActiveEffort(t *testing.T) {
+	_, eb, _, srvB, keyAtoB, _ := pairPeers(t)
+	eb.addProject("solo")
+	resp, body := peerStatus(t, srvB, keyAtoB)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d: %s", resp.StatusCode, body)
+	}
+	var st struct {
+		Projects []struct {
+			Slug        string `json:"slug"`
+			OpenEfforts int    `json:"open_efforts"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal(body, &st); err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Projects) != 1 || st.Projects[0].Slug != "solo" {
+		t.Fatalf("projects = %+v, want solo", st.Projects)
+	}
+	if st.Projects[0].OpenEfforts != 0 {
+		t.Fatalf("open_efforts = %d, want 0", st.Projects[0].OpenEfforts)
+	}
+}
+
+func TestPeerStatusRestUntilIsArray(t *testing.T) {
+	_, eb, _, srvB, keyAtoB, _ := pairPeers(t)
+	if err := eb.st.CreateBackend(t.Context(), "test", store.Backend{
+		Name: "b1", Host: "http://127.0.0.1:11434", APIType: "ollama", Slots: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, body := peerStatus(t, srvB, keyAtoB)
+	var st struct {
+		Backends []struct {
+			Name      string          `json:"name"`
+			RestUntil json.RawMessage `json:"rest_until"`
+		} `json:"backends"`
+	}
+	if err := json.Unmarshal(body, &st); err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range st.Backends {
+		if b.Name != "b1" {
+			continue
+		}
+		if string(b.RestUntil) != "[]" {
+			t.Fatalf("rest_until = %s, want []", b.RestUntil)
+		}
+		return
+	}
+	t.Fatalf("backend b1 missing from status: %+v", st.Backends)
 }
 
 func TestPeerStatusReportsRealLoad(t *testing.T) {

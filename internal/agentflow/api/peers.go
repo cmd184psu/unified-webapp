@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -323,7 +324,8 @@ func (a *API) peersAccept(w http.ResponseWriter, r *http.Request) {
 	// could never reach B through a proxy.
 	client := &peerclient.Client{Peer: "pair:" + localName, Timeout: 30 * time.Second}
 	var resp struct {
-		Key string `json:"key"`
+		Key        string `json:"key"`
+		HostHeader string `json:"host_header"`
 	}
 	body := map[string]any{
 		"code":        req.Code,
@@ -352,11 +354,19 @@ func (a *API) peersAccept(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// B's row for A carries the Host header B must send to A, which A returns
+	// in the pair response. Older peers omit it, so fall back to the A URL.
+	aHostHeader := strings.TrimSpace(resp.HostHeader)
+	if aHostHeader == "" {
+		if u, err := url.Parse(req.AURL); err == nil {
+			aHostHeader = u.Host
+		}
+	}
 	now := time.Now().Unix()
 	peer := store.Peer{
 		Name:        localName,
 		BaseURL:     strings.TrimRight(req.AURL, "/"),
-		HostHeader:  hostHeader,
+		HostHeader:  aHostHeader,
 		Enabled:     true,
 		Protocol:    protocol,
 		RemoteBuild: build,
@@ -460,8 +470,10 @@ func (a *API) peerPair(w http.ResponseWriter, r *http.Request) {
 	}
 	peerLimiter.reset(ip)
 	// The pairing exchange is the one place a key travels in a response: B
-	// needs K_A to call A. It never appears anywhere else.
-	writeJSON(w, http.StatusOK, map[string]any{"key": ka, "protocol": protocolVersion})
+	// needs K_A to call A. It never appears anywhere else. A also returns the
+	// Host header B should send it, so B's row for A is not seeded with B's own
+	// host header.
+	writeJSON(w, http.StatusOK, map[string]any{"key": ka, "protocol": protocolVersion, "host_header": r.Host})
 }
 
 // peerUnpair is authenticated by the presenting peer key; it never matches by
@@ -732,11 +744,15 @@ func (a *API) peerStatus(w http.ResponseWriter, r *http.Request) {
 	if bs, err := a.deps.Store.ListBackends(r.Context()); err == nil {
 		blist := []map[string]any{}
 		for _, b := range bs {
+			until := rest[b.Name]
+			if until == nil {
+				until = []int64{}
+			}
 			blist = append(blist, map[string]any{
 				"name":       b.Name,
 				"slots":      b.Slots,
 				"running":    running[b.Name],
-				"rest_until": rest[b.Name],
+				"rest_until": until,
 			})
 		}
 		st["backends"] = blist
@@ -786,7 +802,7 @@ func (a *API) peerProjectStatus(ctx context.Context) ([]map[string]any, []string
 		return []map[string]any{}, []string{}, nil
 	}
 	rows, err := db.QueryContext(ctx, `
-		SELECT p.slug, COALESCE(e.run_state, 'stopped'), e.id,
+		SELECT p.slug, COALESCE(e.run_state, 'stopped'), COALESCE(e.id, 0),
 		       (SELECT COUNT(*) FROM stages s WHERE s.effort = e.id AND s.state = 'running'),
 		       (SELECT COUNT(*) FROM tasks t JOIN queues q ON q.id = t.queue WHERE q.effort = e.id)
 		FROM projects p

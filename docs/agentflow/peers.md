@@ -62,7 +62,10 @@ Peer routes (peer key, same key as `auth.api_keys`):
    Host header defaults to the request's own `Host` when `host_header` is
    omitted. A verifies and burns the code, stores K_B as its outbound
    credential for B, mints K_A, stores sha256(K_A) as inbound `peer:builder`,
-   mirrors it, and returns K_A. B stores K_A as its outbound credential for A.
+   mirrors it, and returns K_A plus A's Host header (`r.Host` as B called it).
+   B stores K_A as its outbound credential for A and that Host header in its
+   own row for A; the `host_header` B sent in `accept` describes B, so A stores
+   it for calls to B.
 
 Names must match `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`; a separator is rejected
 before it can become a key-file path. Pairing is refused if either node's name
