@@ -154,31 +154,73 @@ func cleanupDropsOn(c *chain, st model.Stage) bool {
 	return false
 }
 
-// askAnotherReviewer widens the review to a panel: while fewer different reviewer
-// models than the review_panel setting have passed the work, another model is asked.
-// It reports true when it did, or when it is waiting for a reviewer's slot. A panel
-// is best effort: when no further reviewer model could ever serve, the reviews that
-// passed stand, so a thin pool of free models does not hold the task up forever.
+// askAnotherReviewer widens the review to a panel: while fewer reviewers than the
+// panel setting have passed the work, another model is asked. It reports true
+// when it did, or when it is waiting for a reviewer's slot.
+//
+// A normal task keeps the best-effort review_panel path: when no further
+// reviewer model could ever serve, the reviews that passed stand, so a thin
+// pool of free models does not hold the task up forever.
+//
+// A risky task uses risky_review_panel and counts distinct reviewer FAMILIES:
+// the second reviewer is never the first one's family. If the pool can only
+// supply one family, the task does not merge on that single pass; it waits
+// (surfaced as attention) instead of reviewing with two of a kind.
 func (e *Engine) askAnotherReviewer(ctx context.Context, c *chain, last model.Stage) (bool, error) {
 	set, err := e.deps.Store.EffectiveSettings(ctx, c.proj.Slug)
-	if err != nil || set.ReviewPanel <= 1 {
+	if err != nil {
 		return false, err
 	}
+	risky := c.task.Risk == model.RiskRisky
+	panel := set.ReviewPanel
+	if risky {
+		panel = set.RiskyReviewPanel
+		if panel <= 0 {
+			panel = 2
+		}
+	}
+	if panel <= 1 {
+		return false, nil
+	}
 	passed := map[string]bool{}
+	passedFamilies := map[string]bool{}
 	for _, st := range c.stages {
 		if st.Role == "reviewer" && st.Outcome == OutcomePass && st.Model != "" {
 			passed[st.Model] = true
+			passedFamilies[model.ModelFamily(st.Model)] = true
 		}
 	}
-	if len(passed) >= set.ReviewPanel {
+	var have int
+	if risky {
+		have = len(passedFamilies)
+	} else {
+		have = len(passed)
+	}
+	if have >= panel {
 		return false, nil
 	}
 	v, err := e.newView(ctx)
 	if err != nil {
 		return false, err
 	}
-	v.avoid = passed
+	v.avoid = map[string]bool{}
+	for m := range passed {
+		v.avoid[m] = true
+	}
+	if risky {
+		// keep every reviewer whose family already passed (or the worker's
+		// family) out of the next pick, so the next reviewer is a new family
+		for _, cand := range v.candidates("reviewer", c.proj.Slug) {
+			if passedFamilies[model.ModelFamily(cand.Model)] || model.ModelFamily(cand.Model) == model.ModelFamily(c.workerModel()) {
+				v.avoid[cand.Model] = true
+			}
+		}
+	}
 	if _, why := reviewerFor(v, c.proj, "", c.workerModel(), false); why != "" {
+		if risky {
+			// only one family can serve: do not let the single pass stand
+			return true, e.setWaiting(ctx, c.task, why)
+		}
 		return false, nil // no other reviewer model could serve: the panel is as wide as the pool
 	}
 	pk, why := reviewerFor(v, c.proj, "", c.workerModel(), true)

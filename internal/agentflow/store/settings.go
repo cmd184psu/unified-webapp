@@ -42,11 +42,15 @@ type Settings struct {
 	AcceptanceRounds int
 	// ReviewPanel is how many different reviewer models must each pass a
 	// task before it merges; 1 is a single reviewer.
-	ReviewPanel   int
-	WorkerTimeout time.Duration
-	ReviewTimeout time.Duration
-	PlanTimeout   time.Duration
-	VerifyTimeout time.Duration
+	ReviewPanel int
+	// RiskyReviewPanel is how many distinct reviewer families must each pass a
+	// risky task before it merges; 2 by default. A risky task never merges on
+	// a single family's pass.
+	RiskyReviewPanel int
+	WorkerTimeout    time.Duration
+	ReviewTimeout    time.Duration
+	PlanTimeout      time.Duration
+	VerifyTimeout    time.Duration
 	// MergerTimeout bounds one merger stage that resolves a conflicted merge (AF-18).
 	MergerTimeout time.Duration
 	// CoordinatorCheckMinutes is how often the coordinator self-check runs; 0 = off (AF-19).
@@ -164,7 +168,7 @@ var (
 
 // limitKeys are the settings a project may override.
 var limitKeys = []string{
-	"max_attempts", "stuck_threshold", "max_infra_retries", "plan_max_rounds", "stall_minutes", "acceptance_rounds", "review_panel",
+	"max_attempts", "stuck_threshold", "max_infra_retries", "plan_max_rounds", "stall_minutes", "acceptance_rounds", "review_panel", "risky_review_panel",
 	"worker_timeout", "review_timeout", "plan_timeout", "verify_timeout", "merger_timeout", "resolver_mode",
 }
 
@@ -243,6 +247,13 @@ func parseSettings(m map[string]string) (Settings, error) {
 	}
 	if s.ReviewPanel, err = validateInt("review_panel", m["review_panel"], 1, 3); err != nil {
 		return s, err
+	}
+	if s.RiskyReviewPanel, err = validateInt("risky_review_panel", m["risky_review_panel"], 1, 3); err != nil {
+		if strings.TrimSpace(m["risky_review_panel"]) == "" {
+			s.RiskyReviewPanel = 2
+		} else {
+			return s, err
+		}
 	}
 	if s.WorkerTimeout, err = validateTimeout("worker_timeout", m["worker_timeout"]); err != nil {
 		return s, err

@@ -70,9 +70,11 @@ func TestTaskRiskRejectsUnknownValue(t *testing.T) {
 }
 
 // Migration 56 adds the two columns to a database at af/af-next3's version and
-// is a no-op the second time it is reached.
+// is a no-op the second time it is reached (later migrations run on the same
+// pass, so the version is the newest one).
 func TestMigration56TaskRisk(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agentflow.db")
+	latest := migrations[len(migrations)-1].version
 	s1, err := openWith(path, migrations[:55])
 	if err != nil {
 		t.Fatal(err)
@@ -87,13 +89,46 @@ func TestMigration56TaskRisk(t *testing.T) {
 		if err != nil {
 			t.Fatalf("apply 56 (pass %d): %v", i+1, err)
 		}
-		if v := schemaVersion(t, s.db); v != 56 {
-			t.Fatalf("version after pass %d = %d, want 56", i+1, v)
+		if v := schemaVersion(t, s.db); v != latest {
+			t.Fatalf("version after pass %d = %d, want %d", i+1, v, latest)
 		}
 		var risk, reason string
 		if err := s.db.QueryRow(`SELECT risk, risk_reason FROM tasks WHERE 0`).Scan(&risk, &reason); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			t.Fatalf("read the new columns: %v", err)
 		}
 		s.Close()
+	}
+}
+
+// The auto-risk settings come with their defaults, and an owner can turn the
+// switch off and empty either list (AF-26).
+func TestAutoRiskSettingsDefaults(t *testing.T) {
+	s, _ := openTemp(t)
+	set, err := s.GetSettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !set.AutoRisk {
+		t.Fatalf("auto_risk must default on")
+	}
+	if len(set.RiskyPaths) == 0 || set.RiskyPaths[0] != "internal/agentflow/store/migrate.go" {
+		t.Fatalf("risky_paths default = %v", set.RiskyPaths)
+	}
+	if len(set.RiskyWords) != 5 || set.RiskyWords[0] != "migration" {
+		t.Fatalf("risky_words default = %v", set.RiskyWords)
+	}
+
+	if err := s.UpdateSettings(ctx, "tester", map[string]string{"auto_risk": "off", "risky_paths": ""}); err != nil {
+		t.Fatal(err)
+	}
+	set, err = s.GetSettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if set.AutoRisk || len(set.RiskyPaths) != 0 || len(set.RiskyWords) != 5 {
+		t.Fatalf("saved settings = %+v", set)
+	}
+	if err := s.UpdateSettings(ctx, "tester", map[string]string{"auto_risk": "sometimes"}); err == nil {
+		t.Fatalf("auto_risk must be on or off")
 	}
 }

@@ -104,6 +104,7 @@ var migrations = []migration{
 	{55, migration55SQL},
 	{56, migration56SQL},
 	{57, migration57SQL},
+	{58, migration58SQL},
 }
 
 // migration51SQL (AF-22) adds the decision_inbox table: pending ruling additions
@@ -1202,6 +1203,12 @@ const migration57SQL = `
 INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_risk', 'on');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('risky_paths', 'internal/agentflow/store/migrate.go, migrations/, internal/platform/auth/, internal/platform/config/, deploy/');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('risky_words', 'migration, promote, auth, key, credential');
+`
+
+// migration58SQL (AF-26) seeds the risky review panel: how many distinct
+// reviewer families must each pass a risky task before it merges.
+const migration58SQL = `
+INSERT OR IGNORE INTO settings (key, value) VALUES ('risky_review_panel', '2');
 `
 
 // migration55SQL (AF-24) adds peer pairing: a paired peer node and one-time

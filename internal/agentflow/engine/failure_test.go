@@ -815,3 +815,38 @@ func TestEditTaskAndResumeKeepsApprovalAndRun(t *testing.T) {
 		t.Fatalf("effort = %+v, %v: an approved queue's edit must not leave it in draft", ef.Status, err)
 	}
 }
+
+// Risky tasks need a reviewer from a different family, and both are asked.
+func TestRiskyReviewPanelAsksTwoFamilies(t *testing.T) {
+	defs := []model.TaskDef{{Key: "T1", Phase: "P", Title: "first", Prompt: "do", Acceptance: []string{"ok"}, Risk: model.RiskRisky}}
+	c := newChainRun(t, nil, defs)
+	c.addBackend("gpu2", 1, false, false, "m3", "m4")
+	c.candidates("global", "", "worker", "gpu/m1")
+	c.candidates("global", "", "reviewer", "gpu/m2", "gpu2/m4")
+	if err := c.st.UpdateSettings(context.Background(), "t", map[string]string{"risky_review_panel": "2"}); err != nil {
+		t.Fatal(err)
+	}
+	c.fake.Script("worker", runner.Step{Reply: workerOK, Edit: writeWork})
+	c.fake.Script("reviewer", runner.Step{Reply: reviewPass}, runner.Step{Reply: reviewPass})
+	c.run()
+	waitFor(t, "task passed", func() bool { return c.taskStatus() == model.StatusPassed })
+	if got := strings.Join(c.reviewerStages(), ","); got != "m2:pass,m4:pass" {
+		t.Fatalf("reviewer stages = %s, want m2 then m4, both passing", got)
+	}
+}
+
+// A risky task with only one reviewer family waits instead of passing.
+func TestRiskyReviewPanelWaitsWithOneFamily(t *testing.T) {
+	defs := []model.TaskDef{{Key: "T1", Phase: "P", Title: "first", Prompt: "do", Acceptance: []string{"ok"}, Risk: model.RiskRisky}}
+	c := newChainRun(t, nil, defs)
+	if err := c.st.UpdateSettings(context.Background(), "t", map[string]string{"risky_review_panel": "2"}); err != nil {
+		t.Fatal(err)
+	}
+	c.fake.Script("worker", runner.Step{Reply: workerOK, Edit: writeWork})
+	c.fake.Script("reviewer", runner.Step{Reply: reviewPass})
+	c.run()
+	waitFor(t, "task waiting", func() bool { return c.task0().WaitingReason != "" })
+	if c.taskStatus() == model.StatusPassed {
+		t.Fatalf("risky task passed on a single family")
+	}
+}
