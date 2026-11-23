@@ -380,6 +380,42 @@ func buildDispatcher(cfg *config.Config, svc *auth.Service) *Dispatcher {
 	return dispatch
 }
 
+// peerKeyHooks mirrors an inbound peer key into auth.api_keys through the same
+// admin writer -gen-api-key uses, then swaps the auth policy so the gate
+// accepts it on the next request without a restart (AF-24).
+func peerKeyHooks(cfg *config.Config, svc *auth.Service) *agentflow.Hooks {
+	path := cfg.ConfigPath()
+	if path == "" || svc == nil {
+		return nil
+	}
+	reload := func() error {
+		c, err := config.Load(path)
+		if err != nil {
+			return err
+		}
+		p, err := auth.BuildPolicy(c.Auth)
+		if err != nil {
+			return err
+		}
+		svc.SwapPolicy(p)
+		return nil
+	}
+	return &agentflow.Hooks{
+		SetPeerKey: func(peerName, hash string) error {
+			if _, err := admin.AddAPIKeyToConfigFile(path, "peer:"+peerName, hash, []string{"agentflow"}); err != nil {
+				return err
+			}
+			return reload()
+		},
+		DeletePeerKey: func(peerName string) error {
+			if _, err := admin.RemoveAPIKeyFromConfigFile(path, "peer:"+peerName); err != nil {
+				return err
+			}
+			return reload()
+		},
+	}
+}
+
 // defaultBodyLimit caps the request body of every module that has no larger
 // need of its own.
 const defaultBodyLimit int64 = 1 << 20 // 1 MiB
@@ -469,7 +505,7 @@ func buildModule(module string, cfg *config.Config, svc *auth.Service, deps *mod
 		if err != nil {
 			return nil, fmt.Errorf("agentflow needs the taskmaster engine: %w", err)
 		}
-		return agentflow.Build(cfg.Agentflow, e)
+		return agentflow.BuildWithHooks(cfg.Agentflow, e, peerKeyHooks(cfg, svc))
 	case "botchat":
 		return botchat.Build(cfg.Botchat)
 	case "grocery":

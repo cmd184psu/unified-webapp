@@ -8,7 +8,7 @@
 
 import { autosave, type Autosave } from './autosave.js';
 import { showToast } from '@shared';
-import { api, type OpenCodeStatus, type RestartView, type ServiceHoldView, type Settings } from './api.js';
+import { api, type OpenCodeStatus, type PeersView, type RestartView, type ServiceHoldView, type Settings } from './api.js';
 import { h, replace } from './dom.js';
 import { subscribe, type AgentflowEvent } from './events.js';
 import { pickDirectory } from './dirpicker.js';
@@ -54,6 +54,11 @@ const EXECUTION_FIELDS: LimitField[] = [
 ];
 
 export type SettingsDeps = Pick<typeof api, 'settings' | 'putSettings' | 'opencodeVersion' | 'restartStatus' | 'restartService' | 'cancelRestart' | 'serviceHold' | 'holdService' | 'liftHold' | 'pruneStageHomes'> & {
+  /** Peers (AF-24); optional so an embedded settings view can omit them. */
+  peers?: (o?: { quiet?: boolean }) => Promise<PeersView>;
+  invitePeer?: (name: string) => Promise<{ code: string; a_url: string }>;
+  acceptPeer?: (p: { a_url: string; code: string; name: string; b_url?: string; host_header?: string }) => Promise<unknown>;
+  revokePeer?: (name: string) => Promise<unknown>;
   /** Opens the directory picker at start; the chosen path, or null when cancelled. */
   pickDir(start: string): Promise<string | null>;
   notify(message: string): void;
@@ -68,9 +73,12 @@ export const defaultSettingsDeps = (): SettingsDeps => ({
   cancelRestart: api.cancelRestart,
   serviceHold: api.serviceHold,
   holdService: api.holdService,
-  liftHold: api.liftHold,
-  pruneStageHomes: api.pruneStageHomes,
-  pickDir: (start) => pickDirectory(start),
+  liftHold: api.liftHold,	pruneStageHomes: api.pruneStageHomes,
+	peers: (o) => api.peers(o),
+	invitePeer: api.invitePeer,
+	acceptPeer: api.acceptPeer,
+	revokePeer: api.revokePeer,
+	pickDir: (start) => pickDirectory(start),
   notify: (m) => void showToast(m, 'success'),
 });
 
@@ -88,8 +96,8 @@ export class SettingsView {
   private svc: RestartView | null = null;
   private hold: ServiceHoldView | null = null;
   private svcHost = h('div', { attrs: { 'data-role': 'service' } });
-  private svcTimer: ReturnType<typeof setInterval> | null = null;
-  private rootsHost = h('div', { class: 'wizard-list', attrs: { 'data-role': 'browse-roots' } });
+  private svcTimer: ReturnType<typeof setInterval> | null = null;	private rootsHost = h('div', { class: 'wizard-list', attrs: { 'data-role': 'browse-roots' } });
+	private peersHost = h('div', { class: 'wizard-list', attrs: { 'data-role': 'peers' } });
   private dirty = false;
   private auto: Autosave | null = null;
   private off: (() => void) | null = null;
@@ -219,9 +227,51 @@ export class SettingsView {
         h('code', { text: r }),
         button('Remove', () => edit(this.roots.filter((_, j) => j !== i)), { field: 'remove-root', icon: 'remove' }))),
       button('Add folder', () => void this.addRoot(edit), { field: 'add-root', icon: 'add' }));
-  }
+  }	/** renderPeers lists paired nodes and offers invite/accept/revoke (AF-24). */
+	private async renderPeers(): Promise<void> {
+		const d = this.deps;
+		if (!d.peers) return;
+		let view: PeersView;
+		try {
+			view = await d.peers({ quiet: true });
+		} catch {
+			return;
+		}
+		const reload = (): void => { void this.renderPeers(); };
+		const rows = view.peers.map((p) => h('div', { class: 'inline-row', attrs: { 'data-peer': p.name } },
+			h('code', { text: `${p.name} -> ${p.base_url}` }),
+			badge(p.enabled ? 'enabled' : 'off', p.enabled ? 'ok' : 'warn'),
+			h('span', { class: 'field-hint', text: p.last_error || (p.last_ok ? `last ok ${new Date(p.last_ok * 1000).toLocaleString()}` : 'never reached') }),
+			button('Revoke', () => { void (async () => {
+				try { await d.revokePeer?.(p.name); } catch { return; }
+				reload();
+			})(); }, { field: 'peer-revoke', icon: 'remove' })));
+		const inviteName = textInput('peer_invite_name', '', { placeholder: 'builder' });
+		const inviteOut = h('div', { class: 'field-hint', attrs: { 'data-role': 'peer-invite-code' } });
+		const aURL = textInput('peer_a_url', '', { placeholder: 'http://a:8788' });
+		const code = textInput('peer_code', '', { placeholder: 'pairing code' });
+		const name = textInput('peer_name', '', { placeholder: 'name for that node' });
+		const bURL = textInput('peer_b_url', '', { placeholder: 'http://b:8788' });
+		replace(this.peersHost,
+			...rows,
+			h('div', { class: 'inline-row' }, inviteName,
+				button('Create pairing code', () => { void (async () => {
+					try {
+						const r = await d.invitePeer?.(inviteName.value.trim());
+						if (r) replace(inviteOut, h('p', { text: `Code: ${r.code}` }), h('p', { text: `On the other node use a_url ${r.a_url}` }));
+					} catch { return; }
+				})(); }, { field: 'peer-invite', icon: 'add' })),
+			inviteOut,
+			h('div', { class: 'inline-row' }, aURL, code, name, bURL,
+				button('Accept invitation', () => { void (async () => {
+					try {
+						await d.acceptPeer?.({ a_url: aURL.value.trim(), code: code.value.trim(), name: name.value.trim(), b_url: bURL.value.trim() });
+					} catch { return; }
+					reload();
+				})(); }, { field: 'peer-accept', icon: 'add' })));
+	}
 
-  private async addRoot(edit: (next: string[]) => void): Promise<void> {
+	private async addRoot(edit: (next: string[]) => void): Promise<void> {
     const chosen = await this.deps.pickDir(this.roots[this.roots.length - 1] ?? '');
     if (chosen !== null && !this.roots.includes(chosen)) edit([...this.roots, chosen]);
   }
@@ -292,13 +342,13 @@ export class SettingsView {
         section('Limits', limits),				section('Execution', exec),
 				section('Backlog', backlog),
         section('opencode', path, this.ocHost),
-        section('BotChat', bcUrl, bcKey, bcMode.el),
-        section('Service', this.svcHost),
+        section('BotChat', bcUrl, bcKey, bcMode.el),		section('Service', this.svcHost),
+		section('Peers', this.peersHost),
         section('Browse limit', this.rootsHost),
         section('Stage homes', h('div', { class: 'row-actions' }, button('Prune stage homes now', () => void this.pruneStageHomes(), { field: 'prune-stage-homes', icon: 'remove', word: true }))),
         this.errors.general,
-        h('div', { class: 'settings-actions' }, this.auto.status));
-    replace(this.host, root);
-    this.auto.watch(root);
+        h('div', { class: 'settings-actions' }, this.auto.status));		replace(this.host, root);
+		void this.renderPeers();
+		this.auto.watch(root);
   }
 }
