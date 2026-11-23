@@ -95,14 +95,16 @@ var migrations = []migration{
 	{48, migration48SQL},
 	{49, migration49SQL},
 	{50, migration50SQL},
+	{51, migration51SQL},
+	{52, migration52SQL},
 }
 
-// migration50SQL (AF-22) adds the decision_inbox table: pending ruling additions
+// migration51SQL (AF-22) adds the decision_inbox table: pending ruling additions
 // from coordinator/resolver stages that need owner or coord-fs3 confirmation
 // before being written to the rulings file. The coordinator/resolver never
 // writes the rulings file directly; they append via the guarded add_ruling action
 // which writes a pending entry here.
-const migration50SQL = `
+const migration51SQL = `
 CREATE TABLE decision_inbox (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   effort INTEGER NOT NULL REFERENCES efforts(id) ON DELETE CASCADE,
@@ -1024,10 +1026,10 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('budget_raise_percent', '50'
 INSERT OR IGNORE INTO settings (key, value) VALUES ('budget_raise_cap', '3');
 `
 
-// migration49SQL (AF-22) seeds the rulings oracle defaults: the default rulings
+// migration52SQL (AF-22) seeds the rulings oracle defaults: the default rulings
 // file path (relative to the repo) and an empty area map (path prefix -> area
 // tag). Empty rulings_file means the oracle is off for that project.
-const migration49SQL = `
+const migration52SQL = `
 INSERT OR IGNORE INTO settings (key, value) VALUES ('rulings_file', 'docs/rulings/RULINGS.md');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('rulings_file_area_map', '{}');
 `
