@@ -187,6 +187,17 @@ func (s *seats) Sweep(ctx context.Context, open func(int64) bool) error {
 
 func (s *seats) Notices() []runner.SeatNotice { return s.board.List() }
 
+// notifiableKind is false for advisory attention kinds that never need the owner: a same-task
+// conflicting-guidance note is advice for the agents and, capped to a top ten, it moves in and out of the
+// list and used to re-fire the same notification over and over (owner 11-24).
+func notifiableKind(kind string) bool {
+	switch kind {
+	case "conflicting_guidance", "conflicting_guidance_summary", "started_from_backlog":
+		return false
+	}
+	return true
+}
+
 // attentionWatcher sends the one notification text when the attention list gains an item.
 func attentionWatcher(eng *engine.Engine, st *store.Store) *notify.Watcher {
 	return &notify.Watcher{
@@ -197,6 +208,9 @@ func attentionWatcher(eng *engine.Engine, st *store.Store) *notify.Watcher {
 			}
 			keys := make([]string, 0, len(items))
 			for _, it := range items {
+				if !notifiableKind(it.Kind) {
+					continue
+				}
 				keys = append(keys, notify.Key(it.Kind, it.Project, strconv.FormatInt(it.Effort, 10), it.Task, strconv.FormatInt(it.Stage, 10)))
 			}
 			return keys, nil
