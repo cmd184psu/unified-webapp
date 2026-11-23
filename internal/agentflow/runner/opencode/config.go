@@ -61,6 +61,10 @@ const KiloAPIType = "kilo"
 // its own id, whatever the backend is called.
 func RefFor(b runner.Backend, model string) string {
 	if b.APIType == "opencode" {
+		// A model id that already names its provider (opencode-go/<model>, the owner's paid plan) is used as given.
+		if strings.Contains(model, "/") {
+			return model
+		}
 		return BuiltinProvider + "/" + model
 	}
 	if b.APIType == KiloAPIType {
