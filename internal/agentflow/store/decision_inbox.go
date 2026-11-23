@@ -2,8 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"time"
 )
@@ -52,15 +50,11 @@ func (s *Store) ListPendingDecisionInbox(ctx context.Context, effort int64) ([]D
 // ConfirmDecisionInbox marks a pending entry as confirmed (the ruling addition
 // is approved and may be written to the rulings file).
 func (s *Store) ConfirmDecisionInbox(ctx context.Context, id int64) error {
-	var n int
-	err := s.db.QueryRowContext(ctx, `UPDATE decision_inbox SET status = 'confirmed' WHERE id = ?`, id).Scan(&n)
+	res, err := s.db.ExecContext(ctx, `UPDATE decision_inbox SET status = 'confirmed' WHERE id = ?`, id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("decision_inbox %d: not found: %w", id, ErrNotFound)
-		}
 		return err
 	}
-	if n == 0 {
+	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("decision_inbox %d: not found: %w", id, ErrNotFound)
 	}
 	return nil
@@ -69,15 +63,11 @@ func (s *Store) ConfirmDecisionInbox(ctx context.Context, id int64) error {
 // RejectDecisionInbox marks a pending entry as rejected (the proposed ruling
 // addition is discarded).
 func (s *Store) RejectDecisionInbox(ctx context.Context, id int64) error {
-	var n int
-	err := s.db.QueryRowContext(ctx, `UPDATE decision_inbox SET status = 'rejected' WHERE id = ?`, id).Scan(&n)
+	res, err := s.db.ExecContext(ctx, `UPDATE decision_inbox SET status = 'rejected' WHERE id = ?`, id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("decision_inbox %d: not found: %w", id, ErrNotFound)
-		}
 		return err
 	}
-	if n == 0 {
+	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("decision_inbox %d: not found: %w", id, ErrNotFound)
 	}
 	return nil

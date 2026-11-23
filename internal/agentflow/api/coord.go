@@ -4,6 +4,9 @@ import (
 	"errors"
 	"net/http"
 
+	"cmd184psu/unified-webapp/internal/agentflow/store"
+	"strconv"
+
 	"cmd184psu/unified-webapp/internal/agentflow/coord"
 	"cmd184psu/unified-webapp/internal/agentflow/runner/seat"
 )
@@ -241,4 +244,48 @@ func (a *API) handoffMerge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.Coord.MergeTask(r.Context(), r.PathValue("task"), body.Branches, body.Dry))
+}
+
+// addRuling handles POST /api/projects/{slug}/efforts/{id}/tasks/{task}/add_ruling.
+// It is the HTTP entrypoint for the guarded add_ruling action: a coordinator or
+// resolver stage proposes a new ruling, which is recorded as a pending entry in
+// the decision_inbox (the rulings file is never written directly). The owner or
+// coord-fs3 confirms or rejects the entry through ConfirmDecisionInbox /
+// RejectDecisionInbox.
+func (a *API) addRuling(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeErr(w, store.Invalid("id", "not a number"))
+		return
+	}
+	task, err := strconv.ParseInt(r.PathValue("task"), 10, 64)
+	if err != nil {
+		writeErr(w, store.Invalid("task", "not a number"))
+		return
+	}
+	var body struct {
+		RulingID     string `json:"ruling_id"`
+		ProposedText string `json:"proposed_text"`
+	}
+	if !decodeBody(w, r, &body, false) {
+		return
+	}
+	if body.RulingID == "" {
+		writeErr(w, store.Invalid("ruling_id", "required"))
+		return
+	}
+	if body.ProposedText == "" {
+		writeErr(w, store.Invalid("proposed_text", "required"))
+		return
+	}
+	actor := r.Header.Get("X-Coordinator-Callsign")
+	if actor == "" {
+		actor = "coord-fs3"
+	}
+	if err := a.deps.Engine.AddRuling(r.Context(), actor, slug, id, task, body.RulingID, body.ProposedText); err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"ok": true})
 }
