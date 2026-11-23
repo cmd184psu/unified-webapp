@@ -87,7 +87,7 @@ const (
 )
 
 // StageRoles lists the roles a stage can have.
-var StageRoles = []string{"worker", "reviewer", "planner", "architect", "critic", "compiler", "verify", "merge", "cleanup", "merger"}
+var StageRoles = []string{"worker", "reviewer", "planner", "architect", "critic", "compiler", "verify", "merge", "cleanup", "merger", "coordinator"}
 
 // Effort is one unit of work on a project: FRD, plan, queue and run.
 type Effort struct {

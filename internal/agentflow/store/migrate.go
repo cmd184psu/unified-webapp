@@ -40,6 +40,7 @@ type migration struct {
 //	46 AF-18 merger role (role_candidates and stages), merger_timeout setting
 //	47 AF-15b stage-home pruning and disk-watchdog settings
 //	48 AF-19 coordinator role (role_candidates and stages), coordinator settings
+//	49 AF-19b coordinator_runbook and coordinator_actions_per_run settings
 //
 // Later stories append the next integer; they never edit an earlier entry.
 var migrations = []migration{
@@ -91,6 +92,7 @@ var migrations = []migration{
 	{46, migration46SQL},
 	{47, migration47SQL},
 	{48, migration48SQL},
+	{49, migration49SQL},
 }
 
 // migration41SQL (AF-14) stores review requests: the branch and base, the task
@@ -1100,4 +1102,12 @@ CREATE INDEX idx_stages_open ON stages(state) WHERE state <> 'done';
 INSERT OR IGNORE INTO settings (key, value) VALUES ('coordinator_check_minutes', '60');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('coordinator_runs_per_day', '24');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('coordinator_timeout', '30m0s');
+`
+
+// migration49SQL (AF-19b) adds the coordinator run's two knobs: the runbook file
+// its prompt points at, and how many of a run's declared actions the engine may
+// apply.
+const migration49SQL = `
+INSERT OR IGNORE INTO settings (key, value) VALUES ('coordinator_runbook', '~/work/coordinator/BEAM-COORD.md');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('coordinator_actions_per_run', '20');
 `

@@ -448,3 +448,126 @@ func (r *ResolverOut) Validate() error {
 	}
 	return nil
 }
+
+// CoordinatorOut is the coordinator's final message for one run (AF-19): what it
+// found and the changes it wants made. The engine applies the actions it is
+// allowed to make and turns any it may not into an item for the owner; a stage
+// itself makes no change.
+type CoordinatorOut struct {
+	// Summary is what the run saw and did, in one or two sentences.
+	Summary string `json:"summary"`
+	// Actions are the changes to apply, in the order to apply them.
+	Actions []CoordinatorAction `json:"actions,omitempty"`
+	// Questions are decisions the coordinator may not make (AF-19 item 6).
+	Questions []CoordinatorQuestion `json:"questions,omitempty"`
+}
+
+// CoordinatorAction is one change the coordinator asks the engine to make.
+type CoordinatorAction struct {
+	// Kind is allow_files, retry, budget, note, park, unpark, approve_queue or
+	// override for one it may make; approve_frd, merge, promote, delete,
+	// set_settings, set_candidates or restart_service is refused.
+	Kind string `json:"kind"`
+	// Project is the project slug and Task the task key, for a task action.
+	Project string `json:"project,omitempty"`
+	Task    string `json:"task,omitempty"`
+	// Effort is the effort id, for an effort action (budget, park, unpark,
+	// approve_queue).
+	Effort int64 `json:"effort,omitempty"`
+	// Files are the paths to allow (allow_files), repo-relative.
+	Files []string `json:"files,omitempty"`
+	// Clean removes the task's worktree before the retry (retry).
+	Clean bool `json:"clean,omitempty"`
+	// Tokens is the new token budget (budget), which may only go up.
+	Tokens int64 `json:"tokens,omitempty"`
+	// Note is the text appended to the task's prompt (note).
+	Note string `json:"note,omitempty"`
+	// Reason says why, in the words the event log and the owner read.
+	Reason string `json:"reason"`
+}
+
+// CoordinatorQuestion is a decision that stays with the owner.
+type CoordinatorQuestion struct {
+	Question string `json:"question"`
+	// Options are the answers it may choose from.
+	Options []string `json:"options,omitempty"`
+	// Recommendation is the coordinator's own pick, if it has one.
+	Recommendation string `json:"recommendation,omitempty"`
+}
+
+// coordinatorKinds are the actions the engine applies for the coordinator.
+var coordinatorKinds = []string{"allow_files", "retry", "budget", "note", "park", "unpark", "approve_queue", "override"}
+
+// coordinatorRefused are the actions the coordinator may never make: they stay
+// with the owner (AF-19 item 4). A run may still name one, and the engine turns
+// it into an item for the owner rather than making it.
+var coordinatorRefused = []string{"approve_frd", "merge", "promote", "delete", "set_settings", "set_candidates", "restart_service"}
+
+// CoordinatorAllowed reports whether the engine may apply actions of a kind.
+func CoordinatorAllowed(kind string) bool {
+	for _, k := range coordinatorKinds {
+		if k == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// CoordinatorForbidden reports whether a kind is one only the owner may take.
+func CoordinatorForbidden(kind string) bool {
+	for _, k := range coordinatorRefused {
+		if k == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *CoordinatorOut) Validate() error {
+	if err := nonEmpty("summary", c.Summary); err != nil {
+		return err
+	}
+	if len(c.Actions) > 100 {
+		return bad("actions", "at most 100 actions per run")
+	}
+	for i, a := range c.Actions {
+		if a.Kind == "" {
+			return bad(fmt.Sprintf("actions[%d].kind", i), "is required")
+		}
+		if !CoordinatorAllowed(a.Kind) && !CoordinatorForbidden(a.Kind) {
+			return bad(fmt.Sprintf("actions[%d].kind", i), "must be one of %v (or a refused kind: %v), got %q", coordinatorKinds, coordinatorRefused, a.Kind)
+		}
+		if err := nonEmpty(fmt.Sprintf("actions[%d].reason", i), a.Reason); err != nil {
+			return err
+		}
+		switch a.Kind {
+		case "allow_files":
+			if len(a.Files) == 0 {
+				return bad(fmt.Sprintf("actions[%d].files", i), "allow_files needs at least one file")
+			}
+		case "note":
+			if err := nonEmpty(fmt.Sprintf("actions[%d].note", i), a.Note); err != nil {
+				return err
+			}
+		case "budget":
+			if a.Effort == 0 || a.Tokens <= 0 {
+				return bad(fmt.Sprintf("actions[%d].tokens", i), "budget needs an effort and a token count")
+			}
+		case "park", "unpark", "approve_queue":
+			if a.Effort == 0 {
+				return bad(fmt.Sprintf("actions[%d].effort", i), "%s needs an effort", a.Kind)
+			}
+		}
+		if a.Kind == "allow_files" || a.Kind == "retry" || a.Kind == "override" {
+			if a.Project == "" || a.Task == "" {
+				return bad(fmt.Sprintf("actions[%d]", i), "%s needs a project and a task key", a.Kind)
+			}
+		}
+	}
+	for i, q := range c.Questions {
+		if err := nonEmpty(fmt.Sprintf("questions[%d].question", i), q.Question); err != nil {
+			return err
+		}
+	}
+	return nil
+}

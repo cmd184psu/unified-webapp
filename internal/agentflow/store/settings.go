@@ -55,7 +55,13 @@ type Settings struct {
 	CoordinatorRunsPerDay int
 	// CoordinatorTimeout bounds one coordinator stage (AF-19).
 	CoordinatorTimeout time.Duration
-	OpencodePath       string
+	// CoordinatorRunbook is the file the coordinator stage's prompt tells it to follow
+	// (AF-19); ~/work/coordinator/BEAM-COORD.md by default, empty means the prompt alone.
+	CoordinatorRunbook string
+	// CoordinatorActionsPerRun caps how many of a run's declared actions the engine applies
+	// (AF-19); 20 by default.
+	CoordinatorActionsPerRun int
+	OpencodePath             string
 	// BotchatURL is the BotChat service address and BotchatKeyFile the file holding the
 	// API key every agent shares; both empty means the relay is off.
 	BotchatURL     string
@@ -232,6 +238,20 @@ func parseSettings(m map[string]string) (Settings, error) {
 	if s.CoordinatorTimeout, err = validateTimeout("coordinator_timeout", m["coordinator_timeout"]); err != nil {
 		if strings.TrimSpace(m["coordinator_timeout"]) == "" {
 			s.CoordinatorTimeout = 30 * time.Minute
+		} else {
+			return s, err
+		}
+	}
+	s.CoordinatorRunbook = strings.TrimSpace(m["coordinator_runbook"])
+	if s.CoordinatorRunbook == "" {
+		s.CoordinatorRunbook = "~/work/coordinator/BEAM-COORD.md"
+	}
+	if !filepath.IsAbs(s.CoordinatorRunbook) && !strings.HasPrefix(s.CoordinatorRunbook, "~/") {
+		return s, Invalid("coordinator_runbook", "must be an absolute path or start with ~/")
+	}
+	if s.CoordinatorActionsPerRun, err = validateInt("coordinator_actions_per_run", m["coordinator_actions_per_run"], 0, 200); err != nil {
+		if strings.TrimSpace(m["coordinator_actions_per_run"]) == "" {
+			s.CoordinatorActionsPerRun = 20
 		} else {
 			return s, err
 		}

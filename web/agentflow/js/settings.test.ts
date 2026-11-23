@@ -8,6 +8,8 @@ const SETTINGS: Settings = {
   max_attempts: 5, stuck_threshold: 3, max_infra_retries: 5, plan_max_rounds: 5, stall_minutes: 10, acceptance_rounds: 2, review_panel: 1,
   worker_timeout: '30m0s', review_timeout: '15m0s', plan_timeout: '20m0s', verify_timeout: '20m0s', merger_timeout: '30m0s', resolver_mode: 'advise',
   opencode_path: 'opencode', botchat_url: '', botchat_key_file: '', botchat_mode: 'mirror', verify_slots: 2, context_floor_tokens: 16384, backend_cooldown: '2m0s',
+  coordinator_check_minutes: 60, coordinator_runs_per_day: 24, coordinator_timeout: '30m0s', coordinator_actions_per_run: 20,
+  coordinator_runbook: '~/work/coordinator/BEAM-COORD.md',
 };
 
 function harness(over: Partial<SettingsDeps> = {}) {
@@ -109,7 +111,7 @@ test('save sends every field and confirms', async () => {
   await flush();
   eq(t.sent.length, 1);
   eq(t.sent[0].max_attempts, '7');
-  eq(Object.keys(t.sent[0]).length, LIMIT_FIELDS.length + 11); // + verify slots, context floor, backend cooldown, browse roots, BotChat address, key file, mode, minimum running efforts, plan revise limit, stage home keep days, minimum free space
+  eq(Object.keys(t.sent[0]).length, LIMIT_FIELDS.length + 16); // + verify slots, context floor, backend cooldown, browse roots, BotChat address, key file, mode, minimum running efforts, plan revise limit, stage home keep days, minimum free space, coordinator check minutes, runs per day, timeout, actions per run, runbook
   stop();
 });
 
