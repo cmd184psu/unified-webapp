@@ -57,7 +57,7 @@ type Adapter struct {
 	PathFunc func() string
 	// ParentEnv is where PATH, HOME and LANG are taken from; nil means os.Environ.
 	ParentEnv []string
-	// MaxTurns bounds one stage; 0 means 40.
+	// MaxTurns bounds one stage; 0 means 400 (owner 11-23: no arbitrary crashes; the stage deadline is the real limit).
 	MaxTurns int
 }
 
@@ -125,7 +125,7 @@ func writesWorktree(role string) bool { return role == "worker" || role == "clea
 func (a *Adapter) Argv(path string, req runner.Request) []string {
 	turns := a.MaxTurns
 	if turns <= 0 {
-		turns = 40
+		turns = 400
 	}
 	profile := ProfileRead
 	if writesWorktree(req.Role) {
