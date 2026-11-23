@@ -10,10 +10,13 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"cmd184psu/unified-webapp/internal/agentflow/engine"
 	"cmd184psu/unified-webapp/internal/agentflow/model"
+	"cmd184psu/unified-webapp/internal/agentflow/rulings"
 	"cmd184psu/unified-webapp/internal/agentflow/store"
+	"path/filepath"
 )
 
 func (a *API) registerExport(mux muxer) {
@@ -185,6 +188,30 @@ func (a *API) exportEffort(w http.ResponseWriter, r *http.Request) {
 	case !errors.Is(err, store.ErrNotFound):
 		writeErr(w, err)
 		return
+	}
+	// AF-22: per-effort rulings display.
+	if set, err := a.deps.Store.EffectiveSettings(r.Context(), ef.Project); err == nil && set.RulingsFile != "" {
+		report.RulingsFile = set.RulingsFile
+		am := rulings.ParseAreaMap(set.RulingsFileAreaMap)
+		// Collect all files_touched across the effort's tasks.
+		var allFiles []string
+		for _, t := range ex.Queue.Tasks {
+			allFiles = append(allFiles, t.FilesTouched...)
+		}
+		proj, err := a.deps.Store.GetProject(r.Context(), ef.Project)
+		if err == nil {
+			if rf, err := rulings.Load(filepath.Join(proj.RepoPath, set.RulingsFile)); err == nil {
+				for _, r := range rulings.Selected(rf, allFiles, am) {
+					report.Rulings = append(report.Rulings, model.RulingExport{
+						ID:     r.ID,
+						Topic:  r.Topic,
+						Ruling: r.Ruling,
+						Areas:  strings.Join(r.Areas, ", "),
+						Date:   r.Date,
+					})
+				}
+			}
+		}
 	}
 	if ex.FRD != nil && ex.Plan != nil && ex.Queue != nil {
 		ex.ContentHash = bundleHash(ex.FRD.JSON, ex.Plan.JSON, ex.Queue.Hash)

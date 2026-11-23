@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/model"
+	"cmd184psu/unified-webapp/internal/agentflow/rulings"
 	"cmd184psu/unified-webapp/internal/agentflow/schema"
 	"cmd184psu/unified-webapp/internal/agentflow/store"
 )
@@ -182,6 +183,53 @@ func (e *Engine) effortAttention(ctx context.Context, project string, ef model.E
 				msg += ": " + d.Quote
 			}
 			add("frd_contradiction", "", msg, ev.TS)
+		}
+		// Two progress notes that contradict each other also raise
+		// conflicting_guidance (notes-vs-notes path via ContradictIssues).
+		// Collect all recent notes across tasks; ContradictIssues compares pairs.
+		{
+			type note struct {
+				key  string
+				body string
+			}
+			var ns []note
+			tasks, tverr := e.deps.Store.ListTasks(ctx, ef.ID)
+			if tverr == nil {
+				for _, t := range tasks {
+					entries, err := e.deps.Store.ListProgress(ctx, t.ID, 50)
+					if err != nil || len(entries) == 0 {
+						continue
+					}
+					// Use every entry (oldest first), not just the last, so two notes
+					// on one task can clash with each other.
+					for _, e := range entries {
+						ns = append(ns, note{t.Key, e})
+					}
+				}
+			}
+			if len(ns) >= 2 {
+				for i := 0; i < len(ns); i++ {
+					for j := i + 1; j < len(ns); j++ {
+						a := rulings.Issues{Issues: []rulings.SchemaIssue{{Description: ns[i].body}}}
+						b := rulings.Issues{Issues: []rulings.SchemaIssue{{Description: ns[j].body}}}
+						if rulings.ContradictIssues(a, b) {
+							add("conflicting_guidance", ns[i].key, fmt.Sprintf("conflicting guidance between notes for %s and %s", ns[i].key, ns[j].key), time.Now())
+						}
+					}
+				}
+			}
+		}
+	}
+	// guidance.conflict is checked for all non-terminal effort statuses, not
+	// just running/paused, because a contradiction can be raised at any time.
+	if ef.Status != model.EffortComplete && ef.Status != model.EffortAbandoned {
+		if ev, ok := last["guidance.conflict"]; ok {
+			var d struct {
+				Task string `json:"task"`
+				Note string `json:"note"`
+			}
+			_ = json.Unmarshal([]byte(ev.DetailJSON), &d)
+			add("conflicting_guidance", d.Task, d.Note, ev.TS)
 		}
 	}
 	return out, nil

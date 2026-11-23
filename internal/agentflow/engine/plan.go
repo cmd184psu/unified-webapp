@@ -706,18 +706,54 @@ const deliberateCriticChecks = "## Deliberate mode\n\n" +
 // never the architect's review (RP1). A custom Deps.Prompt serving effort
 // stages delegates here.
 func (e *Engine) EffortPrompt(ctx context.Context, st model.Stage) (string, error) {
+	p, err := e.deps.Store.GetEffortProject(ctx, st.Effort)
+	if err != nil {
+		return "", err
+	}
+	rh := func() string {
+		if h := e.rulingHeader(ctx, st, p, nil); h != "" {
+			return h
+		}
+		return ""
+	}
 	if purpose := draftPurpose(st); purpose != "" {
-		return e.draftPrompt(ctx, st, purpose)
+		txt, err := e.draftPrompt(ctx, st, purpose)
+		if err != nil {
+			return "", err
+		}
+		if h := rh(); h != "" {
+			txt += "\n\n" + h
+		}
+		return txt, nil
 	}
 	if isAcceptance(st) {
-		return e.acceptancePrompt(ctx, st)
+		txt, err := e.acceptancePrompt(ctx, st)
+		if err != nil {
+			return "", err
+		}
+		if h := rh(); h != "" {
+			txt += "\n\n" + h
+		}
+		return txt, nil
 	}
 	if isResolver(st) {
-		return e.resolverPrompt(ctx, st)
+		txt, err := e.resolverPrompt(ctx, st)
+		if err != nil {
+			return "", err
+		}
+		if h := rh(); h != "" {
+			txt += "\n\n" + h
+		}
+		return txt, nil
 	}
 	text, err := prompts.Load(st.Role)
 	if err != nil {
 		return "", err
+	}
+	// Effort stages get the effort-level ruling header (files=nil), so only
+	// the preamble + process rulings apply.
+	if h := rh(); h != "" {
+		text += "\n\n" + h
 	}
 	s := e.deps.Store
 	ef, err := s.GetEffort(ctx, st.Effort)

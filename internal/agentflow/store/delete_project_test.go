@@ -46,6 +46,7 @@ func seedJourney(t *testing.T, s *Store, slug string) {
 	must(`INSERT INTO task_resets (task, after_attempt_id, after_infra_id, actor, at) VALUES (?, 0, 0, 'x', 1)`, a)
 	must(`INSERT INTO progress_log (task, attempt, entry, at) VALUES (?, ?, 'e', 1)`, a, att)
 	must(`INSERT INTO baselines (effort, commit_sha, report_json, at) VALUES (?, 'c', '{}', 1)`, e.ID)
+	must(`INSERT INTO decision_inbox (effort, task, ruling_id, proposed_by, proposed_text, status, created) VALUES (?, ?, 'R-001', 't', 'test ruling', 'pending', 1)`, e.ID, a)
 	must(`INSERT INTO frd_parts (effort, n, title, json) VALUES (?, 1, 't', '{}')`, e.ID)
 	must(`INSERT INTO project_limits (project, key, value) VALUES (?, 'max_attempts', '3')`, slug)
 	must(`INSERT INTO project_plugins (project, name, version) VALUES (?, 'p', '1.0.0')`, slug)

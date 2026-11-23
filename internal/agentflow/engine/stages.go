@@ -15,6 +15,7 @@ import (
 
 	"cmd184psu/unified-webapp/internal/agentflow/model"
 	"cmd184psu/unified-webapp/internal/agentflow/prompts"
+	"cmd184psu/unified-webapp/internal/agentflow/rulings"
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
 	"cmd184psu/unified-webapp/internal/agentflow/schema"
 	"cmd184psu/unified-webapp/internal/agentflow/store"
@@ -194,6 +195,25 @@ func (e *Engine) changed() {
 	}
 }
 
+func (e *Engine) rulingHeader(ctx context.Context, st model.Stage, project string, files []string) string {
+	set, err := e.deps.Store.EffectiveSettings(ctx, project)
+	if err != nil {
+		return ""
+	}
+	wd, err := e.workdir(ctx, st, project)
+	if err != nil {
+		return ""
+	}
+	return rulings.Header(wd, set.RulingsFile, files, rulings.ParseAreaMap(set.RulingsFileAreaMap))
+}
+
+func (e *Engine) effortRulingHeader(ctx context.Context, st model.Stage, project string) string {
+	// effortRulingHeader is called only from the buildPrompt path for effort
+	// stages (attempt == 0). The project slug is passed in by the caller.
+	// The header is the effort-level ruling header: files=nil, so only preamble + process.
+	return e.rulingHeader(ctx, st, project, nil)
+}
+
 func roleTimeout(set store.Settings, role string) time.Duration {
 	switch role {
 	case "worker", "cleanup":
@@ -217,12 +237,25 @@ func (e *Engine) buildPrompt(ctx context.Context, st model.Stage, project string
 		return "", err
 	}
 	if st.Attempt == 0 {
+		// Effort stages (attempt == 0) get the effort-level ruling header,
+		// files=nil, so only the preamble + process rulings apply.
+		if h := e.effortRulingHeader(ctx, st, project); h != "" {
+			text += "\n\n" + h
+		}
 		return e.EffortPrompt(ctx, st)
 	}
 	if st.Role == "merger" {
+		// merger ships its own prompt shape; the ruling header still applies
+		// for the merge decision, files=nil.
+		if h := e.rulingHeader(ctx, st, project, nil); h != "" {
+			text += "\n\n" + h
+		}
 		return e.mergerPrompt(ctx, project, st)
 	}
 	if isMergeReview(st) {
+		if h := e.rulingHeader(ctx, st, project, nil); h != "" {
+			text += "\n\n" + h
+		}
 		return e.mergerReviewPrompt(ctx, project, st)
 	}
 	if st.Role == "reviewer" {
@@ -239,6 +272,12 @@ func (e *Engine) buildPrompt(ctx context.Context, st model.Stage, project string
 	task, err := e.deps.Store.GetTask(ctx, att.Task)
 	if err != nil {
 		return "", err
+	}
+	// Attempt-stage prompt: the task's files_touched determine which rulings
+	// apply, so the reviewer/worker/planner/architect/critic/compiler/cleanup
+	// get the ruling header that matches this task.
+	if h := e.rulingHeader(ctx, st, project, task.FilesTouched); h != "" {
+		text += "\n\n" + h
 	}
 	var b strings.Builder
 	if st.Role == "reviewer" {
@@ -529,6 +568,34 @@ func (e *Engine) modelCall(ctx context.Context, rc golane.RunContext, st model.S
 	}
 	parsed, verdict, perr := parse(res.Final)
 	if perr == nil {
+		// AF-22: a reviewer repair that contradicts an injected ruling is
+		// invalid. Override it to pass, record a coordinator note, and raise a
+		// conflicting_guidance attention item. Do not fail the attempt.
+		if verdict == OutcomeRepair && st.Role == "reviewer" && p.Task != 0 {
+			if t, err := d.Store.GetTask(ctx, p.Task); err == nil {
+				rulingsSel := func() []rulings.Ruling {
+					if set.RulingsFile == "" || !rulings.CheapExists(filepath.Join(workdir, filepath.Clean(set.RulingsFile))) {
+						return nil
+					}
+					rf, lerr := rulings.Load(filepath.Join(workdir, filepath.Clean(set.RulingsFile)))
+					if lerr != nil {
+						return nil
+					}
+					am := rulings.ParseAreaMap(set.RulingsFileAreaMap)
+					return rulings.Selected(rf, t.FilesTouched, am)
+				}()
+				if len(rulingsSel) > 0 && rulings.ContradictsRuling(rulings.ParseReviewIssues(parsed), rulingsSel) {
+					verdict = OutcomePass
+					ids := make([]string, 0, len(rulingsSel))
+					for _, r := range rulingsSel {
+						ids = append(ids, r.ID)
+					}
+					note := fmt.Sprintf("reviewer repair dropped: it contradicted an injected ruling (%s); not a repair — coordinator note", strings.Join(ids, ", "))
+					_ = d.Store.AppendProgress(ctx, t.ID, st.Attempt, note)
+					e.noteEffort(ctx, SystemActor, "guidance.conflict", p.Effort, map[string]string{"task": t.Key, "note": note})
+				}
+			}
+		}
 		return StageResult{Outcome: verdict, Raw: res.Final, Parsed: parsed}
 	}
 	// A reply with no JSON object that is also not coherent text is gibberish,

@@ -312,6 +312,19 @@ type EffortReport struct {
 	PlanRevision int
 	Queue        *Queue
 	Statuses     map[string]Status
+	// RulingsFile is the relative path to the rulings file (empty = off).
+	RulingsFile string
+	// Rulings is the injected rulings for the effort's tasks.
+	Rulings []RulingExport
+}
+
+// RulingExport is one ruling shown on the effort's dashboard/export.
+type RulingExport struct {
+	ID     string `json:"id"`
+	Topic  string `json:"topic"`
+	Ruling string `json:"ruling"`
+	Areas  string `json:"areas"`
+	Date   string `json:"date,omitempty"`
 }
 
 // RenderEffort renders an effort with its FRD, plan and queue as markdown.
@@ -361,6 +374,23 @@ func RenderEffort(r EffortReport) string {
 			if len(t.DependsOn) > 0 {
 				b.WriteString("Depends on: " + esc(strings.Join(t.DependsOn, ", ")) + "\n\n")
 			}
+		}
+	}
+	if r.RulingsFile != "" || len(r.Rulings) > 0 {
+		heading(&b, 2, "Rulings (the oracle)")
+		if r.RulingsFile != "" {
+			fmt.Fprintf(&b, "Rulings file: `%s`\n\n", esc(r.RulingsFile))
+		} else {
+			b.WriteString("Rulings file: _not set (oracle off)_\n\n")
+		}
+		if len(r.Rulings) == 0 {
+			b.WriteString("_No rulings match this effort's tasks._\n\n")
+		} else {
+			b.WriteString("| id | topic | ruling | areas |\n|---|---|---|---|\n")
+			for _, r := range r.Rulings {
+				fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", esc(r.ID), esc(r.Topic), esc(r.Ruling), esc(r.Areas))
+			}
+			b.WriteString("\n")
 		}
 	}
 	return b.String()

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"cmd184psu/unified-webapp/internal/agentflow/botchat"
 	"cmd184psu/unified-webapp/internal/agentflow/gitsvc"
 	"cmd184psu/unified-webapp/internal/agentflow/model"
 	"cmd184psu/unified-webapp/internal/agentflow/store"
@@ -472,4 +473,29 @@ func (e *Engine) DropAllProjects(ctx context.Context, actor string) (Dropped, er
 		out.Commands = append(out.Commands, left.Commands...)
 	}
 	return out, nil
+}
+
+// AddRuling is the guarded action by which a coordinator or resolver stage
+// proposes a new ruling. It inserts a pending entry into the decision_inbox
+// (never writes the rulings file directly) and posts a notice to the effort's
+// BotChat room as the Coordinator callsign so the owner or coord-fs3 can
+// confirm or reject it.
+func (e *Engine) AddRuling(ctx context.Context, actor, projectSlug string, effort, task int64, rulingID, proposedText string) error {
+	s := e.deps.Store
+	if err := s.InsertDecisionInbox(ctx, effort, task, rulingID, actor, proposedText); err != nil {
+		return fmt.Errorf("add_ruling: insert decision_inbox: %w", err)
+	}
+	// Post to the effort's BotChat room as Coordinator.
+	set, err := s.EffectiveSettings(ctx, projectSlug)
+	if err != nil || set.BotchatURL == "" || set.BotchatKeyFile == "" {
+		// No BotChat configured: the entry is still recorded; the post is best-effort.
+		return nil
+	}
+	roomID := "agentflow-effort-" + strconv.FormatInt(effort, 10)
+	text := fmt.Sprintf("add_ruling: %s proposed ruling %s for task (effort %d, status pending - owner/coord-fs3 confirm): %s", actor, rulingID, effort, proposedText)
+	c := botchat.Client{BaseURL: set.BotchatURL, KeyFile: set.BotchatKeyFile}
+	if err := c.Post(ctx, roomID, "coordinator", "everyone", text); err != nil {
+		log.Printf("add_ruling: botchat post: %v", err)
+	}
+	return nil
 }
