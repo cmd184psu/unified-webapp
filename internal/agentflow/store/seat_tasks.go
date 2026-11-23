@@ -26,6 +26,9 @@ type SeatTask struct {
 	EligibleKinds []string `json:"eligible_kinds"`
 	Priority      int      `json:"priority"`
 	State         string   `json:"state"`
+	FedTo         string   `json:"fed_to"`
+	FedAt         int64    `json:"fed_at"`
+	DoneAt        int64    `json:"done_at"`
 	Created       int64    `json:"created"`
 	Updated       int64    `json:"updated"`
 }
@@ -69,12 +72,12 @@ func normalizeSeatTask(t *SeatTask) error {
 	return nil
 }
 
-const seatTaskCols = `id, title, objective, acceptance, exclusions, eligible_seats, eligible_kinds, priority, state, created, updated`
+const seatTaskCols = `id, title, objective, acceptance, exclusions, eligible_seats, eligible_kinds, priority, state, fed_to, fed_at, done_at, created, updated`
 
 func scanSeatTask(scan func(dest ...any) error) (SeatTask, error) {
 	var t SeatTask
 	var seats, kinds string
-	if err := scan(&t.ID, &t.Title, &t.Objective, &t.Acceptance, &t.Exclusions, &seats, &kinds, &t.Priority, &t.State, &t.Created, &t.Updated); err != nil {
+	if err := scan(&t.ID, &t.Title, &t.Objective, &t.Acceptance, &t.Exclusions, &seats, &kinds, &t.Priority, &t.State, &t.FedTo, &t.FedAt, &t.DoneAt, &t.Created, &t.Updated); err != nil {
 		return SeatTask{}, err
 	}
 	t.EligibleSeats = unmarshalStrings(seats)
@@ -161,6 +164,30 @@ func (s *Store) UpdateSeatTask(ctx context.Context, t SeatTask) (SeatTask, error
 		return SeatTask{}, err
 	}
 	return s.GetSeatTask(ctx, t.ID)
+}
+
+// MarkFed records that callsign is working this ready task.
+// A missing id is ErrNotFound. A task that is not ready is rejected.
+func (s *Store) MarkFed(ctx context.Context, id int64, callsign string, now int64) (SeatTask, error) {
+	callsign = strings.TrimSpace(callsign)
+	if callsign == "" {
+		return SeatTask{}, Invalid("callsign", "callsign is required")
+	}
+	if _, err := s.GetSeatTask(ctx, id); err != nil {
+		return SeatTask{}, err
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE seat_tasks SET state = 'fed', fed_to = ?, fed_at = ?, updated = ? WHERE id = ? AND state = 'ready'`, callsign, now, now, id)
+	if err != nil {
+		return SeatTask{}, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return SeatTask{}, err
+	}
+	if n == 0 {
+		return SeatTask{}, Invalid("state", "task is not ready")
+	}
+	return s.GetSeatTask(ctx, id)
 }
 
 // DeleteSeatTask removes a seat task. An unknown id is ErrNotFound.

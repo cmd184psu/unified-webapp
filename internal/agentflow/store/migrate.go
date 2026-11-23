@@ -100,6 +100,7 @@ var migrations = []migration{
 	{53, migration53SQL},
 	{54, migration54SQL},
 	{55, migration55SQL},
+	{56, migration56SQL},
 }
 
 // migration51SQL (AF-22) adds the decision_inbox table: pending ruling additions
@@ -1215,4 +1216,14 @@ CREATE TABLE peer_inbound (
 INSERT OR IGNORE INTO settings (key, value) VALUES ('peers_enabled', 'off');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('node_name', '');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('peer_poll_seconds', '60');
+`
+
+// migration56SQL (AF-21) records who a seat task was fed to, and the switch
+// that turns native queue rendering and feeding on. Default false: coord/feed.go
+// keeps writing queue files until the owner sets seat_feed_native to true.
+const migration56SQL = `
+ALTER TABLE seat_tasks ADD COLUMN fed_to TEXT NOT NULL DEFAULT '';
+ALTER TABLE seat_tasks ADD COLUMN fed_at INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE seat_tasks ADD COLUMN done_at INTEGER NOT NULL DEFAULT 0;
+INSERT OR IGNORE INTO settings (key, value) VALUES ('seat_feed_native', 'false');
 `

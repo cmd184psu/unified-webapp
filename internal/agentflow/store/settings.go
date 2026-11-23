@@ -519,6 +519,16 @@ func (s *Store) GetSettings(ctx context.Context) (Settings, error) {
 	return loadSettings(ctx, s.db)
 }
 
+// Setting returns one raw settings value. A missing key is empty.
+func (s *Store) Setting(ctx context.Context, key string) (string, error) {
+	var v string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, key).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return v, err
+}
+
 // UpdateSettings applies patch (key -> value; ints as decimals, timeouts as Go
 // durations such as "45m") in one transaction. The merged result must be
 // valid both globally and for every project with overrides (CF1, SV1); an
