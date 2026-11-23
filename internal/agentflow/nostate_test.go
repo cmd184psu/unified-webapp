@@ -40,7 +40,7 @@ var stateWriters = map[string]string{
 	"coord/feed.go:queueText":                      "queues/review-TASK-n.md: a review verdict copied next to the queue for a reworking seat",
 	"coord/git.go:union":                           "a union file (MANIFEST.md) resolved in the coordinator's scratch merge worktree",
 	"coord/state.go:Save":                          "coordinator.py's state.json, shared with the Python coordinator during the switch-over",
-	"coord/registry.go:Save":                      "owner seat registry and nudge log (AF-16)",
+	"coord/registry.go:Save":                       "owner seat registry and nudge log (AF-16)",
 }
 
 // AC-DBS1: no file-based state. Every os.WriteFile, os.Create and

@@ -55,7 +55,7 @@ type Settings struct {
 	CoordinatorRunsPerDay int
 	// CoordinatorTimeout bounds one coordinator stage (AF-19).
 	CoordinatorTimeout time.Duration
-	OpencodePath  string
+	OpencodePath       string
 	// BotchatURL is the BotChat service address and BotchatKeyFile the file holding the
 	// API key every agent shares; both empty means the relay is off.
 	BotchatURL     string

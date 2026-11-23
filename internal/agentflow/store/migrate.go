@@ -1101,4 +1101,3 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('coordinator_check_minutes',
 INSERT OR IGNORE INTO settings (key, value) VALUES ('coordinator_runs_per_day', '24');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('coordinator_timeout', '30m0s');
 `
-`

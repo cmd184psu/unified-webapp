@@ -14,28 +14,28 @@ const DefaultConfigPath = "~/.unified-webapp.json"
 
 // Config is the top-level unified server configuration.
 type Config struct {
-	Port         int                `json:"port"`
-	TLSCert      string             `json:"tls_cert"`
-	TLSKey       string             `json:"tls_key"`
-	Routing      map[string]string  `json:"host_routing"` // hostname → module name
-	Server       ServerConfig       `json:"server"`
-	Grocery      GroceryConfig      `json:"grocery"`
-	Todo         TodoConfig         `json:"todo"`
-	Slideshow    SlideshowConfig    `json:"slideshow"`
-	Menuserver   MenuserverConfig   `json:"menuserver"`
-	Obsidianoid  ObsidianoidConfig  `json:"obsidianoid"`
-	Multissh     MultisshConfig     `json:"multissh"`
-	Certmachine  CertmachineConfig  `json:"certmachine"`
-	Taskmaster   TaskmasterConfig   `json:"taskmaster"`
-	Utuber       UtuberConfig       `json:"utuber"`
-	Auth         AuthConfig         `json:"auth"`
-	Admin        AdminConfig        `json:"admin"`
-	Smbedit      SmbeditConfig      `json:"smbedit"`
-	IssueTracker IssueTrackerConfig `json:"issuetracker"`
-	Timetracker  TimetrackerConfig  `json:"timetracker"`
-	Sampler      SamplerConfig      `json:"sampler"`
-	Haproxy      HaproxyConfig      `json:"haproxy"`
-	Agentflow    AgentflowConfig    `json:"agentflow"`
+	Port         int                  `json:"port"`
+	TLSCert      string               `json:"tls_cert"`
+	TLSKey       string               `json:"tls_key"`
+	Routing      map[string]string    `json:"host_routing"` // hostname → module name
+	Server       ServerConfig         `json:"server"`
+	Grocery      GroceryConfig        `json:"grocery"`
+	Todo         TodoConfig           `json:"todo"`
+	Slideshow    SlideshowConfig      `json:"slideshow"`
+	Menuserver   MenuserverConfig     `json:"menuserver"`
+	Obsidianoid  ObsidianoidConfig    `json:"obsidianoid"`
+	Multissh     MultisshConfig       `json:"multissh"`
+	Certmachine  CertmachineConfig    `json:"certmachine"`
+	Taskmaster   TaskmasterConfig     `json:"taskmaster"`
+	Utuber       UtuberConfig         `json:"utuber"`
+	Auth         AuthConfig           `json:"auth"`
+	Admin        AdminConfig          `json:"admin"`
+	Smbedit      SmbeditConfig        `json:"smbedit"`
+	IssueTracker IssueTrackerConfig   `json:"issuetracker"`
+	Timetracker  TimetrackerConfig    `json:"timetracker"`
+	Sampler      SamplerConfig        `json:"sampler"`
+	Haproxy      HaproxyConfig        `json:"haproxy"`
+	Agentflow    AgentflowConfig      `json:"agentflow"`
 	Botchat      botchatconfig.Config `json:"botchat"`
 
 	// configPath is the absolute path Load read this Config from (empty when
