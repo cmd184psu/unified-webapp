@@ -31,13 +31,14 @@ const (
 	KindKilo     SeatKind = "kilo"
 	KindOpencode SeatKind = "opencode"
 	KindGUI      SeatKind = "gui"
+	KindRemote   SeatKind = "remote"
 	KindOther    SeatKind = "other"
 )
 
 // ValidKind reports whether k is a kind the registry accepts.
 func ValidKind(k SeatKind) bool {
 	switch k {
-	case KindFreebuff, KindKilo, KindOpencode, KindGUI, KindOther:
+	case KindFreebuff, KindKilo, KindOpencode, KindGUI, KindRemote, KindOther:
 		return true
 	}
 	return false
