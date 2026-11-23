@@ -80,6 +80,16 @@ func (s *Store) GetEffort(ctx context.Context, id int64) (model.Effort, error) {
 	return requireEffort(ctx, s.db, id)
 }
 
+// GetEffortProject returns the project slug for an effort.
+func (s *Store) GetEffortProject(ctx context.Context, id int64) (string, error) {
+	var p string
+	err := s.db.QueryRowContext(ctx, `SELECT project FROM efforts WHERE id = ?`, id).Scan(&p)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("effort %d: %w", id, ErrNotFound)
+	}
+	return p, err
+}
+
 // ActiveEffort returns the project's active effort or ErrNotFound.
 func (s *Store) ActiveEffort(ctx context.Context, project string) (model.Effort, error) {
 	id, err := activeEffort(ctx, s.db, project, 0)

@@ -97,6 +97,30 @@ var migrations = []migration{
 	{50, migration50SQL},
 }
 
+// migration50SQL (AF-22) adds the decision_inbox table: pending ruling additions
+// from coordinator/resolver stages that need owner or coord-fs3 confirmation
+// before being written to the rulings file. The coordinator/resolver never
+// writes the rulings file directly; they append via the guarded add_ruling action
+// which writes a pending entry here.
+const migration50SQL = `
+CREATE TABLE decision_inbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  effort INTEGER NOT NULL REFERENCES efforts(id) ON DELETE CASCADE,
+  task INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  ruling_id TEXT NOT NULL,
+  proposed_by TEXT NOT NULL,
+  proposed_text TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'rejected')),
+  created INTEGER NOT NULL
+);
+CREATE INDEX idx_decision_inbox_pending ON decision_inbox(status) WHERE status = 'pending';
+
+-- seed the new settings for the rulings oracle (idempotent; migration 49 may
+-- already have run on this DB).
+INSERT OR IGNORE INTO settings (key, value) VALUES ('rulings_file', 'docs/rulings/RULINGS.md');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('rulings_file_area_map', '{}');
+`
+
 // migration41SQL (AF-14) stores review requests: the branch and base, the task
 // text the reviewer reads, the verify report, the chosen reviewer and the
 // verdict. A review is independent of an effort and its tasks.
@@ -998,6 +1022,14 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_approve', 'off');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_replan', 'off');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('budget_raise_percent', '50');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('budget_raise_cap', '3');
+`
+
+// migration49SQL (AF-22) seeds the rulings oracle defaults: the default rulings
+// file path (relative to the repo) and an empty area map (path prefix -> area
+// tag). Empty rulings_file means the oracle is off for that project.
+const migration49SQL = `
+INSERT OR IGNORE INTO settings (key, value) VALUES ('rulings_file', 'docs/rulings/RULINGS.md');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('rulings_file_area_map', '{}');
 `
 
 // migration46SQL (AF-18) adds the merger role: the agent that resolves a merge

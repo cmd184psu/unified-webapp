@@ -174,6 +174,26 @@ func writeReview(b *strings.Builder, r schema.ReviewOut) {
 	b.WriteString("\n### Reviewer repair instructions\n\n" + r.RepairPrompt + "\n")
 }
 
+// recentProgressNotes returns the last progress-log entry per task for an
+// effort, keyed by task key. It is used by the attention engine to detect
+// conflicting notes (two progress entries that contradict each other).
+func (e *Engine) recentProgressNotes(ctx context.Context, effort int64) map[string]string {
+	s := e.deps.Store
+	tasks, err := s.ListTasks(ctx, effort)
+	if err != nil {
+		return nil
+	}
+	out := map[string]string{}
+	for _, t := range tasks {
+		entries, err := s.ListProgress(ctx, t.ID, 1)
+		if err != nil || len(entries) == 0 {
+			continue
+		}
+		out[t.Key] = entries[len(entries)-1]
+	}
+	return out
+}
+
 // writeDiff appends the previous attempt's changes against the commit the task
 // worktree was forked from.
 func (e *Engine) writeDiff(ctx context.Context, b *strings.Builder, project string, att model.Attempt, prevN int) error {

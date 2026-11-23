@@ -111,6 +111,16 @@ type Settings struct {
 	BudgetRaisePercent int
 	// BudgetRaiseCap is how many automatic raises an effort may receive (AF-17); default 3.
 	BudgetRaiseCap int
+	// RulingsFile is the project-relative path to the project's RULINGS.md (the oracle),
+	// e.g. docs/rulings/RULINGS.md. Empty means the oracle is off for this project. It must
+	// be a relative path (not absolute, no ".." components) so it cannot point outside the
+	// project repo.
+	RulingsFile string
+	// RulingsFileAreaMap is a JSON object mapping path prefixes (each suffixed with "*")
+	// to area tags, e.g. {"src/rules/corruption*": "corruption"}. It turns a task's
+	// files_touched paths into the area tags the rulings table uses. Empty means no
+	// path->area matches (process rulings still apply).
+	RulingsFileAreaMap string
 }
 
 // Resolver modes.
@@ -377,6 +387,30 @@ func parseSettings(m map[string]string) (Settings, error) {
 	s.NotifyCommand = strings.TrimSpace(m["notify_command"])
 	if s.NotifyURL, err = validateNotifyURL(m["notify_url"]); err != nil {
 		return s, err
+	}
+	// Rulings: optional relative path (empty = off); area map is JSON object or empty.
+	s.RulingsFile = strings.TrimSpace(m["rulings_file"])
+	if s.RulingsFile != "" {
+		if filepath.IsAbs(s.RulingsFile) {
+			return s, Invalid("rulings_file", "must be a path relative to the project repo")
+		}
+		clean := filepath.Clean(s.RulingsFile)
+		if strings.HasPrefix(clean, "..") || strings.Contains(clean, string(filepath.Separator)+".."+string(filepath.Separator)) ||
+			clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			return s, Invalid("rulings_file", "must not traverse outside the project repo")
+		}
+	}
+	s.RulingsFileAreaMap = strings.TrimSpace(m["rulings_file_area_map"])
+	if s.RulingsFileAreaMap != "" {
+		var probe map[string]string
+		if err := json.Unmarshal([]byte(s.RulingsFileAreaMap), &probe); err != nil {
+			return s, Invalid("rulings_file_area_map", "must be a JSON object of path-prefix -> area tag")
+		}
+		for k, v := range probe {
+			if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+				return s, Invalid("rulings_file_area_map", "every entry needs a non-empty prefix and area tag")
+			}
+		}
 	}
 	return s, nil
 }
