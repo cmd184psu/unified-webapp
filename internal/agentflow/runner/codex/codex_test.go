@@ -63,7 +63,7 @@ func TestRunFinalIsTheLastAgentMessage(t *testing.T) {
 		t.Fatalf("stdin = %q, want the prompt", in)
 	}
 	args, _ := os.ReadFile(filepath.Join(dir, "args.txt"))
-	for _, want := range []string{"exec\n", "--json", "-m\ngpt-6.1-terra", `default_permissions="agentflow"`, `extends=":workspace"`, `"**/.env"="deny"`, `approval_policy="never"`, `model_reasoning_effort="medium"`, "-C\n" + req.Workdir, "-\n"} {
+	for _, want := range []string{"exec\n", "--json", "-m\ngpt-6.1-terra", `default_permissions="agentflow"`, `extends=":workspace"`, `"**/.env"="deny"`, `approval_policy="never"`, `model_reasoning_effort="high"`, "-C\n" + req.Workdir, "-\n"} {
 		if !strings.Contains(string(args), want) {
 			t.Fatalf("argv lacks %q:\n%s", want, args)
 		}
