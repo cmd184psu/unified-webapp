@@ -35,6 +35,7 @@ func (e *Engine) AutoBudget(ctx context.Context) error {
 				continue
 			}
 			b, err := e.EffortBudget(ctx, ef)
+			// An effort with no budget is unlimited: it is never raised (AF-20).
 			if err != nil || !b.Exhausted() || !b.Set() {
 				continue
 			}

@@ -38,6 +38,7 @@ type migration struct {
 //	42 AF-14 projects.worker_env_json (environment for worker stages)
 //	43 AF-14b backends.cli_path, backends.api_type may be 'kilo' (opencode fork)
 //	46 AF-18 merger role (role_candidates and stages), merger_timeout setting
+//	48 AF-20 backends.metered, daily_token_cap, monthly_token_cap
 //
 // Later stories append the next integer; they never edit an earlier entry.
 var migrations = []migration{
@@ -88,6 +89,7 @@ var migrations = []migration{
 	{45, migration45SQL},
 	{46, migration46SQL},
 	{47, migration47SQL},
+	{48, migration48SQL},
 }
 
 // migration41SQL (AF-14) stores review requests: the branch and base, the task
@@ -1042,6 +1044,14 @@ CREATE INDEX idx_stages_open ON stages(state) WHERE state <> 'done';
 INSERT OR IGNORE INTO settings (key, value) VALUES ('merger_timeout', '30m0s');
 `
 
+// migration48SQL (AF-20) marks a backend whose tokens cost money and caps what
+// it may spend per UTC day and per UTC month. 0 means no cap; metered is off by
+// default so an existing backend keeps behaving exactly as it did.
+const migration48SQL = `
+ALTER TABLE backends ADD COLUMN metered INTEGER NOT NULL DEFAULT 0 CHECK (metered IN (0, 1));
+ALTER TABLE backends ADD COLUMN daily_token_cap INTEGER NOT NULL DEFAULT 0 CHECK (daily_token_cap >= 0);
+ALTER TABLE backends ADD COLUMN monthly_token_cap INTEGER NOT NULL DEFAULT 0 CHECK (monthly_token_cap >= 0);
+`
 
 // migration47SQL (AF-19) adds the coordinator role: an agent that runs the
 // coordination self-check on a schedule. It has its own candidate list and

@@ -46,6 +46,16 @@ func (s *Store) RestModel(ctx context.Context, backend, model, reason string, ba
 	return r, err
 }
 
+// RestModelUntil rests a model until an explicit time, used by a metered
+// backend's token cap (AF-20). It is idempotent: an existing row keeps its
+// streak and since, and only the reason and until are set.
+func (s *Store) RestModelUntil(ctx context.Context, backend, model, reason string, until, now time.Time) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO model_rest (backend, model, until, reason, streak, since) VALUES (?, ?, ?, ?, 1, ?)
+		ON CONFLICT (backend, model) DO UPDATE SET until = excluded.until, reason = excluded.reason`,
+		backend, model, until.UnixMilli(), reason, now.UnixMilli())
+	return err
+}
+
 // ClearModelRest ends a model's rest and its streak; it reports whether there was one.
 func (s *Store) ClearModelRest(ctx context.Context, backend, model string) (bool, error) {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM model_rest WHERE backend = ? AND model = ?`, backend, model)

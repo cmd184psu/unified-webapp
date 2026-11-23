@@ -68,8 +68,8 @@ export function budgetBar(b: BudgetView): HTMLElement {
 export function effortSettings(ef: EffortView, frdText: string, deps: EffortSettingsDeps, onSaved: () => void): HTMLElement {
   const errors = new FormErrors();
   const deliberate = checkbox('effort_deliberate', ef.deliberate);
-  const tokens = textInput('budget_tokens', ef.budget_tokens ? String(ef.budget_tokens) : '', { type: 'number', placeholder: 'no limit' });
-  const minutes = textInput('budget_minutes', ef.budget_seconds ? String(Number((ef.budget_seconds / 60).toFixed(2))) : '', { type: 'number', placeholder: 'no limit' });
+  const tokens = textInput('budget_tokens', ef.budget_tokens ? String(ef.budget_tokens) : '', { type: 'number', placeholder: 'unlimited' });
+  const minutes = textInput('budget_minutes', ef.budget_seconds ? String(Number((ef.budget_seconds / 60).toFixed(2))) : '', { type: 'number', placeholder: 'unlimited' });
   const triggers = ef.deliberate ? [] : deliberateTriggers(frdText);
   const suggestion = triggers.length === 0 ? null : h('div', { class: 'warn-box', attrs: { 'data-role': 'deliberate-suggestion' } },
     h('p', { text: `This FRD mentions ${triggers.join(', ')}. Deliberate planning adds a pre-mortem and a fuller test plan, which suits this kind of work.` }),
@@ -95,9 +95,9 @@ export function effortSettings(ef: EffortView, frdText: string, deps: EffortSett
     errors.add('deliberate', fieldRow('Deliberate planning', deliberate,
       'The planner adds a pre-mortem (three failure scenarios) and an expanded test plan, and the critic checks for them')).el,
     h('div', { class: 'profile-fields' },
-      errors.add('budget_tokens', fieldRow('Token budget', tokens, 'Runner tokens for the whole effort; blank is no limit')).el,
+      errors.add('budget_tokens', fieldRow('Token budget', tokens, 'Runner tokens for the whole effort; blank is unlimited (the default). Only an effort with a budget is auto-raised or stopped')).el,
       errors.add('budget_seconds', fieldRow('Time budget (minutes)', minutes,
-        'Total stage run time, so stages running in parallel add up; blank is no limit. From 90% no new task starts; at 100% the run stops')).el),
+        'Total stage run time, so stages running in parallel add up; blank is unlimited. From 90% no new task starts; at 100% the run stops')).el),
     errors.general,
     h('div', { class: 'settings-actions' }, auto.status));
   auto.watch(el);

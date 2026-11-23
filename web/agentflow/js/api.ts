@@ -171,7 +171,9 @@ export interface AttentionItem {
   effort: number;
   /** the task key; absent for an item about the whole effort */
   task?: string;
-  kind: 'stalled' | 'draft_failed' | 'plan_halted' | 'compile_halted' | 'task_halted' | 'task_needs_files' | 'task_resolved' | 'task_unassignable' | 'seat_question' | 'seat_silent' | 'service_hold';
+  /** the backend a metered_cap item is about */
+  backend?: string;
+  kind: 'stalled' | 'draft_failed' | 'plan_halted' | 'compile_halted' | 'task_halted' | 'task_needs_files' | 'task_resolved' | 'task_unassignable' | 'seat_question' | 'seat_silent' | 'service_hold' | 'metered_cap';
   message: string;
   /** Unix ms, 0 when not known */
   since: number;
@@ -258,6 +260,23 @@ export interface ModelRest {
   since: number;
 }
 
+/** BackendUsage is GET /api/backends/{name}/usage: token spend for the current UTC day/month and the caps (AF-20). */
+export interface BackendUsage {
+  backend: string;
+  metered: boolean;
+  day: string;
+  month: string;
+  day_tokens: number;
+  month_tokens: number;
+  daily_token_cap: number;
+  monthly_token_cap: number;
+  day_resets: number;
+  month_resets: number;
+  at_cap: boolean;
+  cap_resets?: number;
+  cap_window?: string;
+}
+
 export interface ModelCheck {
   Backend: string;
   Model: string;
@@ -315,6 +334,10 @@ export interface Backend {
   cli_path?: string;
   hosted: boolean;
   paid: boolean;
+  /** Tokens on this backend cost money; its daily/monthly caps apply (AF-20). */
+  metered?: boolean;
+  daily_token_cap?: number;
+  monthly_token_cap?: number;
   slots: number;
   /** Memory one loaded model may use on the host, weights and context cache, in MB; 0 = not set (H15d). */
   memory_budget_mb?: number;
@@ -364,6 +387,9 @@ export interface BackendInput {
   cli_path?: string;
   hosted: boolean;
   paid: boolean;
+  metered?: boolean;
+  daily_token_cap?: number;
+  monthly_token_cap?: number;
   slots: number;
   memory_budget_mb: number;
   window_cap_tokens: number;
@@ -905,6 +931,7 @@ export const api = {
 
   // Backends, candidates, settings
   backends: (): Promise<Backend[]> => get('/api/backends'),
+  backendUsage: (name: string): Promise<BackendUsage> => get(`/api/backends/${enc(name)}/usage`, { quiet: true }),
   createBackend: (b: BackendInput, o?: FetchOptions): Promise<BackendResult> => send('POST', '/api/backends', b, o),
   probeBackend: (host: string, apiType: string, key = '', backend = '', cliPath = ''): Promise<{ models: string[]; contexts?: Record<string, number>; tools?: Record<string, string> }> =>
     send('POST', '/api/backends/probe', { host, api_type: apiType, api_key: key, backend, cli_path: cliPath }, { quiet: true }),

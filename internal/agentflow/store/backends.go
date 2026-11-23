@@ -51,7 +51,13 @@ type Backend struct {
 	CLIPath string
 	Hosted  bool
 	Paid    bool
-	Slots   int
+	// Metered marks a backend whose tokens cost money; Paid stays the display
+	// flag. A metered backend may spend DailyTokenCap and MonthlyTokenCap tokens
+	// per UTC day and month (0 means no cap) and then rests until the window resets.
+	Metered         bool
+	DailyTokenCap   int64
+	MonthlyTokenCap int64
+	Slots           int
 	// MemoryBudgetMB is the memory the host may give one loaded model, weights and
 	// context cache together (H15d); 0 means not set, so windows are not extended.
 	MemoryBudgetMB int
@@ -110,6 +116,9 @@ func validateBackend(b Backend) error {
 	if b.DutyPercent != 0 && (b.DutyPercent < 10 || b.DutyPercent > 100) {
 		return Invalid("duty_percent", "must be 100 (no cap) or between 10 and 99")
 	}
+	if b.DailyTokenCap < 0 || b.MonthlyTokenCap < 0 {
+		return Invalid("daily_token_cap", "daily and monthly token caps must be 0 (no cap) or more")
+	}
 	if b.Slots < 1 {
 		return Invalid("slots", "must be at least 1")
 	}
@@ -150,6 +159,7 @@ func validateBackend(b Backend) error {
 func backendDetail(b Backend) map[string]any {
 	return map[string]any{
 		"host": b.Host, "api_type": b.APIType, "cli_path": b.CLIPath, "hosted": b.Hosted, "paid": b.Paid,
+		"metered": b.Metered, "daily_token_cap": b.DailyTokenCap, "monthly_token_cap": b.MonthlyTokenCap,
 		"slots": b.Slots, "models": b.Models,
 	}
 }
@@ -187,9 +197,9 @@ func (s *Store) CreateBackend(ctx context.Context, actor string, b Backend) erro
 		}
 		now := time.Now().UnixMilli()
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO backends (name, host, api_type, cli_path, hosted, paid, slots, memory_budget_mb, window_cap_tokens, duty_percent, retired, created, updated)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-			b.Name, b.Host, b.APIType, b.CLIPath, b2i(b.Hosted), b2i(b.Paid), b.Slots, b.MemoryBudgetMB, b.WindowCapTokens, dutyStored(b.DutyPercent), now, now); err != nil {
+			INSERT INTO backends (name, host, api_type, cli_path, hosted, paid, metered, daily_token_cap, monthly_token_cap, slots, memory_budget_mb, window_cap_tokens, duty_percent, retired, created, updated)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+			b.Name, b.Host, b.APIType, b.CLIPath, b2i(b.Hosted), b2i(b.Paid), b2i(b.Metered), b.DailyTokenCap, b.MonthlyTokenCap, b.Slots, b.MemoryBudgetMB, b.WindowCapTokens, dutyStored(b.DutyPercent), now, now); err != nil {
 			return err
 		}
 		if err := insertModels(ctx, tx, b); err != nil {
@@ -210,9 +220,9 @@ func (s *Store) UpdateBackend(ctx context.Context, actor string, b Backend) erro
 	}
 	return s.WithTx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `
-			UPDATE backends SET host = ?, api_type = ?, cli_path = ?, hosted = ?, paid = ?, slots = ?, memory_budget_mb = ?, window_cap_tokens = ?, duty_percent = ?, updated = ?
+			UPDATE backends SET host = ?, api_type = ?, cli_path = ?, hosted = ?, paid = ?, metered = ?, daily_token_cap = ?, monthly_token_cap = ?, slots = ?, memory_budget_mb = ?, window_cap_tokens = ?, duty_percent = ?, updated = ?
 			WHERE name = ?`,
-			b.Host, b.APIType, b.CLIPath, b2i(b.Hosted), b2i(b.Paid), b.Slots, b.MemoryBudgetMB, b.WindowCapTokens, dutyStored(b.DutyPercent), time.Now().UnixMilli(), b.Name)
+			b.Host, b.APIType, b.CLIPath, b2i(b.Hosted), b2i(b.Paid), b2i(b.Metered), b.DailyTokenCap, b.MonthlyTokenCap, b.Slots, b.MemoryBudgetMB, b.WindowCapTokens, dutyStored(b.DutyPercent), time.Now().UnixMilli(), b.Name)
 		if err != nil {
 			return err
 		}
@@ -346,7 +356,7 @@ func (s *Store) EnableBackend(ctx context.Context, actor, name string) error {
 }
 
 func loadBackends(ctx context.Context, q querier, name string) ([]Backend, error) {
-	query := `SELECT name, host, api_type, cli_path, hosted, paid, slots, memory_budget_mb, window_cap_tokens, duty_percent, retired, api_key <> '', created, updated FROM backends`
+	query := `SELECT name, host, api_type, cli_path, hosted, paid, metered, daily_token_cap, monthly_token_cap, slots, memory_budget_mb, window_cap_tokens, duty_percent, retired, api_key <> '', created, updated FROM backends`
 	var args []any
 	if name != "" {
 		query += ` WHERE name = ?`
@@ -359,13 +369,13 @@ func loadBackends(ctx context.Context, q querier, name string) ([]Backend, error
 	var out []Backend
 	for rows.Next() {
 		var b Backend
-		var hosted, paid, retired, hasKey int
+		var hosted, paid, metered, retired, hasKey int
 		var created, updated int64
-		if err := rows.Scan(&b.Name, &b.Host, &b.APIType, &b.CLIPath, &hosted, &paid, &b.Slots, &b.MemoryBudgetMB, &b.WindowCapTokens, &b.DutyPercent, &retired, &hasKey, &created, &updated); err != nil {
+		if err := rows.Scan(&b.Name, &b.Host, &b.APIType, &b.CLIPath, &hosted, &paid, &metered, &b.DailyTokenCap, &b.MonthlyTokenCap, &b.Slots, &b.MemoryBudgetMB, &b.WindowCapTokens, &b.DutyPercent, &retired, &hasKey, &created, &updated); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		b.Hosted, b.Paid, b.Retired, b.HasKey = hosted != 0, paid != 0, retired != 0, hasKey != 0
+		b.Hosted, b.Paid, b.Metered, b.Retired, b.HasKey = hosted != 0, paid != 0, metered != 0, retired != 0, hasKey != 0
 		b.Created, b.Updated = time.UnixMilli(created), time.UnixMilli(updated)
 		out = append(out, b)
 	}

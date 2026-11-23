@@ -21,7 +21,7 @@ export type AttentionDeps = Pick<typeof api, 'attention'> & Partial<Pick<typeof 
 
 /** itemKey identifies an item across loads, so only a new one raises a toast. */
 export function itemKey(i: AttentionItem): string {
-  return `${i.project}/${i.effort}/${i.task ?? ''}/${i.kind}/${i.since}`;
+  return `${i.backend ?? i.project}/${i.effort}/${i.task ?? ''}/${i.kind}/${i.since}`;
 }
 
 /** titleWith puts the count in front of the page title, replacing an earlier count. */
@@ -64,7 +64,8 @@ export class AttentionBanner {
     if (this.seen) {
       for (const i of this.items) {
         if (this.seen.has(itemKey(i))) continue;
-        const text = `${i.project}, effort ${i.effort}: ${i.message}`;
+        const who = i.backend ? `backend ${i.backend}` : `${i.project}, effort ${i.effort}`;
+        const text = `${who}: ${i.message}`;
         void showToast(text, 'error');
         try {
           if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification('AgentFlow needs you', { body: text });
@@ -84,7 +85,7 @@ export class AttentionBanner {
     replace(this.host, h('div', { class: 'warn-box attention-banner', attrs: { role: 'alert', 'data-role': 'attention-banner' } },
       h('p', { text: this.items.length === 1 ? 'One thing has stopped and needs you:' : `${this.items.length} things have stopped and need you:` }),
       h('ul', {}, ...this.items.map((i) => h('li', {},
-        h('a', { text: `${i.project}, effort ${i.effort}`, attrs: { href: '#', 'data-project': i.project }, on: { click: (e: Event) => { e.preventDefault(); this.open(i.project); } } }),
+        i.backend ? h('strong', { text: `backend ${i.backend}` }) : h('a', { text: `${i.project}, effort ${i.effort}`, attrs: { href: '#', 'data-project': i.project }, on: { click: (e: Event) => { e.preventDefault(); this.open(i.project); } } }),
         h('span', { text: ` — ${i.message}` }),
         ...this.needsFiles(i))))));
     this.host.removeAttribute('hidden');
