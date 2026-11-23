@@ -97,6 +97,7 @@ var migrations = []migration{
 	{50, migration50SQL},
 	{51, migration51SQL},
 	{52, migration52SQL},
+	{53, migration53SQL},
 }
 
 // migration51SQL (AF-22) adds the decision_inbox table: pending ruling additions
@@ -1155,4 +1156,21 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('coordinator_timeout', '30m0
 const migration50SQL = `
 INSERT OR IGNORE INTO settings (key, value) VALUES ('coordinator_runbook', '~/work/coordinator/BEAM-COORD.md');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('coordinator_actions_per_run', '20');
+`
+
+// migration53SQL (AF-21) adds the seat task backlog.
+const migration53SQL = `
+CREATE TABLE seat_tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  objective TEXT NOT NULL DEFAULT '',
+  acceptance TEXT NOT NULL DEFAULT '',
+  exclusions TEXT NOT NULL DEFAULT '',
+  eligible_seats TEXT NOT NULL DEFAULT '[]',
+  eligible_kinds TEXT NOT NULL DEFAULT '[]',
+  priority INTEGER NOT NULL DEFAULT 0,
+  state TEXT NOT NULL DEFAULT 'ready' CHECK (state IN ('ready', 'fed', 'done')),
+  created INTEGER NOT NULL,
+  updated INTEGER NOT NULL
+);
 `

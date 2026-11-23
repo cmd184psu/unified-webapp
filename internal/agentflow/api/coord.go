@@ -7,11 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/coord"
 	"cmd184psu/unified-webapp/internal/agentflow/runner/seat"
+	"cmd184psu/unified-webapp/internal/agentflow/store"
 )
 
 // registerCoord serves the external seats module (AF-13): the hand-run seats, their queue
@@ -29,6 +31,10 @@ func (a *API) registerCoord(mux muxer) {
 	mux.HandleFunc("GET /api/seat/{callsign}/next", a.remoteSeatNext)
 	mux.HandleFunc("POST /api/seat/{callsign}/ack", a.remoteSeatAck)
 	mux.HandleFunc("POST /api/seat/{callsign}/blocked", a.remoteSeatBlocked)
+	mux.HandleFunc("GET /api/seat-tasks", a.listSeatTasks)
+	mux.HandleFunc("POST /api/seat-tasks", a.createSeatTask)
+	mux.HandleFunc("PATCH /api/seat-tasks/{id}", a.updateSeatTask)
+	mux.HandleFunc("POST /api/seat-tasks/import", a.importSeatTasks)
 	mux.HandleFunc("POST /api/handoffs/{task}/merge", a.handoffMerge)
 }
 
@@ -404,4 +410,83 @@ func (a *API) remoteSeatBlocked(w http.ResponseWriter, r *http.Request) {
 		f.Close()
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"recorded": cs})
+}
+
+// listSeatTasks is GET /api/seat-tasks.
+func (a *API) listSeatTasks(w http.ResponseWriter, r *http.Request) {
+	if a.deps.Store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorBody{Error: "store not available"})
+		return
+	}
+	items, err := a.deps.Store.ListSeatTasks(r.Context())
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+// createSeatTask is POST /api/seat-tasks.
+func (a *API) createSeatTask(w http.ResponseWriter, r *http.Request) {
+	if a.deps.Store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorBody{Error: "store not available"})
+		return
+	}
+	var body store.SeatTask
+	if !decodeBody(w, r, &body, false) {
+		return
+	}
+	created, err := a.deps.Store.CreateSeatTask(r.Context(), body)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, created)
+}
+
+// updateSeatTask is PATCH /api/seat-tasks/{id} {state}.
+func (a *API) updateSeatTask(w http.ResponseWriter, r *http.Request) {
+	if a.deps.Store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorBody{Error: "store not available"})
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		badRequest(w, "id", "invalid id")
+		return
+	}
+	var body struct {
+		State string `json:"state"`
+	}
+	if !decodeBody(w, r, &body, false) {
+		return
+	}
+	if err := a.deps.Store.UpdateSeatTaskState(r.Context(), id, body.State); err != nil {
+		writeErr(w, err)
+		return
+	}
+	item, err := a.deps.Store.GetSeatTask(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+// importSeatTasks is POST /api/seat-tasks/import with a JSON array of seat tasks.
+func (a *API) importSeatTasks(w http.ResponseWriter, r *http.Request) {
+	if a.deps.Store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorBody{Error: "store not available"})
+		return
+	}
+	var items []store.SeatTask
+	if !decodeBody(w, r, &items, false) {
+		return
+	}
+	n, err := a.deps.Store.ImportSeatTasks(r.Context(), items)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"imported": n})
 }
