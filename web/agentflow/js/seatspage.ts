@@ -7,10 +7,12 @@
 import { api, type CoordReport, type ExternalSeat, type SeatInput, type SeatPolicy } from './api.js';
 import { h, replace } from './dom.js';
 import { subscribe } from './events.js';
+import { SeatTaskBacklog } from './seatbacklog.js';
 
 export type SeatsPageDeps = Pick<
   typeof api,
   'coordStatus' | 'coordRun' | 'externalSeats' | 'seatQueue' | 'nudgeSeat' | 'saveSeat' | 'deleteSeat' | 'pauseSeat'
+  | 'seatTasks' | 'createSeatTask' | 'setSeatTaskState'
 > & {
   /** copy writes text to the clipboard; the default tries the Clipboard API, then execCommand. */
   copy?: (text: string) => Promise<boolean>;
@@ -71,10 +73,15 @@ export class SeatsPage {
   msg = '';
   private disposed = false;
   private timer: ReturnType<typeof setInterval> | undefined;
+  /** the backlog panel lives in its own element so a re-render keeps its filters and form. */
+  private backlogHost = h('div', { attrs: { 'data-role': 'seat-backlog-panel' } });
+  private backlog: SeatTaskBacklog | undefined;
 
   constructor(private host: HTMLElement, private deps: SeatsPageDeps) {}
 
   mount(): () => void {
+    this.backlog = new SeatTaskBacklog(this.backlogHost, this.deps);
+    this.backlog.mount();
     void this.load();
     this.timer = setInterval(() => {
       if (!this.disposed) void this.load(true);
@@ -85,6 +92,7 @@ export class SeatsPage {
     return () => {
       this.disposed = true;
       if (this.timer) clearInterval(this.timer);
+      this.backlog?.unmount();
       off();
     };
   }
@@ -109,6 +117,7 @@ export class SeatsPage {
       h('h2', { text: `Hand-run seats (coordinator ${this.mode})` }),
       this.msg ? h('p', { class: 'field-hint', attrs: { 'data-role': 'seats-msg' }, text: this.msg }) : null,
       cards.length ? h('div', { class: 'seat-cards' }, ...cards) : h('p', { class: 'field-hint', text: 'No seats registered yet.' }),
+      this.backlogHost,
       this.addForm(),
       h('h3', { text: this.report ? `Last pass ${new Date(this.report.finished).toLocaleString()}${this.report.dry ? ' (dry run)' : ''}` : 'No pass yet' }),
       this.report?.error ? h('p', { class: 'warn-box', text: this.report.error }) : null,

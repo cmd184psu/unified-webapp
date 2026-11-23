@@ -70,6 +70,7 @@ const suites = [
   { name: "agentflow-overview", entry: "web/agentflow/js/overview.test.ts", runner: "esbuild-cjs" },
   { name: "agentflow-attention", entry: "web/agentflow/js/attention.test.ts", runner: "esbuild-cjs" },
   { name: "agentflow-seatspage", entry: "web/agentflow/js/seatspage.test.ts", runner: "esbuild-cjs" },
+  { name: "agentflow-seatbacklog", entry: "web/agentflow/js/seatbacklog.test.ts", runner: "esbuild-cjs" },
   { name: "agentflow-seats", entry: "web/agentflow/js/seats.test.ts", runner: "esbuild-cjs" },
   { name: "agentflow-activity", entry: "web/agentflow/js/activity.test.ts", runner: "esbuild-cjs" },
   { name: "agentflow-autosave", entry: "web/agentflow/js/autosave.test.ts", runner: "esbuild-cjs" },

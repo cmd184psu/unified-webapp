@@ -1,6 +1,6 @@
 import { test, run, eq, ok, installFakeDom, FakeEl, asEl, findAll } from './testkit';
 import { SeatsPage, policyLine, seatState } from './seatspage';
-import type { CoordStatus, ExternalSeat, SeatInput } from './api';
+import type { CoordStatus, ExternalSeat, SeatInput, SeatTask, SeatTaskInput } from './api';
 
 installFakeDom();
 
@@ -25,7 +25,12 @@ const status: CoordStatus = {
   last_run: { started: '2026-11-20T08:00:00Z', finished: '2026-11-20T08:00:05Z', dry: true, decisions: [{ kind: 'fed', task: 'TASK-445', seat: 'deepseek4', detail: 'next' }] },
 };
 
+const task: SeatTask = { id: 1, title: 'backlog item', objective: '', eligible_seats: ['deepseek4'], priority: 0, state: 'ready' };
+
 const deps = (seats: ExternalSeat[], over: Record<string, unknown> = {}) => ({
+  seatTasks: async () => [task],
+  createSeatTask: async (t: SeatTaskInput) => ({ ...task, ...t }),
+  setSeatTaskState: async (id: number, state: string) => ({ ...task, id, state }),
   coordStatus: async () => status,
   externalSeats: async () => seats,
   seatQueue: async (cs: string) => ({ callsign: cs, text: '# Queue' }),
