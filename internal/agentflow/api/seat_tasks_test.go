@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -134,4 +135,60 @@ func TestSeatTaskAPIGaps(t *testing.T) {
 	if code != 404 {
 		t.Fatalf("unknown delete = %d %s", code, out)
 	}
+}
+
+func TestSeatTaskImportDir(t *testing.T) {
+	_, srv := newSeatTaskAPI(t)
+	dir := t.TempDir()
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("a.json", `{"title":"RE-ONE","objective":"find it","acceptanceCriteria":"notes exist","exclusions":"no C","seats":["fb-beam","solar"],"priority":"first","status":"READY"}`)
+	write("b.json", `{"title":"FIX-TWO","objective":"fix it","acceptanceCriteria":"gates","exclusions":"no prod","seats":["deepseek4"],"priority":3,"status":"FED TASK-9"}`)
+	write("c.json", `{"title":"RE-ONE","objective":"duplicate","seats":["nemotron"],"status":"PROPOSED"}`)
+	write("notes.txt", "not json")
+
+	body := `{"dir":` + strconvQuote(dir) + `}`
+	code, out := seatCall(t, srv, "POST", "/api/seat-tasks/import", body)
+	if code != 200 || !strings.Contains(string(out), `"imported":2`) {
+		t.Fatalf("import = %d %s", code, out)
+	}
+	code, out = seatCall(t, srv, "GET", "/api/seat-tasks", "")
+	if code != 200 {
+		t.Fatal(string(out))
+	}
+	var items []store.SeatTask
+	if err := json.Unmarshal(out, &items); err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("stored = %+v", items)
+	}
+	byTitle := map[string]store.SeatTask{}
+	for _, it := range items {
+		byTitle[it.Title] = it
+	}
+	one := byTitle["RE-ONE"]
+	if one.State != "ready" || one.Priority != 1 || one.Acceptance != "notes exist" || one.Objective != "find it" {
+		t.Fatalf("RE-ONE = %+v", one)
+	}
+	if len(one.EligibleSeats) != 2 || one.EligibleSeats[0] != "fb-beam" || one.EligibleSeats[1] != "solar" {
+		t.Fatalf("seats = %+v", one.EligibleSeats)
+	}
+	two := byTitle["FIX-TWO"]
+	if two.State != "done" || two.Priority != 3 || len(two.EligibleSeats) != 1 || two.EligibleSeats[0] != "deepseek4" {
+		t.Fatalf("FIX-TWO = %+v", two)
+	}
+	code, out = seatCall(t, srv, "POST", "/api/seat-tasks/import", body)
+	if code != 200 || !strings.Contains(string(out), `"imported":0`) {
+		t.Fatalf("second import = %d %s", code, out)
+	}
+}
+
+func strconvQuote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }

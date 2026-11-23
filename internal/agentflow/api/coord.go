@@ -1,8 +1,11 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -552,17 +555,58 @@ func (a *API) deleteSeatTask(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// importSeatTasks is POST /api/seat-tasks/import with a JSON array of seat tasks.
+// importSeatTasks is POST /api/seat-tasks/import.
+// A JSON array inserts those tasks. An object {"dir": "..."} reads every
+// *.json backlog file in that directory, mapping and deduping by title.
 func (a *API) importSeatTasks(w http.ResponseWriter, r *http.Request) {
-	if a.deps.Store == nil {
-		writeJSON(w, http.StatusServiceUnavailable, errorBody{Error: "store not available"})
+	st, ok := a.seatTaskStore(w)
+	if !ok {
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeDecodeErr(w, err)
+		return
+	}
+	trim := bytes.TrimSpace(body)
+	if len(trim) == 0 {
+		badRequest(w, "body", "a JSON array of tasks or {\"dir\": ...} is required")
+		return
+	}
+	if trim[0] == '{' {
+		dec := json.NewDecoder(bytes.NewReader(trim))
+		dec.DisallowUnknownFields()
+		var req struct {
+			Dir string `json:"dir"`
+		}
+		if err := dec.Decode(&req); err != nil {
+			writeDecodeErr(w, err)
+			return
+		}
+		if _, more := dec.Token(); more != io.EOF {
+			badRequest(w, "body", "unexpected data after the JSON value")
+			return
+		}
+		if strings.TrimSpace(req.Dir) == "" {
+			badRequest(w, "dir", "dir is required")
+			return
+		}
+		n, err := st.ImportSeatTasksDir(r.Context(), req.Dir)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]int{"imported": n})
 		return
 	}
 	var items []store.SeatTask
-	if !decodeBody(w, r, &items, false) {
+	dec := json.NewDecoder(bytes.NewReader(trim))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&items); err != nil {
+		writeDecodeErr(w, err)
 		return
 	}
-	n, err := a.deps.Store.ImportSeatTasks(r.Context(), items)
+	n, err := st.ImportSeatTasks(r.Context(), items)
 	if err != nil {
 		writeErr(w, err)
 		return

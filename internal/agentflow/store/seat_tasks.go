@@ -1,11 +1,16 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -181,6 +186,116 @@ func (s *Store) ImportSeatTasks(ctx context.Context, tasks []SeatTask) (int, err
 		if _, err := s.CreateSeatTask(ctx, t); err != nil {
 			return n, err
 		}
+		n++
+	}
+	return n, nil
+}
+
+// backlogItem is one queues/backlog/*.json file.
+type backlogItem struct {
+	Title              string          `json:"title"`
+	Objective          string          `json:"objective"`
+	AcceptanceCriteria string          `json:"acceptanceCriteria"`
+	Exclusions         string          `json:"exclusions"`
+	Seats              []string        `json:"seats"`
+	Kinds              []string        `json:"kinds"`
+	Priority           json.RawMessage `json:"priority"`
+	Status             string          `json:"status"`
+}
+
+// backlogPriority reads a number, a numeric string, or the word "first" (1).
+// Anything else, including a missing field, is 0.
+func backlogPriority(raw json.RawMessage) int {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return 0
+	}
+	var n int
+	if json.Unmarshal(raw, &n) == nil {
+		return n
+	}
+	var f float64
+	if json.Unmarshal(raw, &f) == nil {
+		return int(f)
+	}
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return 0
+	}
+	s = strings.TrimSpace(s)
+	if strings.EqualFold(s, "first") {
+		return 1
+	}
+	if i, err := strconv.Atoi(s); err == nil {
+		return i
+	}
+	return 0
+}
+
+// backlogState maps READY and PROPOSED to ready. Every other status is done.
+func backlogState(status string) string {
+	s := strings.ToUpper(strings.TrimSpace(status))
+	if s == "READY" || s == "PROPOSED" || strings.HasPrefix(s, "READY ") || strings.HasPrefix(s, "PROPOSED ") {
+		return "ready"
+	}
+	return "done"
+}
+
+// ImportSeatTasksDir reads every *.json file in dir (not subdirectories).
+// seats becomes eligible_seats. READY and PROPOSED become ready; any other
+// status becomes done. A title already stored, or repeated in this directory,
+// is skipped. A second call imports nothing.
+func (s *Store) ImportSeatTasksDir(ctx context.Context, dir string) (int, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, Invalid("dir", "directory not found")
+		}
+		return 0, err
+	}
+	existing, err := s.ListSeatTasks(ctx, "", "")
+	if err != nil {
+		return 0, err
+	}
+	have := map[string]bool{}
+	for _, t := range existing {
+		have[t.Title] = true
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".json") {
+			continue
+		}
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+	n := 0
+	for _, name := range names {
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return n, err
+		}
+		var item backlogItem
+		if err := json.Unmarshal(b, &item); err != nil {
+			return n, fmt.Errorf("%s: %w", name, err)
+		}
+		title := strings.TrimSpace(item.Title)
+		if title == "" || have[title] {
+			continue
+		}
+		if _, err := s.CreateSeatTask(ctx, SeatTask{
+			Title:         title,
+			Objective:     item.Objective,
+			Acceptance:    item.AcceptanceCriteria,
+			Exclusions:    item.Exclusions,
+			EligibleSeats: item.Seats,
+			EligibleKinds: item.Kinds,
+			Priority:      backlogPriority(item.Priority),
+			State:         backlogState(item.Status),
+		}); err != nil {
+			return n, err
+		}
+		have[title] = true
 		n++
 	}
 	return n, nil
