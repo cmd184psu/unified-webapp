@@ -10,7 +10,10 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	mrand "math/rand"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -58,6 +61,46 @@ func (r *peerRateLimiter) reset(ip string) {
 	delete(r.failures, ip)
 }
 
+// clientIP is the address the lockout accumulates on. RemoteAddr carries a
+// fresh port on every connection, so keying on it would never lock anything
+// out; the host part is stable for a node.
+func clientIP(r *http.Request) string {
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
+// requestBaseURL is how this node is reachable as the caller sees it. Behind a
+// TLS-terminating proxy r.TLS is nil, so X-Forwarded-Proto decides the scheme
+// and X-Forwarded-Host the authority.
+func requestBaseURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if p := firstHeaderValue(r.Header.Get("X-Forwarded-Proto")); p == "http" || p == "https" {
+		scheme = p
+	}
+	host := r.Host
+	if h := firstHeaderValue(r.Header.Get("X-Forwarded-Host")); h != "" {
+		host = h
+	}
+	return scheme + "://" + host
+}
+
+func firstHeaderValue(v string) string {
+	return strings.TrimSpace(strings.Split(v, ",")[0])
+}
+
+func hostOf(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return u.Host
+}
+
 // peerNameRE is the only accepted peer name: it becomes a file name and a
 // config key suffix, so a separator or a dot-only name never gets through.
 var peerNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
@@ -66,6 +109,10 @@ func validPeerName(name string) bool { return peerNameRE.MatchString(name) }
 
 // protocolVersion is the only peer protocol this build speaks.
 const protocolVersion = 1
+
+// BuildTime identifies this node's build in /api/peer/status. The Makefile
+// stamps it with -ldflags -X; a go run/test build keeps the "dev" default.
+var BuildTime = "dev"
 
 func (a *API) registerPeers(mux muxer) {
 	// Management (platform gate, module agentflow).
@@ -184,20 +231,25 @@ func (a *API) peersList(w http.ResponseWriter, r *http.Request) {
 	// Never key material.
 	out := []map[string]any{}
 	for _, p := range peers {
-		out = append(out, map[string]any{
+		row := map[string]any{
 			"name":                 p.Name,
 			"base_url":             p.BaseURL,
 			"host_header":          p.HostHeader,
 			"enabled":              p.Enabled,
 			"protocol":             p.Protocol,
 			"remote_build":         p.RemoteBuild,
+			"remote_schema":        p.RemoteSchema,
 			"paired_at":            p.PairedAt,
 			"last_seen":            p.LastSeen,
 			"last_ok":              p.LastOK,
 			"last_error":           p.LastError,
 			"insecure_skip_verify": p.InsecureSkipVerify,
 			"delegable":            p.Delegable,
-		})
+		}
+		if st, ok := a.lastPeerStatus(p.Name); ok {
+			row["status"] = st
+		}
+		out = append(out, row)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"peers": out})
 }
@@ -238,11 +290,7 @@ func (a *API) peersInvite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	aURL := scheme + "://" + r.Host
+	aURL := requestBaseURL(r)
 	writeJSON(w, http.StatusOK, map[string]any{"code": code, "a_url": aURL})
 }
 
@@ -251,7 +299,7 @@ func (a *API) peersAccept(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "peers disabled"})
 		return
 	}
-	ip := r.RemoteAddr
+	ip := clientIP(r)
 	if !peerLimiter.allow(ip) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
@@ -282,11 +330,7 @@ func (a *API) peersAccept(w http.ResponseWriter, r *http.Request) {
 	}
 	bURL := strings.TrimSpace(req.BURL)
 	if bURL == "" {
-		scheme := "http"
-		if r.TLS != nil {
-			scheme = "https"
-		}
-		bURL = scheme + "://" + r.Host
+		bURL = requestBaseURL(r)
 	}
 	// B's inbound key: A presents K_B when it calls B.
 	kb, err := genKey()
@@ -317,13 +361,14 @@ func (a *API) peersAccept(w http.ResponseWriter, r *http.Request) {
 	}
 	build := req.Build
 	if build == "" {
-		build = "dev"
+		build = BuildTime
 	}
 	// A stores B's host header from this body; it was omitted before, so A
 	// could never reach B through a proxy.
 	client := &peerclient.Client{Peer: "pair:" + localName, Timeout: 30 * time.Second}
 	var resp struct {
-		Key string `json:"key"`
+		Key        string `json:"key"`
+		HostHeader string `json:"host_header"`
 	}
 	body := map[string]any{
 		"code":        req.Code,
@@ -352,11 +397,17 @@ func (a *API) peersAccept(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// The row for A uses the Host header A reported: B's own header is useless
+	// for reaching A through a proxy.
+	aHostHeader := strings.TrimSpace(resp.HostHeader)
+	if aHostHeader == "" {
+		aHostHeader = hostOf(req.AURL)
+	}
 	now := time.Now().Unix()
 	peer := store.Peer{
 		Name:        localName,
 		BaseURL:     strings.TrimRight(req.AURL, "/"),
-		HostHeader:  hostHeader,
+		HostHeader:  aHostHeader,
 		Enabled:     true,
 		Protocol:    protocol,
 		RemoteBuild: build,
@@ -378,7 +429,7 @@ func (a *API) peerPair(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
-	ip := r.RemoteAddr
+	ip := clientIP(r)
 	if !peerLimiter.allow(ip) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
@@ -400,7 +451,10 @@ func (a *API) peerPair(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing fields"})
 		return
 	}
-	name, err := a.deps.Store.ConsumePairingCode(r.Context(), sha256Hex(req.Code))
+	// Validate the code and the target name before burning the code, so a
+	// refused pairing does not use it up; ConsumePairingCode still burns it
+	// atomically, so a race between two pairs leaves one winner.
+	name, err := a.deps.Store.CheckPairingCode(r.Context(), sha256Hex(req.Code))
 	if err != nil {
 		peerLimiter.recordFailure(ip)
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
@@ -411,6 +465,11 @@ func (a *API) peerPair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := a.deps.Store.GetPeer(r.Context(), name); err == nil {
+		peerLimiter.recordFailure(ip)
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+	if name, err = a.deps.Store.ConsumePairingCode(r.Context(), sha256Hex(req.Code)); err != nil {
 		peerLimiter.recordFailure(ip)
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
@@ -460,8 +519,9 @@ func (a *API) peerPair(w http.ResponseWriter, r *http.Request) {
 	}
 	peerLimiter.reset(ip)
 	// The pairing exchange is the one place a key travels in a response: B
-	// needs K_A to call A. It never appears anywhere else.
-	writeJSON(w, http.StatusOK, map[string]any{"key": ka, "protocol": protocolVersion})
+	// needs K_A to call A. It never appears anywhere else. host_header is A's
+	// own authority so B can reach it through a proxy.
+	writeJSON(w, http.StatusOK, map[string]any{"key": ka, "protocol": protocolVersion, "host_header": r.Host})
 }
 
 // peerUnpair is authenticated by the presenting peer key; it never matches by
@@ -509,15 +569,26 @@ func (a *API) peerRotate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing fields"})
 		return
 	}
+	oldHash, oldErr := a.deps.Store.InboundKeyHash(r.Context(), name)
+	hadOld := oldErr == nil
+	oldOut, _ := a.readPeerKey(name)
+	rollback := func() { a.restoreInboundKey(name, oldHash, hadOld) }
+	// Mirror the new inbound key before the row that trusts it, so the gate
+	// and peer_inbound never disagree about which key is current.
+	if err := a.mirrorPeerKey(name, req.Inbound); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
 	if err := a.deps.Store.StoreInboundKey(r.Context(), name, sha256Hex(req.Inbound)); err != nil {
+		rollback()
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	if err := a.writePeerKey(name, req.Outbound); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	if err := a.mirrorPeerKey(name, req.Inbound); err != nil {
+		rollback()
+		if oldOut != "" {
+			_ = a.writePeerKey(name, oldOut)
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -597,23 +668,35 @@ func (a *API) peersRotate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}
-	client := &peerclient.Client{Peer: name, Timeout: 15 * time.Second, InsecureSkipVerify: p.InsecureSkipVerify}
-	url := strings.TrimRight(p.BaseURL, "/") + "/api/peer/rotate"
-	body := map[string]any{"inbound_key": newOut, "outbound_key": newIn}
-	if err := client.Do(r.Context(), http.MethodPost, url, oldOut, p.HostHeader, body, nil); err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "peer did not accept the rotation: " + err.Error()})
-		return
+	oldHash, oldErr := a.deps.Store.InboundKeyHash(r.Context(), name)
+	hadOld := oldErr == nil
+	rollback := func() {
+		// Both halves come back exactly as they were; the peer never swapped.
+		_ = a.writePeerKey(name, oldOut)
+		a.restoreInboundKey(name, oldHash, hadOld)
 	}
+	// Swap this side first: oldOut still authenticates at the peer, so the
+	// call below completes the pair; a failure rolls the local half back.
 	if err := a.writePeerKey(name, newOut); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	if err := a.deps.Store.StoreInboundKey(r.Context(), name, sha256Hex(newIn)); err != nil {
+		rollback()
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	if err := a.mirrorPeerKey(name, newIn); err != nil {
+		rollback()
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	client := &peerclient.Client{Peer: name, Timeout: 15 * time.Second, InsecureSkipVerify: p.InsecureSkipVerify}
+	url := strings.TrimRight(p.BaseURL, "/") + "/api/peer/rotate"
+	body := map[string]any{"inbound_key": newOut, "outbound_key": newIn}
+	if err := client.Do(r.Context(), http.MethodPost, url, oldOut, p.HostHeader, body, nil); err != nil {
+		rollback()
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "peer did not accept the rotation: " + err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -651,6 +734,8 @@ func (a *API) peerTest(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	a.rememberPeerStatus(name, st)
+	_ = a.deps.Store.UpdatePeerStatus(r.Context(), name, time.Now().Unix(), time.Now().Unix(), "", st.Build, st.Schema, st.Protocol, st.Delegable)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": st})
 }
 
@@ -676,19 +761,22 @@ func (a *API) PollPeersOnce(ctx context.Context) {
 		url := strings.TrimRight(p.BaseURL, "/") + "/api/peer/status"
 		now := time.Now().Unix()
 		if err := client.Do(ctx, http.MethodGet, url, key, p.HostHeader, nil, &st); err != nil {
-			_ = a.deps.Store.UpdatePeerStatus(ctx, p.Name, now, p.LastOK, err.Error(), p.RemoteBuild, p.Protocol, p.Delegable)
+			_ = a.deps.Store.UpdatePeerStatus(ctx, p.Name, now, p.LastOK, err.Error(), p.RemoteBuild, p.RemoteSchema, p.Protocol, p.Delegable)
 			continue
 		}
 		if st.Protocol != protocolVersion {
 			_ = a.deps.Store.UpdatePeerStatus(ctx, p.Name, now, p.LastOK,
-				"peer speaks protocol "+strconv.Itoa(st.Protocol)+"; upgrade the older node", st.Build, st.Protocol, st.Delegable)
+				"peer speaks protocol "+strconv.Itoa(st.Protocol)+"; upgrade the older node", st.Build, st.Schema, st.Protocol, st.Delegable)
 			continue
 		}
-		_ = a.deps.Store.UpdatePeerStatus(ctx, p.Name, now, now, "", st.Build, st.Protocol, st.Delegable)
+		a.rememberPeerStatus(p.Name, st)
+		_ = a.deps.Store.UpdatePeerStatus(ctx, p.Name, now, now, "", st.Build, st.Schema, st.Protocol, st.Delegable)
 	}
 }
 
-// RunPeerPoller polls peers at the configured interval until ctx ends.
+// RunPeerPoller polls peers at the configured interval until ctx ends. Each
+// wait is jittered by up to 20% so nodes that were paired together do not poll
+// each other in lockstep for ever.
 func (a *API) RunPeerPoller(ctx context.Context) {
 	for {
 		secs := 60
@@ -700,25 +788,42 @@ func (a *API) RunPeerPoller(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(time.Duration(secs) * time.Second):
+		case <-time.After(pollWait(secs)):
 			a.PollPeersOnce(ctx)
 		}
 	}
 }
 
+// pollWait is the poll interval jittered by up to 20% either way, so two nodes
+// paired together drift apart instead of polling in lockstep.
+func pollWait(secs int) time.Duration {
+	return time.Duration(float64(secs) * (0.8 + 0.4*mrand.Float64()) * float64(time.Second))
+}
+
 func (a *API) peerStatus(w http.ResponseWriter, r *http.Request) {
+	// The master switch gates this route too: an old inbound key must not keep
+	// answering after pairing is turned off.
+	if !a.peersEnabled() {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
 	presented := extractBearer(r)
 	if _, ok := a.deps.Store.ValidateInboundKey(r.Context(), presented); !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
+	// A held service starts nothing, so it accepts no delegated work either.
+	accepting := true
+	if h, err := a.deps.Store.ServiceHold(r.Context()); err == nil && h.Active {
+		accepting = false
+	}
 	st := map[string]any{
 		"protocol":  protocolVersion,
 		"node":      a.nodeName(),
-		"build":     "dev",
+		"build":     BuildTime,
 		"schema":    schemaVersion(a.deps.Store),
 		"time":      time.Now().Unix(),
-		"accepting": true,
+		"accepting": accepting,
 		"load": map[string]any{
 			"1m":      load1m(),
 			"cores":   numCPU(),
@@ -732,11 +837,16 @@ func (a *API) peerStatus(w http.ResponseWriter, r *http.Request) {
 	if bs, err := a.deps.Store.ListBackends(r.Context()); err == nil {
 		blist := []map[string]any{}
 		for _, b := range bs {
+			// A backend with no resting model still reports a list, never null.
+			until := rest[b.Name]
+			if until == nil {
+				until = []int64{}
+			}
 			blist = append(blist, map[string]any{
 				"name":       b.Name,
 				"slots":      b.Slots,
 				"running":    running[b.Name],
-				"rest_until": rest[b.Name],
+				"rest_until": until,
 			})
 		}
 		st["backends"] = blist
@@ -786,7 +896,7 @@ func (a *API) peerProjectStatus(ctx context.Context) ([]map[string]any, []string
 		return []map[string]any{}, []string{}, nil
 	}
 	rows, err := db.QueryContext(ctx, `
-		SELECT p.slug, COALESCE(e.run_state, 'stopped'), e.id,
+		SELECT p.slug, COALESCE(e.run_state, 'stopped'), COALESCE(e.id, 0),
 		       (SELECT COUNT(*) FROM stages s WHERE s.effort = e.id AND s.state = 'running'),
 		       (SELECT COUNT(*) FROM tasks t JOIN queues q ON q.id = t.queue WHERE q.effort = e.id)
 		FROM projects p
@@ -830,12 +940,45 @@ func extractBearer(r *http.Request) string {
 	return r.Header.Get("X-API-Key")
 }
 
+// restoreInboundKey puts the peer's inbound hash (agentflow row and the auth
+// mirror) back after a failed rotation.
+func (a *API) restoreInboundKey(name, hash string, existed bool) {
+	ctx := context.Background()
+	if !existed {
+		_ = a.deps.Store.DeleteInboundKey(ctx, name)
+		a.forgetPeerKey(name)
+		return
+	}
+	_ = a.deps.Store.StoreInboundKey(ctx, name, hash)
+	if a.deps.PeerKeySink != nil {
+		_ = a.deps.PeerKeySink(name, "sha256:"+hash)
+	}
+}
+
 func genKey() (string, error) {
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+// rememberPeerStatus keeps the last status a peer reported, for the peers page
+// and the Test button (AF-24: the last status stays in memory).
+func (a *API) rememberPeerStatus(name string, st peerclient.PeerStatus) {
+	a.peerMu.Lock()
+	defer a.peerMu.Unlock()
+	if a.peerLast == nil {
+		a.peerLast = map[string]peerclient.PeerStatus{}
+	}
+	a.peerLast[name] = st
+}
+
+func (a *API) lastPeerStatus(name string) (peerclient.PeerStatus, bool) {
+	a.peerMu.Lock()
+	defer a.peerMu.Unlock()
+	st, ok := a.peerLast[name]
+	return st, ok
 }
 
 func schemaVersion(s *store.Store) int {

@@ -199,8 +199,17 @@ func (e *Engine) peerAttention(ctx context.Context) []AttentionItem {
 		if !p.Enabled {
 			continue
 		}
-		if p.LastOK > 0 && now-p.LastOK > 600 {
-			out = append(out, AttentionItem{Kind: "peer_unreachable", Message: "peer " + p.Name + " unreachable", Since: p.LastOK * 1000})
+		// A peer that has never answered counts as unreachable from its pairing
+		// time, so a newly paired offline node is not silent for ever.
+		last := p.LastOK
+		if last == 0 {
+			last = p.LastSeen
+		}
+		if last == 0 {
+			last = p.PairedAt
+		}
+		if last > 0 && now-last > 600 {
+			out = append(out, AttentionItem{Kind: "peer_unreachable", Message: "peer " + p.Name + " unreachable", Since: last * 1000})
 		}
 	}
 	return out

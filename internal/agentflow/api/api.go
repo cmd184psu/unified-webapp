@@ -14,6 +14,7 @@ import (
 	"cmd184psu/unified-webapp/internal/agentflow/engine"
 	"cmd184psu/unified-webapp/internal/agentflow/gitsvc"
 	"cmd184psu/unified-webapp/internal/agentflow/model"
+	"cmd184psu/unified-webapp/internal/agentflow/peerclient"
 	"cmd184psu/unified-webapp/internal/agentflow/store"
 	"cmd184psu/unified-webapp/internal/platform/broker"
 )
@@ -71,6 +72,9 @@ type API struct {
 	pulls map[int64]context.CancelFunc
 	// restart is the restart waiting for running work to end, if any.
 	restart restartState
+	// peerMu guards peerLast, the last /api/peer/status answer per peer (AF-24).
+	peerMu   sync.Mutex
+	peerLast map[string]peerclient.PeerStatus
 }
 
 // OpenCodeStatus is the result of the last opencode version probe.

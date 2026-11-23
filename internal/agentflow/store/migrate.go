@@ -92,6 +92,7 @@ var migrations = []migration{
 	{47, migration47SQL},
 	{48, migration48SQL},
 	{49, migration49SQL},
+	{50, migration50SQL},
 }
 
 // migration41SQL (AF-14) stores review requests: the branch and base, the task
@@ -1134,4 +1135,10 @@ CREATE TABLE peer_inbound (
 INSERT OR IGNORE INTO settings (key, value) VALUES ('peers_enabled', 'off');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('node_name', '');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('peer_poll_seconds', '60');
+`
+
+// migration50SQL (AF-24) records the schema a paired node reported, so the
+// peers page can show a node that needs upgrading (AF-24 row 8).
+const migration50SQL = `
+ALTER TABLE peers ADD COLUMN remote_schema INTEGER NOT NULL DEFAULT 0;
 `

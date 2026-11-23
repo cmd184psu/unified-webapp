@@ -8,7 +8,7 @@
 
 import { autosave, type Autosave } from './autosave.js';
 import { showToast } from '@shared';
-import { api, type OpenCodeStatus, type PeersView, type RestartView, type ServiceHoldView, type Settings } from './api.js';
+import { api, type OpenCodeStatus, type Peer, type PeersView, type RestartView, type ServiceHoldView, type Settings } from './api.js';
 import { h, replace } from './dom.js';
 import { subscribe, type AgentflowEvent } from './events.js';
 import { pickDirectory } from './dirpicker.js';
@@ -57,8 +57,9 @@ export type SettingsDeps = Pick<typeof api, 'settings' | 'putSettings' | 'openco
   /** Peers (AF-24); optional so an embedded settings view can omit them. */
   peers?: (o?: { quiet?: boolean }) => Promise<PeersView>;
   invitePeer?: (name: string) => Promise<{ code: string; a_url: string }>;
-  acceptPeer?: (p: { a_url: string; code: string; name: string; b_url?: string; host_header?: string }) => Promise<unknown>;
-  revokePeer?: (name: string) => Promise<unknown>;
+  acceptPeer?: (p: { a_url: string; code: string; name: string; b_url?: string; host_header?: string }) => Promise<unknown>;	revokePeer?: (name: string) => Promise<unknown>;
+  rotatePeer?: (name: string) => Promise<unknown>;
+  testPeer?: (name: string) => Promise<{ ok: boolean; error?: string; status?: Peer['status'] }>;
   /** Opens the directory picker at start; the chosen path, or null when cancelled. */
   pickDir(start: string): Promise<string | null>;
   notify(message: string): void;
@@ -78,6 +79,8 @@ export const defaultSettingsDeps = (): SettingsDeps => ({
 	invitePeer: api.invitePeer,
 	acceptPeer: api.acceptPeer,
 	revokePeer: api.revokePeer,
+	rotatePeer: api.rotatePeer,
+	testPeer: api.testPeer,
 	pickDir: (start) => pickDirectory(start),
   notify: (m) => void showToast(m, 'success'),
 });
@@ -238,14 +241,37 @@ export class SettingsView {
 			return;
 		}
 		const reload = (): void => { void this.renderPeers(); };
-		const rows = view.peers.map((p) => h('div', { class: 'inline-row', attrs: { 'data-peer': p.name } },
+		const rows = view.peers.map((p) => {
+			const st = p.status;
+			const online = !!p.last_ok && Date.now() / 1000 - p.last_ok < 180;
+			const detail = [
+				p.remote_build ? `build ${p.remote_build}` : '',
+				p.remote_schema ? `schema ${p.remote_schema}` : '',
+				st ? `load ${st.load['1m'].toFixed(2)} / ${st.load.cores} cores` : '',
+				p.last_ok ? `last seen ${new Date(p.last_ok * 1000).toLocaleString()}` : 'never reached',
+			].filter(Boolean).join(' · ');
+			return h('div', { class: 'inline-row', attrs: { 'data-peer': p.name } },
 			h('code', { text: `${p.name} -> ${p.base_url}` }),
-			badge(p.enabled ? 'enabled' : 'off', p.enabled ? 'ok' : 'warn'),
-			h('span', { class: 'field-hint', text: p.last_error || (p.last_ok ? `last ok ${new Date(p.last_ok * 1000).toLocaleString()}` : 'never reached') }),
+			badge(online ? 'online' : 'offline', online ? 'ok' : 'warn'),
+			h('span', { class: 'field-hint', attrs: { 'data-peer-detail': p.name }, text: detail }),
+			p.last_error ? h('span', { class: 'field-hint', text: p.last_error }) : h('span'),
+			button('Test', () => { void (async () => {
+				try {
+					const t = await d.testPeer?.(p.name);
+					d.notify(t?.ok ? `${p.name} answered` : `${p.name}: ${t?.error || 'no answer'}`);
+				} catch { return; }
+				reload();
+			})(); }, { field: 'peer-test', icon: 'approve' }),
+			button('Rotate', () => { void (async () => {
+				try { await d.rotatePeer?.(p.name); } catch { return; }
+				d.notify(`New keys exchanged with ${p.name}`);
+				reload();
+			})(); }, { field: 'peer-rotate', icon: 'refresh' }),
 			button('Revoke', () => { void (async () => {
 				try { await d.revokePeer?.(p.name); } catch { return; }
 				reload();
-			})(); }, { field: 'peer-revoke', icon: 'remove' })));
+			})(); }, { field: 'peer-revoke', icon: 'remove' }));
+		});
 		const inviteName = textInput('peer_invite_name', '', { placeholder: 'builder' });
 		const inviteOut = h('div', { class: 'field-hint', attrs: { 'data-role': 'peer-invite-code' } });
 		const aURL = textInput('peer_a_url', '', { placeholder: 'http://a:8788' });
@@ -253,6 +279,7 @@ export class SettingsView {
 		const name = textInput('peer_name', '', { placeholder: 'name for that node' });
 		const bURL = textInput('peer_b_url', '', { placeholder: 'http://b:8788' });
 		replace(this.peersHost,
+			h('p', { class: 'field-hint', text: 'Pairing exchanges keys between the two machines: each node mints a key for the other and keeps only a hash of the key it accepts. No key is shown on this page.' }),
 			...rows,
 			h('div', { class: 'inline-row' }, inviteName,
 				button('Create pairing code', () => { void (async () => {
