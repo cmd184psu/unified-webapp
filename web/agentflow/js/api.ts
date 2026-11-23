@@ -773,6 +773,25 @@ export interface SeatInput {
   policy?: Partial<SeatPolicy>;
 }
 
+/** SeatTask is one item in the seat task backlog (GET /api/seat-tasks). */
+export interface SeatTask {
+  id: number;
+  title: string;
+  objective: string;
+  eligible_seats: string[];
+  priority: number;
+  /** ready -> fed -> done */
+  state: string;
+}
+
+/** SeatTaskInput is what the backlog form sends to create a seat task. */
+export interface SeatTaskInput {
+  title: string;
+  objective?: string;
+  eligible_seats?: string[];
+  priority?: number;
+}
+
 /** CoordDecision is one thing a coordinator pass decided. */
 export interface CoordDecision {
   kind: string;
@@ -969,6 +988,18 @@ export const api = {
     send('POST', `/api/seats/external/${encodeURIComponent(callsign)}/pause`, { paused }),
   seatQueue: (callsign: string): Promise<{ callsign: string; text: string }> => get(`/api/seats/${encodeURIComponent(callsign)}/queue`),
   nudgeSeat: (callsign: string): Promise<{ nudged: string }> => send('POST', `/api/seats/${encodeURIComponent(callsign)}/nudge`, {}),
+  /** seatTasks lists the backlog; empty filters mean every task. */
+  seatTasks: (state = '', seat = '', o?: FetchOptions): Promise<SeatTask[]> => {
+    const q = new URLSearchParams();
+    if (state) q.set('state', state);
+    if (seat) q.set('seat', seat);
+    const qs = q.toString();
+    return get(`/api/seat-tasks${qs ? `?${qs}` : ''}`, o);
+  },
+  createSeatTask: (task: SeatTaskInput): Promise<SeatTask> => send('POST', '/api/seat-tasks', task),
+  /** setSeatTaskState moves one backlog task: ready -> fed -> done. */
+  setSeatTaskState: (id: number, state: string): Promise<SeatTask> =>
+    send('PATCH', `/api/seat-tasks/${id}`, { state }),
   seats: (o?: FetchOptions): Promise<SeatStage[]> => get('/api/seats', o),
   answerSeat: (stage: number, text: string): Promise<{ stage: number; answered: boolean }> => send('POST', `/api/seats/${stage}/answer`, { text }),
   cancelSeat: (stage: number): Promise<{ stage: number; cancelled: boolean }> => send('POST', `/api/seats/${stage}/cancel`),
