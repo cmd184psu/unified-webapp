@@ -106,6 +106,10 @@ func (e *Engine) Attention(ctx context.Context) ([]AttentionItem, error) {
 	return out, nil
 }
 
+// attentionNotesPerTask bounds the conflicting-notes scan: the newest this
+// many progress entries of each task take part in the pairwise comparison.
+const attentionNotesPerTask = 8
+
 func (e *Engine) effortAttention(ctx context.Context, project string, ef model.Effort, lim model.Limits) ([]AttentionItem, error) {
 	evs, err := e.deps.Store.ListEvents(ctx, "effort", strconv.FormatInt(ef.ID, 10), 100000)
 	if err != nil {
@@ -211,37 +215,52 @@ func (e *Engine) effortAttention(ctx context.Context, project string, ef model.E
 			add("frd_contradiction", "", msg, ev.TS)
 		}
 		// Two progress notes that contradict each other also raise
-		// conflicting_guidance (notes-vs-notes path via ContradictIssues).
-		// Collect all recent notes across tasks; ContradictIssues compares pairs.
+		// conflicting_guidance (notes-vs-notes path via ContradictIssues). The
+		// pairwise scan is bounded: the newest few entries of each task are
+		// compared within the task, and the newest entry of each task across
+		// tasks. Comparing every entry ever written is quadratic in the history
+		// and stalls the endpoint on long-lived efforts.
 		{
 			type note struct {
 				key  string
 				body string
 			}
-			var ns []note
+			var latest []note // newest entry of each task, for cross-task pairs
+			var perTask [][]note
 			tasks, tverr := e.deps.Store.ListTasks(ctx, ef.ID)
 			if tverr == nil {
 				for _, t := range tasks {
-					entries, err := e.deps.Store.ListProgress(ctx, t.ID, 50)
+					entries, err := e.deps.Store.ListProgress(ctx, t.ID, attentionNotesPerTask)
 					if err != nil || len(entries) == 0 {
 						continue
 					}
-					// Use every entry (oldest first), not just the last, so two notes
-					// on one task can clash with each other.
-					for _, e := range entries {
-						ns = append(ns, note{t.Key, e})
+					// Use every fetched entry (oldest first), not just the last,
+					// so two notes on one task can clash with each other.
+					var ns []note
+					for _, body := range entries {
+						ns = append(ns, note{t.Key, body})
+					}
+					perTask = append(perTask, ns)
+					latest = append(latest, ns[len(ns)-1])
+				}
+			}
+			check := func(a, b note) {
+				ra := rulings.Issues{Issues: []rulings.SchemaIssue{{Description: a.body}}}
+				rb := rulings.Issues{Issues: []rulings.SchemaIssue{{Description: b.body}}}
+				if rulings.ContradictIssues(ra, rb) {
+					add("conflicting_guidance", a.key, fmt.Sprintf("conflicting guidance between notes for %s and %s", a.key, b.key), time.Now())
+				}
+			}
+			for _, ns := range perTask {
+				for i := 0; i < len(ns); i++ {
+					for j := i + 1; j < len(ns); j++ {
+						check(ns[i], ns[j])
 					}
 				}
 			}
-			if len(ns) >= 2 {
-				for i := 0; i < len(ns); i++ {
-					for j := i + 1; j < len(ns); j++ {
-						a := rulings.Issues{Issues: []rulings.SchemaIssue{{Description: ns[i].body}}}
-						b := rulings.Issues{Issues: []rulings.SchemaIssue{{Description: ns[j].body}}}
-						if rulings.ContradictIssues(a, b) {
-							add("conflicting_guidance", ns[i].key, fmt.Sprintf("conflicting guidance between notes for %s and %s", ns[i].key, ns[j].key), time.Now())
-						}
-					}
+			for i := 0; i < len(latest); i++ {
+				for j := i + 1; j < len(latest); j++ {
+					check(latest[i], latest[j])
 				}
 			}
 		}

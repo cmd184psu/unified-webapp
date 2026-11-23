@@ -371,37 +371,48 @@ func clausePolarityClash(clause, repair string) bool {
 }
 
 // sharedPhrase returns the longest substring (>= 3 words) that appears in both
-// normalized strings, or "" if there is none.
+// normalized strings, or "" if there is none. It compares word runs, not byte
+// offsets, so it costs O(words(a)*words(b)) instead of cubic byte scans; the
+// attention scan calls it once per note pair, where a cubic scan stalls the
+// endpoint on long histories.
 func sharedPhrase(a, b string) string {
 	if len(a) > len(b) {
 		a, b = b, a
 	}
-	best := ""
-	for i := 0; i < len(a); i++ {
-		for j := len(best) + 1; j <= len(a)-i; j++ {
-			sub := a[i : i+j]
-			if strings.Contains(b, sub) && wordCount(sub) >= 3 && len(sub) > len(best) {
-				best = sub
+	aw, bw := strings.Fields(a), strings.Fields(b)
+	if len(aw) < 3 || len(bw) < 3 {
+		return ""
+	}
+	// Compare words with attached punctuation trimmed (the normalizer keeps
+	// periods, so "calculation." must still match "calculation"); the
+	// returned span uses the original words of a.
+	key := func(w string) string { return strings.Trim(w, ".,;:!?()[]{}\"'") }
+	ak, bk := make([]string, len(aw)), make([]string, len(bw))
+	for i, w := range aw {
+		ak[i] = key(w)
+	}
+	for j, w := range bw {
+		bk[j] = key(w)
+	}
+	// Longest common contiguous word run of at least 3 words.
+	prev := make([]int, len(bw)+1)
+	bestLen, bestEnd := 0, 0 // bestEnd is the end index in aw
+	for i := 1; i <= len(aw); i++ {
+		cur := make([]int, len(bw)+1)
+		for j := 1; j <= len(bw); j++ {
+			if ak[i-1] != "" && ak[i-1] == bk[j-1] {
+				cur[j] = prev[j-1] + 1
+				if cur[j] > bestLen {
+					bestLen, bestEnd = cur[j], i
+				}
 			}
 		}
+		prev = cur
 	}
-	return best
-}
-
-func wordCount(s string) int {
-	n := 0
-	in := false
-	for _, r := range s {
-		if r == ' ' || r == '	' {
-			in = false
-			continue
-		}
-		if !in {
-			n++
-			in = true
-		}
+	if bestLen < 3 {
+		return ""
 	}
-	return n
+	return strings.Join(aw[bestEnd-bestLen:bestEnd], " ")
 }
 
 // oppositePolarityAround reports whether the repair text expresses the opposite
