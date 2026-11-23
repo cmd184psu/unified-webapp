@@ -194,6 +194,25 @@ func TestAddAPIKeyToConfigFile_RestoresOriginalOnValidationFailure(t *testing.T)
 	}
 }
 
+func TestRemoveAPIKeyFromConfigFile(t *testing.T) {
+	p := writeCfg(t, `{"api_keys": [{"name":"keep","hash":"sha256:01"},{"name":"peer:builder","hash":"sha256:02","modules":["agentflow"]}]}`)
+	removed, err := RemoveAPIKeyFromConfigFile(p, "peer:builder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !removed {
+		t.Fatal("removed = false, want true")
+	}
+	keys := loadKeys(t, p)
+	if len(keys) != 1 || keys[0].Name != "keep" {
+		t.Fatalf("keys = %+v, want only keep", keys)
+	}
+	removed, err = RemoveAPIKeyFromConfigFile(p, "peer:missing")
+	if err != nil || removed {
+		t.Fatalf("missing removal = (%v, %v), want (false, nil)", removed, err)
+	}
+}
+
 func TestAddAPIKeyToConfigFile_StoresTheScope(t *testing.T) {
 	p := writeCfg(t, `{"api_keys": []}`)
 	if _, err := AddAPIKeyToConfigFile(p, "svc", "sha256:aa", []string{"certmachine", "todo"}); err != nil {

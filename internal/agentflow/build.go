@@ -58,16 +58,33 @@ func (h *handler) Close() error {
 	return err
 }
 
+// Hooks lets the composition root mirror inbound peer keys into the platform
+// auth config. SetPeerKey is called with a "sha256:<hex>" hash; DeletePeerKey
+// removes the mirror after revoke or rotation.
+type Hooks struct {
+	SetPeerKey    func(peerName, hash string) error
+	DeletePeerKey func(peerName string) error
+}
+
 // Build returns a ready-to-use http.Handler for the agentflow module. host is
 // the shared taskmaster engine: agentflow registers its lanes on it and owns no
 // worker loop of its own. The returned handler implements io.Closer.
 func Build(cfg config.AgentflowConfig, host golane.Host) (http.Handler, error) {
-	return buildWith(cfg, host, nil)
+	return buildWithHooks(cfg, host, nil, nil)
+}
+
+// BuildWithHooks is Build plus the platform-auth peer-key hooks.
+func BuildWithHooks(cfg config.AgentflowConfig, host golane.Host, hooks *Hooks) (http.Handler, error) {
+	return buildWithHooks(cfg, host, nil, hooks)
 }
 
 // buildWith is the test seam: a non-nil rn replaces the opencode adapter, so
 // tests never start a real agent (TM6).
 func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (http.Handler, error) {
+	return buildWithHooks(cfg, host, rn, nil)
+}
+
+func buildWithHooks(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner, hooks *Hooks) (http.Handler, error) {
 	if host == nil {
 		return nil, errors.New("agentflow: no taskmaster engine")
 	}
@@ -176,6 +193,8 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 		Terminate:            terminateHook,
 		SSEMaxSubscribers:    cfg.SSEMaxSubscribers,
 		DataDir:              dataDir,
+		PeerKeySink:          peerKeySink(hooks),
+		PeerKeyDelete:        peerKeyDelete(hooks),
 	})
 	a.Register(mux)
 	events.Store(a)
@@ -187,6 +206,7 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 	capCtx, stopCaps := context.WithCancel(context.Background())
 	go a.RefreshCapabilities(capCtx)
 	go containers.Run(capCtx)
+	go a.RunPeerPoller(capCtx)
 	coordSvc.Start(capCtx)
 
 	// What happens in agentflow is posted to BotChat when the botchat settings name a service
@@ -214,6 +234,20 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 		eng.Close()
 		return st.Close()
 	}}, nil
+}
+
+func peerKeySink(h *Hooks) func(string, string) error {
+	if h == nil {
+		return nil
+	}
+	return h.SetPeerKey
+}
+
+func peerKeyDelete(h *Hooks) func(string) error {
+	if h == nil {
+		return nil
+	}
+	return h.DeletePeerKey
 }
 
 // freezeConfig renders the stage's opencode configuration (BK5, OC2). The

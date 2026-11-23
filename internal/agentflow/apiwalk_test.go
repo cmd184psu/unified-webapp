@@ -423,7 +423,8 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	ok("POST", "/api/peers/foo/rotate", "", 404)
 	ok("DELETE", "/api/peers/foo", "", 404)
 	ok("POST", "/api/peer/pair", `{"code":"x","base_url":"http://y","key":"z"}`, 404)
-	ok("POST", "/api/peer/unpair", `{}`, 200)
+	ok("POST", "/api/peer/unpair", `{}`, 404)
+	ok("POST", "/api/peer/rotate", `{}`, 404)
 	ok("GET", "/api/peer/status", "", 401)
 
 	var missing []string
