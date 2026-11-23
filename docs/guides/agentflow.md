@@ -526,10 +526,18 @@ restart never starts a run, YOLO or not.
 
 ### Budgets
 
-Set per effort with `PATCH /api/projects/{slug}/efforts/{id}` using `budget_tokens` and
-`budget_seconds` (0 = none). At 90% of either limit no new task attempt starts. At 100% the
-run is stopped with the reason `budget`. Tokens are as reported by the model runner; seconds
-add up stage runtime across parallel stages.
+Budgets are optional per effort, set with `PATCH /api/projects/{slug}/efforts/{id}` using
+`budget_tokens` and `budget_seconds` (0 or absent = unlimited, the default for new efforts).
+An unlimited effort is never stopped or auto-raised. At 90% of a configured limit no new task
+attempt starts; at 100% the run is stopped with the reason `budget`. Tokens are as reported by
+the model runner; seconds add up stage runtime across parallel stages.
+
+A backend whose tokens cost money can be marked `metered` with `daily_token_cap` and
+`monthly_token_cap` (0 = no cap). Its tokens are summed per UTC day and month; at a cap its
+models rest (reason `budget`) until the window resets and work falls through to the next
+candidate. `GET /api/backends/{name}/usage` and the Backends tab show the spend. Repeated
+identical failures (the circuit breaker) and the stall alert are safety stops, not budgets,
+and still apply to unlimited efforts.
 
 ### Cleanup
 

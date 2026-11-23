@@ -319,12 +319,23 @@ FRD (approved) -> planner -> architect -> critic -> [revise round] -> plan_ready
 
 ## 9. Budgets, cleanup and plugins
 
-- **Budgets** are per effort: `budget_tokens` and `budget_seconds` (0 means none), set through
+- **Budgets** are optional per effort: `budget_tokens` and `budget_seconds` (0 or absent means
+  unlimited, the default for a new effort), set through
   `PATCH /api/projects/{slug}/efforts/{id}`. Tokens come from runner usage; seconds are summed
-  stage runtime. At 90% of either limit the dispatcher starts no new attempt (in-flight
-  attempts finish). At 100% the project run is stopped with reason `budget`. That stop
-  abandons open attempts, which never count against a task. Starting a run on an effort whose
-  budget is used up is refused.
+  stage runtime. An unlimited effort is never stopped or auto-raised. With a budget, at 90% of
+  either limit the dispatcher starts no new attempt (in-flight attempts finish). At 100% the
+  project run is stopped with reason `budget`. That stop abandons open attempts, which never
+  count against a task. Starting a run on an effort whose budget is used up is refused.
+- **Metered backends** (AF-20): a backend may set `metered`, `daily_token_cap` and
+  `monthly_token_cap` (0 = no cap); `paid` remains the display flag. Its stages' tokens are
+  summed per UTC day and month from `stages.tokens`. At a cap every model on it rests
+  (`model_rest`, reason `budget`) until the reached window resets, its work falls through to
+  the next candidate, and one `metered_cap` attention item is raised. `GET
+  /api/backends/{name}/usage` and the Backends tab's Metered usage card show the spend. A
+  backend that is not metered never rests for a token cap.
+- **Safety stops stay outside budgets**: the per-effort circuit breaker on repeated identical
+  failures (`max_infra_retries`, the stuck threshold) and the stall alert are not budgets and
+  keep working for unlimited efforts too.
 - **Cleanup** (per project, `cleanup_enabled`): after a passing review the engine commits the
   reviewed tree as a checkpoint, a `cleanup` stage edits the worktree and verify runs again.
   If the cleanup stage or that verify fails, the engine resets to the checkpoint and carries

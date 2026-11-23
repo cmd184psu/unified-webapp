@@ -23,9 +23,11 @@ type AttentionItem struct {
 	Effort  int64  `json:"effort"`
 	// Task is the task key, empty for an item about the whole effort.
 	Task string `json:"task,omitempty"`
+	// Backend is the backend an item is about (a metered cap), empty for an effort item.
+	Backend string `json:"backend,omitempty"`
 	// Kind is started_from_backlog, stalled, draft_failed, plan_halted, compile_halted, task_halted,
-	// task_needs_files, task_resolved, task_unassignable, seat_question, seat_silent, or service_hold (Project
-	// and Effort are then zero).
+	// task_needs_files, task_resolved, task_unassignable, seat_question, seat_silent, service_hold or
+	// metered_cap (Project and Effort are then zero).
 	Kind    string `json:"kind"`
 	Message string `json:"message"`
 	// Since is when it happened (Unix ms) when the engine knows; 0 otherwise.
@@ -52,6 +54,28 @@ func (e *Engine) Attention(ctx context.Context) ([]AttentionItem, error) {
 	} else if h.Active {
 		// A held service starts nothing anywhere: one item, not one per project.
 		out = append(out, AttentionItem{Kind: "service_hold", Message: "The service is held: " + h.Reason, Since: h.Since})
+	}
+	now := e.deps.Clock()
+	backends, err := s.ListBackends(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, b := range backends {
+		if b.Retired || !b.Metered {
+			continue
+		}
+		u, err := s.BackendUsage(ctx, b.Name, now)
+		if err != nil {
+			return nil, err
+		}
+		if atCap, until, why := u.AtCap(b.DailyTokenCap, b.MonthlyTokenCap); atCap {
+			since := u.DayStart
+			if why == "monthly" || why == "daily and monthly" {
+				since = u.MonthStart
+			}
+			out = append(out, AttentionItem{Backend: b.Name, Kind: "metered_cap", Since: since,
+				Message: fmt.Sprintf("Backend %s reached its %s token cap; it rests until %s", b.Name, why, time.UnixMilli(until).UTC().Format("2006-01-02 15:04 MST"))})
+		}
 	}
 	for _, p := range projects {
 		efforts, err := s.ListEfforts(ctx, p.Slug)

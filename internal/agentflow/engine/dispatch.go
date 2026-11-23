@@ -125,6 +125,9 @@ type view struct {
 	resting map[string]time.Time
 	// restModel maps modelKey to a model that is resting after a rate limit or a stall.
 	restModel map[string]store.ModelRest
+	// metered maps a backend that reached its metered token cap to the time the
+	// reached window resets; its candidates fall through to the next one.
+	metered map[string]time.Time
 	// held is the set of models whose work waits for them while they rest.
 	held map[string]bool
 	// failing maps modelKey to a recent failed check of that model (H27).
@@ -163,7 +166,7 @@ func (e *Engine) newView(ctx context.Context) (*view, error) {
 	if err != nil {
 		return nil, err
 	}
-	v := &view{snap: snap, free: map[string]int{}, down: map[string]bool{}, resting: map[string]time.Time{}, restModel: map[string]store.ModelRest{}, modelFree: map[string]int{}, strikes: strikes, hold: hold.Active}
+	v := &view{snap: snap, free: map[string]int{}, down: map[string]bool{}, resting: map[string]time.Time{}, restModel: map[string]store.ModelRest{}, metered: map[string]time.Time{}, modelFree: map[string]int{}, strikes: strikes, hold: hold.Active}
 	now := e.deps.Clock()
 	if v.failing, err = e.failedChecks(ctx, now); err != nil {
 		return nil, err
@@ -201,6 +204,32 @@ func (e *Engine) newView(ctx context.Context) (*view, error) {
 					v.modelFree[modelKey(b.Name, m.Model)] = m.MaxConcurrent
 				}
 			}
+		}
+	}
+	// A metered backend at its daily or monthly token cap rests every model on
+	// it until the window resets, so its work falls through to the next candidate.
+	for _, b := range snap.Backends {
+		if b.Retired || !b.Metered {
+			continue
+		}
+		u, err := e.deps.Store.BackendUsage(ctx, b.Name, now)
+		if err != nil {
+			return nil, err
+		}
+		atCap, until, _ := u.AtCap(b.DailyTokenCap, b.MonthlyTokenCap)
+		if !atCap {
+			continue
+		}
+		v.metered[b.Name] = time.UnixMilli(until)
+		for _, m := range b.Models {
+			k := modelKey(b.Name, m.Model)
+			if r, ok := v.restModel[k]; ok && r.Reason == "budget" && r.Until >= until {
+				continue
+			}
+			if err := e.deps.Store.RestModelUntil(ctx, b.Name, m.Model, "budget", time.UnixMilli(until), now); err != nil {
+				return nil, err
+			}
+			v.restModel[k] = store.ModelRest{Backend: b.Name, Model: m.Model, Until: until, Reason: "budget", Streak: 1, Since: now.UnixMilli()}
 		}
 	}
 	for _, st := range open {
@@ -665,6 +694,8 @@ func skipReason(v *view, p store.Project, c store.Candidate, needSlot bool) stri
 		return fmt.Sprintf("model %s does not fit its host's memory budget", c.Model)
 	case lightForRole(v, c):
 		return fmt.Sprintf("model %s is rated light (tier 3), too weak for role %s", c.Model, c.Role)
+	case needSlot && !v.metered[c.Backend].IsZero():
+		return fmt.Sprintf("backend %s is at its metered token cap until %s", c.Backend, v.metered[c.Backend].UTC().Format("2006-01-02 15:04"))
 	case needSlot && !restTime(v, c).IsZero():
 		return restReason(c, restTime(v, c), restWhy(v, c))
 	case needSlot && v.down[c.Backend]:

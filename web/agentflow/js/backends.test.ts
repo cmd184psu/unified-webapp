@@ -37,6 +37,7 @@ function harness(init: Partial<State> = {}, over: Partial<BackendsDeps> = {}) {
   const bodies: Record<string, unknown> = {};
   const deps: BackendsDeps = {
     backends: async () => st.backends.map((b) => ({ ...b })),
+    backendUsage: async (name) => ({ backend: name, metered: true, day: '2026-11-22', month: '2026-11', day_tokens: 40, month_tokens: 400, daily_token_cap: 100, monthly_token_cap: 1000, day_resets: 0, month_resets: 0, at_cap: false }),
     candidates: async () => st.candidates.map((c) => ({ ...c })),
     projects: async () => st.projects,
     settings: async () => ({ worker_timeout: '30m0s', max_attempts: 5 }),
@@ -92,6 +93,28 @@ test('CI1: with no backends the tab prompts to add one', async () => {
   eq(byAttr(t.host, 'data-role', 'no-backends').length, 1);
   button(t.host, 'Add backend').click();
   ok(byAttr(t.host, 'data-form', 'add').length === 1, 'add form opened');
+  stop();
+});
+
+test('AF-20: a metered backend sends its caps and the dashboard shows its usage', async () => {
+  const t = harness({ backends: [be('metered', { metered: true, daily_token_cap: 100, monthly_token_cap: 1000 })] });
+  const stop = t.view.mount();
+  await flush();
+  ok(byAttr(t.host, 'data-backend', 'metered')[0].textContent.includes('metered'), 'metered badge');
+  ok(t.host.textContent.includes('Metered usage'), 'usage card');
+  button(t.host, 'Add backend').click();
+  field(t.host, 'name').value = 'paid1';
+  field(t.host, 'host').value = 'http://127.0.0.1:11434';
+  (field(t.host, 'metered') as unknown as HTMLInputElement).checked = true;
+  field(t.host, 'daily_token_cap').value = '100';
+  field(t.host, 'monthly_token_cap').value = '1000';
+  field(t.host, 'model').value = 'm1';
+  button(t.host, 'Add backend').click();
+  await flush();
+  const body = t.bodies.create as BackendInput;
+  eq(body.metered, true);
+  eq(body.daily_token_cap, 100);
+  eq(body.monthly_token_cap, 1000);
   stop();
 });
 

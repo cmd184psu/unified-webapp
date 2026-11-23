@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/engine"
 	"cmd184psu/unified-webapp/internal/agentflow/store"
@@ -24,6 +25,7 @@ func (a *API) registerBackends(mux muxer) {
 	mux.HandleFunc("GET /api/holds", a.listHolds)
 	mux.HandleFunc("PUT /api/holds", a.setHold)
 	mux.HandleFunc("GET /api/backends/{name}/check", a.checkStatus)
+	mux.HandleFunc("GET /api/backends/{name}/usage", a.backendUsage)
 	mux.HandleFunc("GET /api/projects/{slug}/preflight", a.preflight)
 	mux.HandleFunc("POST /api/backends/{name}/check", a.checkModels)
 	mux.HandleFunc("GET /api/backends/{name}/evals", a.evalStatus)
@@ -67,7 +69,12 @@ type BackendView struct {
 	CLIPath string `json:"cli_path,omitempty"`
 	Hosted  bool   `json:"hosted"`
 	Paid    bool   `json:"paid"`
-	Slots   int    `json:"slots"`
+	// Metered marks a backend whose tokens cost money; its daily and monthly caps
+	// are 0 when none (AF-20).
+	Metered         bool  `json:"metered"`
+	DailyTokenCap   int64 `json:"daily_token_cap"`
+	MonthlyTokenCap int64 `json:"monthly_token_cap"`
+	Slots           int   `json:"slots"`
 	// MemoryBudgetMB is what one loaded model may use on the host, weights and context cache (H15d); 0 = not set.
 	MemoryBudgetMB int `json:"memory_budget_mb"`
 	// WindowCapTokens caps an extended window; 0 = no cap.
@@ -94,6 +101,7 @@ func dutyShown(d int) int {
 
 func (a *API) backendView(b store.Backend) BackendView {
 	v := BackendView{Name: b.Name, Host: b.Host, APIType: b.APIType, CLIPath: b.CLIPath, Hosted: b.Hosted, Paid: b.Paid,
+		Metered: b.Metered, DailyTokenCap: b.DailyTokenCap, MonthlyTokenCap: b.MonthlyTokenCap,
 		Slots: b.Slots, MemoryBudgetMB: b.MemoryBudgetMB, WindowCapTokens: b.WindowCapTokens, DutyPercent: dutyShown(b.DutyPercent), Retired: b.Retired, HasKey: b.HasKey, Models: []BackendModelView{}}
 	for _, m := range b.Models {
 		v.Models = append(v.Models, BackendModelView{Model: m.Model, Paid: m.Paid, MaxConcurrent: m.MaxConcurrent, ContextTokens: m.ContextTokens, WindowTokens: m.WindowTokens, WindowSource: m.WindowSource, Tier: m.Tier, Tools: m.Tools, TooBig: m.TooBig})
@@ -150,6 +158,9 @@ type backendBody struct {
 	CLIPath         *string             `json:"cli_path"`
 	Hosted          *bool               `json:"hosted"`
 	Paid            *bool               `json:"paid"`
+	Metered         *bool               `json:"metered"`
+	DailyTokenCap   *int64              `json:"daily_token_cap"`
+	MonthlyTokenCap *int64              `json:"monthly_token_cap"`
 	Slots           *int                `json:"slots"`
 	MemoryBudgetMB  *int                `json:"memory_budget_mb"`
 	WindowCapTokens *int                `json:"window_cap_tokens"`
@@ -177,6 +188,15 @@ func (bb backendBody) apply(b *store.Backend) {
 	}
 	if bb.Paid != nil {
 		b.Paid = *bb.Paid
+	}
+	if bb.Metered != nil {
+		b.Metered = *bb.Metered
+	}
+	if bb.DailyTokenCap != nil {
+		b.DailyTokenCap = *bb.DailyTokenCap
+	}
+	if bb.MonthlyTokenCap != nil {
+		b.MonthlyTokenCap = *bb.MonthlyTokenCap
 	}
 	if bb.Slots != nil {
 		b.Slots = *bb.Slots
@@ -372,6 +392,43 @@ func (a *API) enableBackend(w http.ResponseWriter, r *http.Request) {
 	}
 	a.emit("backend.update", map[string]any{"backend": name})
 	a.respondBackend(w, r.Context(), name, http.StatusOK, engine.RetireReport{})
+}
+
+// BackendUsageView is GET /api/backends/{name}/usage: the backend's runner
+// tokens for the current UTC day and month, its caps, and the reset times.
+type BackendUsageView struct {
+	Backend         string `json:"backend"`
+	Metered         bool   `json:"metered"`
+	Day             string `json:"day"`
+	Month           string `json:"month"`
+	DayTokens       int64  `json:"day_tokens"`
+	MonthTokens     int64  `json:"month_tokens"`
+	DailyTokenCap   int64  `json:"daily_token_cap"`
+	MonthlyTokenCap int64  `json:"monthly_token_cap"`
+	DayResets       int64  `json:"day_resets"`
+	MonthResets     int64  `json:"month_resets"`
+	AtCap           bool   `json:"at_cap"`
+	CapResets       int64  `json:"cap_resets,omitempty"`
+	CapWindow       string `json:"cap_window,omitempty"`
+}
+
+func (a *API) backendUsage(w http.ResponseWriter, r *http.Request) {
+	b, err := a.deps.Store.GetBackend(r.Context(), r.PathValue("name"))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	now := time.Now().UTC()
+	u, err := a.deps.Store.BackendUsage(r.Context(), b.Name, now)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	v := BackendUsageView{Backend: b.Name, Metered: b.Metered, Day: now.Format("2006-01-02"), Month: now.Format("2006-01"),
+		DayTokens: u.DayTokens, MonthTokens: u.MonthTokens, DailyTokenCap: b.DailyTokenCap, MonthlyTokenCap: b.MonthlyTokenCap,
+		DayResets: u.DayReset, MonthResets: u.MonthReset}
+	v.AtCap, v.CapResets, v.CapWindow = u.AtCap(b.DailyTokenCap, b.MonthlyTokenCap)
+	writeJSON(w, http.StatusOK, v)
 }
 
 // CandidateView is one entry of a role's ordered candidate list (MB4). Paid
