@@ -175,6 +175,7 @@ func buildWith(cfg config.AgentflowConfig, host golane.Host, rn runner.Runner) (
 		BuiltinModelsForPath: builtinModelsForPath(rn),
 		Terminate:            terminateHook,
 		SSEMaxSubscribers:    cfg.SSEMaxSubscribers,
+		DataDir:              dataDir,
 	})
 	a.Register(mux)
 	events.Store(a)

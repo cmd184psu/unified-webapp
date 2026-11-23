@@ -61,7 +61,13 @@ type Settings struct {
 	// CoordinatorActionsPerRun caps how many of a run's declared actions the engine applies
 	// (AF-19); 20 by default.
 	CoordinatorActionsPerRun int
-	OpencodePath             string
+	// PeersEnabled enables agentflow-to-agentflow pairing (AF-24).
+	PeersEnabled bool
+	// NodeName is this node's name in peer status; empty derives from hostname.
+	NodeName string
+	// PeerPollSeconds is the peer status poll interval (AF-24).
+	PeerPollSeconds int
+	OpencodePath    string
 	// BotchatURL is the BotChat service address and BotchatKeyFile the file holding the
 	// API key every agent shares; both empty means the relay is off.
 	BotchatURL     string
@@ -411,6 +417,26 @@ func parseSettings(m map[string]string) (Settings, error) {
 				return s, Invalid("rulings_file_area_map", "every entry needs a non-empty prefix and area tag")
 			}
 		}
+	}
+	// AF-24 peers.
+	switch strings.ToLower(strings.TrimSpace(m["peers_enabled"])) {
+	case "", "off", "false", "0", "no":
+		s.PeersEnabled = false
+	case "on", "true", "1", "yes":
+		s.PeersEnabled = true
+	default:
+		return s, Invalid("peers_enabled", "must be on or off")
+	}
+	s.NodeName = strings.TrimSpace(m["node_name"])
+	if s.PeerPollSeconds, err = validateInt("peer_poll_seconds", m["peer_poll_seconds"], 0, 3600); err != nil {
+		if strings.TrimSpace(m["peer_poll_seconds"]) == "" {
+			s.PeerPollSeconds = 60
+		} else {
+			return s, err
+		}
+	}
+	if strings.TrimSpace(m["peer_poll_seconds"]) == "" {
+		s.PeerPollSeconds = 60
 	}
 	return s, nil
 }

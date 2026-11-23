@@ -391,6 +391,17 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	ok("POST", "/api/projects/_all_", `{"confirm":true}`, 200)
 	ok("GET", "/api/projects/demo", "", 404)
 
+	// AF-24 peer routes (peers disabled by default -> 404, except unpair/status).
+	ok("GET", "/api/peers", "", 404)
+	ok("POST", "/api/peers/invite", `{"name":"x"}`, 404)
+	ok("POST", "/api/peers/accept", `{"a_url":"http://x","code":"y","name":"z"}`, 404)
+	ok("GET", "/api/peers/foo/status", "", 404)
+	ok("POST", "/api/peers/foo/rotate", "", 404)
+	ok("DELETE", "/api/peers/foo", "", 404)
+	ok("POST", "/api/peer/pair", `{"code":"x","base_url":"http://y","key":"z"}`, 404)
+	ok("POST", "/api/peer/unpair", `{}`, 200)
+	ok("GET", "/api/peer/status", "", 401)
+
 	var missing []string
 	for _, p := range api.Patterns() {
 		if !visited[p] {

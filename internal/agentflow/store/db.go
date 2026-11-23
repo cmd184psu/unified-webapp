@@ -94,3 +94,6 @@ func (s *Store) WithTx(ctx context.Context, fn func(tx *sql.Tx) error) (err erro
 	}
 	return tx.Commit()
 }
+
+// DataDir returns the directory holding the database file.
+func (s *Store) DataDir() string { return s.dataDir }
