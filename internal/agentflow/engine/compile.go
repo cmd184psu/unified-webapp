@@ -219,7 +219,7 @@ func (e *Engine) advanceCompile(ctx context.Context, p store.Project, ef model.E
 		}
 		return e.haltCompile(ctx, ef, last, "the task queue does not match the FRD: "+strings.Join(probs, "; "))
 	}
-	q, err := e.deps.Store.SaveQueue(ctx, "compiler:"+last.Model, ef.ID, defs)
+	q, err := e.deps.Store.SaveQueue(ctx, "compiler:"+last.Model, ef.ID, e.AutoRiskTasks(ctx, defs))
 	if err != nil {
 		if errors.Is(err, store.ErrConflict) {
 			return e.haltCompile(ctx, ef, last, err.Error())

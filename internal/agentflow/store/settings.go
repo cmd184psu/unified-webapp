@@ -113,6 +113,16 @@ type Settings struct {
 	AutoApprove bool
 	// AutoReplan turns a quoted FRD contradiction into a single attention item (AF-17).
 	AutoReplan bool
+	// AutoRisk flags a task automatically when it touches risky code (AF-26):
+	// a migration, the auth package, the config loader or the deploy code, or a
+	// title or prompt that names a risky subject. On by default.
+	AutoRisk bool
+	// RiskyPaths and RiskyWords are the auto-risk rules (AF-26). A
+	// files_touched entry that matches a path, or a title/prompt mentioning a
+	// word, flags the task. Both are comma lists; an empty list turns that
+	// half of the rule off.
+	RiskyPaths []string
+	RiskyWords []string
 	// BudgetRaisePercent is how much a budget is raised at once (AF-17); default 50.
 	BudgetRaisePercent int
 	// BudgetRaiseCap is how many automatic raises an effort may receive (AF-17); default 3.
@@ -134,6 +144,22 @@ const (
 	ResolverOff    = "off"
 	ResolverAdvise = "advise"
 	ResolverAuto   = "auto"
+)
+
+// DefaultRiskyPaths and DefaultRiskyWords are the AF-26 auto-risk rules: the
+// migrations (by name and by the migrations/ directory), the auth package, the
+// config loader and the deploy code, and the subjects a title or prompt can
+// name. A setting key that is absent falls back to these; an empty value is an
+// empty list.
+var (
+	DefaultRiskyPaths = []string{
+		"internal/agentflow/store/migrate.go",
+		"migrations/",
+		"internal/platform/auth/",
+		"internal/platform/config/",
+		"deploy/",
+	}
+	DefaultRiskyWords = []string{"migration", "promote", "auth", "key", "credential"}
 )
 
 // limitKeys are the settings a project may override.
@@ -438,7 +464,35 @@ func parseSettings(m map[string]string) (Settings, error) {
 	if strings.TrimSpace(m["peer_poll_seconds"]) == "" {
 		s.PeerPollSeconds = 60
 	}
+	// AF-26 auto-risk: on unless the owner turns it off, with the default paths
+	// and words for a database that predates the keys.
+	switch strings.ToLower(strings.TrimSpace(m["auto_risk"])) {
+	case "", "on", "true", "1", "yes":
+		s.AutoRisk = true
+	case "off", "false", "0", "no":
+		s.AutoRisk = false
+	default:
+		return s, Invalid("auto_risk", "must be on or off")
+	}
+	s.RiskyPaths = settingList(m, "risky_paths", DefaultRiskyPaths)
+	s.RiskyWords = settingList(m, "risky_words", DefaultRiskyWords)
 	return s, nil
+}
+
+// settingList reads a comma-list setting: a key that is not stored uses def, and
+// a key stored empty is an empty list.
+func settingList(m map[string]string, key string, def []string) []string {
+	raw, ok := m[key]
+	if !ok {
+		return append([]string(nil), def...)
+	}
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // validateNotifyURL accepts an empty value (off) or an http(s) address.

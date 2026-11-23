@@ -36,7 +36,7 @@ func (a *API) seedQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor := actorOf(r)
-	q, err := a.deps.Store.SaveQueue(r.Context(), actor, ef.ID, body.Tasks)
+	q, err := a.deps.Store.SaveQueue(r.Context(), actor, ef.ID, a.deps.Engine.AutoRiskTasks(r.Context(), body.Tasks))
 	if err != nil {
 		writeErr(w, err)
 		return

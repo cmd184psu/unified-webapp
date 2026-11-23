@@ -43,6 +43,7 @@ type migration struct {
 //	49 AF-20 backends.metered, daily_token_cap, monthly_token_cap
 //	50 AF-19b coordinator_runbook and coordinator_actions_per_run settings
 //	56 AF-26 tasks.risk, tasks.risk_reason
+//	57 AF-26 auto_risk, risky_paths, risky_words settings
 //
 // Later stories append the next integer; they never edit an earlier entry.
 var migrations = []migration{
@@ -102,6 +103,7 @@ var migrations = []migration{
 	{54, migration54SQL},
 	{55, migration55SQL},
 	{56, migration56SQL},
+	{57, migration57SQL},
 }
 
 // migration51SQL (AF-22) adds the decision_inbox table: pending ruling additions
@@ -1191,6 +1193,15 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('coord_rollback', 'on');
 const migration56SQL = `
 ALTER TABLE tasks ADD COLUMN risk TEXT NOT NULL DEFAULT 'normal' CHECK (risk IN ('normal', 'risky'));
 ALTER TABLE tasks ADD COLUMN risk_reason TEXT NOT NULL DEFAULT '';
+`
+
+// migration57SQL (AF-26) seeds the auto-risk settings: the switch and the paths
+// and words that make a task risky on its own. The same defaults are in
+// DefaultRiskyPaths and DefaultRiskyWords, for a database without the keys.
+const migration57SQL = `
+INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_risk', 'on');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('risky_paths', 'internal/agentflow/store/migrate.go, migrations/, internal/platform/auth/, internal/platform/config/, deploy/');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('risky_words', 'migration, promote, auth, key, credential');
 `
 
 // migration55SQL (AF-24) adds peer pairing: a paired peer node and one-time

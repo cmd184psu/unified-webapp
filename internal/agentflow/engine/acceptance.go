@@ -179,7 +179,7 @@ func (e *Engine) acceptance(ctx context.Context, proj store.Project, ef model.Ef
 	if len(covered) > 0 {
 		detail["covered_by_verify"] = covered
 	}
-	err = e.deps.Store.AddTasks(ctx, SystemActor, ef.ID, defs, eventAcceptanceFound, detail)
+	err = e.deps.Store.AddTasks(ctx, SystemActor, ef.ID, e.AutoRiskTasks(ctx, defs), eventAcceptanceFound, detail)
 	if err != nil {
 		return false, err
 	}

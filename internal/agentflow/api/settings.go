@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/store"
@@ -79,6 +80,9 @@ func settingsView(s store.Settings) map[string]any {
 		"auto_retry":           onOff(s.AutoRetry),
 		"auto_approve":         onOff(s.AutoApprove),
 		"auto_replan":          onOff(s.AutoReplan),
+		"auto_risk":            onOff(s.AutoRisk),
+		"risky_paths":          strings.Join(s.RiskyPaths, ", "),
+		"risky_words":          strings.Join(s.RiskyWords, ", "),
 		"budget_raise_percent": s.BudgetRaisePercent,
 		"budget_raise_cap":     s.BudgetRaiseCap,
 		// The coordinator role (AF-19): its schedule, caps and runbook.

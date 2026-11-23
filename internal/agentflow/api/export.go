@@ -383,7 +383,7 @@ func (a *API) importBundle(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	q, err := a.deps.Store.SaveQueue(r.Context(), actorOf(r), ef.ID, b.Queue.Tasks)
+	q, err := a.deps.Store.SaveQueue(r.Context(), actorOf(r), ef.ID, a.deps.Engine.AutoRiskTasks(r.Context(), b.Queue.Tasks))
 	if err != nil {
 		abandon()
 		writeErr(w, err)

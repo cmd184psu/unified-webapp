@@ -337,7 +337,7 @@ func (e *Engine) applyResolution(ctx context.Context, ef model.Effort, t model.T
 			}
 			defs = append(defs, model.TaskDef{Key: key, Phase: t.Phase, Title: nt.Title, Prompt: nt.Prompt, Acceptance: nt.Acceptance, FilesTouched: nt.FilesTouched, Toolchains: nt.Toolchains})
 		}
-		if err = s.AddTasks(ctx, SystemActor, ef.ID, defs, "queue.split", map[string]any{"task": t.Key, "stage": st.ID}); err == nil {
+		if err = s.AddTasks(ctx, SystemActor, ef.ID, e.AutoRiskTasks(ctx, defs), "queue.split", map[string]any{"task": t.Key, "stage": st.ID}); err == nil {
 			var keys []string
 			for _, d := range defs {
 				keys = append(keys, d.Key)

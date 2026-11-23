@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"cmd184psu/unified-webapp/internal/agentflow/model"
@@ -44,4 +45,57 @@ func TestTaskRiskOnCreate(t *testing.T) {
 
 	bad := map[string]any{"key": "S1", "phase": "P1", "title": "t", "prompt": "p", "acceptance": []string{"a"}, "risk": "spicy"}
 	f.field("POST", base+"/queue/seed", map[string]any{"tasks": []any{bad}}, "risk")
+}
+
+// The auto-risk rules are settings with their defaults (AF-26): on, the
+// migrations/auth/config/deploy paths and the risky words, and a save of a
+// comma list round-trips.
+func TestAutoRiskSettings(t *testing.T) {
+	f := newFlow(t, envOpt{})
+	s := decode[map[string]any](t, f.ok("GET", "/api/settings", nil, http.StatusOK))
+	if s["auto_risk"] != "on" {
+		t.Fatalf("auto_risk default = %v, want on", s["auto_risk"])
+	}
+	paths, _ := s["risky_paths"].(string)
+	if !strings.Contains(paths, "internal/agentflow/store/migrate.go") || !strings.Contains(paths, "internal/platform/auth/") {
+		t.Fatalf("risky_paths default = %q", paths)
+	}
+	words, _ := s["risky_words"].(string)
+	if !strings.Contains(words, "credential") {
+		t.Fatalf("risky_words default = %q", words)
+	}
+
+	got := decode[map[string]any](t, f.ok("PUT", "/api/settings", map[string]any{
+		"auto_risk": "off", "risky_paths": "docs/", "risky_words": "secret",
+	}, http.StatusOK))
+	if got["auto_risk"] != "off" || got["risky_paths"] != "docs/" || got["risky_words"] != "secret" {
+		t.Fatalf("saved auto-risk settings = %v / %v / %v", got["auto_risk"], got["risky_paths"], got["risky_words"])
+	}
+}
+
+// A task whose title names a risky subject is stored risky without anyone
+// saying so; a docs task stays normal (AF-26).
+func TestQueueSeedMarksAutoRisk(t *testing.T) {
+	f := newFlow(t, envOpt{})
+	f.ok("POST", "/api/projects", map[string]any{"slug": "smoke-p2", "repo_path": repo(t)}, http.StatusCreated)
+	ef := decode[EffortView](t, f.ok("POST", "/api/projects/smoke-p2/efforts", map[string]any{"title": "seed"}, http.StatusCreated))
+	base := "/api/projects/smoke-p2/efforts/" + itoa(ef.ID)
+	risky := map[string]any{"key": "S1", "phase": "P1", "title": "Rotate the credential", "prompt": "p", "acceptance": []string{"a"}}
+	docs := map[string]any{"key": "S2", "phase": "P1", "title": "Explain the queue", "prompt": "Write the documentation.", "acceptance": []string{"a"}, "files_touched": []string{"docs/queue.md"}}
+	seeded := decode[struct{ Tasks []model.Task }](t, f.ok("POST", base+"/queue/seed", map[string]any{"tasks": []any{risky, docs}}, http.StatusOK))
+	if len(seeded.Tasks) != 2 {
+		t.Fatalf("seeded tasks = %+v", seeded.Tasks)
+	}
+	for _, task := range seeded.Tasks {
+		switch task.Key {
+		case "S1":
+			if task.Risk != model.RiskRisky || !strings.Contains(task.RiskReason, "credential") {
+				t.Fatalf("a risky title must be stored risky naming the word: %+v", task)
+			}
+		case "S2":
+			if task.Risk != model.RiskNormal || task.RiskReason != "" {
+				t.Fatalf("a docs task must stay normal: %+v", task)
+			}
+		}
+	}
 }
