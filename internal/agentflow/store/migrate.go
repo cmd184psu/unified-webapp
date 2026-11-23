@@ -1185,7 +1185,9 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('coord_rollback', 'on');
 `
 
 // migration55SQL (AF-24) adds peer pairing: a paired peer node and one-time
-// pairing codes. Outbound keys live in files, inbound keys in auth api_keys.
+// pairing codes. Outbound keys live only in 0600 files. Inbound hashes live in
+// peer_inbound (agentflow validates them itself) and are mirrored into
+// auth.api_keys as "peer:<name>" so the platform gate accepts a peer key.
 const migration55SQL = `
 CREATE TABLE peers (
   name TEXT PRIMARY KEY,

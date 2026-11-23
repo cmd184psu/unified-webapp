@@ -46,6 +46,12 @@ type Deps struct {
 	ReviewRunner ReviewRunner
 	// DataDir is agentflow's data directory (for peer key files).
 	DataDir string
+	// PeerKeySink mirrors an inbound peer key's hash into the platform auth
+	// config (auth.api_keys, module agentflow) and reloads the gate. Nil in
+	// tests; agentflow still validates against its own peer_inbound table.
+	PeerKeySink func(peerName, hash string) error
+	// PeerKeyDelete removes the mirror for peerName after revoke or rotation.
+	PeerKeyDelete func(peerName string) error
 }
 
 // ReviewRunner is the engine method the review API calls.
