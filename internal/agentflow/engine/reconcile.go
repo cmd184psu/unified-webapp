@@ -93,6 +93,9 @@ func kindForRole(role string) string {
 // job and close it as lost. p.Stage is filled in. If the job cannot be
 // submitted the stage is closed as infra:crash.
 func (e *Engine) Submit(ctx context.Context, laneName string, sp store.StageSpec, p StagePayload) (model.Stage, golane.Job, error) {
+	if !e.LoadGateOK(ctx) {
+		return model.Stage{}, golane.Job{}, fmt.Errorf("load gate closed")
+	}
 	e.submitMu.RLock()
 	defer e.submitMu.RUnlock()
 	l, ok := e.Lane(laneName)

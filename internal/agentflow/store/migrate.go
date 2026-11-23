@@ -100,6 +100,7 @@ var migrations = []migration{
 	{53, migration53SQL},
 	{54, migration54SQL},
 	{55, migration55SQL},
+	{56, migration56SQL},
 }
 
 // migration51SQL (AF-22) adds the decision_inbox table: pending ruling additions
@@ -1215,4 +1216,25 @@ CREATE TABLE peer_inbound (
 INSERT OR IGNORE INTO settings (key, value) VALUES ('peers_enabled', 'off');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('node_name', '');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('peer_poll_seconds', '60');
+`
+
+// migration56SQL (AF-25) adds delegation tracking and load-gate settings.
+const migration56SQL = `
+CREATE TABLE delegations (
+  id TEXT PRIMARY KEY,
+  peer TEXT NOT NULL,
+  project TEXT NOT NULL,
+  effort INTEGER NOT NULL,
+  task_keys TEXT NOT NULL DEFAULT '[]',
+  reason TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending',
+  remote_effort INTEGER NOT NULL DEFAULT 0,
+  created INTEGER NOT NULL,
+  updated INTEGER NOT NULL
+);
+CREATE INDEX idx_delegations_peer ON delegations(peer);
+INSERT OR IGNORE INTO settings (key, value) VALUES ('load_cap_tenths', '15');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('min_free_mem_gb', '2');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('delegation_timeout_minutes', '30');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('account_group', '');
 `

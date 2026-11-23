@@ -67,6 +67,14 @@ type Settings struct {
 	NodeName string
 	// PeerPollSeconds is the peer status poll interval (AF-24).
 	PeerPollSeconds int
+	// AccountGroup groups nodes sharing the same provider account for slot budgeting (AF-25).
+	AccountGroup string
+	// LoadCapTenths is the 1-min load cap as tenths of a core multiple (15 = 1.5x cores).
+	LoadCapTenths int
+	// MinFreeMemGB is the free-memory floor in GB below which new stages are not started.
+	MinFreeMemGB int
+	// DelegationTimeoutMinutes is how long an owner waits for a peer before re-queuing locally.
+	DelegationTimeoutMinutes int
 	OpencodePath    string
 	// BotchatURL is the BotChat service address and BotchatKeyFile the file holding the
 	// API key every agent shares; both empty means the relay is off.
@@ -428,6 +436,7 @@ func parseSettings(m map[string]string) (Settings, error) {
 		return s, Invalid("peers_enabled", "must be on or off")
 	}
 	s.NodeName = strings.TrimSpace(m["node_name"])
+	s.AccountGroup = strings.TrimSpace(m["account_group"])
 	if s.PeerPollSeconds, err = validateInt("peer_poll_seconds", m["peer_poll_seconds"], 0, 3600); err != nil {
 		if strings.TrimSpace(m["peer_poll_seconds"]) == "" {
 			s.PeerPollSeconds = 60
@@ -437,6 +446,27 @@ func parseSettings(m map[string]string) (Settings, error) {
 	}
 	if strings.TrimSpace(m["peer_poll_seconds"]) == "" {
 		s.PeerPollSeconds = 60
+	}
+	if strings.TrimSpace(m["load_cap_tenths"]) == "" {
+		s.LoadCapTenths = 15
+	} else if v, err := validateInt("load_cap_tenths", m["load_cap_tenths"], 5, 100); err != nil {
+		return s, err
+	} else {
+		s.LoadCapTenths = v
+	}
+	if strings.TrimSpace(m["min_free_mem_gb"]) == "" {
+		s.MinFreeMemGB = 2
+	} else if v, err := validateInt("min_free_mem_gb", m["min_free_mem_gb"], 0, 10000); err != nil {
+		return s, err
+	} else {
+		s.MinFreeMemGB = v
+	}
+	if strings.TrimSpace(m["delegation_timeout_minutes"]) == "" {
+		s.DelegationTimeoutMinutes = 30
+	} else if v, err := validateInt("delegation_timeout_minutes", m["delegation_timeout_minutes"], 1, 10000); err != nil {
+		return s, err
+	} else {
+		s.DelegationTimeoutMinutes = v
 	}
 	return s, nil
 }

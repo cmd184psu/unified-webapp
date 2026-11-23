@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -67,10 +68,16 @@ func (a *API) registerPeers(mux muxer) {
 	mux.HandleFunc("GET /api/peers/{name}/status", a.peerTest) // test connection
 	mux.HandleFunc("POST /api/peers/{name}/rotate", a.peersRotate)
 	mux.HandleFunc("DELETE /api/peers/{name}", a.peersRevoke)
+	mux.HandleFunc("POST /api/peers/{name}/delegate", a.peerDelegate)
+	mux.HandleFunc("GET /api/delegations", a.delegationsList)
+	mux.HandleFunc("GET /api/delegations/{id}", a.delegationGet)
+	mux.HandleFunc("POST /api/peers/{name}/delegations/{id}/cancel", a.peerDelegateCancel)
 	// unauthenticated peer routes
 	mux.HandleFunc("POST /api/peer/pair", a.peerPair)
 	mux.HandleFunc("POST /api/peer/unpair", a.peerUnpair)
 	mux.HandleFunc("GET /api/peer/status", a.peerStatus)
+	mux.HandleFunc("GET /api/peer/delegations/{id}", a.peerDelegationStatus)
+	mux.HandleFunc("POST /api/peer/delegations/{id}/cancel", a.peerDelegationStatus)
 }
 
 func (a *API) peersEnabled() bool {
@@ -496,21 +503,31 @@ func (a *API) peerStatus(w http.ResponseWriter, r *http.Request) {
 		"build":     "dev",
 		"schema":    schemaVersion(a.deps.Store),
 		"time":      time.Now().Unix(),
-		"accepting": true,
+		"accepting": func() bool { if a.deps.Engine != nil { return a.deps.Engine.LoadGateOK(r.Context()) }; return true }(),
 		"load":      map[string]any{"1m": 0.0, "cores": numCPU(), "free_gb": freeGB()},
 		"backends":  []map[string]any{},
 		"projects":  []map[string]any{},
 		"delegable": []string{},
 	}
-	// backends
+	// backends (rest_until shared so a peer's 429s propagate)
+	rests := map[string][]map[string]any{}
+	if rs, err := a.deps.Store.ModelRests(r.Context()); err == nil {
+		for _, r := range rs {
+			rests[r.Backend] = append(rests[r.Backend], map[string]any{"model": r.Model, "until": r.Until})
+		}
+	}
 	if bs, err := a.deps.Store.ListBackends(r.Context()); err == nil {
 		blist := []map[string]any{}
 		for _, b := range bs {
+			ru := rests[b.Name]
+			if ru == nil {
+				ru = []map[string]any{}
+			}
 			blist = append(blist, map[string]any{
 				"name":       b.Name,
 				"slots":      b.Slots,
 				"running":    0,
-				"rest_until": []any{},
+				"rest_until": ru,
 			})
 		}
 		st["backends"] = blist
@@ -573,4 +590,161 @@ func sha256Hex(s string) string {
 
 func freeGB() float64 {
 	return 0
+}
+
+func (a *API) peerDelegate(w http.ResponseWriter, r *http.Request) {
+	if !a.peersEnabled() {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "peers disabled"})
+		return
+	}
+	name := r.PathValue("name")
+	if name == "" {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(parts) >= 3 {
+			name = parts[2]
+		}
+	}
+	p, err := a.deps.Store.GetPeer(r.Context(), name)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown peer"})
+		return
+	}
+	var req struct {
+		Project string   `json:"project"`
+		Effort  int64    `json:"effort"`
+		Tasks   []string `json:"tasks"`
+		Reason  string   `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Project) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project required"})
+		return
+	}
+	// project must be present on the peer (delegable).
+	ok := false
+	for _, d := range p.Delegable {
+		if d == req.Project {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "project not delegable on peer"})
+		return
+	}
+	id := fmt.Sprintf("del-%d", time.Now().UnixNano())
+	d := store.Delegation{
+		ID:       id,
+		Peer:     name,
+		Project:  req.Project,
+		Effort:   req.Effort,
+		TaskKeys: req.Tasks,
+		Reason:   req.Reason,
+		Status:   "pending",
+	}
+	if err := a.deps.Store.InsertDelegation(r.Context(), d); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": id, "status": "pending", "peer": name})
+}
+
+func (a *API) delegationsList(w http.ResponseWriter, r *http.Request) {
+	peer := r.URL.Query().Get("peer")
+	ds, err := a.deps.Store.ListDelegations(r.Context(), peer)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	out := []map[string]any{}
+	for _, d := range ds {
+		out = append(out, map[string]any{
+			"id":            d.ID,
+			"peer":          d.Peer,
+			"project":       d.Project,
+			"effort":        d.Effort,
+			"tasks":         d.TaskKeys,
+			"reason":        d.Reason,
+			"status":        d.Status,
+			"remote_effort": d.RemoteEffort,
+			"created":       d.Created.Unix(),
+			"updated":       d.Updated.Unix(),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"delegations": out})
+}
+
+func (a *API) delegationGet(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(parts) > 0 {
+			id = parts[len(parts)-1]
+		}
+	}
+	d, err := a.deps.Store.GetDelegation(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":            d.ID,
+		"peer":          d.Peer,
+		"project":       d.Project,
+		"effort":        d.Effort,
+		"tasks":         d.TaskKeys,
+		"reason":        d.Reason,
+		"status":        d.Status,
+		"remote_effort": d.RemoteEffort,
+	})
+}
+
+func (a *API) peerDelegateCancel(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	id := r.PathValue("id")
+	if name == "" || id == "" {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		// /api/peers/{name}/delegations/{id}/cancel
+		if len(parts) >= 5 {
+			name = parts[2]
+			id = parts[4]
+		}
+	}
+	if err := a.deps.Store.UpdateDelegation(r.Context(), id, "cancelled", 0); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	// best-effort notify peer
+	if p, err := a.deps.Store.GetPeer(r.Context(), name); err == nil {
+		key, _ := a.readPeerKey(name)
+		client := &peerclient.Client{Timeout: 10 * time.Second, InsecureSkipVerify: p.InsecureSkipVerify}
+		url := strings.TrimRight(p.BaseURL, "/") + "/api/peer/delegations/" + id + "/cancel"
+		_ = client.Do(r.Context(), http.MethodPost, url, key, p.HostHeader, nil, nil)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (a *API) peerDelegationStatus(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(parts) > 0 {
+			id = parts[len(parts)-1]
+		}
+	}
+	// cancel handling
+	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/cancel") {
+		_ = a.deps.Store.UpdateDelegation(r.Context(), id, "cancelled", 0)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+	d, err := a.deps.Store.GetDelegation(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":     d.ID,
+		"status": d.Status,
+		"peer":   d.Peer,
+	})
 }
