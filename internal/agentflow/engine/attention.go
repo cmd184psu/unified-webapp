@@ -74,6 +74,7 @@ func (e *Engine) Attention(ctx context.Context) ([]AttentionItem, error) {
 		}
 	}
 	out = append(out, e.seatAttention(ctx)...)
+	out = append(out, e.diskLowAttention(ctx)...)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Since > out[j].Since })
 	return out, nil
 }

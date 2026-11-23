@@ -20,6 +20,23 @@ func (a *API) registerEvents(mux muxer) {
 	mux.HandleFunc("GET /api/stages/{id}/stream", a.streamStage)
 }
 
+func (a *API) registerStageHome(mux muxer) {
+	mux.HandleFunc("POST /api/stages/prune", a.pruneStageHomes)
+}
+
+func (a *API) pruneStageHomes(w http.ResponseWriter, r *http.Request) {
+	if a.deps.Engine == nil {
+		writeErr(w, errors.New("no engine"))
+		return
+	}
+	n, err := a.deps.Engine.PruneStageHomesNow(r.Context())
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"pruned": n})
+}
+
 // snapshot is the first message of every event stream connection: each
 // project's run state, so a joining client starts from the current state
 // (RC5).

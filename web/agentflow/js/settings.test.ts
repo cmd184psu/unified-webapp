@@ -109,7 +109,7 @@ test('save sends every field and confirms', async () => {
   await flush();
   eq(t.sent.length, 1);
   eq(t.sent[0].max_attempts, '7');
-  eq(Object.keys(t.sent[0]).length, LIMIT_FIELDS.length + 9); // + verify slots, context floor, backend cooldown, browse roots, BotChat address, key file, mode, minimum running efforts and plan revise limit
+  eq(Object.keys(t.sent[0]).length, LIMIT_FIELDS.length + 11); // + verify slots, context floor, backend cooldown, browse roots, BotChat address, key file, mode, minimum running efforts, plan revise limit, stage home keep days, minimum free space
   stop();
 });
 
