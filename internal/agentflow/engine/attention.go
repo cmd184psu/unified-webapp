@@ -74,6 +74,7 @@ func (e *Engine) Attention(ctx context.Context) ([]AttentionItem, error) {
 		}
 	}
 	out = append(out, e.seatAttention(ctx)...)
+	out = append(out, e.peerAttention(ctx)...)
 	out = append(out, e.diskLowAttention(ctx)...)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Since > out[j].Since })
 	return out, nil
@@ -185,4 +186,22 @@ func (e *Engine) effortAttention(ctx context.Context, project string, ef model.E
 		}
 	}
 	return out, nil
+}
+
+func (e *Engine) peerAttention(ctx context.Context) []AttentionItem {
+	var out []AttentionItem
+	peers, err := e.deps.Store.ListPeers(ctx)
+	if err != nil {
+		return out
+	}
+	now := time.Now().Unix()
+	for _, p := range peers {
+		if !p.Enabled {
+			continue
+		}
+		if p.LastOK > 0 && now-p.LastOK > 600 {
+			out = append(out, AttentionItem{Kind: "peer_unreachable", Message: "peer " + p.Name + " unreachable", Since: p.LastOK * 1000})
+		}
+	}
+	return out
 }

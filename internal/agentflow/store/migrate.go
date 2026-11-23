@@ -91,6 +91,7 @@ var migrations = []migration{
 	{46, migration46SQL},
 	{47, migration47SQL},
 	{48, migration48SQL},
+	{49, migration49SQL},
 }
 
 // migration41SQL (AF-14) stores review requests: the branch and base, the task
@@ -1100,4 +1101,37 @@ CREATE INDEX idx_stages_open ON stages(state) WHERE state <> 'done';
 INSERT OR IGNORE INTO settings (key, value) VALUES ('coordinator_check_minutes', '60');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('coordinator_runs_per_day', '24');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('coordinator_timeout', '30m0s');
+`
+
+// migration49SQL (AF-24) adds peer pairing: a paired peer node and one-time
+// pairing codes. Outbound keys live in files, inbound keys in auth api_keys.
+const migration49SQL = `
+CREATE TABLE peers (
+  name TEXT PRIMARY KEY,
+  base_url TEXT NOT NULL,
+  host_header TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+  protocol INTEGER NOT NULL DEFAULT 1,
+  remote_build TEXT NOT NULL DEFAULT '',
+  paired_at INTEGER NOT NULL,
+  last_seen INTEGER NOT NULL DEFAULT 0,
+  last_ok INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT NOT NULL DEFAULT '',
+  insecure_skip_verify INTEGER NOT NULL DEFAULT 0 CHECK (insecure_skip_verify IN (0, 1)),
+  delegable_json TEXT NOT NULL DEFAULT '[]'
+);
+CREATE TABLE peer_pairing_codes (
+  code_hash TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  expires INTEGER NOT NULL,
+  used INTEGER NOT NULL DEFAULT 0 CHECK (used IN (0, 1)),
+  created INTEGER NOT NULL
+);
+CREATE TABLE peer_inbound (
+  peer_name TEXT PRIMARY KEY,
+  key_hash TEXT NOT NULL
+);
+INSERT OR IGNORE INTO settings (key, value) VALUES ('peers_enabled', 'off');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('node_name', '');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('peer_poll_seconds', '60');
 `

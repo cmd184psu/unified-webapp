@@ -44,6 +44,8 @@ type Deps struct {
 	Coord *coord.Service
 	// ReviewRunner runs a stored review (AF-14). Nil uses Engine. Tests replace it.
 	ReviewRunner ReviewRunner
+	// DataDir is agentflow's data directory (for peer key files).
+	DataDir string
 }
 
 // ReviewRunner is the engine method the review API calls.
@@ -163,6 +165,7 @@ func (a *API) Register(mux muxer) {
 	a.registerSeats(mux)
 	a.registerCoord(mux)
 	a.registerReviews(mux)
+	a.registerPeers(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	})
