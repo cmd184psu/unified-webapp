@@ -92,6 +92,7 @@ var migrations = []migration{
 	{47, migration47SQL},
 	{48, migration48SQL},
 	{49, migration49SQL},
+	{50, migration50SQL},
 }
 
 // migration41SQL (AF-14) stores review requests: the branch and base, the task
@@ -1119,4 +1120,12 @@ CREATE TABLE seat_tasks (
   created INTEGER NOT NULL,
   updated INTEGER NOT NULL
 );
+`
+
+
+// migration50SQL (AF-21) adds cutover/comparison settings for the coordinator module.
+const migration50SQL = `
+INSERT OR IGNORE INTO settings (key, value) VALUES ('coord_live', 'off');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('coord_compare', 'on');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('coord_rollback', 'on');
 `
