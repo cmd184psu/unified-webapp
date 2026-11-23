@@ -47,6 +47,16 @@ const BACKLOG_FIELDS: LimitField[] = [
   { key: 'min_free_space_gb', label: 'Minimum free space (GB)', hint: 'Below this, agentflow pauses new stages and asks for attention; 20 by default' },
 ];
 
+// COORDINATOR_FIELDS are AF-19's coordinator: how often it checks, how much it
+// may do in a day and in a run, and the runbook its prompt follows.
+const COORDINATOR_FIELDS: LimitField[] = [
+  { key: 'coordinator_check_minutes', label: 'Coordinator check minutes', hint: 'Minutes between coordinator checks; 0 turns the coordinator off' },
+  { key: 'coordinator_runs_per_day', label: 'Coordinator runs per day', hint: 'How many coordinator runs may start in a day; 0 means no cap' },
+  { key: 'coordinator_timeout', label: 'Coordinator timeout', hint: 'A duration such as 30m, for one coordinator run' },
+  { key: 'coordinator_actions_per_run', label: 'Coordinator actions per run', hint: 'How many of one run\'s actions are applied; the rest are skipped and logged' },
+  { key: 'coordinator_runbook', label: 'Coordinator runbook', hint: 'File the runbook section of the prompt is read from, such as ~/work/coordinator/BEAM-COORD.md' },
+];
+
 const EXECUTION_FIELDS: LimitField[] = [
   { key: 'verify_slots', label: 'Verify slots', hint: 'Verify and merge stages that run at once, 1 to 64' },
   { key: 'context_floor_tokens', label: 'Context floor', hint: 'Tokens of context assumed for a model whose served window is not known, 2048 or more' },
@@ -274,8 +284,8 @@ export class SettingsView {
   render(): void {
     this.inputs.clear();
     this.errors = new FormErrors();
-    const limits = h('div', { class: 'profile-fields' }, ...LIMIT_FIELDS.map((f) => this.row(f)));		const exec = h('div', { class: 'profile-fields' }, ...EXECUTION_FIELDS.map((f) => this.row(f)));
-		const backlog = h('div', { class: 'profile-fields' }, ...BACKLOG_FIELDS.map((f) => this.row(f)));
+    const limits = h('div', { class: 'profile-fields' }, ...LIMIT_FIELDS.map((f) => this.row(f)));		const exec = h('div', { class: 'profile-fields' }, ...EXECUTION_FIELDS.map((f) => this.row(f)));    const backlog = h('div', { class: 'profile-fields' }, ...BACKLOG_FIELDS.map((f) => this.row(f)));
+    const coord = h('div', { class: 'profile-fields' }, ...COORDINATOR_FIELDS.map((f) => this.row(f)));
     const path = this.row({ key: 'opencode_path', label: 'opencode path', hint: 'Program to run' });
     const bcUrl = this.row({ key: 'botchat_url', label: 'BotChat address', hint: 'e.g. https://botchat.example.net; empty turns the relay off' });
     const dispatch = checkbox('botchat_dispatch', str(this.values.botchat_mode) === 'dispatch');
@@ -289,8 +299,8 @@ export class SettingsView {
     this.auto?.stop();
     this.auto = autosave({ snapshot: () => JSON.stringify(this.body()), save: () => this.save() });
     const root = h('div', { class: 'settings-host settings-host-drawer' },
-        section('Limits', limits),				section('Execution', exec),
-				section('Backlog', backlog),
+        section('Limits', limits),				section('Execution', exec),        section('Backlog', backlog),
+        section('Coordinator', coord),
         section('opencode', path, this.ocHost),
         section('BotChat', bcUrl, bcKey, bcMode.el),
         section('Service', this.svcHost),

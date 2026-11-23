@@ -81,6 +81,12 @@ func settingsView(s store.Settings) map[string]any {
 		"auto_replan":          onOff(s.AutoReplan),
 		"budget_raise_percent": s.BudgetRaisePercent,
 		"budget_raise_cap":     s.BudgetRaiseCap,
+		// The coordinator role (AF-19): its schedule, caps and runbook.
+		"coordinator_check_minutes":   s.CoordinatorCheckMinutes,
+		"coordinator_runs_per_day":    s.CoordinatorRunsPerDay,
+		"coordinator_timeout":         s.CoordinatorTimeout.String(),
+		"coordinator_runbook":         s.CoordinatorRunbook,
+		"coordinator_actions_per_run": s.CoordinatorActionsPerRun,
 	}
 }
 

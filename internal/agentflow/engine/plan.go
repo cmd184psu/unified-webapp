@@ -715,6 +715,9 @@ func (e *Engine) EffortPrompt(ctx context.Context, st model.Stage) (string, erro
 	if isResolver(st) {
 		return e.resolverPrompt(ctx, st)
 	}
+	if isCoordinator(st) {
+		return e.coordinatorPrompt(ctx, st)
+	}
 	text, err := prompts.Load(st.Role)
 	if err != nil {
 		return "", err

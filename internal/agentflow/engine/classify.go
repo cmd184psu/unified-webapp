@@ -141,6 +141,10 @@ func parseFinal(role, final string, deliberate bool) (json.RawMessage, string, e
 		_, err = schema.Parse[schema.PlanReviewOut](raw)
 	case "merger":
 		_, err = schema.Parse[schema.MergerOut](raw)
+	case "coordinator":
+		// The coordinator's run declared its changes; a reply naming no action
+		// at all is still a valid run (it found nothing to do).
+		_, err = schema.Parse[schema.CoordinatorOut](raw)
 	case "compiler":
 		// A reply the queue would reject (a verify field, a cycle, a
 		// dangling dependency, an absolute path) gets the corrective

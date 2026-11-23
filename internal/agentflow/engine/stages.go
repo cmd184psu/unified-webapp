@@ -204,6 +204,8 @@ func roleTimeout(set store.Settings, role string) time.Duration {
 		return set.VerifyTimeout
 	case "merger":
 		return set.MergerTimeout
+	case "coordinator":
+		return set.CoordinatorTimeout
 	}
 	return set.PlanTimeout
 }

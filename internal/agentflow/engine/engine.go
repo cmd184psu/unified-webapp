@@ -192,6 +192,8 @@ func New(d Deps) (*Engine, error) {
 	e.backendKinds = []golane.Kind{e.kind(KindWork), e.kind(KindReview), e.kind(KindPlan)}
 	e.engineKinds = []golane.Kind{e.kind(KindVerify), e.kind(KindMerge)}
 	e.tickHooks = append(e.tickHooks, func(ctx context.Context) { _ = e.AdvancePlans(ctx) })
+	// The coordinator check rides the same tick: no cron of its own (AF-19).
+	e.tickHooks = append(e.tickHooks, func(ctx context.Context) { _ = e.CoordinatorTick(ctx) })
 	e.tickHooks = append(e.tickHooks, e.watchStalls)
 	if d.Git != nil {
 		if e.deps.Verify == nil {
