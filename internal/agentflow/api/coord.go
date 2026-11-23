@@ -1,13 +1,15 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -33,7 +35,9 @@ func (a *API) registerCoord(mux muxer) {
 	mux.HandleFunc("POST /api/seat/{callsign}/blocked", a.remoteSeatBlocked)
 	mux.HandleFunc("GET /api/seat-tasks", a.listSeatTasks)
 	mux.HandleFunc("POST /api/seat-tasks", a.createSeatTask)
+	mux.HandleFunc("GET /api/seat-tasks/{id}", a.getSeatTask)
 	mux.HandleFunc("PATCH /api/seat-tasks/{id}", a.updateSeatTask)
+	mux.HandleFunc("DELETE /api/seat-tasks/{id}", a.deleteSeatTask)
 	mux.HandleFunc("POST /api/seat-tasks/import", a.importSeatTasks)
 	mux.HandleFunc("POST /api/handoffs/{task}/merge", a.handoffMerge)
 }
@@ -412,13 +416,22 @@ func (a *API) remoteSeatBlocked(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"recorded": cs})
 }
 
-// listSeatTasks is GET /api/seat-tasks.
-func (a *API) listSeatTasks(w http.ResponseWriter, r *http.Request) {
+func (a *API) seatTaskStore(w http.ResponseWriter) (*store.Store, bool) {
 	if a.deps.Store == nil {
 		writeJSON(w, http.StatusServiceUnavailable, errorBody{Error: "store not available"})
+		return nil, false
+	}
+	return a.deps.Store, true
+}
+
+// listSeatTasks is GET /api/seat-tasks. Optional filters: ?state= and ?seat=.
+func (a *API) listSeatTasks(w http.ResponseWriter, r *http.Request) {
+	st, ok := a.seatTaskStore(w)
+	if !ok {
 		return
 	}
-	items, err := a.deps.Store.ListSeatTasks(r.Context())
+	q := r.URL.Query()
+	items, err := st.ListSeatTasks(r.Context(), q.Get("state"), q.Get("seat"))
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -426,17 +439,17 @@ func (a *API) listSeatTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
-// createSeatTask is POST /api/seat-tasks.
+// createSeatTask is POST /api/seat-tasks. An empty title is 400.
 func (a *API) createSeatTask(w http.ResponseWriter, r *http.Request) {
-	if a.deps.Store == nil {
-		writeJSON(w, http.StatusServiceUnavailable, errorBody{Error: "store not available"})
+	st, ok := a.seatTaskStore(w)
+	if !ok {
 		return
 	}
 	var body store.SeatTask
 	if !decodeBody(w, r, &body, false) {
 		return
 	}
-	created, err := a.deps.Store.CreateSeatTask(r.Context(), body)
+	created, err := st.CreateSeatTask(r.Context(), body)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -444,28 +457,17 @@ func (a *API) createSeatTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, created)
 }
 
-// updateSeatTask is PATCH /api/seat-tasks/{id} {state}.
-func (a *API) updateSeatTask(w http.ResponseWriter, r *http.Request) {
-	if a.deps.Store == nil {
-		writeJSON(w, http.StatusServiceUnavailable, errorBody{Error: "store not available"})
+// getSeatTask is GET /api/seat-tasks/{id}. An unknown id is 404.
+func (a *API) getSeatTask(w http.ResponseWriter, r *http.Request) {
+	st, ok := a.seatTaskStore(w)
+	if !ok {
 		return
 	}
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		badRequest(w, "id", "invalid id")
+	id, ok := pathID(w, r, "id")
+	if !ok {
 		return
 	}
-	var body struct {
-		State string `json:"state"`
-	}
-	if !decodeBody(w, r, &body, false) {
-		return
-	}
-	if err := a.deps.Store.UpdateSeatTaskState(r.Context(), id, body.State); err != nil {
-		writeErr(w, err)
-		return
-	}
-	item, err := a.deps.Store.GetSeatTask(r.Context(), id)
+	item, err := st.GetSeatTask(r.Context(), id)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -473,17 +475,138 @@ func (a *API) updateSeatTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, item)
 }
 
-// importSeatTasks is POST /api/seat-tasks/import with a JSON array of seat tasks.
+// seatTaskPatch is a partial edit. A field left out stays as it is.
+type seatTaskPatch struct {
+	Title         *string   `json:"title"`
+	Objective     *string   `json:"objective"`
+	Acceptance    *string   `json:"acceptance"`
+	Exclusions    *string   `json:"exclusions"`
+	EligibleSeats *[]string `json:"eligible_seats"`
+	EligibleKinds *[]string `json:"eligible_kinds"`
+	Priority      *int      `json:"priority"`
+	State         *string   `json:"state"`
+}
+
+// updateSeatTask is PATCH /api/seat-tasks/{id}. It edits any stored field.
+func (a *API) updateSeatTask(w http.ResponseWriter, r *http.Request) {
+	st, ok := a.seatTaskStore(w)
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	var body seatTaskPatch
+	if !decodeBody(w, r, &body, false) {
+		return
+	}
+	cur, err := st.GetSeatTask(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if body.Title != nil {
+		cur.Title = *body.Title
+	}
+	if body.Objective != nil {
+		cur.Objective = *body.Objective
+	}
+	if body.Acceptance != nil {
+		cur.Acceptance = *body.Acceptance
+	}
+	if body.Exclusions != nil {
+		cur.Exclusions = *body.Exclusions
+	}
+	if body.EligibleSeats != nil {
+		cur.EligibleSeats = *body.EligibleSeats
+	}
+	if body.EligibleKinds != nil {
+		cur.EligibleKinds = *body.EligibleKinds
+	}
+	if body.Priority != nil {
+		cur.Priority = *body.Priority
+	}
+	if body.State != nil {
+		cur.State = *body.State
+	}
+	item, err := st.UpdateSeatTask(r.Context(), cur)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+// deleteSeatTask is DELETE /api/seat-tasks/{id}. An unknown id is 404.
+func (a *API) deleteSeatTask(w http.ResponseWriter, r *http.Request) {
+	st, ok := a.seatTaskStore(w)
+	if !ok {
+		return
+	}
+	id, ok := pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	if err := st.DeleteSeatTask(r.Context(), id); err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// importSeatTasks is POST /api/seat-tasks/import.
+// A JSON array inserts those tasks. An object {"dir": "..."} reads every
+// *.json backlog file in that directory, mapping and deduping by title.
 func (a *API) importSeatTasks(w http.ResponseWriter, r *http.Request) {
-	if a.deps.Store == nil {
-		writeJSON(w, http.StatusServiceUnavailable, errorBody{Error: "store not available"})
+	st, ok := a.seatTaskStore(w)
+	if !ok {
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeDecodeErr(w, err)
+		return
+	}
+	trim := bytes.TrimSpace(body)
+	if len(trim) == 0 {
+		badRequest(w, "body", "a JSON array of tasks or {\"dir\": ...} is required")
+		return
+	}
+	if trim[0] == '{' {
+		dec := json.NewDecoder(bytes.NewReader(trim))
+		dec.DisallowUnknownFields()
+		var req struct {
+			Dir string `json:"dir"`
+		}
+		if err := dec.Decode(&req); err != nil {
+			writeDecodeErr(w, err)
+			return
+		}
+		if _, more := dec.Token(); more != io.EOF {
+			badRequest(w, "body", "unexpected data after the JSON value")
+			return
+		}
+		if strings.TrimSpace(req.Dir) == "" {
+			badRequest(w, "dir", "dir is required")
+			return
+		}
+		n, err := st.ImportSeatTasksDir(r.Context(), req.Dir)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]int{"imported": n})
 		return
 	}
 	var items []store.SeatTask
-	if !decodeBody(w, r, &items, false) {
+	dec := json.NewDecoder(bytes.NewReader(trim))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&items); err != nil {
+		writeDecodeErr(w, err)
 		return
 	}
-	n, err := a.deps.Store.ImportSeatTasks(r.Context(), items)
+	n, err := st.ImportSeatTasks(r.Context(), items)
 	if err != nil {
 		writeErr(w, err)
 		return

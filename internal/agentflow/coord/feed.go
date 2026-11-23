@@ -32,6 +32,19 @@ func finishActions(state string) []string {
 // seat_order, then rework, then (AF-13 bug ii) the next open task of the seat's own plans), and
 // rewrites the queue file.
 func (r *run) feed(ctx context.Context) error {
+	if r.c != nil && r.c.Store != nil {
+		on, err := SeatFeedNative(ctx, r.c.Store)
+		if err != nil {
+			return err
+		}
+		if on {
+			// Native feeding owns the queue files. A dry run still writes nothing.
+			if r.dry {
+				return nil
+			}
+			return r.feedNative(ctx)
+		}
+	}
 	var msgs []Msg
 	for _, room := range r.cfg.Rooms {
 		msgs = append(msgs, r.rooms[room]...)
@@ -135,6 +148,47 @@ func (r *run) feed(ctx context.Context) error {
 }
 
 func (r *run) queuePath(cs string) string { return filepath.Join(r.cfg.QueueDir, cs+".md") }
+
+// feedNative gives empty seats their next backlog task. It runs only when
+// seat_feed_native is true, in place of the legacy queue writer above.
+func (r *run) feedNative(ctx context.Context) error {
+	reg := DefaultRegistry()
+	if r.cfg.StateFile != "" {
+		loaded, err := LoadRegistry(filepath.Join(filepath.Dir(r.cfg.StateFile), RegistryFile))
+		if err != nil {
+			return err
+		}
+		reg = loaded
+	}
+	seen := map[string]bool{}
+	var seats []FeedSeat
+	for _, c := range reg.Seats {
+		seen[c.Callsign] = true
+		q := c.QueueFile
+		if q == "" {
+			q = r.queuePath(c.Callsign)
+		}
+		seats = append(seats, FeedSeat{Callsign: c.Callsign, Kind: c.Kind, QueueFile: q})
+	}
+	for _, s := range r.cfg.Seats {
+		if seen[s.Callsign] || !s.Feed {
+			continue
+		}
+		kind := KindFreebuff
+		for _, cap := range s.Capabilities {
+			if cap == "headless" || cap == "kilo" || cap == "opencode" {
+				kind = KindKilo
+				break
+			}
+		}
+		seats = append(seats, FeedSeat{Callsign: s.Callsign, Kind: kind, QueueFile: r.queuePath(s.Callsign)})
+	}
+	f := &SeatFeeder{Store: r.c.Store, QueueDir: r.cfg.QueueDir, Seats: seats}
+	f.Post = func(ctx context.Context, cs, msg string) error {
+		return r.bus.Post(ctx, r.cfg.EngineRoom, r.cfg.Me, cs, msg)
+	}
+	return f.FeedSeats(ctx)
+}
 
 // pullTask claims the next eligible task in one of our plans for an idle
 // seat, filtered by the seat's capability tags. The claim is atomic on the
