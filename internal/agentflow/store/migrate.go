@@ -42,6 +42,7 @@ type migration struct {
 //	48 AF-19 coordinator role (role_candidates and stages), coordinator settings
 //	49 AF-20 backends.metered, daily_token_cap, monthly_token_cap
 //	50 AF-19b coordinator_runbook and coordinator_actions_per_run settings
+//	56 AF-26 tasks.risk, tasks.risk_reason
 //
 // Later stories append the next integer; they never edit an earlier entry.
 var migrations = []migration{
@@ -100,6 +101,7 @@ var migrations = []migration{
 	{53, migration53SQL},
 	{54, migration54SQL},
 	{55, migration55SQL},
+	{56, migration56SQL},
 }
 
 // migration51SQL (AF-22) adds the decision_inbox table: pending ruling additions
@@ -1182,6 +1184,13 @@ const migration54SQL = `
 INSERT OR IGNORE INTO settings (key, value) VALUES ('coord_live', 'off');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('coord_compare', 'on');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('coord_rollback', 'on');
+`
+
+// migration56SQL (AF-26) adds tasks.risk and tasks.risk_reason. A task is
+// normal unless a caller marks it risky; nothing derives the value.
+const migration56SQL = `
+ALTER TABLE tasks ADD COLUMN risk TEXT NOT NULL DEFAULT 'normal' CHECK (risk IN ('normal', 'risky'));
+ALTER TABLE tasks ADD COLUMN risk_reason TEXT NOT NULL DEFAULT '';
 `
 
 // migration55SQL (AF-24) adds peer pairing: a paired peer node and one-time

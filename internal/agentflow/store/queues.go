@@ -35,11 +35,24 @@ func validateTaskToolchains(defs []model.TaskDef) error {
 	return nil
 }
 
+// validateTaskRisk rejects a risk outside normal|risky and fills in normal for
+// an unset one, so every stored task carries an explicit value (AF-26).
+func validateTaskRisk(defs []model.TaskDef) error {
+	for i := range defs {
+		risk, ok := model.NormalizeRisk(defs[i].Risk)
+		if !ok {
+			return Invalid("risk", fmt.Sprintf("task %s: unknown risk %q (known: %s, %s)", defs[i].Key, defs[i].Risk, model.RiskNormal, model.RiskRisky))
+		}
+		defs[i].Risk = risk
+	}
+	return nil
+}
+
 func insertTasks(ctx context.Context, tx *sql.Tx, queue int64, defs []model.TaskDef) error {
 	ids := map[string]int64{}
 	for _, d := range defs {
-		res, err := tx.ExecContext(ctx, `INSERT INTO tasks (queue, task_key, phase, title, prompt, acceptance_json, files_touched_json, toolchains_json)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, queue, d.Key, d.Phase, d.Title, d.Prompt, jsonList(d.Acceptance), jsonList(d.FilesTouched), jsonList(d.Toolchains))
+		res, err := tx.ExecContext(ctx, `INSERT INTO tasks (queue, task_key, phase, title, prompt, acceptance_json, files_touched_json, toolchains_json, risk, risk_reason)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, queue, d.Key, d.Phase, d.Title, d.Prompt, jsonList(d.Acceptance), jsonList(d.FilesTouched), jsonList(d.Toolchains), d.Risk, d.RiskReason)
 		if err != nil {
 			return err
 		}
@@ -79,7 +92,7 @@ func loadQueue(ctx context.Context, q querier, effort int64) (model.Queue, int64
 
 // loadTasks returns a queue's tasks in insertion order with dependency keys.
 func loadTasks(ctx context.Context, q querier, queue int64) ([]model.Task, error) {
-	rows, err := q.QueryContext(ctx, `SELECT id, task_key, phase, title, prompt, acceptance_json, files_touched_json, toolchains_json, waiting_reason
+	rows, err := q.QueryContext(ctx, `SELECT id, task_key, phase, title, prompt, acceptance_json, files_touched_json, toolchains_json, waiting_reason, risk, risk_reason
 		FROM tasks WHERE queue = ? ORDER BY id`, queue)
 	if err != nil {
 		return nil, err
@@ -88,7 +101,7 @@ func loadTasks(ctx context.Context, q querier, queue int64) ([]model.Task, error
 	for rows.Next() {
 		t := model.Task{Queue: queue}
 		var acc, files, toolchains string
-		if err := rows.Scan(&t.ID, &t.Key, &t.Phase, &t.Title, &t.Prompt, &acc, &files, &toolchains, &t.WaitingReason); err != nil {
+		if err := rows.Scan(&t.ID, &t.Key, &t.Phase, &t.Title, &t.Prompt, &acc, &files, &toolchains, &t.WaitingReason, &t.Risk, &t.RiskReason); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -125,6 +138,9 @@ func loadTasks(ctx context.Context, q querier, queue int64) ([]model.Task, error
 		if out[i].Toolchains == nil {
 			out[i].Toolchains = []string{}
 		}
+		if out[i].Risk == "" { // a row written before AF-26 is normal
+			out[i].Risk = model.RiskNormal
+		}
 		drows, err := q.QueryContext(ctx, `SELECT t.task_key FROM task_deps d JOIN tasks t ON t.id = d.depends_on
 			WHERE d.task = ? ORDER BY t.task_key`, out[i].ID)
 		if err != nil {
@@ -160,6 +176,9 @@ func (s *Store) SaveQueue(ctx context.Context, actor string, effort int64, defs 
 		return model.Queue{}, Invalid("queue", err.Error())
 	}
 	if err := validateTaskToolchains(defs); err != nil {
+		return model.Queue{}, err
+	}
+	if err := validateTaskRisk(defs); err != nil {
 		return model.Queue{}, err
 	}
 	hash := model.QueueHash(defs)
@@ -219,14 +238,14 @@ func (s *Store) EditTask(ctx context.Context, actor string, effort int64, def mo
 			return err
 		}
 		defs := make([]model.TaskDef, len(cur.Tasks))
-		found := false
+		found := -1
 		for i, t := range cur.Tasks {
 			defs[i] = t
 			if t.Key == def.Key {
-				defs[i], found = def, true
+				defs[i], found = def, i
 			}
 		}
-		if !found {
+		if found < 0 {
 			return fmt.Errorf("task %q in effort %d: %w", def.Key, effort, ErrNotFound)
 		}
 		if err := model.ValidateTasks(defs); err != nil {
@@ -235,8 +254,12 @@ func (s *Store) EditTask(ctx context.Context, actor string, effort int64, def mo
 		if err := validateTaskToolchains(defs); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE tasks SET phase = ?, title = ?, prompt = ?, acceptance_json = ?, files_touched_json = ?, toolchains_json = ?
-			WHERE queue = ? AND task_key = ?`, def.Phase, def.Title, def.Prompt, jsonList(def.Acceptance), jsonList(def.FilesTouched), jsonList(def.Toolchains), qid, def.Key); err != nil {
+		if err := validateTaskRisk(defs); err != nil {
+			return err
+		}
+		def = defs[found]
+		if _, err := tx.ExecContext(ctx, `UPDATE tasks SET phase = ?, title = ?, prompt = ?, acceptance_json = ?, files_touched_json = ?, toolchains_json = ?, risk = ?, risk_reason = ?
+			WHERE queue = ? AND task_key = ?`, def.Phase, def.Title, def.Prompt, jsonList(def.Acceptance), jsonList(def.FilesTouched), jsonList(def.Toolchains), def.Risk, def.RiskReason, qid, def.Key); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM task_deps WHERE task IN (SELECT id FROM tasks WHERE queue = ? AND task_key = ?)`, qid, def.Key); err != nil {
@@ -323,6 +346,9 @@ func (s *Store) AddTasks(ctx context.Context, actor string, effort int64, defs [
 		return Invalid("tasks", err.Error())
 	}
 	if err := validateTaskToolchains(defs); err != nil {
+		return err
+	}
+	if err := validateTaskRisk(defs); err != nil {
 		return err
 	}
 	return s.WithTx(ctx, func(tx *sql.Tx) error {

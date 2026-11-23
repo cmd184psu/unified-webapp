@@ -132,6 +132,26 @@ type Approval struct {
 	At         int64  `json:"at"`
 }
 
+// A task's risk as stored (AF-26). Nothing in the engine decides when a task
+// is risky: a caller (planner, web client) sets it and the engine only keeps
+// the value.
+const (
+	RiskNormal = "normal"
+	RiskRisky  = "risky"
+)
+
+// NormalizeRisk maps an unset risk to normal and reports whether risk is one
+// of the two accepted words.
+func NormalizeRisk(risk string) (string, bool) {
+	switch risk {
+	case "", RiskNormal:
+		return RiskNormal, true
+	case RiskRisky:
+		return RiskRisky, true
+	}
+	return "", false
+}
+
 // TaskDef is a task's definition. It carries no executable content (V1).
 type TaskDef struct {
 	Key          string   `json:"key"`
@@ -145,6 +165,9 @@ type TaskDef struct {
 	// example "dotnet" (AF-6b). The engine also infers them from FilesTouched
 	// and acts on the union, so a hint can add a toolchain but never remove one.
 	Toolchains []string `json:"toolchains,omitempty"`
+	// Risk is normal (the zero value) or risky (AF-26); RiskReason says why.
+	Risk       string `json:"risk,omitempty"`
+	RiskReason string `json:"risk_reason,omitempty"`
 }
 
 // Queue is an effort's task queue. Hash covers the task definitions.
