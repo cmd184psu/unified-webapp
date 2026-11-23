@@ -36,13 +36,13 @@ type Adapter struct {
 	PathFunc func() string
 	// ParentEnv is where PATH, HOME and LANG are taken from; nil means os.Environ.
 	ParentEnv []string
-	// Effort is the reasoning effort passed to every call; empty means "medium".
+	// Effort is the reasoning effort passed to every call; empty means "high" (owner 11-24: sol 6.2 high is an opus-level model).
 	Effort string
 }
 
 func (a *Adapter) effort() string {
 	if a.Effort == "" {
-		return "medium"
+		return "high"
 	}
 	return a.Effort
 }
