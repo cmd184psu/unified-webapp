@@ -2,7 +2,13 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"cmd184psu/unified-webapp/internal/agentflow/coord"
 	"cmd184psu/unified-webapp/internal/agentflow/runner/seat"
@@ -20,6 +26,9 @@ func (a *API) registerCoord(mux muxer) {
 	mux.HandleFunc("POST /api/seats/external/{callsign}/pause", a.pauseSeat)
 	mux.HandleFunc("GET /api/seats/{callsign}/queue", a.seatQueue)
 	mux.HandleFunc("POST /api/seats/{callsign}/nudge", a.seatNudge)
+	mux.HandleFunc("GET /api/seat/{callsign}/next", a.remoteSeatNext)
+	mux.HandleFunc("POST /api/seat/{callsign}/ack", a.remoteSeatAck)
+	mux.HandleFunc("POST /api/seat/{callsign}/blocked", a.remoteSeatBlocked)
 	mux.HandleFunc("POST /api/handoffs/{task}/merge", a.handoffMerge)
 }
 
@@ -241,4 +250,158 @@ func (a *API) handoffMerge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.Coord.MergeTask(r.Context(), r.PathValue("task"), body.Branches, body.Dry))
+}
+
+// remoteSeatKey returns the shared key for off-system (remote-pull) seats. It is read from
+// the environment or a key file, never from a prompt or a task.
+func remoteSeatKey() string {
+	if v := strings.TrimSpace(os.Getenv("AGENTFLOW_SEAT_KEY")); v != "" {
+		return v
+	}
+	if p := strings.TrimSpace(os.Getenv("AGENTFLOW_SEAT_KEY_FILE")); p != "" {
+		if b, err := os.ReadFile(p); err == nil {
+			return strings.TrimSpace(string(b))
+		}
+	}
+	return ""
+}
+
+func (a *API) remoteSeatAuth(w http.ResponseWriter, r *http.Request) bool {
+	auth := strings.TrimSpace(r.Header.Get("Authorization"))
+	if !strings.HasPrefix(strings.ToLower(auth), "bearer ") {
+		writeJSON(w, http.StatusUnauthorized, errorBody{Error: "missing bearer token"})
+		return false
+	}
+	key := strings.TrimSpace(auth[7:])
+	expected := remoteSeatKey()
+	if expected == "" || key != expected {
+		writeJSON(w, http.StatusUnauthorized, errorBody{Error: "invalid seat key"})
+		return false
+	}
+	return true
+}
+
+// remoteSeatNext is GET /api/seat/{callsign}/next: the full document an off-system seat
+// pulls to do its task.
+func (a *API) remoteSeatNext(w http.ResponseWriter, r *http.Request) {
+	if !a.remoteSeatAuth(w, r) {
+		return
+	}
+	s, ok := a.coordOn(w)
+	if !ok {
+		return
+	}
+	cs := r.PathValue("callsign")
+	_, found, err := s.Seat(cs)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, errorBody{Error: "no such seat"})
+		return
+	}
+	text, err := s.QueueFile(cs)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	doc := text
+	if sp := strings.TrimSpace(s.Cfg.StartHere); sp != "" {
+		if b, err := os.ReadFile(sp); err == nil {
+			doc = "# START-HERE\n\n" + string(b) + "\n\n# QUEUE\n\n" + text
+		}
+	}
+	st, _ := coord.LoadState(s.Cfg.StateFile)
+	task := ""
+	if st != nil {
+		task = st.Fed[cs]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"callsign": cs,
+		"task":     task,
+		"document": doc,
+	})
+}
+
+// remoteSeatAck is POST /api/seat/{callsign}/ack: marks the task done only after verifying
+// that branch@sha exists on the shared remote.
+func (a *API) remoteSeatAck(w http.ResponseWriter, r *http.Request) {
+	if !a.remoteSeatAuth(w, r) {
+		return
+	}
+	s, ok := a.coordOn(w)
+	if !ok {
+		return
+	}
+	cs := r.PathValue("callsign")
+	var body struct {
+		Task   string `json:"task"`
+		Branch string `json:"branch"`
+		SHA    string `json:"sha"`
+		Notes  string `json:"notes"`
+	}
+	if !decodeBody(w, r, &body, false) {
+		return
+	}
+	if strings.TrimSpace(body.Task) == "" || strings.TrimSpace(body.Branch) == "" || strings.TrimSpace(body.SHA) == "" {
+		badRequest(w, "task/branch/sha", "task, branch and sha are required")
+		return
+	}
+	verified := false
+	for _, repo := range s.Cfg.Repos {
+		out, err := exec.Command("git", "-C", repo.Path, "ls-remote", "origin", body.Branch).Output()
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(out), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) >= 1 && strings.HasPrefix(fields[0], body.SHA) {
+				verified = true
+				break
+			}
+		}
+		if verified {
+			break
+		}
+	}
+	if !verified {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "branch@sha not found on the shared remote"})
+		return
+	}
+	if err := s.Coord.Bus.Transition(r.Context(), body.Task, cs, "done", body.Notes); err != nil {
+		// The remote sha was verified; report the transition failure but do not pretend success.
+		writeJSON(w, http.StatusInternalServerError, errorBody{Error: fmt.Sprintf("verified, but transition failed: %v", err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"verified": true, "task": body.Task, "acked_at": time.Now().UTC().Format(time.RFC3339)})
+}
+
+// remoteSeatBlocked is POST /api/seat/{callsign}/blocked: records a blocked question.
+func (a *API) remoteSeatBlocked(w http.ResponseWriter, r *http.Request) {
+	if !a.remoteSeatAuth(w, r) {
+		return
+	}
+	s, ok := a.coordOn(w)
+	if !ok {
+		return
+	}
+	cs := r.PathValue("callsign")
+	var body struct {
+		Task     string `json:"task"`
+		Question string `json:"question"`
+	}
+	if !decodeBody(w, r, &body, false) {
+		return
+	}
+	line := fmt.Sprintf("%s %s %s: %s", time.Now().Format("01-02 15:04"), cs, body.Task, body.Question)
+	path := s.Cfg.AlertFile
+	if strings.TrimSpace(path) == "" {
+		path = filepath.Join(s.Dir, "seat-blocked.log")
+	}
+	if f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+		_, _ = f.WriteString(line + "\n")
+		f.Close()
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"recorded": cs})
 }
