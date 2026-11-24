@@ -91,7 +91,7 @@ export class SeatTaskBacklog {
       h('button', {
         attrs: { type: 'button', 'data-role': 'backlog-delete', 'data-task': String(t.id) },
         text: 'Delete',
-        on: { click: () => void this.remove(t.id) },
+        on: { click: () => { if (typeof window === 'undefined' || !window.confirm || window.confirm(`Delete #${t.id}?`)) void this.remove(t.id); } },
       }),
     );
   }

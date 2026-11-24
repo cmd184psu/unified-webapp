@@ -40,16 +40,15 @@ function fixture() {
     },
   };
   return { posted, patched, deleted, deps };
-  return { posted, patched, deps };
 }
 
 const rows = (host: FakeEl): FakeEl[] => findAll(host, (e) => e.tagName === 'LI');
 
 const mounted = () => {
-  const { posted, patched, deps } = fixture();
+  const { posted, patched, deleted, deps } = fixture();
   const host = new FakeEl('DIV');
   new SeatTaskBacklog(asEl(host), deps).mount();
-  return { posted, patched, host };
+  return { posted, patched, deleted, host };
 };
 
 test('lists every seat task with its state, seats and priority', async () => {
@@ -121,13 +120,17 @@ test('a task moves ready -> fed -> done and the row shows it', async () => {
 
 
 test('delete removes a row', async () => {
-  const { host } = mounted();
+  const { host, deleted } = mounted();
   await flush();
   eq(rows(host).length, 3, 'three rows');
   byAttr(host, 'data-role', 'backlog-delete')[0].click();
   await flush();
   await flush();
   eq(rows(host).length, 2, 'one row gone');
+  eq(deleted.join(','), '1', 'the id was sent');
+  ok(host.textContent.includes('Review the panel'), host.textContent);
+  ok(host.textContent.includes('Old task'), host.textContent);
+  ok(!host.textContent.includes('Wire the backlog'), host.textContent);
 });
 
 void run('agentflow-seatbacklog');

@@ -137,6 +137,9 @@ logs, exports, events or API responses. Keys are stored in plain text in
 
 Every project starts **stopped** after every restart. Nothing runs until you press Start.
 
+Note: `DELETE /api/seat-tasks/{id}` answers 200 with `{"deleted": id}`; the other `DELETE`
+routes in this API answer 204.
+
 ---
 
 ## Backends and role candidates
