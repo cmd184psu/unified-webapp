@@ -124,7 +124,7 @@ func TestSeatTaskAPIGaps(t *testing.T) {
 	}
 
 	code, out = seatCall(t, srv, "DELETE", "/api/seat-tasks/"+itoa(readyBeam.ID), "")
-	if code != 204 {
+	if code != 200 {
 		t.Fatalf("delete = %d %s", code, out)
 	}
 	code, out = seatCall(t, srv, "GET", "/api/seat-tasks/"+itoa(readyBeam.ID), "")
@@ -191,4 +191,84 @@ func TestSeatTaskImportDir(t *testing.T) {
 func strconvQuote(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+func TestSeatTaskAPIFiltersAndDelete(t *testing.T) {
+	_, srv := newSeatTaskAPI(t)
+	post := func(body string, want int) store.SeatTask {
+		t.Helper()
+		code, out := seatCall(t, srv, "POST", "/api/seat-tasks", body)
+		if code != want {
+			t.Fatalf("POST %s = %d, want %d: %s", body, code, want, out)
+		}
+		var got store.SeatTask
+		if want == http.StatusCreated {
+			if err := json.Unmarshal(out, &got); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return got
+	}
+	first := post(`{"title":"beam work","eligible_seats":["fb-beam"]}`, 201)
+	post(`{"title":"solar work","eligible_seats":["solar"]}`, 201)
+	post(`{"title":"old work","state":"done"}`, 201)
+
+	code, out := seatCall(t, srv, "GET", "/api/seat-tasks?state=ready", "")
+	if code != 200 {
+		t.Fatalf("list ready = %d %s", code, out)
+	}
+	var ready []store.SeatTask
+	if err := json.Unmarshal(out, &ready); err != nil {
+		t.Fatal(err)
+	}
+	if len(ready) != 2 {
+		t.Fatalf("ready = %+v, want 2", ready)
+	}
+
+	code, out = seatCall(t, srv, "GET", "/api/seat-tasks?seat=fb-beam", "")
+	if code != 200 {
+		t.Fatalf("list seat = %d %s", code, out)
+	}
+	var beam []store.SeatTask
+	if err := json.Unmarshal(out, &beam); err != nil {
+		t.Fatal(err)
+	}
+	if len(beam) != 1 || beam[0].ID != first.ID {
+		t.Fatalf("fb-beam = %+v", beam)
+	}
+
+	code, out = seatCall(t, srv, "GET", "/api/seat-tasks/"+itoa(first.ID), "")
+	if code != 200 || !strings.Contains(string(out), `"beam work"`) {
+		t.Fatalf("get one = %d %s", code, out)
+	}
+
+	code, out = seatCall(t, srv, "DELETE", "/api/seat-tasks/"+itoa(first.ID), "")
+	if code != 200 {
+		t.Fatalf("delete = %d %s", code, out)
+	}
+	code, out = seatCall(t, srv, "GET", "/api/seat-tasks/"+itoa(first.ID), "")
+	if code != 404 {
+		t.Fatalf("get after delete = %d %s", code, out)
+	}
+	code, out = seatCall(t, srv, "DELETE", "/api/seat-tasks/"+itoa(first.ID), "")
+	if code != 404 {
+		t.Fatalf("second delete = %d %s", code, out)
+	}
+
+	code, out = seatCall(t, srv, "POST", "/api/seat-tasks", `{"title":""}`)
+	if code != 400 {
+		t.Fatalf("empty title = %d %s", code, out)
+	}
+	var eb struct {
+		Field string `json:"field"`
+	}
+	if err := json.Unmarshal(out, &eb); err != nil || eb.Field != "title" {
+		t.Fatalf("empty title field = %+v (%v)", eb, err)
+	}
+
+	// PATCH state validation.
+	code, out = seatCall(t, srv, "PATCH", "/api/seat-tasks/"+itoa(post(`{"title":"patch me"}`, 201).ID), `{"state":"nope"}`)
+	if code != 400 {
+		t.Fatalf("bad state = %d %s", code, out)
+	}
 }

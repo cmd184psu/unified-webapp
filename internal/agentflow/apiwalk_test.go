@@ -180,7 +180,7 @@ func TestAPIWalk_EveryRouteIsExercised(t *testing.T) {
 	ok("PATCH", "/api/seat-tasks/"+seatID, `{"state":"fed"}`, 200)
 	ok("GET", "/api/seat-tasks/999999", "", 404)
 	ok("DELETE", "/api/seat-tasks/999999", "", 404)
-	ok("DELETE", "/api/seat-tasks/"+seatID, "", 204)
+	ok("DELETE", "/api/seat-tasks/"+seatID, "", 200)
 	if out := ok("POST", "/api/seat-tasks/import", `[{"title":"imported one","objective":"o"},{"title":"imported two","objective":"o","priority":2}]`, 200); !strings.Contains(string(out), `"imported":2`) {
 		t.Fatalf("seat task import: %s", out)
 	}
