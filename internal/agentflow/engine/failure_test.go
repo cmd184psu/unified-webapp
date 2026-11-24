@@ -849,4 +849,7 @@ func TestRiskyReviewPanelWaitsWithOneFamily(t *testing.T) {
 	if c.taskStatus() == model.StatusPassed {
 		t.Fatalf("risky task passed on a single family")
 	}
+	if !strings.Contains(c.task0().WaitingReason, "risky task: a reviewer from a second model family is required") {
+		t.Fatalf("waiting reason = %q, want the risky-panel explanation", c.task0().WaitingReason)
+	}
 }

@@ -222,13 +222,19 @@ func (e *Engine) askAnotherReviewer(ctx context.Context, c *chain, last model.St
 	}
 	if _, why := reviewerFor(v, c.proj, "", c.workerModel(), false); why != "" {
 		if risky {
-			// only one family can serve: do not let the single pass stand
+			// only one family can serve: do not let the single pass stand.
+			// Say what a person has to do: a second distinct family is
+			// required, so waiting for a slot in the same family will not help.
+			why = "risky task: a reviewer from a second model family is required (risky_review_panel=" + strconv.Itoa(panel) + "); " + why
 			return true, e.setWaiting(ctx, c.task, why)
 		}
 		return false, nil // no other reviewer model could serve: the panel is as wide as the pool
 	}
 	pk, why := reviewerFor(v, c.proj, "", c.workerModel(), true)
 	if why != "" {
+		if risky {
+			why = "risky task: a reviewer from a second model family is required (risky_review_panel=" + strconv.Itoa(panel) + "); " + why
+		}
 		return true, e.setWaiting(ctx, c.task, why) // one could serve, but has no free slot yet
 	}
 	if err := e.submit(ctx, c, BackendLane(pk.Backend), "reviewer", pk.Backend, pk.Model, last.QueueHash); err != nil {
