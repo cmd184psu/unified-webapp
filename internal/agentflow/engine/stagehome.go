@@ -188,6 +188,12 @@ func (e *Engine) PruneExpiredStageHomes(ctx context.Context, force bool) (int, e
 		if st.State == model.StageQueued || st.State == model.StageRunning {
 			continue
 		}
+		if st.Attempt != 0 {
+			attempt, err := e.deps.Store.GetAttempt(ctx, st.Attempt)
+			if err != nil || attempt.Outcome == "" || attempt.Finished == 0 {
+				continue
+			}
+		}
 		// Respect the keep window unless forced.
 		if !force && st.Finished > 0 && time.UnixMilli(st.Finished).After(cutoff) {
 			continue
