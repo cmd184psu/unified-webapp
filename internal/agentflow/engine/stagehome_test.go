@@ -17,13 +17,17 @@ import (
 func stageHomeFixture(t *testing.T) (*Engine, *store.Store, model.Effort, model.Attempt) {
 	t.Helper()
 	ctx := context.Background()
-	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "test.db"))
+	dataDir := t.TempDir()
+	repoDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repoDir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(filepath.Join(dataDir, "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	if err := st.CreateProject(ctx, "test", store.Project{Slug: "test", RepoPath: dir, ModelScope: "any"}); err != nil {
+	if err := st.CreateProject(ctx, "test", store.Project{Slug: "test", RepoPath: repoDir, ModelScope: "any"}); err != nil {
 		t.Fatal(err)
 	}
 	effort, err := st.CreateEffort(ctx, "test", "test", "test", false)
@@ -41,11 +45,11 @@ func stageHomeFixture(t *testing.T) (*Engine, *store.Store, model.Effort, model.
 	if err != nil || len(tasks) != 1 {
 		t.Fatalf("tasks: %v, %v", tasks, err)
 	}
-	attempt, err := st.StartAttempt(ctx, tasks[0].ID, model.AttemptNormal, dir, "worker")
+	attempt, err := st.StartAttempt(ctx, tasks[0].ID, model.AttemptNormal, t.TempDir(), "worker")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Engine{deps: Deps{Store: st, DataDir: dir}}, st, effort, attempt
+	return &Engine{deps: Deps{Store: st, DataDir: dataDir}}, st, effort, attempt
 }
 
 func stageHomeCompleted(t *testing.T, e *Engine, st *store.Store, spec store.StageSpec) model.Stage {
