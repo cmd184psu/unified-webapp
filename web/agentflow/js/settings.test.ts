@@ -30,6 +30,7 @@ function harness(over: Partial<SettingsDeps> = {}) {
     serviceHold: async () => ({ active: false, open_stages: 0 }),
     holdService: async (reason) => { calls.push('hold:' + reason); return { active: true, reason, paused: [], open_stages: 1 }; },
     liftHold: async () => { calls.push('lift-hold'); return { active: false, open_stages: 0 }; },
+    pruneStageHomes: async () => ({ pruned: 0 }),
     pickDir: async (start) => { calls.push('pick:' + start); return picked.path; },
     notify: (m) => { calls.push('notify:' + m); },
     ...over,

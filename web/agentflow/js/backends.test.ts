@@ -568,7 +568,7 @@ test('H4a: Probe sends the typed key and the saved backend name so a host that w
 
 test('AF-14b: Kilo is a hostless backend with its own CLI path and full model ids', async () => {
   let probed: string[] = [];
-  const t = harness({}, { probeBackend: async (host, type, _key, _backend, path) => { probed = [host, type, path]; return { models: ['kilo/liquid/lfm-3-1.7b:free'] }; } });
+  const t = harness({}, { probeBackend: async (host, type, _key, _backend, path) => { probed = [host, type, path ?? '']; return { models: ['kilo/liquid/lfm-3-1.7b:free'] }; } });
   const stop = t.view.mount();
   await flush();
   button(t.host, 'Add backend').click();

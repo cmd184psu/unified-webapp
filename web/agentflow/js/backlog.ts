@@ -88,7 +88,7 @@ export class Backlog {
     const input = h('input', {
       class: 'ui-input',
       attrs: { type: 'text', value: e.start_condition ?? '', placeholder: 'branch main contains feature/turn-loop', 'data-field': 'start_condition' },
-    });
+    }) as HTMLInputElement;
     const save = button('Save condition', () => {
       void this.run(() => this.deps.patchEffort(e.project, e.id, { start_condition: input.value.trim() }), 'Start condition saved');
     }, { field: 'save-condition', icon: 'save' });

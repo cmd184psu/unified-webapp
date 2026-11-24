@@ -27,6 +27,7 @@ const status: CoordStatus = {
 
 const deps = (seats: ExternalSeat[], over: Record<string, unknown> = {}) => ({
   coordStatus: async () => status,
+  coordRun: async () => ({ started: '', finished: '', dry: true, decisions: null }),
   externalSeats: async () => seats,
   seatQueue: async (cs: string) => ({ callsign: cs, text: '# Queue' }),
   nudgeSeat: async (cs: string) => ({ nudged: cs }),
