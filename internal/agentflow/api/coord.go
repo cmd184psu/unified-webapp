@@ -552,7 +552,7 @@ func (a *API) deleteSeatTask(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": id})
 }
 
 // importSeatTasks is POST /api/seat-tasks/import.

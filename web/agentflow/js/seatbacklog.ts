@@ -7,7 +7,7 @@
 import { api, type SeatTask, type SeatTaskInput } from './api.js';
 import { h, replace } from './dom.js';
 
-export type SeatTaskBacklogDeps = Pick<typeof api, 'seatTasks' | 'createSeatTask' | 'setSeatTaskState'>;
+export type SeatTaskBacklogDeps = Pick<typeof api, 'seatTasks' | 'createSeatTask' | 'setSeatTaskState' | 'deleteSeatTask'>;
 
 const STATES = ['ready', 'fed', 'done'];
 
@@ -88,6 +88,11 @@ export class SeatTaskBacklog {
         text: next === 'fed' ? 'Feed' : 'Done',
         on: { click: () => void this.advance(t, next) },
       }) : null,
+      h('button', {
+        attrs: { type: 'button', 'data-role': 'backlog-delete', 'data-task': String(t.id) },
+        text: 'Delete',
+        on: { click: () => void this.remove(t.id) },
+      }),
     );
   }
 
@@ -119,6 +124,10 @@ export class SeatTaskBacklog {
 
   private async advance(t: SeatTask, state: string): Promise<void> {
     await this.run(() => this.deps.setSeatTaskState(t.id, state), (updated) => `#${updated.id} is ${updated.state}`);
+  }
+
+  private async remove(id: number): Promise<void> {
+    await this.run(() => this.deps.deleteSeatTask(id), () => `deleted #${id}`);
   }
 
   /** run sends one change, keeps its outcome in msg, then re-reads the list. */

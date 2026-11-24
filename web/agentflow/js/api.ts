@@ -1000,6 +1000,9 @@ export const api = {
   /** setSeatTaskState moves one backlog task: ready -> fed -> done. */
   setSeatTaskState: (id: number, state: string): Promise<SeatTask> =>
     send('PATCH', `/api/seat-tasks/${id}`, { state }),
+  /** deleteSeatTask removes one backlog task. */
+  deleteSeatTask: (id: number): Promise<{ deleted: number }> =>
+    send('DELETE', `/api/seat-tasks/${id}`),
   seats: (o?: FetchOptions): Promise<SeatStage[]> => get('/api/seats', o),
   answerSeat: (stage: number, text: string): Promise<{ stage: number; answered: boolean }> => send('POST', `/api/seats/${stage}/answer`, { text }),
   cancelSeat: (stage: number): Promise<{ stage: number; cancelled: boolean }> => send('POST', `/api/seats/${stage}/cancel`),

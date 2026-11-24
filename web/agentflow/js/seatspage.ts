@@ -12,7 +12,7 @@ import { SeatTaskBacklog } from './seatbacklog.js';
 export type SeatsPageDeps = Pick<
   typeof api,
   'coordStatus' | 'coordRun' | 'externalSeats' | 'seatQueue' | 'nudgeSeat' | 'saveSeat' | 'deleteSeat' | 'pauseSeat'
-  | 'seatTasks' | 'createSeatTask' | 'setSeatTaskState'
+  | 'seatTasks' | 'createSeatTask' | 'setSeatTaskState' | 'deleteSeatTask'
 > & {
   /** copy writes text to the clipboard; the default tries the Clipboard API, then execCommand. */
   copy?: (text: string) => Promise<boolean>;

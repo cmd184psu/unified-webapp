@@ -15,6 +15,7 @@ function fixture() {
   ];
   const posted: SeatTaskInput[] = [];
   const patched: string[] = [];
+  const deleted: number[] = [];
   let next = list.length;
   const deps: SeatTaskBacklogDeps = {
     seatTasks: async (state = '', seat = '') =>
@@ -31,7 +32,14 @@ function fixture() {
       t.state = state;
       return t;
     },
+    deleteSeatTask: async (id: number) => {
+      deleted.push(id);
+      const i = list.findIndex((x) => x.id === id);
+      if (i >= 0) list.splice(i, 1);
+      return { deleted: id };
+    },
   };
+  return { posted, patched, deleted, deps };
   return { posted, patched, deps };
 }
 
@@ -109,6 +117,17 @@ test('a task moves ready -> fed -> done and the row shows it', async () => {
   eq(patched.join(','), '1:fed,1:done');
   ok(first().textContent.includes('done · solar'), first().textContent);
   eq(nextState('done'), '', 'done is the end');
+});
+
+
+test('delete removes a row', async () => {
+  const { host } = mounted();
+  await flush();
+  eq(rows(host).length, 3, 'three rows');
+  byAttr(host, 'data-role', 'backlog-delete')[0].click();
+  await flush();
+  await flush();
+  eq(rows(host).length, 2, 'one row gone');
 });
 
 void run('agentflow-seatbacklog');
