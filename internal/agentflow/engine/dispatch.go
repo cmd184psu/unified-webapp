@@ -139,6 +139,8 @@ type view struct {
 	strikes map[store.StrikeKey]int
 	// avoid are models to pass over for this pick, for one retry: the model whose last reply was unreadable (H11).
 	avoid map[string]bool
+	// panelAvoid are models skipped because they are already represented in the review panel (AF-26).
+	panelAvoid map[string]bool
 	// need is the context a worker task needs; a worker candidate with a
 	// smaller window is passed over (H15). 0 means no requirement.
 	need int
@@ -166,7 +168,7 @@ func (e *Engine) newView(ctx context.Context) (*view, error) {
 	if err != nil {
 		return nil, err
 	}
-	v := &view{snap: snap, free: map[string]int{}, down: map[string]bool{}, resting: map[string]time.Time{}, restModel: map[string]store.ModelRest{}, metered: map[string]time.Time{}, modelFree: map[string]int{}, strikes: strikes, hold: hold.Active}
+	v := &view{snap: snap, free: map[string]int{}, down: map[string]bool{}, resting: map[string]time.Time{}, restModel: map[string]store.ModelRest{}, metered: map[string]time.Time{}, modelFree: map[string]int{}, strikes: strikes, hold: hold.Active, avoid: map[string]bool{}, panelAvoid: map[string]bool{}}
 	now := e.deps.Clock()
 	if v.failing, err = e.failedChecks(ctx, now); err != nil {
 		return nil, err
@@ -679,6 +681,8 @@ func skipReason(v *view, p store.Project, c store.Candidate, needSlot bool) stri
 		return "backend " + c.Backend + " is unavailable"
 	case b.Hosted && p.ModelScope == "local":
 		return "hosted under local scope"
+	case v.panelAvoid[c.Model]:
+		return fmt.Sprintf("model %s is already represented in the review panel", c.Model)
 	case v.avoid[c.Model]:
 		return fmt.Sprintf("model %s's last reply could not be read", c.Model)
 	case v.strikes[store.StrikeKey{Backend: c.Backend, Model: c.Model, Role: c.Role}] >= store.StrikeLimit:

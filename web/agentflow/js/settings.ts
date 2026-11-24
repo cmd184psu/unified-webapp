@@ -28,6 +28,7 @@ export const LIMIT_FIELDS: LimitField[] = [
   { key: 'plan_max_rounds', label: 'Plan max rounds', hint: 'ralplan rounds before the best plan is presented, 1 to 50' },
   { key: 'acceptance_rounds', label: 'Acceptance rounds', hint: 'How many times a finished effort is checked against its FRD, with gaps turned into follow-up tasks; 0 turns the check off, 2 by default' },
   { key: 'review_panel', label: 'Review panel', hint: 'How many different reviewer models must each pass a task before it merges; 1 to 3, 1 by default' },
+  { key: 'risky_review_panel', label: 'Risky review panel', hint: 'Distinct reviewer families that must each pass a risky task before it merges; 1 to 3, 2 by default' },
   { key: 'stall_minutes', label: 'Stall minutes', hint: 'Minutes a stage may say nothing, or a running effort sit idle, before it counts as stalled; 1 to 100, 10 by default' },
   { key: 'worker_timeout', label: 'Worker timeout', hint: 'A duration such as 30m or 1h' },
   { key: 'review_timeout', label: 'Review timeout', hint: 'A duration such as 15m' },

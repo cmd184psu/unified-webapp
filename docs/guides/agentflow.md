@@ -328,6 +328,7 @@ Global settings are at `GET/PUT /api/settings`; a project overrides most of them
 | `max_infra_retries` | 5 | Infrastructure failures before `needs_attention`. 0 means unlimited. |
 | `plan_max_rounds` | 5 | Planner, architect, critic rounds. |
 | `review_panel` | 1 | Different reviewer models that must each pass a task before it merges, 1 to 3. The first dissent sends the task back. A panel is best effort: when no further reviewer model could serve, the reviews that passed stand. |
+| `risky_review_panel` | 2 | Distinct reviewer families that must each pass a risky task before it merges, 1 to 3. A risky task never passes on a single family: if only one family can serve it waits instead of merging. |
 | `worker_timeout` | 30m | Per worker stage. |
 | `review_timeout` | 15m | Per review stage. |
 | `plan_timeout` | 30m | Per planning stage. |

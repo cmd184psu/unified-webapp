@@ -203,16 +203,20 @@ func (e *Engine) askAnotherReviewer(ctx context.Context, c *chain, last model.St
 	if err != nil {
 		return false, err
 	}
-	v.avoid = map[string]bool{}
+	v.panelAvoid = map[string]bool{}
 	for m := range passed {
-		v.avoid[m] = true
+		v.panelAvoid[m] = true
 	}
 	if risky {
-		// keep every reviewer whose family already passed (or the worker's
-		// family) out of the next pick, so the next reviewer is a new family
+		// A risky task widens the panel until risky_review_panel distinct
+		// families have passed: keep every reviewer whose family already
+		// passed out of the next pick, so the next reviewer is a new family.
+		// The worker's own family is NOT excluded on its own (H28): it may be
+		// the only second family available, and reviewerFor already keeps the
+		// worker's own model out.
 		for _, cand := range v.candidates("reviewer", c.proj.Slug) {
-			if passedFamilies[model.ModelFamily(cand.Model)] || model.ModelFamily(cand.Model) == model.ModelFamily(c.workerModel()) {
-				v.avoid[cand.Model] = true
+			if passedFamilies[model.ModelFamily(cand.Model)] {
+				v.panelAvoid[cand.Model] = true
 			}
 		}
 	}
