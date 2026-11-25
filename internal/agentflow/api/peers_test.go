@@ -483,7 +483,7 @@ func TestPeerKeySinkMirrorsInbound(t *testing.T) {
 
 func TestNoKeyInAnyPeerOutput(t *testing.T) {
 	ea, eb, srvA, srvB, keyAtoB, keyBtoA := pairPeers(t)
-	keys := [][]byte{[]byte(keyAtoB), []byte(keyBtoA)}
+	keys := [][]byte{[]byte(keyAtoB), []byte(keyBtoA), []byte("kb-pairtest-secret")}
 
 	check := func(label string, body []byte, allow ...[]byte) {
 		for _, k := range keys {
@@ -501,12 +501,20 @@ func TestNoKeyInAnyPeerOutput(t *testing.T) {
 
 	// invite response carries a one-time code and a URL, never a key.
 	invResp, _ := postJSON(srvA.URL+"/api/peers/invite", map[string]any{"name": "invtest"})
+	if invResp.StatusCode < 200 || invResp.StatusCode >= 300 {
+		invResp.Body.Close()
+		t.Fatalf("invite status %d", invResp.StatusCode)
+	}
 	invBody := readAll(invResp)
 	invResp.Body.Close()
 	check("invite", invBody)
 
 	// accept response is an ok acknowledgement; capture it from a real exchange.
 	invResp2, _ := postJSON(srvA.URL+"/api/peers/invite", map[string]any{"name": "acctest"})
+	if invResp2.StatusCode < 200 || invResp2.StatusCode >= 300 {
+		invResp2.Body.Close()
+		t.Fatalf("invite status %d", invResp2.StatusCode)
+	}
 	invBody2 := readAll(invResp2)
 	invResp2.Body.Close()
 	var inv2 struct {
@@ -517,9 +525,15 @@ func TestNoKeyInAnyPeerOutput(t *testing.T) {
 	accResp, _ := postJSON(srvB.URL+"/api/peers/accept", map[string]any{
 		"a_url": srvA.URL, "code": inv2.Code, "name": "acctest", "b_url": srvB.URL,
 	})
+	if accResp.StatusCode < 200 || accResp.StatusCode >= 300 {
+		b := readAll(accResp)
+		accResp.Body.Close()
+		t.Fatalf("accept status %d: %s", accResp.StatusCode, b)
+	}
 	accBody := readAll(accResp)
 	accResp.Body.Close()
-	check("accept", accBody)
+	// Capture the keys minted by this accept BEFORE scanning its body, so a
+	// leak in the accept response is actually observable.
 	for _, name := range []string{"acctest"} {
 		if k, err := ea.api.readPeerKey(name); err == nil {
 			keys = append(keys, []byte(k))
@@ -528,10 +542,15 @@ func TestNoKeyInAnyPeerOutput(t *testing.T) {
 			keys = append(keys, []byte(k))
 		}
 	}
+	check("accept", accBody)
 
 	// pair is the one response that legitimately carries K_A once; allow that
 	// single key and assert no other minted key appears.
 	invResp3, _ := postJSON(srvA.URL+"/api/peers/invite", map[string]any{"name": "pairtest"})
+	if invResp3.StatusCode < 200 || invResp3.StatusCode >= 300 {
+		invResp3.Body.Close()
+		t.Fatalf("invite status %d", invResp3.StatusCode)
+	}
 	invBody3 := readAll(invResp3)
 	invResp3.Body.Close()
 	var inv3 struct {
@@ -548,6 +567,11 @@ func TestNoKeyInAnyPeerOutput(t *testing.T) {
 		"protocol":    1,
 		"build":       "dev",
 	})
+	if pairResp.StatusCode < 200 || pairResp.StatusCode >= 300 {
+		b := readAll(pairResp)
+		pairResp.Body.Close()
+		t.Fatalf("pair status %d: %s", pairResp.StatusCode, b)
+	}
 	pairBody := readAll(pairResp)
 	pairResp.Body.Close()
 	var pairOut struct {
@@ -569,11 +593,22 @@ func TestNoKeyInAnyPeerOutput(t *testing.T) {
 	check("rotate", readAll(r))
 	r.Body.Close()
 
+	// Rotate invalidated the old A->B key; unpair must use the new one.
+	unpairKey, err := ea.api.readPeerKey("builder")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// unpair requires and returns no key.
 	reqU, _ := http.NewRequest(http.MethodPost, srvB.URL+"/api/peer/unpair", bytes.NewReader([]byte(`{}`)))
-	reqU.Header.Set("Authorization", "Bearer "+keyAtoB)
+	reqU.Header.Set("Authorization", "Bearer "+unpairKey)
 	ru, _ := http.DefaultClient.Do(reqU)
-	check("unpair", readAll(ru))
+	unpairBody := readAll(ru)
+	if ru.StatusCode < 200 || ru.StatusCode >= 300 {
+		ru.Body.Close()
+		t.Fatalf("unpair status %d: %s", ru.StatusCode, unpairBody)
+	}
+	check("unpair", unpairBody)
 	ru.Body.Close()
 
 	// Revoke's best-effort unpair body comes from A; B's delete response is
