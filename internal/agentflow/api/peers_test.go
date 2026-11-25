@@ -499,6 +499,66 @@ func TestNoKeyInAnyPeerOutput(t *testing.T) {
 		}
 	}
 
+	// invite response carries a one-time code and a URL, never a key.
+	invResp, _ := postJSON(srvA.URL+"/api/peers/invite", map[string]any{"name": "invtest"})
+	invBody := readAll(invResp)
+	invResp.Body.Close()
+	check("invite", invBody)
+
+	// accept response is an ok acknowledgement; capture it from a real exchange.
+	invResp2, _ := postJSON(srvA.URL+"/api/peers/invite", map[string]any{"name": "acctest"})
+	invBody2 := readAll(invResp2)
+	invResp2.Body.Close()
+	var inv2 struct {
+		Code string `json:"code"`
+	}
+	_ = json.Unmarshal(invBody2, &inv2)
+	check("invite", invBody2)
+	accResp, _ := postJSON(srvB.URL+"/api/peers/accept", map[string]any{
+		"a_url": srvA.URL, "code": inv2.Code, "name": "acctest", "b_url": srvB.URL,
+	})
+	accBody := readAll(accResp)
+	accResp.Body.Close()
+	check("accept", accBody)
+	for _, name := range []string{"acctest"} {
+		if k, err := ea.api.readPeerKey(name); err == nil {
+			keys = append(keys, []byte(k))
+		}
+		if k, err := eb.api.readPeerKey(name); err == nil {
+			keys = append(keys, []byte(k))
+		}
+	}
+
+	// pair is the one response that legitimately carries K_A once; allow that
+	// single key and assert no other minted key appears.
+	invResp3, _ := postJSON(srvA.URL+"/api/peers/invite", map[string]any{"name": "pairtest"})
+	invBody3 := readAll(invResp3)
+	invResp3.Body.Close()
+	var inv3 struct {
+		Code string `json:"code"`
+	}
+	_ = json.Unmarshal(invBody3, &inv3)
+	check("invite", invBody3)
+	pairResp, _ := postJSON(srvA.URL+"/api/peer/pair", map[string]any{
+		"code":        inv3.Code,
+		"node_name":   "b",
+		"base_url":    srvB.URL,
+		"host_header": "b.example",
+		"key":         "kb-pairtest-secret",
+		"protocol":    1,
+		"build":       "dev",
+	})
+	pairBody := readAll(pairResp)
+	pairResp.Body.Close()
+	var pairOut struct {
+		Key string `json:"key"`
+	}
+	_ = json.Unmarshal(pairBody, &pairOut)
+	if pairOut.Key != "" {
+		keys = append(keys, []byte(pairOut.Key))
+	}
+	check("pair", pairBody, []byte(pairOut.Key))
+
 	respL, _ := http.Get(srvA.URL + "/api/peers")
 	check("peers list", readAll(respL))
 	respL.Body.Close()
@@ -508,6 +568,13 @@ func TestNoKeyInAnyPeerOutput(t *testing.T) {
 	r, _ := postJSON(srvA.URL+"/api/peers/builder/rotate", map[string]any{})
 	check("rotate", readAll(r))
 	r.Body.Close()
+
+	// unpair requires and returns no key.
+	reqU, _ := http.NewRequest(http.MethodPost, srvB.URL+"/api/peer/unpair", bytes.NewReader([]byte(`{}`)))
+	reqU.Header.Set("Authorization", "Bearer "+keyAtoB)
+	ru, _ := http.DefaultClient.Do(reqU)
+	check("unpair", readAll(ru))
+	ru.Body.Close()
 
 	// Revoke's best-effort unpair body comes from A; B's delete response is
 	// empty of keys as well.
