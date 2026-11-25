@@ -853,3 +853,46 @@ func TestRiskyReviewPanelWaitsWithOneFamily(t *testing.T) {
 		t.Fatalf("waiting reason = %q, want the risky-panel explanation", c.task0().WaitingReason)
 	}
 }
+
+// A risky task may take its second reviewer from the worker's own family: only
+// the worker's own model is excluded, not the whole family. Real family names
+// (claude/openai) are used so family counting is distinguishable from model
+// counting; the second seat comes from the worker's family (claude-opus).
+func TestRiskyReviewPanelAsksWorkerFamilySecondSeat(t *testing.T) {
+	defs := []model.TaskDef{{Key: "T1", Phase: "P", Title: "first", Prompt: "do", Acceptance: []string{"ok"}, Risk: model.RiskRisky}}
+	c := newChainRun(t, nil, defs)
+	c.addBackend("gpu2", 3, false, false, "claude-sonnet", "gpt-6", "claude-opus")
+	c.candidates("global", "", "worker", "gpu2/claude-sonnet")
+	c.candidates("global", "", "reviewer", "gpu2/gpt-6", "gpu2/claude-opus")
+	if err := c.st.UpdateSettings(context.Background(), "t", map[string]string{"risky_review_panel": "2"}); err != nil {
+		t.Fatal(err)
+	}
+	c.fake.Script("worker", runner.Step{Reply: workerOK, Edit: writeWork})
+	c.fake.Script("reviewer", runner.Step{Reply: reviewPass}, runner.Step{Reply: reviewPass})
+	c.run()
+	waitFor(t, "task passed", func() bool { return c.taskStatus() == model.StatusPassed })
+	if got := strings.Join(c.reviewerStages(), ","); got != "gpt-6:pass,claude-opus:pass" {
+		t.Fatalf("reviewer stages = %s, want gpt-6 then claude-opus (worker's family), both passing", got)
+	}
+}
+
+// Two reviewers in one family count as one family, so a risky task with only
+// that family available waits instead of passing. Real family names (openai)
+// are used so this fails if family counting regresses to model counting.
+func TestRiskyReviewPanelWaitsOnSameFamilyPair(t *testing.T) {
+	defs := []model.TaskDef{{Key: "T1", Phase: "P", Title: "first", Prompt: "do", Acceptance: []string{"ok"}, Risk: model.RiskRisky}}
+	c := newChainRun(t, nil, defs)
+	c.addBackend("gpu2", 3, false, false, "gpt-4", "gpt-4o", "o3")
+	c.candidates("global", "", "worker", "gpu2/gpt-4")
+	c.candidates("global", "", "reviewer", "gpu2/gpt-4o", "gpu2/o3")
+	if err := c.st.UpdateSettings(context.Background(), "t", map[string]string{"risky_review_panel": "2"}); err != nil {
+		t.Fatal(err)
+	}
+	c.fake.Script("worker", runner.Step{Reply: workerOK, Edit: writeWork})
+	c.fake.Script("reviewer", runner.Step{Reply: reviewPass}, runner.Step{Reply: reviewPass})
+	c.run()
+	waitFor(t, "task waiting", func() bool { return c.task0().WaitingReason != "" })
+	if c.taskStatus() == model.StatusPassed {
+		t.Fatalf("risky task passed on a single family (gpt-4o and o3 are both openai)")
+	}
+}

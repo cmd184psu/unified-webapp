@@ -211,7 +211,7 @@ func (e *Engine) askAnotherReviewer(ctx context.Context, c *chain, last model.St
 		// A risky task widens the panel until risky_review_panel distinct
 		// families have passed: keep every reviewer whose family already
 		// passed out of the next pick, so the next reviewer is a new family.
-		// The worker's own family is NOT excluded on its own (H28): it may be
+		// The worker's own family is NOT excluded on its own (H2): it may be
 		// the only second family available, and reviewerFor already keeps the
 		// worker's own model out.
 		for _, cand := range v.candidates("reviewer", c.proj.Slug) {
