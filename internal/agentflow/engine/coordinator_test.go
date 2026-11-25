@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,6 +11,7 @@ import (
 
 	"cmd184psu/unified-webapp/internal/agentflow/model"
 	"cmd184psu/unified-webapp/internal/agentflow/runner"
+	"cmd184psu/unified-webapp/internal/agentflow/schema"
 	"cmd184psu/unified-webapp/internal/agentflow/store"
 )
 
@@ -291,5 +293,91 @@ func TestCoordinatorDueFollowsTheScheduleAndTheDayCap(t *testing.T) {
 				t.Fatalf("coordinatorDue = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// A question that names its exact task is cleared once that task passes or is
+// overridden, while the same task key in another effort keeps its question. A
+// legacy free-text question, and a reference that does not resolve, stay
+// visible: a bad reference must never hide a decision from the owner.
+func TestCoordinatorAttentionClearsResolvedTaskQuestion(t *testing.T) {
+	h := newHarness(t)
+	h.start()
+	t.Cleanup(h.eng.Close)
+	ctx := context.Background()
+	defs := []model.TaskDef{{Key: "T1", Phase: "P", Title: "port the truce", Prompt: "Port the truce.", Acceptance: []string{"ok"}}}
+	efforts := map[string]int64{}
+	tasks := map[string][]model.Task{}
+	for _, slug := range []string{"alpha", "beta"} {
+		repo := t.TempDir()
+		gitT(t, repo, "init", "-q", "-b", "main")
+		writeFile(t, filepath.Join(repo, "README"), "readme\n")
+		gitT(t, repo, "add", "-A")
+		gitT(t, repo, "commit", "-q", "-m", "initial")
+		if err := h.st.CreateProject(ctx, "t", store.Project{Slug: slug, RepoPath: repo, ModelScope: "any"}); err != nil {
+			t.Fatal(err)
+		}
+		ef, err := h.st.CreateEffort(ctx, "t", slug, "e", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		q, err := h.st.SaveQueue(ctx, "t", ef.ID, defs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.st.ApproveQueue(ctx, "t", ef.ID, q.Hash); err != nil {
+			t.Fatal(err)
+		}
+		ts, err := h.st.ListTasks(ctx, ef.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		efforts[slug], tasks[slug] = ef.ID, ts
+	}
+	// Both efforts are active scopes and both hold a task keyed T1; beta's is
+	// resolved by hand, so only its question may go.
+	if err := h.st.OverrideTask(ctx, "owner", tasks["beta"][0].ID, "closed by decision"); err != nil {
+		t.Fatal(err)
+	}
+	questions := []schema.CoordinatorQuestion{
+		{Question: "Alpha: merge T1?", Project: "alpha", Effort: efforts["alpha"], Task: "T1"},
+		{Question: "Beta: merge T1?", Project: "beta", Effort: efforts["beta"], Task: "T1"},
+		{Question: "Alpha: is T1 still blocked?", Project: "alpha", Effort: efforts["beta"], Task: "T1"},
+		{Question: "Anything else on the runbook?"},
+	}
+	if !questions[0].Ref() || questions[3].Ref() {
+		t.Fatalf("Ref = %v/%v, want true for the referenced question and false for the legacy one", questions[0].Ref(), questions[3].Ref())
+	}
+	if err := h.eng.noteCoordinator(ctx, "coordinator:m1", eventCoordinatorRun, coordinatorRunEvent{Model: "m1", Questions: questions}); err != nil {
+		t.Fatal(err)
+	}
+	items, err := h.eng.Attention(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var asked []string
+	for _, it := range items {
+		if it.Kind == "coordinator_question" {
+			asked = append(asked, it.Message)
+		}
+	}
+	if len(asked) != 1 {
+		t.Fatalf("coordinator questions = %d, want one item: %v", len(asked), asked)
+	}
+	msg := asked[0]
+	if !contains(msg, "Alpha: merge T1?") {
+		t.Fatalf("the unresolved question in alpha is gone:\n%s", msg)
+	}
+	if want := fmt.Sprintf("task T1 in alpha effort %d", efforts["alpha"]); !contains(msg, want) {
+		t.Fatalf("the alpha question does not name its effort (%q):\n%s", want, msg)
+	}
+	if contains(msg, "Beta: merge T1?") {
+		t.Fatalf("the resolved question in beta is still asked:\n%s", msg)
+	}
+	if !contains(msg, "Alpha: is T1 still blocked?") {
+		t.Fatalf("a question with an unresolvable reference was hidden:\n%s", msg)
+	}
+	if !contains(msg, "Anything else on the runbook?") {
+		t.Fatalf("the legacy question was hidden:\n%s", msg)
 	}
 }

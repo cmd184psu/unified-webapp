@@ -603,6 +603,27 @@ func (e *Engine) coordinatorTask(ctx context.Context, project, key string) (mode
 	return model.Task{}, model.Effort{}, fmt.Errorf("task %s in %s's active effort: %w", key, project, store.ErrNotFound)
 }
 
+// coordinatorQuestionResolved reports whether a question's exact task reference
+// names a task that is passed or overridden, so the question is no longer the
+// owner's to answer. Only a complete reference can resolve: a legacy question
+// stays until it is acknowledged, and a reference that does not resolve to a
+// task in the named effort keeps the question visible instead of hiding it.
+func (e *Engine) coordinatorQuestionResolved(ctx context.Context, q schema.CoordinatorQuestion) bool {
+	if !q.Ref() {
+		return false
+	}
+	ef, err := e.deps.Store.GetEffort(ctx, q.Effort)
+	if err != nil || ef.Project != q.Project {
+		return false
+	}
+	statuses, err := e.TaskStatuses(ctx, ef.Project, ef.ID)
+	if err != nil {
+		return false
+	}
+	st, ok := statuses[q.Task]
+	return ok && st.Done()
+}
+
 // coordinatorAttention is the coordinator's own items for the owner: a check
 // that could not find a model to run on, and the decisions the newest run left
 // with the owner.
@@ -627,10 +648,15 @@ func (e *Engine) coordinatorAttention(ctx context.Context) []AttentionItem {
 		if json.Unmarshal([]byte(lastRun.DetailJSON), &d) == nil && len(d.Questions) > 0 {
 			var asked []string
 			for _, q := range d.Questions {
-				asked = append(asked, q.Question)
+				if e.coordinatorQuestionResolved(ctx, q) {
+					continue
+				}
+				asked = append(asked, q.Label())
 			}
-			out = append(out, AttentionItem{Kind: "coordinator_question", Since: lastRun.TS.UnixMilli(),
-				Message: fmt.Sprintf("The coordinator (%s) asked: %s", d.Model, strings.Join(asked, " "))})
+			if len(asked) > 0 {
+				out = append(out, AttentionItem{Kind: "coordinator_question", Since: lastRun.TS.UnixMilli(),
+					Message: fmt.Sprintf("The coordinator (%s) asked: %s", d.Model, strings.Join(asked, " "))})
+			}
 		}
 	}
 	if lastUnavailable != nil && (lastRun == nil || lastUnavailable.ID > lastRun.ID) {

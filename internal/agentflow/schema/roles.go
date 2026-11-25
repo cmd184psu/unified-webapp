@@ -493,6 +493,29 @@ type CoordinatorQuestion struct {
 	Options []string `json:"options,omitempty"`
 	// Recommendation is the coordinator's own pick, if it has one.
 	Recommendation string `json:"recommendation,omitempty"`
+	// Project, Effort and Task name the exact task the question is about: the
+	// project slug, the effort id and the task key in that effort. They are
+	// optional, but a question that sets one of them sets all three; an
+	// incomplete or unresolvable reference is never an error and never hides the
+	// question, it just leaves the question to the owner like a legacy one.
+	Project string `json:"project,omitempty"`
+	Effort  int64  `json:"effort,omitempty"`
+	Task    string `json:"task,omitempty"`
+}
+
+// Ref reports whether q names an exact task (project, effort and task key).
+func (q CoordinatorQuestion) Ref() bool {
+	return q.Project != "" && q.Effort > 0 && q.Task != ""
+}
+
+// Label is the question text. A question that names its task carries the exact
+// identity too, so two questions about the same task key in different efforts
+// stay apart in the attention list.
+func (q CoordinatorQuestion) Label() string {
+	if !q.Ref() {
+		return q.Question
+	}
+	return fmt.Sprintf("%s (task %s in %s effort %d)", q.Question, q.Task, q.Project, q.Effort)
 }
 
 // coordinatorKinds are the actions the engine applies for the coordinator.
