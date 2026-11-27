@@ -534,13 +534,12 @@ func TestNoKeyInAnyPeerOutput(t *testing.T) {
 	accResp.Body.Close()
 	// Capture the keys minted by this accept BEFORE scanning its body, so a
 	// leak in the accept response is actually observable.
-	for _, name := range []string{"acctest"} {
-		if k, err := ea.api.readPeerKey(name); err == nil {
-			keys = append(keys, []byte(k))
+	for _, api := range []*API{ea.api, eb.api} {
+		key, err := api.readPeerKey("acctest")
+		if err != nil || key == "" {
+			t.Fatal("accept fixture did not retain both keys")
 		}
-		if k, err := eb.api.readPeerKey(name); err == nil {
-			keys = append(keys, []byte(k))
-		}
+		keys = append(keys, []byte(key))
 	}
 	check("accept", accBody)
 
@@ -589,15 +588,27 @@ func TestNoKeyInAnyPeerOutput(t *testing.T) {
 	_, status := peerStatus(t, srvB, keyAtoB)
 	check("peer status", status)
 
-	r, _ := postJSON(srvA.URL+"/api/peers/builder/rotate", map[string]any{})
-	check("rotate", readAll(r))
-	r.Body.Close()
-
-	// Rotate invalidated the old A->B key; unpair must use the new one.
-	unpairKey, err := ea.api.readPeerKey("builder")
+	r, err := postJSON(srvA.URL+"/api/peers/builder/rotate", map[string]any{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	rotateBody := readAll(r)
+	r.Body.Close()
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("rotate status %d", r.StatusCode)
+	}
+
+	// Scan both newly issued values as well as all earlier fixture values.
+	unpairKey, err := ea.api.readPeerKey("builder")
+	if err != nil || unpairKey == "" || unpairKey == keyAtoB {
+		t.Fatal("rotate fixture did not replace the outbound key")
+	}
+	rotatedPeerKey, err := eb.api.readPeerKey("laptop")
+	if err != nil || rotatedPeerKey == "" || rotatedPeerKey == keyBtoA {
+		t.Fatal("rotate fixture did not replace the inbound key")
+	}
+	keys = append(keys, []byte(unpairKey), []byte(rotatedPeerKey))
+	check("rotate", rotateBody)
 
 	// unpair requires and returns no key.
 	reqU, _ := http.NewRequest(http.MethodPost, srvB.URL+"/api/peer/unpair", bytes.NewReader([]byte(`{}`)))
