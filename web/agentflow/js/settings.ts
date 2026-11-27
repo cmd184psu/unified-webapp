@@ -8,7 +8,7 @@
 
 import { autosave, type Autosave } from './autosave.js';
 import { showToast } from '@shared';
-import { api, type OpenCodeStatus, type PeersView, type RestartView, type ServiceHoldView, type Settings } from './api.js';
+import { api, type OpenCodeStatus, type RestartView, type ServiceHoldView, type Settings } from './api.js';
 import { h, replace } from './dom.js';
 import { subscribe, type AgentflowEvent } from './events.js';
 import { pickDirectory } from './dirpicker.js';
@@ -43,18 +43,6 @@ export const LIMIT_FIELDS: LimitField[] = [
 const BACKLOG_FIELDS: LimitField[] = [
   { key: 'min_running_efforts', label: 'Minimum running efforts', hint: 'Auto-start ready efforts until this many run across all projects; 0 turns auto-start off' },
   { key: 'plan_revise_limit', label: 'Plan revise limit', hint: 'After this many revise rounds on the same FRD, stop and ask a person; 3 by default' },
-  { key: 'stage_home_keep_days', label: 'Stage home keep days', hint: 'Days a finished stage home is kept before pruning; 0 deletes it at once' },
-  { key: 'min_free_space_gb', label: 'Minimum free space (GB)', hint: 'Below this, agentflow pauses new stages and asks for attention; 20 by default' },
-];
-
-// COORDINATOR_FIELDS are AF-19's coordinator: how often it checks, how much it
-// may do in a day and in a run, and the runbook its prompt follows.
-const COORDINATOR_FIELDS: LimitField[] = [
-  { key: 'coordinator_check_minutes', label: 'Coordinator check minutes', hint: 'Minutes between coordinator checks; 0 turns the coordinator off' },
-  { key: 'coordinator_runs_per_day', label: 'Coordinator runs per day', hint: 'How many coordinator runs may start in a day; 0 means no cap' },
-  { key: 'coordinator_timeout', label: 'Coordinator timeout', hint: 'A duration such as 30m, for one coordinator run' },
-  { key: 'coordinator_actions_per_run', label: 'Coordinator actions per run', hint: 'How many of one run\'s actions are applied; the rest are skipped and logged' },
-  { key: 'coordinator_runbook', label: 'Coordinator runbook', hint: 'File the runbook section of the prompt is read from, such as ~/work/coordinator/BEAM-COORD.md' },
 ];
 
 const EXECUTION_FIELDS: LimitField[] = [
@@ -63,12 +51,7 @@ const EXECUTION_FIELDS: LimitField[] = [
   { key: 'backend_cooldown', label: 'Backend cooldown', hint: 'How long an unreachable backend is skipped, such as 2m' },
 ];
 
-export type SettingsDeps = Pick<typeof api, 'settings' | 'putSettings' | 'opencodeVersion' | 'restartStatus' | 'restartService' | 'cancelRestart' | 'serviceHold' | 'holdService' | 'liftHold' | 'pruneStageHomes'> & {
-  /** Peers (AF-24); optional so an embedded settings view can omit them. */
-  peers?: (o?: { quiet?: boolean }) => Promise<PeersView>;
-  invitePeer?: (name: string) => Promise<{ code: string; a_url: string }>;
-  acceptPeer?: (p: { a_url: string; code: string; name: string; b_url?: string; host_header?: string }) => Promise<unknown>;
-  revokePeer?: (name: string) => Promise<unknown>;
+export type SettingsDeps = Pick<typeof api, 'settings' | 'putSettings' | 'opencodeVersion' | 'restartStatus' | 'restartService' | 'cancelRestart' | 'serviceHold' | 'holdService' | 'liftHold'> & {
   /** Opens the directory picker at start; the chosen path, or null when cancelled. */
   pickDir(start: string): Promise<string | null>;
   notify(message: string): void;
@@ -83,12 +66,8 @@ export const defaultSettingsDeps = (): SettingsDeps => ({
   cancelRestart: api.cancelRestart,
   serviceHold: api.serviceHold,
   holdService: api.holdService,
-  liftHold: api.liftHold,	pruneStageHomes: api.pruneStageHomes,
-	peers: (o) => api.peers(o),
-	invitePeer: api.invitePeer,
-	acceptPeer: api.acceptPeer,
-	revokePeer: api.revokePeer,
-	pickDir: (start) => pickDirectory(start),
+  liftHold: api.liftHold,
+  pickDir: (start) => pickDirectory(start),
   notify: (m) => void showToast(m, 'success'),
 });
 
@@ -106,8 +85,8 @@ export class SettingsView {
   private svc: RestartView | null = null;
   private hold: ServiceHoldView | null = null;
   private svcHost = h('div', { attrs: { 'data-role': 'service' } });
-  private svcTimer: ReturnType<typeof setInterval> | null = null;	private rootsHost = h('div', { class: 'wizard-list', attrs: { 'data-role': 'browse-roots' } });
-	private peersHost = h('div', { class: 'wizard-list', attrs: { 'data-role': 'peers' } });
+  private svcTimer: ReturnType<typeof setInterval> | null = null;
+  private rootsHost = h('div', { class: 'wizard-list', attrs: { 'data-role': 'browse-roots' } });
   private dirty = false;
   private auto: Autosave | null = null;
   private off: (() => void) | null = null;
@@ -237,51 +216,9 @@ export class SettingsView {
         h('code', { text: r }),
         button('Remove', () => edit(this.roots.filter((_, j) => j !== i)), { field: 'remove-root', icon: 'remove' }))),
       button('Add folder', () => void this.addRoot(edit), { field: 'add-root', icon: 'add' }));
-  }	/** renderPeers lists paired nodes and offers invite/accept/revoke (AF-24). */
-	private async renderPeers(): Promise<void> {
-		const d = this.deps;
-		if (!d.peers) return;
-		let view: PeersView;
-		try {
-			view = await d.peers({ quiet: true });
-		} catch {
-			return;
-		}
-		const reload = (): void => { void this.renderPeers(); };
-		const rows = view.peers.map((p) => h('div', { class: 'inline-row', attrs: { 'data-peer': p.name } },
-			h('code', { text: `${p.name} -> ${p.base_url}` }),
-			badge(p.enabled ? 'enabled' : 'off', p.enabled ? 'ok' : 'warn'),
-			h('span', { class: 'field-hint', text: p.last_error || (p.last_ok ? `last ok ${new Date(p.last_ok * 1000).toLocaleString()}` : 'never reached') }),
-			button('Revoke', () => { void (async () => {
-				try { await d.revokePeer?.(p.name); } catch { return; }
-				reload();
-			})(); }, { field: 'peer-revoke', icon: 'remove' })));
-		const inviteName = textInput('peer_invite_name', '', { placeholder: 'builder' });
-		const inviteOut = h('div', { class: 'field-hint', attrs: { 'data-role': 'peer-invite-code' } });
-		const aURL = textInput('peer_a_url', '', { placeholder: 'http://a:8788' });
-		const code = textInput('peer_code', '', { placeholder: 'pairing code' });
-		const name = textInput('peer_name', '', { placeholder: 'name for that node' });
-		const bURL = textInput('peer_b_url', '', { placeholder: 'http://b:8788' });
-		replace(this.peersHost,
-			...rows,
-			h('div', { class: 'inline-row' }, inviteName,
-				button('Create pairing code', () => { void (async () => {
-					try {
-						const r = await d.invitePeer?.(inviteName.value.trim());
-						if (r) replace(inviteOut, h('p', { text: `Code: ${r.code}` }), h('p', { text: `On the other node use a_url ${r.a_url}` }));
-					} catch { return; }
-				})(); }, { field: 'peer-invite', icon: 'add' })),
-			inviteOut,
-			h('div', { class: 'inline-row' }, aURL, code, name, bURL,
-				button('Accept invitation', () => { void (async () => {
-					try {
-						await d.acceptPeer?.({ a_url: aURL.value.trim(), code: code.value.trim(), name: name.value.trim(), b_url: bURL.value.trim() });
-					} catch { return; }
-					reload();
-				})(); }, { field: 'peer-accept', icon: 'add' })));
-	}
+  }
 
-	private async addRoot(edit: (next: string[]) => void): Promise<void> {
+  private async addRoot(edit: (next: string[]) => void): Promise<void> {
     const chosen = await this.deps.pickDir(this.roots[this.roots.length - 1] ?? '');
     if (chosen !== null && !this.roots.includes(chosen)) edit([...this.roots, chosen]);
   }
@@ -299,15 +236,6 @@ export class SettingsView {
   /** saveNow saves a pending change now (what the pause would do). */
   saveNow(): Promise<void> {
     return this.auto?.flush() ?? Promise.resolve();
-  }
-
-  private async pruneStageHomes(): Promise<void> {
-    try {
-      const r = await this.deps.pruneStageHomes();
-      this.deps.notify(`Pruned ${r.pruned} stage homes`);
-    } catch (err) {
-      this.deps.notify(err instanceof Error ? err.message : String(err));
-    }
   }
 
   private body(): Settings {
@@ -334,8 +262,8 @@ export class SettingsView {
   render(): void {
     this.inputs.clear();
     this.errors = new FormErrors();
-    const limits = h('div', { class: 'profile-fields' }, ...LIMIT_FIELDS.map((f) => this.row(f)));		const exec = h('div', { class: 'profile-fields' }, ...EXECUTION_FIELDS.map((f) => this.row(f)));    const backlog = h('div', { class: 'profile-fields' }, ...BACKLOG_FIELDS.map((f) => this.row(f)));
-    const coord = h('div', { class: 'profile-fields' }, ...COORDINATOR_FIELDS.map((f) => this.row(f)));
+    const limits = h('div', { class: 'profile-fields' }, ...LIMIT_FIELDS.map((f) => this.row(f)));		const exec = h('div', { class: 'profile-fields' }, ...EXECUTION_FIELDS.map((f) => this.row(f)));
+		const backlog = h('div', { class: 'profile-fields' }, ...BACKLOG_FIELDS.map((f) => this.row(f)));
     const path = this.row({ key: 'opencode_path', label: 'opencode path', hint: 'Program to run' });
     const bcUrl = this.row({ key: 'botchat_url', label: 'BotChat address', hint: 'e.g. https://botchat.example.net; empty turns the relay off' });
     const dispatch = checkbox('botchat_dispatch', str(this.values.botchat_mode) === 'dispatch');
@@ -349,16 +277,15 @@ export class SettingsView {
     this.auto?.stop();
     this.auto = autosave({ snapshot: () => JSON.stringify(this.body()), save: () => this.save() });
     const root = h('div', { class: 'settings-host settings-host-drawer' },
-        section('Limits', limits),				section('Execution', exec),        section('Backlog', backlog),
-        section('Coordinator', coord),
+        section('Limits', limits),				section('Execution', exec),
+				section('Backlog', backlog),
         section('opencode', path, this.ocHost),
-        section('BotChat', bcUrl, bcKey, bcMode.el),		section('Service', this.svcHost),
-		section('Peers', this.peersHost),
+        section('BotChat', bcUrl, bcKey, bcMode.el),
+        section('Service', this.svcHost),
         section('Browse limit', this.rootsHost),
-        section('Stage homes', h('div', { class: 'row-actions' }, button('Prune stage homes now', () => void this.pruneStageHomes(), { field: 'prune-stage-homes', icon: 'remove', word: true }))),
         this.errors.general,
-        h('div', { class: 'settings-actions' }, this.auto.status));		replace(this.host, root);
-		void this.renderPeers();
-		this.auto.watch(root);
+        h('div', { class: 'settings-actions' }, this.auto.status));
+    replace(this.host, root);
+    this.auto.watch(root);
   }
 }

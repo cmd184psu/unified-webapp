@@ -9,7 +9,7 @@
 import { autosave, type Autosave } from './autosave.js';
 import { confirmDialog, showToast } from '@shared';
 import {
-  api, type Backend, type BackendInput, type BackendResult, type BackendUsage, type Candidate, type CheckView, type EvalView, type EvalSummary, type ModelCheck, type ModelRest, type ProjectView,
+  api, type Backend, type BackendInput, type BackendResult, type Candidate, type CheckView, type EvalView, type EvalSummary, type ModelCheck, type ModelRest, type ProjectView,
 } from './api.js';
 import { h, replace } from './dom.js';
 import { subscribe, type AgentflowEvent } from './events.js';
@@ -61,13 +61,12 @@ export const setCheckPollMs = (ms: number): void => { checkPollMs = ms; };
 
 export type BackendsDeps = Pick<
   typeof api,
-  'backends' | 'backendUsage' | 'createBackend' | 'probeBackend' | 'patchBackend' | 'retireBackend' | 'enableBackend' | 'deleteBackend' | 'rests' | 'wakeModel' | 'holds' | 'setHold' | 'checkModels' | 'checkStatus' | 'checkReviewers' | 'evalStatus' | 'extendWindows' | 'candidates' | 'putCandidates' |
+  'backends' | 'createBackend' | 'probeBackend' | 'patchBackend' | 'retireBackend' | 'enableBackend' | 'deleteBackend' | 'rests' | 'wakeModel' | 'holds' | 'setHold' | 'checkModels' | 'checkStatus' | 'checkReviewers' | 'evalStatus' | 'extendWindows' | 'candidates' | 'putCandidates' |
   'projects' | 'limits' | 'putLimits' | 'settings'
 > & { notify(message: string): void; confirm(message: string, confirmLabel?: string): Promise<boolean> };
 
 export const defaultBackendsDeps = (): BackendsDeps => ({
   backends: api.backends,
-  backendUsage: api.backendUsage,
   createBackend: api.createBackend,
   probeBackend: api.probeBackend,
   patchBackend: api.patchBackend,
@@ -129,8 +128,6 @@ export class BackendsView {
   private holds = new Set<string>();
   /** The last seeded-defect reviewer check of each backend (H32), refreshed while one runs. */
   private evals = new Map<string, EvalView>();
-  /** Metered token usage by backend (AF-20), refreshed with the list. */
-  private usage = new Map<string, BackendUsage>();
   /** role -> rows being edited; present only while the role has unsaved edits. */
   private drafts = new Map<string, CandRow[]>();
   private limitsSlug = '';
@@ -186,14 +183,6 @@ export class BackendsView {
       } catch {
         // no list of holds yet: nothing is shown as held
       }
-      this.usage = new Map();
-      await Promise.all(backends.filter((b) => b.metered).map(async (b) => {
-        try {
-          this.usage.set(b.name, await this.deps.backendUsage(b.name));
-        } catch {
-          // usage is informative; the backend still works without it
-        }
-      }));
       await Promise.all(backends.map(async (b) => {
         try {
           this.checks.set(b.name, await this.deps.checkStatus(b.name));
@@ -236,9 +225,6 @@ export class BackendsView {
     const cap = textInput('window_cap_tokens', initial?.window_cap_tokens ? String(initial.window_cap_tokens) : '', { type: 'number', placeholder: 'no cap' });
     const hosted = checkbox('hosted', initial?.hosted ?? false);
     const paid = checkbox('paid', initial?.paid ?? false);
-    const metered = checkbox('metered', initial?.metered ?? false);
-    const dailyCap = textInput('daily_token_cap', initial?.daily_token_cap ? String(initial.daily_token_cap) : '', { type: 'number', placeholder: 'no cap' });
-    const monthlyCap = textInput('monthly_token_cap', initial?.monthly_token_cap ? String(initial.monthly_token_cap) : '', { type: 'number', placeholder: 'no cap' });
     // The API key is write-only: typed text is sent, an untouched field keeps the stored key, Clear key removes it.
     const apiKey = textInput('api_key', '', { type: 'password', placeholder: initial?.has_key ? 'unchanged' : 'API key' });
     apiKey.setAttribute('autocomplete', 'new-password');
@@ -353,13 +339,6 @@ export class BackendsView {
         window_cap_tokens: Math.max(0, Math.round(Number(cap.value) || 0)),
         models: models.map((m) => ({ model: m.model.value.trim(), paid: m.paid.checked, max_concurrent: Number(m.max.value) || 0, context_tokens: contexts[m.model.value.trim()] ?? 0, window_tokens: Math.max(0, Math.round(Number(m.ctx.value) || 0)), tier: Number(m.tier.value) || 0 })).filter((m) => m.model !== ''),
       };
-      // An existing backend always sends the metering fields, so turning it off
-      // or clearing a cap takes effect. A new backend omits the defaults.
-      if (initial || metered.checked || Number(dailyCap.value) > 0 || Number(monthlyCap.value) > 0) {
-        body.metered = metered.checked;
-        body.daily_token_cap = Math.max(0, Math.round(Number(dailyCap.value) || 0));
-        body.monthly_token_cap = Math.max(0, Math.round(Number(monthlyCap.value) || 0));
-      }
       if (canPickBinary()) body.cli_path = cliPath.value.trim();
       if (!builtin() && apiKey.value !== '') body.api_key = apiKey.value;
       else if (clearKey) body.api_key = '';
@@ -393,9 +372,6 @@ export class BackendsView {
         errors.add('window_cap_tokens', fieldRow('Window cap (tokens)', cap, 'Never extend a window past this, for a host where a long context is too slow')).el,
         errors.add('hosted', fieldRow('Hosted', hosted, 'A remote service rather than your own machine')).el,
         errors.add('paid', fieldRow('Paid', paid, 'Every model on it costs money')).el,
-        errors.add('metered', fieldRow('Metered', metered, 'Tokens on this backend cost money; its daily and monthly caps below apply (AF-20)')).el,
-        errors.add('daily_token_cap', fieldRow('Daily token cap', dailyCap, 'Runner tokens per UTC day; blank or 0 is no cap')).el,
-        errors.add('monthly_token_cap', fieldRow('Monthly token cap', monthlyCap, 'Runner tokens per UTC month; blank or 0 is no cap')).el,
         keyField.el),
       modelsField.el,
       errors.general,
@@ -457,7 +433,6 @@ export class BackendsView {
         h('span', { class: 'row-actions' },
           h('strong', { text: b.name }),
           b.paid ? badge('paid') : null,
-          b.metered ? badge('metered', 'warn') : null,
           b.hosted ? badge('hosted', 'muted') : null,
           b.has_key ? badge('key set', 'ok') : null,
           b.hosted && !cliTypes.has(b.api_type) && isPrivateHost(b.host) ? h('span', { class: 'badge badge-warn', text: '\u26A0 hosted?', attrs: { title: 'Flagged hosted, but the host is a private or local address: it may be mis-flagged. Edit the backend and untick Hosted if it runs on your own machine or network.', 'data-role': 'hosted-warning' } }) : null,
@@ -478,7 +453,6 @@ export class BackendsView {
         cliTypes.has(b.api_type) ? null : h('div', {}, h('label', { text: 'Host' }), h('span', { text: b.host })),
         h('div', {}, h('label', { text: 'API type' }), h('span', { text: b.api_type })),
         h('div', {}, h('label', { text: 'Slots' }), h('span', { text: String(b.slots) })),
-        b.metered ? h('div', {}, h('label', { text: 'Token caps' }), h('span', { text: `${b.daily_token_cap ? formatTokens(b.daily_token_cap) + ' / day' : 'no daily cap'} · ${b.monthly_token_cap ? formatTokens(b.monthly_token_cap) + ' / month' : 'no monthly cap'}` })) : null,
         b.retired ? null : h('div', {}, h('label', { text: 'Pace' }), this.paceSelect(b)),
         b.memory_budget_mb ? h('div', {}, h('label', { text: 'Memory budget' }), h('span', { text: `${Math.round(b.memory_budget_mb / 1024)} GB${b.window_cap_tokens ? `, windows capped at ${formatTokens(b.window_cap_tokens)}` : ''}` })) : null,
         h('div', { class: 'profile-wide' }, h('label', { text: 'Models' }), h('div', { class: 'model-list' }, ...models))),
@@ -661,17 +635,6 @@ export class BackendsView {
     await this.load();
   }
 
-  /** meteredUsageSection is the dashboard card that shows where metered tokens go (AF-20). */
-  private meteredUsageSection(): HTMLElement | null {
-    const rows = [...this.usage.values()];
-    if (rows.length === 0) return null;
-    return section('Metered usage',
-      h('p', { class: 'field-hint', text: 'Runner tokens per UTC day and month. A metered backend at its cap rests until the window resets; work moves to the next candidate.' }),
-      h('div', { class: 'profile-list' }, ...rows.map((u) => h('div', { class: 'profile-card', attrs: { 'data-role': 'metered-usage', 'data-backend': u.backend } },
-        h('div', { class: 'profile-header' }, h('strong', { text: u.backend }), u.at_cap ? badge(`at cap until ${new Date(u.cap_resets ?? 0).toLocaleString()} (${u.cap_window})`, 'warn') : badge('under cap', 'ok')),
-        h('p', { text: `Today ${formatTokens(u.day_tokens)}${u.daily_token_cap ? ` of ${formatTokens(u.daily_token_cap)}` : ' (no cap)'} · this month ${formatTokens(u.month_tokens)}${u.monthly_token_cap ? ` of ${formatTokens(u.monthly_token_cap)}` : ' (no cap)'}` })))));
-  }
-
   private backendsSection(): HTMLElement {
     const addForm = this.adding ? this.backendForm(null, () => { this.adding = false; void this.load(); }) : null;
     const addBtn = button('Add backend', () => { this.adding = true; this.render(); }, { primary: true, field: 'add-backend', icon: 'add' });
@@ -793,7 +756,6 @@ export class BackendsView {
       h('div', { class: 'settings-host' },
         warn,
         this.backendsSection(),
-        this.meteredUsageSection(),
         this.backends.length > 0 ? this.candidatesSection() : null,
         this.projects.length > 0 || this.backends.length > 0 ? this.limitsSection() : null,
         this.configSection()));

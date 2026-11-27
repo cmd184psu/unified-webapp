@@ -63,6 +63,17 @@ var api = {
   externalSeats: (o) => get("/api/seats/external", o),
   seatQueue: (callsign) => get(`/api/seats/${encodeURIComponent(callsign)}/queue`),
   nudgeSeat: (callsign) => send("POST", `/api/seats/${encodeURIComponent(callsign)}/nudge`, {}),
+  /** seatTasks lists the backlog; empty filters mean every task. */
+  seatTasks: (state = "", seat = "", o) => {
+    const q = new URLSearchParams();
+    if (state) q.set("state", state);
+    if (seat) q.set("seat", seat);
+    const qs = q.toString();
+    return get(`/api/seat-tasks${qs ? `?${qs}` : ""}`, o);
+  },
+  createSeatTask: (task) => send("POST", "/api/seat-tasks", task),
+  /** setSeatTaskState moves one backlog task: ready -> fed -> done. */
+  setSeatTaskState: (id, state) => send("PATCH", `/api/seat-tasks/${id}`, { state }),
   seats: (o) => get("/api/seats", o),
   answerSeat: (stage, text) => send("POST", `/api/seats/${stage}/answer`, { text }),
   cancelSeat: (stage) => send("POST", `/api/seats/${stage}/cancel`),
@@ -5656,6 +5667,155 @@ function mountStats(host) {
   return new StatsView(host, defaultStatsDeps()).mount();
 }
 
+// web/agentflow/js/seatbacklog.ts
+var STATES = ["ready", "fed", "done"];
+function seatsOf(tasks) {
+  return [...new Set(tasks.flatMap((t) => t.eligible_seats))].sort();
+}
+function nextState(state) {
+  if (state === "ready") return "fed";
+  if (state === "fed") return "done";
+  return "";
+}
+var SeatTaskBacklog = class {
+  constructor(host, deps) {
+    this.host = host;
+    this.deps = deps;
+    this.tasks = [];
+    /** the filters; empty means every state, every seat */
+    this.stateFilter = "";
+    this.seatFilter = "";
+    this.msg = "";
+    /** the seats the seat filter offers: every seat in the backlog, not just the filtered rows */
+    this.knownSeats = [];
+    this.seatsLoaded = false;
+    this.disposed = false;
+  }
+  mount() {
+    void this.load();
+    return () => {
+      this.disposed = true;
+    };
+  }
+  unmount() {
+    this.disposed = true;
+  }
+  async load() {
+    try {
+      if (!this.seatsLoaded) {
+        this.knownSeats = seatsOf(await this.deps.seatTasks("", "", { quiet: true }));
+        this.seatsLoaded = true;
+      }
+      this.tasks = await this.deps.seatTasks(this.stateFilter, this.seatFilter, { quiet: true });
+      this.knownSeats = [.../* @__PURE__ */ new Set([...this.knownSeats, ...seatsOf(this.tasks)])].sort();
+    } catch (err) {
+      this.msg = `The seat task backlog is unavailable: ${err instanceof Error ? err.message : String(err)}`;
+    }
+    if (this.disposed) return;
+    this.render();
+    if (this.seatFilter && !this.knownSeats.includes(this.seatFilter)) {
+      this.seatFilter = "";
+      await this.load();
+    }
+  }
+  render() {
+    replace(
+      this.host,
+      h("h3", { text: "Seat task backlog" }),
+      this.msg ? h("p", { class: "field-hint", attrs: { "data-role": "backlog-msg" }, text: this.msg }) : null,
+      this.filters(this.knownSeats),
+      this.tasks.length ? h("ul", { attrs: { "data-role": "seat-backlog" } }, ...this.tasks.map((t) => this.row(t))) : h("p", { class: "field-hint", text: "No seat tasks yet." }),
+      this.form()
+    );
+  }
+  filters(seats) {
+    const select = (field, values, any, pick, set) => {
+      const el = h("select", {
+        attrs: { "data-field": field },
+        on: { change: (ev) => pick(ev.target.value) }
+      }, ...["", ...values].map((v) => h("option", { attrs: { value: v }, text: v || any })));
+      el.value = set;
+      return el;
+    };
+    const refilter = (pick) => (v) => {
+      this.msg = "";
+      pick(v);
+      void this.load();
+    };
+    return h(
+      "div",
+      { class: "row-actions" },
+      select("backlog-state", STATES, "all states", refilter((v) => {
+        this.stateFilter = v;
+      }), this.stateFilter),
+      select("backlog-seat", seats, "any seat", refilter((v) => {
+        this.seatFilter = v;
+      }), this.seatFilter)
+    );
+  }
+  row(t) {
+    const next = nextState(t.state);
+    const facts = [t.state, t.eligible_seats.join(", ") || "any seat", t.priority ? `priority ${t.priority}` : ""];
+    return h(
+      "li",
+      { attrs: { "data-task": String(t.id) } },
+      h("span", { class: "mono", text: `#${t.id}` }),
+      " ",
+      h("strong", { text: t.title }),
+      h("span", { class: "field-hint", text: ` \u2014 ${facts.filter(Boolean).join(" \xB7 ")}` }),
+      next ? h("button", {
+        attrs: { type: "button", "data-role": "backlog-advance", "data-task": String(t.id) },
+        text: next === "fed" ? "Feed" : "Done",
+        on: { click: () => void this.advance(t, next) }
+      }) : null
+    );
+  }
+  form() {
+    const title = h("input", { attrs: { placeholder: "title", "data-field": "backlog-title" } });
+    const objective = h("input", { attrs: { placeholder: "objective (optional)", "data-field": "backlog-objective" } });
+    const seats = h("input", { attrs: { placeholder: "eligible seats, comma separated", "data-field": "backlog-seats" } });
+    const priority = h("input", { attrs: { type: "number", placeholder: "priority", "data-field": "backlog-priority" } });
+    return h(
+      "section",
+      { class: "seat-add" },
+      h("h3", { text: "Add a seat task" }),
+      title,
+      objective,
+      seats,
+      priority,
+      h("button", {
+        attrs: { type: "button", "data-role": "backlog-add" },
+        text: "Add task",
+        on: { click: () => void this.add(title, objective, seats, priority) }
+      })
+    );
+  }
+  async add(title, objective, seats, priority) {
+    const n = Number(priority.value.trim());
+    const input = {
+      title: title.value.trim(),
+      objective: objective.value.trim() || void 0,
+      eligible_seats: seats.value.split(",").map((s) => s.trim()).filter(Boolean),
+      // An empty or non-numeric priority is left out, so the server's default applies.
+      priority: priority.value.trim() && Number.isFinite(n) ? n : void 0
+    };
+    await this.run(() => this.deps.createSeatTask(input), (created) => `added #${created.id} ${created.title}`);
+  }
+  async advance(t, state) {
+    await this.run(() => this.deps.setSeatTaskState(t.id, state), (updated) => `#${updated.id} is ${updated.state}`);
+  }
+  /** run sends one change, keeps its outcome in msg, then re-reads the list. */
+  async run(send2, done) {
+    this.msg = "";
+    try {
+      this.msg = done(await send2());
+    } catch (err) {
+      this.msg = err instanceof Error ? err.message : String(err);
+    }
+    await this.load();
+  }
+};
+
 // web/agentflow/js/seatspage.ts
 function seatState(s) {
   if (!s.running) return "no session";
@@ -5668,11 +5828,12 @@ var SeatsPage = class {
     this.host = host;
     this.deps = deps;
     this.msg = "";
+    this.backlogHost = h("div", { attrs: { "data-role": "seat-backlog-panel" } });
   }
   mount() {
+    const unmountBacklog = new SeatTaskBacklog(this.backlogHost, this.deps).mount();
     void this.load();
-    return () => {
-    };
+    return unmountBacklog;
   }
   async load() {
     let seats = [];
@@ -5699,6 +5860,7 @@ var SeatsPage = class {
         h("button", { text: "Queue", attrs: { type: "button", "data-role": "seat-queue" }, on: { click: () => void this.showQueue(s.callsign) } }),
         s.nudge ? h("button", { text: "Nudge", attrs: { type: "button", "data-role": "seat-nudge" }, on: { click: () => void this.nudge(s.callsign) } }) : null
       ))),
+      this.backlogHost,
       h("h3", { text: report ? `Last pass ${new Date(report.finished).toLocaleString()}${report.dry ? " (dry run)" : ""}` : "No pass yet" }),
       report?.error ? h("p", { class: "warn-box", text: report.error }) : null,
       h("ul", { attrs: { "data-role": "coord-decisions" } }, ...(report?.decisions ?? []).map((d) => h("li", { text: `${d.kind} ${d.task ?? ""} ${d.seat ?? ""}: ${d.detail}` }))),

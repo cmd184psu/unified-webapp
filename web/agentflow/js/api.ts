@@ -171,9 +171,7 @@ export interface AttentionItem {
   effort: number;
   /** the task key; absent for an item about the whole effort */
   task?: string;
-  /** the backend a metered_cap item is about */
-  backend?: string;
-  kind: 'stalled' | 'draft_failed' | 'plan_halted' | 'compile_halted' | 'task_halted' | 'task_needs_files' | 'task_resolved' | 'task_unassignable' | 'seat_question' | 'seat_silent' | 'service_hold' | 'metered_cap';
+  kind: 'stalled' | 'draft_failed' | 'plan_halted' | 'compile_halted' | 'task_halted' | 'task_needs_files' | 'task_resolved' | 'task_unassignable' | 'seat_question' | 'seat_silent' | 'service_hold';
   message: string;
   /** Unix ms, 0 when not known */
   since: number;
@@ -260,23 +258,6 @@ export interface ModelRest {
   since: number;
 }
 
-/** BackendUsage is GET /api/backends/{name}/usage: token spend for the current UTC day/month and the caps (AF-20). */
-export interface BackendUsage {
-  backend: string;
-  metered: boolean;
-  day: string;
-  month: string;
-  day_tokens: number;
-  month_tokens: number;
-  daily_token_cap: number;
-  monthly_token_cap: number;
-  day_resets: number;
-  month_resets: number;
-  at_cap: boolean;
-  cap_resets?: number;
-  cap_window?: string;
-}
-
 export interface ModelCheck {
   Backend: string;
   Model: string;
@@ -334,10 +315,6 @@ export interface Backend {
   cli_path?: string;
   hosted: boolean;
   paid: boolean;
-  /** Tokens on this backend cost money; its daily/monthly caps apply (AF-20). */
-  metered?: boolean;
-  daily_token_cap?: number;
-  monthly_token_cap?: number;
   slots: number;
   /** Memory one loaded model may use on the host, weights and context cache, in MB; 0 = not set (H15d). */
   memory_budget_mb?: number;
@@ -387,9 +364,6 @@ export interface BackendInput {
   cli_path?: string;
   hosted: boolean;
   paid: boolean;
-  metered?: boolean;
-  daily_token_cap?: number;
-  monthly_token_cap?: number;
   slots: number;
   memory_budget_mb: number;
   window_cap_tokens: number;
@@ -716,33 +690,7 @@ export interface TaskDetail extends TaskView {
   resolutions?: Resolution[];
 }
 
-/** SeatPolicy is the owner's nudge rule for one hand-run seat (AF-16). */
-export interface SeatPolicy {
-  enabled: boolean;
-  trigger: 'idle' | 'queued' | 'both' | string;
-  idle_minutes: number;
-  min_gap_minutes: number;
-  max_per_hour: number;
-  quiet_hours?: string;
-  templates?: string[];
-  paused?: boolean;
-}
-
-/** SeatSuggestion is the exact message to paste into a seat, by pastes.py's rules. */
-export interface SeatSuggestion {
-  status: string;
-  message: string;
-}
-
-/** SeatNudgeLogEntry is one logged nudge. */
-export interface SeatNudgeLogEntry {
-  seat: string;
-  at: string;
-  message: string;
-  typed: boolean;
-}
-
-/** ExternalSeat is a seat the owner runs by hand, as the coordinator module sees it (AF-13, AF-16). */
+/** ExternalSeat is a seat the owner runs by hand, as the coordinator module sees it (AF-13). */
 export interface ExternalSeat {
   callsign: string;
   session: string;
@@ -757,20 +705,25 @@ export interface ExternalSeat {
   nudge: boolean;
   current?: string;
   queue_file: string;
-  kind: string;
-  where: string;
-  policy: SeatPolicy;
-  suggested: SeatSuggestion;
-  nudge_log?: SeatNudgeLogEntry[];
 }
 
-/** SeatInput is what the Seats page sends to register or edit a seat. */
-export interface SeatInput {
-  callsign: string;
-  kind?: string;
-  where?: string;
-  queue_file?: string;
-  policy?: Partial<SeatPolicy>;
+/** SeatTask is one item in the seat task backlog (GET /api/seat-tasks). */
+export interface SeatTask {
+  id: number;
+  title: string;
+  objective: string;
+  eligible_seats: string[];
+  priority: number;
+  /** ready -> fed -> done */
+  state: string;
+}
+
+/** SeatTaskInput is what the backlog form sends to create a seat task. */
+export interface SeatTaskInput {
+  title: string;
+  objective?: string;
+  eligible_seats?: string[];
+  priority?: number;
 }
 
 /** CoordDecision is one thing a coordinator pass decided. */
@@ -927,25 +880,6 @@ export interface FsDirs {
   dirs: Array<{ name: string; path: string; git: boolean }>;
 }
 
-/** Peer is one paired agentflow node (GET /api/peers); it never carries a key. */
-export interface Peer {
-  name: string;
-  base_url: string;
-  host_header: string;
-  enabled: boolean;
-  protocol: number;
-  remote_build?: string;
-  paired_at?: number;
-  last_seen?: number;
-  last_ok?: number;
-  last_error?: string;
-  delegable?: string[];
-}
-
-export interface PeersView {
-  peers: Peer[];
-}
-
 // ─── Typed endpoints ────────────────────────────────────────────────────────
 
 export const api = {
@@ -957,18 +891,20 @@ export const api = {
   review: (id: number, o?: FetchOptions): Promise<Review> => get(`/api/reviews/${id}`, o),
   coordRun: (dry: boolean): Promise<CoordReport> => send('POST', '/api/coord/run', { dry }),
   externalSeats: (o?: FetchOptions): Promise<ExternalSeat[]> => get('/api/seats/external', o),
-  /** saveSeat registers a seat (POST) with its nudge policy; the server keeps the file. */
-  saveSeat: (seat: SeatInput): Promise<ExternalSeat> => send('POST', '/api/seats/external', seat),
-  /** updateSeat edits a seat; fields left out keep their stored value. */
-  updateSeat: (callsign: string, patch: Partial<SeatInput>): Promise<ExternalSeat> =>
-    send('PATCH', `/api/seats/external/${encodeURIComponent(callsign)}`, patch),
-  deleteSeat: (callsign: string): Promise<{ deleted: string }> =>
-    send('DELETE', `/api/seats/external/${encodeURIComponent(callsign)}`),
-  /** pauseSeat stops or resumes nudges without losing the seat's enabled choice. */
-  pauseSeat: (callsign: string, paused: boolean): Promise<unknown> =>
-    send('POST', `/api/seats/external/${encodeURIComponent(callsign)}/pause`, { paused }),
   seatQueue: (callsign: string): Promise<{ callsign: string; text: string }> => get(`/api/seats/${encodeURIComponent(callsign)}/queue`),
   nudgeSeat: (callsign: string): Promise<{ nudged: string }> => send('POST', `/api/seats/${encodeURIComponent(callsign)}/nudge`, {}),
+  /** seatTasks lists the backlog; empty filters mean every task. */
+  seatTasks: (state = '', seat = '', o?: FetchOptions): Promise<SeatTask[]> => {
+    const q = new URLSearchParams();
+    if (state) q.set('state', state);
+    if (seat) q.set('seat', seat);
+    const qs = q.toString();
+    return get(`/api/seat-tasks${qs ? `?${qs}` : ''}`, o);
+  },
+  createSeatTask: (task: SeatTaskInput): Promise<SeatTask> => send('POST', '/api/seat-tasks', task),
+  /** setSeatTaskState moves one backlog task: ready -> fed -> done. */
+  setSeatTaskState: (id: number, state: string): Promise<SeatTask> =>
+    send('PATCH', `/api/seat-tasks/${id}`, { state }),
   seats: (o?: FetchOptions): Promise<SeatStage[]> => get('/api/seats', o),
   answerSeat: (stage: number, text: string): Promise<{ stage: number; answered: boolean }> => send('POST', `/api/seats/${stage}/answer`, { text }),
   cancelSeat: (stage: number): Promise<{ stage: number; cancelled: boolean }> => send('POST', `/api/seats/${stage}/cancel`),
@@ -980,7 +916,6 @@ export const api = {
   serviceHold: (o?: FetchOptions): Promise<ServiceHoldView> => get('/api/service/hold', o),
   holdService: (reason: string): Promise<ServiceHoldView> => send('POST', '/api/service/hold', { reason }),
   liftHold: (): Promise<ServiceHoldView> => send('DELETE', '/api/service/hold'),
-  pruneStageHomes: (): Promise<{ pruned: number }> => send('POST', '/api/stages/prune', {}),
 
   fsDirs: (path = ''): Promise<FsDirs> => get(`/api/fs/dirs${path ? `?path=${encodeURIComponent(path)}` : ''}`, { quiet: true }),
 
@@ -1001,7 +936,6 @@ export const api = {
 
   // Backends, candidates, settings
   backends: (): Promise<Backend[]> => get('/api/backends'),
-  backendUsage: (name: string): Promise<BackendUsage> => get(`/api/backends/${enc(name)}/usage`, { quiet: true }),
   createBackend: (b: BackendInput, o?: FetchOptions): Promise<BackendResult> => send('POST', '/api/backends', b, o),
   probeBackend: (host: string, apiType: string, key = '', backend = '', cliPath = ''): Promise<{ models: string[]; contexts?: Record<string, number>; tools?: Record<string, string> }> =>
     send('POST', '/api/backends/probe', { host, api_type: apiType, api_key: key, backend, cli_path: cliPath }, { quiet: true }),
@@ -1029,11 +963,6 @@ export const api = {
     send('DELETE', `${proj(slug)}/candidates/${enc(role)}`),
   settings: (): Promise<Settings> => get('/api/settings'),
   putSettings: (s: Settings, o?: FetchOptions): Promise<Settings> => send('PUT', '/api/settings', s, o),
-  peers: (o?: FetchOptions): Promise<PeersView> => get('/api/peers', o),
-  invitePeer: (name: string): Promise<{ code: string; a_url: string }> => send('POST', '/api/peers/invite', { name }),
-  acceptPeer: (p: { a_url: string; code: string; name: string; b_url?: string; host_header?: string }): Promise<unknown> =>
-    send('POST', '/api/peers/accept', p),
-  revokePeer: (name: string): Promise<unknown> => send('DELETE', `/api/peers/${enc(name)}`),
 
   modelStats: (project = ''): Promise<ModelStat[]> => get(`/api/stats/models${project ? `?project=${enc(project)}` : ''}`),
   strikeHistory: (project = '', limit = 50): Promise<StrikeHistory> =>
