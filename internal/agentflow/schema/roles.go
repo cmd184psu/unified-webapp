@@ -1,6 +1,8 @@
 package schema
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -501,6 +503,35 @@ type CoordinatorQuestion struct {
 	Project string `json:"project,omitempty"`
 	Effort  int64  `json:"effort,omitempty"`
 	Task    string `json:"task,omitempty"`
+}
+
+// UnmarshalJSON keeps the question visible when only its optional task
+// reference is ill-typed. It still rejects unknown fields and invalid text,
+// options, or recommendation values.
+func (q *CoordinatorQuestion) UnmarshalJSON(data []byte) error {
+	type question CoordinatorQuestion
+	var value question
+	wire := struct {
+		*question
+		Project json.RawMessage `json:"project"`
+		Effort  json.RawMessage `json:"effort"`
+		Task    json.RawMessage `json:"task"`
+	}{question: &value}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&wire); err != nil {
+		return err
+	}
+	// Malformed or incomplete references are treated as unlinked questions.
+	var project, task string
+	var effort int64
+	if json.Unmarshal(wire.Project, &project) == nil &&
+		json.Unmarshal(wire.Effort, &effort) == nil &&
+		json.Unmarshal(wire.Task, &task) == nil {
+		value.Project, value.Effort, value.Task = project, effort, task
+	}
+	*q = CoordinatorQuestion(value)
+	return nil
 }
 
 // Ref reports whether q names an exact task (project, effort and task key).

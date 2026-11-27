@@ -348,7 +348,19 @@ func TestCoordinatorAttentionClearsResolvedTaskQuestion(t *testing.T) {
 	if !questions[0].Ref() || questions[3].Ref() {
 		t.Fatalf("Ref = %v/%v, want true for the referenced question and false for the legacy one", questions[0].Ref(), questions[3].Ref())
 	}
-	if err := h.eng.noteCoordinator(ctx, "coordinator:m1", eventCoordinatorRun, coordinatorRunEvent{Model: "m1", Questions: questions}); err != nil {
+	encodedQuestions, err := json.Marshal(questions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply := fmt.Sprintf(`{"summary":"Two task references","questions":%s,{"question":"Question with malformed reference","project":"beta","effort":"%d","task":"T1"}]}`, encodedQuestions[:len(encodedQuestions)-1], efforts["beta"])
+	decoded, err := schema.Parse[schema.CoordinatorOut](json.RawMessage(reply))
+	if err != nil {
+		t.Fatalf("malformed reference rejected unrelated questions: %v", err)
+	}
+	if len(decoded.Questions) != 5 || decoded.Questions[4].Ref() {
+		t.Fatalf("malformed reference was not preserved as an unlinked question: %+v", decoded.Questions)
+	}
+	if err := h.eng.noteCoordinator(ctx, "coordinator:m1", eventCoordinatorRun, json.RawMessage(reply)); err != nil {
 		t.Fatal(err)
 	}
 	items, err := h.eng.Attention(ctx)
@@ -379,5 +391,8 @@ func TestCoordinatorAttentionClearsResolvedTaskQuestion(t *testing.T) {
 	}
 	if !contains(msg, "Anything else on the runbook?") {
 		t.Fatalf("the legacy question was hidden:\n%s", msg)
+	}
+	if !contains(msg, "Question with malformed reference") {
+		t.Fatalf("the question with a malformed reference was hidden:\n%s", msg)
 	}
 }
