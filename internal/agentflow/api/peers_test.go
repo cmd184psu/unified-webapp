@@ -8,7 +8,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"cmd184psu/unified-webapp/internal/agentflow/store"
 )
 
 func enablePeers(t *testing.T, e *env) {
@@ -323,7 +326,7 @@ func TestPeerUnpairRequiresKey(t *testing.T) {
 }
 
 func TestPeersAcceptSendsHostHeader(t *testing.T) {
-	ea, _, _, _, _, _ := pairPeers(t)
+	ea, eb, srvA, _, _, _ := pairPeers(t)
 	p, err := ea.st.GetPeer(t.Context(), "builder")
 	if err != nil {
 		t.Fatal(err)
@@ -331,6 +334,69 @@ func TestPeersAcceptSendsHostHeader(t *testing.T) {
 	if p.HostHeader != "b.example" {
 		t.Fatalf("A stored host_header %q, want b.example", p.HostHeader)
 	}
+	// B's row is for A, so it must carry A's Host header, not the header B
+	// sent describing itself.
+	bp, err := eb.st.GetPeer(t.Context(), "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantA := strings.TrimPrefix(strings.TrimPrefix(srvA.URL, "https://"), "http://")
+	if bp.HostHeader != wantA {
+		t.Fatalf("B stored host_header %q for A, want %q", bp.HostHeader, wantA)
+	}
+}
+
+func TestPeerStatusListsProjectWithoutActiveEffort(t *testing.T) {
+	_, eb, _, srvB, keyAtoB, _ := pairPeers(t)
+	eb.addProject("solo")
+	resp, body := peerStatus(t, srvB, keyAtoB)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d: %s", resp.StatusCode, body)
+	}
+	var st struct {
+		Projects []struct {
+			Slug        string `json:"slug"`
+			OpenEfforts int    `json:"open_efforts"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal(body, &st); err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Projects) != 1 || st.Projects[0].Slug != "solo" {
+		t.Fatalf("projects = %+v, want solo", st.Projects)
+	}
+	if st.Projects[0].OpenEfforts != 0 {
+		t.Fatalf("open_efforts = %d, want 0", st.Projects[0].OpenEfforts)
+	}
+}
+
+func TestPeerStatusRestUntilIsArray(t *testing.T) {
+	_, eb, _, srvB, keyAtoB, _ := pairPeers(t)
+	if err := eb.st.CreateBackend(t.Context(), "test", store.Backend{
+		Name: "b1", Host: "http://127.0.0.1:11434", APIType: "ollama", Slots: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, body := peerStatus(t, srvB, keyAtoB)
+	var st struct {
+		Backends []struct {
+			Name      string          `json:"name"`
+			RestUntil json.RawMessage `json:"rest_until"`
+		} `json:"backends"`
+	}
+	if err := json.Unmarshal(body, &st); err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range st.Backends {
+		if b.Name != "b1" {
+			continue
+		}
+		if string(b.RestUntil) != "[]" {
+			t.Fatalf("rest_until = %s, want []", b.RestUntil)
+		}
+		return
+	}
+	t.Fatalf("backend b1 missing from status: %+v", st.Backends)
 }
 
 func TestPeerStatusReportsRealLoad(t *testing.T) {
@@ -417,7 +483,7 @@ func TestPeerKeySinkMirrorsInbound(t *testing.T) {
 
 func TestNoKeyInAnyPeerOutput(t *testing.T) {
 	ea, eb, srvA, srvB, keyAtoB, keyBtoA := pairPeers(t)
-	keys := [][]byte{[]byte(keyAtoB), []byte(keyBtoA)}
+	keys := [][]byte{[]byte(keyAtoB), []byte(keyBtoA), []byte("kb-pairtest-secret")}
 
 	check := func(label string, body []byte, allow ...[]byte) {
 		for _, k := range keys {
@@ -433,15 +499,128 @@ func TestNoKeyInAnyPeerOutput(t *testing.T) {
 		}
 	}
 
+	// invite response carries a one-time code and a URL, never a key.
+	invResp, _ := postJSON(srvA.URL+"/api/peers/invite", map[string]any{"name": "invtest"})
+	if invResp.StatusCode < 200 || invResp.StatusCode >= 300 {
+		invResp.Body.Close()
+		t.Fatalf("invite status %d", invResp.StatusCode)
+	}
+	invBody := readAll(invResp)
+	invResp.Body.Close()
+	check("invite", invBody)
+
+	// accept response is an ok acknowledgement; capture it from a real exchange.
+	invResp2, _ := postJSON(srvA.URL+"/api/peers/invite", map[string]any{"name": "acctest"})
+	if invResp2.StatusCode < 200 || invResp2.StatusCode >= 300 {
+		invResp2.Body.Close()
+		t.Fatalf("invite status %d", invResp2.StatusCode)
+	}
+	invBody2 := readAll(invResp2)
+	invResp2.Body.Close()
+	var inv2 struct {
+		Code string `json:"code"`
+	}
+	_ = json.Unmarshal(invBody2, &inv2)
+	check("invite", invBody2)
+	accResp, _ := postJSON(srvB.URL+"/api/peers/accept", map[string]any{
+		"a_url": srvA.URL, "code": inv2.Code, "name": "acctest", "b_url": srvB.URL,
+	})
+	if accResp.StatusCode < 200 || accResp.StatusCode >= 300 {
+		b := readAll(accResp)
+		accResp.Body.Close()
+		t.Fatalf("accept status %d: %s", accResp.StatusCode, b)
+	}
+	accBody := readAll(accResp)
+	accResp.Body.Close()
+	// Capture the keys minted by this accept BEFORE scanning its body, so a
+	// leak in the accept response is actually observable.
+	for _, api := range []*API{ea.api, eb.api} {
+		key, err := api.readPeerKey("acctest")
+		if err != nil || key == "" {
+			t.Fatal("accept fixture did not retain both keys")
+		}
+		keys = append(keys, []byte(key))
+	}
+	check("accept", accBody)
+
+	// pair is the one response that legitimately carries K_A once; allow that
+	// single key and assert no other minted key appears.
+	invResp3, _ := postJSON(srvA.URL+"/api/peers/invite", map[string]any{"name": "pairtest"})
+	if invResp3.StatusCode < 200 || invResp3.StatusCode >= 300 {
+		invResp3.Body.Close()
+		t.Fatalf("invite status %d", invResp3.StatusCode)
+	}
+	invBody3 := readAll(invResp3)
+	invResp3.Body.Close()
+	var inv3 struct {
+		Code string `json:"code"`
+	}
+	_ = json.Unmarshal(invBody3, &inv3)
+	check("invite", invBody3)
+	pairResp, _ := postJSON(srvA.URL+"/api/peer/pair", map[string]any{
+		"code":        inv3.Code,
+		"node_name":   "b",
+		"base_url":    srvB.URL,
+		"host_header": "b.example",
+		"key":         "kb-pairtest-secret",
+		"protocol":    1,
+		"build":       "dev",
+	})
+	if pairResp.StatusCode < 200 || pairResp.StatusCode >= 300 {
+		b := readAll(pairResp)
+		pairResp.Body.Close()
+		t.Fatalf("pair status %d: %s", pairResp.StatusCode, b)
+	}
+	pairBody := readAll(pairResp)
+	pairResp.Body.Close()
+	var pairOut struct {
+		Key string `json:"key"`
+	}
+	_ = json.Unmarshal(pairBody, &pairOut)
+	if pairOut.Key != "" {
+		keys = append(keys, []byte(pairOut.Key))
+	}
+	check("pair", pairBody, []byte(pairOut.Key))
+
 	respL, _ := http.Get(srvA.URL + "/api/peers")
 	check("peers list", readAll(respL))
 	respL.Body.Close()
 	_, status := peerStatus(t, srvB, keyAtoB)
 	check("peer status", status)
 
-	r, _ := postJSON(srvA.URL+"/api/peers/builder/rotate", map[string]any{})
-	check("rotate", readAll(r))
+	r, err := postJSON(srvA.URL+"/api/peers/builder/rotate", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotateBody := readAll(r)
 	r.Body.Close()
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("rotate status %d", r.StatusCode)
+	}
+
+	// Scan both newly issued values as well as all earlier fixture values.
+	unpairKey, err := ea.api.readPeerKey("builder")
+	if err != nil || unpairKey == "" || unpairKey == keyAtoB {
+		t.Fatal("rotate fixture did not replace the outbound key")
+	}
+	rotatedPeerKey, err := eb.api.readPeerKey("laptop")
+	if err != nil || rotatedPeerKey == "" || rotatedPeerKey == keyBtoA {
+		t.Fatal("rotate fixture did not replace the inbound key")
+	}
+	keys = append(keys, []byte(unpairKey), []byte(rotatedPeerKey))
+	check("rotate", rotateBody)
+
+	// unpair requires and returns no key.
+	reqU, _ := http.NewRequest(http.MethodPost, srvB.URL+"/api/peer/unpair", bytes.NewReader([]byte(`{}`)))
+	reqU.Header.Set("Authorization", "Bearer "+unpairKey)
+	ru, _ := http.DefaultClient.Do(reqU)
+	unpairBody := readAll(ru)
+	if ru.StatusCode < 200 || ru.StatusCode >= 300 {
+		ru.Body.Close()
+		t.Fatalf("unpair status %d: %s", ru.StatusCode, unpairBody)
+	}
+	check("unpair", unpairBody)
+	ru.Body.Close()
 
 	// Revoke's best-effort unpair body comes from A; B's delete response is
 	// empty of keys as well.
